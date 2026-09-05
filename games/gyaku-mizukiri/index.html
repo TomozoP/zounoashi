@@ -48,18 +48,70 @@
   var MAX_ROLL_THRESHOLD = 0.95;
   var IMPACT_DURATION = 0.8;
 
-  var rockImg = new Image();
   var ojisanImg = new Image();
   var assetsReady = 0;
-  function onAssetLoad() { assetsReady++; }
-  rockImg.onload = onAssetLoad;
-  ojisanImg.onload = onAssetLoad;
-  rockImg.src = "img/rock.png";
+  ojisanImg.onload = function () { assetsReady++; };
   ojisanImg.src = "img/ojisan.png";
 
-  var ROCK_STAND_SIZE = 200, ROCK_FOOT = 0.88;
+  var ROCK_STAND_SIZE = 200;
   var ROCK_FLY_SIZE = 150;
   var OJISAN_SIZE = 118, OJISAN_FOOT = 0.92;
+  var ROCK_STAND_X = START_X + 78, ROCK_GROUND_Y = WATER_Y - 6;
+
+  /* ---- 岩の生成: 10種類、丸い〜平たいまで ---- */
+  var ROCK_COUNT = 10;
+  var rockTypes = [];
+  (function initRocks() {
+    for (var i = 0; i < ROCK_COUNT; i++) {
+      var flatness = 1.0 + (i / (ROCK_COUNT - 1)) * 1.7;
+      var jag = 0.22 + Math.random() * 0.14;
+      var n = 9 + Math.floor(Math.random() * 4);
+      var shape = [];
+      for (var k = 0; k < n; k++) {
+        var a = (k / n) * Math.PI * 2;
+        var r = 1 + (Math.random() - 0.5) * jag;
+        shape.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+      }
+      var darkSpots = [];
+      for (var s = 0; s < 3; s++) {
+        darkSpots.push([0, 1, 2].map(function () {
+          var a2 = Math.random() * Math.PI * 2;
+          var r2 = 0.2 + Math.random() * 0.55;
+          return { x: Math.cos(a2) * r2, y: Math.sin(a2) * r2 };
+        }));
+      }
+      rockTypes.push({ flatness: flatness, shape: shape, darkSpots: darkSpots, hue: 205 + Math.random() * 20 - 10 });
+    }
+  })();
+  var selectedRock = rockTypes[0];
+
+  function drawGeneratedRock(rock, width) {
+    var height = width / rock.flatness;
+    var hw = width / 2, hh = height / 2;
+    ctx.beginPath();
+    rock.shape.forEach(function (p, i) {
+      var px = p.x * hw, py = p.y * hh;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    var g = ctx.createLinearGradient(-hw, -hh, hw, hh);
+    g.addColorStop(0, "hsl(" + rock.hue + ",8%,74%)");
+    g.addColorStop(1, "hsl(" + rock.hue + ",10%,40%)");
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,.16)";
+    rock.darkSpots.forEach(function (tri) {
+      ctx.beginPath();
+      ctx.moveTo(tri[0].x * hw, tri[0].y * hh);
+      ctx.lineTo(tri[1].x * hw, tri[1].y * hh);
+      ctx.lineTo(tri[2].x * hw, tri[2].y * hh);
+      ctx.closePath();
+      ctx.fill();
+    });
+    ctx.strokeStyle = "rgba(0,0,0,.28)";
+    ctx.lineWidth = Math.max(1.5, width * 0.015);
+    ctx.stroke();
+  }
 
   var audioCtx = null;
   function beep(freq, dur, type, gain) {
@@ -77,7 +129,7 @@
     } catch (e) {}
   }
 
-  var state = "title";
+  var state = "select";
   var t = 0;
   var power = 0, angle = 0;
   var throwFx = 0;
@@ -87,11 +139,12 @@
   var body = { x: START_X, y: WATER_Y - 40, vx: 0, vy: 0, rot: 0, rotSpeed: 0, sinking: 0 };
   var skips = 0;
   var turboFrom = 0, turboTo = 0, turboT = 0, turboBaseDistM = 0, turboIsMax = false;
+  var turboStartX = 0, turboStartY = 0, turboStartRot = 0, turboRotSpeed = 0;
   var resultDistanceM = 0;
   var impactT = 0, impactHit = false, hitFlash = 0;
 
   function reset() {
-    state = "title";
+    state = "select";
     body.x = START_X; body.y = WATER_Y - 40;
     body.vx = 0; body.vy = 0; body.rot = 0; body.rotSpeed = 0; body.sinking = 0;
     skips = 0; camX = 0; particles = [];
@@ -118,6 +171,8 @@
     turboTo = skips + (turboIsMax ? 12000 : Math.round(3000 + roll * 9000));
     turboT = 0;
     turboBaseDistM = (body.x - START_X) / 12;
+    turboStartX = body.x; turboStartY = body.y; turboStartRot = body.rot;
+    turboRotSpeed = body.rotSpeed;
     beep(660, 0.2, "square", 0.14);
   }
 
@@ -131,6 +186,11 @@
       throwFx += dt;
       if (throwFx > 0.16) { throwFx = 0; launch(); }
     } else if (state === "flying") {
+      var flat = selectedRock.flatness;
+      var restitution = 0.40 + (flat - 1) * 0.11;
+      var vxFriction = 0.80 + (flat - 1) * 0.048;
+      var maxIncidence = 0.48 + (flat - 1) * 0.135;
+
       body.vy += GRAVITY * dt;
       body.x += body.vx * dt;
       body.y += body.vy * dt;
@@ -139,10 +199,10 @@
       var speed = Math.hypot(body.vx, body.vy);
       if (body.y + 30 >= WATER_Y && body.vy > 0 && body.x > SHORE_RIGHT) {
         var incidence = Math.atan2(body.vy, Math.abs(body.vx));
-        if (incidence < 0.62 && speed > 130) {
+        if (incidence < maxIncidence && speed > 130) {
           body.y = WATER_Y - 30;
-          body.vy = -body.vy * 0.56;
-          body.vx *= 0.88;
+          body.vy = -body.vy * restitution;
+          body.vx *= vxFriction;
           body.rotSpeed *= 0.85;
           skips++;
           spawnSplash(body.x, WATER_Y);
@@ -225,21 +285,62 @@
     return (MIN_ANGLE_DEG + angle * (MAX_ANGLE_DEG - MIN_ANGLE_DEG)) * Math.PI / 180;
   }
 
+  function standingRockCenterY() {
+    var h = ROCK_STAND_SIZE / selectedRock.flatness;
+    return ROCK_GROUND_Y - h / 2;
+  }
+
   function launch() {
     var speed = 620 + power * 480;
     var ang = currentAngleRad();
-    body.x = START_X + 90; body.y = WATER_Y - 80;
+    body.x = ROCK_STAND_X; body.y = standingRockCenterY();
     body.vx = Math.cos(ang) * speed;
     body.vy = -Math.sin(ang) * speed;
-    body.rotSpeed = 6 + power * 7;
+    body.rotSpeed = (6 + power * 7) * (1 + (selectedRock.flatness - 1) * 0.12);
     skips = 0;
     state = "flying";
     beep(520, 0.12, "square", 0.12);
   }
 
-  function handleTap() {
-    if (assetsReady < 2) return;
-    if (state === "title") { state = "power"; t = 0; }
+  /* ---- 岩の選択画面 ---- */
+  var SELECT_COLS = 5, SELECT_ROWS = 2;
+  var SELECT_CELL_W = W * 0.16, SELECT_CELL_H = 140;
+  var SELECT_GRID_LEFT = W / 2 - (SELECT_COLS * SELECT_CELL_W) / 2;
+  var SELECT_GRID_TOP = 40;
+  var SELECT_ROCK_WIDTH = 92;
+
+  function selectSlotPos(i) {
+    var col = i % SELECT_COLS, row = Math.floor(i / SELECT_COLS);
+    return {
+      x: SELECT_GRID_LEFT + SELECT_CELL_W * (col + 0.5),
+      y: SELECT_GRID_TOP + SELECT_CELL_H * (row + 0.5)
+    };
+  }
+
+  function hitTestRockSlot(x, y) {
+    for (var i = 0; i < ROCK_COUNT; i++) {
+      var pos = selectSlotPos(i);
+      if (Math.abs(x - pos.x) < SELECT_CELL_W / 2 && Math.abs(y - pos.y) < SELECT_CELL_H / 2) return i;
+    }
+    return null;
+  }
+
+  function drawRockSelectGrid() {
+    for (var i = 0; i < ROCK_COUNT; i++) {
+      var pos = selectSlotPos(i);
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      drawGeneratedRock(rockTypes[i], SELECT_ROCK_WIDTH);
+      ctx.restore();
+    }
+  }
+
+  function handleTap(x, y) {
+    if (assetsReady < 1) return;
+    if (state === "select") {
+      var idx = hitTestRockSlot(x, y);
+      if (idx != null) { selectedRock = rockTypes[idx]; state = "power"; t = 0; }
+    }
     else if (state === "power") { state = "angle"; t = 0; }
     else if (state === "angle") { state = "throw-anim"; throwFx = 0; }
     else if (state === "result") { reset(); }
@@ -247,7 +348,10 @@
 
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault();
-    handleTap();
+    var rect = canvas.getBoundingClientRect();
+    var lx = (e.clientX - rect.left) / rect.width * W;
+    var ly = (e.clientY - rect.top) / rect.height * H;
+    handleTap(lx, ly);
   });
 
   function drawSky() {
@@ -306,13 +410,13 @@
     ctx.restore();
   }
 
-  function drawRockStanding(x, y, throwing) {
+  function drawRockStanding(x, throwing) {
     ctx.save();
     var progress = throwFx / 0.16;
     var squish = throwing ? 1 - Math.sin(progress * Math.PI) * 0.14 : 1;
-    ctx.translate(x - camX, y);
+    ctx.translate(x - camX, standingRockCenterY());
     ctx.scale(squish, 2 - squish);
-    ctx.drawImage(rockImg, -ROCK_STAND_SIZE / 2, -ROCK_STAND_SIZE * ROCK_FOOT, ROCK_STAND_SIZE, ROCK_STAND_SIZE);
+    drawGeneratedRock(selectedRock, ROCK_STAND_SIZE);
     ctx.restore();
   }
 
@@ -320,7 +424,7 @@
     ctx.save();
     ctx.translate(x - camX, y);
     ctx.rotate(rot);
-    ctx.drawImage(rockImg, -ROCK_FLY_SIZE / 2, -ROCK_FLY_SIZE / 2, ROCK_FLY_SIZE, ROCK_FLY_SIZE);
+    drawGeneratedRock(selectedRock, ROCK_FLY_SIZE);
     ctx.restore();
   }
 
@@ -392,7 +496,7 @@
 
   function draw() {
     ctx.clearRect(0, 0, W, H);
-    if (assetsReady < 2) {
+    if (assetsReady < 1) {
       ctx.fillStyle = "#0b1622";
       ctx.fillRect(0, 0, W, H);
       return;
@@ -401,28 +505,33 @@
     drawWater();
     drawShore();
 
-    var ojisanX = START_X, ojisanY = WATER_Y - 20;
-    if (state === "impact" && hitFlash > 0) {
-      ojisanX += (Math.random() - 0.5) * 12 * hitFlash;
-      ojisanY += (Math.random() - 0.5) * 12 * hitFlash;
-    }
-    drawOjisan(ojisanX, ojisanY);
-
-    if (state === "title" || state === "power" || state === "angle" || state === "throw-anim") {
-      drawRockStanding(START_X + 78, WATER_Y - 30, state === "throw-anim");
-    } else if (state === "turbo") {
-      var bx = camX + W * 0.58;
-      var by = WATER_Y - 30 - Math.abs(Math.sin(t * 16)) * 50;
-      drawRockFlying(bx, by, t * 9);
-    } else if (state === "impact") {
-      var ip = Math.min(1, impactT / IMPACT_DURATION);
-      if (ip < 1) {
-        var fromX = camX + W + 140, fromY = WATER_Y - 170;
-        var toX = START_X + 40, toY = WATER_Y - 90;
-        drawRockFlying(fromX + (toX - fromX) * ip, fromY + (toY - fromY) * ip, ip * 30);
-      }
+    if (state === "select") {
+      drawRockSelectGrid();
+      drawOjisan(START_X, WATER_Y - 20);
     } else {
-      drawRockFlying(body.x, body.y, body.rot);
+      var ojisanX = START_X, ojisanY = WATER_Y - 20;
+      if (state === "impact" && hitFlash > 0) {
+        ojisanX += (Math.random() - 0.5) * 12 * hitFlash;
+        ojisanY += (Math.random() - 0.5) * 12 * hitFlash;
+      }
+      drawOjisan(ojisanX, ojisanY);
+
+      if (state === "power" || state === "angle" || state === "throw-anim") {
+        drawRockStanding(ROCK_STAND_X, state === "throw-anim");
+      } else if (state === "turbo") {
+        var bx = turboStartX - camX + turboT * 60;
+        var by = turboStartY - Math.abs(Math.sin(turboT * 16)) * 50;
+        drawRockFlying(bx, by, turboStartRot + turboT * (turboRotSpeed + 20));
+      } else if (state === "impact") {
+        var ip = Math.min(1, impactT / IMPACT_DURATION);
+        if (ip < 1) {
+          var fromX = camX + W + 140, fromY = WATER_Y - 170;
+          var toX = START_X + 40, toY = WATER_Y - 90;
+          drawRockFlying(fromX + (toX - fromX) * ip, fromY + (toY - fromY) * ip, ip * 30);
+        }
+      } else {
+        drawRockFlying(body.x, body.y, body.rot);
+      }
     }
     drawParticles();
 
