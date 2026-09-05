@@ -16,6 +16,7 @@
 <div id="stage"><div id="wrap">
   <canvas id="c"></canvas>
 </div></div>
+<script src="../share.js"></script>
 <script>
 (function () {
   "use strict";
@@ -276,11 +277,13 @@
   var selfT, squash, armed, crushed, hitReal;
   var flyT, grazing, islands, speedLines, islandAcc;
   var revealT, selTick, confetti;
+  var shareMsg = "", shareMsgT = 0, shareHit = 0, retryHit = 0;
 
   function newRound() {
     state = S.SELECT;
     t = 0; camX = CAM_MIN; particles = [];
     revealT = 0; selTick = 0; confetti = [];
+    shareMsg = ""; shareMsgT = 0; shareHit = 0;
     choices = [];
     for (var i = 0; i < SEL_COUNT; i++) {
       var r = makeRock();
@@ -598,6 +601,10 @@
       toneStop();
     }
 
+    if (shareHit > 0) shareHit = Math.max(0, shareHit - dt * 4);
+    if (retryHit > 0) retryHit = Math.max(0, retryHit - dt * 4);
+    if (shareMsg) shareMsgT += dt;
+
     for (var ci = confetti.length - 1; ci >= 0; ci--) {
       var cf = confetti[ci];
       cf.age += dt;
@@ -620,8 +627,44 @@
   }
 
   /* ============ 入力 ============ */
-  function tap() {
+  /* 結果画面のボタン */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.68;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+
+  function doShare() {
+    shareHit = 1;
+    zShare({
+      text: km(resultM) + "の水切りに成功しました #水切り世界一周",
+      done: function (res) {
+        shareMsg = res === "blocked" ? "ポップアップを許可してください" : "";
+        shareMsgT = 0;
+      }
+    });
+  }
+
+  function tap(x, y) {
     if (!ready) return;
+    if (state === S.RESULT) {
+      // 結果画面はボタンでしか進まない(スペースキーはもう一度に割り当てる)
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "share") { shareHit = 1; doShare(); }
+      else if (hit === "retry") { retryHit = 1; newRound(); }
+      return;
+    }
     if (state === S.SELECT) {
       // いま中央にいちばん近い石を、そのまま掴む
       var L = SEL_COUNT * SEL_SPACING, best = 0, bestD = Infinity;
@@ -640,14 +683,13 @@
     } else if (state === S.POWER) {
       state = S.WIND; windT = 0;
       beep(1000, 0.12, "square", 0.13);
-    } else if (state === S.RESULT) {
-      newRound();
     }
   }
 
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault();
-    tap();
+    var r = canvas.getBoundingClientRect();
+    tap((e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H);
   });
 
   // スペース(とEnter)でも同じ操作ができるようにする
@@ -909,6 +951,47 @@
 
   function km(m) { return (m / 1000).toFixed(1) + "km"; }
 
+  function drawButton(b, pressed) {
+    var pop = 1 + 0.06 * pressed;
+    ctx.save();
+    ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+    ctx.scale(pop, pop);
+    var hw = b.w / 2, hh = b.h / 2, rad = hh;
+    ctx.beginPath();
+    ctx.moveTo(-hw + rad, -hh);
+    ctx.arcTo(hw, -hh, hw, hh, rad);
+    ctx.arcTo(hw, hh, -hw, hh, rad);
+    ctx.arcTo(-hw, hh, -hw, -hh, rad);
+    ctx.arcTo(-hw, -hh, hw, -hh, rad);
+    ctx.closePath();
+    ctx.fillStyle = "#fff";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#16202e";
+    ctx.stroke();
+    ctx.fillStyle = "#16202e";
+    ctx.font = "800 24px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(b.label, 0, 1);
+    ctx.restore();
+    ctx.textBaseline = "alphabetic";
+  }
+
+  function drawResultButtons() {
+    var bs = resultButtons();
+    drawButton(bs[0], retryHit);
+    drawButton(bs[1], shareHit);
+    if (shareMsg && shareMsgT < 2.6) {
+      ctx.save();
+      ctx.fillStyle = "#fff";
+      ctx.font = "700 16px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(shareMsg, W / 2, bs[0].y + bs[0].h + 30);
+      ctx.restore();
+    }
+  }
+
   function drawSelect() {
     var g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, "#e6d3a8");
@@ -1046,7 +1129,8 @@
     if (state === S.RESULT) {
       ctx.fillStyle = "rgba(8,16,26,.55)";
       ctx.fillRect(0, 0, W, H);
-      drawNumber(W / 2, H * 0.56, 92, km(resultM));
+      drawNumber(W / 2, H * 0.5, 92, km(resultM));
+      drawResultButtons();
     }
   }
 
