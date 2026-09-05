@@ -40,12 +40,13 @@
   var GROUND_Y = WATER_Y - 4;
   var SHORE_RIGHT = 250;
   var OJISAN_X = 120, OJISAN_W = 118, OJISAN_FOOT = 0.92;
-  var ROCK_X = OJISAN_X + 100;
-  var ROCK_HELD_W = 190, ROCK_FLY_W = 140;
+  var HEAD_Y = GROUND_Y - OJISAN_W * OJISAN_FOOT;   // 頭のてっぺん
+  var ROCK_X = OJISAN_X;                            // 岩はおじさんの頭の上
+  var ROCK_W = 160;
   var GRAVITY = 1500;
-  var MIN_ANGLE = 8, MAX_ANGLE = 48;
+  var MIN_ANGLE = 0, MAX_ANGLE = 90;
   var SKIM_VY = 95;             // 反発後の跳ね上がりがこれ未満なら水面を滑走しはじめる
-  var V_REF = 800;              // 滑走距離の基準速度
+  var V_REF = 740;              // 滑走距離の基準速度
   var D_MAX = 52000000;         // 到達しうる最大距離(m)
   var EARTH_M = 40075000;       // 地球一周
   var DEST_OFFSET = EARTH_M + (ROCK_X - OJISAN_X);  // 一周した先の砂浜(おじさんが投げた地点に戻る)
@@ -194,40 +195,53 @@
 
   /* ============ 状態 ============ */
   var S = {
-    SELECT: "select", POWER: "power", AIM: "aim", WIND: "wind",
-    FLY: "fly", SKIM: "skim", APPROACH: "approach", HIT: "hit", SINK: "sink", RESULT: "result"
+    SELECT: "select", AIM: "aim", POWER: "power", WIND: "wind",
+    FLY: "fly", SKIM: "skim", APPROACH: "approach", HIT: "hit",
+    SINK: "sink", SELFHIT: "selfhit", RESULT: "result"
   };
   var APPROACH_LEN = 950;    // 一周して浜が見えてから着弾するまでの助走
   var APPROACH_VX = 720;
   var BASE_TILT = -0.13;     // 石は少しだけ頭を上げた姿勢のまま飛ぶ
+  var SEL_COUNT = 16;        // 砂浜に転がっている石の数
+  var SEL_SPACING = 250;
+  var SEL_SPEED = 1050;      // 砂浜を探し回る速さ
 
   var state, t, camX, particles, choices, rock, power, aimT, windT;
   var body, traveled, skim, hitT, ojiFly, resultM, sinkT;
+  var selScroll, selSpeed, selStopping, selTarget, selIndex;
+  var selfT, squash, armed;
 
   function newRound() {
     state = S.SELECT;
     t = 0; camX = 0; particles = [];
     choices = [];
-    for (var i = 0; i < 10; i++) choices.push(makeRock());
+    for (var i = 0; i < SEL_COUNT; i++) {
+      var r = makeRock();
+      r.sy = rnd(H * 0.36, H * 0.74);   // 砂浜のどのあたりに転がっているか
+      choices.push(r);
+    }
     rock = choices[0];
+    selScroll = 0; selSpeed = SEL_SPEED; selStopping = false; selTarget = null; selIndex = 0;
     power = 0; aimT = 0; windT = 0;
-    body = { x: ROCK_X, y: 0, vx: 0, vy: 0, rot: 0, spin: 0 };
-    traveled = 0; resultM = 0; sinkT = 0; hitT = 0;
+    body = { x: ROCK_X, y: 0, vx: 0, vy: 0, rot: 0 };
+    traveled = 0; resultM = 0; sinkT = 0; hitT = 0; selfT = 0; squash = 0; armed = false;
     skim = null;
     ojiFly = null;
   }
   newRound();
 
-  function heldCenterY() { return GROUND_Y - (ROCK_HELD_W / rock.flat) / 2; }
-  function flyHalfH() { return (ROCK_FLY_W / rock.flat) / 2; }
+  function rockHalfH() { return (ROCK_W / rock.flat) / 2; }
+  function heldCenterY() { return HEAD_Y + 10 - rockHalfH(); }   // 頭に乗せた状態
+  function flyHalfH() { return rockHalfH(); }
   function aimRad() { return (MIN_ANGLE + aimT * (MAX_ANGLE - MIN_ANGLE)) * Math.PI / 180; }
 
-  function spawnSplash(x, y, n, spread) {
+  function spawnSplash(x, y, n, spread, col) {
     for (var i = 0; i < n; i++) {
       particles.push({
         x: x, y: y,
         vx: rnd(-1, 1) * spread, vy: rnd(-1, -0.15) * spread * 1.4,
-        life: rnd(0.35, 0.8), age: 0, r: rnd(1.6, 3.6)
+        life: rnd(0.35, 0.8), age: 0, r: rnd(1.6, 3.6),
+        col: col || "255,255,255"
       });
     }
     if (particles.length > 420) particles.splice(0, particles.length - 420);
@@ -272,6 +286,24 @@
     beep(170, 0.34, "sawtooth", 0.11);
   }
 
+  function thud() {
+    state = S.SINK;
+    sinkT = 0;
+    resultM = Math.max(0, body.x - ROCK_X);
+    spawnSplash(body.x, GROUND_Y, 14, 150, "196,168,120");
+    beep(130, 0.26, "sawtooth", 0.14);
+  }
+
+  function selfHit() {
+    state = S.SELFHIT;
+    selfT = 0;
+    squash = 1;
+    body.vx = 0; body.vy = 0;
+    resultM = 0;
+    spawnSplash(OJISAN_X, GROUND_Y - 20, 24, 210, "196,168,120");
+    beep(84, 0.5, "sawtooth", 0.26);
+  }
+
   function hitOjisan() {
     state = S.HIT;
     hitT = 0;
@@ -286,7 +318,32 @@
   function update(dt) {
     t += dt;
 
-    if (state === S.POWER) {
+    if (state === S.SELECT) {
+      // 砂浜を横に流し、タップで減速 → 中央に来た石を拾う
+      var L = SEL_COUNT * SEL_SPACING;
+      if (selTarget == null) {
+        if (selStopping) selSpeed = selSpeed * Math.pow(0.05, dt);
+        selScroll += selSpeed * dt;
+        if (selStopping && selSpeed < 150) {
+          var best = 0, bestD = Infinity;
+          for (var si2 = 0; si2 < SEL_COUNT; si2++) {
+            var base = si2 * SEL_SPACING - W / 2;
+            var d = base + Math.ceil((selScroll - base) / L) * L - selScroll;
+            if (d < bestD) { bestD = d; best = si2; }
+          }
+          selIndex = best;
+          selTarget = selScroll + bestD;
+        }
+      } else {
+        selScroll += (selTarget - selScroll) * Math.min(1, dt * 5);
+        if (Math.abs(selTarget - selScroll) < 0.6) {
+          rock = choices[selIndex];
+          state = S.AIM; t = 0;
+          beep(780, 0.1, "triangle", 0.12);
+        }
+      }
+
+    } else if (state === S.POWER) {
       power = (Math.sin(t * 4.2) + 1) / 2;
 
     } else if (state === S.AIM) {
@@ -322,6 +379,13 @@
           sink();
         }
       }
+      // 頭から離れてはじめて、落下の判定を有効にする
+      if (!armed && (body.y + flyHalfH() < HEAD_Y - 14 || body.x > OJISAN_X + 90)) armed = true;
+      // 真上に投げてしまった場合は、落ちてきて自分に当たる
+      if (armed && body.vy > 0 && body.x < SHORE_RIGHT) {
+        if (Math.abs(body.x - OJISAN_X) < 75 && body.y + flyHalfH() >= HEAD_Y) selfHit();
+        else if (body.y + flyHalfH() >= GROUND_Y) thud();
+      }
       traveled = body.x - ROCK_X;
       camX = Math.max(0, body.x - 300);
 
@@ -351,9 +415,20 @@
 
     } else if (state === S.SINK) {
       sinkT += dt;
-      body.y += 90 * dt;
-      body.rot += 0.9 * dt;   // 沈むときだけ、ぐらりと傾いて水に入る
+      if (body.x > SHORE_RIGHT) {
+        body.y += 90 * dt;
+        body.rot += 0.9 * dt;   // 水に落ちたときだけ、ぐらりと傾いて沈む
+      }
       if (sinkT > 0.85) state = S.RESULT;
+
+    } else if (state === S.SELFHIT) {
+      selfT += dt;
+      squash = 0.75 + 0.25 * Math.max(0, 1 - selfT * 2.5);
+      body.x = OJISAN_X;
+      body.y = GROUND_Y - OJISAN_W * OJISAN_FOOT * (1 - squash * 0.42) - flyHalfH();
+      body.rot += (0 - body.rot) * Math.min(1, dt * 4);
+      camX = selfT < 0.35 ? (Math.random() - 0.5) * 18 * (1 - selfT / 0.35) : 0;
+      if (selfT > 1.9) state = S.RESULT;
 
     } else if (state === S.HIT) {
       hitT += dt;
@@ -377,31 +452,13 @@
   }
 
   /* ============ 入力 ============ */
-  function slotPos(i) {
-    var col = i % 5, row = (i / 5) | 0;
-    return { x: W * 0.13 + col * (W * 0.185), y: H * 0.30 + row * (H * 0.33) };
-  }
-
-  function pickChoice(x, y) {
-    for (var i = 0; i < choices.length; i++) {
-      var s = slotPos(i);
-      if (Math.abs(x - s.x) < W * 0.09 && Math.abs(y - s.y) < H * 0.16) return i;
-    }
-    return -1;
-  }
-
-  function tap(x, y) {
+  function tap() {
     if (!ready) return;
     if (state === S.SELECT) {
-      var i = pickChoice(x, y);
-      if (i >= 0) {
-        rock = choices[i];
-        state = S.POWER; t = 0;
-        beep(660, 0.08, "triangle", 0.1);
-      }
-    } else if (state === S.POWER) {
-      state = S.AIM; t = 0;
+      if (!selStopping) { selStopping = true; beep(540, 0.07, "square", 0.1); }
     } else if (state === S.AIM) {
+      state = S.POWER; t = 0;
+    } else if (state === S.POWER) {
       state = S.WIND; windT = 0;
     } else if (state === S.RESULT) {
       newRound();
@@ -410,8 +467,7 @@
 
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault();
-    var r = canvas.getBoundingClientRect();
-    tap((e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H);
+    tap();
   });
 
   /* ============ 描画 ============ */
@@ -510,13 +566,15 @@
     ctx.fill();
   }
 
-  function drawOjisan(worldX, y, night, rot) {
+  function drawOjisan(worldX, y, night, rot, sq) {
     var x = worldX - camX;
     if (x < -140 || x > W + 140) return;
     ctx.save();
     ctx.translate(x, y);
     if (rot) ctx.rotate(rot);
-    else if (state === S.WIND) ctx.rotate(Math.sin((windT / 0.18) * Math.PI) * 0.24);
+    // 投げる瞬間と、石が落ちてきたときは足元を軸に潰れる
+    var s = sq || (state === S.WIND ? Math.sin((windT / 0.18) * Math.PI) * 0.22 : 0);
+    if (s) ctx.scale(1 + s * 0.40, 1 - s * 0.42);
     ctx.drawImage(ojisanImg, -OJISAN_W / 2, -OJISAN_W * OJISAN_FOOT, OJISAN_W, OJISAN_W);
     if (night > 0.05) {
       ctx.globalAlpha = night * 0.55;
@@ -528,21 +586,19 @@
   }
 
   function drawParticles() {
-    ctx.fillStyle = "rgba(255,255,255,.9)";
     for (var i = 0; i < particles.length; i++) {
       var p = particles[i];
       var sx = p.x - camX;
       if (sx < -20 || sx > W + 20) continue;
-      ctx.globalAlpha = Math.max(0, 1 - p.age / p.life);
+      ctx.fillStyle = "rgba(" + p.col + "," + Math.max(0, 1 - p.age / p.life) * 0.9 + ")";
       ctx.beginPath();
       ctx.arc(sx, p.y, p.r, 0, TAU);
       ctx.fill();
     }
-    ctx.globalAlpha = 1;
   }
 
   function drawGauge(v) {
-    var bw = W * 0.46, bh = 20, bx = (W - bw) / 2, by = H * 0.12;
+    var bw = W * 0.46, bh = 20, bx = (W - bw) / 2, by = 74;
     ctx.fillStyle = "rgba(8,16,26,.35)";
     ctx.fillRect(bx - 5, by - 5, bw + 10, bh + 10);
     var g = ctx.createLinearGradient(bx, 0, bx + bw, 0);
@@ -557,9 +613,15 @@
 
   function drawArrow() {
     var a = aimRad();
-    var ox = ROCK_X - camX, oy = heldCenterY();
-    var len = 96 + power * 46;
-    var tx = ox + Math.cos(a) * len, ty = oy - Math.sin(a) * len;
+    var ca = Math.cos(a), sa = Math.sin(a);
+    // 石の外側から生やして、石に埋もれないようにする
+    var ox = ROCK_X - camX + ca * (ROCK_W / 2) * 0.85;
+    var oy = heldCenterY() - sa * rockHalfH() * 0.85;
+    var len = 88;
+    var ty = oy - sa * len;
+    if (ty < 84) len = Math.max(24, (oy - 84) / Math.max(sa, 0.001));
+    var tx = ox + ca * len;
+    ty = oy - sa * len;
     ctx.save();
     ctx.strokeStyle = "#fff";
     ctx.fillStyle = "#fff";
@@ -600,26 +662,63 @@
     g.addColorStop(1, "#c9ad7e");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
+
+    // 砂粒は奥と手前で流れる速さを変えて、浜を見て回っている感じを出す
     for (var i = 0; i < sandDots.length; i++) {
       var d = sandDots[i];
+      var par = (i % 2) ? 1 : 0.45;
+      var dx = ((d.x - selScroll * par) % W + W) % W;
       ctx.fillStyle = "rgba(90,70,40," + d.d + ")";
       ctx.beginPath();
-      ctx.arc(d.x, d.y, d.r, 0, TAU);
+      ctx.arc(dx, d.y, d.r, 0, TAU);
       ctx.fill();
     }
-    for (var k = 0; k < choices.length; k++) {
-      var s = slotPos(k), c = choices[k];
-      var w = 118;
+
+    // 拾う位置
+    ctx.fillStyle = "rgba(255,255,255,.15)";
+    ctx.fillRect(W / 2 - 74, 0, 148, H);
+
+    var L = SEL_COUNT * SEL_SPACING, w = 132;
+    for (var k = 0; k < SEL_COUNT; k++) {
+      var sx = ((k * SEL_SPACING - selScroll + 300) % L + L) % L - 300;
+      if (sx < -220 || sx > W + 220) continue;
+      var c = choices[k];
       ctx.save();
-      ctx.translate(s.x, s.y);
+      ctx.translate(sx, c.sy);
       ctx.fillStyle = "rgba(90,72,44,.22)";
       ctx.beginPath();
-      ctx.ellipse(4, (w / c.flat) / 2 + 4, w * 0.48, w * 0.09, 0, 0, TAU);
+      ctx.ellipse(4, (w / c.flat) / 2 + 5, w * 0.48, w * 0.09, 0, 0, TAU);
       ctx.fill();
       ctx.rotate(c.lie);
       drawRock(c, w);
       ctx.restore();
     }
+
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "rgba(24,30,38,.65)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(W / 2, H * 0.20);
+    ctx.lineTo(W / 2 - 15, H * 0.20 - 23);
+    ctx.lineTo(W / 2 + 15, H * 0.20 - 23);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPrompt(text) {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.font = "800 38px sans-serif";
+    ctx.lineWidth = 8;
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(12,18,26,.75)";
+    ctx.strokeText(text, W / 2, 44);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(text, W / 2, 44);
+    ctx.restore();
   }
 
   function draw() {
@@ -629,7 +728,7 @@
       ctx.fillRect(0, 0, W, H);
       return;
     }
-    if (state === S.SELECT) { drawSelect(); return; }
+    if (state === S.SELECT) { drawSelect(); drawPrompt("石を探せ！"); return; }
 
     var phase = dayPhase();
     var ang = phase * TAU;
@@ -642,23 +741,23 @@
     drawShore(DEST_OFFSET, night);
 
     // 投げた場所のおじさん
-    if (state !== S.HIT || !ojiFly) drawOjisan(OJISAN_X, GROUND_Y, night);
+    if (state !== S.HIT || !ojiFly) {
+      drawOjisan(OJISAN_X, GROUND_Y, night, 0, state === S.SELFHIT ? squash : 0);
+    }
     // 一周した先のおじさん(＝同じ砂浜)
     if (ojiFly) drawOjisan(ojiFly.x, ojiFly.y, night, ojiFly.rot);
     else drawOjisan(DEST_OFFSET + OJISAN_X, GROUND_Y, night);
 
-    if (state === S.POWER || state === S.AIM || state === S.WIND) {
+    if (state === S.AIM || state === S.POWER || state === S.WIND) {
       ctx.save();
-      var sq = state === S.WIND ? 1 - Math.sin((windT / 0.18) * Math.PI) * 0.12 : 1;
       ctx.translate(ROCK_X - camX, heldCenterY());
-      ctx.scale(sq, 2 - sq);
-      drawRock(rock, ROCK_HELD_W);
+      drawRock(rock, ROCK_W);
       ctx.restore();
-    } else if (state !== S.SELECT) {
+    } else {
       ctx.save();
       ctx.translate(body.x - camX, body.y);
       ctx.rotate(body.rot);
-      drawRock(rock, ROCK_FLY_W);
+      drawRock(rock, ROCK_W);
       ctx.restore();
     }
 
@@ -668,9 +767,13 @@
       ctx.fillStyle = "rgba(255,255,255," + (1 - hitT / 0.22) * 0.6 + ")";
       ctx.fillRect(0, 0, W, H);
     }
+    if (state === S.SELFHIT && selfT < 0.22) {
+      ctx.fillStyle = "rgba(255,236,180," + (1 - selfT / 0.22) * 0.55 + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
 
-    if (state === S.POWER) drawGauge(power);
-    if (state === S.AIM) drawArrow();
+    if (state === S.AIM) { drawArrow(); drawPrompt("角度を決めろ！"); }
+    if (state === S.POWER) { drawGauge(power); drawPrompt("力を込めろ！"); }
 
     if (state === S.FLY || state === S.SKIM || state === S.APPROACH) drawNumber(W - 96, 52, 30, km(traveled));
 
