@@ -46,7 +46,7 @@
   var GRAVITY = 1500;
   var MIN_ANGLE = 0, MAX_ANGLE = 90;
   var SKIM_VY = 95;             // 反発後の跳ね上がりがこれ未満なら水面を滑走しはじめる
-  var V_REF = 740;              // 滑走距離の基準速度
+  var V_REF = 690;              // 滑走距離の基準速度
   var D_MAX = 52000000;         // 到達しうる最大距離(m)
   var EARTH_M = 40075000;       // 地球一周
   var DEST_OFFSET = EARTH_M + (ROCK_X - OJISAN_X);  // 一周した先の砂浜(おじさんが投げた地点に戻る)
@@ -205,11 +205,14 @@
   var SEL_COUNT = 16;        // 砂浜に転がっている石の数
   var SEL_SPACING = 250;
   var SEL_SPEED = 1050;      // 砂浜を探し回る速さ
+  var WIND_DUR = 0.55;       // 投げる直前のタメ
+  var SKIM_DELAY = 3.0;      // 投げてからこの秒数は普通に跳ねさせ、そのあと加速に入る
 
   var state, t, camX, particles, choices, rock, power, aimT, windT;
   var body, traveled, skim, hitT, ojiFly, resultM, sinkT;
   var selScroll, selSpeed, selStopping, selTarget, selIndex;
-  var selfT, squash, armed;
+  var selfT, squash, armed, crushed;
+  var flyT, grazing, islands, speedLines, islandAcc;
 
   function newRound() {
     state = S.SELECT;
@@ -225,10 +228,19 @@
     power = 0; aimT = 0; windT = 0;
     body = { x: ROCK_X, y: 0, vx: 0, vy: 0, rot: 0 };
     traveled = 0; resultM = 0; sinkT = 0; hitT = 0; selfT = 0; squash = 0; armed = false;
+    crushed = false; flyT = 0; grazing = false;
+    islands = []; speedLines = []; islandAcc = 0;
     skim = null;
     ojiFly = null;
   }
   newRound();
+
+  // タメ: ぐっと沈み込んでから、最後に一気に伸び上がる
+  function windCrouch() {
+    var wp = clamp(windT / WIND_DUR, 0, 1);
+    return wp < 0.7 ? Math.sin((wp / 0.7) * Math.PI / 2)
+                    : Math.cos(((wp - 0.7) / 0.3) * Math.PI / 2);
+  }
 
   function rockHalfH() { return (ROCK_W / rock.flat) / 2; }
   function heldCenterY() { return HEAD_Y + 10 - rockHalfH(); }   // 頭に乗せた状態
@@ -255,6 +267,7 @@
     body.vx = Math.cos(a) * speed;
     body.vy = -Math.sin(a) * speed;
     body.rot = BASE_TILT;      // 水切りの石は回らず、水面と平行のまま跳ねていく
+    flyT = 0; grazing = false;
     state = S.FLY;
     beep(520, 0.12, "square", 0.13);
   }
@@ -298,6 +311,7 @@
     state = S.SELFHIT;
     selfT = 0;
     squash = 1;
+    crushed = true;   // 結果表示のあいだも潰れたままにする
     body.vx = 0; body.vy = 0;
     resultM = 0;
     spawnSplash(OJISAN_X, GROUND_Y - 20, 24, 210, "196,168,120");
@@ -350,13 +364,17 @@
       aimT = (Math.sin(t * 4.6) + 1) / 2;
 
     } else if (state === S.WIND) {
+      if (windT === 0) beep(220, 0.4, "square", 0.09);   // タメの唸り
       windT += dt;
-      if (windT >= 0.18) launch();
+      if (windT >= WIND_DUR) launch();
 
     } else if (state === S.FLY) {
       var maxInc = 0.40 + (rock.flat - 1) * 0.16;
       var rest = 0.36 + (rock.flat - 1) * 0.095;
       var fric = 0.79 + (rock.flat - 1) * 0.042;
+
+      flyT += dt;
+      if (grazing) body.vx *= Math.pow(0.90, dt);   // 細かく水面を叩いている間はゆるやかに減速
 
       body.vy += GRAVITY * dt;
       body.x += body.vx * dt;
@@ -369,12 +387,17 @@
         var speed = Math.hypot(body.vx, body.vy);
         if (inc < maxInc && speed > 120) {
           body.y = WATER_Y - contact;
-          body.vy = -body.vy * rest;
-          body.vx *= fric;
-          body.rot = BASE_TILT - 0.26;   // 水を蹴った瞬間だけ頭を跳ね上げる
           spawnSplash(body.x, WATER_Y, 8, 150);
           beep(300 + Math.random() * 150, 0.1, "triangle", 0.1);
-          if (-body.vy < SKIM_VY) startSkim();
+          if (body.vy * rest < SKIM_VY) {
+            // 跳ねる力を使い切って、水面を細かく叩きはじめた状態
+            if (flyT >= SKIM_DELAY) startSkim();
+            else { grazing = true; body.vy = -SKIM_VY * 0.85; body.rot = BASE_TILT - 0.12; }
+          } else {
+            body.vy = -body.vy * rest;
+            body.vx *= fric;
+            body.rot = BASE_TILT - 0.26;   // 水を蹴った瞬間だけ頭を跳ね上げる
+          }
         } else {
           sink();
         }
@@ -399,7 +422,35 @@
       traveled = body.x - ROCK_X;
       camX = Math.max(0, body.x - 300);
       if (Math.random() < 0.9) spawnSplash(body.x - rnd(0, 40), WATER_Y, 2, 120);
+
+      // 流れていく島と加速線(見た目の速さは頭打ちにして、速さの変化だけ伝える)
+      var vis = 2600 * Math.pow(1 - p, 3);
+      islandAcc += vis * dt;
+      if (islandAcc > 340) {
+        islandAcc = 0;
+        islands.push({ x: W + 150, w: rnd(50, 140), h: rnd(22, 74), par: rnd(0.30, 0.58) });
+        if (islands.length > 24) islands.shift();
+      }
+      for (var ii = islands.length - 1; ii >= 0; ii--) {
+        islands[ii].x -= vis * islands[ii].par * dt;
+        if (islands[ii].x < -260) islands.splice(ii, 1);
+      }
+      if (vis > 260 && Math.random() < 0.85) {
+        speedLines.push({
+          x: W + rnd(0, 220), y: rnd(WATER_Y + 8, H - 10), w: rnd(90, 280),
+          a: rnd(0.35, 0.8), life: rnd(0.25, 0.5), age: 0
+        });
+        if (speedLines.length > 70) speedLines.shift();
+      }
+      for (var li = speedLines.length - 1; li >= 0; li--) {
+        var ln = speedLines[li];
+        ln.age += dt;
+        ln.x -= vis * 1.3 * dt;
+        if (ln.age > ln.life || ln.x < -300) speedLines.splice(li, 1);
+      }
+
       if (p >= 1) {
+        speedLines.length = 0;
         if (skim.jackpot) { state = S.APPROACH; } else sink();
       }
 
@@ -501,22 +552,27 @@
       ctx.globalAlpha = 1;
     }
 
-    drawOrb(ang, "#ffe9a8", "#ffd166", 34);
-    drawOrb(ang + Math.PI, "#f2f4ff", "#d8ddf0", 24);
+    // 太陽と月は、走りはじめて世界が動きだしてから現れる
+    var orbA = clamp((phase - 0.015) / 0.05, 0, 1);
+    drawOrb(ang, "#ffe9a8", "#ffd166", 34, orbA);
+    drawOrb(ang + Math.PI, "#f2f4ff", "#d8ddf0", 24, orbA);
     return night;
   }
 
-  function drawOrb(ang, c1, c2, r) {
+  function drawOrb(ang, c1, c2, r, alpha) {
+    if (alpha <= 0) return;
     var x = W * 0.5 + Math.sin(ang) * (W * 0.42);
     var y = (WATER_Y - 60) - Math.cos(ang) * (WATER_Y - 120);
     if (y > WATER_Y + 20) return;
     var g = ctx.createRadialGradient(x, y, 0, x, y, r);
     g.addColorStop(0, c1);
     g.addColorStop(1, c2);
+    ctx.globalAlpha = alpha;
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, TAU);
     ctx.fill();
+    ctx.globalAlpha = 1;
   }
 
   function drawWater(night, dusk) {
@@ -572,8 +628,8 @@
     ctx.save();
     ctx.translate(x, y);
     if (rot) ctx.rotate(rot);
-    // 投げる瞬間と、石が落ちてきたときは足元を軸に潰れる
-    var s = sq || (state === S.WIND ? Math.sin((windT / 0.18) * Math.PI) * 0.22 : 0);
+    // 投げる直前のタメと、石が落ちてきたときは足元を軸に潰れる
+    var s = sq || (state === S.WIND ? windCrouch() * 0.26 : 0);
     if (s) ctx.scale(1 + s * 0.40, 1 - s * 0.42);
     ctx.drawImage(ojisanImg, -OJISAN_W / 2, -OJISAN_W * OJISAN_FOOT, OJISAN_W, OJISAN_W);
     if (night > 0.05) {
@@ -583,6 +639,33 @@
       ctx.fillRect(-OJISAN_W / 2, -OJISAN_W * OJISAN_FOOT, OJISAN_W, OJISAN_W);
     }
     ctx.restore();
+  }
+
+  function drawIslands(night) {
+    var col = rgb(mixRGB([92, 128, 96], [14, 22, 38], night));
+    for (var i = 0; i < islands.length; i++) {
+      var s = islands[i];
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(s.x - s.w, WATER_Y + 2);
+      ctx.quadraticCurveTo(s.x - s.w * 0.4, WATER_Y - s.h, s.x, WATER_Y - s.h * 0.92);
+      ctx.quadraticCurveTo(s.x + s.w * 0.5, WATER_Y - s.h * 0.7, s.x + s.w, WATER_Y + 2);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  function drawSpeedLines() {
+    ctx.lineCap = "round";
+    for (var i = 0; i < speedLines.length; i++) {
+      var l = speedLines[i];
+      ctx.strokeStyle = "rgba(255,255,255," + l.a * (1 - l.age / l.life) + ")";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(l.x, l.y);
+      ctx.lineTo(l.x + l.w, l.y);
+      ctx.stroke();
+    }
   }
 
   function drawParticles() {
@@ -737,12 +820,14 @@
 
     drawSky(phase);
     drawWater(night, dusk);
+    drawIslands(night);
     drawShore(0, night);
     drawShore(DEST_OFFSET, night);
 
-    // 投げた場所のおじさん
+    // 投げた場所のおじさん(潰れたら結果表示のあいだも潰れたまま)
     if (state !== S.HIT || !ojiFly) {
-      drawOjisan(OJISAN_X, GROUND_Y, night, 0, state === S.SELFHIT ? squash : 0);
+      var crush = (state === S.SELFHIT || (crushed && state === S.RESULT)) ? squash : 0;
+      drawOjisan(OJISAN_X, GROUND_Y, night, 0, crush);
     }
     // 一周した先のおじさん(＝同じ砂浜)
     if (ojiFly) drawOjisan(ojiFly.x, ojiFly.y, night, ojiFly.rot);
@@ -750,7 +835,10 @@
 
     if (state === S.AIM || state === S.POWER || state === S.WIND) {
       ctx.save();
-      ctx.translate(ROCK_X - camX, heldCenterY());
+      // タメの間は石も一緒に沈み込んで、小刻みに震える
+      var cr = state === S.WIND ? windCrouch() : 0;
+      var shake = cr > 0.2 ? (Math.random() - 0.5) * 5 * cr : 0;
+      ctx.translate(ROCK_X - camX + shake, heldCenterY() + cr * 16);
       drawRock(rock, ROCK_W);
       ctx.restore();
     } else {
@@ -762,6 +850,7 @@
     }
 
     drawParticles();
+    drawSpeedLines();
 
     if (state === S.HIT && hitT < 0.22) {
       ctx.fillStyle = "rgba(255,255,255," + (1 - hitT / 0.22) * 0.6 + ")";
