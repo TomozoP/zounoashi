@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>逆水切り</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b1622; overflow: hidden; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #wrap { position: relative; width: 100%; max-width: 960px; aspect-ratio: 16/9; touch-action: none; }
+  canvas { width: 100%; height: 100%; display: block; border-radius: 0; background: #7fc8e8; }
+  #hint {
+    position: absolute; left: 0; right: 0; bottom: 4%; text-align: center;
+    color: #fff; font: 700 clamp(13px,2.6vw,18px)/1.5 -apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+    text-shadow: 0 2px 6px rgba(0,0,0,.55); pointer-events: none; letter-spacing: .02em;
+  }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="hint"></div>
+</div></div>
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var hint = document.getElementById("hint");
+  var wrap = document.getElementById("wrap");
+
+  var W = 960, H = 540;
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  var WATER_Y = 340;
+  var SHORE_RIGHT = 210;
+  var START_X = 130;
+  var GRAVITY = 1500;
+  var WORLD_W = 5200;
+
+  var results = [
+    { max: 0,  text: "ドボン…一瞬の出来事だった。石も気まずそう。" },
+    { max: 2,  text: "ちょっとだけ跳ねた。まだ石も本気じゃない。" },
+    { max: 4,  text: "なかなかの水切り記録！おじさん、意外と飛ぶ。" },
+    { max: 7,  text: "伝説級のスキップ！おじさんが人類の可能性を広げた。" },
+    { max: 999,text: "水切り世界記録更新？！おじさんはもう水面を歩けるかもしれない。" }
+  ];
+
+  var audioCtx = null;
+  function beep(freq, dur, type, gain) {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var t0 = audioCtx.currentTime;
+      var osc = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      osc.type = type || "sine";
+      osc.frequency.setValueAtTime(freq, t0);
+      g.gain.setValueAtTime((gain || 0.15), t0);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+      osc.connect(g); g.connect(audioCtx.destination);
+      osc.start(t0); osc.stop(t0 + dur);
+    } catch (e) {}
+  }
+
+  var state = "title";
+  var t = 0;
+  var power = 0, angle = 0;
+  var throwFx = 0;
+  var camX = 0;
+  var particles = [];
+
+  var body = { x: START_X, y: WATER_Y - 40, vx: 0, vy: 0, rot: 0, rotSpeed: 0, sinking: 0 };
+  var skips = 0;
+  var bestDist = 0;
+
+  function reset() {
+    state = "title";
+    body.x = START_X; body.y = WATER_Y - 40;
+    body.vx = 0; body.vy = 0; body.rot = 0; body.rotSpeed = 0; body.sinking = 0;
+    skips = 0; camX = 0; particles = [];
+  }
+  reset();
+
+  function spawnSplash(x, y) {
+    for (var i = 0; i < 10; i++) {
+      particles.push({
+        x: x, y: y,
+        vx: (Math.random() - 0.5) * 260,
+        vy: -Math.random() * 260 - 40,
+        life: 0.5 + Math.random() * 0.3,
+        age: 0
+      });
+    }
+  }
+
+  function update(dt) {
+    t += dt;
+    if (state === "power") {
+      power = (Math.sin(t * 4.2) + 1) / 2;
+    } else if (state === "angle") {
+      angle = (Math.sin(t * 4.6) + 1) / 2;
+    } else if (state === "throw-anim") {
+      throwFx += dt;
+      if (throwFx > 0.16) { throwFx = 0; launch(); }
+    } else if (state === "flying") {
+      body.vy += GRAVITY * dt;
+      body.x += body.vx * dt;
+      body.y += body.vy * dt;
+      body.rot += body.rotSpeed * dt;
+
+      var speed = Math.hypot(body.vx, body.vy);
+      if (body.y + 12 >= WATER_Y && body.vy > 0 && body.x > SHORE_RIGHT) {
+        var incidence = Math.atan2(body.vy, Math.abs(body.vx));
+        if (incidence < 0.62 && speed > 130) {
+          body.y = WATER_Y - 12;
+          body.vy = -body.vy * 0.56;
+          body.vx *= 0.88;
+          body.rotSpeed *= 0.8;
+          skips++;
+          spawnSplash(body.x, WATER_Y);
+          beep(320 + Math.random() * 120, 0.12, "triangle", 0.12);
+          if (Math.hypot(body.vx, body.vy) < 150) sink();
+        } else {
+          sink();
+        }
+      }
+      if (body.x > WORLD_W - 60) sink();
+
+      var target = body.x - 220;
+      camX += (Math.max(0, Math.min(WORLD_W - W, target)) - camX) * Math.min(1, dt * 6);
+    } else if (state === "sinking") {
+      body.sinking += dt;
+      body.y += 60 * dt;
+      if (body.sinking > 0.9) {
+        bestDist = Math.max(bestDist, Math.round((body.x - START_X) / 12));
+        state = "result";
+      }
+    }
+
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var p = particles[i];
+      p.age += dt;
+      if (p.age > p.life) { particles.splice(i, 1); continue; }
+      p.vy += 700 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+    }
+  }
+
+  function sink() {
+    state = "sinking";
+    body.sinking = 0;
+    spawnSplash(body.x, WATER_Y);
+    beep(180, 0.35, "sawtooth", 0.1);
+  }
+
+  function launch() {
+    var speed = 560 + power * 420;
+    var ang = (10 + angle * 42) * Math.PI / 180;
+    body.x = START_X + 70; body.y = WATER_Y - 46;
+    body.vx = Math.cos(ang) * speed;
+    body.vy = -Math.sin(ang) * speed;
+    body.rotSpeed = 14 + power * 10;
+    skips = 0;
+    state = "flying";
+    beep(520, 0.12, "square", 0.12);
+  }
+
+  function handleTap() {
+    if (state === "title") { state = "power"; t = 0; }
+    else if (state === "power") { state = "angle"; t = 0; }
+    else if (state === "angle") { state = "throw-anim"; throwFx = 0; }
+    else if (state === "result") { reset(); }
+  }
+
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    handleTap();
+  });
+
+  function drawSky() {
+    var g = ctx.createLinearGradient(0, 0, 0, WATER_Y);
+    g.addColorStop(0, "#bfe8ff");
+    g.addColorStop(1, "#eaf8ff");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawWater() {
+    var g = ctx.createLinearGradient(0, WATER_Y, 0, H);
+    g.addColorStop(0, "#4fb3d9");
+    g.addColorStop(1, "#1c6f94");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, WATER_Y, W, H - WATER_Y);
+    ctx.strokeStyle = "rgba(255,255,255,.45)";
+    ctx.lineWidth = 2;
+    for (var i = 0; i < 6; i++) {
+      var wy = WATER_Y + 14 + i * 22;
+      ctx.beginPath();
+      for (var x = -40; x < W + 40; x += 8) {
+        var yy = wy + Math.sin((x + camX) * 0.03 + t * 2 + i) * 3;
+        if (x === -40) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+      }
+      ctx.globalAlpha = 0.18;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawShore() {
+    ctx.fillStyle = "#c9b183";
+    ctx.beginPath();
+    ctx.moveTo(-10 - camX, H);
+    ctx.lineTo(-10 - camX, WATER_Y - 10);
+    ctx.quadraticCurveTo(SHORE_RIGHT * 0.5 - camX, WATER_Y - 60, SHORE_RIGHT - camX, WATER_Y);
+    ctx.lineTo(-10 - camX, WATER_Y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#7cae5c";
+    ctx.beginPath();
+    ctx.moveTo(-10 - camX, WATER_Y - 30);
+    ctx.quadraticCurveTo(SHORE_RIGHT * 0.5 - camX, WATER_Y - 90, SHORE_RIGHT - camX, WATER_Y - 20);
+    ctx.lineTo(-10 - camX, WATER_Y - 10);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawRock(x, y, throwing) {
+    ctx.save();
+    var squish = throwing ? 1 - Math.sin((throwFx / 0.16) * Math.PI) * 0.18 : 1;
+    ctx.translate(x - camX, y);
+    ctx.scale(1, squish);
+    ctx.fillStyle = "#8b9096";
+    ctx.beginPath();
+    ctx.moveTo(-30, 8);
+    ctx.lineTo(-34, -10);
+    ctx.lineTo(-14, -30);
+    ctx.lineTo(10, -32);
+    ctx.lineTo(30, -14);
+    ctx.lineTo(32, 8);
+    ctx.lineTo(14, 20);
+    ctx.lineTo(-14, 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.18)";
+    ctx.beginPath();
+    ctx.moveTo(-14, -30); ctx.lineTo(10, -32); ctx.lineTo(2, -14); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,.15)";
+    ctx.beginPath();
+    ctx.moveTo(10, -6); ctx.lineTo(30, -14); ctx.lineTo(32, 8); ctx.lineTo(14, 20); ctx.closePath(); ctx.fill();
+    var armSwing = throwing ? Math.sin((throwFx / 0.16) * Math.PI) * 30 : 0;
+    ctx.fillStyle = "#8b9096";
+    ctx.save();
+    ctx.translate(28, -4);
+    ctx.rotate((-20 - armSwing) * Math.PI / 180);
+    ctx.fillRect(0, -4, 22, 8);
+    ctx.restore();
+    ctx.fillStyle = "#2b2f33";
+    ctx.beginPath(); ctx.arc(-8, -12, 2.4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(4, -14, 2.4, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawOjisan(x, y, rot) {
+    ctx.save();
+    ctx.translate(x - camX, y);
+    if (rot != null) ctx.rotate(rot);
+    ctx.fillStyle = "#c98a52";
+    ctx.beginPath(); ctx.arc(0, -22, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#5a4a3c";
+    ctx.beginPath(); ctx.arc(0, -26, 8, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#9a9a9a";
+    ctx.beginPath(); ctx.arc(0, -18, 6, 0.2, Math.PI - 0.2); ctx.fill();
+    ctx.fillStyle = "#eae4d6";
+    ctx.fillRect(-9, -13, 18, 22);
+    ctx.fillStyle = "#c98a52";
+    ctx.fillRect(-20, -12, 12, 6);
+    ctx.fillRect(8, -12, 12, 6);
+    ctx.fillStyle = "#4d5f7d";
+    ctx.fillRect(-8, 9, 7, 16);
+    ctx.fillRect(1, 9, 7, 16);
+    ctx.fillStyle = "#5a3d28";
+    ctx.fillRect(-9, 24, 8, 5);
+    ctx.fillRect(1, 24, 8, 5);
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    ctx.fillStyle = "rgba(255,255,255,.85)";
+    particles.forEach(function (p) {
+      var a = 1 - p.age / p.life;
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.beginPath();
+      ctx.arc(p.x - camX, p.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBar(label, value) {
+    var bw = W * 0.5, bh = 22, bx = (W - bw) / 2, by = H * 0.14;
+    ctx.fillStyle = "rgba(0,0,0,.35)";
+    ctx.fillRect(bx - 4, by - 4, bw + 8, bh + 8);
+    ctx.fillStyle = "#233043";
+    ctx.fillRect(bx, by, bw, bh);
+    var g = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+    g.addColorStop(0, "#5fd0ff");
+    g.addColorStop(0.5, "#ffe15a");
+    g.addColorStop(1, "#ff5a5a");
+    ctx.fillStyle = g;
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(bx + value * bw - 2, by - 6, 4, bh + 12);
+    ctx.fillStyle = "#fff";
+    ctx.font = "700 20px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(label, W / 2, by - 14);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    drawSky();
+    drawWater();
+    drawShore();
+
+    if (state === "title" || state === "power" || state === "angle" || state === "throw-anim") {
+      drawRock(START_X, WATER_Y - 30, state === "throw-anim");
+      drawOjisan(START_X + 46, WATER_Y - 38, null);
+    } else {
+      drawRock(START_X, WATER_Y - 30, false);
+      drawOjisan(body.x, body.y, body.rot);
+    }
+    drawParticles();
+
+    if (state === "power") drawBar("パワー ー タップで決定", power);
+    if (state === "angle") drawBar("角度 ー タップで決定", angle);
+
+    if (state === "flying" || state === "sinking") {
+      ctx.fillStyle = "rgba(0,0,0,.4)";
+      ctx.fillRect(14, 14, 150, 30);
+      ctx.fillStyle = "#fff";
+      ctx.font = "700 18px sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("スキップ数: " + skips, 24, 35);
+    }
+
+    if (state === "result") {
+      ctx.fillStyle = "rgba(10,20,30,.55)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.font = "700 40px sans-serif";
+      ctx.fillText("スキップ " + skips + " 回！", W / 2, H * 0.36);
+      ctx.font = "700 22px sans-serif";
+      var msg = results.filter(function (r) { return skips <= r.max; })[0].text;
+      wrapText(msg, W / 2, H * 0.48, W * 0.72, 30);
+      ctx.font = "600 18px sans-serif";
+      ctx.fillText("最高到達距離: " + bestDist + " m", W / 2, H * 0.66);
+    }
+  }
+
+  function wrapText(text, cx, cy, maxWidth, lineHeight) {
+    var chars = text.split("");
+    var lines = [""], li = 0;
+    chars.forEach(function (ch) {
+      var test = lines[li] + ch;
+      if (ctx.measureText(test).width > maxWidth) { li++; lines[li] = ch; }
+      else lines[li] = test;
+    });
+    var startY = cy - (lines.length - 1) * lineHeight / 2;
+    lines.forEach(function (line, i) {
+      ctx.fillText(line, cx, startY + i * lineHeight);
+    });
+  }
+
+  function updateHint() {
+    var msgs = {
+      "title": "タップ / クリックでスタート",
+      "power": "",
+      "angle": "",
+      "throw-anim": "",
+      "flying": "",
+      "sinking": "",
+      "result": "タップ / クリックでもう一度"
+    };
+    hint.textContent = state === "title" ? "おじさんが石を投げる…と見せかけて、石がおじさんを投げます" : (msgs[state] || "");
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    updateHint();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
