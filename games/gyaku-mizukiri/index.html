@@ -178,32 +178,75 @@
 
   /* ============ 音 ============ */
   var actx = null;
+  function audio() {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    return actx;
+  }
+
   function beep(freq, dur, type, gain) {
     try {
-      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
-      var t0 = actx.currentTime;
-      var osc = actx.createOscillator(), g = actx.createGain();
+      var a = audio(), t0 = a.currentTime;
+      var osc = a.createOscillator(), g = a.createGain();
       osc.type = type || "sine";
       osc.frequency.setValueAtTime(freq, t0);
       g.gain.setValueAtTime(gain || 0.14, t0);
       g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
-      osc.connect(g); g.connect(actx.destination);
+      osc.connect(g); g.connect(a.destination);
       osc.start(t0); osc.stop(t0 + dur);
     } catch (e) {}
   }
 
+  // ゲージや矢印が動いているあいだ、高さの変わる音を鳴らし続ける
+  var toneOsc = null, toneGain = null, toneKind = null;
+  function toneStart(kind, type, vol) {
+    try {
+      toneStop();
+      var a = audio();
+      toneOsc = a.createOscillator();
+      toneGain = a.createGain();
+      toneOsc.type = type;
+      toneGain.gain.setValueAtTime(vol, a.currentTime);
+      toneOsc.connect(toneGain); toneGain.connect(a.destination);
+      toneOsc.start();
+      toneKind = kind;
+    } catch (e) {}
+  }
+  function toneFreq(f) {
+    try { if (toneOsc) toneOsc.frequency.setTargetAtTime(f, actx.currentTime, 0.015); } catch (e) {}
+  }
+  function toneStop() {
+    try {
+      if (!toneOsc) return;
+      var osc = toneOsc, g = toneGain, a = audio();
+      g.gain.setTargetAtTime(0, a.currentTime, 0.02);
+      setTimeout(function () { try { osc.stop(); } catch (e) {} }, 140);
+    } catch (e) {}
+    toneOsc = null; toneGain = null; toneKind = null;
+  }
+
+  function fanfare() {
+    var notes = [523, 659, 784, 1047, 1319];
+    for (var i = 0; i < notes.length; i++) {
+      (function (f, d) {
+        setTimeout(function () { beep(f, d, "square", 0.13); }, i * 135);
+      })(notes[i], i === notes.length - 1 ? 0.7 : 0.22);
+    }
+  }
+
   /* ============ 状態 ============ */
   var S = {
-    SELECT: "select", AIM: "aim", POWER: "power", WIND: "wind",
+    SELECT: "select", REVEAL: "reveal", AIM: "aim", POWER: "power", WIND: "wind",
     FLY: "fly", SKIM: "skim", APPROACH: "approach", HIT: "hit",
     SINK: "sink", SELFHIT: "selfhit", RESULT: "result"
   };
+  var REVEAL_DUR = 0.6;      // 拾った石を見せる時間
+  var CAM_MIN = -140;        // 投げる前は、おじさんが真ん中寄りに見えるところまで寄せる
   var APPROACH_LEN = 430;    // 一周して浜が見えてから着弾するまでの助走
   var APPROACH_VX = 1450;
   var BASE_TILT = -0.13;     // 石は少しだけ頭を上げた姿勢のまま飛ぶ
   var SEL_COUNT = 16;        // 砂浜に転がっている石の数
   var SEL_SPACING = 250;
-  var SEL_SPEED = 1050;      // 砂浜を探し回る速さ
+  var SEL_SPEED = 2100;      // 砂浜を探し回る速さ
   var WIND_DUR = 0.55;       // 投げる直前のタメ
   var SKIM_DELAY = 3.0;      // 投げてからこの秒数は普通に跳ねさせ、そのあと加速に入る
 
@@ -212,10 +255,12 @@
   var selScroll;
   var selfT, squash, armed, crushed, hitReal;
   var flyT, grazing, islands, speedLines, islandAcc;
+  var revealT, selTick, confetti;
 
   function newRound() {
     state = S.SELECT;
-    t = 0; camX = 0; particles = [];
+    t = 0; camX = CAM_MIN; particles = [];
+    revealT = 0; selTick = 0; confetti = [];
     choices = [];
     for (var i = 0; i < SEL_COUNT; i++) {
       var r = makeRock();
@@ -280,12 +325,16 @@
     // 一周ぶんに届く場合は、浜が見えるところまでで滑走を終えて助走に切り替える
     if (jackpot) total = (ROCK_X + EARTH_M - APPROACH_LEN) - body.x;
 
-    // 距離に応じて、加速を最大3段階まで踏んでいく
+    // 距離に応じて、加速を最大3段階まで踏んでいく。
+    // 各段は2.5秒ほど流し、次の段へは切れ目なく速さと音程が上がっていく。
     var stages = total > EARTH_M * 0.35 ? 3 : (total > EARTH_M * 0.06 ? 2 : 1);
     var levels = [1, 1.8, 2.6];
     var segs = [];
-    for (var i = 0; i < stages; i++) segs.push({ dur: 0.85, v0: levels[i], v1: levels[i] });
-    segs.push({ dur: 1.0, v0: levels[stages - 1], v1: 0 });   // 最後は失速して止まる
+    for (var i = 0; i < stages; i++) {
+      segs.push({ dur: 1.9, v0: levels[i], v1: levels[i] });
+      if (i < stages - 1) segs.push({ dur: 0.6, v0: levels[i], v1: levels[i + 1] });
+    }
+    segs.push({ dur: 1.2, v0: levels[stages - 1], v1: 0 });   // 最後は失速して止まる
     var area = 0;
     for (i = 0; i < segs.length; i++) {
       segs[i].a0 = area;
@@ -333,7 +382,23 @@
     ojiFly = { x: DEST_OFFSET + OJISAN_X, y: GROUND_Y, vx: 300, vy: -640, rot: 0, spin: 7 };
     spawnSplash(body.x, GROUND_Y - 60, 40, 320);
     spawnSplash(body.x, GROUND_Y - 20, 20, 240, "196,168,120");
+    spawnConfetti(body.x, GROUND_Y - 60, 70);
     beep(110, 0.45, "sawtooth", 0.26);
+  }
+
+  function spawnConfetti(x, y, n) {
+    var cols = ["#ff5a7a", "#ffd166", "#5fd0ff", "#7ce08a", "#d08cff", "#fff"];
+    for (var i = 0; i < n; i++) {
+      var a = rnd(0, TAU), sp = rnd(120, 620);
+      confetti.push({
+        x: x, y: y,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 180,
+        w: rnd(5, 12), h: rnd(8, 16),
+        rot: rnd(0, TAU), spin: rnd(-9, 9),
+        col: cols[(Math.random() * cols.length) | 0],
+        life: rnd(1.6, 3.0), age: 0
+      });
+    }
   }
 
   function update(dt) {
@@ -346,12 +411,18 @@
 
     if (state === S.SELECT) {
       selScroll += SEL_SPEED * dt;   // 一定の速さで流し続ける(タップした瞬間に決まる)
+      var tick = Math.floor((selScroll + W / 2) / SEL_SPACING);
+      if (tick !== selTick) { selTick = tick; beep(1050, 0.03, "square", 0.05); }
+
+    } else if (state === S.REVEAL) {
+      revealT += dt;
+      if (revealT >= REVEAL_DUR) { state = S.AIM; t = 0; }
 
     } else if (state === S.POWER) {
-      power = (Math.sin(t * 4.2) + 1) / 2;
+      power = (Math.sin(t * 8.4) + 1) / 2;
 
     } else if (state === S.AIM) {
-      aimT = (Math.sin(t * 4.6) + 1) / 2;
+      aimT = (Math.sin(t * 9.2) + 1) / 2;
 
     } else if (state === S.WIND) {
       if (windT === 0) beep(220, 0.4, "square", 0.09);   // タメの唸り
@@ -400,7 +471,7 @@
         else if (body.y + flyHalfH() >= GROUND_Y) thud();
       }
       traveled = body.x - ROCK_X;
-      camX = Math.max(0, body.x - 300);
+      camX = Math.max(CAM_MIN, body.x - 300);
 
     } else if (state === S.SKIM) {
       skim.t += dt;
@@ -411,16 +482,13 @@
       var sk = clamp(rem / seg.dur, 0, 1);
       var sv = lerp(seg.v0, seg.v1, sk);
       var p = clamp((seg.a0 + (seg.v0 + sv) / 2 * (sk * seg.dur)) / skim.area, 0, 1);
-      if (idx !== skim.stage) {
-        skim.stage = idx;
-        if (seg.v1 > 0) beep(300 + idx * 160, 0.16, "square", 0.14);   // シフトアップ
-      }
+      skim.stage = idx;
       body.x = skim.x0 + skim.total * p;
       var hop = Math.abs(Math.sin(t * (20 + sv * 9)));
       body.y = WATER_Y - flyHalfH() * 0.7 - hop * 18;
       body.rot = BASE_TILT - hop * 0.18;
       traveled = body.x - ROCK_X;
-      camX = Math.max(0, body.x - 300);
+      camX = Math.max(CAM_MIN, body.x - 300);
       if (Math.random() < 0.9) spawnSplash(body.x - rnd(0, 40), WATER_Y, 2, 120);
 
       // 水を叩く音を、速さに合わせてピッチと間隔を上げながら流す
@@ -485,7 +553,7 @@
       body.x = OJISAN_X;
       body.y = GROUND_Y - OJISAN_W * OJISAN_FOOT * (1 - squash * 0.42) - flyHalfH();
       body.rot += (0 - body.rot) * Math.min(1, dt * 4);
-      camX = selfT < 0.35 ? (Math.random() - 0.5) * 18 * (1 - selfT / 0.35) : 0;
+      camX = CAM_MIN + (selfT < 0.35 ? (Math.random() - 0.5) * 18 * (1 - selfT / 0.35) : 0);
       if (selfT > 1.9) state = S.RESULT;
 
     } else if (state === S.HIT) {
@@ -496,7 +564,29 @@
         ojiFly.y += ojiFly.vy * dt;
         ojiFly.rot += ojiFly.spin * dt;
       }
-      if (hitReal > 2.3) state = S.RESULT;
+      if (hitReal > 2.3) { state = S.RESULT; fanfare(); }
+    }
+
+    // 矢印とゲージが動いているあいだは、その値を音の高さで表す
+    if (state === S.AIM) {
+      if (toneKind !== "aim") toneStart("aim", "sine", 0.05);
+      toneFreq(240 + aimT * 540);
+    } else if (state === S.POWER) {
+      if (toneKind !== "power") toneStart("power", "sawtooth", 0.04);
+      toneFreq(150 + power * 430);
+    } else if (toneKind) {
+      toneStop();
+    }
+
+    for (var ci = confetti.length - 1; ci >= 0; ci--) {
+      var cf = confetti[ci];
+      cf.age += dt;
+      if (cf.age > cf.life) { confetti.splice(ci, 1); continue; }
+      cf.vy += 520 * dt;
+      cf.vx *= Math.pow(0.5, dt);
+      cf.x += cf.vx * dt;
+      cf.y += cf.vy * dt;
+      cf.rot += cf.spin * dt;
     }
 
     for (var i = particles.length - 1; i >= 0; i--) {
@@ -521,12 +611,15 @@
         if (d < bestD) { bestD = d; best = i; }
       }
       rock = choices[best];
-      state = S.AIM; t = 0;
-      beep(780, 0.1, "triangle", 0.12);
+      state = S.REVEAL; revealT = 0;
+      beep(760, 0.09, "triangle", 0.13);
+      setTimeout(function () { beep(1140, 0.16, "triangle", 0.13); }, 90);
     } else if (state === S.AIM) {
       state = S.POWER; t = 0;
+      beep(900, 0.1, "square", 0.12);
     } else if (state === S.POWER) {
       state = S.WIND; windT = 0;
+      beep(1000, 0.12, "square", 0.13);
     } else if (state === S.RESULT) {
       newRound();
     }
@@ -617,7 +710,7 @@
   }
 
   function drawShore(offset, night) {
-    var left = offset - 120 - camX, right = offset + SHORE_RIGHT - camX;
+    var left = offset - 420 - camX, right = offset + SHORE_RIGHT - camX;
     if (right < -40 || left > W + 40) return;
     var sand = mixRGB([206, 180, 132], [56, 62, 84], night);
     var grass = mixRGB([124, 174, 92], [30, 48, 52], night);
@@ -669,6 +762,22 @@
       ctx.closePath();
       ctx.fill();
     }
+  }
+
+  function drawConfetti() {
+    for (var i = 0; i < confetti.length; i++) {
+      var c = confetti[i];
+      var sx = c.x - camX;
+      if (sx < -30 || sx > W + 30) continue;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - c.age / c.life);
+      ctx.translate(sx, c.y);
+      ctx.rotate(c.rot);
+      ctx.fillStyle = c.col;
+      ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h * (0.4 + 0.6 * Math.abs(Math.cos(c.rot * 1.7))));
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
   }
 
   function drawSpeedLines() {
@@ -807,6 +916,24 @@
     ctx.restore();
   }
 
+  // 拾った石を、フラッシュとともに一拍見せる
+  function drawReveal() {
+    drawSelect();
+    var p = clamp(revealT / REVEAL_DUR, 0, 1);
+    ctx.fillStyle = "rgba(12,18,26,.45)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.translate(W / 2, H * 0.52);
+    var pop = 1 + 0.25 * Math.max(0, 1 - p * 6);
+    ctx.scale(pop, pop);
+    drawRock(rock, 250);
+    ctx.restore();
+    if (revealT < 0.22) {
+      ctx.fillStyle = "rgba(255,255,255," + (1 - revealT / 0.22) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
   function drawPrompt(text) {
     ctx.save();
     ctx.textAlign = "center";
@@ -828,6 +955,7 @@
       return;
     }
     if (state === S.SELECT) { drawSelect(); drawPrompt("石を探せ！"); return; }
+    if (state === S.REVEAL) { drawReveal(); return; }
 
     var phase = dayPhase();
     var ang = phase * TAU;
@@ -866,6 +994,7 @@
     }
 
     drawParticles();
+    drawConfetti();
     drawSpeedLines();
 
     if (state === S.HIT && hitReal < 0.5) {
