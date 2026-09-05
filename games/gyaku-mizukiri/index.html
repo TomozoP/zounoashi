@@ -3,31 +3,24 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>逆水切り</title>
+<title>ストロング水切り</title>
 <style>
   html, body { margin: 0; height: 100%; background: #0b1622; overflow: hidden; }
   * { -webkit-tap-highlight-color: transparent; }
   #stage { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   #wrap { position: relative; width: 100%; max-width: 960px; aspect-ratio: 16/9; touch-action: none; }
   canvas { width: 100%; height: 100%; display: block; border-radius: 0; background: #7fc8e8; }
-  #hint {
-    position: absolute; left: 0; right: 0; bottom: 4%; text-align: center;
-    color: #fff; font: 700 clamp(13px,2.6vw,18px)/1.5 -apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
-    text-shadow: 0 2px 6px rgba(0,0,0,.55); pointer-events: none; letter-spacing: .02em;
-  }
 </style>
 </head>
 <body>
 <div id="stage"><div id="wrap">
   <canvas id="c"></canvas>
-  <div id="hint"></div>
 </div></div>
 <script>
 (function () {
   "use strict";
   var canvas = document.getElementById("c");
   var ctx = canvas.getContext("2d");
-  var hint = document.getElementById("hint");
   var wrap = document.getElementById("wrap");
 
   var W = 960, H = 540;
@@ -45,14 +38,28 @@
   var START_X = 130;
   var GRAVITY = 1500;
   var WORLD_W = 5200;
+  var TURBO_TRIGGER = 4;
+  var TURBO_MIN_SPEED = 180;
+  var TURBO_DURATION = 2.4;
+  var MIN_ANGLE_DEG = 8, MAX_ANGLE_DEG = 48;
+  var ARROW_ORIGIN_X = START_X + 90, ARROW_ORIGIN_Y = WATER_Y - 140;
+  var METERS_PER_SKIP = 3.2;
+  var EARTH_KM = 40075;
+  var MAX_ROLL_THRESHOLD = 0.95;
+  var IMPACT_DURATION = 0.8;
 
-  var results = [
-    { max: 0,  text: "ドボン…一瞬の出来事だった。石も気まずそう。" },
-    { max: 2,  text: "ちょっとだけ跳ねた。まだ石も本気じゃない。" },
-    { max: 4,  text: "なかなかの水切り記録！おじさん、意外と飛ぶ。" },
-    { max: 7,  text: "伝説級のスキップ！おじさんが人類の可能性を広げた。" },
-    { max: 999,text: "水切り世界記録更新？！おじさんはもう水面を歩けるかもしれない。" }
-  ];
+  var rockImg = new Image();
+  var ojisanImg = new Image();
+  var assetsReady = 0;
+  function onAssetLoad() { assetsReady++; }
+  rockImg.onload = onAssetLoad;
+  ojisanImg.onload = onAssetLoad;
+  rockImg.src = "img/rock.png";
+  ojisanImg.src = "img/ojisan.png";
+
+  var ROCK_STAND_SIZE = 200, ROCK_FOOT = 0.88;
+  var ROCK_FLY_SIZE = 150;
+  var OJISAN_SIZE = 118, OJISAN_FOOT = 0.92;
 
   var audioCtx = null;
   function beep(freq, dur, type, gain) {
@@ -79,7 +86,9 @@
 
   var body = { x: START_X, y: WATER_Y - 40, vx: 0, vy: 0, rot: 0, rotSpeed: 0, sinking: 0 };
   var skips = 0;
-  var bestDist = 0;
+  var turboFrom = 0, turboTo = 0, turboT = 0, turboBaseDistM = 0, turboIsMax = false;
+  var resultDistanceM = 0;
+  var impactT = 0, impactHit = false, hitFlash = 0;
 
   function reset() {
     state = "title";
@@ -101,6 +110,17 @@
     }
   }
 
+  function startTurbo() {
+    state = "turbo";
+    turboFrom = skips;
+    var roll = Math.random();
+    turboIsMax = roll > MAX_ROLL_THRESHOLD;
+    turboTo = skips + (turboIsMax ? 12000 : Math.round(3000 + roll * 9000));
+    turboT = 0;
+    turboBaseDistM = (body.x - START_X) / 12;
+    beep(660, 0.2, "square", 0.14);
+  }
+
   function update(dt) {
     t += dt;
     if (state === "power") {
@@ -117,17 +137,22 @@
       body.rot += body.rotSpeed * dt;
 
       var speed = Math.hypot(body.vx, body.vy);
-      if (body.y + 12 >= WATER_Y && body.vy > 0 && body.x > SHORE_RIGHT) {
+      if (body.y + 30 >= WATER_Y && body.vy > 0 && body.x > SHORE_RIGHT) {
         var incidence = Math.atan2(body.vy, Math.abs(body.vx));
         if (incidence < 0.62 && speed > 130) {
-          body.y = WATER_Y - 12;
+          body.y = WATER_Y - 30;
           body.vy = -body.vy * 0.56;
           body.vx *= 0.88;
-          body.rotSpeed *= 0.8;
+          body.rotSpeed *= 0.85;
           skips++;
           spawnSplash(body.x, WATER_Y);
           beep(320 + Math.random() * 120, 0.12, "triangle", 0.12);
-          if (Math.hypot(body.vx, body.vy) < 150) sink();
+          var postSpeed = Math.hypot(body.vx, body.vy);
+          if (skips >= TURBO_TRIGGER && postSpeed > TURBO_MIN_SPEED) {
+            startTurbo();
+          } else if (postSpeed < 150) {
+            sink();
+          }
         } else {
           sink();
         }
@@ -136,22 +161,56 @@
 
       var target = body.x - 220;
       camX += (Math.max(0, Math.min(WORLD_W - W, target)) - camX) * Math.min(1, dt * 6);
+    } else if (state === "turbo") {
+      turboT += dt;
+      var p = Math.min(1, turboT / TURBO_DURATION);
+      var eased = 1 - Math.pow(1 - p, 3);
+      skips = Math.round(turboFrom + (turboTo - turboFrom) * eased);
+      if (Math.random() < 0.4) {
+        spawnSplash(camX + W * 0.5 + (Math.random() - 0.5) * 220, WATER_Y);
+      }
+      if (p >= 1) {
+        if (turboIsMax) {
+          resultDistanceM = EARTH_KM * 1000;
+          state = "impact";
+          impactT = 0; impactHit = false; hitFlash = 0;
+          beep(200, 0.15, "square", 0.2);
+        } else {
+          resultDistanceM = turboBaseDistM + (skips - turboFrom) * METERS_PER_SKIP;
+          beep(880, 0.4, "sine", 0.16);
+          state = "result";
+        }
+      }
+    } else if (state === "impact") {
+      impactT += dt;
+      if (impactT >= IMPACT_DURATION && !impactHit) {
+        impactHit = true;
+        hitFlash = 1;
+        spawnSplash(START_X + 30, WATER_Y - 70);
+        beep(140, 0.25, "sawtooth", 0.22);
+      }
+      if (impactHit) {
+        hitFlash = Math.max(0, hitFlash - dt * 2.2);
+        if (hitFlash <= 0 && impactT >= IMPACT_DURATION + 0.5) {
+          state = "result";
+        }
+      }
     } else if (state === "sinking") {
       body.sinking += dt;
       body.y += 60 * dt;
       if (body.sinking > 0.9) {
-        bestDist = Math.max(bestDist, Math.round((body.x - START_X) / 12));
+        resultDistanceM = Math.max(0, (body.x - START_X) / 12);
         state = "result";
       }
     }
 
     for (var i = particles.length - 1; i >= 0; i--) {
-      var p = particles[i];
-      p.age += dt;
-      if (p.age > p.life) { particles.splice(i, 1); continue; }
-      p.vy += 700 * dt;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
+      var p2 = particles[i];
+      p2.age += dt;
+      if (p2.age > p2.life) { particles.splice(i, 1); continue; }
+      p2.vy += 700 * dt;
+      p2.x += p2.vx * dt;
+      p2.y += p2.vy * dt;
     }
   }
 
@@ -162,19 +221,24 @@
     beep(180, 0.35, "sawtooth", 0.1);
   }
 
+  function currentAngleRad() {
+    return (MIN_ANGLE_DEG + angle * (MAX_ANGLE_DEG - MIN_ANGLE_DEG)) * Math.PI / 180;
+  }
+
   function launch() {
-    var speed = 560 + power * 420;
-    var ang = (10 + angle * 42) * Math.PI / 180;
-    body.x = START_X + 70; body.y = WATER_Y - 46;
+    var speed = 620 + power * 480;
+    var ang = currentAngleRad();
+    body.x = START_X + 90; body.y = WATER_Y - 80;
     body.vx = Math.cos(ang) * speed;
     body.vy = -Math.sin(ang) * speed;
-    body.rotSpeed = 14 + power * 10;
+    body.rotSpeed = 6 + power * 7;
     skips = 0;
     state = "flying";
     beep(520, 0.12, "square", 0.12);
   }
 
   function handleTap() {
+    if (assetsReady < 2) return;
     if (state === "title") { state = "power"; t = 0; }
     else if (state === "power") { state = "angle"; t = 0; }
     else if (state === "angle") { state = "throw-anim"; throwFx = 0; }
@@ -233,63 +297,30 @@
     ctx.fill();
   }
 
-  function drawRock(x, y, throwing) {
+  function drawOjisan(x, y) {
     ctx.save();
-    var squish = throwing ? 1 - Math.sin((throwFx / 0.16) * Math.PI) * 0.18 : 1;
     ctx.translate(x - camX, y);
-    ctx.scale(1, squish);
-    ctx.fillStyle = "#8b9096";
-    ctx.beginPath();
-    ctx.moveTo(-30, 8);
-    ctx.lineTo(-34, -10);
-    ctx.lineTo(-14, -30);
-    ctx.lineTo(10, -32);
-    ctx.lineTo(30, -14);
-    ctx.lineTo(32, 8);
-    ctx.lineTo(14, 20);
-    ctx.lineTo(-14, 20);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,.18)";
-    ctx.beginPath();
-    ctx.moveTo(-14, -30); ctx.lineTo(10, -32); ctx.lineTo(2, -14); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "rgba(0,0,0,.15)";
-    ctx.beginPath();
-    ctx.moveTo(10, -6); ctx.lineTo(30, -14); ctx.lineTo(32, 8); ctx.lineTo(14, 20); ctx.closePath(); ctx.fill();
-    var armSwing = throwing ? Math.sin((throwFx / 0.16) * Math.PI) * 30 : 0;
-    ctx.fillStyle = "#8b9096";
-    ctx.save();
-    ctx.translate(28, -4);
-    ctx.rotate((-20 - armSwing) * Math.PI / 180);
-    ctx.fillRect(0, -4, 22, 8);
-    ctx.restore();
-    ctx.fillStyle = "#2b2f33";
-    ctx.beginPath(); ctx.arc(-8, -12, 2.4, 0, 7); ctx.fill();
-    ctx.beginPath(); ctx.arc(4, -14, 2.4, 0, 7); ctx.fill();
+    var lean = state === "throw-anim" ? Math.sin((throwFx / 0.16) * Math.PI) * 0.22 : 0;
+    ctx.rotate(lean);
+    ctx.drawImage(ojisanImg, -OJISAN_SIZE / 2, -OJISAN_SIZE * OJISAN_FOOT, OJISAN_SIZE, OJISAN_SIZE);
     ctx.restore();
   }
 
-  function drawOjisan(x, y, rot) {
+  function drawRockStanding(x, y, throwing) {
+    ctx.save();
+    var progress = throwFx / 0.16;
+    var squish = throwing ? 1 - Math.sin(progress * Math.PI) * 0.14 : 1;
+    ctx.translate(x - camX, y);
+    ctx.scale(squish, 2 - squish);
+    ctx.drawImage(rockImg, -ROCK_STAND_SIZE / 2, -ROCK_STAND_SIZE * ROCK_FOOT, ROCK_STAND_SIZE, ROCK_STAND_SIZE);
+    ctx.restore();
+  }
+
+  function drawRockFlying(x, y, rot) {
     ctx.save();
     ctx.translate(x - camX, y);
-    if (rot != null) ctx.rotate(rot);
-    ctx.fillStyle = "#c98a52";
-    ctx.beginPath(); ctx.arc(0, -22, 9, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#5a4a3c";
-    ctx.beginPath(); ctx.arc(0, -26, 8, Math.PI, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#9a9a9a";
-    ctx.beginPath(); ctx.arc(0, -18, 6, 0.2, Math.PI - 0.2); ctx.fill();
-    ctx.fillStyle = "#eae4d6";
-    ctx.fillRect(-9, -13, 18, 22);
-    ctx.fillStyle = "#c98a52";
-    ctx.fillRect(-20, -12, 12, 6);
-    ctx.fillRect(8, -12, 12, 6);
-    ctx.fillStyle = "#4d5f7d";
-    ctx.fillRect(-8, 9, 7, 16);
-    ctx.fillRect(1, 9, 7, 16);
-    ctx.fillStyle = "#5a3d28";
-    ctx.fillRect(-9, 24, 8, 5);
-    ctx.fillRect(1, 24, 8, 5);
+    ctx.rotate(rot);
+    ctx.drawImage(rockImg, -ROCK_FLY_SIZE / 2, -ROCK_FLY_SIZE / 2, ROCK_FLY_SIZE, ROCK_FLY_SIZE);
     ctx.restore();
   }
 
@@ -305,7 +336,7 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawBar(label, value) {
+  function drawPowerGauge(value) {
     var bw = W * 0.5, bh = 22, bx = (W - bw) / 2, by = H * 0.14;
     ctx.fillStyle = "rgba(0,0,0,.35)";
     ctx.fillRect(bx - 4, by - 4, bw + 8, bh + 8);
@@ -319,79 +350,103 @@
     ctx.fillRect(bx, by, bw, bh);
     ctx.fillStyle = "#fff";
     ctx.fillRect(bx + value * bw - 2, by - 6, 4, bh + 12);
+  }
+
+  function drawAngleArrow(angRad) {
+    var len = 100 + power * 20;
+    var dx = Math.cos(angRad), dy = -Math.sin(angRad);
+    var ox = ARROW_ORIGIN_X - camX, oy = ARROW_ORIGIN_Y;
+    var tx = ox + dx * len, ty = oy + dy * len;
+    ctx.save();
+    ctx.strokeStyle = "#fff";
     ctx.fillStyle = "#fff";
-    ctx.font = "700 20px sans-serif";
+    ctx.shadowColor = "rgba(0,0,0,.45)";
+    ctx.shadowBlur = 8;
+    ctx.lineWidth = 7;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(ox, oy);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    var headAng = Math.atan2(dy, dx);
+    var headLen = 20, headSpread = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - headLen * Math.cos(headAng - headSpread), ty - headLen * Math.sin(headAng - headSpread));
+    ctx.lineTo(tx - headLen * Math.cos(headAng + headSpread), ty - headLen * Math.sin(headAng + headSpread));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawCount(x, y, size, value) {
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.5)";
+    ctx.shadowBlur = 6;
+    ctx.font = "800 " + size + "px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(label, W / 2, by - 14);
+    ctx.fillText(String(value), x, y);
+    ctx.restore();
   }
 
   function draw() {
     ctx.clearRect(0, 0, W, H);
+    if (assetsReady < 2) {
+      ctx.fillStyle = "#0b1622";
+      ctx.fillRect(0, 0, W, H);
+      return;
+    }
     drawSky();
     drawWater();
     drawShore();
 
+    var ojisanX = START_X, ojisanY = WATER_Y - 20;
+    if (state === "impact" && hitFlash > 0) {
+      ojisanX += (Math.random() - 0.5) * 12 * hitFlash;
+      ojisanY += (Math.random() - 0.5) * 12 * hitFlash;
+    }
+    drawOjisan(ojisanX, ojisanY);
+
     if (state === "title" || state === "power" || state === "angle" || state === "throw-anim") {
-      drawRock(START_X, WATER_Y - 30, state === "throw-anim");
-      drawOjisan(START_X + 46, WATER_Y - 38, null);
+      drawRockStanding(START_X + 78, WATER_Y - 30, state === "throw-anim");
+    } else if (state === "turbo") {
+      var bx = camX + W * 0.58;
+      var by = WATER_Y - 30 - Math.abs(Math.sin(t * 16)) * 50;
+      drawRockFlying(bx, by, t * 9);
+    } else if (state === "impact") {
+      var ip = Math.min(1, impactT / IMPACT_DURATION);
+      if (ip < 1) {
+        var fromX = camX + W + 140, fromY = WATER_Y - 170;
+        var toX = START_X + 40, toY = WATER_Y - 90;
+        drawRockFlying(fromX + (toX - fromX) * ip, fromY + (toY - fromY) * ip, ip * 30);
+      }
     } else {
-      drawRock(START_X, WATER_Y - 30, false);
-      drawOjisan(body.x, body.y, body.rot);
+      drawRockFlying(body.x, body.y, body.rot);
     }
     drawParticles();
 
-    if (state === "power") drawBar("パワー ー タップで決定", power);
-    if (state === "angle") drawBar("角度 ー タップで決定", angle);
+    if (state === "impact" && hitFlash > 0) {
+      ctx.fillStyle = "rgba(255,255,255," + (hitFlash * 0.5) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    if (state === "power") drawPowerGauge(power);
+    if (state === "angle") drawAngleArrow(currentAngleRad());
 
     if (state === "flying" || state === "sinking") {
-      ctx.fillStyle = "rgba(0,0,0,.4)";
-      ctx.fillRect(14, 14, 150, 30);
-      ctx.fillStyle = "#fff";
-      ctx.font = "700 18px sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillText("スキップ数: " + skips, 24, 35);
+      drawCount(W - 60, 46, 28, skips);
+    }
+
+    if (state === "turbo") {
+      drawCount(W / 2, H * 0.5, 90, skips);
     }
 
     if (state === "result") {
       ctx.fillStyle = "rgba(10,20,30,.55)";
       ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = "#fff";
-      ctx.textAlign = "center";
-      ctx.font = "700 40px sans-serif";
-      ctx.fillText("スキップ " + skips + " 回！", W / 2, H * 0.36);
-      ctx.font = "700 22px sans-serif";
-      var msg = results.filter(function (r) { return skips <= r.max; })[0].text;
-      wrapText(msg, W / 2, H * 0.48, W * 0.72, 30);
-      ctx.font = "600 18px sans-serif";
-      ctx.fillText("最高到達距離: " + bestDist + " m", W / 2, H * 0.66);
+      drawCount(W / 2, H * 0.55, 88, (resultDistanceM / 1000).toFixed(1) + "km");
     }
-  }
-
-  function wrapText(text, cx, cy, maxWidth, lineHeight) {
-    var chars = text.split("");
-    var lines = [""], li = 0;
-    chars.forEach(function (ch) {
-      var test = lines[li] + ch;
-      if (ctx.measureText(test).width > maxWidth) { li++; lines[li] = ch; }
-      else lines[li] = test;
-    });
-    var startY = cy - (lines.length - 1) * lineHeight / 2;
-    lines.forEach(function (line, i) {
-      ctx.fillText(line, cx, startY + i * lineHeight);
-    });
-  }
-
-  function updateHint() {
-    var msgs = {
-      "title": "タップ / クリックでスタート",
-      "power": "",
-      "angle": "",
-      "throw-anim": "",
-      "flying": "",
-      "sinking": "",
-      "result": "タップ / クリックでもう一度"
-    };
-    hint.textContent = state === "title" ? "おじさんが石を投げる…と見せかけて、石がおじさんを投げます" : (msgs[state] || "");
   }
 
   var last = performance.now();
@@ -400,7 +455,6 @@
     last = now;
     update(dt);
     draw();
-    updateHint();
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
