@@ -1,0 +1,84 @@
+/* ===========================================================================
+   ゾウノアシゲームズ プレイ数カウンター（Google Apps Script）
+
+   ■ 置きかた
+     1. Googleスプレッドシートを新規作成する
+     2. 拡張機能 → Apps Script を開き、このファイルの中身をぜんぶ貼り付ける
+     3. 「デプロイ」→「新しいデプロイ」→ 種類は「ウェブアプリ」
+          次のユーザーとして実行 : 自分
+          アクセスできるユーザー : 全員
+     4. 出てきた .../exec で終わるURLを index.html の COUNTER_URL に貼る
+
+   ■ できること（どちらも GET）
+     <URL>                → { "ゲームid": 回数, ... } を全部返す（数えない）
+     <URL>?hit=ゲームid   → そのゲームを1増やして、増えたあとの数を返す
+
+   counts シートに id と count が並ぶので、数字は手で直せます。
+   コードを直したときは、もう一度デプロイし直すと反映されます。
+   =========================================================================== */
+
+var SHEET_NAME = "counts";
+
+function sheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET_NAME);
+  if (!sh) {
+    sh = ss.insertSheet(SHEET_NAME);
+    sh.getRange(1, 1, 1, 2).setValues([["id", "count"]]);
+  }
+  return sh;
+}
+
+/* シート全体を { id: 回数 } にして返す */
+function readAll_(sh) {
+  var out = {};
+  var last = sh.getLastRow();
+  if (last < 2) return out;
+  var rows = sh.getRange(2, 1, last - 1, 2).getValues();
+  for (var i = 0; i < rows.length; i++) {
+    var id = String(rows[i][0]).trim();
+    if (id) out[id] = Number(rows[i][1]) || 0;
+  }
+  return out;
+}
+
+/* id の行番号を返す。無ければ末尾に作る */
+function rowOf_(sh, id) {
+  var last = sh.getLastRow();
+  if (last >= 2) {
+    var ids = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]).trim() === id) return i + 2;
+    }
+  }
+  var row = Math.max(last, 1) + 1;
+  sh.getRange(row, 1, 1, 2).setValues([[id, 0]]);
+  return row;
+}
+
+function doGet(e) {
+  var id = (e && e.parameter && e.parameter.hit) ? String(e.parameter.hit).trim() : "";
+  var sh = sheet_();
+  var out;
+
+  if (id) {
+    /* 同時にアクセスされても数え落とさないように、ここだけ順番待ちにする */
+    var lock = LockService.getScriptLock();
+    try { lock.waitLock(10000); } catch (err) {}
+    try {
+      var row = rowOf_(sh, id);
+      var n = (Number(sh.getRange(row, 2).getValue()) || 0) + 1;
+      sh.getRange(row, 2).setValue(n);
+      SpreadsheetApp.flush();
+      out = {};
+      out[id] = n;
+    } finally {
+      try { lock.releaseLock(); } catch (err) {}
+    }
+  } else {
+    out = readAll_(sh);
+  }
+
+  return ContentService.createTextOutput(JSON.stringify(out))
+    .setMimeType(ContentService.MimeType.JSON);
+}

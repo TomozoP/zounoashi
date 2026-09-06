@@ -330,9 +330,21 @@ var SITE = {
   ],
 
 };
+/* --------------------------------------------------------------
+   2. プレイ数カウンター（Googleスプレッドシート）
+   -----------------------------------------------------------------
+   counter.gs をスプレッドシートの Apps Script に貼って「ウェブアプリ」として
+   公開すると、.../exec で終わるURLがもらえます。それをここに貼ると、
+   カードに「◯◯ plays」が出るようになります。
+
+   空のままでも問題ありません（数えないし、数字が出ないだけ）。
+   下の GAMES に plays を手書きしてあるゲームは、そちらの数字が優先されます。
+   -------------------------------------------------------------- */
+var COUNTER_URL = "";
+
 
 /* --------------------------------------------------------------
-   2. ゲームデータ
+   3. ゲームデータ
    -----------------------------------------------------------------
    ★ 新作を足すときは { ... } を1つコピペして書き換えるだけ。
 
@@ -458,7 +470,7 @@ var LAB_NOTE = 'ここにあるのは何か実験的なゲームなどです';
 var GRID_NOTES = { work: WORK_NOTE, lab: LAB_NOTE };
 
 /* --------------------------------------------------------------
-   3. 「トモぞヴP」ページ（プロフィール・年表・リンク）
+   4. 「トモぞヴP」ページ（プロフィール・年表・リンク）
    -------------------------------------------------------------- */
 /* プロフィール欄の紹介文。空文字にすると何も表示されません */
 var PROFILE = "2019年に面白法人カヤックに新卒入社し、「ケツバトラー」等を制作。個人でもブラウザゲームや「スゴイツヨイトウフ」等のPCゲーム等を制作。";
@@ -526,6 +538,38 @@ var PINNED_SECOND = {
     return out;
   }
 
+  /* ---------------- プレイ数 ---------------- */
+  /* 数を持っているのはスプレッドシート側（counter.gs）。
+     COUNTER_URL が空のときや、つながらなかったときは黙って諦める。 */
+  var counts = {};
+
+  function countsLoad(after) {
+    if (!COUNTER_URL) return;
+    fetch(COUNTER_URL, { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { counts = d || {}; if (after) after(); })
+      .catch(function () {});
+  }
+
+  /* ゲームを開いたときに1増やす。同じタブで開き直しても二重には数えない */
+  function countsHit(id) {
+    if (!COUNTER_URL || !id) return;
+    try {
+      if (sessionStorage.getItem("hit:" + id)) return;
+      sessionStorage.setItem("hit:" + id, "1");
+    } catch (e) {}
+    fetch(COUNTER_URL + "?hit=" + encodeURIComponent(id), { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { for (var k in d) counts[k] = d[k]; })
+      .catch(function () {});
+  }
+
+  /* GAMES に手書きした数があればそれを、無ければ数えた回数を使う */
+  function playsOf(g) {
+    if (g.plays != null) return g.plays;
+    return (g.id && counts[g.id] != null) ? counts[g.id] : null;
+  }
+
   function fmtPlays(n) {
     if (n == null) return "";
     if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, "") + "万 plays";
@@ -585,13 +629,14 @@ var PINNED_SECOND = {
     var playable = !!g.play;
     var href = playable ? '#/game/' + encodeURIComponent(g.id) : g.url;
     var attrs = playable ? '' : ' target="_blank" rel="noopener"';
+    var p = playsOf(g);
     return '' +
       '<a class="card-link" href="' + esc(href) + '"' + attrs + '><div class="card">' +
         '<div class="thumb">' + thumbInner(g) + '</div>' +
         '<div class="meta">' +
           '<div class="title">' + esc(g.title) + '</div>' +
           '<div class="tags">' + tagsOf(g).map(function (t) { return "#" + esc(t); }).join(" ") + '</div>' +
-          '<div class="year">' + esc(g.year) + (g.plays != null ? " ・ " + fmtPlays(g.plays) : "") + '</div>' +
+          '<div class="year">' + esc(g.year) + (p != null ? " ・ " + fmtPlays(p) : "") + '</div>' +
         '</div>' +
       '</div></a>';
   }
@@ -793,6 +838,7 @@ var PINNED_SECOND = {
       html = pageGame(id);
       var g = GAMES.filter(function (x) { return x.id === id; })[0];
       if (g) title = g.title + " | " + SITE.name;
+      if (g && g.play) countsHit(id);   // 開いた回数を数える
     }
     else if (h === "/about")   { html = pageAbout(); title = "トモぞヴP | " + SITE.name; isAbout = true; }
     else                       { html = pageHome(); isGames = true; }   /* 旧 #/games もここに来ます */
@@ -818,6 +864,7 @@ var PINNED_SECOND = {
 
   addEventListener("hashchange", render);
   render();
+  countsLoad(function () { if ($("#grid")) paintGrid(); });
 })();
 </script>
 </body>
