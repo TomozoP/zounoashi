@@ -232,12 +232,20 @@ section + section { margin-top: 46px; }
 .pbtn:hover { transform: translateY(-1px); }
 .pbtn:active { transform: translateY(0); }
 
-.player-shell { overflow: hidden; }
+.player-shell { position: relative; overflow: hidden; }
 /* 全画面のときは、ゲームに枠いっぱい使わせる(中身の余白はゲーム側が持つ) */
-.player-shell:fullscreen { background: #0b1622; }
+.player-shell:fullscreen { background: #0b1622; display: flex; align-items: center; justify-content: center; }
 .player-shell:fullscreen .player-frame { width: 100%; height: 100%; aspect-ratio: auto !important; }
-.player-shell:-webkit-full-screen { background: #0b1622; }
+.player-shell:-webkit-full-screen { background: #0b1622; display: flex; align-items: center; justify-content: center; }
 .player-shell:-webkit-full-screen .player-frame { width: 100%; height: 100%; aspect-ratio: auto !important; }
+/* 全画面が使えない端末(iPhoneなど)むけ。画面いっぱいに広げる */
+.player-shell.faux-fs {
+  position: fixed; inset: 0; z-index: 9999; background: #0b1622;
+  display: flex; align-items: center; justify-content: center;
+}
+.player-shell.faux-fs .player-frame { width: 100%; height: 100%; aspect-ratio: auto !important; }
+body.fs-lock { overflow: hidden; }
+.fs-exit { position: absolute; top: 10px; right: 10px; z-index: 3; }
 .player-frame { width: 100%; aspect-ratio: 16 / 9; border: 0; display: block; }   /* 比率は GAMES の aspect で上書きできます */
 .player-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0; }
 .player-tags {
@@ -679,6 +687,7 @@ var PINNED_SECOND = {
         '<iframe class="player-frame" style="aspect-ratio:' + esc(g.aspect || "16 / 9") + '"' +
           ' src="' + esc(g.play) + '" title="' + esc(g.title) +
           '" allow="autoplay; fullscreen; gamepad; web-share" allowfullscreen></iframe>' +
+        '<button class="pbtn fs-exit" id="fsExit" type="button" hidden>もどす</button>' +
       '</div>' +
       '</div></main>';
   }
@@ -713,33 +722,64 @@ var PINNED_SECOND = {
       '</div></main>';
   }
 
-  /* ---------------- 全画面で遊ぶ ---------------- */
+  /* ---------------- 全画面で遊ぶ ----------------
+     ふつうは全画面APIを使う。iPhoneなど使えない端末では、
+     枠を画面いっぱいに広げる表示で代える。 */
   function bindFullscreen() {
-    var btn = $("#fsBtn"), shell = $(".player-shell");
+    var btn = $("#fsBtn"), exit = $("#fsExit"), shell = $(".player-shell");
     if (!btn || !shell) return;
-    var req = shell.requestFullscreen || shell.webkitRequestFullscreen;
-    if (!req) return;                 // iPhoneなど、対応していない場合はボタンを出さない
     btn.hidden = false;
 
-    function current() { return document.fullscreenElement || document.webkitFullscreenElement; }
+    var req = shell.requestFullscreen || shell.webkitRequestFullscreen;
 
-    btn.addEventListener("click", function () {
-      if (current()) {
-        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-      } else {
-        var p = req.call(shell);
-        if (p && p.catch) p.catch(function () {});
-      }
-    });
+    /* 「この枠が」全画面になっているかで判定する(他所の値に引きずられないように) */
+    function real() {
+      var el = document.fullscreenElement || document.webkitFullscreenElement;
+      return el === shell;
+    }
+    function faux() { return shell.classList.contains("faux-fs"); }
+
+    function focusGame() {
+      try { $(".player-frame").contentWindow.focus(); } catch (e) {}
+    }
 
     function sync() {
-      var on = !!current();
+      var on = real() || faux();
       btn.textContent = on ? "もどす" : "全画面";
-      // 全画面にしたら、そのままキーで遊べるようにゲームへ入力を渡す
-      if (on) { try { $(".player-frame").contentWindow.focus(); } catch (e) {} }
+      exit.hidden = !on;
+      if (!on) document.body.classList.remove("fs-lock");
+      if (on) focusGame();
     }
+
+    function setFaux(on) {
+      shell.classList.toggle("faux-fs", on);
+      document.body.classList.toggle("fs-lock", on);
+      sync();
+    }
+
+    function enter() {
+      if (!req) { setFaux(true); return; }
+      var p;
+      try { p = req.call(shell); } catch (e) { setFaux(true); return; }
+      if (p && p.then) { p.then(sync, function () { setFaux(true); }); return; }
+      // 戻り値を返さない古いAPI。全画面になっていなければ広げる表示に切り替える
+      setTimeout(function () { if (real()) sync(); else setFaux(true); }, 300);
+    }
+
+    function leave() {
+      if (real()) {
+        var x = document.exitFullscreen || document.webkitExitFullscreen;
+        try { x.call(document); } catch (e) {}
+      }
+      if (faux()) setFaux(false);
+      setTimeout(sync, 200);   // 抜けたことが通知されない場合の保険
+    }
+
+    btn.addEventListener("click", function () { (real() || faux()) ? leave() : enter(); });
+    exit.addEventListener("click", leave);
     document.addEventListener("fullscreenchange", sync);
     document.addEventListener("webkitfullscreenchange", sync);
+    sync();
   }
 
   /* ---------------- ルーター ---------------- */
@@ -758,6 +798,7 @@ var PINNED_SECOND = {
 
     $("#app").innerHTML = html;
     document.title = title;
+    document.body.classList.remove("fs-lock");   // 全画面のまま別ページへ移ったとき用
     chrome();
     window.scrollTo(0, 0);
 
