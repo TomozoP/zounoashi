@@ -29,8 +29,21 @@ var SHEET_NAME = "counts";
 var MAX_IDS = 200;                    // 知らないIDで行が際限なく増えないように
 var ID_OK = /^[a-z0-9][a-z0-9_-]{0,39}$/;   // ゲームIDとして認める形
 
+/* 動作確認用。エディタの「実行」でこれを選ぶと、
+   スプレッドシートとつながっているか確かめられます。 */
+function test() {
+  var sh = sheet_();
+  Logger.log("シート「" + sh.getName() + "」につながりました");
+  Logger.log(readAll_(sh));
+}
+
 function sheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    throw new Error(
+      "スプレッドシートにつながっていません。" +
+      "スプレッドシートを開いて「拡張機能 → Apps Script」から作り直してください。");
+  }
   var sh = ss.getSheetByName(SHEET_NAME);
   if (!sh) {
     sh = ss.insertSheet(SHEET_NAME);
