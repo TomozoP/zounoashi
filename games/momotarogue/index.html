@@ -497,7 +497,7 @@
     b = {
       t: 0, won: false, scroll: 0, arrived: false,
       units: [], drops: [], shots: [], stones: [], sparks: [], debris: [], dust: [],
-      hero: { x: 240, y: 430, tx: 240, ty: 430, ph: 0, moving: false, seek: false },
+      hero: { x: 240, y: 430, ph: 0, moving: false },
       blade: { cool: 0.5, swing: 0 },
       eSpawnT: 1.2,
       boss: null, pending: 0, boxes: 0, boxT: 50, boxDue: false, rockT: 30,
@@ -653,23 +653,24 @@
     if (keys.down) my += 1;
 
     if (mx || my) {
-      h.seek = false;
       var l = Math.sqrt(mx * mx + my * my);
       h.x += mx / l * sp * dt;
       h.y += my / l * sp * dt;
       walked = true;
-    } else if (h.seek) {
-      var dx = h.tx - h.x, dy = h.ty - h.y;
-      var d = Math.sqrt(dx * dx + dy * dy), st = sp * dt;
-      if (d <= st) { h.x = h.tx; h.y = h.ty; h.seek = false; }
-      else { h.x += dx / d * st; h.y += dy / d * st; walked = true; }
+    } else if (pad.on) {
+      var dx = pad.x - pad.ox, dy = pad.y - pad.oy;   /* 倒した向きと深さで歩く */
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d > PAD_DEAD) {
+        var k = Math.min(1, (d - PAD_DEAD) / (PAD_R - PAD_DEAD));
+        h.x += dx / d * sp * k * dt;
+        h.y += dy / d * sp * k * dt;
+        walked = true;
+      }
     }
     h.moving = walked;
     if (walked) h.ph += dt * sp * 0.05;
     h.x = clamp(h.x, FX + 20, FR - 20);
     h.y = clamp(h.y, FTOP, FBOT);
-    h.tx = clamp(h.tx, FX + 20, FR - 20);
-    h.ty = clamp(h.ty, FTOP, FBOT);
   }
 
   /* おともは倒れない。レベルぶんの数をいつも並べておく */
@@ -973,6 +974,8 @@
 
   /* ============ 入力 ============ */
   var keys = { left: false, right: false, up: false, down: false };
+  var PAD_R = 62, PAD_DEAD = 9;                     /* 画面を押したところに出る操作パッド */
+  var pad = { on: false, id: null, ox: 0, oy: 0, x: 0, y: 0 };
 
   function pickCards() {
     var n = pk.cards.length, cw = 210, gap = 26;
@@ -1037,19 +1040,25 @@
     var c = toCanvas(e);
     if (state === S.BATTLE) {
       if (b.over) return;
-      b.hero.seek = true; b.hero.tx = c.x; b.hero.ty = c.y;
+      pad.on = true; pad.id = e.pointerId;           // 押したところがパッドの中心になる
+      pad.ox = c.x; pad.oy = c.y; pad.x = c.x; pad.y = c.y;
       if (wrap.setPointerCapture) { try { wrap.setPointerCapture(e.pointerId); } catch (err) {} }
       return;
     }
     tap(c.x, c.y);
   });
   wrap.addEventListener("pointermove", function (e) {
-    if (state !== S.BATTLE || !b || !b.hero.seek) return;
-    if (e.buttons === 0 && e.pointerType === "mouse") return;   // 引っぱっている間だけ追う
+    if (!pad.on || e.pointerId !== pad.id) return;
     e.preventDefault();
     var c = toCanvas(e);
-    b.hero.tx = c.x; b.hero.ty = c.y;
+    pad.x = c.x; pad.y = c.y;
   });
+  function padEnd(e) {
+    if (!pad.on || (e && e.pointerId !== pad.id)) return;
+    pad.on = false; pad.id = null;
+  }
+  wrap.addEventListener("pointerup", padEnd);
+  wrap.addEventListener("pointercancel", padEnd);
 
   function arrowOf(e) {
     if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") return "left";
@@ -1080,6 +1089,7 @@
   });
   window.addEventListener("blur", function () {
     keys.left = keys.right = keys.up = keys.down = false;
+    padEnd(null);
   });
 
   /* =========================================================================
@@ -2300,11 +2310,37 @@
     else if (state === S.RESULT) res.tt += dt;
   }
 
+  /* 押しているあいだだけ出る操作パッド */
+  function drawPad() {
+    if (!pad.on || state !== S.BATTLE) return;
+    var dx = pad.x - pad.ox, dy = pad.y - pad.oy;
+    var d = Math.sqrt(dx * dx + dy * dy);
+    var kx = pad.x, ky = pad.y;
+    if (d > PAD_R) { kx = pad.ox + dx / d * PAD_R; ky = pad.oy + dy / d * PAD_R; }
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(pad.ox, pad.oy, PAD_R, 0, 6.2832);
+    ctx.fillStyle = "rgba(255,255,255,.12)";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(255,255,255,.55)";
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(kx, ky, 21, 0, 6.2832);
+    ctx.fillStyle = "rgba(255,255,255,.6)";
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = "rgba(40,32,50,.55)";
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function draw() {
     ctx.clearRect(0, 0, W, H);
     if (state === S.BATTLE) drawBattle();
     else if (state === S.PICK) drawPick();
     else drawResult();
+    drawPad();
   }
 
 

@@ -201,7 +201,8 @@
   var oji, ojiCd, popCar, popCd, carCd, pedCd, bikeCd, flockCd, deadT, deadKind;
   var beast, beastCd, ambCd;
   var fever, feverX, feverY, feverFlash, shake;
-  var aim = { on: false, x: 0, y: 0 };
+  var PAD_R = 62, PAD_DEAD = 9;                     /* 画面を押したところに出る操作パッド */
+  var pad = { on: false, id: null, ox: 0, oy: 0, x: 0, y: 0 };
   var keys = { left: false, right: false, up: false, down: false };
 
   var BIRD_SZ = 0.7;                                 /* 鳩の大きさ */
@@ -247,7 +248,7 @@
     beast = null; beastCd = rnd(10, 18); ambCd = rnd(3, 7);
     fever = 0; feverX = W / 2; feverY = NEAR_TOP; feverFlash = 0; shake = 0;
     deadT = 0; deadKind = "";
-    aim.on = false;
+    pad.on = false; pad.id = null;
     keys.left = keys.right = keys.up = keys.down = false;
     var i;
     for (i = 0; i < 4; i++) spawnPed(true);
@@ -561,6 +562,7 @@
   function die(kind) {
     if (state !== S.PLAY) return;
     state = S.DEAD; deadT = 0; deadKind = kind;
+    pad.on = false; pad.id = null;
     bird.peck = null;
     if (kind === "hunger") {
       tone({ f: 300, f2: 120, d: 0.7, v: 0.12, type: "sine" });
@@ -708,15 +710,14 @@
       if (keys.up) ay -= 1;
       if (keys.down) ay += 1;
       if (ax || ay) {
-        aim.on = false;
         var m = hyp(ax, ay); ax /= m; ay /= m;
-      } else if (aim.on) {
-        var dx = aim.x - b.x, dy = aim.y - b.y;
+      } else if (pad.on) {
+        var dx = pad.x - pad.ox, dy = pad.y - pad.oy;   /* 倒した向きと深さで歩く */
         var d = hyp(dx, dy);
-        if (d > 7) {
-          ax = dx / d; ay = dy / d;
-          if (d < 46) { ax *= d / 46; ay *= d / 46; }
-        } else aim.on = false;
+        if (d > PAD_DEAD) {
+          var k = Math.min(1, (d - PAD_DEAD) / (PAD_R - PAD_DEAD));
+          ax = dx / d * k; ay = dy / d * k;
+        }
       }
       var sp = updateBirdMotion(b, dt, ax, ay, 172);
 
@@ -2090,6 +2091,31 @@
     ctx.restore();
   }
 
+  /* 押しているあいだだけ出る操作パッド */
+  function drawPad() {
+    if (!pad.on || state !== S.PLAY) return;
+    var dx = pad.x - pad.ox, dy = pad.y - pad.oy;
+    var d = hyp(dx, dy);
+    var kx = pad.x, ky = pad.y;
+    if (d > PAD_R) { kx = pad.ox + dx / d * PAD_R; ky = pad.oy + dy / d * PAD_R; }
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(pad.ox, pad.oy, PAD_R, 0, 6.2832);
+    ctx.fillStyle = "rgba(255,255,255,.1)";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(255,255,255,.5)";
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(kx, ky, 21, 0, 6.2832);
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = "rgba(28,38,50,.55)";
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawNumber(x, y, size, str, align) {
     ctx.save();
     ctx.fillStyle = "#fff";
@@ -2190,6 +2216,7 @@
     ctx.restore();
 
     drawNumber(W - 28, 50, 36, String(score), "right");
+    drawPad();
 
     if (state === S.RESULT) {
       ctx.fillStyle = "rgba(10,16,24,.6)";
@@ -2232,9 +2259,7 @@
       else if (hit === "retry") newRound();
       return;
     }
-    if (state === S.PLAY && x != null) {
-      aim.on = true; aim.x = x; aim.y = clamp(y, FAR_TOP + 6, NEAR_BOT - 4);
-    }
+
   }
 
   wrap.addEventListener("pointerdown", function (e) {
@@ -2242,18 +2267,27 @@
     try { window.focus(); wrap.focus(); } catch (err) {}   // 触ったあともキーボードで遊べるように
     wakeAudio();
     var c = toCanvas(e);
-    tap(c.x, c.y);
-    if (state === S.PLAY && wrap.setPointerCapture) {
-      try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+    if (state === S.PLAY) {                                // 押したところがパッドの中心になる
+      pad.on = true; pad.id = e.pointerId;
+      pad.ox = c.x; pad.oy = c.y; pad.x = c.x; pad.y = c.y;
+      if (wrap.setPointerCapture) { try { wrap.setPointerCapture(e.pointerId); } catch (err) {} }
+      return;
     }
+    tap(c.x, c.y);
   });
   wrap.addEventListener("pointermove", function (e) {
-    if (state !== S.PLAY || !aim.on) return;
-    if (e.buttons === 0 && e.pointerType === "mouse") return;     // 引っぱっている間だけ追う
+    if (!pad.on || e.pointerId !== pad.id) return;
     e.preventDefault();
     var c = toCanvas(e);
-    aim.x = c.x; aim.y = clamp(c.y, FAR_TOP + 6, NEAR_BOT - 4);
+    pad.x = c.x; pad.y = c.y;
   });
+  function padEnd(e) {
+    if (!pad.on || (e && e.pointerId !== pad.id)) return;
+    pad.on = false; pad.id = null;
+  }
+  wrap.addEventListener("pointerup", padEnd);
+  wrap.addEventListener("pointercancel", padEnd);
+  window.addEventListener("blur", function () { padEnd(null); });
 
   function arrowOf(e) {
     if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") return "left";
