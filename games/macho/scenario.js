@@ -19,13 +19,13 @@
    ========================================================================= */
 var CHARA = {
   "筋肉探偵":     { name: "筋肉探偵", color: "#ffe6a0", voice: 300, noArt: true },                    /* 姿なし（最後の場面まで、ずっとこちら） */
-  "筋肉探偵・姿": { name: "筋肉探偵", color: "#ffe6a0", voice: 300, img: "img/tantei.png", h: 640, skin: "#e8c9a8", cloth: "#33415c", hair: "#20242e", sw: 120, arm: 48 },  /* 姿あり（最後だけ） */
-  "息子":         { name: "息子",     color: "#8ec9ff", voice: 620, img: "img/musuko.png", h: 560, skin: "#f0d2b4", cloth: "#4a6b8a", hair: "#2b2320", sw: 64, arm: 22 },
-  "古物商":       { name: "古物商",   color: "#a8e0a0", voice: 360, img: "img/kobutu.png", h: 570, skin: "#d9b48a", cloth: "#6b5a3e", hair: "#ddd8d0", sw: 80, arm: 30 },
-  "家政婦":       { name: "家政婦",   color: "#d9aaff", voice: 520, img: "img/kaseifu.png", h: 570, skin: "#f0d2b4", cloth: "#7a5c8e", hair: "#5a4a44", sw: 96, arm: 36 },
-  "館主":         { name: "館主",   color: "#c8c8c8", voice: 340, img: "img/kanshu.png", h: 520, scale: 0.72,
+  "筋肉探偵・姿": { name: "筋肉探偵", color: "#ffe6a0", voice: 300, img: "img/tantei.webp", h: 640, skin: "#e8c9a8", cloth: "#33415c", hair: "#20242e", sw: 120, arm: 48 },  /* 姿あり（最後だけ） */
+  "息子":         { name: "息子",     color: "#8ec9ff", voice: 620, img: "img/musuko.webp", h: 560, skin: "#f0d2b4", cloth: "#4a6b8a", hair: "#2b2320", sw: 64, arm: 22 },
+  "古物商":       { name: "古物商",   color: "#a8e0a0", voice: 360, img: "img/kobutu.webp", h: 570, skin: "#d9b48a", cloth: "#6b5a3e", hair: "#ddd8d0", sw: 80, arm: 30 },
+  "家政婦":       { name: "家政婦",   color: "#d9aaff", voice: 520, img: "img/kaseifu.webp", h: 570, skin: "#f0d2b4", cloth: "#7a5c8e", hair: "#5a4a44", sw: 96, arm: 36 },
+  "館主":         { name: "館主",   color: "#c8c8c8", voice: 340, img: "img/kanshu.webp", h: 520, scale: 0.72,
                   gray: true, rotate: -90, dy: -22 },   /* 倒れている被害者。白黒・横向き */
-  "犬":           { name: "犬",       color: "#ffb0c8", voice: 900, img: "img/dog.png", h: 460, skin: "#c8a06a", cloth: "#b98b52", hair: "#8a6236", dog: true }
+  "犬":           { name: "犬",       color: "#ffb0c8", voice: 900, img: "img/dog.webp", h: 460, skin: "#c8a06a", cloth: "#b98b52", hair: "#8a6236", dog: true }
 };
 
 var BG = {

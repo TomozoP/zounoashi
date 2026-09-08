@@ -42,7 +42,7 @@ http.createServer(function (req, res) {
     req.on("end", function () {
       try {
         var d = JSON.parse(raw);
-        if (["img/thumb.jpg", "img/thumb.png"].indexOf(d.file) < 0) throw new Error("その名前では置けません");
+        if (!/^img\/[\w.-]+\.(png|jpg|webp)$/.test(d.file)) throw new Error("その名前では置けません: " + d.file);
         var body = String(d.data).replace(/^data:image\/\w+;base64,/, "");
         fs.writeFileSync(path.join(ROOT, d.file), Buffer.from(body, "base64"));
         console.log(new Date().toLocaleTimeString("ja-JP") + "  " + d.file + " を置きました");
