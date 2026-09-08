@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>全員マッチョ館の殺人</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b1622; overflow: hidden; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #wrap { position: relative; width: 100%; touch-action: none; }
+  canvas { width: 100%; height: 100%; display: block; background: #1a1f2b; }
+
+  /* 名前や数を打ち込む欄。canvas の上に重ねている */
+  #ans, #ansBtn {
+    position: absolute; box-sizing: border-box; display: none;
+    font-family: sans-serif; font-weight: 700; border-radius: 12px;
+  }
+  #ans {
+    left: 6%; top: 59.5%; width: 62%; height: 6.4%;
+    border: 3px solid rgba(255,255,255,.55); background: rgba(10,16,26,.92);
+    color: #fff; padding: 0 3%; outline: none;
+  }
+  #ansBtn {
+    left: 71%; top: 59.5%; width: 23%; height: 6.4%;
+    border: 3px solid #16202e; background: #fff; color: #16202e; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <input id="ans" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <button id="ansBtn">答える</button>
+</div></div>
+<script src="../share.js"></script>
+<script src="scenario.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var ansEl = document.getElementById("ans");
+  var ansBtn = document.getElementById("ansBtn");
+
+  var W = 540, H = 960;   /* スマホ向けの縦画面 */
+  wrap.style.aspectRatio = W + " / " + H;
+  wrap.style.width = "min(100%, calc(100vh * " + W + " / " + H + "))";
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var fs = Math.round(wrap.clientWidth * 0.052) + "px";
+    ansEl.style.fontSize = fs;
+    ansBtn.style.fontSize = fs;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  /* 中身は scenario.js。editor.html の下書きを試すときだけ、そちらを使う（?draft=1）。
+     ?from=シーン名 が付いていれば、そのシーンから始める */
+  var SCRIPT = window.SCRIPT;
+  var KEYWORDS = window.KEYWORDS || [];
+  var KEY_COLOR = window.KEY_COLOR || "#ffa23a";
+  var startFrom = "";
+  try {
+    if (location.search.indexOf("draft=1") > -1) {
+      var draft = localStorage.getItem("macho-draft");
+      if (draft) SCRIPT = JSON.parse(draft);
+      var kw = JSON.parse(localStorage.getItem("macho-draft-kw") || "null");
+      if (kw && kw.words) { KEYWORDS = kw.words; KEY_COLOR = kw.color || KEY_COLOR; }
+    }
+    var m = location.search.match(/[?&]from=([^&]*)/);
+    if (m) startFrom = decodeURIComponent(m[1]);
+  } catch (e) {}
+
+  /* 背景の絵（SVG）を先に読み込んでおく */
+  var bgImages = {};
+  for (var bgKey in BG) if (BG.hasOwnProperty(bgKey) && BG[bgKey].img) {
+    bgImages[bgKey] = new Image();
+    bgImages[bgKey].src = BG[bgKey].img;
+  }
+
+  /* 立ち絵。img を書いた人は絵で、書いていない人は図形で描きます */
+  var charaImages = {};
+  for (var chKey in CHARA) if (CHARA.hasOwnProperty(chKey) && CHARA[chKey].img) {
+    charaImages[chKey] = new Image();
+    charaImages[chKey].src = CHARA[chKey].img;
+  }
+
+  /* =========================================================================
+     ノベルの進行
+     ========================================================================= */
+  var S = { TEXT: "text", ASK: "ask", INPUT: "input", RESULT: "result", FADE: "fade" };
+  var fade = null, FADE_DUR = 0.34;   // 場所が変わるときの暗転（片道の秒数）
+  var state, idx, flags, bg, chars, ending;
+  var line, lines, shown, speaker;      // 表示中のセリフ
+  var options, sel;                     // 表示中の選択肢
+  var quiz;                             // 表示中の入力
+  var log, logOpen, logScroll, logLines, drag;   // 読んだ文の控えと、その画面
+  var CPS = 34;                         // 文字送りの速さ（1秒あたりの文字数）
+
+  function labelIndex(name) {
+    for (var i = 0; i < SCRIPT.length; i++) if (SCRIPT[i].label === name) return i;
+    return SCRIPT.length;
+  }
+
+  function setLine(c) {
+    speaker = c.say ? CHARA[c.say].name : "";
+
+    /* 喋っている人は、そのあいだ立っている（noArt の人は姿を出さない）。
+       地の文では、直前に喋っていた人がそのまま残る */
+    if (c.say && !CHARA[c.say].noArt) {
+      for (var k in chars) if (chars.hasOwnProperty(k) && chars[k].auto) delete chars[k];
+      chars[c.say] = { pos: "center", auto: true };
+    }
+    /* 姿のない人（筋肉探偵）が喋るあいだは、いま立っている相手をそのままにする */
+
+    line = c.text;
+    lines = wrapText(line, W - 100, "26px sans-serif");
+    shown = 0;
+    log.push({ name: speaker, text: line });   // あとで振り返れるように控えておく
+  }
+
+  /* i 番目の命令から、止まるところ（セリフ・選択肢・入力・おわり）まで一気に処理する */
+  function runFrom(i) {
+    hideInput();
+    while (i < SCRIPT.length) {
+      var c = SCRIPT[i];
+      if (c.bg) {
+        if (bg && bg !== c.bg) {                    // 場所が変わるときは、いちど暗くする
+          fade = { phase: "out", t: 0, to: c.bg, next: i + 1 };
+          state = S.FADE;
+          hideInput();
+          return;
+        }
+        bg = c.bg; i++; continue;
+      }
+      if (c.bgm !== undefined) { setTune(c.bgm); i++; continue; }
+      if (c.show) { chars[c.show] = { pos: c.pos || "center", auto: false }; i++; continue; }
+      if (c.hide) { delete chars[c.hide]; i++; continue; }
+      if (c.set) { flags[c.set] = true; i++; continue; }
+      if (c.jump) { i = labelIndex(c.jump); continue; }
+      if (c["if"]) { i = flags[c["if"]] ? labelIndex(c.to) : i + 1; continue; }
+
+      if (c.ask) {
+        var live = [];
+        for (var n = 0; n < c.options.length; n++) {
+          var o = c.options[n];
+          if (o.once && flags["@" + i + ":" + n]) continue;      // 一度選んだものは出さない
+          live.push({ o: o, key: "@" + i + ":" + n });
+        }
+        if (!live.length) {
+          if (!c.last) { i = labelIndex(c.to); continue; }       // 全部選び終わったら次へ
+          live = [{ o: { text: c.last, to: c.to }, key: null }]; // last があれば、それだけを出す
+        }
+        idx = i; options = live; sel = 0;
+        setLine({ text: c.ask }); shown = 1e9; state = S.ASK;
+        return;
+      }
+
+      if (c.input !== undefined) {
+        idx = i; quiz = c;
+        setLine({ text: c.input }); shown = 1e9; state = S.INPUT;
+        showInput();
+        return;
+      }
+
+      if (c.end !== undefined) { idx = i; ending = c.end; state = S.RESULT; return; }
+      if (c.text !== undefined) { idx = i; setLine(c); state = S.TEXT; return; }
+      i++;
+    }
+    ending = "";
+    state = S.RESULT;
+  }
+
+  function newRound() {
+    log = [];
+    logOpen = false;
+    logScroll = 0;
+    drag = null;
+    flags = {};
+    chars = {};
+    bg = Object.keys(BG)[0];       // 最初の背景。scenario.js の一番上に書いたもの
+    options = null;
+    quiz = null;
+    fade = null;
+    sel = 0;
+    lines = [];              // まだ何も喋っていない状態から始める
+    speaker = "";
+    shown = 0;
+    tuneName = FIRST_TUNE;                 // 曲も最初のものに戻す
+    tune = TUNES[FIRST_TUNE] || tune;
+    BEAT = 60 / tune.bpm;
+    stepAt = 0;
+
+    var at = 0;                       // ふつうは先頭から。?from= があれば、そのシーンから
+    if (startFrom) {
+      var i = labelIndex(startFrom);
+      if (i < SCRIPT.length) at = i;
+    }
+    runFrom(at);
+  }
+
+  /* =========================================================================
+     BGM（FM音源。ライブラリなしで、その場で音を作っています）
+
+     Am7 → Dm7 → E7♭9 → Am7 の4小節をゆっくり回します。
+     音は最初にさわった時から鳴りはじめ、画面から離れると止まります。
+     ========================================================================= */
+  var AC = window.AudioContext || window.webkitAudioContext;
+  var actx, master, bgmTimer, nextTime = 0, stepAt = 0;
+  var bgmOn = true;
+  try { bgmOn = localStorage.getItem("macho-bgm") !== "0"; } catch (e) {}
+
+  /* 曲は scenario.js の TUNES にあります */
+  var TUNES = window.TUNES || {};
+  var FIRST_TUNE = Object.keys(TUNES)[0] || "";
+  var tune = TUNES[FIRST_TUNE] || { bpm: 84, hat: true, prog: [{ bass: [45, 45, 45, 45], top: [64, 69, 72, 76] }] };
+  var BEAT = 60 / tune.bpm;
+
+  /* 人ごとの声の高さ（文字が出るときのポポポ音） */
+  var VOICE = {};
+  for (var vk in CHARA) if (CHARA.hasOwnProperty(vk)) VOICE[CHARA[vk].name] = CHARA[vk].voice || 420;
+
+  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+  /* ひとつの音。modulator で carrier の高さを揺らす、いちばん素直なFM */
+  function fm(t, freq, dur, ratio, index, level) {
+    var car = actx.createOscillator(), mod = actx.createOscillator();
+    var mg = actx.createGain(), g = actx.createGain();
+    car.frequency.value = freq;
+    mod.frequency.value = freq * ratio;
+    mg.gain.setValueAtTime(freq * index, t);
+    mg.gain.exponentialRampToValueAtTime(freq * index * 0.02 + 0.001, t + dur * 0.7);
+    mod.connect(mg);
+    mg.connect(car.frequency);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(level, t + 0.014);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    car.connect(g);
+    g.connect(master);
+    mod.start(t); car.start(t);
+    mod.stop(t + dur + 0.05); car.stop(t + dur + 0.05);
+  }
+
+  /* ブラシで撫でるような、うすい刻み */
+  function hat(t, level) {
+    fm(t, 5200, 0.05, 7.3, 1.6, level);
+  }
+
+  function tick(t, s) {
+    var prog = tune.prog, bar = Math.floor(s / 16) % prog.length, pos = s % 16, ch = prog[bar];
+    var soft = !!tune.soft;
+
+    if (pos % 4 === 0) fm(t, mtof(ch.bass[pos / 4] - 12), BEAT * 0.85, 1, soft ? 3 : 5, soft ? 0.30 : 0.42);
+    if (pos === 0)  fm(t, mtof(ch.top[0]), BEAT * (soft ? 3.2 : 1.6), soft ? 2 : 3.5, soft ? 1.1 : 2.4, soft ? 0.085 : 0.10);
+    if (pos === 6)  fm(t, mtof(ch.top[1]), BEAT * (soft ? 2.6 : 1.2), soft ? 2 : 3.5, soft ? 1.0 : 2.0, soft ? 0.07 : 0.085);
+    if (pos === 11) fm(t, mtof(ch.top[2]), BEAT * (soft ? 2.6 : 1.2), soft ? 2 : 3.5, soft ? 1.0 : 2.0, soft ? 0.06 : 0.075);
+    if (pos === 14 && bar % 2 === 1 && !soft) fm(t, mtof(ch.top[3]), BEAT * 0.9, 2, 3.0, 0.07);
+    if (tune.hat && pos % 4 === 2) hat(t, 0.05);
+    if (tune.hat && pos % 8 === 6) hat(t, 0.03);
+  }
+
+  /* 曲を替える。「なし」や空なら、そこから先はずっと無音 */
+  function setTune(name) {
+    tuneName = (!name || name === "なし" || !TUNES[name]) ? "" : name;
+    if (bgmTimer) { clearInterval(bgmTimer); bgmTimer = null; }
+    if (!tuneName) return;
+    tune = TUNES[tuneName];
+    BEAT = 60 / tune.bpm;
+    stepAt = 0;
+    bgmStart();
+  }
+
+  /* 文字が出るたびの、小さな音。人ごとに高さが違う。
+     とても短い音なので、立ち上がりを速くした専用のつくりにしています */
+  function sePop(name) {
+    if (!actx || !bgmOn) return;
+    var hz = (VOICE[name] || 420) * (0.99 + Math.random() * 0.02);
+    try {
+      var t = actx.currentTime;
+      var car = actx.createOscillator(), mod = actx.createOscillator();
+      var mg = actx.createGain(), g = actx.createGain();
+      car.frequency.value = hz;
+      mod.frequency.value = hz * 2;
+      mg.gain.setValueAtTime(hz * 1.2, t);
+      mod.connect(mg);
+      mg.connect(car.frequency);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.10, t + 0.004);          // ぱっと立ち上げて
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.055);   // すぐ消す
+      car.connect(g);
+      g.connect(master);
+      mod.start(t); car.start(t);
+      mod.stop(t + 0.08); car.stop(t + 0.08);
+    } catch (e) {}
+  }
+
+  var audioDead = false;                   // 一度も鳴らせなかった環境では、もう試さない
+  var tuneName = FIRST_TUNE;               // いまかかっている曲。空なら無音のまま
+
+  function bgmStart() {
+    if (!AC || !bgmOn || audioDead || !tuneName) return;
+    try {
+      if (!actx) {
+        actx = new AC();
+        master = actx.createGain();
+        master.gain.value = 0.2;
+        master.connect(actx.destination);
+      }
+      if (actx.state === "suspended") actx.resume();
+      if (bgmTimer) return;
+      nextTime = actx.currentTime + 0.1;
+      bgmTimer = setInterval(function () {
+        try {
+          while (nextTime < actx.currentTime + 0.25) {     // 少し先まで予約しておく
+            tick(nextTime, stepAt);
+            nextTime += BEAT / 4;
+            stepAt++;
+          }
+        } catch (e) { bgmStop(); }                          // 鳴らせなくなったら、静かに止める
+      }, 60);
+    } catch (e) { audioDead = true; actx = null; }
+  }
+
+  function bgmStop() {
+    if (bgmTimer) { clearInterval(bgmTimer); bgmTimer = null; }
+    if (actx && actx.state === "running") actx.suspend();
+  }
+
+  /* 効果音。音を切っているときは鳴りません。
+     鳴らせない環境でも話が止まらないように、音まわりはすべて包んであります */
+  function seClick() {
+    if (!actx || !bgmOn) return;
+    try { fm(actx.currentTime, 1150, 0.045, 2.4, 1.1, 0.05); } catch (e) {}
+  }
+
+  function seOk() {
+    if (!actx || !bgmOn) return;
+    try {
+      var t = actx.currentTime;
+      [0, 4, 7, 12].forEach(function (n, i) {      // 上がって解ける四つの音
+        fm(t + i * 0.07, mtof(69 + n), 0.45, 3, 2.2, 0.13);
+      });
+    } catch (e) {}
+  }
+
+  function seNg() {
+    if (!actx || !bgmOn) return;
+    try { fm(actx.currentTime, mtof(53), 0.28, 1.4, 3.5, 0.14); } catch (e) {}
+  }
+
+  function bgmToggle() {
+    bgmOn = !bgmOn;
+    try { localStorage.setItem("macho-bgm", bgmOn ? "1" : "0"); } catch (e) {}
+    if (bgmOn) bgmStart(); else bgmStop();
+  }
+
+  /* 画面から離れたら止める。戻ったら鳴らしなおす */
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) bgmStop();
+    else if (bgmOn) bgmStart();
+  });
+  window.addEventListener("pagehide", bgmStop);
+
+  /* =========================================================================
+     打ち込む欄
+     ========================================================================= */
+  function showInput() {
+    ansEl.value = "";
+    ansEl.style.display = "block";
+    ansBtn.style.display = "block";
+    ansEl.focus();
+  }
+  function hideInput() {
+    ansEl.style.display = "none";
+    ansBtn.style.display = "none";
+    ansEl.blur();
+  }
+
+  /* =========================================================================
+     ログ（読んだ文をいつでも振り返る）
+     ========================================================================= */
+  function logButton() {
+    return { x: W - 112, y: 22, w: 90, h: 46, label: logOpen ? "閉じる" : "ログ" };
+  }
+
+  function bgmButton() {
+    return { x: W - 112, y: 134, w: 90, h: 46, label: bgmOn ? "♪ 音" : "♪ 切" };
+  }
+
+  function openLog() {
+    logLines = buildLog();
+    logScroll = 1e9;          // いちばん下（最新）から見せる
+    logOpen = true;
+    hideInput();
+  }
+
+  function closeLog() {
+    logOpen = false;
+    drag = null;
+    if (state === S.INPUT) showInput();
+  }
+
+  /* 打ち間違いで詰まらないように、ゆれをならしてから見比べる */
+  function norm(s) {
+    s = String(s).trim().toLowerCase();
+    s = s.replace(/[Ａ-Ｚａ-ｚ０-９]/g, function (ch) { return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); });
+    s = s.replace(/[\s　]/g, "");
+    s = s.replace(/(kg|キロ|きろ|kilo)/g, "");
+    s = s.replace(/[ァ-ヶ]/g, function (ch) { return String.fromCharCode(ch.charCodeAt(0) - 0x60); });
+    s = s.replace(/(さん|様|さま|氏)$/, "");
+    return s;
+  }
+
+  function answer() {
+    if (state !== S.INPUT) return;
+    var v = norm(ansEl.value);
+    if (!v) return;
+    for (var i = 0; i < quiz.ok.length; i++) {
+      if (norm(quiz.ok[i]) !== v) continue;
+      var next = idx + 1;                       // ふつうは、すぐ下の行へ続く
+      if (quiz.to) {
+        var j = labelIndex(quiz.to);            // 行き先が書いてあれば、そのシーンへ
+        if (j < SCRIPT.length) next = j;
+      }
+      seOk();
+      runFrom(next);
+      return;
+    }
+    seNg();
+    setLine({ text: quiz.ng });     // 違ったときは、そのまま打ち直してもらう
+    shown = 1e9;
+    ansEl.value = "";
+    ansEl.focus();
+  }
+
+  ansBtn.addEventListener("click", answer);
+  ansEl.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); answer(); }
+  });
+
+  /* =========================================================================
+     入力（送り・選択）
+     ========================================================================= */
+  function advance() {
+    seClick();
+    if (shown < totalChars()) { shown = totalChars(); return; }   // 送り途中なら全部出す
+    runFrom(idx + 1);
+  }
+
+  function choose(n) {
+    seClick();
+    var picked = options[n];
+    if (picked.key) flags[picked.key] = true;
+    options = null;
+    runFrom(labelIndex(picked.o.to));
+  }
+
+  function optionRects() {
+    var r = [], n = options.length, h = 62, gap = 16;
+    var y0 = H * 0.32 - (n * h + (n - 1) * gap) / 2;
+    for (var i = 0; i < n; i++) r.push({ x: W / 2 - 220, y: y0 + i * (h + gap), w: 440, h: h, label: options[i].o.text });
+    return r;
+  }
+
+  function resultButtons() {
+    var h = 58, gap = 14, wr = 160, ws = 214;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.56;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + gap + wr, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+
+  function hit(bs, x, y) {
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return i;
+    }
+    return -1;
+  }
+
+  function doShare() {
+    zShare({ text: "#全員マッチョ館の殺人" });
+  }
+
+  /* x,y は canvas 上の座標。キー操作のときは undefined で来る */
+  function tap(x, y) {
+    if (state === S.INPUT || state === S.FADE) return;
+    if (state === S.RESULT) {
+      var i = x == null ? 0 : hit(resultButtons(), x, y);
+      if (i === 1) doShare();
+      else if (i === 0) newRound();
+      return;
+    }
+    if (state === S.ASK) {
+      if (x == null) { sel = (sel + 1) % options.length; return; }   // スペースで選ぶものを移す
+      var j = hit(optionRects(), x, y);
+      if (j >= 0) choose(j);
+      return;
+    }
+    advance();
+  }
+
+  function atCanvas(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+  }
+
+  wrap.addEventListener("pointerdown", function (e) {
+    if (e.target === ansEl || e.target === ansBtn) return;
+    e.preventDefault();
+    var p = atCanvas(e);
+    if (hit([logButton()], p.x, p.y) === 0) { if (logOpen) closeLog(); else openLog(); return; }
+    if (!logOpen && hit([bgmButton()], p.x, p.y) === 0) { bgmToggle(); return; }
+    bgmStart();                                   // さわられた合図。ここで初めて音が出せる
+    if (logOpen) { drag = { y: p.y, from: logScroll }; return; }   // ログ画面はなぞって送る
+    tap(p.x, p.y);
+  });
+
+  wrap.addEventListener("pointermove", function (e) {
+    if (!drag) return;
+    logScroll = drag.from + (drag.y - atCanvas(e).y);
+  });
+
+  wrap.addEventListener("pointerup", function () { drag = null; });
+  wrap.addEventListener("pointercancel", function () { drag = null; });
+
+  wrap.addEventListener("wheel", function (e) {
+    if (!logOpen) return;
+    e.preventDefault();
+    logScroll += e.deltaY;
+  }, { passive: false });
+
+  window.addEventListener("keydown", function (e) {
+    if (e.target === ansEl) return;                 // 打ち込み中はゲーム側で受けない
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " ";
+    var enter = e.key === "Enter";
+    var up = e.key === "ArrowUp", down = e.key === "ArrowDown";
+    var lkey = e.key === "l" || e.key === "L";
+    if (!esc && !go && !enter && !up && !down && !lkey) return;
+    e.preventDefault();
+    bgmStart();                                   // さわられた合図
+
+    if (logOpen) {                                  // ログを見ている間
+      if (up) logScroll -= 90;
+      else if (down) logScroll += 90;
+      else if (!e.repeat) closeLog();
+      return;
+    }
+    if (e.repeat) return;
+    if (lkey) { openLog(); return; }
+    if (esc) { newRound(); return; }
+    if (state === S.ASK) {
+      if (enter) choose(sel);
+      else if (up) sel = (sel + options.length - 1) % options.length;
+      else if (down || go) sel = (sel + 1) % options.length;
+      return;
+    }
+    tap();
+  });
+
+  /* =========================================================================
+     描画
+     ========================================================================= */
+  /* 行のあたま・おわりに来ると読みにくい字（かるい禁則） */
+  var NO_HEAD = "。、，．・：；！？）」』】〕》〉』」ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶーゝゞ々,.:;!?)]}";
+  var NO_TAIL = "（「『【〔《〈([{";
+
+  function wrapText(text, maxW, font) {
+    ctx.font = font;
+    var out = [], src = String(text).split("\n");
+    for (var s = 0; s < src.length; s++) {
+      var segs = segments(src[s]), cur = "";
+      for (var g = 0; g < segs.length; g++) {
+        var seg = segs[g];
+        if (seg.key) {                    // 覚えておきたい言葉は、途中で行を折らない
+          if (ctx.measureText(cur + seg.s).width > maxW && cur) { out.push(cur); cur = ""; }
+          cur += seg.s;
+          continue;
+        }
+        for (var i = 0; i < seg.s.length; i++) {
+          var ch = seg.s.charAt(i);
+          if (ctx.measureText(cur + ch).width > maxW && cur && NO_HEAD.indexOf(ch) < 0) {
+            var tail = cur.charAt(cur.length - 1);
+            if (NO_TAIL.indexOf(tail) > -1 && cur.length > 1) {   // 行おわりの「（」などは次の行へ送る
+              out.push(cur.slice(0, -1));
+              cur = tail;
+            } else {
+              out.push(cur);
+              cur = "";
+            }
+          }
+          cur += ch;                        // 行あたまに来てはいけない字は、前の行にぶら下げる
+        }
+      }
+      out.push(cur);
+    }
+    return out;
+  }
+
+  /* 色を付けたい言葉ぜんぶ（人の名前は、その人の色で）。長いものから照らし合わせます */
+  var HILITE = [];
+  (function () {
+    var seen = {};
+    for (var k in CHARA) if (CHARA.hasOwnProperty(k)) {
+      var d = CHARA[k];
+      if (d.name && d.color && !seen[d.name]) { seen[d.name] = 1; HILITE.push({ w: d.name, c: d.color }); }
+    }
+    for (var i = 0; i < KEYWORDS.length; i++) HILITE.push({ w: KEYWORDS[i], c: KEY_COLOR });
+    HILITE.sort(function (a, b) { return b.w.length - a.w.length; });
+  })();
+
+  function nameColor(name) {
+    for (var k in CHARA) if (CHARA.hasOwnProperty(k) && CHARA[k].name === name) return CHARA[k].color || "#fff";
+    return "#fff";
+  }
+
+  /* 一行を、ふつうの字と色の付く言葉に切り分ける */
+  function segments(str) {
+    var out = [], buf = "", i = 0;
+    while (i < str.length) {
+      var hit = null;
+      for (var k = 0; k < HILITE.length; k++) {
+        if (str.substr(i, HILITE[k].w.length) === HILITE[k].w) { hit = HILITE[k]; break; }
+      }
+      if (hit) {
+        if (buf) { out.push({ s: buf, key: false }); buf = ""; }
+        out.push({ s: hit.w, key: true, c: hit.c });
+        i += hit.w.length;
+      } else {
+        buf += str.charAt(i);
+        i++;
+      }
+    }
+    if (buf) out.push({ s: buf, key: false });
+    return out;
+  }
+
+  /* 先頭から n 文字だけ描く。切れている途中でも色は変わらない */
+  function drawRich(str, n, x, y, color) {
+    var segs = segments(str), cx = x, left = n;
+    for (var i = 0; i < segs.length && left > 0; i++) {
+      var seg = segs[i];
+      ctx.fillStyle = seg.key ? (seg.c || KEY_COLOR) : color;
+      ctx.fillText(seg.s.slice(0, left), cx, y);
+      cx += ctx.measureText(seg.s).width;    // 切れていても、次の字の位置はずらさない
+      left -= seg.s.length;
+    }
+  }
+
+  function totalChars() {
+    var n = 0;
+    for (var i = 0; i < lines.length; i++) n += lines[i].length;
+    return n;
+  }
+
+  function drawDog(d, dim) {
+    ctx.save();
+    ctx.globalAlpha = dim ? 0.45 : 1;
+    ctx.fillStyle = d.cloth;
+    ctx.fillRect(-70, -46, 26, 46);                       // 脚
+    ctx.fillRect(-30, -46, 26, 46);
+    ctx.fillRect(40, -46, 24, 46);
+    ctx.fillRect(72, -46, 24, 46);
+    ctx.beginPath(); ctx.ellipse(20, -78, 62, 40, 0, 0, 7); ctx.fill();     // 胴
+    ctx.fillStyle = d.hair;
+    ctx.beginPath(); ctx.ellipse(-46, -80, 40, 46, 0, 0, 7); ctx.fill();    // 胸
+    ctx.fillStyle = d.skin;
+    ctx.beginPath(); ctx.arc(-80, -126, 30, 0, 7); ctx.fill();              // 頭
+    ctx.fillStyle = d.hair;
+    ctx.beginPath(); ctx.moveTo(-96, -150); ctx.lineTo(-104, -110); ctx.lineTo(-72, -142); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawChara(key, pos, dim) {
+    var d = CHARA[key];
+    var sw = d.sw, arm = d.arm;
+    var x = pos === "left" ? W * 0.26 : pos === "right" ? W * 0.72 : W * 0.5;
+    var base = H * 0.72;
+
+    /* 絵があるときは、それを足もとから積み上げて描く */
+    var im = charaImages[key];
+    if (d.img && im && im.complete && im.naturalWidth) {
+      var h = (d.h || 560) * (d.scale || 1);
+      var w = h * im.naturalWidth / im.naturalHeight;
+      ctx.save();
+      ctx.globalAlpha = dim ? 0.45 : 1;
+      if (d.gray) ctx.filter = "grayscale(1) brightness(.85)";
+      ctx.translate(x + (d.dx || 0), base + (d.dy || 0));
+      if (d.rotate) {
+        ctx.rotate(d.rotate * Math.PI / 180);
+        ctx.drawImage(im, -w / 2, -h / 2, w, h);     // 傾けるときは、絵の真ん中を指した場所に置く
+      } else {
+        ctx.drawImage(im, -w / 2, -h, w, h);         // ふつうは、足もとを指した場所に立たせる
+      }
+      ctx.restore();
+      return;
+    }
+
+    ctx.save();
+    ctx.translate(x, base);
+    ctx.scale(1.25, 1.25);
+    if (d.dog) { drawDog(d, dim); ctx.restore(); return; }
+
+    ctx.globalAlpha = dim ? 0.45 : 1;
+    if (arm) {                                     // 腕
+      ctx.fillStyle = d.skin;
+      ctx.beginPath(); ctx.ellipse(-sw * 0.85 - arm * 0.35, -85, arm, 50, 0.25, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(sw * 0.85 + arm * 0.35, -85, arm, 50, -0.25, 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = d.cloth;                       // 胴
+    ctx.beginPath();
+    ctx.moveTo(-sw, 0);
+    ctx.lineTo(-sw * 0.72, -150);
+    ctx.lineTo(sw * 0.72, -150);
+    ctx.lineTo(sw, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = d.skin;                        // 首と頭
+    ctx.fillRect(-14, -172, 28, 30);
+    ctx.beginPath();
+    ctx.arc(0, -196, 34, 0, 7);
+    ctx.fill();
+    ctx.fillStyle = d.hair;
+    ctx.beginPath();
+    ctx.arc(0, -204, 34, Math.PI, 0);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawBox(x, y, w, h, rad, fill, stroke) {
+    ctx.beginPath();
+    ctx.moveTo(x + rad, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rad);
+    ctx.arcTo(x + w, y + h, x, y + h, rad);
+    ctx.arcTo(x, y + h, x, y, rad);
+    ctx.arcTo(x, y, x + w, y, rad);
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.lineWidth = 3; ctx.strokeStyle = stroke; ctx.stroke(); }
+  }
+
+  function drawButton(b, on, size) {
+    drawBox(b.x, b.y, b.w, b.h, b.h / 2, on ? "#fff" : "rgba(255,255,255,.14)", on ? "#16202e" : "rgba(255,255,255,.6)");
+    ctx.fillStyle = on ? "#16202e" : "#fff";
+    ctx.font = "800 " + (size || 24) + "px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 1);
+    ctx.textBaseline = "alphabetic";
+  }
+
+  function drawTextBox() {
+    if (!lines || !lines.length) return;          // まだ出す文が無いときは、窓ごと出さない
+    var bx = 26, by = 700, bw = W - 52, bh = 210;
+    drawBox(bx, by, bw, bh, 14, "rgba(10,16,26,.78)", "rgba(255,255,255,.35)");
+
+    if (speaker) {
+      ctx.font = "800 22px sans-serif";
+      var tw = ctx.measureText(speaker).width;
+      drawBox(bx + 18, by - 20, tw + 32, 38, 10, "rgba(10,16,26,.92)", "rgba(255,255,255,.35)");
+      ctx.fillStyle = nameColor(speaker);          // 名札も、その人の色
+      ctx.textAlign = "left";
+      ctx.fillText(speaker, bx + 34, by + 6);
+    }
+
+    ctx.font = "26px sans-serif";
+    ctx.textAlign = "left";
+    var left = Math.floor(shown), y = by + 48;
+    for (var i = 0; i < lines.length && left > 0; i++) {
+      drawRich(lines[i], left, bx + 24, y + i * 38, "#fff");
+      left -= lines[i].length;
+    }
+  }
+
+  /* 控えてある文を、行の高さまで含めて組み直す */
+  function buildLog() {
+    var out = [];
+    for (var i = 0; i < log.length; i++) {
+      var e = log[i];
+      if (e.name) out.push({ kind: "name", s: e.name, h: 32 });
+      var ls = wrapText(e.text, W - 96, "24px sans-serif");
+      for (var j = 0; j < ls.length; j++) out.push({ kind: "body", s: ls[j], h: 34 });
+      out.push({ kind: "gap", s: "", h: 16 });
+    }
+    return out;
+  }
+
+  function drawLog() {
+    ctx.fillStyle = "#070b12";
+    ctx.fillRect(0, 0, W, H);
+
+    var top = 86, bottom = H - 34, viewH = bottom - top;
+    var total = 0, i;
+    for (i = 0; i < logLines.length; i++) total += logLines[i].h;
+    var maxScroll = Math.max(0, total - viewH);
+    if (logScroll > maxScroll) logScroll = maxScroll;
+    if (logScroll < 0) logScroll = 0;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(20, top, W - 40, viewH);
+    ctx.clip();
+    ctx.textAlign = "left";
+    var y = top - logScroll;
+    for (i = 0; i < logLines.length; i++) {
+      var L = logLines[i];
+      if (y > top - 40 && y < bottom + 10) {
+        if (L.kind === "name") {
+          ctx.font = "800 21px sans-serif";
+          ctx.fillStyle = nameColor(L.s);
+          ctx.fillText(L.s, 34, y + 22);
+        } else if (L.kind === "body") {
+          ctx.font = "24px sans-serif";
+          drawRich(L.s, L.s.length, 34, y + 25, "#fff");
+        }
+      }
+      y += L.h;
+    }
+    ctx.restore();
+
+    if (maxScroll > 0) {                      // どのあたりを見ているかの目印
+      var bh = Math.max(48, viewH * viewH / total);
+      var by = top + (viewH - bh) * (logScroll / maxScroll);
+      ctx.fillStyle = "rgba(255,255,255,.28)";
+      ctx.fillRect(W - 16, by, 6, bh);
+    }
+  }
+
+  function draw() {
+    var scene = BG[bg] || {};
+    ctx.fillStyle = scene.base || "#1a1f2b";      // 絵が届くまでは、下地の色だけ
+    ctx.fillRect(0, 0, W, H);
+    var im = bgImages[bg];
+    if (im && im.complete && im.naturalWidth) ctx.drawImage(im, 0, 0, W, H);
+
+    var talking = null;
+    for (var t in chars) if (chars.hasOwnProperty(t) && chars[t].auto) talking = t;
+    for (var k in chars) if (chars.hasOwnProperty(k)) {
+      drawChara(k, chars[k].pos, !!talking && k !== talking);
+    }
+
+    if (state === S.ASK || state === S.INPUT) {
+      ctx.fillStyle = "rgba(8,12,20,.5)";
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    if (state !== S.RESULT) drawTextBox();
+    if (state === S.ASK) optionRects().forEach(function (b, i) { drawButton(b, i === sel); });
+
+    if (state === S.RESULT) {
+      ctx.fillStyle = "rgba(8,12,20,.72)";
+      ctx.fillRect(0, 0, W, H);
+      if (ending) {
+        ctx.fillStyle = "#fff";
+        ctx.font = "800 52px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(ending, W / 2, H * 0.42);
+      }
+      resultButtons().forEach(function (b) { drawButton(b, true); });
+    }
+
+    if (logOpen) drawLog();
+    drawButton(logButton(), logOpen);
+    if (!logOpen) drawButton(bgmButton(), false, 20);
+
+    if (fade) {                                    // いちばん上に、暗転の幕
+      var a = fade.phase === "out" ? fade.t / FADE_DUR : 1 - fade.t / FADE_DUR;
+      ctx.fillStyle = "rgba(0,0,0," + Math.max(0, Math.min(1, a)) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  /* =========================================================================
+     ループ
+     ========================================================================= */
+  newRound();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    if (state === S.TEXT) {
+      var was = Math.floor(shown);
+      shown = Math.min(totalChars(), shown + CPS * dt);
+      var now = Math.floor(shown);
+      if (now > was) sePop(speaker);                       // 一文字ごとに、小さく鳴らす
+    }
+
+    if (state === S.FADE && fade) {                 // 暗くして、背景を替えて、また明るくする
+      fade.t += dt;
+      if (fade.t >= FADE_DUR) {
+        if (fade.phase === "out") { bg = fade.to; fade.phase = "in"; fade.t = 0; }
+        else { var back = fade.next; fade = null; runFrom(back); }
+      }
+    }
+
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
