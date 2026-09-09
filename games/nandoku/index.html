@@ -83,9 +83,11 @@
     [[20, 34], [80, 34]], [[20, 48], [80, 48]], [[20, 62], [80, 62]],
     [[24, 74], [76, 74]], [[24, 74], [24, 98]], [[76, 74], [76, 98]], [[24, 98], [76, 98]]
   );
-  R.itoguchi = L(                                               /* 幺 */
-    [[64, 2], [34, 20]], [[34, 20], [74, 36], [30, 50]],
-    [[30, 50], [72, 66], [26, 82]], [[26, 82], [62, 96]]
+  R.itoguchi = L(                                               /* 幺（折り返しは曲がれるように丸めてある） */
+    [[64, 2], [36, 20]],
+    [[36, 20], [64, 28], [76, 38], [64, 47], [32, 52]],
+    [[32, 52], [62, 60], [74, 70], [62, 79], [30, 84]],
+    [[30, 84], [22, 90], [34, 97], [60, 99]]
   );
   R.naga = L(                                                   /* 長 */
     [[26, 10], [76, 10]], [[26, 28], [76, 28]], [[26, 46], [80, 46]],
@@ -174,11 +176,10 @@
   /* 離れた画をつなぐ細い渡り。続け書きしたときの筆の跡のつもり */
   var BRIDGES = [
     [], [], [],
-    [[[49.4, 31.1], [49.4, 29.6]], [[48.2, 28.1], [48.2, 26.3]], [[48.2, 24.8], [48.2, 22.9]],
-     [[57.8, 21.4], [57.8, 18.4]], [[71.2, 53.8], [76.9, 54.2]], [[87.5, 38.4], [88.2, 37.8]],
-     [[81.5, 64.5], [82.1, 65.4]], [[92.4, 62], [90.9, 63.8]], [[90.6, 90.2], [90.6, 93.2]],
-     [[23.6, 91.1], [24.8, 89.6]], [[31.5, 38.4], [32.1, 37.8]], [[89.4, 13.8], [93.3, 10.8]],
-     [[51.8, 62.3], [47.5, 66.6]], [[5.7, 34.5], [12.4, 26.6]]]
+    [[[24.7, 89.8], [24.1, 91.3]], [[90.1, 93.1], [90.1, 90.4]], [[91, 64], [92.5, 62.5]],
+     [[81.3, 64.6], [81.9, 65.2]], [[89.5, 14.3], [93.2, 10.7]], [[76.8, 54], [71.3, 53.7]],
+     [[50.7, 31], [50.7, 29.8]], [[48.6, 27.9], [48.6, 26.4]], [[48.3, 24.6], [48.3, 23.1]],
+     [[58.3, 21.3], [58.3, 18.5]], [[51.9, 62.5], [48, 66.7]], [[6.2, 34.6], [12.5, 26.7]]]
   ];
 
   /* =====================================================================
@@ -486,7 +487,7 @@
 
   /* ===== 進行 ===== */
   var ST = { READY: "ready", PLAY: "play", CLEAR: "clear", RESULT: "result" };
-  var state, stageIdx, g, total, falls, safe, safeT, clearT, flash, steer, steerT;
+  var state, stageIdx, g, total, falls, start, clearT, flash, steer, steerT;
 
   function loadStage(k) {
     stageIdx = k;
@@ -494,7 +495,7 @@
     car.x = g.sx; car.z = g.sz; car.y = 0; car.v = 0; car.vy = 0; car.fall = 0; car.roll = 0;
     car.a = bestHeading(g, g.sx, g.sz, Math.atan2(g.gx - g.sx, g.gz - g.sz));
     cam.yaw = car.a;
-    safe = { x: car.x, z: car.z, a: car.a }; safeT = 0; clearT = 0; flash = 0;
+    start = { x: car.x, z: car.z, a: car.a }; clearT = 0; flash = 0;
     steer = 0; steerT = 0;
   }
   function newRun() {
@@ -505,8 +506,8 @@
 
   var MAXV = 172, ACC = 210, TURN = 4.9;
 
-  function respawn() {
-    car.x = safe.x; car.z = safe.z; car.a = safe.a;
+  function respawn() {                                  /* 落ちたら、その面のはじめから */
+    car.x = start.x; car.z = start.z; car.a = start.a;
     car.y = 0; car.vy = 0; car.v = 0; car.fall = 0; car.roll = 0;
     cam.yaw = car.a; flash = 0.45;
   }
@@ -529,7 +530,16 @@
         car.roll += dt * 2.2;
         if (car.y < -560) respawn();
       } else {
-        var lim = MAXV * (1 - 0.5 * Math.abs(steer));
+        /* 先の道を見て、行き止まりや曲がり角の手前では自分から落とす */
+        var s0 = Math.sin(car.a), c0 = Math.cos(car.a), clear = 0, fan, ang, n, sa, ca;
+        for (fan = -2; fan <= 2; fan++) {
+          ang = car.a + fan * 0.26; sa = Math.sin(ang); ca = Math.cos(ang);
+          for (n = 60; n <= 300; n += 30) {
+            if (!onRoad(g, car.x + sa * n, car.z + ca * n)) break;
+            if (n > clear) clear = n;
+          }
+        }
+        var lim = Math.min(MAXV * (1 - 0.5 * Math.abs(steer)), 45 + clear * 0.42);
         car.v += (car.v < lim ? ACC : -ACC * 2.6) * dt;
         if (car.v > lim) car.v = lim;
         if (car.v < 0) car.v = 0;
@@ -542,20 +552,6 @@
           car.fall = 1; car.vy = 24; falls++;
           blip(320, 60, 0.5, "sawtooth", 0.1);
         } else {
-          safeT += dt;
-          if (safeT > 0.1) {
-            safeT = 0;
-            var s = Math.sin(car.a), c = Math.cos(car.a), ok = 1, n;
-            var pt = [[-11, -15], [11, -15], [-11, 15], [11, 15]];
-            for (n = 0; n < 4; n++) {
-              var lx = pt[n][0], lz = pt[n][1];
-              if (!onRoad(g, car.x + lx * c + lz * s, car.z - lx * s + lz * c)) { ok = 0; break; }
-            }
-            for (n = 40; ok && n <= 150; n += 35) {          /* 行き止まりを戻り先にしない */
-              if (!onRoad(g, car.x + s * n, car.z + c * n)) ok = 0;
-            }
-            if (ok) { safe.x = car.x; safe.z = car.z; safe.a = car.a; }
-          }
           var dx = car.x - g.gx, dz = car.z - g.gz;
           if (dx * dx + dz * dz < 82 * 82) {
             state = ST.CLEAR; clearT = 0; flash = 0.6;
