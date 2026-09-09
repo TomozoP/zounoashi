@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>難読サーキット</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #cdc4ae; overflow: hidden; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #wrap { position: relative; width: 100%; touch-action: none; }
+  canvas { width: 100%; height: 100%; display: block; background: #f4eee1; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+</div></div>
+<script src="../share.js"></script>
+<script>
+/* 難読サーキット
+   難読漢字の字画がそのまま道になっている。墨の上を走り、外は崖。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+
+  var W = 540, H = 960;                 /* タテ画面 */
+  wrap.style.aspectRatio = W + " / " + H;
+  wrap.style.width = "min(100%, calc(100vh * " + W + " / " + H + "))";
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  /* =====================================================================
+     字のかたち
+     0..100 の正方形に、線（折れ線）で書く。x は右、y は下。
+     太さ w は道幅の倍率。0.5 くらいの細い線は、離れた画をつなぐ渡り。
+     ===================================================================== */
+
+  function L() {                                    /* 折れ線をまとめて画にする */
+    var out = [], i;
+    for (i = 0; i < arguments.length; i++) out.push({ p: arguments[i] });
+    return out;
+  }
+  function thin(a) {                                /* 細い渡りの画 */
+    return a.map(function (p) { return { p: p, w: 0.7 }; });
+  }
+  function put(x, y, w, h, strokes) {               /* 部品を枠の中に置く */
+    return strokes.map(function (s) {
+      return {
+        w: s.w || 1,
+        p: s.p.map(function (q) { return [x + q[0] * w / 100, y + q[1] * h / 100]; })
+      };
+    });
+  }
+  function cat() {
+    var out = [], i;
+    for (i = 0; i < arguments.length; i++) out = out.concat(arguments[i]);
+    return out;
+  }
+
+  /* 部品（へん・つくり）。それぞれ 0..100 の枠で書いてある */
+  var R = {};
+  R.ki = L(                                                     /* 木 */
+    [[50, 0], [50, 100]], [[4, 32], [96, 32]],
+    [[50, 36], [6, 94]], [[50, 36], [94, 94]]
+  );
+  R.hotogi = L(                                                 /* 缶 */
+    [[66, 2], [26, 26]], [[6, 26], [94, 26]], [[50, 10], [50, 100]],
+    [[24, 48], [76, 48]], [[24, 48], [24, 86]], [[76, 48], [76, 86]],
+    [[8, 86], [92, 86]]
+  );
+  R.gen = L(                                                    /* 言 */
+    [[50, 0], [50, 10]], [[8, 16], [92, 16]],
+    [[20, 34], [80, 34]], [[20, 48], [80, 48]], [[20, 62], [80, 62]],
+    [[24, 74], [76, 74]], [[24, 74], [24, 98]], [[76, 74], [76, 98]], [[24, 98], [76, 98]]
+  );
+  R.itoguchi = L(                                               /* 幺 */
+    [[64, 2], [34, 20]], [[34, 20], [74, 36], [30, 50]],
+    [[30, 50], [72, 66], [26, 82]], [[26, 82], [62, 96]]
+  );
+  R.naga = L(                                                   /* 長 */
+    [[26, 10], [76, 10]], [[26, 28], [76, 28]], [[26, 46], [80, 46]],
+    [[50, 4], [50, 66]], [[8, 62], [92, 62]],
+    [[50, 64], [22, 100]], [[54, 70], [88, 100]]
+  );
+  R.uma = L(                                                    /* 馬 */
+    [[28, 10], [80, 10]], [[46, 2], [46, 60]],
+    [[28, 10], [28, 60]], [[80, 10], [80, 60]],
+    [[28, 26], [80, 26]], [[28, 44], [80, 44]], [[28, 60], [88, 60]],
+    [[30, 64], [28, 92]], [[46, 64], [45, 92]], [[62, 64], [63, 92]], [[78, 64], [80, 92]]
+  );
+  R.tsuki = L(                                                  /* 月 */
+    [[26, 4], [26, 96]], [[26, 4], [74, 4], [74, 90], [58, 100]],
+    [[26, 34], [74, 34]], [[26, 64], [74, 64]]
+  );
+  R.kokoro = L(                                                 /* 心 */
+    [[24, 22], [30, 60], [60, 76], [92, 44]],
+    [[26, 30], [10, 12]], [[46, 68], [50, 28]], [[76, 62], [82, 24]]
+  );
+  R.rittou = L([[32, 8], [32, 56]], [[72, 2], [72, 98]]);       /* 刂 */
+  R.uk = L([[50, 0], [50, 28]], [[8, 70], [8, 34], [92, 34], [95, 74]]);  /* 宀 */
+
+  /* =====================================================================
+     コース
+     box  … 字ぜんたいの大きさ（走る距離）
+     road … 道幅
+     start/goal … 字の座標（0..100）
+     ===================================================================== */
+  var STAGES = [
+    {                                                    /* 屮（てつ） */
+      box: 1000, road: 66, cell: 8,
+      start: [50, 6], goal: [14, 24],
+      strokes: L(
+        [[50, 6], [50, 94]], [[14, 58], [86, 58]],
+        [[14, 58], [14, 24]], [[86, 58], [86, 24]]
+      )
+    },
+    {                                                    /* 鼎（かなえ） */
+      box: 1550, road: 64, cell: 9,
+      start: [50, 6], goal: [64, 86],
+      strokes: L(
+        [[32, 6], [32, 46], [68, 46], [68, 6], [32, 6]],
+        [[32, 19], [68, 19]], [[32, 32], [68, 32]],
+        [[50, 46], [50, 60]], [[8, 60], [92, 60]],
+        [[22, 60], [22, 92], [36, 86]], [[78, 60], [78, 92], [64, 86]],
+        [[38, 60], [38, 80]], [[62, 60], [62, 80]], [[38, 80], [62, 80]]
+      )
+    },
+    {                                                    /* 鬱（うつ） */
+      box: 2150, road: 60, cell: 9,
+      start: [15, 0], goal: [72, 90],
+      strokes: cat(
+        put(0, 0, 30, 46, R.ki),
+        put(34, 0, 32, 46, R.hotogi),
+        put(70, 0, 30, 46, R.ki),
+        L(
+          [[8, 54], [8, 44], [92, 44], [92, 54]],
+          [[22, 44], [22, 86], [70, 86], [70, 44]],
+          [[46, 50], [46, 84]], [[26, 67], [66, 67]],
+          [[46, 67], [30, 53]], [[46, 67], [62, 53]],
+          [[46, 67], [30, 81]], [[46, 67], [62, 81]],
+          [[46, 86], [46, 97], [72, 90]],
+          [[92, 50], [70, 62]], [[92, 64], [70, 76]], [[92, 78], [70, 88]]
+        )
+      )
+    },
+    {                                                    /* 𰻞（ビャン） */
+      box: 3300, road: 66, cell: 10,
+      start: [58, 0], goal: [98, 94],
+      strokes: cat(
+        put(18, 0, 80, 14, R.uk),
+        put(20, 14, 20, 24, R.itoguchi),
+        put(42, 14, 32, 24, R.gen),
+        put(76, 14, 20, 24, R.itoguchi),
+        put(20, 38, 22, 26, R.naga),
+        put(44, 38, 30, 26, R.uma),
+        put(76, 38, 22, 26, R.naga),
+        put(20, 64, 20, 26, R.tsuki),
+        put(44, 64, 30, 26, R.kokoro),
+        put(76, 64, 20, 26, R.rittou),
+        L([[8, 20], [13, 26]], [[4, 34], [12, 40], [6, 48]], [[6, 48], [8, 80], [26, 94], [98, 94]])
+      )
+    }
+  ];
+  /* 離れた画をつなぐ細い渡り。続け書きしたときの筆の跡のつもり */
+  var BRIDGES = [
+    [], [], [],
+    [[[49.4, 31.1], [49.4, 29.6]], [[48.2, 28.1], [48.2, 26.3]], [[48.2, 24.8], [48.2, 22.9]],
+     [[57.8, 21.4], [57.8, 18.4]], [[71.2, 53.8], [76.9, 54.2]], [[87.5, 38.4], [88.2, 37.8]],
+     [[81.5, 64.5], [82.1, 65.4]], [[92.4, 62], [90.9, 63.8]], [[90.6, 90.2], [90.6, 93.2]],
+     [[23.6, 91.1], [24.8, 89.6]], [[31.5, 38.4], [32.1, 37.8]], [[89.4, 13.8], [93.3, 10.8]],
+     [[51.8, 62.3], [47.5, 66.6]], [[5.7, 34.5], [12.4, 26.6]]]
+  ];
+
+  /* =====================================================================
+     コースを組み立てる
+     画を太らせて升目に塗る。塗ってあるところが道、塗っていないところは崖。
+     ===================================================================== */
+  function buildStage(k) {
+    var st = STAGES[k];
+    var strokes = st.strokes.concat(thin(BRIDGES[k] || []));
+    var box = st.box, cell = st.cell, rw = st.road;
+    var segs = [], i, j;
+
+    strokes.forEach(function (s) {
+      var r = (s.w || 1) * rw / 2;
+      for (var n = 0; n < s.p.length - 1; n++) {
+        segs.push({
+          ax: s.p[n][0] / 100 * box, az: s.p[n][1] / 100 * box,
+          bx: s.p[n + 1][0] / 100 * box, bz: s.p[n + 1][1] / 100 * box, r: r
+        });
+      }
+    });
+
+    var x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9;
+    segs.forEach(function (s) {
+      x0 = Math.min(x0, s.ax - s.r, s.bx - s.r); x1 = Math.max(x1, s.ax + s.r, s.bx + s.r);
+      z0 = Math.min(z0, s.az - s.r, s.bz - s.r); z1 = Math.max(z1, s.az + s.r, s.bz + s.r);
+    });
+    var m = cell * 2;
+    x0 -= m; z0 -= m; x1 += m; z1 += m;
+    var gw = Math.ceil((x1 - x0) / cell), gh = Math.ceil((z1 - z0) / cell);
+    var data = new Uint8Array(gw * gh);
+
+    segs.forEach(function (s) {
+      var i0 = Math.max(0, Math.floor((Math.min(s.ax, s.bx) - s.r - x0) / cell));
+      var i1 = Math.min(gw - 1, Math.ceil((Math.max(s.ax, s.bx) + s.r - x0) / cell));
+      var j0 = Math.max(0, Math.floor((Math.min(s.az, s.bz) - s.r - z0) / cell));
+      var j1 = Math.min(gh - 1, Math.ceil((Math.max(s.az, s.bz) + s.r - z0) / cell));
+      var dx = s.bx - s.ax, dz = s.bz - s.az, ll = dx * dx + dz * dz || 1;
+      for (var j = j0; j <= j1; j++) for (var i = i0; i <= i1; i++) {
+        var px = x0 + (i + 0.5) * cell, pz = z0 + (j + 0.5) * cell;
+        var t = ((px - s.ax) * dx + (pz - s.az) * dz) / ll;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        var qx = px - (s.ax + dx * t), qz = pz - (s.az + dz * t);
+        if (qx * qx + qz * qz <= s.r * s.r) data[j * gw + i] = 1;
+      }
+    });
+
+    return {
+      def: st, strokes: strokes, box: box, cell: cell, gw: gw, gh: gh, x0: x0, z0: z0, data: data,
+      sx: st.start[0] / 100 * box, sz: st.start[1] / 100 * box,
+      gx: st.goal[0] / 100 * box, gz: st.goal[1] / 100 * box
+    };
+  }
+
+  function onRoad(g, x, z) {
+    var i = Math.floor((x - g.x0) / g.cell), j = Math.floor((z - g.z0) / g.cell);
+    if (i < 0 || j < 0 || i >= g.gw || j >= g.gh) return 0;
+    return g.data[j * g.gw + i];
+  }
+
+  /* =====================================================================
+     色
+     紙の上に墨で書いた字、という見立て。遠くは紙の色に溶ける。
+     ===================================================================== */
+  var PAPER = [244, 238, 225];
+  function hex(s) { return [parseInt(s.substr(1, 2), 16), parseInt(s.substr(3, 2), 16), parseInt(s.substr(5, 2), 16)]; }
+  function ramp(c, top) {                  /* 距離で紙の色へ溶かした段階を先に作っておく */
+    var a = [], i, t;
+    for (i = 0; i < 12; i++) {
+      t = i / 11 * (top == null ? 0.94 : top);
+      a.push("rgb(" + Math.round(c[0] + (PAPER[0] - c[0]) * t) + "," +
+                      Math.round(c[1] + (PAPER[1] - c[1]) * t) + "," +
+                      Math.round(c[2] + (PAPER[2] - c[2]) * t) + ")");
+    }
+    return a;
+  }
+  var MAT = {
+    top:   ramp(hex("#3e3739")),
+    top2:  ramp(hex("#443c3e")),
+    rim:   ramp(hex("#5d5250")),
+    wallN: ramp(hex("#2d2728")),
+    wallE: ramp(hex("#201b1c")),
+    goal:  ramp(hex("#c2402b"), 0.45),
+    start: ramp(hex("#7c7060")),
+    post:  ramp(hex("#c2402b"), 0.5)
+  };
+  var FOG0 = 300, FOG1 = 1450;
+  function shade(mat, d) {
+    var t = (d - FOG0) / (FOG1 - FOG0);
+    var k = t <= 0 ? 0 : t >= 1 ? 11 : (t * 11) | 0;
+    return mat[k];
+  }
+
+  /* =====================================================================
+     3D（自前）。カメラの後ろは切り、遠い順に塗る。
+     ===================================================================== */
+  var cam = { x: 0, y: 50, z: 0, yaw: 0, pitch: 0.36 };
+  var FOCAL = (H / 2) / Math.tan(0.55), NEAR = 6;
+  var cyaw = 1, syaw = 0, cpit = 1, spit = 0;
+  function camSync() {
+    cyaw = Math.cos(cam.yaw); syaw = Math.sin(cam.yaw);
+    cpit = Math.cos(cam.pitch); spit = Math.sin(cam.pitch);
+  }
+  var _cx, _cy, _cz;
+  function toCam(x, y, z) {
+    var dx = x - cam.x, dy = y - cam.y, dz = z - cam.z;
+    var rx = dx * cyaw - dz * syaw, rz = dx * syaw + dz * cyaw;
+    _cx = rx; _cy = dy * cpit + rz * spit; _cz = -dy * spit + rz * cpit;
+  }
+
+  var polys = [], polyN = 0;
+  function addPoly(v, mat) {                 /* v: 世界座標の [x,y,z,...] */
+    var n = v.length / 3, i, cp = [], d = 0;
+    for (i = 0; i < n; i++) { toCam(v[i * 3], v[i * 3 + 1], v[i * 3 + 2]); cp.push(_cx, _cy, _cz); }
+    var out = [], inside = 0;
+    for (i = 0; i < n; i++) {
+      var a = i * 3, b = ((i + 1) % n) * 3;
+      var az = cp[a + 2], bz = cp[b + 2], t;
+      if (az > NEAR) { out.push(cp[a], cp[a + 1], az); inside++; }
+      if ((az > NEAR) !== (bz > NEAR)) {
+        t = (NEAR - az) / (bz - az);
+        out.push(cp[a] + (cp[b] - cp[a]) * t, cp[a + 1] + (cp[b + 1] - cp[a + 1]) * t, NEAR);
+      }
+    }
+    if (out.length < 9) return;
+    for (i = 2; i < out.length; i += 3) d += out[i];
+    d /= (out.length / 3);
+    if (d > FOG1 * 1.15) return;
+    var p = polys[polyN];
+    if (!p) { p = polys[polyN] = { v: null, d: 0, c: "" }; }
+    p.v = out; p.d = d; p.c = shade(mat, d);
+    polyN++;
+  }
+  function drawPolys() {
+    var list = polys.slice(0, polyN);
+    list.sort(function (a, b) { return b.d - a.d; });
+    for (var i = 0; i < list.length; i++) {
+      var v = list[i].v, n = v.length / 3, j;
+      ctx.beginPath();
+      for (j = 0; j < n; j++) {
+        var iz = FOCAL / v[j * 3 + 2];
+        var sx = W / 2 + v[j * 3] * iz, sy = H / 2 - v[j * 3 + 1] * iz;
+        if (j === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+      }
+      ctx.closePath();
+      ctx.fillStyle = list[i].c;
+      ctx.fill();
+    }
+    polyN = 0;
+  }
+
+  /* 見えている升目だけを板と壁にする */
+  var VIEW = 860, SLAB = 30;
+  function buildScene(g) {
+    var cell = g.cell;
+    var i0 = Math.max(0, Math.floor((cam.x - VIEW - g.x0) / cell));
+    var i1 = Math.min(g.gw - 1, Math.ceil((cam.x + VIEW - g.x0) / cell));
+    var j0 = Math.max(0, Math.floor((cam.z - VIEW - g.z0) / cell));
+    var j1 = Math.min(g.gh - 1, Math.ceil((cam.z + VIEW - g.z0) / cell));
+    var fx = syaw, fz = cyaw;                    /* カメラの前方向 */
+    var d = g.data, gw = g.gw, i, j, row;
+
+    function seen(i, j) {                        /* 画面に入る見込みのある升目か */
+      var px = g.x0 + (i + 0.5) * cell - cam.x, pz = g.z0 + (j + 0.5) * cell - cam.z;
+      var al = px * fx + pz * fz;
+      if (al < -70 || al > VIEW) return 0;
+      var si = px * fz - pz * fx;
+      return (si < 0 ? -si : si) < al * 0.8 + 150 ? 1 : 0;
+    }
+
+    for (j = j0; j <= j1; j++) {
+      row = j * gw;
+      var zA = g.z0 + j * cell, zB = zA + cell;
+      var run = -1;
+      for (i = i0; i <= i1 + 1; i++) {
+        var on = i <= i1 && d[row + i] && seen(i, j);
+        if (on && run < 0) run = i;
+        if (run >= 0 && (!on || i - run >= 5)) {
+          var xA = g.x0 + run * cell, xB = g.x0 + i * cell;
+          addPoly([xA, 0, zA, xB, 0, zA, xB, 0, zB, xA, 0, zB], (((run >> 1) + (j >> 1)) & 1) ? MAT.top : MAT.top2);
+          run = on ? i : -1;
+        }
+      }
+      /* 北と南の壁（升目の並びぶんまとめる） */
+      var wrun = -1;
+      for (i = i0; i <= i1 + 1; i++) {
+        var w = i <= i1 && d[row + i] && seen(i, j) && (j === 0 || !d[row - gw + i]);
+        if (w && wrun < 0) wrun = i;
+        if (!w && wrun >= 0) {
+          if (cam.z < zA) addPoly([g.x0 + wrun * cell, 0, zA, g.x0 + i * cell, 0, zA,
+                                   g.x0 + i * cell, -SLAB, zA, g.x0 + wrun * cell, -SLAB, zA], MAT.wallN);
+          wrun = -1;
+        }
+      }
+      wrun = -1;
+      for (i = i0; i <= i1 + 1; i++) {
+        var s = i <= i1 && d[row + i] && seen(i, j) && (j === g.gh - 1 || !d[row + gw + i]);
+        if (s && wrun < 0) wrun = i;
+        if (!s && wrun >= 0) {
+          if (cam.z > zB) addPoly([g.x0 + wrun * cell, 0, zB, g.x0 + i * cell, 0, zB,
+                                   g.x0 + i * cell, -SLAB, zB, g.x0 + wrun * cell, -SLAB, zB], MAT.wallN);
+          wrun = -1;
+        }
+      }
+      /* 東と西の壁 */
+      for (i = i0; i <= i1; i++) {
+        if (!d[row + i] || !seen(i, j)) continue;
+        var xL = g.x0 + i * cell, xR = xL + cell;
+        if ((i === 0 || !d[row + i - 1]) && cam.x < xL)
+          addPoly([xL, 0, zA, xL, 0, zB, xL, -SLAB, zB, xL, -SLAB, zA], MAT.wallE);
+        if ((i === g.gw - 1 || !d[row + i + 1]) && cam.x > xR)
+          addPoly([xR, 0, zA, xR, 0, zB, xR, -SLAB, zB, xR, -SLAB, zA], MAT.wallE);
+      }
+    }
+  }
+
+  /* ゴールの柱。遠くからでも見えるように高く立てる */
+  function goalMark(g) {
+    var x = g.gx, z = g.gz, w = 26, h = 520;
+    var dx = cam.x - x, dz = cam.z - z, l = Math.sqrt(dx * dx + dz * dz) || 1;
+    var px = -dz / l * w, pz = dx / l * w;                  /* こちらを向いた板 */
+    addPoly([x - px, 4, z - pz, x + px, 4, z + pz, x + px, h, z + pz, x - px, h, z - pz], MAT.post);
+    addPoly([x - 46, 1, z - 46, x + 46, 1, z - 46, x + 46, 1, z + 46, x - 46, 1, z + 46], MAT.goal);
+  }
+
+  /* 車 */
+  var car = { x: 0, z: 0, y: 0, a: 0, v: 0, vy: 0, fall: 0, roll: 0 };
+  function carQuads() {
+    var s = Math.sin(car.a), c = Math.cos(car.a), rz = Math.sin(car.roll) * 8;
+    function P(lx, ly, lz) { return [car.x + lx * c + lz * s, car.y + ly + lx * rz * 0.1, car.z - lx * s + lz * c]; }
+    function Q(a, b, cc, dd, mat) {
+      addPoly([a[0], a[1], a[2], b[0], b[1], b[2], cc[0], cc[1], cc[2], dd[0], dd[1], dd[2]], mat);
+    }
+    var bw = 7.6, bl = 14, y0 = 3.4, y1 = 11.6, cy = 18.4;
+    var A = P(-bw, y1, -bl), B = P(bw, y1, -bl), C = P(bw, y1, bl), D = P(-bw, y1, bl);
+    var a = P(-bw, y0, -bl), b = P(bw, y0, -bl), c2 = P(bw, y0, bl), d2 = P(-bw, y0, bl);
+    Q(A, B, C, D, MAT_CAR.top);
+    Q(d2, c2, C, D, MAT_CAR.front);
+    Q(b, a, A, B, MAT_CAR.back);
+    Q(a, d2, D, A, MAT_CAR.side);
+    Q(c2, b, B, C, MAT_CAR.side);
+    var cw = 6.2, f = 5.6, r = -6.4;
+    var E = P(-cw, cy, r), F = P(cw, cy, r), G = P(cw, cy, f), I = P(-cw, cy, f);
+    var e = P(-cw, y1, r), f2 = P(cw, y1, r), g2 = P(cw, y1, f), i2 = P(-cw, y1, f);
+    Q(E, F, G, I, MAT_CAR.roof);
+    Q(i2, g2, G, I, MAT_CAR.glass);
+    Q(f2, e, E, F, MAT_CAR.glass);
+    Q(e, i2, I, E, MAT_CAR.glass);
+    Q(g2, f2, F, G, MAT_CAR.glass);
+    [[-1, 7.4], [1, 7.4], [-1, -7.4], [1, -7.4]].forEach(function (w) {
+      var xx = w[0] * (bw + 0.7), zz = w[1];
+      Q(P(xx, 0.6, zz - 4), P(xx, 0.6, zz + 4), P(xx, 7.4, zz + 4), P(xx, 7.4, zz - 4), MAT_CAR.tire);
+    });
+    if (car.fall === 0) {                                   /* 影 */
+      Q(P(-bw - 2, 0.6, -bl - 2), P(bw + 2, 0.6, -bl - 2), P(bw + 2, 0.6, bl + 2), P(-bw - 2, 0.6, bl + 2), MAT_CAR.shadow);
+    }
+  }
+  var MAT_CAR = {
+    top: ramp(hex("#d8492e")), front: ramp(hex("#b93b23")), back: ramp(hex("#93301d")),
+    side: ramp(hex("#a6382a")), roof: ramp(hex("#f2ece0")), glass: ramp(hex("#2c2f36")),
+    tire: ramp(hex("#191617")), shadow: ramp(hex("#2a2422"))
+  };
+
+  /* 道が続いているほうを向く。止まったとき・戻されたときの向き決め */
+  function bestHeading(g, x, z, prefer) {
+    var best = -1e9, ba = 0, k, t;
+    for (k = 0; k < 72; k++) {
+      var a = k / 72 * Math.PI * 2, s = Math.sin(a), c = Math.cos(a), d = 0;
+      for (t = 12; t <= 340; t += 12) { if (!onRoad(g, x + s * t, z + c * t)) break; d = t; }
+      var sc = d + (prefer == null ? 0 : 46 * Math.cos(a - prefer));
+      if (sc > best) { best = sc; ba = a; }
+    }
+    return ba;
+  }
+
+  /* ===== 音 ===== */
+  var actx = null, eng = null, engGain = null;
+  function audioStart() {
+    if (actx) { if (actx.state === "suspended") actx.resume(); return; }
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+    eng = actx.createOscillator(); eng.type = "sawtooth"; eng.frequency.value = 60;
+    var f = actx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 460; f.Q.value = 5;
+    engGain = actx.createGain(); engGain.gain.value = 0;
+    eng.connect(f); f.connect(engGain); engGain.connect(actx.destination); eng.start();
+  }
+  function engineSound(v, on) {
+    if (!actx) return;
+    eng.frequency.setTargetAtTime(52 + v * 0.42, actx.currentTime, 0.07);
+    engGain.gain.setTargetAtTime(on ? 0.045 : 0, actx.currentTime, 0.12);
+  }
+  function blip(f0, f1, dur, type, vol) {
+    if (!actx) return;
+    var o = actx.createOscillator(), gg = actx.createGain(), t = actx.currentTime;
+    o.type = type || "triangle";
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    gg.gain.setValueAtTime(vol || 0.14, t);
+    gg.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(gg); gg.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!actx) return;
+    if (document.hidden) { engGain.gain.value = 0; actx.suspend(); } else actx.resume();
+  });
+
+  /* ===== 進行 ===== */
+  var ST = { READY: "ready", PLAY: "play", CLEAR: "clear", RESULT: "result" };
+  var state, stageIdx, g, total, falls, safe, safeT, clearT, flash, steer, steerT;
+
+  function loadStage(k) {
+    stageIdx = k;
+    g = buildStage(k);
+    car.x = g.sx; car.z = g.sz; car.y = 0; car.v = 0; car.vy = 0; car.fall = 0; car.roll = 0;
+    car.a = bestHeading(g, g.sx, g.sz, Math.atan2(g.gx - g.sx, g.gz - g.sz));
+    cam.yaw = car.a;
+    safe = { x: car.x, z: car.z, a: car.a }; safeT = 0; clearT = 0; flash = 0;
+    steer = 0; steerT = 0;
+  }
+  function newRun() {
+    state = ST.READY; total = 0; falls = 0;
+    loadStage(0);
+  }
+  newRun();
+
+  var MAXV = 172, ACC = 210, TURN = 4.9;
+
+  function respawn() {
+    car.x = safe.x; car.z = safe.z; car.a = safe.a;
+    car.y = 0; car.vy = 0; car.v = 0; car.fall = 0; car.roll = 0;
+    cam.yaw = car.a; flash = 0.45;
+  }
+
+  function update(dt) {
+    /* ハンドル */
+    var tgt = 0;
+    if (keyL && !keyR) tgt = -1; else if (keyR && !keyL) tgt = 1;
+    else if (touchOn) tgt = Math.max(-1, Math.min(1, touchX / (W * 0.26)));
+    if (tgt > -0.09 && tgt < 0.09) tgt = 0;
+    steer += (tgt - steer) * Math.min(1, dt * 13);
+
+    if (state === ST.PLAY) {
+      total += dt;
+      if (car.fall) {
+        car.v *= Math.max(0, 1 - dt * 0.6);
+        car.x += Math.sin(car.a) * car.v * dt;
+        car.z += Math.cos(car.a) * car.v * dt;
+        car.vy -= 1500 * dt; car.y += car.vy * dt;
+        car.roll += dt * 2.2;
+        if (car.y < -560) respawn();
+      } else {
+        var lim = MAXV * (1 - 0.5 * Math.abs(steer));
+        car.v += (car.v < lim ? ACC : -ACC * 2.6) * dt;
+        if (car.v > lim) car.v = lim;
+        if (car.v < 0) car.v = 0;
+        car.a += steer * TURN * (0.34 + 0.66 * (1 - car.v / MAXV)) * Math.min(1, car.v / 55) * dt;
+        car.x += Math.sin(car.a) * car.v * dt;
+        car.z += Math.cos(car.a) * car.v * dt;
+        car.roll += (-steer * 0.24 * (car.v / MAXV) - car.roll) * Math.min(1, dt * 9);
+
+        if (!onRoad(g, car.x, car.z)) {
+          car.fall = 1; car.vy = 24; falls++;
+          blip(320, 60, 0.5, "sawtooth", 0.1);
+        } else {
+          safeT += dt;
+          if (safeT > 0.1) {
+            safeT = 0;
+            var s = Math.sin(car.a), c = Math.cos(car.a), ok = 1, n;
+            var pt = [[-11, -15], [11, -15], [-11, 15], [11, 15]];
+            for (n = 0; n < 4; n++) {
+              var lx = pt[n][0], lz = pt[n][1];
+              if (!onRoad(g, car.x + lx * c + lz * s, car.z - lx * s + lz * c)) { ok = 0; break; }
+            }
+            for (n = 40; ok && n <= 150; n += 35) {          /* 行き止まりを戻り先にしない */
+              if (!onRoad(g, car.x + s * n, car.z + c * n)) ok = 0;
+            }
+            if (ok) { safe.x = car.x; safe.z = car.z; safe.a = car.a; }
+          }
+          var dx = car.x - g.gx, dz = car.z - g.gz;
+          if (dx * dx + dz * dz < 82 * 82) {
+            state = ST.CLEAR; clearT = 0; flash = 0.6;
+            blip(660, 1320, 0.5, "triangle", 0.16);
+          }
+        }
+      }
+    } else if (state === ST.CLEAR) {
+      clearT += dt;
+      car.x += Math.sin(car.a) * car.v * dt;
+      car.z += Math.cos(car.a) * car.v * dt;
+      car.v *= Math.max(0, 1 - dt * 1.8);
+      if (clearT > 1.05) {
+        if (stageIdx + 1 < STAGES.length) { loadStage(stageIdx + 1); state = ST.PLAY; }
+        else { state = ST.RESULT; blip(520, 1040, 0.7, "triangle", 0.16); }
+      }
+    }
+    if (flash > 0) flash -= dt * 1.6;
+
+    /* カメラ */
+    var da = car.a - cam.yaw;
+    while (da > Math.PI) da -= Math.PI * 2;
+    while (da < -Math.PI) da += Math.PI * 2;
+    cam.yaw += da * Math.min(1, dt * 5.5);
+    var back = 92 + car.v * 0.09;
+    cam.x = car.x - Math.sin(cam.yaw) * back;
+    cam.z = car.z - Math.cos(cam.yaw) * back;
+    cam.y = 50 + Math.max(car.y, -260) * 0.55;
+    camSync();
+
+    engineSound(car.v, state === ST.PLAY && !car.fall);
+  }
+
+  /* ===== 入力 ===== */
+  var keyL = false, keyR = false, touchOn = false, touchX = 0;
+
+  function resultButtons() {
+    var h = 56, gap = 16, wr = 158, ws = 208;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons(), i, b;
+    for (i = 0; i < bs.length; i++) {
+      b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function timeStr(t) {
+    var m = Math.floor(t / 60), s = t - m * 60;
+    return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1);
+  }
+  function doShare() {
+    zShare({ text: "難読サーキット全" + STAGES.length + "コースを " + timeStr(total) + " で走破しました #難読サーキット" });
+  }
+
+  function tap(x, y) {
+    audioStart();
+    if (state === ST.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "share") doShare();
+      else if (hit === "retry") newRun();
+      return;
+    }
+    if (state === ST.READY) state = ST.PLAY;
+  }
+
+  function pos(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+  }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    var p = pos(e);
+    touchOn = true; touchX = p.x - W / 2;
+    tap(p.x, p.y);
+  });
+  window.addEventListener("pointermove", function (e) {
+    if (!touchOn) return;
+    touchX = pos(e).x - W / 2;
+  });
+  window.addEventListener("pointerup", function () { touchOn = false; });
+  window.addEventListener("pointercancel", function () { touchOn = false; });
+
+  window.addEventListener("keydown", function (e) {
+    var k = e.key;
+    if (k === "ArrowLeft" || k === "a" || k === "A") { keyL = true; e.preventDefault(); return; }
+    if (k === "ArrowRight" || k === "d" || k === "D") { keyR = true; e.preventDefault(); return; }
+    if (k === "Escape") { e.preventDefault(); if (!e.repeat) newRun(); return; }
+    if (e.code === "Space" || k === " " || k === "Enter") {
+      e.preventDefault();
+      if (!e.repeat) tap();
+    }
+  });
+  window.addEventListener("keyup", function (e) {
+    var k = e.key;
+    if (k === "ArrowLeft" || k === "a" || k === "A") keyL = false;
+    if (k === "ArrowRight" || k === "d" || k === "D") keyR = false;
+  });
+
+  /* ===== 背景（下に広がる紙） ===== */
+  var PLANE = -360;
+  function seg(x1, y1, z1, x2, y2, z2) {
+    toCam(x1, y1, z1); var ax = _cx, ay = _cy, az = _cz;
+    toCam(x2, y2, z2); var bx = _cx, by = _cy, bz = _cz;
+    if (az <= NEAR && bz <= NEAR) return;
+    if (az <= NEAR) { var t = (NEAR - az) / (bz - az); ax += (bx - ax) * t; ay += (by - ay) * t; az = NEAR; }
+    else if (bz <= NEAR) { var u = (NEAR - bz) / (az - bz); bx += (ax - bx) * u; by += (ay - by) * u; bz = NEAR; }
+    var ia = FOCAL / az, ib = FOCAL / bz;
+    ctx.moveTo(W / 2 + ax * ia, H / 2 - ay * ia);
+    ctx.lineTo(W / 2 + bx * ib, H / 2 - by * ib);
+  }
+  function drawBg() {
+    var hy = H / 2 - FOCAL * Math.tan(cam.pitch);
+    hy = Math.max(0, Math.min(H, hy));
+    var sky = ctx.createLinearGradient(0, 0, 0, hy + 1);
+    sky.addColorStop(0, "#e5dbc6");
+    sky.addColorStop(1, "#f7f2e7");
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, hy);
+    var gr = ctx.createLinearGradient(0, hy, 0, H);
+    gr.addColorStop(0, "#f1e9d8");
+    gr.addColorStop(1, "#e0d5be");
+    ctx.fillStyle = gr; ctx.fillRect(0, hy, W, H - hy);
+
+    var step = 360, far = 5000, k;
+    var bx = Math.round(cam.x / step) * step, bz = Math.round(cam.z / step) * step;
+    ctx.strokeStyle = "#dccfb5"; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (k = -7; k <= 7; k++) {
+      seg(bx + k * step, PLANE, bz - far, bx + k * step, PLANE, bz + far);
+      seg(bx - far, PLANE, bz + k * step, bx + far, PLANE, bz + k * step);
+    }
+    ctx.stroke();
+  }
+
+  /* ===== 画面まわり ===== */
+  function drawMap() {
+    var m = 132, mx = W - m - 16, my = 16, pad = 8;
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "#fffdf6";
+    ctx.fillRect(mx, my, m, m);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(58,51,53,.28)"; ctx.lineWidth = 1;
+    ctx.strokeRect(mx + 0.5, my + 0.5, m - 1, m - 1);
+    var sc = (m - pad * 2) / 100;
+    function MX(x) { return mx + pad + x * sc; }
+    function MY(y) { return my + pad + y * sc; }
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.strokeStyle = "#4b4345";
+    g.strokes.forEach(function (s) {
+      ctx.lineWidth = Math.max(1.1, (s.w || 1) * g.def.road / g.box * 100 * sc);
+      ctx.beginPath();
+      for (var i = 0; i < s.p.length; i++) {
+        if (i === 0) ctx.moveTo(MX(s.p[i][0]), MY(s.p[i][1]));
+        else ctx.lineTo(MX(s.p[i][0]), MY(s.p[i][1]));
+      }
+      ctx.stroke();
+    });
+    ctx.fillStyle = "#c2402b";
+    ctx.beginPath(); ctx.arc(MX(g.def.goal[0]), MY(g.def.goal[1]), 4.2, 0, 6.284); ctx.fill();
+    var cx = MX(car.x / g.box * 100), cy = MY(car.z / g.box * 100);
+    ctx.fillStyle = "#fffdf6"; ctx.beginPath(); ctx.arc(cx, cy, 4.6, 0, 6.284); ctx.fill();
+    ctx.fillStyle = "#1c1719"; ctx.beginPath(); ctx.arc(cx, cy, 3, 0, 6.284); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawHud() {
+    ctx.save();
+    ctx.fillStyle = "rgba(28,23,25,.86)";
+    ctx.font = "800 30px ui-monospace, Menlo, Consolas, monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(timeStr(total), 18, 44);
+    var i, x = 18, y = 60;
+    for (i = 0; i < STAGES.length; i++) {
+      ctx.beginPath();
+      ctx.rect(x + i * 15, y, 10, 10);
+      if (i < stageIdx || state === ST.RESULT) ctx.fillStyle = "rgba(28,23,25,.8)";
+      else if (i === stageIdx) ctx.fillStyle = "#c2402b";
+      else ctx.fillStyle = "rgba(28,23,25,.18)";
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawButton(b) {
+    ctx.save();
+    ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+    var hw = b.w / 2, hh = b.h / 2, rad = hh;
+    ctx.beginPath();
+    ctx.moveTo(-hw + rad, -hh);
+    ctx.arcTo(hw, -hh, hw, hh, rad);
+    ctx.arcTo(hw, hh, -hw, hh, rad);
+    ctx.arcTo(-hw, hh, -hw, -hh, rad);
+    ctx.arcTo(-hw, -hh, hw, -hh, rad);
+    ctx.closePath();
+    ctx.fillStyle = "#fffdf6";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#2a2426";
+    ctx.stroke();
+    ctx.fillStyle = "#2a2426";
+    ctx.font = "800 24px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(b.label, 0, 1);
+    ctx.restore();
+    ctx.textBaseline = "alphabetic";
+  }
+
+  var tick = 0;
+  function draw() {
+    drawBg();
+    buildScene(g);
+    goalMark(g);
+    carQuads();
+    drawPolys();
+
+    if (flash > 0) {
+      ctx.fillStyle = "rgba(255,252,244," + Math.min(0.75, flash) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    drawHud();
+    drawMap();
+
+    if (state === ST.READY) {
+      var p = 0.5 + 0.5 * Math.sin(tick * 4);
+      ctx.save();
+      ctx.globalAlpha = 0.35 + 0.45 * p;
+      ctx.fillStyle = "#c2402b";
+      ctx.translate(W / 2, H * 0.78 - p * 10);
+      ctx.beginPath();
+      ctx.moveTo(0, -26); ctx.lineTo(26, 14); ctx.lineTo(0, 2); ctx.lineTo(-26, 14);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+
+    if (state === ST.RESULT) {
+      ctx.fillStyle = "rgba(247,242,231,.86)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.save();
+      ctx.fillStyle = "#2a2426";
+      ctx.textAlign = "center";
+      ctx.font = "800 76px ui-monospace, Menlo, Consolas, monospace";
+      ctx.fillText(timeStr(total), W / 2, H * 0.45);
+      ctx.restore();
+      resultButtons().forEach(drawButton);
+    }
+  }
+
+  /* ===== ループ ===== */
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    tick += dt;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
