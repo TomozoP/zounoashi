@@ -2,6 +2,7 @@
 
      zShare({
        text: "40075.0kmの水切りに成功しました #水切り世界一周",
+       native: false,                    // 端末の共有シートを使わず、Xの投稿画面を直接開く
        done: function (result) { ... }   // "shared" / "opened" / "cancel" / "blocked"
      });
 
@@ -62,7 +63,7 @@
     var done = opt.done || function () {};
     var nav = global.navigator;
 
-    if (isPhone() && nav && nav.share) {
+    if (opt.native !== false && isPhone() && nav && nav.share) {
       try {
         var p = nav.share({ text: text, url: url });
         if (p && p.then) {
