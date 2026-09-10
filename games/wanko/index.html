@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>わんこ爆弾解除</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #wrap { position: relative; width: 100%; touch-action: none; }
+  canvas { width: 100%; height: 100%; display: block; background: #1d1714; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+</div></div>
+<script src="../share.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+
+  var W = 960, H = 540;
+  wrap.style.aspectRatio = W + " / " + H;
+  wrap.style.width = "min(100%, calc(100vh * " + W + " / " + H + "))";
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null, hissGain = null, hissFilter = null;
+
+  function audioOn() {
+    if (AC) { if (AC.state === "suspended") AC.resume(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    var src = AC.createBufferSource();
+    src.buffer = NOISE; src.loop = true;
+    hissFilter = AC.createBiquadFilter();
+    hissFilter.type = "bandpass";
+    hissFilter.frequency.value = 2400;
+    hissFilter.Q.value = 0.8;
+    hissGain = AC.createGain();
+    hissGain.gain.value = 0;
+    src.connect(hissFilter); hissFilter.connect(hissGain); hissGain.connect(AC.destination);
+    src.start();
+  }
+
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    s.playbackRate.value = 0.8 + Math.random() * 0.4;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain();
+    var n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+
+  function sfxServe() { noiseHit(0.12, 900, 0.22, 2); tone(300, 0.09, 0.1, "square"); }
+  function sfxSnip()  { noiseHit(0.07, 3600, 0.4, 3); }
+  function sfxClick() { noiseHit(0.04, 1800, 0.3, 4); tone(520, 0.05, 0.09, "square"); }
+  function sfxTick()  { noiseHit(0.03, 5200, 0.16, 6); }
+  function sfxOk()    { tone(880, 0.08, 0.14, "square"); tone(1320, 0.12, 0.12, "square", null, 0.07); }
+  function sfxDone()  {
+    tone(660, 0.09, 0.15, "triangle");
+    tone(990, 0.09, 0.15, "triangle", null, 0.08);
+    tone(1480, 0.22, 0.15, "triangle", null, 0.16);
+  }
+  function sfxBoom() {
+    noiseHit(0.9, 220, 0.9, 0.4);
+    noiseHit(0.5, 90, 0.9, 0.3);
+    tone(180, 0.8, 0.5, "sine", 30);
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 共通のかたち ============ */
+  var CX = 500, CY = 252, GROUND = 404;
+  var FACE = { x: 380, y: 182, w: 240, h: 140 };
+  var GREEN = "#5dffa0", GREEN_D = "#1d6b45";
+  var COLORS = ["#e8453a", "#3f9fe8", "#f0c93a", "#49bf62", "#f2f2f2", "#9a63de"];
+
+  function bez(p, t) {
+    var u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+    return { x: a * p[0].x + b * p[1].x + c * p[2].x + d * p[3].x,
+             y: a * p[0].y + b * p[1].y + c * p[2].y + d * p[3].y };
+  }
+  function pathBez(p, t0, t1) {
+    ctx.beginPath();
+    var N = 24;
+    for (var i = 0; i <= N; i++) {
+      var q = bez(p, t0 + (t1 - t0) * i / N);
+      if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y);
+    }
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function shuffled(n) {
+    var a = [], i, j, k;
+    for (i = 0; i < n; i++) a.push(i);
+    for (i = n - 1; i > 0; i--) { j = Math.floor(Math.random() * (i + 1)); k = a[i]; a[i] = a[j]; a[j] = k; }
+    return a;
+  }
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+
+  function facePlate() {
+    ctx.save();
+    roundRect(FACE.x - 10, FACE.y - 10, FACE.w + 20, FACE.h + 20, 14);
+    ctx.fillStyle = "#8d7038";
+    ctx.fill();
+    ctx.fillStyle = "#c6a559";
+    for (var s = 0; s < 4; s++) {
+      var sx = FACE.x - 10 + (s % 2) * (FACE.w + 20) + (s % 2 ? -10 : 10);
+      var sy = FACE.y - 10 + (s > 1 ? FACE.h + 20 - 10 : 10);
+      ctx.beginPath(); ctx.arc(sx, sy, 4, 0, 6.284); ctx.fill();
+    }
+    roundRect(FACE.x, FACE.y, FACE.w, FACE.h, 8);
+    ctx.fillStyle = "#0d1418";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(90,200,150,.07)";
+    ctx.lineWidth = 1;
+    ctx.save(); ctx.clip();
+    for (var x = FACE.x; x < FACE.x + FACE.w; x += 14) {
+      ctx.beginPath(); ctx.moveTo(x, FACE.y); ctx.lineTo(x, FACE.y + FACE.h); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.restore();
+  }
+
+  /* ============ 胴体 ============ */
+  var BODY = {
+    round: {
+      fuse: { x: 30, y: -192 },
+      tray: 214,
+      draw: function () {
+        var cy = GROUND - 172, r = 172;
+        var g = ctx.createRadialGradient(CX - 66, cy - 78, 24, CX, cy, r);
+        g.addColorStop(0, "#454c56");
+        g.addColorStop(0.55, "#1b1f25");
+        g.addColorStop(1, "#090b0e");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(CX, cy, r, 0, 6.284); ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,.10)";
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(CX, cy, r - 2, 0, 6.284); ctx.stroke();
+        ctx.fillStyle = "#8d7038";
+        ctx.beginPath();
+        ctx.moveTo(CX + 8, cy - r + 16); ctx.lineTo(CX + 56, cy - r + 16);
+        ctx.lineTo(CX + 50, cy - r - 12); ctx.lineTo(CX + 14, cy - r - 12);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#b8974f";
+        ctx.fillRect(CX + 4, cy - r + 10, 58, 9);
+      }
+    },
+    box: {
+      fuse: { x: 110, y: -136 },
+      tray: 190,
+      draw: function () {
+        var x = 322, y = 116, w = 356, h = GROUND - 116;
+        var g = ctx.createLinearGradient(x, y, x, y + h);
+        g.addColorStop(0, "#5b4a34");
+        g.addColorStop(0.5, "#3d3122");
+        g.addColorStop(1, "#241c14");
+        ctx.fillStyle = g;
+        roundRect(x, y, w, h, 14); ctx.fill();
+        ctx.strokeStyle = "#7d6640";
+        ctx.lineWidth = 4;
+        roundRect(x + 8, y + 8, w - 16, h - 16, 10); ctx.stroke();
+        ctx.strokeStyle = "#2b2218";
+        ctx.lineWidth = 12; ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(x + 124, y + 2);
+        ctx.quadraticCurveTo(x + w / 2, y - 46, x + w - 124, y + 2);
+        ctx.stroke();
+        ctx.fillStyle = "#c6a559";
+        roundRect(x + 36, y + h - 36, 44, 26, 5); ctx.fill();
+        roundRect(x + w - 80, y + h - 36, 44, 26, 5); ctx.fill();
+      }
+    },
+    drum: {
+      fuse: { x: -10, y: -140 },
+      tray: 168,
+      draw: function () {
+        var x = 358, y = 112, w = 284, h = GROUND - 112 - 18;
+        var g = ctx.createLinearGradient(x, 0, x + w, 0);
+        g.addColorStop(0, "#22331f");
+        g.addColorStop(0.35, "#4e6b41");
+        g.addColorStop(0.7, "#2e4227");
+        g.addColorStop(1, "#1a2617");
+        ctx.fillStyle = g;
+        ctx.fillRect(x, y, w, h);
+        ctx.beginPath(); ctx.ellipse(CX, y + h, w / 2, 18, 0, 0, 6.284); ctx.fill();
+        ctx.fillStyle = "#5d7d4e";
+        ctx.beginPath(); ctx.ellipse(CX, y, w / 2, 18, 0, 0, 6.284); ctx.fill();
+        ctx.fillStyle = "#425c37";
+        ctx.beginPath(); ctx.ellipse(CX, y, w / 2 - 12, 12, 0, 0, 6.284); ctx.fill();
+        ctx.fillStyle = "rgba(0,0,0,.28)";
+        ctx.fillRect(x, y + 34, w, 13);
+        ctx.fillRect(x, y + h - 44, w, 13);
+      }
+    },
+    pipe: {
+      fuse: { x: 150, y: -84 },
+      tray: 200,
+      draw: function () {
+        var x = 286, y = 160, w = 428, h = GROUND - 160, r = h / 2;
+        var g = ctx.createLinearGradient(0, y, 0, y + h);
+        g.addColorStop(0, "#767d86");
+        g.addColorStop(0.4, "#3d444d");
+        g.addColorStop(1, "#191d22");
+        ctx.fillStyle = g;
+        roundRect(x, y, w, h, r); ctx.fill();
+        ctx.fillStyle = "#5a626c";
+        ctx.beginPath(); ctx.ellipse(x + 28, y + r, 20, r - 6, 0, 0, 6.284); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(x + w - 28, y + r, 20, r - 6, 0, 0, 6.284); ctx.fill();
+        ctx.fillStyle = "rgba(210,150,60,.55)";
+        ctx.fillRect(x + 66, y + 14, 22, h - 28);
+        ctx.fillRect(x + w - 88, y + 14, 22, h - 28);
+      }
+    }
+  };
+
+  var FUSE_PATH = [{ x: 0, y: 0 }, { x: 48, y: -58 }, { x: 104, y: -10 }, { x: 152, y: -50 }];
+
+  /* ============ 仕掛け ============ */
+  var TYPES = {};
+
+  /* --- 配線を切る --- */
+  TYPES.wire = {
+    body: "round",
+    make: function (g, k) {
+      var n = k >= 16 ? 5 : (k >= 7 ? 4 : 3);
+      g.n = n;
+      var perm = shuffled(n), tries = 0, i, same;
+      while (tries++ < 40) {
+        same = 0;
+        for (i = 0; i < n; i++) if (perm[i] === i) same++;
+        if (same === 0) break;
+        perm = shuffled(n);
+      }
+      g.perm = perm;
+      g.lit = Math.floor(Math.random() * n);
+      g.cols = shuffled(COLORS.length).slice(0, n).map(function (v) { return COLORS[v]; });
+      g.z = shuffled(n);
+      g.wires = [];
+      g.slots = [];
+      var lampY = FACE.y + 30, termY = FACE.y + FACE.h - 26;
+      var a = FACE.x + 34, b = FACE.x + FACE.w - 34;
+      g.lx = [];
+      for (i = 0; i < n; i++) g.lx.push(a + (b - a) * i / (n - 1));
+      var ea = 250, eb = 760;
+      for (i = 0; i < n; i++) {
+        var ex = ea + (eb - ea) * i / (n - 1);
+        var p = [{ x: g.lx[i], y: termY }, { x: g.lx[i], y: termY + 74 },
+                 { x: ex, y: 462 - 92 }, { x: ex, y: 462 }];
+        g.wires.push({ color: g.cols[i], cut: false, ct: 0, p: p });
+        g.slots.push(bez(p, 0.6));
+      }
+      g.inner = [];
+      for (i = 0; i < n; i++) {
+        var x1 = g.lx[i], x2 = g.lx[perm[i]], mid = (termY - lampY) * 0.62;
+        g.inner.push([{ x: x1, y: lampY }, { x: x1, y: lampY + mid },
+                      { x: x2, y: termY - mid }, { x: x2, y: termY }]);
+      }
+      g.lampY = lampY; g.termY = termY;
+    },
+    act: function (g, i) {
+      var w = g.wires[i];
+      if (w.cut) return;
+      w.cut = true; w.ct = 0;
+      sfxSnip();
+      spark(g.slots[i].x, g.slots[i].y, 12, "#ffe08a", 150);
+      if (g.perm[g.lit] === i) solve(); else fail();
+    },
+    tick: function (g, dt) {
+      for (var i = 0; i < g.n; i++) if (g.wires[i].cut) g.wires[i].ct += dt;
+    },
+    draw: function (g) {
+      facePlate();
+      ctx.save();
+      roundRect(FACE.x, FACE.y, FACE.w, FACE.h, 8);
+      ctx.clip();
+      for (var k = 0; k < g.n; k++) {
+        var p = g.inner[g.z[k]];
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "#05090b"; ctx.lineWidth = 13; pathBez(p, 0, 1); ctx.stroke();
+        ctx.strokeStyle = "#9a8f7c"; ctx.lineWidth = 7; pathBez(p, 0, 1); ctx.stroke();
+        ctx.strokeStyle = "rgba(255,255,255,.22)"; ctx.lineWidth = 2; pathBez(p, 0, 1); ctx.stroke();
+      }
+      ctx.restore();
+      for (var i = 0; i < g.n; i++) {
+        lamp(g.lx[i], g.lampY, 12, g.lit === i);
+        ctx.fillStyle = "#c6a559";
+        roundRect(g.lx[i] - 9, g.termY - 8, 18, 16, 4);
+        ctx.fill();
+      }
+    },
+    drawFront: function (g) {
+      for (var j = 0; j < g.n; j++) {
+        var w = g.wires[j], p = w.p;
+        ctx.lineCap = "round";
+        if (!w.cut) {
+          ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 15; pathBez(p, 0, 1); ctx.stroke();
+          ctx.strokeStyle = w.color; ctx.lineWidth = 10; pathBez(p, 0, 1); ctx.stroke();
+          ctx.strokeStyle = "rgba(255,255,255,.3)"; ctx.lineWidth = 2.5; pathBez(p, 0.02, 0.98); ctx.stroke();
+        } else {
+          ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 15; pathBez(p, 0, 0.55); ctx.stroke();
+          ctx.strokeStyle = w.color; ctx.lineWidth = 10; pathBez(p, 0, 0.55); ctx.stroke();
+          ctx.save();
+          ctx.translate(Math.sin(w.ct * 6) * 10, Math.min(320, 700 * w.ct * w.ct));
+          ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 15; pathBez(p, 0.62, 1); ctx.stroke();
+          ctx.strokeStyle = w.color; ctx.lineWidth = 10; pathBez(p, 0.62, 1); ctx.stroke();
+          ctx.restore();
+        }
+      }
+      nipper(g);
+    }
+  };
+
+  /* --- 同じ色のボタン --- */
+  TYPES.color = {
+    body: "box",
+    make: function (g, k) {
+      var n = 4;
+      g.n = n;
+      g.cols = shuffled(COLORS.length).slice(0, n).map(function (v) { return COLORS[v]; });
+      g.target = Math.floor(Math.random() * n);
+      g.slots = [];
+      var a = FACE.x + 44, b = FACE.x + FACE.w - 44;
+      for (var i = 0; i < n; i++) g.slots.push({ x: a + (b - a) * i / (n - 1), y: FACE.y + 104 });
+      g.press = -1;
+    },
+    act: function (g, i) {
+      g.press = i;
+      sfxClick();
+      if (i === g.target) solve(); else fail();
+    },
+    draw: function (g) {
+      facePlate();
+      var wx = CX, wy = FACE.y + 42;
+      ctx.fillStyle = "#05090b";
+      roundRect(wx - 46, wy - 22, 92, 44, 10); ctx.fill();
+      ctx.save();
+      ctx.shadowColor = g.cols[g.target];
+      ctx.shadowBlur = 26;
+      ctx.fillStyle = g.cols[g.target];
+      ctx.beginPath(); ctx.arc(wx, wy, 15, 0, 6.284); ctx.fill();
+      ctx.restore();
+      for (var i = 0; i < g.n; i++) {
+        var s = g.slots[i], down = g.press === i;
+        ctx.fillStyle = "rgba(0,0,0,.6)";
+        ctx.beginPath(); ctx.arc(s.x, s.y + 5, 24, 0, 6.284); ctx.fill();
+        ctx.fillStyle = g.cols[i];
+        ctx.beginPath(); ctx.arc(s.x, s.y + (down ? 4 : 0), 23, 0, 6.284); ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,.3)";
+        ctx.beginPath(); ctx.arc(s.x - 7, s.y - 8 + (down ? 4 : 0), 7, 0, 6.284); ctx.fill();
+      }
+      cursorRing(g, 30);
+    }
+  };
+
+  /* --- スイッチを倒す --- */
+  TYPES.sw = {
+    body: "box",
+    make: function (g, k) {
+      var n = 4;
+      g.n = n;
+      var up = k >= 12 ? 3 : (k >= 5 ? 2 : 1);
+      var pick = shuffled(n).slice(0, up);
+      g.on = [];
+      for (var i = 0; i < n; i++) g.on.push(pick.indexOf(i) >= 0);
+      g.slots = [];
+      var a = FACE.x + 42, b = FACE.x + FACE.w - 42;
+      for (i = 0; i < n; i++) g.slots.push({ x: a + (b - a) * i / (n - 1), y: FACE.y + 72 });
+      g.anim = [0, 0, 0, 0];
+    },
+    act: function (g, i) {
+      if (!g.on[i]) { sfxClick(); fail(); return; }
+      g.on[i] = false;
+      g.anim[i] = 1;
+      sfxClick();
+      for (var j = 0; j < g.n; j++) if (g.on[j]) { sfxOk(); return; }
+      solve();
+    },
+    tick: function (g, dt) {
+      for (var i = 0; i < g.n; i++) if (g.anim[i] > 0) g.anim[i] = Math.max(0, g.anim[i] - dt * 5);
+    },
+    draw: function (g) {
+      facePlate();
+      for (var i = 0; i < g.n; i++) {
+        var s = g.slots[i], on = g.on[i];
+        ctx.fillStyle = "#141a1e";
+        roundRect(s.x - 20, s.y - 30, 40, 92, 8); ctx.fill();
+        ctx.strokeStyle = "#333c44"; ctx.lineWidth = 2;
+        roundRect(s.x - 20, s.y - 30, 40, 92, 8); ctx.stroke();
+        var ly = on ? s.y - 12 : s.y + 44;
+        ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 16; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(s.x, s.y + 16); ctx.lineTo(s.x, ly); ctx.stroke();
+        ctx.strokeStyle = on ? "#d7dee6" : "#7b848d"; ctx.lineWidth = 12;
+        ctx.beginPath(); ctx.moveTo(s.x, s.y + 16); ctx.lineTo(s.x, ly); ctx.stroke();
+        ctx.fillStyle = on ? "#e8eef4" : "#8f979f";
+        ctx.beginPath(); ctx.arc(s.x, ly, 11, 0, 6.284); ctx.fill();
+        lamp(s.x, s.y - 44, 9, on);
+      }
+      cursorRing(g, 30);
+    }
+  };
+
+  /* --- ネジを外す --- */
+  TYPES.screw = {
+    body: "pipe",
+    make: function (g, k) {
+      var n = k >= 10 ? 6 : 4;
+      g.n = n;
+      g.slots = [];
+      var cols = n / 2;
+      for (var i = 0; i < n; i++) {
+        var c = i % cols, r = Math.floor(i / cols);
+        var a = FACE.x + 44, b = FACE.x + FACE.w - 44;
+        g.slots.push({ x: a + (b - a) * c / (cols - 1), y: FACE.y + 42 + r * 58 });
+      }
+      g.out = [];
+      for (i = 0; i < n; i++) g.out.push(0);
+      g.left = n;
+    },
+    act: function (g, i) {
+      if (g.out[i] > 0) return;
+      g.out[i] = 0.001;
+      g.left--;
+      sfxTick(); sfxClick();
+      if (g.left <= 0) solve();
+    },
+    tick: function (g, dt) {
+      for (var i = 0; i < g.n; i++) if (g.out[i] > 0) g.out[i] = Math.min(1, g.out[i] + dt * 3);
+    },
+    draw: function (g) {
+      facePlate();
+      ctx.fillStyle = "#2a3238";
+      roundRect(FACE.x + 20, FACE.y + 16, FACE.w - 40, FACE.h - 32, 8); ctx.fill();
+      ctx.strokeStyle = "#454f57"; ctx.lineWidth = 2;
+      roundRect(FACE.x + 20, FACE.y + 16, FACE.w - 40, FACE.h - 32, 8); ctx.stroke();
+      for (var i = 0; i < g.n; i++) {
+        var s = g.slots[i], o = g.out[i];
+        ctx.save();
+        ctx.translate(s.x, s.y + o * 44);
+        ctx.globalAlpha = 1 - o * 0.85;
+        ctx.rotate(o * 9);
+        ctx.fillStyle = "#0a0f12";
+        ctx.beginPath(); ctx.arc(0, 0, 17, 0, 6.284); ctx.fill();
+        var lit = o === 0;
+        ctx.fillStyle = lit ? "#8fe8b8" : "#6f7982";
+        ctx.beginPath(); ctx.arc(0, 0, 14, 0, 6.284); ctx.fill();
+        if (lit) {
+          ctx.save();
+          ctx.shadowColor = GREEN; ctx.shadowBlur = 16;
+          ctx.fillStyle = GREEN;
+          ctx.beginPath(); ctx.arc(0, 0, 14, 0, 6.284); ctx.fill();
+          ctx.restore();
+        }
+        ctx.strokeStyle = "#0d1418"; ctx.lineWidth = 4; ctx.lineCap = "butt";
+        ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(9, 0); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, 9); ctx.stroke();
+        ctx.restore();
+      }
+      cursorRing(g, 24);
+    }
+  };
+
+  /* --- 針を緑に合わせる --- */
+  TYPES.dial = {
+    body: "drum",
+    make: function (g, k) {
+      g.slots = null;
+      g.ang = rnd(0, 6.283);
+      g.tgt = rnd(0, 6.283);
+      g.wid = Math.max(0.34, 0.62 - k * 0.012);
+      while (Math.abs(angDiff(g.ang, g.tgt)) < g.wid) g.tgt = rnd(0, 6.283);
+      g.hold = 0;
+    },
+    dir: function (g, d) { g.ang += d * 0.1; sfxTick(); },
+    drag: function (g, x, y) {
+      var dx = x - CX, dy = y - (FACE.y + 70);
+      if (dx * dx + dy * dy < 400) return;
+      g.ang = Math.atan2(dy, dx);
+    },
+    tick: function (g, dt) {
+      if (Math.abs(angDiff(g.ang, g.tgt)) < g.wid / 2) {
+        g.hold += dt;
+        if (g.hold > 0.001 && g.hold - dt <= 0.001) sfxOk();
+        if (g.hold >= 0.4) solve();
+      } else g.hold = 0;
+    },
+    draw: function (g) {
+      facePlate();
+      var cx = CX, cy = FACE.y + 70, r = 44;
+      ctx.strokeStyle = "#1a232a"; ctx.lineWidth = 15;
+      ctx.beginPath(); ctx.arc(cx, cy, r + 13, 0, 6.284); ctx.stroke();
+      ctx.strokeStyle = GREEN_D; ctx.lineWidth = 15;
+      ctx.beginPath(); ctx.arc(cx, cy, r + 13, g.tgt - g.wid / 2, g.tgt + g.wid / 2); ctx.stroke();
+      if (g.hold > 0) {
+        ctx.save();
+        ctx.shadowColor = GREEN; ctx.shadowBlur = 22;
+        ctx.strokeStyle = GREEN; ctx.lineWidth = 15;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r + 13, g.tgt - g.wid / 2, g.tgt - g.wid / 2 + g.wid * Math.min(1, g.hold / 0.4));
+        ctx.stroke();
+        ctx.restore();
+      }
+      var gr = ctx.createRadialGradient(cx - 18, cy - 20, 6, cx, cy, r);
+      gr.addColorStop(0, "#6a737d");
+      gr.addColorStop(1, "#242a31");
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.284); ctx.fill();
+      for (var i = 0; i < 10; i++) {
+        var a = i / 10 * 6.283;
+        ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * (r - 10), cy + Math.sin(a) * (r - 10));
+        ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+        ctx.stroke();
+      }
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(g.ang);
+      ctx.fillStyle = "#f2f2f2";
+      ctx.beginPath();
+      ctx.moveTo(0, -7); ctx.lineTo(r + 6, -3); ctx.lineTo(r + 6, 3); ctx.lineTo(0, 7);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = "#c6a559";
+      ctx.beginPath(); ctx.arc(cx, cy, 9, 0, 6.284); ctx.fill();
+    }
+  };
+
+  /* --- 緑の帯で止める --- */
+  TYPES.time = {
+    body: "round",
+    make: function (g, k) {
+      g.slots = null;
+      g.pos = 0; g.dir = 1;
+      g.sp = 1.05 + k * 0.045;
+      g.half = Math.max(0.055, 0.125 - k * 0.0035);
+      g.tgt = rnd(0.22 + g.half, 0.78 - g.half);
+      g.stop = -1;
+    },
+    press: function (g) {
+      if (g.stop >= 0) return;
+      g.stop = g.pos;
+      sfxClick();
+      if (Math.abs(g.pos - g.tgt) < g.half) solve(); else fail();
+    },
+    tick: function (g, dt) {
+      if (g.stop >= 0) return;
+      g.pos += g.dir * g.sp * dt;
+      if (g.pos > 1) { g.pos = 1; g.dir = -1; }
+      if (g.pos < 0) { g.pos = 0; g.dir = 1; }
+    },
+    draw: function (g) {
+      facePlate();
+      var x0 = FACE.x + 26, x1 = FACE.x + FACE.w - 26, y = FACE.y + 78;
+      ctx.fillStyle = "#141c21";
+      roundRect(x0, y - 24, x1 - x0, 48, 10); ctx.fill();
+      ctx.fillStyle = GREEN_D;
+      ctx.fillRect(x0 + (x1 - x0) * (g.tgt - g.half), y - 22, (x1 - x0) * g.half * 2, 44);
+      ctx.save();
+      ctx.shadowColor = GREEN; ctx.shadowBlur = 14;
+      ctx.strokeStyle = GREEN; ctx.lineWidth = 3;
+      ctx.strokeRect(x0 + (x1 - x0) * (g.tgt - g.half), y - 22, (x1 - x0) * g.half * 2, 44);
+      ctx.restore();
+      var mx = x0 + (x1 - x0) * (g.stop >= 0 ? g.stop : g.pos);
+      ctx.fillStyle = "#fff";
+      roundRect(mx - 5, y - 32, 10, 64, 4); ctx.fill();
+      ctx.fillStyle = "#c6a559";
+      ctx.beginPath();
+      ctx.moveTo(mx, y - 34); ctx.lineTo(mx - 11, y - 50); ctx.lineTo(mx + 11, y - 50);
+      ctx.closePath(); ctx.fill();
+    }
+  };
+
+  /* --- 連打してゲージを満たす --- */
+  TYPES.pump = {
+    body: "drum",
+    make: function (g, k) {
+      g.slots = null;
+      g.need = Math.min(16, 9 + Math.floor(k / 2));
+      g.v = 0; g.kick = 0;
+    },
+    press: function (g) {
+      g.v += 1 / g.need;
+      g.kick = 1;
+      sfxTick();
+      if (g.v >= 1) { g.v = 1; solve(); }
+    },
+    tick: function (g, dt) {
+      g.v = Math.max(0, g.v - dt * 0.3);
+      if (g.kick > 0) g.kick = Math.max(0, g.kick - dt * 6);
+    },
+    draw: function (g) {
+      facePlate();
+      var x = FACE.x + 24, y = FACE.y + 22, w = 52, h = FACE.h - 44;
+      ctx.fillStyle = "#141c21";
+      roundRect(x, y, w, h, 8); ctx.fill();
+      var fh = (h - 10) * Math.min(1, g.v);
+      if (fh > 1) {
+        ctx.save();
+        ctx.shadowColor = GREEN; ctx.shadowBlur = 16;
+        ctx.fillStyle = GREEN;
+        roundRect(x + 5, y + h - 5 - fh, w - 10, fh, 6);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.strokeStyle = "#3a464f"; ctx.lineWidth = 3;
+      roundRect(x, y, w, h, 8); ctx.stroke();
+      /* ポンプ */
+      var px = FACE.x + 158, py = FACE.y + 92, k = g.kick;
+      ctx.fillStyle = "#2a3238";
+      roundRect(px - 40, py - 6, 80, 34, 8); ctx.fill();
+      ctx.fillStyle = "#8f979f";
+      ctx.fillRect(px - 7, py - 60 + k * 22, 14, 60 - k * 22);
+      ctx.fillStyle = "#c8352c";
+      roundRect(px - 34, py - 76 + k * 22, 68, 20, 9); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.25)";
+      roundRect(px - 28, py - 72 + k * 22, 56, 6, 3); ctx.fill();
+    }
+  };
+
+  /* --- 溜めて緑で離す --- */
+  TYPES.hold = {
+    body: "pipe",
+    make: function (g, k) {
+      g.slots = null;
+      g.half = Math.max(0.05, 0.1 - k * 0.003);
+      g.tgt = rnd(0.5 + g.half, 0.92 - g.half);
+      g.v = 0; g.down = false; g.done = false;
+    },
+    press: function (g) { g.down = true; sfxClick(); },
+    release: function (g) {
+      if (!g.down || g.done) return;
+      g.down = false; g.done = true;
+      if (Math.abs(g.v - g.tgt) < g.half) solve(); else fail();
+    },
+    tick: function (g, dt) {
+      if (g.done) return;
+      if (g.down) {
+        g.v += dt * 0.5;
+        if (Math.random() < dt * 30) spark(FACE.x + 60, FACE.y + FACE.h - 24 - (FACE.h - 48) * g.v, 1, "#ffe08a", 60);
+        if (g.v >= 1.06) { g.done = true; fail(); }
+      }
+    },
+    draw: function (g) {
+      facePlate();
+      var x = FACE.x + 34, y = FACE.y + 24, w = 52, h = FACE.h - 48;
+      ctx.fillStyle = "#141c21";
+      roundRect(x, y, w, h, 8); ctx.fill();
+      ctx.fillStyle = GREEN_D;
+      ctx.fillRect(x + 3, y + h - h * (g.tgt + g.half), w - 6, h * g.half * 2);
+      ctx.save();
+      ctx.shadowColor = GREEN; ctx.shadowBlur = 14;
+      ctx.strokeStyle = GREEN; ctx.lineWidth = 3;
+      ctx.strokeRect(x + 3, y + h - h * (g.tgt + g.half), w - 6, h * g.half * 2);
+      ctx.restore();
+      var v = Math.min(1, g.v);
+      ctx.fillStyle = g.v > 1 ? "#e8453a" : "#f0c93a";
+      ctx.fillRect(x + 9, y + h - h * v, w - 18, h * v);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(x - 4, y + h - h * v - 3, w + 8, 6);
+      /* ボタン */
+      var bx = FACE.x + 176, by = FACE.y + 76, d = g.down ? 6 : 0;
+      ctx.fillStyle = "#2a3238";
+      ctx.beginPath(); ctx.ellipse(bx, by + 16, 54, 22, 0, 0, 6.284); ctx.fill();
+      ctx.fillStyle = "#a8842c";
+      ctx.beginPath(); ctx.ellipse(bx, by + 8 + d, 46, 20, 0, 0, 6.284); ctx.fill();
+      ctx.fillStyle = "#f0c93a";
+      ctx.beginPath(); ctx.ellipse(bx, by + d, 46, 20, 0, 0, 6.284); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.3)";
+      ctx.beginPath(); ctx.ellipse(bx - 12, by - 5 + d, 16, 6, 0, 0, 6.284); ctx.fill();
+    }
+  };
+
+  var TYPE_KEYS = ["wire", "color", "sw", "screw", "dial", "time", "pump", "hold"];
+
+  function angDiff(a, b) {
+    var d = (a - b) % 6.283185;
+    if (d > 3.14159) d -= 6.283185;
+    if (d < -3.14159) d += 6.283185;
+    return d;
+  }
+
+  function lamp(x, y, r, on) {
+    ctx.fillStyle = "#2b3038";
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.284); ctx.fill();
+    if (on) {
+      ctx.save();
+      ctx.shadowColor = "#4dff92";
+      ctx.shadowBlur = 24 * (0.75 + 0.25 * Math.sin(T * 7));
+      ctx.fillStyle = "#7cffae";
+      ctx.beginPath(); ctx.arc(x, y, r * 0.72, 0, 6.284); ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = "#18301f";
+      ctx.beginPath(); ctx.arc(x, y, r * 0.72, 0, 6.284); ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.284); ctx.stroke();
+  }
+
+  function cursorRing(g, r) {
+    if (!g.slots || cur < 0 || cur >= g.slots.length) return;
+    var s = g.slots[cur];
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.5)";
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 6]);
+    ctx.lineDashOffset = -T * 18;
+    ctx.beginPath(); ctx.arc(s.x, s.y, r + 6, 0, 6.284); ctx.stroke();
+    ctx.restore();
+  }
+
+  function nipper(g) {
+    var w = g.wires[cur];
+    if (!w || w.cut) return;
+    var a = bez(w.p, 0.54), b = bez(w.p, 0.66), q = g.slots[cur];
+    /* 柄がいつも下を向くようにする */
+    var ang = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
+    if (Math.cos(ang) < 0) ang -= Math.PI;
+    ctx.save();
+    ctx.translate(q.x, q.y);
+    ctx.rotate(ang);
+    var open = (10 + Math.sin(T * 4) * 2) * Math.PI / 180;
+    for (var s = -1; s <= 1; s += 2) {
+      ctx.save();
+      ctx.rotate(s * open);
+      ctx.fillStyle = "#cfd6de";
+      ctx.beginPath();
+      ctx.moveTo(-4, -6); ctx.lineTo(4, -6); ctx.lineTo(6, 26); ctx.lineTo(-6, 26);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#c8352c";
+      roundRect(-9, 26, 18, 58, 8); ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillStyle = "#8f98a4";
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, 6.284); ctx.fill();
+    ctx.restore();
+  }
+
+  /* ============ 状態 ============ */
+  var S = { SERVE: "serve", PLAY: "play", PASS: "pass", BOOM: "boom", RESULT: "result" };
+  var state, score, bomb, kind, phase, cur, parts, shake, flash, pile, T, lastKind, held;
+
+  function makeBomb() {
+    var k = score, key;
+    do { key = TYPE_KEYS[Math.floor(Math.random() * TYPE_KEYS.length)]; }
+    while (key === lastKind && TYPE_KEYS.length > 1);
+    lastKind = key;
+    kind = TYPES[key];
+    bomb = { key: key, body: kind.body, fuse: 1, fuseTime: Math.max(2.9, 6.2 - k * 0.14), slots: null };
+    kind.make(bomb, k);
+    cur = bomb.slots ? Math.floor(bomb.slots.length / 2) : -1;
+    held = false;
+  }
+
+  function newRound() {
+    state = S.SERVE; phase = 0; score = 0; T = 0;
+    parts = []; pile = []; shake = 0; flash = 0; lastKind = null;
+    makeBomb();
+    if (hissGain) hissGain.gain.value = 0;
+  }
+
+  function pileSlot(i) {
+    var row = Math.floor(i / 5), c = i % 5;
+    return { x: 46 + c * 38 + (row % 2) * 19, y: 494 - row * 27, r: 19 };
+  }
+
+  function spark(x, y, n, col, sp) {
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * Math.PI * 2, v = (0.3 + Math.random()) * (sp || 180);
+      parts.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 40,
+                   life: 0.35 + Math.random() * 0.5, age: 0, c: col, r: 1.5 + Math.random() * 2.5 });
+    }
+  }
+
+  function solve() {
+    if (state !== S.PLAY) return;
+    sfxDone();
+    var s = pileSlot(score);
+    s.body = bomb.body;
+    pile.push(s);
+    score++;
+    state = S.PASS; phase = 0;
+    if (hissGain) hissGain.gain.value = 0;
+  }
+
+  function fail() {
+    if (state !== S.PLAY) return;
+    state = S.BOOM; phase = 0; shake = 26; flash = 1;
+    spark(CX, CY, 90, "#ffd36b", 640);
+    spark(CX, CY, 40, "#ff6a2a", 400);
+    for (var i = 0; i < 24; i++) {
+      var a = Math.random() * Math.PI * 2, v = 120 + Math.random() * 440;
+      parts.push({ x: CX, y: CY, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 120,
+                   life: 1.2 + Math.random(), age: 0, c: "#1b1f25", r: 4 + Math.random() * 9, chunk: true });
+    }
+    if (hissGain) hissGain.gain.value = 0;
+    sfxBoom();
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    T += dt;
+    phase += dt;
+    if (shake > 0) shake = Math.max(0, shake - dt * 60);
+    if (flash > 0) flash = Math.max(0, flash - dt * 3);
+
+    for (var i = parts.length - 1; i >= 0; i--) {
+      var p = parts[i];
+      p.age += dt;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += (p.chunk ? 900 : 420) * dt;
+      p.vx *= 0.99;
+      if (p.age >= p.life) parts.splice(i, 1);
+    }
+    if (kind.tick) kind.tick(bomb, dt);
+
+    if (state === S.SERVE) {
+      if (phase >= 0.32) { state = S.PLAY; phase = 0; }
+    } else if (state === S.PLAY) {
+      bomb.fuse -= dt / bomb.fuseTime;
+      if (hissGain) hissGain.gain.value = 0.05 + (1 - bomb.fuse) * 0.11;
+      if (hissFilter) hissFilter.frequency.value = 1800 + (1 - bomb.fuse) * 2200;
+      if (bomb.fuse > 0 && Math.random() < dt * 40) {
+        var a = BODY[bomb.body].fuse, q = bez(FUSE_PATH, bomb.fuse);
+        spark(CX + a.x + q.x, CY + a.y + q.y, 1, "#ffd36b", 70);
+      }
+      if (bomb.fuse <= 0) { bomb.fuse = 0; fail(); }
+    } else if (state === S.PASS) {
+      if (phase >= 0.4) { makeBomb(); state = S.SERVE; phase = 0; sfxServe(); }
+    } else if (state === S.BOOM) {
+      if (phase >= 1.5) { state = S.RESULT; phase = 0; }
+    }
+  }
+
+  function ease(x) { return 1 - Math.pow(1 - x, 3); }
+
+  function bombPos() {
+    if (state === S.SERVE) {
+      var u = ease(Math.min(1, phase / 0.32));
+      return { x: (1 - u) * 620, y: 0, s: 1, rot: (1 - u) * 0.45 };
+    }
+    if (state === S.PASS) {
+      var v = Math.min(1, phase / 0.4), e = ease(v), slot = pile[pile.length - 1];
+      return { x: (slot.x - CX) * e, y: (slot.y - CY) * e - Math.sin(v * Math.PI) * 90,
+               s: 1 + (slot.r / 170 - 1) * e, rot: -v * 1.4, gone: v >= 1 };
+    }
+    return { x: 0, y: 0, s: 1, rot: 0 };
+  }
+
+  /* ============ 入力 ============ */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.68;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function doShare() {
+    zShare({ text: score + "個目で爆散しました #わんこ爆弾解除" });
+  }
+
+  function nearSlot(x, y) {
+    if (!bomb.slots) return -1;
+    var best = -1, bd = 52 * 52;
+    for (var i = 0; i < bomb.slots.length; i++) {
+      var s = bomb.slots[i], dx = s.x - x, dy = s.y - y, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+
+  function down(x, y) {
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "share") doShare();
+      else if (hit === "retry") newRound();
+      return;
+    }
+    if (state !== S.PLAY) return;
+    held = true;
+    if (bomb.slots) {
+      var i = x == null ? cur : nearSlot(x, y);
+      if (i >= 0) { cur = i; if (kind.act) kind.act(bomb, i); }
+      return;
+    }
+    if (kind.drag && x != null) kind.drag(bomb, x, y);
+    if (kind.press) kind.press(bomb);
+  }
+
+  function up() {
+    if (!held) return;
+    held = false;
+    if (state === S.PLAY && kind.release) kind.release(bomb);
+  }
+
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    down((e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    if (state !== S.PLAY) return;
+    var r = canvas.getBoundingClientRect();
+    var x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+    if (bomb.slots) {
+      var i = nearSlot(x, y);
+      if (i >= 0) cur = i;
+    } else if (kind.drag && held) kind.drag(bomb, x, y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  window.addEventListener("keydown", function (e) {
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (!esc && !go && !left && !right) return;
+    e.preventDefault();
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (left || right) {
+      if (state !== S.PLAY) return;
+      var d = right ? 1 : -1;
+      if (bomb.slots) cur = (cur + d + bomb.slots.length) % bomb.slots.length;
+      else if (kind.dir) kind.dir(bomb, d);
+      return;
+    }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") up();
+  });
+
+  /* ============ 描画 ============ */
+  function drawBg() {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#241c18");
+    g.addColorStop(1, "#120f0d");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = "#3a2c20";
+    ctx.fillRect(60, 20, 840, 300);
+    ctx.fillStyle = "#2a2018";
+    for (var x = 60; x <= 900; x += 60) ctx.fillRect(x - 3, 20, 6, 300);
+    for (var y = 20; y <= 320; y += 60) ctx.fillRect(60, y - 3, 840, 6);
+    ctx.restore();
+    var tg = ctx.createLinearGradient(0, 372, 0, H);
+    tg.addColorStop(0, "#5a3d29");
+    tg.addColorStop(0.08, "#46301f");
+    tg.addColorStop(1, "#2a1c13");
+    ctx.fillStyle = tg;
+    ctx.fillRect(0, 372, W, H - 372);
+    ctx.fillStyle = "rgba(255,220,170,.08)";
+    ctx.fillRect(0, 372, W, 4);
+  }
+
+  function drawTray() {
+    var rx = BODY[bomb.body].tray, y = GROUND - 4;
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,.35)";
+    ctx.beginPath(); ctx.ellipse(CX, y + 10, rx, 28, 0, 0, 6.284); ctx.fill();
+    ctx.fillStyle = "#7d2b20";
+    ctx.beginPath(); ctx.ellipse(CX, y, rx, 26, 0, 0, 6.284); ctx.fill();
+    ctx.fillStyle = "#98392a";
+    ctx.beginPath(); ctx.ellipse(CX, y - 5, rx - 16, 21, 0, 0, 6.284); ctx.fill();
+    ctx.strokeStyle = "rgba(255,200,160,.25)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(CX, y - 5, rx - 16, 21, 0, 0, 6.284); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawMini(x, y, r, body, rot) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot || 0);
+    var g = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.1, 0, 0, r * 1.2);
+    g.addColorStop(0, "#4a515b");
+    g.addColorStop(0.6, "#1c2027");
+    g.addColorStop(1, "#0b0d11");
+    ctx.fillStyle = g;
+    if (body === "box") {
+      roundRect(-r, -r * 0.8, r * 2, r * 1.6, 3); ctx.fill();
+      ctx.strokeStyle = "#a8834a"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(-r * 0.5, -r * 0.85); ctx.quadraticCurveTo(0, -r * 1.5, r * 0.5, -r * 0.85); ctx.stroke();
+    } else if (body === "drum") {
+      ctx.fillStyle = "#37502d";
+      roundRect(-r * 0.7, -r, r * 1.4, r * 2, 3); ctx.fill();
+      ctx.fillStyle = "#5d7d4e";
+      ctx.beginPath(); ctx.ellipse(0, -r, r * 0.7, r * 0.24, 0, 0, 6.284); ctx.fill();
+    } else if (body === "pipe") {
+      ctx.fillStyle = "#4b535c";
+      roundRect(-r * 1.2, -r * 0.5, r * 2.4, r, r * 0.5); ctx.fill();
+      ctx.fillStyle = "rgba(210,150,60,.6)";
+      ctx.fillRect(-r * 0.6, -r * 0.5, r * 0.3, r);
+    } else {
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.284); ctx.fill();
+      ctx.strokeStyle = "#a8834a";
+      ctx.lineWidth = Math.max(1.5, r * 0.12);
+      ctx.beginPath(); ctx.arc(0, -r * 0.9, r * 0.28, 0, 6.284); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPile() {
+    for (var i = 0; i < pile.length; i++) {
+      if (state === S.PASS && i === pile.length - 1) continue;
+      var s = pile[i];
+      drawMini(s.x, s.y, s.r, s.body, (i % 3 - 1) * 0.16);
+    }
+  }
+
+  function drawFuse() {
+    var a = BODY[bomb.body].fuse, f = bomb.fuse;
+    if (f <= 0.001) return;
+    ctx.save();
+    ctx.translate(CX + a.x, CY + a.y);
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#c0a878"; ctx.lineWidth = 8;
+    pathBez(FUSE_PATH, 0, f); ctx.stroke();
+    ctx.strokeStyle = "#8d7749"; ctx.lineWidth = 3;
+    pathBez(FUSE_PATH, 0, f); ctx.stroke();
+    var tip = bez(FUSE_PATH, f), fl = 0.7 + Math.random() * 0.6;
+    ctx.fillStyle = "#fff0b0";
+    ctx.shadowColor = "#ffb43a";
+    ctx.shadowBlur = 26 * fl;
+    ctx.beginPath(); ctx.arc(tip.x, tip.y, 6 * fl, 0, 6.284); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawBomb() {
+    var pos = bombPos();
+    if (state === S.BOOM || state === S.RESULT) return;
+    if (state === S.PASS && pos.gone) return;
+    ctx.save();
+    ctx.translate(CX + pos.x, CY + pos.y);
+    ctx.rotate(pos.rot || 0);
+    ctx.scale(pos.s, pos.s);
+    ctx.translate(-CX, -CY);
+    drawTray();
+    drawFuse();
+    BODY[bomb.body].draw();
+    kind.draw(bomb);
+    if (kind.drawFront) kind.drawFront(bomb);
+    ctx.restore();
+  }
+
+  function drawParts() {
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i], a = 1 - p.age / p.life;
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.fillStyle = p.c;
+      if (p.chunk) {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.age * 6);
+        ctx.fillRect(-p.r, -p.r * 0.7, p.r * 2, p.r * 1.4);
+        ctx.restore();
+      } else {
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * a + 0.5, 0, 6.284); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawButton(b) {
+    ctx.save();
+    ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+    var hw = b.w / 2, hh = b.h / 2, rad = hh;
+    ctx.beginPath();
+    ctx.moveTo(-hw + rad, -hh);
+    ctx.arcTo(hw, -hh, hw, hh, rad);
+    ctx.arcTo(hw, hh, -hw, hh, rad);
+    ctx.arcTo(-hw, hh, -hw, -hh, rad);
+    ctx.arcTo(-hw, -hh, hw, -hh, rad);
+    ctx.closePath();
+    ctx.fillStyle = "#fff";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#16202e";
+    ctx.stroke();
+    ctx.fillStyle = "#16202e";
+    ctx.font = "800 24px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(b.label, 0, 1);
+    ctx.restore();
+    ctx.textBaseline = "alphabetic";
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    drawBg();
+    drawPile();
+    drawBomb();
+    drawParts();
+    if (flash > 0) {
+      ctx.fillStyle = "rgba(255,238,200," + Math.min(1, flash) + ")";
+      ctx.fillRect(-40, -40, W + 80, H + 80);
+    }
+    ctx.restore();
+
+    if (state === S.RESULT) {
+      ctx.fillStyle = "rgba(10,8,6,.66)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.save();
+      ctx.fillStyle = "#fff";
+      ctx.shadowColor = "rgba(0,0,0,.6)";
+      ctx.shadowBlur = 10;
+      ctx.font = "800 108px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(String(score), W / 2, H * 0.46);
+      ctx.restore();
+      resultButtons().forEach(drawButton);
+    }
+  }
+
+  /* ============ ループ ============ */
+  newRound();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
