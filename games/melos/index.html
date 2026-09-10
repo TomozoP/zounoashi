@@ -7,7 +7,7 @@
 <style>
   html, body { margin: 0; height: 100%; background: #2b2331; overflow: hidden; }
   * { -webkit-tap-highlight-color: transparent; }
-  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #2b2331; }
   #wrap { position: relative; touch-action: none; }
   canvas { width: 100%; height: 100%; display: block; background: #cfe0e6; }
   #ending-reader { position:absolute; inset:0 0 auto; box-sizing:border-box; height:22.3%; overflow-y:auto; overscroll-behavior:contain; touch-action:pan-y; background:#fffdf8; color:#25221e; padding:24px 30px 38px; z-index:3; transition:height 1.15s cubic-bezier(.22,.7,.25,1); scrollbar-width:thin; }
@@ -639,6 +639,102 @@
     gg.gain.exponentialRampToValueAtTime(0.001, t + dur);
     o.connect(gg); gg.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
   }
+  /* ===== BGM（ユーロビート風）=====
+     四つ打ちのバスドラ、跳ねるベース、速いアルペジオ。Am-F-G-Am の四小節を回す。 */
+  var mus = { on: false, t: 0, step: 0, gain: null, noise: null };
+  var BPM = 155, STEP16 = 60 / BPM / 4;
+  var CHORD = [[0, 3, 7], [-4, 0, 3], [-2, 2, 5], [0, 3, 7]];   /* Aからの半音 */
+  var ROOT = [0, -4, -2, 0];
+  var ARP = [0, 1, 2, 3, 4, 2, 1, 2];
+  function hz(semi) { return 110 * Math.pow(2, semi / 12); }
+  function chordNote(ch, i) { return ch[i % 3] + (i >= 3 ? 12 : 0); }
+
+  function noiseBuf() {
+    if (mus.noise) return mus.noise;
+    var n = Math.floor(actx.sampleRate * 0.2);
+    var b = actx.createBuffer(1, n, actx.sampleRate), d = b.getChannelData(0), i;
+    for (i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    mus.noise = b;
+    return b;
+  }
+  function note(t, f, dur, type, vol, cut, dest) {
+    var o = actx.createOscillator(), g = actx.createGain(), out = g;
+    o.type = type;
+    o.frequency.setValueAtTime(f, t);
+    if (cut) {
+      var fl = actx.createBiquadFilter();
+      fl.type = "lowpass"; fl.frequency.value = cut; fl.Q.value = 3;
+      o.connect(fl); fl.connect(g);
+    } else o.connect(g);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    out.connect(dest || actx.destination);
+    o.start(t); o.stop(t + dur + 0.03);
+  }
+  function kick(t) {
+    var o = actx.createOscillator(), g = actx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(135, t);
+    o.frequency.exponentialRampToValueAtTime(44, t + 0.1);
+    g.gain.setValueAtTime(0.8, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.17);
+    o.connect(g); g.connect(mus.gain); o.start(t); o.stop(t + 0.19);
+  }
+  function hat(t, open) {
+    var s2 = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+    var d = open ? 0.14 : 0.032;
+    s2.buffer = noiseBuf();
+    f.type = "highpass"; f.frequency.value = 7200;
+    g.gain.setValueAtTime(open ? 0.11 : 0.07, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + d);
+    s2.connect(f); f.connect(g); g.connect(mus.gain);
+    s2.start(t); s2.stop(t + d + 0.02);
+  }
+  function musicStart() {
+    if (!actx || mus.on) return;
+    if (!mus.gain) { mus.gain = actx.createGain(); mus.gain.connect(actx.destination); }
+    var t = actx.currentTime;
+    mus.gain.gain.cancelScheduledValues(t);
+    mus.gain.gain.setValueAtTime(0.0001, t);
+    mus.gain.gain.exponentialRampToValueAtTime(0.34, t + 0.7);
+    mus.on = true; mus.step = 0; mus.t = t + 0.1;
+  }
+  function musicStop(fade) {
+    if (!actx || !mus.on) return;
+    mus.on = false;
+    var t = actx.currentTime, v = Math.max(0.0001, mus.gain.gain.value);
+    mus.gain.gain.cancelScheduledValues(t);
+    mus.gain.gain.setValueAtTime(v, t);
+    mus.gain.gain.exponentialRampToValueAtTime(0.0001, t + (fade || 0.25));
+  }
+  function musicTick() {
+    if (!actx || !mus.on) return;
+    if (mus.t < actx.currentTime - 0.4) mus.t = actx.currentTime + 0.05;   /* 戻ってきたとき詰まらせない */
+    while (mus.t < actx.currentTime + 0.16) {
+      var st = mus.step, bar = ((st / 16) | 0) % 4, k = st % 16, t = mus.t;
+      var ch = CHORD[bar], rt = ROOT[bar];
+      if (k % 4 === 0) kick(t);
+      if (k % 2 === 1) hat(t, k === 15);
+      if (k % 2 === 0) note(t, hz(rt - 12 + (k % 4 ? 12 : 0)), 0.1, "sawtooth", 0.26, 620, mus.gain);
+      note(t, hz(chordNote(ch, ARP[k % 8]) + 24), 0.085, "sawtooth", 0.085, 2800, mus.gain);
+      if (k === 0) note(t, hz(chordNote(ch, 0) + 12), 0.75, "square", 0.045, 1500, mus.gain);
+      mus.t += STEP16;
+      mus.step = (st + 1) % 64;
+    }
+  }
+  function fanfare() {                                  /* 着いたときの一吹き */
+    if (!actx) return;
+    var t0 = actx.currentTime + 0.06, up = [12, 16, 19, 24], i;
+    for (i = 0; i < up.length; i++) note(t0 + i * 0.1, hz(up[i]), 0.24, "sawtooth", 0.16, 3200);
+    var t1 = t0 + up.length * 0.1;
+    [12, 16, 19, 24, 28].forEach(function (n, j) {
+      note(t1, hz(n) * (j % 2 ? 1.003 : 0.997), 1.5, "sawtooth", 0.12, 3600);
+    });
+    note(t1, hz(0), 1.6, "triangle", 0.16, 900);
+    for (i = 0; i < 3; i++) note(t1 + 0.02 + i * 0.16, hz(36), 0.5, "sine", 0.07, 0);
+  }
+
   document.addEventListener("visibilitychange", function () {
     if (!actx) return;
     if (document.hidden) { engGain.gain.value = 0; actx.suspend(); } else actx.resume();
@@ -655,6 +751,7 @@
   actors.forEach(function (a) { a.x0 = a.x; a.z0 = a.z; a.a0 = a.a; });
 
   function newRun() {
+    musicStop(0.12);
     reader.hidden=true;reader.classList.remove('expanded');
     state = ST.READY; total = 0; hits = 0; ok = false; flash = 0; steer = 0;
     springUsed = 0; flying.length = 0;
@@ -822,6 +919,7 @@
         say("まだだ。王は、刑場のまんなかに立っている。メロスは車の鼻先を王へ向け直した。",4);
       } else if (total >= LIMIT) {
         state = ST.RESULT; ok = false;
+        musicStop(1.1);
         blip(300, 90, 0.9, "sawtooth", 0.13);
         say("最後の光が、塔の向こうへ消えた。メロスはなおもハンドルを握っていた。友よ。呼びかける声は、暮れた街路に吸われていった。", 5);
         openReading();
@@ -831,7 +929,7 @@
     if(state==='finish') {
       king.t+=dt;king.vy-=GRAV*dt;king.x+=king.vx*dt;king.z+=king.vz*dt;king.y=Math.max(0,king.y+king.vy*dt);
       car.v=Math.max(0,car.v-180*dt);car.z+=car.v*dt;
-      if(king.t>1.7){state=ST.RESULT;openReading();}
+      if(king.t>1.7){state=ST.RESULT;musicStop(0.15);fanfare();openReading();}
     }
     advanceNarration(dt);
     if (sayCool > 0) sayCool -= dt;
@@ -845,6 +943,7 @@
     cam.y = 84 + car.y * 0.7 + (Math.random() - 0.5) * car.shake * 16;
     camSync();
     engineSound(car.v, state === ST.PLAY);
+    musicTick();
   }
 
   /* ===== 入力 ===== */
@@ -881,7 +980,7 @@
       if (h === "share") doShare(); else if (h === "retry") newRun();
       return;
     }
-    if (state === ST.READY) state = ST.PLAY;
+    if (state === ST.READY) { state = ST.PLAY; musicStart(); }
   }
   function pos(e) {
     var r = canvas.getBoundingClientRect();
@@ -1040,26 +1139,38 @@
     ctx.save();
     ctx.fillStyle="#fffdf8";ctx.fillRect(0,0,W,TEXTH);
     ctx.fillStyle="#ded8ce";ctx.fillRect(0,TEXTH-1,W,1);
-    ctx.font="400 19px 'Yu Mincho', 'Hiragino Mincho ProN', 'Noto Serif JP', serif";
+    /* 帯の高さから字の大きさと入る行数を出す。画面の形が変わっても、
+       行が半分だけ見えるような切れ方をしないようにする */
+    var fs = Math.max(15, Math.min(22, Math.round(TEXTH * 0.089)));
+    var leading = Math.round(fs * 1.48);
+    var titleSpace = state === ST.READY ? Math.round(TEXTH * 0.29) : 0;
+    var body = "400 " + fs + "px 'Yu Mincho', 'Hiragino Mincho ProN', 'Noto Serif JP', serif";
+    ctx.font = body;
     ctx.fillStyle="#25221e";ctx.textAlign="left";ctx.textBaseline="alphabetic";
-    if(narr.layoutAt!==narr.shown) {
-      narr.lines=wrapLines(narr.s.slice(0,narr.shown),W-76);
-      narr.layoutAt=narr.shown;
+    if (narr.layoutAt !== narr.shown || narr.wrapAt !== fs) {
+      narr.lines = wrapLines(narr.s.slice(0, narr.shown), W - 76);
+      narr.layoutAt = narr.shown;
+      narr.wrapAt = fs;
     }
-    var titleSpace=state===ST.READY?62:0;
-    if(titleSpace) {
-      ctx.save();ctx.font="700 32px 'Yu Mincho','Hiragino Mincho ProN',serif";
-      ctx.textAlign='center';ctx.fillText('車で走れメロス',W/2,43);ctx.restore();
+    if (titleSpace) {
+      ctx.save();
+      ctx.font = "700 " + Math.round(TEXTH * 0.15) + "px 'Yu Mincho','Hiragino Mincho ProN',serif";
+      ctx.textAlign = "center";
+      ctx.fillText("車で走れメロス", W / 2, Math.round(titleSpace * 0.68));
+      ctx.restore();
+      ctx.font = body;
     }
-    var leading=28, target=Math.max(0,narr.lines.length-(titleSpace?4:6))*leading;
-    narr.scroll+=(target-narr.scroll)*(1-Math.exp(-32*narr.dt));
-    if(Math.abs(target-narr.scroll)<.05)narr.scroll=target;
-    ctx.beginPath();ctx.rect(28,13+titleSpace,W-56,TEXTH-26-titleSpace);ctx.clip();
-    var first=Math.max(0,Math.floor(narr.scroll/leading)-1);
-    for(var i=first;i<narr.lines.length;i++) {
-      var y=34+titleSpace+i*leading-narr.scroll;
-      if(y>TEXTH+leading)break;
-      ctx.fillText(narr.lines[i],32,y);
+    var top = titleSpace + 10, avail = TEXTH - top - 10;
+    var rows = Math.max(1, Math.floor(avail / leading));
+    var target = Math.max(0, narr.lines.length - rows) * leading;
+    narr.scroll += (target - narr.scroll) * (1 - Math.exp(-32 * narr.dt));
+    if (Math.abs(target - narr.scroll) < .05) narr.scroll = target;
+    ctx.beginPath(); ctx.rect(26, top - 4, W - 52, rows * leading + 8); ctx.clip();
+    var first = Math.max(0, Math.floor(narr.scroll / leading) - 1);
+    for (var i = first; i < narr.lines.length; i++) {
+      var y = top + leading * 0.78 + i * leading - narr.scroll;
+      if (y > top + avail + leading) break;
+      ctx.fillText(narr.lines[i], 32, y);
     }
     ctx.restore();
   }
