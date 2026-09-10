@@ -987,6 +987,7 @@
     advanceNarration(dt);
     if (sayCool > 0) sayCool -= dt;
     if (flash > 0) flash -= dt * 1.7;
+    updatePuffs(dt);
     if (car.shake > 0) car.shake = Math.max(0, car.shake - dt * 2.2);
 
     cam.yaw += (car.a * 0.5 - cam.yaw) * Math.min(1, dt * 7);
@@ -1265,6 +1266,90 @@
     ctx.fillText(name, x, y);
     ctx.restore();
   }
+  /* 排気。マフラーから後ろへ吐いて、膨らみながら消える */
+  var puffs = [], puffT = 0;
+  function updatePuffs(dt) {
+    var i, p;
+    for (i = puffs.length - 1; i >= 0; i--) {
+      p = puffs[i];
+      p.life += dt;
+      if (p.life >= p.max) { puffs.splice(i, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      p.vy -= 9 * dt;
+      p.r += 19 * dt;
+    }
+    if (state !== ST.PLAY || car.air) return;
+    puffT -= dt;
+    var span = car.boost > 0 ? 0.018 : 0.028 + 0.05 * (1 - Math.min(1, car.v / 430));
+    var guard = 0;
+    while (puffT <= 0 && guard++ < 4) {
+      puffT += span;
+      var sa = Math.sin(car.a), ca = Math.cos(car.a), side = (puffs.length & 1 ? 1 : -1) * 7;
+      puffs.push({
+        x: car.x + side * ca - 25 * sa, y: car.y + 7, z: car.z - side * sa - 25 * ca,
+        vx: -sa * 55 + (Math.random() - 0.5) * 26,
+        vy: 14 + Math.random() * 20,
+        vz: -ca * 55 - Math.random() * 26,
+        r: 3 + Math.random() * 3, life: 0, max: 0.55 + Math.random() * 0.45,
+        dark: car.boost > 0
+      });
+      if (puffs.length > 70) puffs.shift();
+    }
+  }
+  function drawPuffs() {
+    if (!puffs.length) return;
+    ctx.save();
+    for (var i = 0; i < puffs.length; i++) {
+      var p = puffs[i], f = p.life / p.max;
+      toCam(p.x, p.y, p.z);
+      if (_cz <= NEAR) continue;
+      var k = FOCAL / _cz, sx = W / 2 + _cx * k, sy = CY - _cy * k, r = p.r * k;
+      if (r < 0.5 || sx < -r || sx > W + r || sy < -r || sy > VH + r) continue;
+      var a = (1 - f) * (1 - f) * (p.dark ? 0.3 : 0.2);
+      ctx.fillStyle = (windMix > 0.02 || p.dark)
+        ? "rgba(46,42,52," + a + ")" : "rgba(196,188,176," + a + ")";
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, 6.284); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /* 走っている間の加速線。速いほど本数と長さが増え、消失点から外へ流れる */
+  var SPD = [];
+  (function () {
+    for (var i = 0; i < 30; i++) {
+      SPD.push({ a: (i / 30) * Math.PI * 2 + (i % 3) * 0.21, o: (i * 0.3137) % 1, w: 1 + (i % 3) * 0.8 });
+    }
+  })();
+  function drawSpeedLines() {
+    if (state !== ST.PLAY) return;
+    var t = (car.v - 240) / 300;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    if (t < 0.02) return;
+    toCam(car.x, car.y + 10, car.z + 60000);          /* 進む先が消失点 */
+    if (_cz <= NEAR) return;
+    var k = FOCAL / _cz, vx = W / 2 + _cx * k, vy = CY - _cy * k;
+    var far = Math.max(W, VH) * 0.95;
+    var ink = windMix > 0.02;
+    ctx.save();
+    ctx.lineCap = "round";
+    for (var i = 0; i < SPD.length; i++) {
+      var d = SPD[i];
+      var ph = (tick * (0.8 + car.v / 620) + d.o) % 1;
+      var r0 = far * (0.1 + ph * ph * 0.95);
+      var len = far * (0.05 + ph * 0.2) * (0.45 + t * 0.75);
+      var ca = Math.cos(d.a), sa = Math.sin(d.a) * 0.72;   /* タテ画面なので少し潰す */
+      var a = t * (0.5 - Math.abs(ph - 0.6)) * 0.9;
+      if (a <= 0.005) continue;
+      ctx.strokeStyle = ink ? "rgba(22,20,30," + (a * 0.9) + ")"
+                            : "rgba(255,247,232," + (a * 0.95) + ")";
+      ctx.lineWidth = d.w * (0.7 + t);
+      ctx.beginPath();
+      ctx.moveTo(vx + ca * r0, vy + sa * r0);
+      ctx.lineTo(vx + ca * (r0 + len), vy + sa * (r0 + len));
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
   function drawWind() {
     if(!windMode || state!==ST.PLAY)return;
     ctx.save();
@@ -1305,8 +1390,10 @@
     drawCar();
     if(philo.active)drawCar(philo);
     drawPolys();
+    drawPuffs();
     drawDriverName(car, 'メロス');
     if(philo.active)drawDriverName(philo, 'フィロストラトス');
+    drawSpeedLines();
     drawWind();
     if (flash > 0) {
       ctx.fillStyle = "rgba(255,246,226," + Math.min(0.7, flash) + ")";
