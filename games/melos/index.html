@@ -641,7 +641,7 @@
   }
   /* ===== BGM（ユーロビート風）=====
      四つ打ちのバスドラ、跳ねるベース、速いアルペジオ。Am-F-G-Am の四小節を回す。 */
-  var mus = { on: false, t: 0, step: 0, gain: null, noise: null };
+  var mus = { on: false, t: 0, step: 0, gain: null, noise: null, hi: 0, want: 0, step16: 0 };
   var BPM = 155, STEP16 = 60 / BPM / 4;
   var CHORD = [[0, 3, 7], [-4, 0, 3], [-2, 2, 5], [0, 3, 7]];   /* Aからの半音 */
   var ROOT = [0, -4, -2, 0];
@@ -691,6 +691,42 @@
     s2.connect(f); f.connect(g); g.connect(mus.gain);
     s2.start(t); s2.stop(t + d + 0.02);
   }
+  function clap(t) {
+    var s2 = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+    s2.buffer = noiseBuf();
+    f.type = "bandpass"; f.frequency.value = 1800; f.Q.value = 1.1;
+    g.gain.setValueAtTime(0.19, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.17);
+    s2.connect(f); f.connect(g); g.connect(mus.gain);
+    s2.start(t); s2.stop(t + 0.19);
+  }
+  function crash(t) {
+    var s2 = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+    s2.buffer = noiseBuf(); s2.loop = true;
+    f.type = "highpass"; f.frequency.value = 4200;
+    g.gain.setValueAtTime(0.2, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 1.3);
+    s2.connect(f); f.connect(g); g.connect(mus.gain);
+    s2.start(t); s2.stop(t + 1.35);
+  }
+  function riser() {                                    /* 上がっていく風切り音 */
+    if (!actx || !mus.gain) return;
+    var t = actx.currentTime, s2 = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+    s2.buffer = noiseBuf(); s2.loop = true;
+    f.type = "bandpass"; f.Q.value = 2.2;
+    f.frequency.setValueAtTime(280, t);
+    f.frequency.exponentialRampToValueAtTime(6200, t + 1.2);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 1.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.45);
+    s2.connect(f); f.connect(g); g.connect(mus.gain);
+    s2.start(t); s2.stop(t + 1.5);
+  }
+  function musicClimax() {                              /* 黒い風。ここから山場 */
+    if (!actx || !mus.on || mus.want) return;
+    mus.want = 1;
+    riser();
+  }
   function musicStart() {
     if (!actx || mus.on) return;
     if (!mus.gain) { mus.gain = actx.createGain(); mus.gain.connect(actx.destination); }
@@ -699,6 +735,7 @@
     mus.gain.gain.setValueAtTime(0.0001, t);
     mus.gain.gain.exponentialRampToValueAtTime(0.34, t + 0.7);
     mus.on = true; mus.step = 0; mus.t = t + 0.1;
+    mus.hi = 0; mus.want = 0; mus.step16 = STEP16;
   }
   function musicStop(fade) {
     if (!actx || !mus.on) return;
@@ -713,13 +750,28 @@
     if (mus.t < actx.currentTime - 0.4) mus.t = actx.currentTime + 0.05;   /* 戻ってきたとき詰まらせない */
     while (mus.t < actx.currentTime + 0.16) {
       var st = mus.step, bar = ((st / 16) | 0) % 4, k = st % 16, t = mus.t;
+      if (k === 0 && mus.want !== mus.hi) {            /* 小節のあたまで山場へ移る */
+        mus.hi = mus.want;
+        mus.step16 = 60 / (mus.hi ? 174 : BPM) / 4;    /* 速くする */
+        mus.gain.gain.setTargetAtTime(mus.hi ? 0.42 : 0.34, t, 0.3);
+        if (mus.hi) crash(t);
+      }
+      var key = mus.hi ? 3 : 0;                        /* 三半音上げる */
       var ch = CHORD[bar], rt = ROOT[bar];
       if (k % 4 === 0) kick(t);
-      if (k % 2 === 1) hat(t, k === 15);
-      if (k % 2 === 0) note(t, hz(rt - 12 + (k % 4 ? 12 : 0)), 0.1, "sawtooth", 0.26, 620, mus.gain);
-      note(t, hz(chordNote(ch, ARP[k % 8]) + 24), 0.085, "sawtooth", 0.085, 2800, mus.gain);
-      if (k === 0) note(t, hz(chordNote(ch, 0) + 12), 0.75, "square", 0.045, 1500, mus.gain);
-      mus.t += STEP16;
+      if (mus.hi && (k === 4 || k === 12)) clap(t);
+      if (k % 2 === 1) hat(t, mus.hi ? k % 4 === 3 : k === 15);
+      if (mus.hi || k % 2 === 0) {                     /* 山場はベースを16分で刻む */
+        note(t, hz(key + rt - 12 + (k % 4 ? 12 : 0)), mus.hi ? 0.07 : 0.1, "sawtooth", 0.26, 620, mus.gain);
+      }
+      var lead = hz(key + chordNote(ch, ARP[k % 8]) + 24);
+      note(t, lead, 0.085, "sawtooth", 0.085, 2800, mus.gain);
+      if (mus.hi) {
+        note(t, lead * 2.004, 0.075, "sawtooth", 0.05, 4200, mus.gain);
+        note(t, lead * 0.4985, 0.09, "square", 0.035, 1900, mus.gain);
+      }
+      if (k === 0) note(t, hz(key + chordNote(ch, 0) + 12), 0.75, "square", 0.045, 1500, mus.gain);
+      mus.t += mus.step16;
       mus.step = (st + 1) % 64;
     }
   }
@@ -806,6 +858,7 @@
 
       if (!windMode && car.z >= RIVERS[3].z1) {
         windMode=true;
+        musicClimax();
         say("見える。夕陽を受けてきらきらと光る、シラクスの塔楼が見える。メロスは歯をくいしばり、アクセルを床まで踏んだ。車は、黒い風になった。",3);
       }
       windMix += ((windMode?1:0)-windMix)*Math.min(1,dt*2);
