@@ -19,7 +19,7 @@
 <script src="../share.js"></script>
 <script>
 /* わんこ爆弾解除
-   次から次へと差し出される爆弾を、導火線が尽きる前に解除しつづける。
+   女将が奥から次々と爆弾を出してくる。導火線が尽きる前に解除しつづける。
    仕掛けは8種類。緑に光っているところを触る、で全部通る。 */
 (function () {
   "use strict";
@@ -815,6 +815,72 @@
 
   var TYPE_KEYS = ["wire", "color", "sw", "screw", "dial", "time", "pump", "hold"];
 
+  /* ============ 女将 ============ */
+  /* 台の向こうに立っていて、奥から爆弾を出してくる。台の手前は見えない */
+  var okami = document.createElement("img");
+  var okamiOn = false;
+  okami.onload = function () { okamiOn = true; };
+  okami.src = "img/okami.webp";
+  var OK_RATIO = 363 / 1228;                 /* 絵の 横/縦 */
+  var OK_HEAD = { x: 0.50, y: 0.073 };       /* 絵の中の顔の位置 */
+  var OK_OUT = { x: 0.62, y: 0.32 };         /* 爆弾を出してくるあたり(胸の前) */
+
+  function okamiBox() {
+    var top = 34;
+    var h = Math.max(520, Math.min(1150, (TABLE_Y - top) / 0.72));
+    var w = h * OK_RATIO;
+    return { x: W + 10 - w, y: top, w: w, h: h };
+  }
+  function servePoint() {
+    var b = okamiBox();
+    return { x: b.x + b.w * OK_OUT.x, y: b.y + b.h * OK_OUT.y };
+  }
+  function drawOkami() {
+    if (!okamiOn) return;
+    var b = okamiBox();
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, TABLE_Y);
+    ctx.clip();
+    ctx.drawImage(okami, b.x, b.y, b.w, b.h);
+    ctx.restore();
+  }
+
+  /* 出すたびの掛け声 */
+  var LINES = ["はい、どんどん", "はい、じゃんじゃん", "もう一つどうぞ", "はい、おかわり",
+               "まだまだどうぞ", "はい、お待たせ", "どんどんいきますよ", "はい、次ですよ"];
+  var say = "", sayT = 9, lastSay = -1;
+
+  function pickSay() {
+    var i;
+    do { i = Math.floor(Math.random() * LINES.length); } while (i === lastSay && LINES.length > 1);
+    lastSay = i; say = LINES[i]; sayT = 0;
+  }
+
+  function drawSay() {
+    if (!okamiOn || sayT > 1.9 || state === S.BOOM || state === S.RESULT) return;
+    var b = okamiBox();
+    var hx = b.x + b.w * OK_HEAD.x, hy = b.y + b.h * OK_HEAD.y;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, sayT > 1.6 ? 1 - (sayT - 1.6) / 0.3 : 1);
+    ctx.font = "700 21px sans-serif";
+    var bw = ctx.measureText(say).width + 34, bh = 46;
+    var bx = Math.max(10, hx - 55 - bw), by = hy - 29;
+    ctx.fillStyle = "#fffdf6";
+    roundRect(bx, by, bw, bh, 12); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(bx + bw - 2, by + 19);
+    ctx.lineTo(bx + bw + 19, by + 28);
+    ctx.lineTo(bx + bw - 2, by + 36);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#2a221c";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(say, bx + bw / 2, by + bh / 2 + 1);
+    ctx.restore();
+    ctx.textBaseline = "alphabetic";
+  }
+
   /* ============ 状態 ============ */
   var S = { SERVE: "serve", PLAY: "play", PASS: "pass", BOOM: "boom", RESULT: "result" };
   var state, score, bomb, kind, phase, cur, parts, shake, flash, pile, T, lastKind, held;
@@ -830,6 +896,7 @@
     kind.make(bomb, k);
     cur = bomb.slots ? Math.floor(bomb.slots.length / 2) : -1;
     held = false;
+    pickSay();
   }
 
   function newRound() {
@@ -882,6 +949,7 @@
   function update(dt) {
     T += dt;
     phase += dt;
+    sayT += dt;
     if (shake > 0) shake = Math.max(0, shake - dt * 60);
     if (flash > 0) flash = Math.max(0, flash - dt * 3);
 
@@ -918,7 +986,9 @@
   function bombPos() {
     if (state === S.SERVE) {
       var u = ease(Math.min(1, phase / 0.32));
-      return { x: (1 - u) * (W + 120), y: 0, s: 1, rot: (1 - u) * 0.45 };
+      var sp = servePoint(), cy0 = GROUND - 150;
+      return { x: (sp.x - CX) * (1 - u), y: (sp.y - cy0) * (1 - u),
+               s: 0.46 + 0.54 * u, rot: (1 - u) * 0.5 };
     }
     if (state === S.PASS) {
       var v = Math.min(1, phase / 0.4), e = ease(v), slot = pile[pile.length - 1];
@@ -1195,9 +1265,11 @@
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
     drawBg();
+    drawOkami();
     drawPile();
     drawBomb();
     drawParts();
+    drawSay();
     if (flash > 0) {
       ctx.fillStyle = "rgba(255,238,200," + Math.min(1, flash) + ")";
       ctx.fillRect(-40, -40, W + 80, H + 80);
