@@ -8,15 +8,28 @@
   html, body { margin: 0; height: 100%; background: #2b2331; overflow: hidden; }
   * { -webkit-tap-highlight-color: transparent; }
   #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-  #wrap { position: relative; width: 100%; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
   canvas { width: 100%; height: 100%; display: block; background: #cfe0e6; }
+  #ending-reader { position:absolute; inset:0 0 auto; box-sizing:border-box; height:22.3%; overflow-y:auto; overscroll-behavior:contain; touch-action:pan-y; background:#fffdf8; color:#25221e; padding:24px 30px 38px; z-index:3; transition:height 1.15s cubic-bezier(.22,.7,.25,1); scrollbar-width:thin; }
+  #ending-reader[hidden] { display:none; }
+  #ending-reader.expanded { height:100%; }
+  #ending-reader h2 { font:700 32px 'Yu Mincho','Hiragino Mincho ProN',serif; margin:0 0 30px; letter-spacing:.06em; text-align:center; }
+  #ending-prose { font:400 clamp(18px,2.2vw,21px)/1.95 'Yu Mincho','Hiragino Mincho ProN',serif; margin:0; overflow-wrap:anywhere; white-space:pre-wrap; }
+  #ending-buttons { display:flex; gap:14px; justify-content:center; margin:34px 0 0; flex-wrap:wrap; }
+  #ending-buttons button { padding:11px 26px; border-radius:3px; cursor:pointer; font:inherit; }
+  #read-again { background:transparent; color:#35312b; border:1px solid #bbb2a3; }
+  #read-share { background:#25221e; color:#fffdf8; border:1px solid #25221e; }
 </style>
 </head>
 <body>
 <div id="stage"><div id="wrap">
   <canvas id="c"></canvas>
+  <article id="ending-reader" aria-label="走行の物語" hidden><h2>車で走れメロス</h2><p id="ending-prose"></p><div id="ending-buttons"><button id="read-again" type="button">もう一度走る</button><button id="read-share" type="button">Xでシェア</button></div></article>
 </div></div>
 <script src="../share.js"></script>
+<script src="car-model.js"></script>
+<script src="scenery-models.js"></script>
+<script src="depth-renderer.js"></script>
 <script>
 /* 車で走れメロス
    村から刑場までの帰り道を、日が沈むまでに走りきる。
@@ -27,38 +40,73 @@
   var canvas = document.getElementById("c");
   var ctx = canvas.getContext("2d");
   var wrap = document.getElementById("wrap");
-
-  var W = 540, H = 960;                 /* タテ画面 */
-  wrap.style.aspectRatio = W + " / " + H;
-  wrap.style.width = "min(100%, calc(100vh * " + W + " / " + H + "))";
-  function resize() {
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  var reader=document.getElementById('ending-reader'), prose=document.getElementById('ending-prose');
+  function openReading() {
+    narr.shown=narr.s.length;touchOn=false;keyL=false;keyR=false;
+    prose.textContent=narr.s;reader.hidden=false;reader.scrollTop=0;
+    reader.classList.remove('expanded');
+    requestAnimationFrame(function(){requestAnimationFrame(function(){if(state===ST.RESULT)reader.classList.add('expanded');});});
   }
-  window.addEventListener("resize", resize);
-  resize();
+  document.getElementById('read-again').addEventListener('click',function(e){e.stopPropagation();newRun();});
+  document.getElementById('read-share').addEventListener('click',function(e){e.stopPropagation();doShare();});
+
+  /* タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする */
+  var W = 540, H = 960;
+  function layout() {
+    var host = wrap.parentNode;
+    var vw = host.clientWidth || window.innerWidth;
+    var vh = host.clientHeight || window.innerHeight;
+    H = Math.max(780, Math.min(1700, Math.round(W * vh / vw)));
+    TEXTH = Math.round(H * 0.223);
+    VH = H - TEXTH;
+    CY = VH / 2;
+    FOCAL = (VH / 2) / Math.tan(0.55);
+    var scale = Math.min(vw / W, vh / H);
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    wrap.style.width = canvas.style.width = Math.round(W * scale) + "px";
+    wrap.style.height = canvas.style.height = Math.round(H * scale) + "px";
+    canvas.width = Math.round(W * scale * dpr);
+    canvas.height = Math.round(H * scale * dpr);
+    var k = canvas.width / W;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
 
   /* =====================================================================
      帰り道。x は横、z は進む向き。
      ===================================================================== */
   var HW = 140;                              /* 道の半分の幅 */
-  var GOALZ = 16200;                         /* 刑場 */
-  var RIVER = { z0: 5620, z1: 5910 };        /* 橋は流されている */
-  var RAMP = { z0: 5410, z1: 5550, h: 42 };  /* かわりの踏切り台 */
-  var SPRING = { x: 0, z: 10250 };           /* 泉。触れると生き返る */
-  var LIMIT = 62;                            /* 日没まで（秒） */
+  var GOALZ = 46000;                         /* 刑場 */
+  var RIVERS = [
+    {z0:1900,z1:2130}, {z0:5620,z1:5910}, {z0:8800,z1:9050},
+    {z0:11700,z1:12000}, {z0:17800,z1:18120}
+  ];
+  RIVERS.forEach(function(r,i) {
+    var width=r.z1-r.z0;r.z0*=2;r.z1=r.z0+width;
+    r.ramp={z0:r.z0-210,z1:r.z0-70,h:42};
+    var speed=i===4?688:430,z=r.z0+(r.z1-r.z0)*.45,t=(z-r.ramp.z1)/speed;
+    r.ring={x:0,y:42+(240+speed*.62)*t-450*t*t+14,z:z,radius:73,done:false};
+  });
+  var RIVER=RIVERS[0], RAMP=RIVER.ramp;
+  function riverNear(z) {
+    var result=RIVERS[0],distance=Infinity;
+    RIVERS.forEach(function(r){var d=Math.abs(z-(r.z0+r.z1)/2);if(d<distance){distance=d;result=r;}});
+    return result;
+  }
+  function waterAt(z,end) {return RIVERS.some(function(r){return (end==null?z:end)>r.z0 && z<r.z1;});}
+  var PADS=[
+    {x:0,z:2600},{x:-60,z:7300},{x:60,z:9600},{x:0,z:14400},
+    {x:0,z:19400},{x:-55,z:20700},{x:55,z:22000},{x:0,z:22900},
+    {x:0,z:26400},{x:-60,z:29500},{x:60,z:32600},{x:0,z:34000},
+    {x:0,z:37900},{x:0,z:41000},{x:0,z:43700}
+  ];
+  var LIMIT = 90;                            /* 日没まで（秒） */
 
   /* 場面の切れ目 */
   var SEC = [
-    { z: 1900, k: "village" },
-    { z: 5300, k: "forest" },
-    { z: 5980, k: "river" },
-    { z: 8800, k: "bandit" },
-    { z: 11700, k: "waste" },
-    { z: 15700, k: "town" },
-    { z: 99999, k: "goal" }
+    {z:RIVERS[0].z1,k:'village'}, {z:RIVERS[1].z1,k:'forest'}, {z:RIVERS[2].z1,k:'bandit'},
+    {z:RIVERS[3].z1,k:'waste'}, {z:RIVERS[4].z1,k:'town'}, {z:45000,k:'sprint'}, {z:99999,k:'goal'}
   ];
   function sectionAt(z) {
     for (var i = 0; i < SEC.length; i++) if (z < SEC[i].z) return SEC[i].k;
@@ -77,7 +125,7 @@
   var rocks = [];      /* 岩と倒木。ぶつかると止まる */
   var actors = [];     /* 山賊と市中の人々。跳ね飛ばせる */
 
-  function inRiver(z) { return z > RIVER.z0 - 120 && z < RIVER.z1 + 90; }
+  function inRiver(z) { return RIVERS.some(function(r){return z>r.z0-240 && z<r.z1+240;}); }
 
   (function build() {
     var z, k, n, side;
@@ -99,31 +147,40 @@
       }
     }
 
-    for (z = 2300; z < 5250; z += between(340, 560)) {   /* 林の倒木 */
+    for (z = 4600; z < 10500; z += between(340, 560)) {   /* 林の倒木 */
       if (inRiver(z)) continue;
       var lx = between(-HW + 60, HW - 60), ll = between(120, 230);
       rocks.push({ k: "log", x: lx, z: z, r: ll / 2, w: 26 });
     }
-    for (z = 6100; z < 8700; z += between(190, 310)) {   /* 山賊の待ち伏せ */
+    for (z = 12200; z < 17400; z += between(190, 310)) {   /* 山賊の待ち伏せ */
       var m = 1 + (rnd() < 0.5 ? 1 : 0);
       for (n = 0; n < m; n++) actors.push(mkActor("bandit", between(-HW + 24, HW - 24), z + between(-40, 40)));
       if (rnd() < 0.25) rocks.push({ k: "rock", x: between(-HW + 40, HW - 40), z: z + between(60, 130), r: between(28, 40), w: 0 });
     }
-    for (z = 8900; z < 11650; z += between(230, 380)) {  /* 荒野の岩 */
+    for (z = 17800; z < 23300; z += between(230, 380)) {  /* 荒野の岩 */
       rocks.push({ k: "rock", x: between(-HW + 34, HW - 34), z: z, r: between(26, 42), w: 0 });
       if (rnd() < 0.3) rocks.push({ k: "rock", x: between(-HW + 34, HW - 34), z: z + between(70, 140), r: between(26, 40), w: 0 });
     }
-    for (z = 11800; z < GOALZ - 120; z += between(58, 112)) {  /* 市中の人々 */
-      var mm = 1 + (rnd() < 0.6 ? 1 : 0);
-      for (n = 0; n < mm; n++) actors.push(mkActor("citizen", between(-HW + 18, HW - 18), z + between(-30, 30)));
-      if (rnd() < 0.14) rocks.push({ k: "cart", x: between(-HW + 50, HW - 50), z: z + between(40, 90), r: 36, w: 26 });
+    for (z = 23800; z < GOALZ - 120; z += between(430, 720)) {  /* 市中の人々 */
+      var mm = 1;
+      for (n = 0; n < mm; n++) actors.push(mkActor("citizen", (rnd() < .5 ? -1 : 1) * between(85, HW - 18), z + between(-30, 30)));
+      if (z < GOALZ - 10400 && rnd() < 0.07) rocks.push({ k: "cart", x: (rnd() < .5 ? -1 : 1) * (HW - 30), z: z + between(40, 90), r: 36, w: 26 });
     }
-    for (z = 11800; z < GOALZ; z += 46) {                /* 沿道で見ている人 */
+    for (z = 23800; z < GOALZ; z += 46) {                /* 沿道で見ている人 */
       side = rnd() < 0.5 ? -1 : 1;
       if (rnd() < 0.8) actors.push(mkActor("citizen", side * (HW + between(10, 90)), z + between(-20, 20)));
     }
   })();
 
+  // Keep the launch and landing zones clear of generated obstacles and spectators.
+  function blocksPad(o, rx, rz) {
+    return PADS.some(function(p) {
+      return Math.abs(o.x-p.x)<64+rx+24 && Math.abs(o.z-p.z)<100+rz+120;
+    });
+  }
+  rocks=rocks.filter(function(o){return !inRiver(o.z)&&!blocksPad(o,o.r+14,(o.w||o.r)+25);});
+  actors=actors.filter(function(o){return !inRiver(o.z)&&!blocksPad(o,19,29);});
+  props=props.filter(function(o){var r=(o.k==='house'?84:40)*o.s;return !blocksPad(o,r,r);});
   function mkActor(k, x, z) {
     return { k: k, x: x, z: z, y: 0, a: rnd() * 6.28, vx: 0, vy: 0, vz: 0,
              spin: 0, hit: 0, c: rnd(), h: between(0.9, 1.1) };
@@ -141,8 +198,18 @@
     cloth2: "#b8523f", cloth3: "#4e6a86", cloth4: "#c08a3e",
     body: "#c8452e", body2: "#a8351f", body3: "#8a2a17", roofc: "#f0e6d2",
     glass: "#33363d", tire: "#1b1719", shadow: "#4a4038",
-    banner: "#b8332a", water: "#5d6b6a", water2: "#6e7c78"
+    pad: "#299fad", padLight: "#b7f3e9", royal: "#803954", crown: "#f0c958", ringGold: "#e2b453", ringLight: "#fff0ab", ringSide: "#997036", banner: "#b8332a", water: "#5d6b6a", water2: "#6e7c78"
   };
+  var carMesh = window.MELOS_CAR || [];
+  carMesh.forEach(function (f, i) {
+    f.mat='carMesh'+i;SPEC[f.mat]=f.c;f.philoMat='philo'+i;
+    var r=parseInt(f.c.slice(1,3),16),g=parseInt(f.c.slice(3,5),16),b=parseInt(f.c.slice(5,7),16);
+    SPEC[f.philoMat]=r>g*1.45&&r>b*1.3 ? '#496c80' : f.c;
+  });
+  var scenery = window.MELOS_SCENERY || {};
+  Object.keys(scenery).forEach(function(name) {
+    scenery[name].forEach(function(f) {f.mat='mesh'+f.c.slice(1); SPEC[f.mat]=f.c;});
+  });
   var MAT = {}, FOGC = [206, 218, 208], duskT = 0, paletteAt = -9;
   function hx(s) { return [parseInt(s.substr(1, 2), 16), parseInt(s.substr(3, 2), 16), parseInt(s.substr(5, 2), 16)]; }
   function dusk(c) {
@@ -171,7 +238,7 @@
      3D。カメラの後ろは切り、遠い順に塗る
      ===================================================================== */
   var cam = { x: 0, y: 84, z: 0, yaw: 0, pitch: 0.33 };
-  var TEXTH = 176, VH = H - TEXTH, CY = VH / 2;      /* 下は文章の場所 */
+  var TEXTH = 214, VH = H - TEXTH, CY = VH / 2;      /* 上は文章、下は走行画面 */
   var FOCAL = (VH / 2) / Math.tan(0.55), NEAR = 6;
   var cyaw = 1, syaw = 0, cpit = 1, spit = 0;
   function camSync() {
@@ -222,7 +289,11 @@
     Q(a, d2, D, A, side);
     Q(c2, b, B, C, side);
   }
+  var depthRenderer = window.createMelosDepthRenderer ? window.createMelosDepthRenderer() : null;
   function drawPolys() {
+    if (depthRenderer && depthRenderer(ctx,polys,polyN,W,VH,FOCAL,canvas.width/W)) {
+      polyN=0; return;
+    }
     var list = polys.slice(0, polyN);
     list.sort(function (a, b) { return b.d - a.d; });
     for (var i = 0; i < list.length; i++) {
@@ -251,14 +322,17 @@
 
   var VIEW = 2200;
   function rampH(z) {
-    if (z < RAMP.z0 || z > RAMP.z1) return 0;
-    return RAMP.h * (z - RAMP.z0) / (RAMP.z1 - RAMP.z0);
+    for(var i=0;i<RIVERS.length;i++) {
+      var ramp=RIVERS[i].ramp;
+      if(z>=ramp.z0&&z<=ramp.z1)return ramp.h*(z-ramp.z0)/(ramp.z1-ramp.z0);
+    }
+    return 0;
   }
 
   function drawRoad() {
     var s = 55, z0 = Math.floor((cam.z - 120) / s) * s, z, i = 0;
     for (z = z0; z < cam.z + VIEW; z += s) {
-      if (z + s > RIVER.z0 && z < RIVER.z1) { i++; continue; }
+      if (waterAt(z,z+s)) { i++; continue; }
       var yA = rampH(z), yB = rampH(z + s);
       var m = ((z / s) | 0) & 1 ? MAT.roadA : MAT.roadB;
       addPoly([-HW, yA, z, HW, yA, z, HW, yB, z + s, -HW, yB, z + s], m);
@@ -275,6 +349,7 @@
       i++;
     }
     /* 川と、流された橋の名残り */
+    RIVERS.forEach(function(RIVER) {
     if (cam.z > RIVER.z0 - VIEW && cam.z < RIVER.z1 + 400) {
       var cx = cam.x;
       addPoly([cx - 2600, -34, RIVER.z0, cx + 2600, -34, RIVER.z0,
@@ -291,53 +366,83 @@
       box(0, -34, RIVER.z0 - 4, HW, 34, 16, 0, MAT.log, MAT.log);
       box(0, -34, RIVER.z1 + 4, HW, 34, 16, 0, MAT.log, MAT.log);
     }
-    /* 泉 */
-    if (Math.abs(SPRING.z - cam.z) < VIEW) {
-      addPoly([SPRING.x - 54, 1, SPRING.z - 54, SPRING.x + 54, 1, SPRING.z - 54,
-               SPRING.x + 54, 1, SPRING.z + 54, SPRING.x - 54, 1, SPRING.z + 54], MAT.water2);
-    }
+    });
+    drawRings();
+    drawPads();
+  }
+  function drawPads() {
+    PADS.forEach(function(p){
+      if(p.z<cam.z-200||p.z>cam.z+VIEW)return;
+      box(p.x,0,p.z,64,3,100,0,MAT.pad,MAT.water);
+      for(var i=0;i<3;i++) {
+        var z=p.z-65+i*60;
+        addPoly([p.x-46,4,z-18,p.x,4,z+8,p.x+46,4,z-18,p.x+46,4,z+1,p.x,4,z+27,p.x-46,4,z+1],p.used?MAT.water2:MAT.ringLight);
+      }
+      for(var side=-1;side<=1;side+=2)for(var j=0;j<3;j++) {
+        var height=10+8*Math.sin(tick*6+j*2);
+        box(p.x+side*57,4,p.z-60+j*60,2,height,2,0,MAT.padLight,MAT.padLight);
+      }
+    });
   }
 
-  function drawProps() {
-    var i = firstAt(props, cam.z - 160), p;
-    for (; i < props.length; i++) {
-      p = props[i];
-      if (p.z > cam.z + VIEW) break;
-      if (Math.abs(p.x - cam.x) > 1100) continue;
-      var s = p.s;
-      if (p.k === "tree") {
-        box(p.x, 0, p.z, 8 * s, 42 * s, 8 * s, 0, MAT.trunk, MAT.trunk);
-        box(p.x, 38 * s, p.z, 34 * s, 44 * s, 34 * s, p.c * 3, p.c < 0.5 ? MAT.leaf : MAT.leaf2, MAT.leaf);
-        box(p.x, 74 * s, p.z, 22 * s, 30 * s, 22 * s, p.c * 5, MAT.leaf2, MAT.leaf);
-      } else if (p.k === "house") {
-        box(p.x, 0, p.z, 56 * s, 54 * s, 46 * s, p.c, MAT.wall2, MAT.wall);
-        box(p.x, 54 * s, p.z, 62 * s, 26 * s, 52 * s, p.c, MAT.roof, MAT.roof);
-      } else if (p.k === "column") {
-        box(p.x, 0, p.z, 13 * s, 96 * s, 13 * s, 0, MAT.column, MAT.column);
-        box(p.x, 96 * s, p.z, 18 * s, 10 * s, 18 * s, 0, MAT.stone, MAT.column);
-      } else if (p.k === "bush") {
-        box(p.x, 0, p.z, 26 * s, 16 * s, 22 * s, p.c * 4, MAT.bush, MAT.bush);
-      } else {
-        box(p.x, 0, p.z, 26 * s, 22 * s, 24 * s, p.c * 4, MAT.rockTop, MAT.rock);
+  function drawRings() {
+    RIVERS.forEach(function(r){
+      var ring=r.ring;if(ring.done||ring.z<cam.z-100||ring.z>cam.z+VIEW)return;
+      var segments=28,outer=ring.radius+5,inner=ring.radius-5;
+      for(var i=0;i<segments;i++) {
+        var a=i*Math.PI*2/segments,b=(i+1)*Math.PI*2/segments;
+        function point(angle,radius,z){return [ring.x+Math.cos(angle)*radius,ring.y+Math.sin(angle)*radius,z];}
+        function face(p,q,s,t,m){addPoly(p.concat(q,s,t),m);}
+        face(point(a,outer,ring.z-4),point(b,outer,ring.z-4),point(b,inner,ring.z-4),point(a,inner,ring.z-4),i<14?MAT.ringLight:MAT.ringGold);
+        face(point(a,outer,ring.z-4),point(a,outer,ring.z+4),point(b,outer,ring.z+4),point(b,outer,ring.z-4),MAT.ringSide);
+        face(point(a,inner,ring.z-4),point(b,inner,ring.z-4),point(b,inner,ring.z+4),point(a,inner,ring.z+4),MAT.ringGold);
       }
+    });
+  }
+  function collectRings(before) {
+    if(!car.air || car.z<=before.z)return;
+    RIVERS.forEach(function(r){
+      var ring=r.ring;
+      if(ring.done||before.z>ring.z||car.z<ring.z)return;
+      var t=(ring.z-before.z)/(car.z-before.z);
+      var x=before.x+(car.x-before.x)*t-ring.x;
+      var y=before.y+(car.y+14-before.y)*t-ring.y;
+      if(x*x+y*y>(ring.radius-18)*(ring.radius-18))return;
+      ring.done=true;car.boost=3.4;
+      car.v=Math.min(car.v+120,MAXV*(windMode?1.6:1)*1.24);
+      blip(660,1320,.23,'triangle',.12);
+      say("金色の輪をくぐった。風が車の背を押した。メロスは息を呑み、さらに深く、アクセルを踏みこんだ。",3);
+    });
+  }
+
+  function drawMesh(name,x,y,z,sx,sy,sz,angle,cloth,fall) {
+    var mesh=scenery[name]; if(!mesh)return;
+    var sn=Math.sin(angle||0),cs=Math.cos(angle||0),sf=Math.sin(fall||0),cf=Math.cos(fall||0);
+    for(var i=0;i<mesh.length;i++) {
+      var face=mesh[i],world=[],v=face.v;
+      for(var j=0;j<v.length;j+=3) {
+        var lx=v[j]*sx,ly=v[j+1]*sy,lz=v[j+2]*sz;
+        var yy=ly*cf-lz*sf,zz=ly*sf+lz*cf;
+        world.push(x+lx*cs+zz*sn,y+yy,z-lx*sn+zz*cs);
+      }
+      addPoly(world,face.slot==='cloth'&&cloth?cloth:MAT[face.mat]);
+    }
+  }
+  function drawProps() {
+    for(var i=firstAt(props,cam.z-160);i<props.length;i++) {
+      var p=props[i];if(p.z>cam.z+VIEW)break;
+      if(Math.abs(p.x-cam.x)>1100)continue;
+      var s=p.s,rock=p.k==='rock';
+      drawMesh(p.k,p.x,0,p.z,s*(rock?26:1),s*(rock?26:1),s*(rock?26:1),p.c*2);
     }
   }
 
   function drawRocks() {
-    var i = firstAt(rocks, cam.z - 160), r;
-    for (; i < rocks.length; i++) {
-      r = rocks[i];
-      if (r.z > cam.z + VIEW) break;
-      if (r.k === "log") {
-        box(r.x, 0, r.z, r.r, 26, r.w, 0.05, MAT.log, MAT.log);
-        box(r.x - r.r * 0.8, 0, r.z, 14, 30, 14, 0, MAT.trunk, MAT.trunk);
-      } else if (r.k === "cart") {
-        box(r.x, 15, r.z, r.r, 24, r.w, 0, MAT.cart, MAT.cart);
-        box(r.x - r.r, 0, r.z, 8, 20, 20, 0, MAT.trunk, MAT.trunk);
-        box(r.x + r.r, 0, r.z, 8, 20, 20, 0, MAT.trunk, MAT.trunk);
-      } else {
-        box(r.x, 0, r.z, r.r, r.r * 1.15, r.r * 0.92, r.x, MAT.rockTop, MAT.rock);
-      }
+    for(var i=firstAt(rocks,cam.z-160);i<rocks.length;i++) {
+      var r=rocks[i];if(r.z>cam.z+VIEW)break;
+      if(r.k==='log')drawMesh('log',r.x,0,r.z,r.r,1,1,.05);
+      else if(r.k==='cart')drawMesh('cart',r.x,0,r.z,r.r/36,1,r.w/26,0);
+      else drawMesh('rock',r.x,0,r.z,r.r,r.r,r.r,r.x);
     }
   }
 
@@ -347,20 +452,10 @@
   }
   var FIG = 0.38;                                       /* 人の背丈。車に合わせてある */
   function drawFigure(a) {
-    var cl = actorCloth(a), h = a.h * FIG;
-    if (a.hit === 2) {                                  /* 倒れている */
-      box(a.x, 0, a.z, 22 * FIG, 13 * FIG, 12 * FIG, a.a, cl, cl);
-      box(a.x + Math.sin(a.a) * 26 * FIG, 0, a.z + Math.cos(a.a) * 26 * FIG, 9 * FIG, 12 * FIG, 9 * FIG, a.a, MAT.skin, MAT.skin);
-      return;
-    }
-    box(a.x, a.y, a.z, 11 * FIG, 26 * h, 9 * FIG, a.a, MAT.bandit, MAT.bandit);
-    box(a.x, a.y + 24 * h, a.z, 14 * FIG, 30 * h, 11 * FIG, a.a, cl, cl);
-    box(a.x, a.y + 54 * h, a.z, 9 * FIG, 15 * FIG, 9 * FIG, a.a, MAT.skin, MAT.skin);
-    if (a.k === "bandit" && !a.hit) {
-      box(a.x + Math.sin(a.a + 1.2) * 16 * FIG, a.y + 30 * h, a.z + Math.cos(a.a + 1.2) * 16 * FIG,
-          4 * FIG, 34 * FIG, 4 * FIG, a.a, MAT.trunk, MAT.trunk);
-    }
+    var fallen=a.hit===2;
+    drawMesh(a.k,a.x,fallen?4:a.y,a.z,.8,.8*a.h,.8,a.a,actorCloth(a),fallen?Math.PI/2:a.hit===1?(a.a-a.a0)*.5:0);
   }
+
   function drawActors() {
     var i = firstAt(actors, cam.z - 700), a;
     for (; i < actors.length; i++) {
@@ -377,8 +472,8 @@
     if (cam.z < GOALZ - VIEW) return;
     var x = 0, z = GOALZ;
     box(x, 0, z + 60, HW + 60, 12, 90, 0, MAT.stone, MAT.stone);
-    box(x - HW + 10, 0, z, 11, 130, 11, 0, MAT.column, MAT.column);
-    box(x + HW - 10, 0, z, 11, 130, 11, 0, MAT.column, MAT.column);
+    drawMesh('column',x-HW+10,0,z,1,1.3,1,0);
+    drawMesh('column',x+HW-10,0,z,1,1.3,1,0);
     box(x, 116, z, HW, 22, 10, 0, MAT.banner, MAT.banner);
     box(x, 12, z + 120, 4, 62, 4, 0, MAT.trunk, MAT.trunk);      /* はりつけの柱 */
     box(x, 56, z + 120, 22, 5, 4, 0, MAT.trunk, MAT.trunk);
@@ -386,9 +481,54 @@
     box(x, 52, z + 116, 4, 7, 4, 0, MAT.skin, MAT.skin);
   }
 
+  function drawKing() {
+    if(!king||Math.abs(king.z-cam.z)>VIEW)return;
+    drawMesh('citizen',king.x,king.y,king.z,1.6,1.6,1.6,king.hit?king.t*6:Math.PI,MAT.royal,king.hit?king.t*4:0);
+    if(!king.hit) {
+      box(king.x,52,king.z,9,5,8,0,MAT.crown,MAT.crown);
+      for(var i=-1;i<=1;i++)box(king.x+i*7,57,king.z,2,6,8,0,MAT.crown,MAT.crown);
+    } else box(king.x+king.t*24,king.y+58,king.z-king.t*15,9,7,8,king.t*5,MAT.crown,MAT.crown);
+  }
+
   /* ===== 車 ===== */
-  var car = { x: 0, z: 0, y: 0, a: 0, v: 0, vy: 0, air: 0, roll: 0, shake: 0, boost: 0 };
-  function drawCar() {
+  var car = { x: 0, z: 0, y: 0, a: 0, v: 0, vy: 0, air: 0, roll: 0, shake: 0, boost: 0, wheelSpin: 0 };
+  var playerCar=car;
+  function drawCar(vehicle) {
+    var car=vehicle||playerCar;
+    if (carMesh.length) {
+      var sn = Math.sin(car.a), cs = Math.cos(car.a);
+      var ws = Math.sin(car.wheelSpin), wc = Math.cos(car.wheelSpin);
+      var turn = steer * .32, ts = Math.sin(turn), tc = Math.cos(turn);
+      var bounce = car.air ? 0 : Math.sin(tick * 20) * Math.min(0.35, car.v / 1200);
+      // Keep the shadow on the road while the body lifts over the river.
+      if (!car.air) {
+        var shadow=[];
+        for(var si=0;si<12;si++) {
+          var sa=si*Math.PI/6,sx=Math.cos(sa)*17,sz=Math.sin(sa)*28;
+          shadow.push(car.x+sx*cs+sz*sn,car.y+.6,car.z-sx*sn+sz*cs);
+        }
+        addPoly(shadow,MAT.shadow);
+      }
+      for (var fi = 0; fi < carMesh.length; fi++) {
+        var face = carMesh[fi], v = face.v, world = [];
+        for (var vi = 0; vi < v.length; vi += 3) {
+          var x = v[vi], y = v[vi+1], z = v[vi+2];
+          if (face.wheel) {
+            var pivot=face.wheel, dy=y-pivot[1], dz=z-pivot[2];
+            y=pivot[1]+dy*wc-dz*ws;
+            z=pivot[2]+dy*ws+dz*wc;
+            if(pivot[2]>0) {
+              var dx=x-pivot[0];dz=z-pivot[2];
+              x=pivot[0]+dx*tc+dz*ts;
+              z=pivot[2]-dx*ts+dz*tc;
+            }
+          }
+          world.push(car.x+x*cs+z*sn,car.y+y+x*car.roll*0.9+bounce,car.z-x*sn+z*cs);
+        }
+        addPoly(world, MAT[car.companion ? face.philoMat : face.mat]);
+      }
+      return;
+    }
     var s = Math.sin(car.a), c = Math.cos(car.a), tilt = car.roll;
     function P(lx, ly, lz) {
       return [car.x + lx * c + lz * s, car.y + ly + lx * tilt * 0.9, car.z - lx * s + lz * c];
@@ -507,21 +647,32 @@
   /* ===== 進行 ===== */
   var ST = { READY: "ready", PLAY: "play", RESULT: "result" };
   var state, total, hits, ok, flash, steer, flying = [], springUsed;
+  var king;
   var MAXV = 430, ACC = 250, GRAV = 900;
+  var windMode=false, windMix=0, storyClock=0, storyIndex={};
+  var philo={active:false,enter:0,stage:0,side:1,x:0,y:0,z:0,a:0,v:0,air:0,roll:0,wheelSpin:0,companion:true};
 
   actors.forEach(function (a) { a.x0 = a.x; a.z0 = a.z; a.a0 = a.a; });
 
   function newRun() {
+    reader.hidden=true;reader.classList.remove('expanded');
     state = ST.READY; total = 0; hits = 0; ok = false; flash = 0; steer = 0;
     springUsed = 0; flying.length = 0;
+    PADS.forEach(function(p){p.used=false;});
+    king={x:0,y:0,z:GOALZ-140,hit:false,vx:0,vy:0,vz:0,t:0};
+    windMode = false; windMix = 0; philo.active = false; philo.enter = 0; philo.stage = 0; storyClock = 0; storyIndex = {};
     car.x = 0; car.z = -280; car.y = 0; car.a = 0; car.v = 0; car.vy = 0;
-    car.air = 0; car.roll = 0; car.shake = 0; car.boost = 0;
+    car.air = 0; car.roll = 0; car.shake = 0; car.boost = 0; car.wheelSpin = 0;
     cam.yaw = 0;
     actors.forEach(function (a) { a.hit = 0; a.y = 0; a.x = a.x0; a.z = a.z0; a.a = a.a0; a.spin = 0; });
     rocks.forEach(function (r) { r.done = 0; });
-    dayT = 0; duskT = 0; paletteAt = -9;
-    narr.s = "メロスは激怒した。だが、いまは走るときだ。";
-    narr.shown = 0; narr.t = 3.4; narr.prio = 0;
+    RIVERS.forEach(function(r){r.ring.done=false;});
+    RIVER=RIVERS[0];RAMP=RIVER.ramp;
+    dayT = 0; duskT = 0; paletteAt = 0;
+    FOGC = SKY_HOR[0].slice();
+    buildPalette();
+    narr.s = "　メロスは激怒した。必ず、かの邪智暴虐の王を除かなければならぬと決意し、愛車のエンジンに火を灯した。";
+    narr.shown = 0; narr.credit = 0; narr.pause = 0; narr.scroll = 0; narr.layoutAt = -1; narr.lines = [];
     sayCool = 0; secNow = "village"; lowSaid = 0; banditHits = 0; townHits = 0;
     camSync();
   }
@@ -529,7 +680,7 @@
   function splash() {
     car.z = RAMP.z0 - 620; car.x = 0; car.y = 0; car.v = 0;
     car.air = 0; car.vy = 0; flash = 0.7;
-    say("濁流にのまれた。それでも、岸へ這い上がる。", 4);
+    say("車は濁流に呑まれた。メロスはハンドルにしがみつき、岸の土を車輪で掻いた。まだ動く。ならば、行かねばならぬ。", 4);
     blip(220, 40, 0.6, "sine", 0.16);
   }
 
@@ -537,10 +688,16 @@
     var tgt = 0;
     if (keyL && !keyR) tgt = -1; else if (keyR && !keyL) tgt = 1;
     else if (touchOn) tgt = Math.max(-1, Math.min(1, touchX / (W * 0.26)));
+    if(state===ST.PLAY && car.z>GOALZ-1100 && !king.hit) {
+      tgt=Math.max(-1,Math.min(1,(king.x-car.x)/95));
+      car.x+=(king.x-car.x)*(1-Math.exp(-3*dt));
+    }
     if (tgt > -0.08 && tgt < 0.08) tgt = 0;
-    steer += (tgt - steer) * Math.min(1, dt * 14);
+    steer += (tgt - steer) * (1 - Math.exp(-10 * dt));
 
     if (state === ST.PLAY) {
+      RIVER=riverNear(car.z);RAMP=RIVER.ramp;
+      var before={x:car.x,y:car.y+14,z:car.z};
       total += dt;
       dayT = Math.min(1, total / LIMIT);
       duskT = dayT * dayT * (3 - 2 * dayT);
@@ -550,15 +707,21 @@
         buildPalette();
       }
 
+      if (!windMode && car.z >= RIVERS[3].z1) {
+        windMode=true;
+        say("見える。夕陽を受けてきらきらと光る、シラクスの塔楼が見える。メロスは歯をくいしばり、アクセルを床まで踏んだ。車は、黒い風になった。",3);
+      }
+      windMix += ((windMode?1:0)-windMix)*Math.min(1,dt*2);
       var off = Math.abs(car.x) > HW;
-      var lim = MAXV * (off ? 0.44 : 1 - 0.26 * Math.abs(steer));
-      if (car.boost > 0) { car.boost -= dt; lim = MAXV * 1.24; }
-      car.v += (car.v < lim ? ACC : -ACC * 2.4) * dt;
-      if (car.v > lim && car.boost <= 0) car.v = Math.max(lim, car.v - ACC * 2.4 * dt);
+      var lim = MAXV * (windMode ? 1.6 : 1) * (off ? 0.44 : 1);
+      if (car.boost > 0) { car.boost -= dt; lim *= 1.24; }
+      if (car.v < lim) car.v = Math.min(lim, car.v + ACC*(car.boost>0?2.2:1)*dt);
+      else car.v = Math.max(lim, car.v - ACC*2.4*dt);
       if (car.v < 0) car.v = 0;
-      car.a += (steer * 0.58 - car.a) * Math.min(1, dt * 6);
+      car.a += (steer * 0.48 - car.a) * (1 - Math.exp(-7 * dt));
       car.x += Math.sin(car.a) * car.v * dt;
-      car.z += Math.cos(car.a) * car.v * dt;
+      car.z += car.v * dt;
+      car.wheelSpin = (car.wheelSpin + car.v * dt / 5.85) % (Math.PI * 2);
       car.roll += (-steer * 0.15 - car.roll) * Math.min(1, dt * 8);
       if (off) car.shake = Math.max(car.shake, 0.12);
 
@@ -566,18 +729,18 @@
         car.vy -= GRAV * dt; car.y += car.vy * dt;
         if (car.y <= 0) {
           car.y = 0; car.air = 0;
-          if (car.z > RIVER.z0 && car.z < RIVER.z1) splash();
+          if (waterAt(car.z)) splash();
           else {
             car.shake = 0.55; blip(150, 70, 0.18, "square", 0.1);
-            if (car.z > RIVER.z1) say("向こう岸だ。まだ走れる。", 3);
+            if (car.z > RIVER.z1) say("車輪が向こう岸の土を噛んだ。メロスは胸いっぱいに息を吸った。ああ、まだ走れる。友を救うことが出来る。", 3);
           }
         }
-      } else if (car.z >= RAMP.z0 && car.z <= RAMP.z1) {
+      } else if (car.z >= RAMP.z0 && car.z <= RAMP.z1 && Math.abs(car.x)<HW) {
         car.y = rampH(car.z);
       } else if (car.y > 0.5) {
         car.air = 1; car.vy = 240 + car.v * 0.62;
         blip(300, 620, 0.22, "triangle", 0.11);
-        say("メロスは、飛んだ。", 3);
+        say("メロスは、飛んだ。車輪は空しく宙を掻き、濁流が腹の下で吼えた。南無三。友の顔だけが、まぶたに浮かんだ。", 3);
       } else {
         car.y = 0;
         if (car.z > RIVER.z0 && car.z < RIVER.z1) splash();
@@ -593,9 +756,9 @@
             r.done = 1; car.v *= 0.48; car.shake = 0.8;
             car.x += dx > 0 ? 20 : -20;
             blip(120, 50, 0.24, "square", 0.15);
-            sayHit(r.k === "log" ? "倒木をはねのけた。木くずが宙に散った。"
-                 : r.k === "cart" ? "荷車を蹴散らした。荷が転がっていく。"
-                 : "岩に乗り上げた。速度が死ぬ。");
+            sayHit(r.k === "log" ? "倒木をはねのけた。乾いた木片が雨のように降ったが、メロスは一度も振り返らなかった。"
+                 : r.k === "cart" ? "荷車が傾き、積まれた麦が道へこぼれた。すまぬ。だが、この車を止めるわけにはゆかぬ。"
+                 : "車輪が岩を噛み、車体がはげしく跳ねた。メロスは唇を噛んだ。こんな石ころ一つに、誠を疑わせてなるものか。");
           }
         }
         var j = firstAt(actors, car.z - 150), a;      /* 山賊・市中の人々 */
@@ -610,25 +773,29 @@
             a.vy = 220 + rnd() * 160;
             a.spin = (rnd() - 0.5) * 20;
             flying.push(a);
-            car.v -= a.k === "bandit" ? 15 : 6;
+            if(a.k==='bandit') {
+              car.boost=Math.max(car.boost,2.8);car.v=Math.min(car.v+105,MAXV*(windMode?1.6:1)*1.24);
+              blip(470,1000,.18,'triangle',.12);
+            } else car.v-=6;
             if (car.v < 0) car.v = 0;
             car.shake = Math.max(car.shake, 0.3);
             blip(a.k === "bandit" ? 420 : 620, 90, 0.16, "square", 0.11);
             if (a.k === "bandit") {
               banditHits++;
-              sayHit(banditHits === 1 ? "一人、宙を舞った。" : "また一人、はねとばした。こん棒が転がる。");
+              sayHit(banditHits === 1 ? "男のからだが宙を舞い、こん棒が道へ落ちた。その一撃が車の勢いとなった。メロスは、さらに速く走った。" : "また一人、車の鼻先から転がり去った。おまえたちに用は無い。私は、友のために走っているのだ。");
             } else {
               townHits++;
-              sayHit(townHits < 3 ? "人がはねとんだ。すまぬ、と胸の内で詫びた。"
-                                  : "群衆をかき分ける。もう、止まれない。");
+              sayHit(townHits < 3 ? "人影が車の傍らへはねとんだ。すまぬ、とメロスは胸の内で詫びた。しかし足は、アクセルを離さなかった。"
+                                  : "群衆が左右へ割れた。叫び声も、罵声も、もう耳へは届かなかった。");
             }
           }
         }
-        if (!springUsed && Math.abs(car.x - SPRING.x) < 80 && Math.abs(car.z - SPRING.z) < 80) {
-          springUsed = 1; car.boost = 2.6; flash = 0.35;
-          blip(520, 1180, 0.4, "triangle", 0.14);
-          say("清水が湧いていた。生き返る心地がした。", 3);
-        }
+        PADS.forEach(function(p) {
+          if(p.used||Math.abs(car.x-p.x)>76||before.z>p.z+100||car.z<p.z-100)return;
+          p.used=true;car.boost=4.2;car.v=Math.min(car.v+160,MAXV*(windMode?1.6:1)*1.24);
+          blip(520,1180,.32,'triangle',.12);
+          say("清水が車輪の下から噴きあがった。ああ、生き返る。車は水の帯を踏み、矢のように先へ躍り出た。",3);
+        });
       }
 
       for (var k = flying.length - 1; k >= 0; k--) {
@@ -638,29 +805,41 @@
         if (fa.y <= 0) { fa.y = 0; fa.hit = 2; flying.splice(k, 1); }
       }
 
+      collectRings(before);
+      updateCompanion(dt);
+      updateStory(dt);
       var sc = sectionAt(car.z);                       /* 場面が変わったら一行 */
       if (sc !== secNow) { secNow = sc; if (SEC_LINE[sc]) say(SEC_LINE[sc], 2); }
-      if (!lowSaid && left() < 15) { lowSaid = 1; say("日が、沈もうとしている。", 2); }
+      if (!lowSaid && left() < 15) { lowSaid = 1; say("日は、容赦なく西へ傾いてゆく。待ってくれ。私は信じられている。あの男を、死なせてはならぬ。", 2); }
 
-      if (car.z >= GOALZ - 20) {
-        state = ST.RESULT; ok = true; flash = 0.6;
-        blip(560, 1200, 0.7, "triangle", 0.16);
-        say("間に合った。友は、まだ生きている。", 5);
+      if(!king.hit && before.z<=king.z+20 && car.z>=king.z-20 && Math.abs(car.x-king.x)<48) {
+        king.hit=true;king.vx=80;king.vy=280;king.vz=210;king.t=0;
+        state='finish';ok=true;car.v*=.4;
+        blip(180,800,.35,'square',.12);
+        say("「待て、王よ。」メロスの車が刑場へ飛びこんだ。王の紫の衣が、ふわりと宙へ舞った。冠は夕陽をきらりと返した。友は、まだ生きていた。日没まで"+left().toFixed(1)+"秒を残し、メロスはついに、約束を果たしたのである。",5);
+      } else if(car.z>GOALZ+100) {
+        car.z=GOALZ-650;car.x=0;car.v=220;
+        say("まだだ。王は、刑場のまんなかに立っている。メロスは車の鼻先を王へ向け直した。",4);
       } else if (total >= LIMIT) {
         state = ST.RESULT; ok = false;
         blip(300, 90, 0.9, "sawtooth", 0.13);
-        say("日は沈んだ。メロスは、間に合わなかった。", 5);
+        say("最後の光が、塔の向こうへ消えた。メロスはなおもハンドルを握っていた。友よ。呼びかける声は、暮れた街路に吸われていった。", 5);
+        openReading();
       }
     }
 
-    if (narr.t > 0) narr.t -= dt;
-    narr.shown += dt * 44;
+    if(state==='finish') {
+      king.t+=dt;king.vy-=GRAV*dt;king.x+=king.vx*dt;king.z+=king.vz*dt;king.y=Math.max(0,king.y+king.vy*dt);
+      car.v=Math.max(0,car.v-180*dt);car.z+=car.v*dt;
+      if(king.t>1.7){state=ST.RESULT;openReading();}
+    }
+    advanceNarration(dt);
     if (sayCool > 0) sayCool -= dt;
     if (flash > 0) flash -= dt * 1.7;
     if (car.shake > 0) car.shake = Math.max(0, car.shake - dt * 2.2);
 
     cam.yaw += (car.a * 0.5 - cam.yaw) * Math.min(1, dt * 7);
-    var back = 124 + car.v * 0.11;
+    var back = 124 + car.v * 0.11 + windMix*12;
     cam.x = car.x - Math.sin(cam.yaw) * back + (Math.random() - 0.5) * car.shake * 22;
     cam.z = car.z - Math.cos(cam.yaw) * back;
     cam.y = 84 + car.y * 0.7 + (Math.random() - 0.5) * car.shake * 16;
@@ -673,7 +852,7 @@
 
   function resultButtons() {
     var h = 56, gap = 16, wr = 158, ws = 208;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.64;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = TEXTH + VH * 0.70;
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -697,6 +876,7 @@
   function tap(x, y) {
     audioStart();
     if (state === ST.RESULT) {
+      return;
       var h = x == null ? "retry" : hitButton(x, y);
       if (h === "share") doShare(); else if (h === "retry") newRun();
       return;
@@ -708,6 +888,7 @@
     return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
   }
   wrap.addEventListener("pointerdown", function (e) {
+    if(!reader.hidden)return;
     e.preventDefault();
     var p = pos(e);
     touchOn = true; touchX = p.x - W / 2;
@@ -718,6 +899,7 @@
   window.addEventListener("pointercancel", function () { touchOn = false; });
   window.addEventListener("keydown", function (e) {
     var k = e.key;
+    if(!reader.hidden && k!=='Escape')return;
     if (k === "ArrowLeft" || k === "a" || k === "A") { keyL = true; e.preventDefault(); return; }
     if (k === "ArrowRight" || k === "d" || k === "D") { keyR = true; e.preventDefault(); return; }
     if (k === "Escape") { e.preventDefault(); if (!e.repeat) newRun(); return; }
@@ -749,77 +931,139 @@
     ctx.textBaseline = "alphabetic";
   }
   /* ===== 画面下の文章。走ったことが小説になって出る ===== */
-  var narr = { s: "", shown: 0, t: 0, prio: -1 };
+  var narr = { s: "", shown: 0, credit: 0, pause: 0, scroll: 0, layoutAt: -1, lines: [], dt: 1/60 };
   var sayCool = 0, secNow = "", lowSaid = 0, banditHits = 0, townHits = 0;
   function say(t, p) {
-    p = p || 0;
-    if (narr.t > 0 && p < narr.prio) return;
-    narr.s = t; narr.shown = 0; narr.t = 3.4; narr.prio = p;
+    // Events remain in chronological order; a new sentence never erases one being written.
+    if(p>=2 || narr.s.length-narr.shown>100) {narr.shown=narr.s.length;narr.pause=0;narr.credit=0;}
+    narr.s += (narr.s ? "" : "　") + t;
+  }
+  function advanceNarration(dt) {
+    narr.dt = dt;
+    if (narr.pause > 0) { narr.pause = Math.max(0, narr.pause - dt); return; }
+    if (narr.shown >= narr.s.length) { narr.credit = 0; return; }
+    narr.credit += dt * (narr.s.length - narr.shown > 90 ? 480 : 180);
+    while (narr.credit >= 1 && narr.shown < narr.s.length) {
+      var ch = narr.s[narr.shown++]; narr.credit--;
+      if (ch === "。" || ch === "！" || ch === "？") { narr.pause=.012; narr.credit=0; break; }
+      if (ch === "、") { narr.pause=0; narr.credit=0; break; }
+    }
   }
   function sayHit(t) {                                  /* はねた話は続けざまに出さない */
     if (sayCool > 0) return;
-    sayCool = 1.9; say(t, 1);
+    sayCool = 3.5; say(t, 1);
   }
   var SEC_LINE = {
-    forest: "森に入った。道は荒れている。",
-    river: "橋が、無い。濁流だけが、そこにあった。",
-    bandit: "こん棒を持った男たちが、道をふさいでいる。",
-    waste: "荒野に出た。日ざしが、背中を焼いた。",
-    town: "市が見えた。街が、夕日に燃えている。"
+    forest:"やがて道は深い森へはいった。枝は車窓を打ち、湿った土の匂いが、熱いエンジンの匂いとまじった。",
+    river:"橋が無い。昨日までそこにあった橋が、影も形も無い。濁流だけが、声を張りあげて笑っていた。",
+    bandit:"こん棒を持った男たちが、道をふさいでいた。山賊である。メロスは警笛を鳴らした。退け。私には、命より大切な用事がある。",
+    waste:"森を抜けると、白く乾いた荒野であった。太陽は頭上から肩へ移り、メロスの影を、少しずつ長くした。",
+    goal:"刑場の柱が見えた。群衆のざわめきが、一つの大きな波となって車窓へ押し寄せた。"
   };
-  function wrapLines(str, maxw) {
-    var out = [], line = "", i;
-    for (i = 0; i < str.length; i++) {
-      if (ctx.measureText(line + str[i]).width > maxw && line) { out.push(line); line = ""; }
-      line += str[i];
+  var STORY = {
+    village:[
+      "メロスには政治がわからぬ。けれども、友を置き去りにして平気でいられるほど、鈍い心の持主ではなかった。",
+      "村の屋根が、後ろへ後ろへと流れてゆく。妹の笑顔を思い出しかけて、メロスは強く首を振った。いまは、ただ走るのだ。",
+      "友は私を信じた。なんの疑いも持たず、この私のために縄を受けた。そのことだけが、エンジンよりも強く胸を打っていた。"
+    ],
+    forest:[
+      "木々のあいだから、細い光が幾筋も射した。車は光と影を縫い、鳥の群れを驚かせながら、山道を下っていった。",
+      "車軸がきしんだ。古い車である。メロスはハンドルを撫でた。頼む。今日だけは、私を裏切ってくれるな。",
+      "急げ、メロス。おくれてはならぬ。自分へ言いきかせる声は、車輪の響きにまじって、幾度も胸へ帰って来た。",
+      "谷底から水の音が聞こえた。いつもより太く、荒い音であった。メロスは眉をひそめたが、足をゆるめはしなかった。"
+    ],
+    river:["水しぶきが窓を白くした。行く手は見えぬ。それでも、信じて踏むほかには、道は無かった。"],
+    bandit:[
+      "男たちの口が何事か叫んだ。金ならば無い。命も、いまは私だけのものでは無い。メロスは低く身を伏せた。",
+      "こん棒の影が車窓をかすめた。ガラスの震える音がした。けれども、友の待つ刑場は、この道の先にある。",
+      "背後の怒号は、たちまち小さくなった。メロスは歯をくいしばった。まだ陽はある。まだ、間に合う。"
+    ],
+    waste:[
+      "喉が焼けた。息をするたびに、熱い砂を呑む心地がした。一瞬、すべてを投げ出して眠りたいと思った。メロスは、その一瞬を恥じた。",
+      "ああ、私は信じられている。疑われていない。その思いが、萎えかけた腕を、もう一度ハンドルへ結びつけた。",
+      "野原には酒宴の輪があった。車がその傍らを駈け抜けると、杯が止まり、人々は口をあけた。犬が吠えながら、土煙を追って来た。",
+      "旅人の一団を颯っと追い越した。「いまごろは、あの男も。」不吉な声の続きを、風がさらった。ああ、その男のために、私は走っているのだ。"
+    ],
+    town:[
+      "塔楼は夕陽を受けて、燃えるように光っていた。車輪は石畳を打った。その響きは、街じゅうの扉を叩くようであった。",
+      "宴席の人々が顔を上げた。皿が鳴り、葡萄酒がこぼれた。メロスの車は黒い風となり、驚きの声さえ、はるか後ろへ置き去りにした。",
+      "小さな水路を車輪が跳ねた。沈んでゆく太陽より、十倍も早く走りたい。メロスは胸をハンドルへ押しつけ、なおも踏んだ。",
+      "風態などは、どうでもよかった。乱れた髪も、土にまみれた頬も。愛と誠の力を、いまこそ知らせてやるがよい。",
+      "人々は軒下へ身を寄せた。大通りは、まっすぐ刑場へ続いていた。メロスの眼には、もはやその一本の道しか映らなかった。",
+      "赤い光が車窓を満たした。太陽よ、しばし待て。友の胸がまだ温かいうちに、私はあの腕へ飛びこまねばならぬ。"
+    ],
+    goal:["友よ、私はここにいる。車の響きよ、この声より先に、あの人の耳へ届いてくれ。"]
+  };
+  function updateStory(dt) {
+    storyClock+=dt;
+    if(storyClock<.2 || narr.s.length-narr.shown>35)return;
+    var section=sectionAt(car.z), lines=STORY[section]||(section==='sprint'?STORY.town:STORY.goal);
+    var index=storyIndex[section]||0;
+    if(index<lines.length){say(lines[index],0);storyIndex[section]=index+1;storyClock=0;}
+    else if(storyClock>.6) {
+      var refrain=["車輪は回った。道は続いた。メロスは、友の名を胸の内で呼びながら走った。","一刻が惜しかった。風が頬を打っても、メロスはまばたきさえ惜しんで、前を見た。","まだ走れる。そう思うたび、メロスはハンドルを握り直した。待っていてくれ。私は帰る。"][index%3];
+      say(refrain,0);storyIndex[section]=index+1;storyClock=0;
     }
-    if (line) out.push(line);
+  }
+  function updateCompanion(dt) {
+    if(car.z<RIVERS[4].z1)return;
+    if(!philo.active) {
+      philo.active=true;philo.side=car.x>0?-1:1;philo.enter=0;philo.stage=1;
+      say("その時、別のエンジンの音が迫った。青い車が傍らへ並ぶ。フィロストラトスであった。青年は窓から身を乗り出した。「メロスさま、もう、むだでございます。」",4);
+    }
+    philo.enter=Math.min(1,philo.enter+dt*.7);
+    philo.x=car.x+philo.side*65;philo.z=car.z-120+philo.enter*135;
+    philo.y=car.y;philo.a=car.a;philo.v=car.v;philo.roll=car.roll*.65;philo.wheelSpin=car.wheelSpin;
+    if(philo.stage===1 && car.z>GOALZ-6800) {
+      philo.stage=2;say("「まだ陽は沈まぬ。」メロスは叫んだ。フィロストラトスの車は、必死に食い下がった。「あの方は、あなたを信じておいでです。最後まで、少しも疑わずに。」",4);
+    }
+    if(philo.stage===2 && car.z>GOALZ-3400) {
+      philo.stage=3;say("「だから、走るのだ。」メロスはそれだけ答えた。青年の声が風にちぎれた。二台の車は、長い影を引きずりながら、刑場への道を駈けた。",4);
+    }
+  }
+  function wrapLines(str, maxw) {
+    var out=[],line="", noStart="、。，．！？!?）］｝〉》」』】ーぁぃぅぇぉっゃゅょ", noEnd="（［｛〈《「『【";
+    for (var i=0;i<str.length;i++) {
+      var ch=str[i];
+      if(ch === "\n") { out.push(line); line=""; continue; }
+      if(line && ctx.measureText(line+ch).width>maxw && noStart.indexOf(ch)<0) {
+        var last=line.slice(-1);
+        if(noEnd.indexOf(last)>=0) {out.push(line.slice(0,-1));line=last;}
+        else {out.push(line);line="";}
+      }
+      line+=ch;
+    }
+    if(line)out.push(line);
     return out;
   }
   function drawText() {
-    ctx.fillStyle = "rgba(22,18,24,.9)";
-    ctx.fillRect(0, VH, W, TEXTH);
-    ctx.fillStyle = "rgba(240,226,198,.22)";
-    ctx.fillRect(0, VH, W, 2);
     ctx.save();
-    ctx.font = "500 25px 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', 'Times New Roman', serif";
-    ctx.fillStyle = "#f1e6d2";
-    ctx.textAlign = "left";
-    var shown = narr.s.slice(0, Math.floor(narr.shown));
-    var lines = wrapLines(shown, W - 60), i;
-    for (i = 0; i < lines.length && i < 3; i++) ctx.fillText(lines[i], 30, VH + 52 + i * 38);
+    ctx.fillStyle="#fffdf8";ctx.fillRect(0,0,W,TEXTH);
+    ctx.fillStyle="#ded8ce";ctx.fillRect(0,TEXTH-1,W,1);
+    ctx.font="400 19px 'Yu Mincho', 'Hiragino Mincho ProN', 'Noto Serif JP', serif";
+    ctx.fillStyle="#25221e";ctx.textAlign="left";ctx.textBaseline="alphabetic";
+    if(narr.layoutAt!==narr.shown) {
+      narr.lines=wrapLines(narr.s.slice(0,narr.shown),W-76);
+      narr.layoutAt=narr.shown;
+    }
+    var titleSpace=state===ST.READY?62:0;
+    if(titleSpace) {
+      ctx.save();ctx.font="700 32px 'Yu Mincho','Hiragino Mincho ProN',serif";
+      ctx.textAlign='center';ctx.fillText('車で走れメロス',W/2,43);ctx.restore();
+    }
+    var leading=28, target=Math.max(0,narr.lines.length-(titleSpace?4:6))*leading;
+    narr.scroll+=(target-narr.scroll)*(1-Math.exp(-32*narr.dt));
+    if(Math.abs(target-narr.scroll)<.05)narr.scroll=target;
+    ctx.beginPath();ctx.rect(28,13+titleSpace,W-56,TEXTH-26-titleSpace);ctx.clip();
+    var first=Math.max(0,Math.floor(narr.scroll/leading)-1);
+    for(var i=first;i<narr.lines.length;i++) {
+      var y=34+titleSpace+i*leading-narr.scroll;
+      if(y>TEXTH+leading)break;
+      ctx.fillText(narr.lines[i],32,y);
+    }
     ctx.restore();
   }
 
-  /* ===== 上の残り時間と、右のタテのめもり ===== */
-  function drawHud() {
-    ctx.save();
-    var lv = left(), warn = lv < 15;
-    ctx.fillStyle = warn ? "rgba(220,64,44,.96)" : "rgba(28,22,24,.8)";
-    ctx.textAlign = "left";
-    ctx.font = "600 19px 'Hiragino Mincho ProN', 'Yu Mincho', serif";
-    ctx.fillText("日没まで", 18, 40);
-    ctx.font = "800 32px ui-monospace, Menlo, Consolas, monospace";
-    ctx.fillText(lv.toFixed(1), 98, 43);
-
-    var bx = W - 30, top = 86, bot = VH - 96, hgt = bot - top;
-    ctx.fillStyle = "rgba(28,22,24,.2)";
-    ctx.fillRect(bx - 5, top, 10, hgt);
-    var pr = Math.max(0, Math.min(1, (car.z + 280) / (GOALZ + 280)));
-    ctx.fillStyle = "rgba(28,22,24,.55)";
-    ctx.fillRect(bx - 5, bot - hgt * pr, 10, hgt * pr);
-    var rv = (RIVER.z0 + 280) / (GOALZ + 280);           /* 川のあるところ */
-    ctx.fillStyle = "rgba(70,100,110,.85)";
-    ctx.fillRect(bx - 9, bot - hgt * rv - 1, 18, 3);
-    ctx.fillStyle = "#5c4632";                           /* いちばん上が刑場 */
-    ctx.fillRect(bx - 2, top - 22, 4, 18);
-    ctx.fillRect(bx - 9, top - 16, 18, 4);
-    ctx.fillStyle = "#c8452e";                           /* いまいるところ */
-    ctx.beginPath();
-    ctx.arc(bx, bot - hgt * pr, 7, 0, 6.284);
-    ctx.fill();
-    ctx.restore();
-  }
 
   function drawButton(b) {
     ctx.save();
@@ -840,22 +1084,72 @@
     ctx.textBaseline = "alphabetic";
   }
 
-  var tick = 0;
+  function drawDriverName(vehicle, name) {
+    toCam(vehicle.x, vehicle.y + 37, vehicle.z);
+    if (_cz <= NEAR) return;
+    var scale = FOCAL / _cz;
+    var x = W / 2 + _cx * scale, y = CY - _cy * scale;
+    if (x < -100 || x > W + 100 || y < 0 || y > VH) return;
+    ctx.save();
+    ctx.font = "600 14px 'Yu Gothic', sans-serif";
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    var width = ctx.measureText(name).width + 20;
+    x = Math.max(width / 2 + 6, Math.min(W - width / 2 - 6, x));
+    ctx.fillStyle = 'rgba(30,28,29,.76)';
+    ctx.fillRect(x - width / 2, y - 12, width, 24);
+    ctx.fillStyle = '#fffdf6';
+    ctx.fillText(name, x, y);
+    ctx.restore();
+  }
+  function drawWind() {
+    if(!windMode || state!==ST.PLAY)return;
+    ctx.save();
+    var strength=windMix*Math.min(1,car.v/620);
+    var edge=ctx.createLinearGradient(0,0,W,0);
+    edge.addColorStop(0,'rgba(18,17,27,'+(.32*strength)+')');
+    edge.addColorStop(.24,'rgba(18,17,27,0)');
+    edge.addColorStop(.76,'rgba(18,17,27,0)');
+    edge.addColorStop(1,'rgba(18,17,27,'+(.32*strength)+')');
+    ctx.fillStyle=edge;ctx.fillRect(0,0,W,VH);
+    // Ink-like wakes extend backwards from the rear wheels.
+    for(var s=-1;s<=1;s+=2) {
+      toCam(car.x+s*14,car.y+5,car.z-28);
+      if(_cz<=NEAR)continue;
+      var scale=FOCAL/_cz,x=W/2+_cx*scale,y=CY-_cy*scale;
+      ctx.beginPath();ctx.moveTo(x,y);
+      ctx.bezierCurveTo(x+s*18,y+45,x+s*(35+Math.sin(tick*8)*8),VH-35,x+s*65,VH+20);
+      ctx.lineTo(x+s*34,VH+20);
+      ctx.bezierCurveTo(x+s*24,VH-30,x+s*7,y+30,x,y);
+      ctx.fillStyle='rgba(22,22,30,'+(.28*strength)+')';ctx.fill();
+    }
+    for(var i=0;i<26;i++) {
+      var side=i%2?-1:1,phase=(tick*(1.25+car.v/700)+i*.137)%1;
+      var x=W/2+side*(W*.22+phase*W*.37),y=VH*.15+phase*VH*.78;
+      ctx.strokeStyle='rgba(18,19,28,'+((.12+phase*.32)*strength)+')';
+      ctx.lineWidth=1+(i%3)*.7;
+      ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+side*(25+phase*38),y+45+phase*65);ctx.stroke();
+    }
+    ctx.restore();
+  }  var tick = 0;
   function draw() {
     ctx.save();
+    ctx.translate(0,TEXTH);
     ctx.beginPath(); ctx.rect(0, 0, W, VH); ctx.clip();
     drawSky();
     drawRoad(); drawProps(); drawRocks(); drawActors(); drawGoal();
-    drawPolys();
+    drawKing();
     drawCar();
+    if(philo.active)drawCar(philo);
     drawPolys();
+    drawDriverName(car, 'メロス');
+    if(philo.active)drawDriverName(philo, 'フィロストラトス');
+    drawWind();
     if (flash > 0) {
       ctx.fillStyle = "rgba(255,246,226," + Math.min(0.7, flash) + ")";
       ctx.fillRect(0, 0, W, VH);
     }
     ctx.restore();
 
-    drawHud();
     drawText();
 
     if (state === ST.READY) {
@@ -863,30 +1157,16 @@
       ctx.save();
       ctx.globalAlpha = 0.35 + 0.45 * pp;
       ctx.fillStyle = "#c8452e";
-      ctx.translate(W / 2, VH * 0.44 - pp * 10);
+      ctx.translate(W / 2, TEXTH + VH * 0.44 - pp * 10);
       ctx.beginPath();
       ctx.moveTo(0, -26); ctx.lineTo(26, 14); ctx.lineTo(0, 2); ctx.lineTo(-26, 14);
       ctx.closePath(); ctx.fill();
       ctx.restore();
     }
 
-    if (state === ST.RESULT) {
-      ctx.fillStyle = ok ? "rgba(250,226,180,.9)" : "rgba(28,24,44,.88)";
-      ctx.fillRect(0, 0, W, VH);
-      ctx.save();
-      ctx.textAlign = "center";
-      ctx.fillStyle = ok ? "#3a2a1e" : "#efe4d6";
-      ctx.font = "600 20px 'Hiragino Mincho ProN', 'Yu Mincho', serif";
-      ctx.fillText(ok ? "日没まで" : "日没", W / 2, VH * 0.3);
-      ctx.font = "800 84px ui-monospace, Menlo, Consolas, monospace";
-      ctx.fillText(left().toFixed(1), W / 2, VH * 0.44);
-      ctx.font = "600 30px 'Hiragino Mincho ProN', 'Yu Mincho', serif";
-      ctx.fillText(hits + "人をはねとばした", W / 2, VH * 0.54);
-      ctx.restore();
-      resultButtons().forEach(drawButton);
-    }
   }
 
+  layout();
   buildPalette();
   newRun();
 
