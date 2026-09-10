@@ -4,8 +4,16 @@
 `https://www.zounoashi.com/games/wanko/…` も `games/_wanko/…` も 404 になり、直リンクでも開けません。
 このファイル自体も公開されません。
 
-サイトのトップ（`index.html`）からも登録を外してあるので、一覧にも出ず、
+サイトのトップ（`index.html`）の `GAMES` にも入れていないので、公開サイトの一覧には出ず、
 ページのソースにも名前が残りません。
+
+## 手元では一覧に出る
+
+`index.html` は、**localhost で開いたときだけ** このフォルダの `local.js` を読みに行きます。
+そこに一覧用の1件が書いてあるので、手元では実験場のタブにカードが出て、そのまま遊べます。
+公開サイトではこのファイルを読みに行かないので、何も出ません。
+
+手元で試したぶんはプレイ数に数えません（`countsHit` が localhost では何もしません）。
 
 ## 公開するとき
 
@@ -15,8 +23,9 @@
    git mv games/_wanko games/wanko
    ```
 
-2. `index.html` の `var GAMES = [` の中、実験場のゲームが並んでいるところ（`melos` の行の上）に
-   次の1行を戻す
+2. `games/wanko/local.js` の中の1件を、`index.html` の `var GAMES = [` の中、
+   実験場のゲームが並んでいるところ（`melos` の行の上）に移す。
+   **パスの `_wanko` を `wanko` に直す**のを忘れずに。
 
    ```js
    { type: "lab", tags: [], id: "wanko", title: "わんこボマー", year: 2026, date: "2026-09-11",
@@ -25,7 +34,9 @@
      catch: "次から次へと差し出される爆弾を、導火線が尽きる前に解除しつづける" },
    ```
 
-3. `git add` → `git commit` → `git push origin main`
+3. `local.js` を消す（`git rm games/wanko/local.js`）
+
+4. `git add` → `git commit` → `git push origin main`
 
 ## 中身のおぼえがき
 
