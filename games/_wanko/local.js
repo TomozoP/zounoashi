@@ -7,9 +7,10 @@
    公開するときは games/_wanko/README.md の手順どおりに、
    フォルダ名を games/wanko に戻して、下の1件を index.html の GAMES に移します
    （パスの _wanko を wanko に直すのを忘れずに）。 */
+/* 手元で古いファイルが残らないよう、開くたびに違うURLにする（公開時は付けない） */
 window.DRAFT_GAMES = [
   { type: "lab", tags: [], id: "wanko", title: "わんこボマー", year: 2026, date: "2026-09-11",
     plays: null, url: "", img: "games/_wanko/img/thumb.svg",
-    play: "games/_wanko/index.html", full: true,
+    play: "games/_wanko/index.html?v=" + Date.now(), full: true,
     catch: "次から次へと差し出される爆弾を、導火線が尽きる前に解除しつづける" }
 ];
