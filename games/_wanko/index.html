@@ -41,7 +41,7 @@
     H = Math.max(780, Math.min(1700, Math.round(W * vh / vw)));
 
     CX = W / 2;
-    GROUND = Math.round(H * 0.62);
+    GROUND = Math.round(H * 0.67);
     TABLE_Y = GROUND - 32;
     END_Y = GROUND + Math.round(H * 0.15);
     FACE.w = 240; FACE.h = 140;
@@ -1084,26 +1084,43 @@
   var OK_HEAD = { x: 0.50, y: 0.073 };       /* 絵の中の顔の位置 */
   var OK_OUT = { x: 0.62, y: 0.32 };         /* 爆弾を出してくるあたり(胸の前) */
 
-  /* 真ん中に立つ。出すものが無い間は、右へ半分はけて取りに行く */
-  var okOut = 0;
-  function okamiBox() {
-    var top = 34;
+  /* 女将は右から入ってきて真ん中に立ち、出し終えたら左へはけていく。
+     入れ替わりの間だけ2人が画面に居る */
+  var staff = [], OK_IN = 330, OK_GONE = -360, OK_SPEED = 820;
+
+  function okamiBox(dx) {
+    var top = 92;
     var h = Math.max(520, Math.min(1150, (TABLE_Y - top) / 0.72));
     var w = h * OK_RATIO;
-    return { x: (W - w) / 2 + okOut * 215, y: top, w: w, h: h };
+    return { x: (W - w) / 2 + (dx || 0), y: top, w: w, h: h };
   }
+  function nowServing() { return staff.length ? staff[staff.length - 1] : null; }
   function servePoint() {
-    var b = okamiBox();
+    var s = nowServing(), b = okamiBox(s ? s.x : 0);
     return { x: b.x + b.w * OK_OUT.x, y: b.y + b.h * OK_OUT.y };
+  }
+  function staffStep(dt) {
+    for (var i = staff.length - 1; i >= 0; i--) {
+      var s = staff[i], to = s.mode === "out" ? OK_GONE : 0;
+      var d = to - s.x, step = OK_SPEED * dt;
+      s.x = Math.abs(d) <= step ? to : s.x + (d > 0 ? step : -step);
+      if (s.mode === "out" && s.x <= OK_GONE + 1) staff.splice(i, 1);
+    }
+  }
+  function staffSwap() {                         /* 出し終えた人がはけて、次の人が入ってくる */
+    for (var i = 0; i < staff.length; i++) staff[i].mode = "out";
+    staff.push({ x: OK_IN, mode: "in" });
   }
   function drawOkami() {
     if (!okamiOn) return;
-    var b = okamiBox();
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, W, TABLE_Y);
     ctx.clip();
-    ctx.drawImage(okami, b.x, b.y, b.w, b.h);
+    for (var i = 0; i < staff.length; i++) {
+      var b = okamiBox(staff[i].x);
+      ctx.drawImage(okami, b.x, b.y, b.w, b.h);
+    }
     ctx.restore();
   }
 
@@ -1121,13 +1138,11 @@
   /* 掛け声は画面の上、真ん中 */
   function drawSay() {
     if (!okamiOn || sayT > 1.9 || state === S.BOOM || state === S.RESULT) return;
-    var b = okamiBox();
-    var hy = b.y + b.h * OK_HEAD.y;
     ctx.save();
     ctx.globalAlpha = Math.max(0, sayT > 1.6 ? 1 - (sayT - 1.6) / 0.3 : 1);
     ctx.font = "700 21px sans-serif";
     var bw = ctx.measureText(say).width + 34, bh = 46;
-    var bx = CX - bw / 2, by = Math.max(8, hy - 74);
+    var bx = CX - bw / 2, by = 24;                /* 女将の頭より上に固定 */
     ctx.fillStyle = "#fffdf6";
     roundRect(bx, by, bw, bh, 12); ctx.fill();
     ctx.beginPath();                                  /* 下向きのしっぽ */
@@ -1188,6 +1203,7 @@
     bomb = bombs[0]; kind = bomb.kind; cur = bomb.cur;
     focus = 0;
     held = false;
+    staffSwap();                          /* 前の人ははけて、次の人が持って入ってくる */
     pickSay();
     sfxServe();
   }
@@ -1222,7 +1238,7 @@
   function newRound() {
     state = S.PLAY; phase = 0; score = 0; T = 0; INV = 1;
     parts = []; pile = []; shake = 0; flash = 0; lastKind = null;
-    bombs = []; bomb = null; okOut = 0;
+    bombs = []; bomb = null; staff = [];
     spawnWave();
     if (hissGain) hissGain.gain.value = 0;
     bgmDuck(0.16, 0.4);
@@ -1291,9 +1307,7 @@
       p.vx *= 0.99;
       if (p.age >= p.life) parts.splice(i, 1);
     }
-    /* 出すものが無い間は、女将が取りに行って半分はける */
-    var want = live().length || servingCount() ? 0 : 1;
-    okOut += Math.max(-1, Math.min(1, want - okOut)) * Math.min(1, dt * 5.5);
+    staffStep(dt);
 
     if (state === S.PLAY) {
       var worst = 1, i;
