@@ -81,6 +81,25 @@ g.until(function () { return g.probe.now().state === "result"; });
 - サムネは正方形に切られます（`object-fit: cover`）。`thumb.js` は縦長の画面から
   「上のほう」と「下のほう」を詰めた正方形を作ります
 
+## 素材の画像
+
+生成した png をそのまま置かないこと。だいたい 2MB くらいあります。webp にすると
+1割前後に減ります（見た目はほぼ変わらない）。
+
+```bash
+node games/_tools/img.js "C:/Users/megus/Downloads/image (2).png" -o games/_hoge/img
+node games/_tools/img.js 拾った絵/ -o games/_hoge/img -w 1080   # 横1080まで縮める
+```
+
+- まとめて渡せます。フォルダを渡すと中の画像を全部
+- 出す先を書かなければ、元と同じ場所に同じ名前の `.webp` ができる
+- 元のファイルは消しません
+- 透過はそのまま残ります
+- `-q` で画質（既定82）、`-w` / `-h` で大きさの上限、`--png` で png のまま縮小
+
+裏で Edge か Chrome を画面なしで借りて書き出しています（Node だけでは webp を
+作れないため）。手は要りません。
+
 ## 気をつけること
 
 - **キー操作**: ページに埋め込まれて動くので、他の場所をクリックするとフォーカスが外れます。
@@ -98,6 +117,7 @@ g.until(function () { return g.probe.now().state === "result"; });
 | `smoke.js` | 落ちないかの共通確認（読み込み・30秒・画面6通り・でたらめ操作・やり直し） |
 | `harness.js` | 偽DOMの台。ゲームごとのテストはこれを使って書く |
 | `thumb.js` | 動いている画面からサムネ（600x600 webp）を作る |
+| `img.js` | 素材の png/jpg を webp にする（縮小もできる） |
 | `publish.js` | `_` を外して `GAMES` に入れる（commit と push はしない） |
 | `tests/` | ゲームごとのテスト。`wanko-*.js` が書き方の見本 |
 
