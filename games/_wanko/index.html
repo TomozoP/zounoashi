@@ -1084,20 +1084,17 @@
   var OK_HEAD = { x: 0.50, y: 0.073 };       /* 絵の中の顔の位置 */
   var OK_OUT = { x: 0.62, y: 0.32 };         /* 爆弾を出してくるあたり(胸の前) */
 
+  /* 真ん中に立つ。出すものが無い間は、右へ半分はけて取りに行く */
+  var okOut = 0;
   function okamiBox() {
     var top = 34;
     var h = Math.max(520, Math.min(1150, (TABLE_Y - top) / 0.72));
     var w = h * OK_RATIO;
-    return { x: W + 10 - w, y: top, w: w, h: h };
+    return { x: (W - w) / 2 + okOut * 215, y: top, w: w, h: h };
   }
   function servePoint() {
     var b = okamiBox();
     return { x: b.x + b.w * OK_OUT.x, y: b.y + b.h * OK_OUT.y };
-  }
-  /* サブ女将（左側）が差し出すあたり */
-  function subServePoint() {
-    var b = okamiBox(), w = b.w * 0.92, h = b.h * 0.92;
-    return { x: -40 + w * (1 - OK_OUT.x), y: b.y + (b.h - h) + h * OK_OUT.y };
   }
   function drawOkami() {
     if (!okamiOn) return;
@@ -1107,22 +1104,6 @@
     ctx.rect(0, 0, W, TABLE_Y);
     ctx.clip();
     ctx.drawImage(okami, b.x, b.y, b.w, b.h);
-    ctx.restore();
-  }
-
-  /* 2台まとめて出てくるときだけ、左から入ってくるもう一人 */
-  function drawSub() {
-    if (!okamiOn || sub < 0) return;
-    var b = okamiBox();
-    var w = b.w * 0.92, h = b.h * 0.92;
-    var x = -40 - (1 - Math.min(1, sub)) * 220;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, W, TABLE_Y);
-    ctx.clip();
-    ctx.translate(x + w, b.y + (b.h - h));
-    ctx.scale(-1, 1);                          /* 左右を返して、こちらを向かせる */
-    ctx.drawImage(okami, 0, 0, w, h);
     ctx.restore();
   }
 
@@ -1137,26 +1118,27 @@
     lastSay = i; say = LINES[i]; sayT = 0;
   }
 
+  /* 掛け声は画面の上、真ん中 */
   function drawSay() {
     if (!okamiOn || sayT > 1.9 || state === S.BOOM || state === S.RESULT) return;
     var b = okamiBox();
-    var hx = b.x + b.w * OK_HEAD.x, hy = b.y + b.h * OK_HEAD.y;
+    var hy = b.y + b.h * OK_HEAD.y;
     ctx.save();
     ctx.globalAlpha = Math.max(0, sayT > 1.6 ? 1 - (sayT - 1.6) / 0.3 : 1);
     ctx.font = "700 21px sans-serif";
     var bw = ctx.measureText(say).width + 34, bh = 46;
-    var bx = Math.max(10, hx - 55 - bw), by = hy - 29;
+    var bx = CX - bw / 2, by = Math.max(8, hy - 74);
     ctx.fillStyle = "#fffdf6";
     roundRect(bx, by, bw, bh, 12); ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(bx + bw - 2, by + 19);
-    ctx.lineTo(bx + bw + 19, by + 28);
-    ctx.lineTo(bx + bw - 2, by + 36);
+    ctx.beginPath();                                  /* 下向きのしっぽ */
+    ctx.moveTo(CX - 9, by + bh - 2);
+    ctx.lineTo(CX, by + bh + 17);
+    ctx.lineTo(CX + 9, by + bh - 2);
     ctx.closePath(); ctx.fill();
     ctx.fillStyle = "#2a221c";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(say, bx + bw / 2, by + bh / 2 + 1);
+    ctx.fillText(say, CX, by + bh / 2 + 1);
     ctx.restore();
     ctx.textBaseline = "alphabetic";
   }
@@ -1165,13 +1147,12 @@
   /* 爆弾は同時に2台まで。台ごとに serve → live → pass と進む */
   var S = { PLAY: "play", BOOM: "boom", RESULT: "result" };
   var state, score, bombs, bomb, kind, phase, cur, focus, INV;
-  var parts, shake, flash, pile, T, lastKind, held, sub, DUAL_FROM = 20;
+  var parts, shake, flash, pile, T, lastKind, held, DUAL_FROM = 20;
 
-  /* 置き場所。1台なら真ん中、2台なら左右に並べて小さくする */
+  /* 置き場所。1台なら真ん中、2ユニット連結なら左右の面板に振り分ける */
   function slotTf(i, n) {
     if (n < 2) return { x: 0, y: 0, s: 1 };
-    var s = 0.6;
-    return { x: (i === 0 ? W * 0.25 : W * 0.75) - CX, y: 150 * (1 - s), s: s };
+    return { x: i === 0 ? -139 : 139, y: 0, s: 0.92 };
   }
 
   /* 台ごとに、その台を「いまの1台」として扱う */
@@ -1191,25 +1172,33 @@
     var kd = TYPES[key];
     var b = { key: key, kind: kd, body: kd.body, fuse: 1,
               fuseTime: (Math.max(2.9, 6.2 - k * 0.14) + (kd.extra || 0)) * (dual ? 2.2 : 1),
-              slots: null, cur: -1, dual: !!dual, fromLeft: i === 0 && dual,
+              slots: null, cur: -1, twin: !!dual,
               mode: "serve", mt: 0, tf: slotTf(i, n) };
     withBomb(b, function () { kd.make(b, k); });
     b.cur = b.slots ? Math.floor(b.slots.length / 2) : -1;
     return b;
   }
 
-  /* 1台、20個目からはときどき2台まとめて出す */
+  /* ふつうは1台。20個目から10回に1度だけ、2ユニット連結の大きいのが出る */
   function spawnWave() {
-    var dual = score >= DUAL_FROM && Math.random() < 0.5;
+    var dual = score >= DUAL_FROM && Math.random() < 0.1;
     var n = dual ? 2 : 1;
     bombs = [];
     for (var i = 0; i < n; i++) bombs.push(newBomb(score, dual, i, n));
     bomb = bombs[0]; kind = bomb.kind; cur = bomb.cur;
     focus = 0;
-    sub = dual ? 0 : -1;                  /* 0以上ならサブ女将が出てくる（入場の進み具合） */
     held = false;
     pickSay();
     sfxServe();
+  }
+
+  function isTwin() { return bombs.length === 2 && bombs[0].twin; }
+
+  /* 連結のときの導火線は、まだ残っているユニットのもの */
+  function waveFuse() {
+    var f = 1;
+    for (var i = 0; i < bombs.length; i++) if (bombs[i].mode !== "done") f = Math.min(f, bombs[i].fuse);
+    return f;
   }
 
   function live() {
@@ -1223,11 +1212,17 @@
     for (var i = 0; i < bombs.length; i++) if (bombs[i].mode === "pass") return true;
     return false;
   }
+  /* 出てくる途中の台の数 */
+  function servingCount() {
+    var n = 0;
+    for (var i = 0; i < bombs.length; i++) if (bombs[i].mode === "serve") n++;
+    return n;
+  }
 
   function newRound() {
     state = S.PLAY; phase = 0; score = 0; T = 0; INV = 1;
     parts = []; pile = []; shake = 0; flash = 0; lastKind = null;
-    bombs = []; sub = -1; bomb = null;
+    bombs = []; bomb = null; okOut = 0;
     spawnWave();
     if (hissGain) hissGain.gain.value = 0;
     bgmDuck(0.16, 0.4);
@@ -1253,6 +1248,12 @@
     bomb.plate = pileSlot(score);
     pile.push(bomb.plate);
     score++;
+    if (isTwin()) {                       /* 連結は、両方そろってから飛んでいく */
+      bomb.mode = "done"; bomb.mt = 0;
+      for (var i = 0; i < bombs.length; i++) if (bombs[i].mode !== "done") return;
+      for (i = 0; i < bombs.length; i++) { bombs[i].mode = "pass"; bombs[i].mt = 0; }
+      return;
+    }
     bomb.mode = "pass"; bomb.mt = 0;
   }
 
@@ -1290,7 +1291,9 @@
       p.vx *= 0.99;
       if (p.age >= p.life) parts.splice(i, 1);
     }
-    if (sub >= 0 && sub < 1) sub = Math.min(1, sub + dt / 0.45);
+    /* 出すものが無い間は、女将が取りに行って半分はける */
+    var want = live().length || servingCount() ? 0 : 1;
+    okOut += Math.max(-1, Math.min(1, want - okOut)) * Math.min(1, dt * 5.5);
 
     if (state === S.PLAY) {
       var worst = 1, i;
@@ -1304,8 +1307,8 @@
           if (state !== S.PLAY) return;                    /* tick の中で決着することがある */
           b.fuse -= dt / b.fuseTime;
           if (b.fuse < worst) worst = b.fuse;
-          if (b.fuse > 0 && Math.random() < dt * 40) {
-            var p = posOf(b), a = BODY[b.body].fuse, q = bez(FUSE_PATH, b.fuse);
+          if (b.fuse > 0 && Math.random() < dt * 40 && !(b.twin && b !== bombs[0])) {
+            var p = wavePos(b), a = b.twin ? TWIN_FUSE : BODY[b.body].fuse, q = bez(FUSE_PATH, b.fuse);
             spark(CX + p.x + (a.x + q.x) * p.s, GROUND + p.y + (a.y + q.y) * p.s, 1, "#ffd36b", 70 * p.s);
           }
           if (b.fuse <= 0) { b.fuse = 0; bomb = b; kind = b.kind; fail(); return; }
@@ -1315,7 +1318,7 @@
       }
       if (hissGain) hissGain.gain.value = 0.05 + (1 - worst) * 0.11;
       if (hissFilter) hissFilter.frequency.value = 1800 + (1 - worst) * 2200;
-      if (!bombs.length) { if (sub >= 0) sub = -1; spawnWave(); }
+      if (!bombs.length) spawnWave();
       else if (live().indexOf(bomb) < 0) {                 /* 触る先が無くなったら生きている方へ */
         var lv = live();
         if (lv.length) { bomb = lv[0]; kind = bomb.kind; cur = bomb.cur; focus = bombs.indexOf(bomb); }
@@ -1327,21 +1330,27 @@
 
   function ease(x) { return 1 - Math.pow(1 - x, 3); }
 
-  /* 台ごとの、いまの位置と大きさ */
-  function posOf(b) {
-    var tf = b.tf, cy = GROUND - 150;
+  /* 台ぜんたい（連結なら箱ごと）の動き */
+  function wavePos(b) {
+    var cy = GROUND - 150;
     if (b.mode === "serve") {
       var u = ease(Math.min(1, b.mt / 0.32));
-      var sp = b.fromLeft ? subServePoint() : servePoint();
-      return { x: (sp.x - CX) * (1 - u) + tf.x * u, y: (sp.y - cy) * (1 - u) + tf.y * u,
-               s: 0.46 * (1 - u) + tf.s * u, rot: (1 - u) * 0.5 };
+      var sp = servePoint();
+      return { x: (sp.x - CX) * (1 - u), y: (sp.y - cy) * (1 - u),
+               s: 0.46 * (1 - u) + u, rot: (1 - u) * 0.5 };
     }
     if (b.mode === "pass") {
       var v = Math.min(1, b.mt / 0.4), e = ease(v), slot = b.plate;
-      return { x: tf.x + (slot.x - CX - tf.x) * e, y: tf.y + (slot.y - cy - tf.y) * e - Math.sin(v * Math.PI) * 90,
-               s: tf.s + (slot.r / 170 - tf.s) * e, rot: -v * 1.4, gone: v >= 1 };
+      return { x: (slot.x - CX) * e, y: (slot.y - cy) * e - Math.sin(v * Math.PI) * 90,
+               s: 1 + (slot.r / 170 - 1) * e, rot: -v * 1.4, gone: v >= 1 };
     }
-    return { x: tf.x, y: tf.y, s: tf.s, rot: 0 };
+    return { x: 0, y: 0, s: 1, rot: 0 };
+  }
+
+  /* ユニットごとの、いまの位置と大きさ（台の動き × 面板の割り当て） */
+  function posOf(b) {
+    var w = wavePos(b), tf = b.tf;
+    return { x: w.x + tf.x * w.s, y: w.y + tf.y * w.s, s: tf.s * w.s, rot: w.rot, gone: w.gone };
   }
 
   /* 画面の点を、その台の中の座標に直す */
@@ -1579,8 +1588,8 @@
     ctx.restore();
   }
 
-  function drawTray() {
-    var rx = BODY[bomb.body].tray, y = GROUND - 4;
+  function drawTray(rxIn) {
+    var rx = rxIn || BODY[bomb.body].tray, y = GROUND - 4;
     ctx.save();
     ctx.fillStyle = "rgba(0,0,0,.35)";
     ctx.beginPath(); ctx.ellipse(CX, y + 10, rx, 28, 0, 0, 6.284); ctx.fill();
@@ -1621,8 +1630,8 @@
     }
   }
 
-  function drawFuse() {
-    var a = BODY[bomb.body].fuse, f = bomb.fuse;
+  function drawFuse(aIn, fIn) {
+    var a = aIn || BODY[bomb.body].fuse, f = fIn === undefined ? bomb.fuse : fIn;
     if (f <= 0.001) return;
     ctx.save();
     ctx.translate(CX + a.x, GROUND + a.y);
@@ -1658,14 +1667,79 @@
     bomb = ob; kind = ok; cur = ocur;
   }
 
+  /* 2ユニット連結の大きい箱 */
+  var TWIN_FUSE = { x: 104, y: -284 };
+  function drawTwinBody() {
+    var y = GROUND - 292, h = 292, uw = 246;
+    for (var s = 0; s < 2; s++) {
+      var ux = s ? CX + 16 : CX - 262;
+      var g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, "#5e6874");
+      g.addColorStop(0.45, "#333c46");
+      g.addColorStop(1, "#161c22");
+      ctx.fillStyle = g;
+      roundRect(ux, y, uw, h, 14); ctx.fill();
+      ctx.strokeStyle = "#727c88"; ctx.lineWidth = 3;
+      roundRect(ux + 8, y + 8, uw - 16, h - 16, 10); ctx.stroke();
+    }
+    ctx.fillStyle = "#8d7038";                       /* 連結の帯 */
+    ctx.fillRect(CX - 24, y + 26, 48, h - 52);
+    ctx.fillStyle = "#c6a559";
+    for (var i = 0; i < 4; i++) {
+      ctx.beginPath(); ctx.arc(CX, y + 50 + i * (h - 100) / 3, 5.5, 0, 6.284); ctx.fill();
+    }
+    ctx.fillStyle = "#b8974f";                       /* 導火線の口金 */
+    ctx.fillRect(CX + 78, y - 6, 52, 14);
+  }
+
   function drawBomb() {
     if (state === S.BOOM || state === S.RESULT) return;
     if (bomb) bomb.cur = cur;
-    for (var i = 0; i < bombs.length; i++) {
-      var b = bombs[i], pos = posOf(b);
+    var i, b, cy = GROUND - 150;
+
+    if (isTwin()) {
+      var wp = wavePos(bombs[0]);
+      if (wp.gone) return;
+      ctx.save();
+      ctx.translate(CX + wp.x, cy + wp.y);
+      ctx.rotate(wp.rot || 0);
+      ctx.scale(wp.s, wp.s);
+      ctx.translate(-CX, -cy);
+      drawTray(252);
+      drawFuse(TWIN_FUSE, waveFuse());
+      drawTwinBody();
+      ctx.restore();
+      for (i = 0; i < bombs.length; i++) drawUnit(bombs[i]);
+      return;
+    }
+
+    for (i = 0; i < bombs.length; i++) {
+      b = bombs[i];
+      var pos = posOf(b);
       if (b.mode === "pass" && pos.gone) continue;
       drawBombAt(b, pos);
     }
+  }
+
+  /* 連結のときの、面板ひとつぶん */
+  function drawUnit(b) {
+    var pos = posOf(b), cy = GROUND - 150;
+    var ob = bomb, ok = kind, oc = cur;
+    bomb = b; kind = b.kind; cur = b.cur;
+    ctx.save();
+    ctx.translate(CX + pos.x, cy + pos.y);
+    ctx.rotate(pos.rot || 0);
+    ctx.scale(pos.s, pos.s);
+    ctx.translate(-CX, -cy);
+    kind.draw(b);
+    if (kind.drawFront && b.mode === "live") kind.drawFront(b);
+    if (b.mode !== "live" && b.mode !== "serve") {   /* 済んだ面は暗くする */
+      var fr = b.fr || FACE;
+      ctx.fillStyle = "rgba(6,10,14,.6)";
+      roundRect(fr.x, fr.y, fr.w, fr.h, 8); ctx.fill();
+    }
+    ctx.restore();
+    bomb = ob; kind = ok; cur = oc;
   }
 
   function drawParts() {
@@ -1716,7 +1790,7 @@
     if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
     drawBg();
     drawOkami();
-    drawSub();
+
     drawPile();
     drawBomb();
     drawParts();
