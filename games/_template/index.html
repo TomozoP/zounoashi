@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>あたらしいゲーム</title>
+<title>__TITLE__</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #0b1622; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; }
   * { -webkit-tap-highlight-color: transparent; }
-  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-  #wrap { position: relative; width: 100%; touch-action: none; }   /* 縦横比はJS側のW,Hから決まります */
-  canvas { width: 100%; height: 100%; display: block; background: #9fd8ef; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #12100e; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
 </style>
 </head>
 <body>
@@ -18,17 +18,13 @@
 </div></div>
 <script src="../share.js"></script>
 <script>
-/* =========================================================================
-   実験場ゲームの雛形。このフォルダごとコピーして中身を書き換えてください。
+/* __TITLE__
 
-   ここに用意してあるもの
-     ・画面サイズに関係なく 960x540 の座標で描けるcanvas（高解像度対応ずみ）
-     ・タップとスペースキー、両方で同じように操作できる入力
-     ・時間の刻み(dt)を渡してくれるゲームループ
-     ・結果画面と、「もう一度」「Xでシェア」のボタン
-
-   書き換えるところは UPDATE と DRAW、それに SHARE_TEXT の3か所が中心です。
-   ========================================================================= */
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
 (function () {
   "use strict";
 
@@ -36,49 +32,194 @@
   var ctx = canvas.getContext("2d");
   var wrap = document.getElementById("wrap");
 
-  /* 画面の大きさに関係なく、いつもこの座標で描ける。
-     ▼ 縦横比を変えたいときはここだけ直す（サイト側の GAMES に aspect も書く） */
-  var W = 960, H = 540;
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
+  var W = 540, H = 960;
+  function layout() {
+    var host = wrap.parentNode;
+    var vw = host.clientWidth || window.innerWidth;
+    var vh = host.clientHeight || window.innerHeight;
+    H = Math.max(780, Math.min(1700, Math.round(W * vh / vw)));
 
-  /* 横長の画面でも縦長の画面でも、はみ出さずに収まるようにする（全画面のとき効く） */
-  wrap.style.aspectRatio = W + " / " + H;
-  wrap.style.width = "min(100%, calc(100vh * " + W + " / " + H + "))";
-  function resize() {
+    place();                                   /* 高さが決まってから置き直す */
+
+    var scale = Math.min(vw / W, vh / H);
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    wrap.style.width = canvas.style.width = Math.round(W * scale) + "px";
+    wrap.style.height = canvas.style.height = Math.round(H * scale) + "px";
+    canvas.width = Math.round(W * scale * dpr);
+    canvas.height = Math.round(H * scale * dpr);
+    var k = canvas.width / W;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
   }
-  window.addEventListener("resize", resize);
-  resize();
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null;
+  function audioOn() {
+    if (AC) { if (AC.state === "suspended") AC.resume(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
 
   /* ============ 状態 ============ */
   var S = { PLAY: "play", RESULT: "result" };
-  var state, t, score;
+  var state, score, T, held, keyMode = false;
+
+  var CY;                                      /* 高さから決まる置き場所 */
+  function place() {
+    CY = Math.round(H * 0.5);                  /* ▼UPDATE: 置き場所の計算 */
+  }
 
   function newRound() {
     state = S.PLAY;
-    t = 0;
     score = 0;
+    T = 0;
+    held = false;
+    /* ▼UPDATE: ここで初期化 */
   }
-  newRound();
 
   /* ============ 進行 ============ */
   function update(dt) {
-    t += dt;
+    T += dt;
+    if (state !== S.PLAY) return;
 
-    if (state === S.PLAY) {
-      // ▼ UPDATE: ここにゲームの中身を書く
-      score = Math.floor(t * 10);
-      if (t > 3) state = S.RESULT;
-    }
+    /* ▼UPDATE: ここにゲームの中身 */
+    if (T > 5) state = S.RESULT;
   }
 
-  /* ============ 入力 ============ */
-  /* 押されたのが結果画面のボタンなら、その id が返る */
+  /* ============ 入力 ============
+     タップとスペースキーで同じことができるようにする。
+     x が null のときはキー操作（場所を指さない）。 */
+  function down(x, y) {
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "share") doShare();
+      else if (hit === "retry") newRound();
+      return;
+    }
+    held = true;
+    /* ▼UPDATE: 押したときの処理 */
+    score++;
+    tone(660, 0.08, 0.12, "square");
+  }
+  function move(x, y) {
+    if (state !== S.PLAY || !held) return;
+    /* ▼UPDATE: なぞっているときの処理（要らなければ空のまま） */
+  }
+  function up() {
+    if (!held) return;
+    held = false;
+    /* ▼UPDATE: 離したときの処理（要らなければ空のまま） */
+  }
+
+  function atCanvas(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+  }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  window.addEventListener("keydown", function (e) {
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (!esc && !go && !left && !right) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (left || right) {
+      if (state !== S.PLAY) return;
+      /* ▼UPDATE: 左右キー（選ぶものがあるとき。目印は keyMode のときだけ出す） */
+      return;
+    }
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") up();
+  });
+
+  function doShare() {
+    /* ▼SHARE: シェアされる文。リンクは share.js が後ろに付ける */
+    zShare({ text: score + "点でした #__TITLE__" });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    /* ▼DRAW: ここに絵 */
+    ctx.fillStyle = "#1d1714";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#f2ede4";
+    ctx.font = "800 92px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, CY);
+
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.68;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -92,95 +233,48 @@
     }
     return null;
   }
-
-  function doShare() {
-    // ▼ SHARE_TEXT: シェアされる文章。リンクは share.js が後ろに付けます
-    zShare({ text: score + "点とりました #あたらしいゲーム" });
-  }
-
-  /* x,y は canvas 上の座標。キー操作のときは undefined で来る */
-  function tap(x, y) {
-    if (state === S.RESULT) {
-      var hit = x == null ? "retry" : hitButton(x, y);
-      if (hit === "share") doShare();
-      else if (hit === "retry") newRound();
-      return;
-    }
-    // ▼ UPDATE: 遊んでいる最中に押されたときの処理
-  }
-
-  wrap.addEventListener("pointerdown", function (e) {
-    e.preventDefault();
-    var r = canvas.getBoundingClientRect();
-    tap((e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H);
-  });
-
-  window.addEventListener("keydown", function (e) {
-    var esc = e.key === "Escape";                                     // いつでも最初から
-    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    if (!esc && !go) return;
-    e.preventDefault();      // ページが下にスクロールしないように
-    if (e.repeat) return;    // 押しっぱなしで連打・連続リセットにはしない
-    if (esc) newRound(); else tap();
-  });
-
-  /* ============ 描画 ============ */
-  function drawButton(b) {
-    ctx.save();
-    ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
-    var hw = b.w / 2, hh = b.h / 2, rad = hh;
-    ctx.beginPath();
-    ctx.moveTo(-hw + rad, -hh);
-    ctx.arcTo(hw, -hh, hw, hh, rad);
-    ctx.arcTo(hw, hh, -hw, hh, rad);
-    ctx.arcTo(-hw, hh, -hw, -hh, rad);
-    ctx.arcTo(-hw, -hh, hw, -hh, rad);
-    ctx.closePath();
-    ctx.fillStyle = "#fff";
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "#16202e";
-    ctx.stroke();
-    ctx.fillStyle = "#16202e";
-    ctx.font = "800 24px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(b.label, 0, 1);
-    ctx.restore();
-    ctx.textBaseline = "alphabetic";
-  }
-
-  function drawNumber(x, y, size, str) {
-    ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.55)";
-    ctx.shadowBlur = 8;
-    ctx.font = "800 " + size + "px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(str, x, y);
-    ctx.restore();
-  }
-
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-
-    // ▼ DRAW: ここにゲームの絵を描く
-    ctx.fillStyle = "#9fd8ef";
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
     ctx.fillRect(0, 0, W, H);
-    drawNumber(W / 2, H * 0.5, 64, String(score));
-
-    if (state === S.RESULT) {
-      ctx.fillStyle = "rgba(8,16,26,.55)";
-      ctx.fillRect(0, 0, W, H);
-      drawNumber(W / 2, H * 0.5, 92, String(score));
-      resultButtons().forEach(drawButton);
-    }
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
   }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
+     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
+  window.__probe = {
+    now: function () { return { state: state, score: score, W: W, H: H }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
 
   /* ============ ループ ============ */
+  newRound();
+  layout();
   var last = performance.now();
   function loop(now) {
-    var dt = Math.min(0.033, (now - last) / 1000);   // 画面から離れて戻ったとき飛ばないように上限をつける
+    var dt = Math.min(0.033, (now - last) / 1000);   /* 戻ってきたとき飛ばないように上限 */
     last = now;
     update(dt);
     draw();
