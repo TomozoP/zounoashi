@@ -89,6 +89,11 @@
     hissGain.gain.value = 0;
     src.connect(hissFilter); hissFilter.connect(hissGain); hissGain.connect(AC.destination);
     src.start();
+
+    bgmGain = AC.createGain();
+    bgmGain.gain.value = 0.16;
+    bgmGain.connect(AC.destination);
+    bgmNext = AC.currentTime + 0.15;
   }
 
   function noiseHit(dur, freq, vol, q) {
@@ -140,6 +145,81 @@
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
     else { try { AC.resume(); } catch (e) {} }
   });
+
+  /* ============ BGM ============ */
+  /* ヨナ抜き音階の短い句を、箏っぽい音で並べ続ける。店の有線みたいな薄さで鳴らす */
+  var bgmGain = null, bgmNext = 0, bgmBar = 0;
+  var PENTA = [0, 2, 4, 7, 9];
+  var PHRASES = [
+    [4, -1, 3, 2, -1, 3, 4, -1],
+    [2, 3, 4, -1, 5, 4, -1, 3],
+    [4, 4, 3, -1, 2, -1, 1, -1],
+    [0, 2, 3, -1, 4, 3, 2, -1],
+    [5, 4, -1, 3, 4, -1, 2, -1],
+    [3, -1, 4, 5, -1, 4, 3, -1]
+  ];
+  var BEAT = 0.42;                                  /* 8分音符の長さ */
+
+  function penta(i, oct) {
+    var k = ((i % 5) + 5) % 5;
+    var step = PENTA[k] + 12 * (Math.floor(i / 5) + (oct || 0));
+    return 261.63 * Math.pow(2, step / 12);
+  }
+
+  function koto(freq, at, vol, dur) {
+    var o = AC.createOscillator(), o2 = AC.createOscillator();
+    var f = AC.createBiquadFilter(), g = AC.createGain();
+    o.type = "triangle"; o.frequency.value = freq;
+    o2.type = "sine"; o2.frequency.value = freq * 2.01;
+    f.type = "lowpass";
+    f.frequency.setValueAtTime(4200, at);
+    f.frequency.exponentialRampToValueAtTime(800, at + dur);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(vol, at + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(f); o2.connect(f); f.connect(g); g.connect(bgmGain);
+    o.start(at); o2.start(at); o.stop(at + dur + 0.05); o2.stop(at + dur + 0.05);
+  }
+
+  function tsuzumi(at, vol) {
+    if (!NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    s.playbackRate.value = 0.5;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = 320; f.Q.value = 3;
+    var g = AC.createGain();
+    g.gain.setValueAtTime(vol, at);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.16);
+    s.connect(f); f.connect(g); g.connect(bgmGain);
+    s.start(at); s.stop(at + 0.25);
+  }
+
+  function bgmSchedule() {
+    if (!AC || !bgmGain) return;
+    while (bgmNext < AC.currentTime + 1.2) {
+      var at = Math.max(bgmNext, AC.currentTime + 0.05);
+      var ph = PHRASES[(bgmBar * 3 + Math.floor(bgmBar / 4)) % PHRASES.length];
+      var root = [0, 0, 4, 3][bgmBar % 4];
+      koto(penta(root, -2), at, 0.20, 1.3);                 /* 低音 */
+      koto(penta(root + 2, -2), at + BEAT * 4, 0.14, 1.0);
+      tsuzumi(at + BEAT * 2, 0.10);
+      tsuzumi(at + BEAT * 6, 0.07);
+      for (var i = 0; i < 8; i++) {
+        if (ph[i] < 0) continue;
+        koto(penta(ph[i], 0), at + BEAT * i, 0.17, 0.85);
+      }
+      bgmNext = at + BEAT * 8;
+      bgmBar++;
+    }
+  }
+
+  function bgmDuck(v, sec) {
+    if (!bgmGain) return;
+    var n = AC.currentTime;
+    bgmGain.gain.cancelScheduledValues(n);
+    bgmGain.gain.setValueAtTime(bgmGain.gain.value, n);
+    bgmGain.gain.linearRampToValueAtTime(v, n + sec);
+  }
 
   /* ============ 道具 ============ */
   var GREEN = "#5dffa0", GREEN_D = "#1d6b45";
@@ -1077,11 +1157,13 @@
     parts = []; pile = []; shake = 0; flash = 0; lastKind = null;
     makeBomb();
     if (hissGain) hissGain.gain.value = 0;
+    bgmDuck(0.16, 0.4);
   }
 
+  /* 左端から積む。18枚で1本、そこから右へ列を足していく */
   function pileSlot(i) {
-    var row = Math.floor(i / 6), c = i % 6;
-    return { x: 44 + c * 38 + (row % 2) * 19, y: H - 44 - row * 30, r: 20 };
+    var col = Math.floor(i / 18), n = i % 18;
+    return { x: 52 + col * 66, y: H - 34 - n * 13, r: 30, kind: i % 3 };
   }
 
   function spark(x, y, n, col, sp) {
@@ -1096,7 +1178,6 @@
     if (state !== S.PLAY) return;
     sfxDone();
     var s = pileSlot(score);
-    s.body = bomb.body;
     pile.push(s);
     score++;
     state = S.PASS; phase = 0;
@@ -1115,6 +1196,7 @@
                    life: 1.2 + Math.random(), age: 0, c: "#1b1f25", r: 4 + Math.random() * 9, chunk: true });
     }
     if (hissGain) hissGain.gain.value = 0;
+    bgmDuck(0.05, 0.25);
     sfxBoom();
   }
 
@@ -1123,6 +1205,7 @@
     T += dt;
     phase += dt;
     sayT += dt;
+    bgmSchedule();
     if (shake > 0) shake = Math.max(0, shake - dt * 60);
     if (flash > 0) flash = Math.max(0, flash - dt * 3);
 
@@ -1278,31 +1361,88 @@
   });
 
   /* ============ 描画 ============ */
+  /* 定食屋の店内。奥が厨房の暖簾、手前が白木のカウンター */
   function drawBg() {
-    var g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#241c18");
-    g.addColorStop(1, "#120f0d");
+    var g = ctx.createLinearGradient(0, 0, 0, TABLE_Y);
+    g.addColorStop(0, "#40301f");
+    g.addColorStop(0.55, "#33261a");
+    g.addColorStop(1, "#241b13");
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, W, TABLE_Y);
 
-    var wx = 24, ww = W - 48, wy = 24, wh = TABLE_Y - 40;
+    /* 板張りの壁 */
     ctx.save();
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = "#3a2c20";
-    ctx.fillRect(wx, wy, ww, wh);
-    ctx.fillStyle = "#2a2018";
-    for (var x = wx + 62; x < wx + ww; x += 62) ctx.fillRect(x - 3, wy, 6, wh);
-    for (var y = wy + 62; y < wy + wh; y += 62) ctx.fillRect(wx, y - 3, ww, 6);
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = "#1c150f";
+    for (var y = 120; y < TABLE_Y; y += 46) ctx.fillRect(0, y, W, 3);
     ctx.restore();
 
+    /* 品書きの短冊（文字は入れない） */
+    ctx.save();
+    for (var i = 0; i < 4; i++) {
+      var sx = 22 + i * 28, sy = 132, sh = 112 + (i % 2) * 26;
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = "#e8dcc2";
+      ctx.fillRect(sx, sy, 24, sh);
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = "#3a2c20";
+      for (var m = 0; m < 5; m++) ctx.fillRect(sx + 9, sy + 16 + m * 20, 6, 11);
+    }
+    ctx.restore();
+
+    /* 赤提灯 */
+    ctx.save();
+    var lx = 192, ly = 200;
+    ctx.strokeStyle = "#2a1f16"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, ly - 40); ctx.stroke();
+    ctx.fillStyle = "#a8302a";
+    ctx.beginPath(); ctx.ellipse(lx, ly, 34, 44, 0, 0, 6.284); ctx.fill();
+    ctx.fillStyle = "rgba(255,190,120,.22)";
+    ctx.beginPath(); ctx.ellipse(lx - 9, ly - 10, 14, 22, 0, 0, 6.284); ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,.28)"; ctx.lineWidth = 2;
+    for (var r = -3; r <= 3; r++) {
+      ctx.beginPath();
+      ctx.ellipse(lx, ly + r * 12, 34 * Math.sqrt(Math.max(0.02, 1 - (r * 12 / 44) * (r * 12 / 44))), 2, 0, 0, 6.284);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#2a1f16";
+    ctx.fillRect(lx - 12, ly - 46, 24, 7);
+    ctx.fillRect(lx - 12, ly + 39, 24, 7);
+    ctx.restore();
+
+    /* 厨房の暖簾 */
+    var nh = 92, ny = 0;
+    ctx.fillStyle = "#1e3550";
+    ctx.fillRect(0, ny, W, nh);
+    ctx.fillStyle = "#16283d";
+    for (var s = 0; s < 5; s++) ctx.fillRect(s * (W / 5) + W / 5 - 4, ny + 16, 8, nh - 16);
+    ctx.fillStyle = "rgba(240,236,226,.9)";
+    ctx.fillRect(0, ny + nh - 26, W, 7);
+    ctx.fillStyle = "#0f1a27";
+    ctx.fillRect(0, ny, W, 14);
+
+    /* カウンター */
     var tg = ctx.createLinearGradient(0, TABLE_Y, 0, H);
-    tg.addColorStop(0, "#5a3d29");
-    tg.addColorStop(0.06, "#46301f");
-    tg.addColorStop(1, "#2a1c13");
+    tg.addColorStop(0, "#c79a5e");
+    tg.addColorStop(0.05, "#a87d45");
+    tg.addColorStop(0.3, "#8a6436");
+    tg.addColorStop(1, "#5d4223");
     ctx.fillStyle = tg;
     ctx.fillRect(0, TABLE_Y, W, H - TABLE_Y);
-    ctx.fillStyle = "rgba(255,220,170,.08)";
-    ctx.fillRect(0, TABLE_Y, W, 4);
+    ctx.fillStyle = "rgba(255,240,210,.20)";
+    ctx.fillRect(0, TABLE_Y, W, 5);
+    ctx.save();                                  /* 木目 */
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = "#3a2a16";
+    ctx.lineWidth = 2;
+    for (var k = 0; k < 6; k++) {
+      var wy2 = TABLE_Y + 26 + k * 38;
+      ctx.beginPath();
+      ctx.moveTo(0, wy2);
+      ctx.bezierCurveTo(W * 0.3, wy2 - 7, W * 0.7, wy2 + 7, W, wy2 - 2);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   function drawTray() {
@@ -1320,34 +1460,24 @@
     ctx.restore();
   }
 
-  function drawMini(x, y, r, body, rot) {
+  /* 解除した数だけ、左端に皿が積み上がる */
+  function drawPlate(x, y, r, kind2, rot) {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rot || 0);
-    var g = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.1, 0, 0, r * 1.2);
-    g.addColorStop(0, "#4a515b");
-    g.addColorStop(0.6, "#1c2027");
-    g.addColorStop(1, "#0b0d11");
-    ctx.fillStyle = g;
-    if (body === "box") {
-      roundRect(-r, -r * 0.8, r * 2, r * 1.6, 3); ctx.fill();
-      ctx.strokeStyle = "#a8834a"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(-r * 0.5, -r * 0.85); ctx.quadraticCurveTo(0, -r * 1.5, r * 0.5, -r * 0.85); ctx.stroke();
-    } else if (body === "drum") {
-      ctx.fillStyle = "#37502d";
-      roundRect(-r * 0.7, -r, r * 1.4, r * 2, 3); ctx.fill();
-      ctx.fillStyle = "#5d7d4e";
-      ctx.beginPath(); ctx.ellipse(0, -r, r * 0.7, r * 0.24, 0, 0, 6.284); ctx.fill();
-    } else if (body === "pipe") {
-      ctx.fillStyle = "#4b535c";
-      roundRect(-r * 1.2, -r * 0.5, r * 2.4, r, r * 0.5); ctx.fill();
-      ctx.fillStyle = "rgba(210,150,60,.6)";
-      ctx.fillRect(-r * 0.6, -r * 0.5, r * 0.3, r);
-    } else {
-      ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.284); ctx.fill();
-      ctx.strokeStyle = "#a8834a";
-      ctx.lineWidth = Math.max(1.5, r * 0.12);
-      ctx.beginPath(); ctx.arc(0, -r * 0.9, r * 0.28, 0, 6.284); ctx.stroke();
+    var rx = r, ry = r * 0.26;
+    ctx.fillStyle = "rgba(0,0,0,.28)";
+    ctx.beginPath(); ctx.ellipse(0, ry * 0.7, rx, ry, 0, 0, 6.284); ctx.fill();
+    ctx.fillStyle = "#d9d2c4";                    /* 皿の縁（横から見た厚み） */
+    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, 6.284); ctx.fill();
+    ctx.fillStyle = "#fbf7ef";                    /* 上面 */
+    ctx.beginPath(); ctx.ellipse(0, -ry * 0.5, rx * 0.96, ry * 0.86, 0, 0, 6.284); ctx.fill();
+    if (kind2 === 1) {                            /* 藍の線が入った皿 */
+      ctx.strokeStyle = "#3c6fa0"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(0, -ry * 0.5, rx * 0.72, ry * 0.62, 0, 0, 6.284); ctx.stroke();
+    } else if (kind2 === 2) {                     /* 小鉢 */
+      ctx.fillStyle = "#e8eef2";
+      ctx.beginPath(); ctx.ellipse(0, -ry * 0.6, rx * 0.58, ry * 0.5, 0, 0, 6.284); ctx.fill();
     }
     ctx.restore();
   }
@@ -1356,7 +1486,7 @@
     for (var i = 0; i < pile.length; i++) {
       if (state === S.PASS && i === pile.length - 1) continue;
       var s = pile[i];
-      drawMini(s.x, s.y, s.r, s.body, (i % 3 - 1) * 0.16);
+      drawPlate(s.x, s.y, s.r, s.kind, (i % 3 - 1) * 0.012);
     }
   }
 
