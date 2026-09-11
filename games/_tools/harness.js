@@ -150,6 +150,12 @@ function load(file, opts) {
     FakeImage, location_
   );
 
+  function poke(name, x, y) {
+    var ev = { clientX: x, clientY: y, preventDefault: noop, pointerId: 1, button: 0 };
+    wrap.fire(name, ev);
+    win.fire(name, ev);
+  }
+
   var api = {
     win: win, wrap: wrap, canvas: canvas, drawn: drawn, shared: shared,
     get probe() { return window_.__probe || {}; },
@@ -169,9 +175,11 @@ function load(file, opts) {
       for (var i = 0; i < (max || 400); i++) { if (cond()) return true; api.step(1); }
       return cond();
     },
-    down: function (x, y) { wrap.fire("pointerdown", { clientX: x, clientY: y, preventDefault: noop }); return api; },
-    moveTo: function (x, y) { wrap.fire("pointermove", { clientX: x, clientY: y, preventDefault: noop }); return api; },
-    up: function () { wrap.fire("pointerup", { clientX: 0, clientY: 0, preventDefault: noop }); return api; },
+    /* ゲームによって、触るのを wrap で受けるものと window で受けるものがある。
+       どちらか片方しか聞いていないので、両方に投げてよい */
+    down: function (x, y) { poke("pointerdown", x, y); return api; },
+    moveTo: function (x, y) { poke("pointermove", x, y); return api; },
+    up: function (x, y) { poke("pointerup", x || 0, y || 0); return api; },
     tap: function (x, y) { api.down(x, y); api.up(); return api; },
     drag: function (pts, stepPer) {
       api.down(pts[0].x, pts[0].y);
@@ -186,6 +194,18 @@ function load(file, opts) {
     },
     press: function (k) { api.key(k); api.key(k, true); return api; },
     esc: function () { return api.press("Escape"); },
+    /* ジョイパッドの今の状態を1回ぶん送る（サイトが枠へ送るのと同じ形）。
+       {press: true, dx: -1} のように書く。押しっぱなしなら毎コマ送ること */
+    pad: function (o) {
+      o = o || {};
+      var buttons = [], i;
+      for (i = 0; i < 16; i++) buttons.push({ pressed: false, value: 0 });
+      if (o.press) buttons[0] = { pressed: true, value: 1 };
+      if (o.dx < 0) buttons[14] = { pressed: true, value: 1 };
+      if (o.dx > 0) buttons[15] = { pressed: true, value: 1 };
+      win.fire("message", { data: { z: "pad", pads: [{ buttons: buttons, axes: [0, 0] }] } });
+      return api;
+    },
     /* 画面の形を変える（リサイズと同じことが起きる） */
     view: function (w, h) { view.w = w; view.h = h; win.fire("resize"); return api; }
   };

@@ -1555,15 +1555,28 @@
     return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
   }
 
-  wrap.addEventListener("pointerdown", function (e) {
+  /* 絵の外（上下左右の黒い余白）に触ったか */
+  function outside(p) { return p.x < 0 || p.x > W || p.y < 0 || p.y > H; }
+
+  /* 触るのは canvas の外でもよい。ただし、ねらいの要る面（切る・押す・なぞる）は
+     外では効かない。押すだけの面（連打・長押し・止める）は外でも効く */
+  window.addEventListener("pointerdown", function (e) {
     e.preventDefault();
     keyMode = false;
     var p = atCanvas(e);
+    if (outside(p)) {
+      if (state !== S.PLAY) return;
+      var b = pickBomb(null);
+      if (!b || b.slots || b.kind.drag) return;
+      down();
+      return;
+    }
     down(p.x, p.y);
   });
-  wrap.addEventListener("pointermove", function (e) {
+  window.addEventListener("pointermove", function (e) {
     if (state !== S.PLAY) return;
     var p = atCanvas(e);
+    if (outside(p)) return;
     var b = held ? bomb : pickBomb(p.x, p.y);
     if (!b || b.mode !== "live") return;
     withBomb(b, function (g) {
@@ -1574,8 +1587,8 @@
       } else if (kind.drag && held) kind.drag(g, q.x, q.y);
     });
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  window.addEventListener("pointercancel", function () { up(); });
   window.addEventListener("blur", function () { up(); });
 
   window.addEventListener("keydown", function (e) {
@@ -1939,6 +1952,65 @@
     }
   }
 
+  /* ============ ジョイパッド ============
+     ボタンはどれでも「押す」、十字キーと左スティックは左右。
+     自分で読むほかに、サイト側から送られてくる状態も受ける
+     （ゲームの枠にフォーカスが無いと自分では読めないため）。
+     同じ押しを二重に取らないよう、状態にしてから変わり目だけ拾う。 */
+  var padWant = { press: false, dx: 0 }, padHave = { press: false, dx: 0 }, padSeen = 0;
+
+  function padFrom(pads) {
+    var press = false, dx = 0, i, b, p;
+    for (i = 0; i < pads.length; i++) {
+      p = pads[i];
+      if (!p || !p.buttons) continue;
+      for (b = 0; b < p.buttons.length && b < 10; b++) {
+        var v = p.buttons[b];
+        if (v && (v.pressed || v.value > 0.5)) press = true;
+      }
+      if (p.buttons[14] && p.buttons[14].pressed) dx = -1;      /* 十字キー左 */
+      if (p.buttons[15] && p.buttons[15].pressed) dx = 1;       /* 十字キー右 */
+      if (p.axes && p.axes.length) {
+        if (p.axes[0] < -0.5) dx = -1;
+        if (p.axes[0] > 0.5) dx = 1;
+      }
+    }
+    padWant.press = press; padWant.dx = dx;
+    padSeen = 0;
+  }
+
+  function padPoll() {
+    var nav = window.navigator;
+    if (nav && nav.getGamepads) {
+      var list = nav.getGamepads ? nav.getGamepads() : [];
+      var any = false;
+      for (var i = 0; i < list.length; i++) if (list[i]) any = true;
+      if (any) padFrom(list);                                   /* 自分で読めたときだけ */
+    }
+    if (++padSeen > 20) { padWant.press = false; padWant.dx = 0; }  /* 便りが途切れたら離す */
+
+    if (padWant.press && !padHave.press) { keyMode = true; down(); }
+    if (!padWant.press && padHave.press) up();
+    if (padWant.dx && padWant.dx !== padHave.dx) {
+      keyMode = true;
+      if (state === S.PLAY && bomb) {
+        var d = padWant.dx;
+        withBomb(bomb, function (g) {
+          if (g.slots) cur = (cur + d + g.slots.length) % g.slots.length;
+          else if (kind.dir) kind.dir(g, d);
+        });
+      }
+    }
+    padHave.press = padWant.press; padHave.dx = padWant.dx;
+  }
+
+  /* サイト側（親ページ）から届くパッドの状態 */
+  window.addEventListener("message", function (e) {
+    var d = e && e.data;
+    if (!d || d.z !== "pad" || !d.pads) return;
+    padFrom(d.pads);
+  });
+
   /* ============ 覗き穴 ============
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      遊びを飛ばせるものは足さないこと。 */
@@ -1969,6 +2041,7 @@
   function loop(now) {
     var dt = Math.min(0.033, (now - last) / 1000);
     last = now;
+    padPoll();
     update(dt);
     draw();
     requestAnimationFrame(loop);

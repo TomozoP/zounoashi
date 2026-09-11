@@ -33,6 +33,9 @@ function el() {
     fire: function (n, e) { (h[n] || []).forEach(function (f) { f(e || {}); }); } };
 }
 var canvas = el(), wrap = el(), win = el(), doc = el();
+
+/* 触るのは wrap でも window でも受けられるよう、wrap へ投げたぶんは window にも流す */
+(function () { var f = wrap.fire; wrap.fire = function (n, e) { f(n, e); win.fire(n, e); }; })();
 var document = { getElementById: function (id) { return id === "c" ? canvas : wrap; },
   addEventListener: doc.addEventListener, hidden: false,
   createElement: function () { return { style: {}, click: function () {} }; },
