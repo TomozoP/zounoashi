@@ -446,25 +446,20 @@
       g.ct = 0;
       TYPES.wire.place(g);
     },
+    /* 左右の端子台から出たコードが、爆弾の前で入れ替わりながら横切る。
+       光っているランプのコードを、真ん中で切る */
     place: function (g) {
       var n = g.n, i;
-      g.lampY = FACE.y + 30;
-      g.termY = FACE.y + FACE.h - 26;
-      g.lx = spread(n, FACE.x + 34, FACE.x + FACE.w - 34);
-      var ex = spread(n, WIRE_A, WIRE_B);
-      g.wires = [];
-      g.slots = [];
+      g.lx = 30; g.rx = W - 30;                       /* 端子台の位置 */
+      g.ye = spread(n, GROUND - 296, GROUND - 44);    /* 両端の高さ */
+      g.left = [];  g.right = []; g.slots = [];
       for (i = 0; i < n; i++) {
-        var p = [{ x: g.lx[i], y: g.termY }, { x: g.lx[i], y: g.termY + (END_Y - g.termY) * 0.45 },
-                 { x: ex[i], y: END_Y - (END_Y - g.termY) * 0.55 }, { x: ex[i], y: END_Y }];
-        g.wires.push({ color: g.cols[i], p: p });
-        g.slots.push(bez(p, 0.6));
-      }
-      g.inner = [];
-      for (i = 0; i < n; i++) {
-        var x1 = g.lx[i], x2 = g.lx[g.perm[i]], mid = (g.termY - g.lampY) * 0.62;
-        g.inner.push([{ x: x1, y: g.lampY }, { x: x1, y: g.lampY + mid },
-                      { x: x2, y: g.termY - mid }, { x: x2, y: g.termY }]);
+        var ye = g.ye[i], ym = g.ye[g.perm[i]];       /* 真ん中では高さが入れ替わる */
+        g.left.push([{ x: g.lx, y: ye }, { x: g.lx + 96, y: ye },
+                     { x: CX - 86, y: ym }, { x: CX, y: ym }]);
+        g.right.push([{ x: CX, y: ym }, { x: CX + 86, y: ym },
+                      { x: g.rx - 96, y: ye }, { x: g.rx, y: ye }]);
+        g.slots.push({ x: CX, y: ym });
       }
     },
     act: function (g, i) {
@@ -472,46 +467,47 @@
       g.cut[i] = true; g.ct = 0;
       sfxSnip();
       spark(g.slots[i].x, g.slots[i].y, 12, "#ffe08a", 150);
-      if (g.perm[g.lit] === i) solve(); else fail();
+      if (i === g.lit) solve(); else fail();
     },
     tick: function (g, dt) { if (g.cut.indexOf(true) >= 0) g.ct += dt; },
     draw: function (g) {
       facePlate();
-      ctx.save();
-      roundRect(FACE.x, FACE.y, FACE.w, FACE.h, 8);
-      ctx.clip();
-      for (var k = 0; k < g.n; k++) {
-        var p = g.inner[g.z[k]];
-        ctx.lineCap = "round";
-        ctx.strokeStyle = "#05090b"; ctx.lineWidth = 13; pathBez(p, 0, 1); ctx.stroke();
-        ctx.strokeStyle = "#9a8f7c"; ctx.lineWidth = 7; pathBez(p, 0, 1); ctx.stroke();
-        ctx.strokeStyle = "rgba(255,255,255,.22)"; ctx.lineWidth = 2; pathBez(p, 0, 1); ctx.stroke();
-      }
-      ctx.restore();
-      for (var i = 0; i < g.n; i++) {
-        lamp(g.lx[i], g.lampY, 12, g.lit === i);
-        ctx.fillStyle = "#c6a559";
-        roundRect(g.lx[i] - 9, g.termY - 8, 18, 16, 4);
-        ctx.fill();
-      }
+      /* 面板には何も置かない。コードは drawFront で胴の前を通す */
     },
     drawFront: function (g) {
-      for (var j = 0; j < g.n; j++) {
-        var p = g.wires[j].p, col = g.wires[j].color;
-        ctx.lineCap = "round";
-        if (!g.cut[j]) {
-          ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 15; pathBez(p, 0, 1); ctx.stroke();
-          ctx.strokeStyle = col; ctx.lineWidth = 10; pathBez(p, 0, 1); ctx.stroke();
-          ctx.strokeStyle = "rgba(255,255,255,.3)"; ctx.lineWidth = 2.5; pathBez(p, 0.02, 0.98); ctx.stroke();
-        } else {
-          ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 15; pathBez(p, 0, 0.55); ctx.stroke();
-          ctx.strokeStyle = col; ctx.lineWidth = 10; pathBez(p, 0, 0.55); ctx.stroke();
-          ctx.save();
-          ctx.translate(Math.sin(g.ct * 6) * 10, Math.min(320, 700 * g.ct * g.ct));
-          ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 15; pathBez(p, 0.62, 1); ctx.stroke();
-          ctx.strokeStyle = col; ctx.lineWidth = 10; pathBez(p, 0.62, 1); ctx.stroke();
-          ctx.restore();
+      var i, k;
+      /* 端子台 */
+      for (k = 0; k < 2; k++) {
+        var bx = k ? g.rx : g.lx;
+        ctx.fillStyle = "#2a3238";
+        roundRect(bx - 20, g.ye[0] - 26, 40, g.ye[g.n - 1] - g.ye[0] + 52, 10);
+        ctx.fill();
+        ctx.strokeStyle = "#454f57"; ctx.lineWidth = 2;
+        roundRect(bx - 20, g.ye[0] - 26, 40, g.ye[g.n - 1] - g.ye[0] + 52, 10);
+        ctx.stroke();
+      }
+      /* コード。交差の上下がわかるように、決めた順で重ねる */
+      ctx.lineCap = "round";
+      for (k = 0; k < g.n; k++) {
+        var j = g.z[k], col = g.cols[j];
+        var d = g.cut[j] ? Math.min(96, 420 * g.ct * g.ct) : 0;
+        var sw = Math.sin(g.ct * 7) * (g.cut[j] ? 7 : 0);
+        var L = g.left[j], R = g.right[j];
+        if (d > 0) {                                  /* 切った両端を垂らす */
+          L = [L[0], L[1], { x: L[2].x, y: L[2].y + d * 0.6 }, { x: L[3].x - 10 + sw, y: L[3].y + d }];
+          R = [{ x: R[0].x + 10 + sw, y: R[0].y + d }, { x: R[1].x, y: R[1].y + d * 0.6 }, R[2], R[3]];
         }
+        ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 16;
+        pathBez(L, 0, 1); ctx.stroke(); pathBez(R, 0, 1); ctx.stroke();
+        ctx.strokeStyle = col; ctx.lineWidth = 11;
+        pathBez(L, 0, 1); ctx.stroke(); pathBez(R, 0, 1); ctx.stroke();
+        ctx.strokeStyle = "rgba(255,255,255,.3)"; ctx.lineWidth = 2.5;
+        pathBez(L, 0.03, 0.97); ctx.stroke(); pathBez(R, 0.03, 0.97); ctx.stroke();
+      }
+      /* 左右のランプ。光っている1本が、切るコード */
+      for (i = 0; i < g.n; i++) {
+        lamp(g.lx, g.ye[i], 11, g.lit === i && !g.cut[i]);
+        lamp(g.rx, g.ye[i], 11, g.lit === i && !g.cut[i]);
       }
       nipper(g);
     }
@@ -519,8 +515,8 @@
 
   function nipper(g) {
     if (cur < 0 || cur >= g.n || g.cut[cur]) return;
-    var p = g.wires[cur].p;
-    var a = bez(p, 0.54), b = bez(p, 0.66), q = g.slots[cur];
+    var p = g.left[cur];
+    var a = bez(p, 0.86), b = bez(p, 1), q = g.slots[cur];
     var ang = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
     if (Math.cos(ang) < 0) ang -= Math.PI;                 /* 柄がいつも下を向くように */
     ctx.save();
