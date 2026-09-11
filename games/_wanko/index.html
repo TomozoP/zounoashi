@@ -59,6 +59,9 @@
     ctx.setTransform(k, 0, 0, k, 0, 0);
 
     if (bomb && kind.place) kind.place(bomb);
+    if (queue) for (var qi = 0; qi < queue.length; qi++) {
+      if (queue[qi].kind.place) queue[qi].kind.place(queue[qi]);
+    }
     for (var i = 0; i < pile.length; i++) {
       var s = pileSlot(i);
       pile[i].x = s.x; pile[i].y = s.y; pile[i].r = s.r;
@@ -1099,6 +1102,22 @@
     ctx.restore();
   }
 
+  /* 2台まとめて出てくるときだけ、左から入ってくるもう一人 */
+  function drawSub() {
+    if (!okamiOn || sub < 0) return;
+    var b = okamiBox();
+    var w = b.w * 0.92, h = b.h * 0.92;
+    var x = -40 - (1 - Math.min(1, sub)) * 220;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, TABLE_Y);
+    ctx.clip();
+    ctx.translate(x + w, b.y + (b.h - h));
+    ctx.scale(-1, 1);                          /* 左右を返して、こちらを向かせる */
+    ctx.drawImage(okami, 0, 0, w, h);
+    ctx.restore();
+  }
+
   /* 出すたびの掛け声 */
   var LINES = ["はい、どんどん", "はい、じゃんじゃん", "もう一つどうぞ", "はい、おかわり",
                "まだまだどうぞ", "はい、お待たせ", "どんどんいきますよ", "はい、次ですよ"];
@@ -1137,25 +1156,63 @@
   /* ============ 状態 ============ */
   var S = { SERVE: "serve", PLAY: "play", PASS: "pass", BOOM: "boom", RESULT: "result" };
   var state, score, bomb, kind, phase, cur, parts, shake, flash, pile, T, lastKind, held;
+  var queue, sub, DUAL_FROM = 20;
 
-  function makeBomb() {
-    var k = score, key;
+  /* 待たせている方の爆弾を置く場所（カウンターの手前、皿の右どなり） */
+  function waitSpot() { return { x: W * 0.45, y: H - 118, s: 0.45 }; }
+  function waitPos() {
+    var w = waitSpot(), cy = GROUND - 150;
+    return { x: w.x - CX, y: w.y - cy, s: w.s, rot: -0.07 };
+  }
+
+  function newBomb(k, dual) {
+    var key;
     do { key = TYPE_KEYS[Math.floor(Math.random() * TYPE_KEYS.length)]; }
     while (key === lastKind && TYPE_KEYS.length > 1);
     lastKind = key;
-    kind = TYPES[key];
-    bomb = { key: key, body: kind.body, fuse: 1,
-             fuseTime: Math.max(2.9, 6.2 - k * 0.14) + (kind.extra || 0), slots: null };
-    kind.make(bomb, k);
-    cur = bomb.slots ? Math.floor(bomb.slots.length / 2) : -1;
+    var kd = TYPES[key];
+    var b = { key: key, kind: kd, body: kd.body, fuse: 1,
+              fuseTime: (Math.max(2.9, 6.2 - k * 0.14) + (kd.extra || 0)) * (dual ? 2.1 : 1),
+              slots: null, cur: -1 };
+    kd.make(b, k);
+    b.cur = b.slots ? Math.floor(b.slots.length / 2) : -1;
+    return b;
+  }
+
+  /* 1台、ときどき2台まとめて出す */
+  function spawnWave() {
+    var dual = score >= DUAL_FROM && Math.random() < 0.5;
+    bomb = newBomb(score, dual);
+    kind = bomb.kind;
+    cur = bomb.cur;
+    queue = dual ? [newBomb(score, true)] : [];
+    sub = dual ? 0 : -1;                  /* 0以上ならサブ女将が出てくる（入場の進み具合） */
     held = false;
     pickSay();
+  }
+
+  function makeBomb() { spawnWave(); }    /* 呼び名は前のまま */
+
+  function useFront(b) {                  /* 前に出す爆弾を差し替える */
+    if (bomb) bomb.cur = cur;
+    bomb = b; kind = b.kind; cur = b.cur;
+    held = false;
+  }
+
+  function swapBomb() {
+    if (!queue.length || state !== S.PLAY) return;
+    var back = queue[0];
+    queue[0] = bomb;
+    queue[0].cur = cur;
+    useFront(back);
+    sfxServe();
   }
 
   function newRound() {
     state = S.SERVE; phase = 0; score = 0; T = 0;
     parts = []; pile = []; shake = 0; flash = 0; lastKind = null;
-    makeBomb();
+    queue = []; sub = -1; bomb = null;
+    spawnWave();
     if (hissGain) hissGain.gain.value = 0;
     bgmDuck(0.16, 0.4);
   }
@@ -1218,20 +1275,37 @@
       if (p.age >= p.life) parts.splice(i, 1);
     }
     if (kind.tick) kind.tick(bomb, dt);
+    if (sub >= 0 && sub < 1) sub = Math.min(1, sub + dt / 0.45);
 
     if (state === S.SERVE) {
       if (phase >= 0.32) { state = S.PLAY; phase = 0; }
     } else if (state === S.PLAY) {
       bomb.fuse -= dt / bomb.fuseTime;
-      if (hissGain) hissGain.gain.value = 0.05 + (1 - bomb.fuse) * 0.11;
-      if (hissFilter) hissFilter.frequency.value = 1800 + (1 - bomb.fuse) * 2200;
+      var worst = bomb.fuse;
+      for (var q2 = 0; q2 < queue.length; q2++) {          /* 待たせている方も燃える */
+        queue[q2].fuse -= dt / queue[q2].fuseTime;
+        if (queue[q2].fuse < worst) worst = queue[q2].fuse;
+        if (queue[q2].fuse <= 0) { queue[q2].fuse = 0; useFront(queue[q2]); fail(); return; }
+      }
+      if (hissGain) hissGain.gain.value = 0.05 + (1 - worst) * 0.11;
+      if (hissFilter) hissFilter.frequency.value = 1800 + (1 - worst) * 2200;
       if (bomb.fuse > 0 && Math.random() < dt * 40) {
         var a = BODY[bomb.body].fuse, q = bez(FUSE_PATH, bomb.fuse);
         spark(CX + a.x + q.x, GROUND + a.y + q.y, 1, "#ffd36b", 70);
       }
       if (bomb.fuse <= 0) { bomb.fuse = 0; fail(); }
     } else if (state === S.PASS) {
-      if (phase >= 0.4) { makeBomb(); state = S.SERVE; phase = 0; sfxServe(); }
+      if (phase >= 0.4) {
+        if (queue.length) {                                /* 待たせていた方を前に出す */
+          var nx = queue.shift();
+          nx.fromWait = true;
+          useFront(nx);
+          if (!queue.length && sub >= 0) sub = -1;          /* サブ女将は引っこむ */
+        } else {
+          spawnWave();
+        }
+        state = S.SERVE; phase = 0; sfxServe();
+      }
     } else if (state === S.BOOM) {
       if (phase >= 1.5) { state = S.RESULT; phase = 0; }
     }
@@ -1242,7 +1316,13 @@
   function bombPos() {
     if (state === S.SERVE) {
       var u = ease(Math.min(1, phase / 0.32));
-      var sp = servePoint(), cy0 = GROUND - 150;
+      var cy0 = GROUND - 150;
+      if (bomb.fromWait) {                        /* 待たせていた方が前に出てくる */
+        var wp = waitPos();
+        return { x: wp.x * (1 - u), y: wp.y * (1 - u),
+                 s: wp.s + (1 - wp.s) * u, rot: wp.rot * (1 - u) };
+      }
+      var sp = servePoint();
       return { x: (sp.x - CX) * (1 - u), y: (sp.y - cy0) * (1 - u),
                s: 0.46 + 0.54 * u, rot: (1 - u) * 0.5 };
     }
@@ -1295,6 +1375,11 @@
       return;
     }
     if (state !== S.PLAY) return;
+    /* 待たせている方に触ったら、前後を入れ替える */
+    if (queue.length && x != null && nearSlot(x, y) < 0) {
+      var w = waitSpot(), dx = x - w.x, dy = y - (w.y - 16);
+      if (dx * dx + dy * dy < 86 * 86) { swapBomb(); return; }
+    }
     held = true;
     if (bomb.slots) {
       var i = x == null ? cur : nearSlot(x, y);
@@ -1339,9 +1424,12 @@
     var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
     var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
     var num = (e.key.length === 1 && e.key >= "1" && e.key <= "9") ? Number(e.key) : 0;
-    if (!esc && !go && !left && !right && !num) return;
+    var swapKey = e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Tab" ||
+                  e.key === "w" || e.key === "W" || e.key === "s" || e.key === "S";
+    if (!esc && !go && !left && !right && !num && !swapKey) return;
     e.preventDefault();
     if (esc) { if (!e.repeat) newRound(); return; }
+    if (swapKey) { if (!e.repeat) swapBomb(); return; }
     if (num) {                                   /* テンキーの面は数字キーでも打てる */
       if (!e.repeat && state === S.PLAY && kind.digit) kind.digit(bomb, num);
       return;
@@ -1460,25 +1548,22 @@
     ctx.restore();
   }
 
-  /* 解除した数だけ、左端に皿が積み上がる */
-  function drawPlate(x, y, r, kind2, rot) {
+  /* 解除した数だけ、左端に皿が積み上がる。
+     爆弾を乗せている朱塗りのお盆と同じ意匠（drawTray と色・作りを揃えてある） */
+  function drawPlate(x, y, r, rot) {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rot || 0);
-    var rx = r, ry = r * 0.26;
-    ctx.fillStyle = "rgba(0,0,0,.28)";
-    ctx.beginPath(); ctx.ellipse(0, ry * 0.7, rx, ry, 0, 0, 6.284); ctx.fill();
-    ctx.fillStyle = "#d9d2c4";                    /* 皿の縁（横から見た厚み） */
-    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, 6.284); ctx.fill();
-    ctx.fillStyle = "#fbf7ef";                    /* 上面 */
-    ctx.beginPath(); ctx.ellipse(0, -ry * 0.5, rx * 0.96, ry * 0.86, 0, 0, 6.284); ctx.fill();
-    if (kind2 === 1) {                            /* 藍の線が入った皿 */
-      ctx.strokeStyle = "#3c6fa0"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.ellipse(0, -ry * 0.5, rx * 0.72, ry * 0.62, 0, 0, 6.284); ctx.stroke();
-    } else if (kind2 === 2) {                     /* 小鉢 */
-      ctx.fillStyle = "#e8eef2";
-      ctx.beginPath(); ctx.ellipse(0, -ry * 0.6, rx * 0.58, ry * 0.5, 0, 0, 6.284); ctx.fill();
-    }
+    var ry = r * 0.24;
+    ctx.fillStyle = "rgba(0,0,0,.30)";
+    ctx.beginPath(); ctx.ellipse(0, ry * 0.8, r, ry, 0, 0, 6.284); ctx.fill();
+    ctx.fillStyle = "#7d2b20";
+    ctx.beginPath(); ctx.ellipse(0, 0, r, ry, 0, 0, 6.284); ctx.fill();
+    ctx.fillStyle = "#98392a";
+    ctx.beginPath(); ctx.ellipse(0, -ry * 0.42, r * 0.92, ry * 0.82, 0, 0, 6.284); ctx.fill();
+    ctx.strokeStyle = "rgba(255,200,160,.25)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(0, -ry * 0.42, r * 0.92, ry * 0.82, 0, 0, 6.284); ctx.stroke();
     ctx.restore();
   }
 
@@ -1486,7 +1571,7 @@
     for (var i = 0; i < pile.length; i++) {
       if (state === S.PASS && i === pile.length - 1) continue;
       var s = pile[i];
-      drawPlate(s.x, s.y, s.r, s.kind, (i % 3 - 1) * 0.012);
+      drawPlate(s.x, s.y, s.r, (i % 3 - 1) * 0.012);
     }
   }
 
@@ -1508,10 +1593,10 @@
     ctx.restore();
   }
 
-  function drawBomb() {
-    var pos = bombPos();
-    if (state === S.BOOM || state === S.RESULT) return;
-    if (state === S.PASS && pos.gone) return;
+  /* 爆弾1台を、与えられた位置と大きさで描く */
+  function drawBombAt(b, pos) {
+    var ob = bomb, ok = kind, ocur = cur;
+    bomb = b; kind = b.kind; cur = b.cur === undefined ? cur : b.cur;
     var cy = GROUND - 150;
     ctx.save();
     ctx.translate(CX + pos.x, cy + pos.y);
@@ -1524,6 +1609,32 @@
     kind.draw(bomb);
     if (kind.drawFront) kind.drawFront(bomb);
     ctx.restore();
+    bomb = ob; kind = ok; cur = ocur;
+  }
+
+  function drawBomb() {
+    if (state === S.BOOM || state === S.RESULT) return;
+    /* 待たせている方を先に（奥に）描く */
+    for (var i = 0; i < queue.length; i++) {
+      var q = queue[i], wp = waitPos();
+      q.cur = q.cur < 0 ? -1 : q.cur;
+      drawBombAt(q, wp);
+      if (state === S.PLAY) {                    /* こっちも触れる、の合図 */
+        var w = waitSpot();
+        ctx.save();
+        ctx.strokeStyle = "rgba(255,255,255,.38)";
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([7, 7]);
+        ctx.lineDashOffset = -T * 20;
+        ctx.beginPath(); ctx.arc(w.x, w.y - 16, 86, 0, 6.284); ctx.stroke();
+        ctx.restore();
+      }
+    }
+    var pos = bombPos();
+    if (state === S.PASS && pos.gone) return;
+    var self = bomb;
+    self.cur = cur;
+    drawBombAt(self, pos);
   }
 
   function drawParts() {
@@ -1574,6 +1685,7 @@
     if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
     drawBg();
     drawOkami();
+    drawSub();
     drawPile();
     drawBomb();
     drawParts();
