@@ -81,6 +81,15 @@ g.until(function () { return g.probe.now().state === "result"; });
 - サムネは正方形に切られます（`object-fit: cover`）。`thumb.js` は縦長の画面から
   「上のほう」と「下のほう」を詰めた正方形を作ります
 
+```bash
+node games/_tools/thumb.js hoge            # 3秒動かして撮る
+node games/_tools/thumb.js hoge -t 8       # もっと進んだ場面で撮る
+node games/_tools/thumb.js hoge --top 200  # 切り取り位置をずらす
+```
+
+裏でブラウザを画面なしで借りて**実際に遊ばせた画面**を撮ります。手は要りません。
+最初にスペースを1回押すので、タイトルから始まるゲームでもそのまま中身が写ります。
+
 ## 素材の画像
 
 生成した png をそのまま置かないこと。だいたい 2MB くらいあります。webp にすると
