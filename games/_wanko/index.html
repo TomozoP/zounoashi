@@ -1184,10 +1184,24 @@
   var state, score, bombs, bomb, kind, phase, cur, focus, INV, keyMode = false;
   var parts, shake, flash, pile, T, lastKind, held, DUAL_FROM = 10;
 
-  /* 置き場所。1台なら真ん中、2ユニット連結なら左右の面板に振り分ける */
+  /* 置き場所。1台なら真ん中、2ユニット連結なら上下に積む。
+     下の面がお盆に乗る高さは1台のときと同じ。足りないぶんは上へ伸ばして、
+     女将にかぶってよい（掛け声の吹き出しだけは避ける） */
+  function twinScale() { return Math.max(0.6, Math.min(1, (GROUND - 128) / 430)); }
   function slotTf(i, n) {
     if (n < 2) return { x: 0, y: 0, s: 1 };
-    return { x: i === 0 ? -139 : 139, y: 0, s: 0.92 };
+    var s = twinScale(), low = 126 / s - 83;
+    return { x: 0, y: i === 0 ? low - 220 : low, s: s };
+  }
+  /* 連結の箱の、画面の上での大きさ */
+  function twinRect() {
+    var t = slotTf(0, 2), py = GROUND - 150;
+    var top = py + (t.y - 127) * t.s - 24, w = 260 * t.s + 90;
+    return { x: CX - w / 2, y: top, w: w, h: GROUND + 4 - top };
+  }
+  function twinFuse() {
+    var r = twinRect();
+    return { x: r.w / 2 - 52, y: r.y - GROUND + 6 };
   }
 
   /* 台ごとに、その台を「いまの1台」として扱う */
@@ -1343,7 +1357,7 @@
           b.fuse -= dt / b.fuseTime;
           if (b.fuse < worst) worst = b.fuse;
           if (b.fuse > 0 && Math.random() < dt * 40 && !(b.twin && b !== bombs[0])) {
-            var p = wavePos(b), a = b.twin ? TWIN_FUSE : BODY[b.body].fuse, q = bez(FUSE_PATH, b.fuse);
+            var p = wavePos(b), a = b.twin ? twinFuse() : BODY[b.body].fuse, q = bez(FUSE_PATH, b.fuse);
             spark(CX + p.x + (a.x + q.x) * p.s, GROUND + p.y + (a.y + q.y) * p.s, 1, "#ffd36b", 70 * p.s);
           }
           if (b.fuse <= 0) { b.fuse = 0; bomb = b; kind = b.kind; fail(); return; }
@@ -1394,13 +1408,21 @@
     return { x: CX + (x - CX - p.x) / p.s, y: cy + (y - cy - p.y) / p.s };
   }
 
-  /* どの台に触ったか。2台あるときは左右で分ける */
-  function pickBomb(x) {
+  /* どの面に触ったか。面板の真ん中がいちばん近いものを選ぶ */
+  function pickBomb(x, y) {
     var lv = live();
     if (!lv.length) return null;
     if (lv.length === 1) return lv[0];
     if (x == null) return bombs[focus] && bombs[focus].mode === "live" ? bombs[focus] : lv[0];
-    return x < W / 2 ? lv[0] : lv[1];
+    var best = lv[0], bd = Infinity, cy = GROUND - 150;
+    for (var i = 0; i < lv.length; i++) {
+      var p = posOf(lv[i]), fr = lv[i].fr || FACE;
+      var fx = CX + p.x + (fr.x + fr.w / 2 - CX) * p.s;
+      var fy = cy + p.y + (fr.y + fr.h / 2 - cy) * p.s;
+      var d = (fx - x) * (fx - x) + (fy - y) * (fy - y);
+      if (d < bd) { bd = d; best = lv[i]; }
+    }
+    return best;
   }
 
   /* ============ 入力 ============ */
@@ -1444,7 +1466,7 @@
       return;
     }
     if (state !== S.PLAY) return;
-    var b = pickBomb(x);
+    var b = pickBomb(x, y);
     if (!b) return;
     held = true;
     if (b !== bomb) { bomb = b; kind = b.kind; cur = b.cur; focus = bombs.indexOf(b); }
@@ -1481,7 +1503,7 @@
   wrap.addEventListener("pointermove", function (e) {
     if (state !== S.PLAY) return;
     var p = atCanvas(e);
-    var b = held ? bomb : pickBomb(p.x);
+    var b = held ? bomb : pickBomb(p.x, p.y);
     if (!b || b.mode !== "live") return;
     withBomb(b, function (g) {
       var q = toLocal(g, p.x, p.y);
@@ -1704,29 +1726,31 @@
     bomb = ob; kind = ok; cur = ocur;
   }
 
-  /* 2ユニット連結の大きい箱 */
-  var TWIN_FUSE = { x: 104, y: -284 };
+  /* 2ユニット連結の大きい箱（上下に積む） */
   function drawTwinBody() {
-    var y = GROUND - 292, h = 292, uw = 246;
+    var r = twinRect(), band = 34, uh = (r.h - band) / 2;
     for (var s = 0; s < 2; s++) {
-      var ux = s ? CX + 16 : CX - 262;
-      var g = ctx.createLinearGradient(0, y, 0, y + h);
-      g.addColorStop(0, "#5e6874");
-      g.addColorStop(0.45, "#333c46");
-      g.addColorStop(1, "#161c22");
+      var uy = s ? r.y + uh + band : r.y;
+      var g = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
+      g.addColorStop(0, "#252d35");
+      g.addColorStop(0.35, "#4b5560");
+      g.addColorStop(0.7, "#333c46");
+      g.addColorStop(1, "#171d23");
       ctx.fillStyle = g;
-      roundRect(ux, y, uw, h, 14); ctx.fill();
+      roundRect(r.x, uy, r.w, uh, 14); ctx.fill();
       ctx.strokeStyle = "#727c88"; ctx.lineWidth = 3;
-      roundRect(ux + 8, y + 8, uw - 16, h - 16, 10); ctx.stroke();
+      roundRect(r.x + 8, uy + 8, r.w - 16, uh - 16, 10); ctx.stroke();
     }
     ctx.fillStyle = "#8d7038";                       /* 連結の帯 */
-    ctx.fillRect(CX - 24, y + 26, 48, h - 52);
+    ctx.fillRect(r.x + 18, r.y + uh + 2, r.w - 36, band - 4);
     ctx.fillStyle = "#c6a559";
     for (var i = 0; i < 4; i++) {
-      ctx.beginPath(); ctx.arc(CX, y + 50 + i * (h - 100) / 3, 5.5, 0, 6.284); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(r.x + 40 + i * (r.w - 80) / 3, r.y + uh + band / 2, 5.5, 0, 6.284);
+      ctx.fill();
     }
     ctx.fillStyle = "#b8974f";                       /* 導火線の口金 */
-    ctx.fillRect(CX + 78, y - 6, 52, 14);
+    ctx.fillRect(CX + r.w / 2 - 78, r.y - 8, 52, 14);
   }
 
   function drawBomb() {
@@ -1742,8 +1766,8 @@
       ctx.rotate(wp.rot || 0);
       ctx.scale(wp.s, wp.s);
       ctx.translate(-CX, -cy);
-      drawTray(252);
-      drawFuse(TWIN_FUSE, waveFuse());
+      drawTray(twinRect().w / 2 + 34);
+      drawFuse(twinFuse(), waveFuse());
       drawTwinBody();
       ctx.restore();
       for (i = 0; i < bombs.length; i++) drawUnit(bombs[i]);
