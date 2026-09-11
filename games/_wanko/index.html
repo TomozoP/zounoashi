@@ -445,10 +445,10 @@
   TYPES.wire = {
     body: "round",
     make: function (g, k) {
-      var n = 3;                        /* 指で切り分けられる間隔を取ると3本まで */
+      var n = Math.min(5, 1 + Math.floor(k / 7));
       g.n = n;
       var perm = shuffled(n), tries = 0, i, same;
-      while (tries++ < 40) {
+      while (n > 1 && tries++ < 40) {
         same = 0;
         for (i = 0; i < n; i++) if (perm[i] === i) same++;
         if (same === 0) break;
@@ -473,12 +473,14 @@
       g.ye = spread(n, g.fr.y + 24, g.fr.y + g.fr.h - 24);
       g.left = []; g.right = []; g.slots = [];
       for (i = 0; i < n; i++) {
-        var ye = g.ye[i], ym = g.ye[g.perm[i]];       /* 真ん中では高さが入れ替わる */
-        g.left.push([{ x: g.lx, y: ye }, { x: g.lx + 54, y: ye },
-                     { x: CX - 50, y: ym }, { x: CX, y: ym }]);
-        g.right.push([{ x: CX, y: ym }, { x: CX + 50, y: ym },
-                      { x: g.rx - 54, y: ye }, { x: g.rx, y: ye }]);
-        g.slots.push({ x: CX, y: ym });
+        var ye = g.ye[i], row = g.perm[i], ym = g.ye[row];   /* 真ん中では高さが入れ替わる */
+        /* 切る場所は左右にも振る。段が詰まっても、指で押し分けられる間隔になる */
+        var mx = CX + (n > 1 ? (row % 2 ? 40 : -40) : 0);
+        g.left.push([{ x: g.lx, y: ye }, { x: g.lx + 46, y: ye },
+                     { x: mx - 46, y: ym }, { x: mx, y: ym }]);
+        g.right.push([{ x: mx, y: ym }, { x: mx + 46, y: ym },
+                      { x: g.rx - 46, y: ye }, { x: g.rx, y: ye }]);
+        g.slots.push({ x: mx, y: ym });
       }
     },
     act: function (g, i) {
@@ -536,17 +538,24 @@
   TYPES.color = {
     body: "box",
     make: function (g, k) {
-      g.n = 4;
+      g.n = Math.min(6, 3 + Math.floor(k / 8));
       g.cols = shuffled(COLORS.length).slice(0, g.n).map(function (v) { return COLORS[v]; });
       g.target = Math.floor(Math.random() * g.n);
       g.press = -1;
       TYPES.color.place(g);
     },
     place: function (g) {
-      /* 指の間隔を取るため、この仕掛けは面板を横に広げる */
-      g.fr = { x: CX - 140, y: FACE.y, w: 280, h: FACE.h };
-      var xs = spread(g.n, g.fr.x + 44, g.fr.x + g.fr.w - 44);
-      g.slots = xs.map(function (x) { return { x: x, y: g.fr.y + 104 }; });
+      /* 指の間隔を取るため面板を横に広げ、4つ以上は2段に分ける */
+      var two = g.n > 3, top = Math.ceil(g.n / (two ? 2 : 1));
+      g.fr = { x: CX - 140, y: two ? FACE.y - 30 : FACE.y, w: 280, h: two ? 200 : FACE.h };
+      g.slots = [];
+      var ys = two ? [g.fr.y + 86, g.fr.y + 162] : [g.fr.y + 104];
+      for (var r = 0; r < ys.length; r++) {
+        var c = r === 0 ? top : g.n - top;
+        for (var i = 0; i < c; i++) {
+          g.slots.push({ x: CX + (i - (c - 1) / 2) * 96, y: ys[r] });
+        }
+      }
     },
     act: function (g, i) {
       g.press = i;
@@ -555,7 +564,7 @@
     },
     draw: function (g) {
       facePlate(g.fr);
-      var wx = CX, wy = g.fr.y + 42;
+      var wx = CX, wy = g.fr.y + (g.n > 3 ? 32 : 42);
       ctx.fillStyle = "#05090b";
       roundRect(wx - 46, wy - 22, 92, 44, 10); ctx.fill();
       ctx.save();
@@ -629,15 +638,22 @@
       g.out = [];
       for (var i = 0; i < g.n; i++) g.out.push(0);
       g.left = g.n;
+      /* 位置は毎回ばらす。3×2のます目から使うところを選び、少しずらす
+         （画面の形が変わっても動かないよう、面板の中のずれとして持つ） */
+      var pick = shuffled(6).slice(0, g.n);
+      g.spot = pick.map(function (c) {
+        return { col: c % 3, row: Math.floor(c / 3),
+                 jx: rnd(-14, 14), jy: rnd(-10, 10) };
+      });
       TYPES.screw.place(g);
     },
     place: function (g) {
-      g.fr = { x: FACE.x, y: FACE.y - 16, w: FACE.w, h: FACE.h + 32 };   /* 縦に広げて間隔を取る */
-      var cols = g.n / 2, xs = spread(cols, g.fr.x + 44, g.fr.x + g.fr.w - 44);
-      g.slots = [];
-      for (var i = 0; i < g.n; i++) {
-        g.slots.push({ x: xs[i % cols], y: g.fr.y + 52 + Math.floor(i / cols) * 70 });
-      }
+      g.fr = { x: CX - 140, y: FACE.y - 20, w: 280, h: 180 };   /* 広げて間隔を取る */
+      var xs = spread(3, g.fr.x + 46, g.fr.x + g.fr.w - 46);
+      var ys = [g.fr.y + 46, g.fr.y + 136];
+      g.slots = g.spot.map(function (p) {
+        return { x: xs[p.col] + p.jx, y: ys[p.row] + p.jy };
+      });
     },
     act: function (g, i) {
       if (g.out[i] > 0) return;
@@ -689,7 +705,7 @@
       g.slots = null;
       g.ang = rnd(0, 6.283);
       g.tgt = rnd(0, 6.283);
-      g.wid = Math.max(0.34, 0.62 - k * 0.012);
+      g.wid = Math.max(0.20, 0.50 - k * 0.011);
       while (Math.abs(angDiff(g.ang, g.tgt)) < g.wid) g.tgt = rnd(0, 6.283);
       g.hold = 0;
     },
@@ -934,7 +950,7 @@
     make: function (g, k) {
       g.slots = null;
       g.prog = 0; g.tick10 = 0;
-      var n = k >= 6 ? 4 : 3;        /* 5点にすると折れが細かすぎて指でなぞりにくい */
+      var n = Math.min(5, 1 + Math.floor(k / 7)) + 1;   /* 折れの数＋1が点の数 */
       g.ry = [];
       for (var i = 0; i < n; i++) {
         var v = rnd(0.16, 0.84);
@@ -944,9 +960,10 @@
       TYPES.trace.place(g);
     },
     place: function (g) {
-      var n = g.ry.length, xs = spread(n, FACE.x + 32, FACE.x + FACE.w - 32), i;
+      g.fr = { x: FACE.x, y: FACE.y - 16, w: FACE.w, h: FACE.h + 32 };   /* 縦に広げて折れを取りやすく */
+      var n = g.ry.length, xs = spread(n, g.fr.x + 32, g.fr.x + g.fr.w - 32), i;
       g.pts = [];
-      for (i = 0; i < n; i++) g.pts.push({ x: xs[i], y: FACE.y + FACE.h * g.ry[i] });
+      for (i = 0; i < n; i++) g.pts.push({ x: xs[i], y: g.fr.y + g.fr.h * g.ry[i] });
       g.seg = []; g.len = 0;
       for (i = 1; i < n; i++) {
         var dx = g.pts[i].x - g.pts[i - 1].x, dy = g.pts[i].y - g.pts[i - 1].y;
@@ -971,7 +988,7 @@
       TYPES.trace.advance(g, Math.min(1, g.prog + 0.05));
     },
     draw: function (g) {
-      facePlate();
+      facePlate(g.fr);
       ctx.lineCap = "round"; ctx.lineJoin = "round";
       ctx.strokeStyle = "#141c21"; ctx.lineWidth = 26;
       traceStroke(g, 1); ctx.stroke();
@@ -1007,7 +1024,7 @@
     body: "box",
     extra: 0.9,
     make: function (g, k) {
-      var len = k >= 14 ? 3 : (k >= 5 ? 2 : 1);
+      var len = Math.min(4, 1 + Math.floor(k / 9));
       g.code = [];
       for (var i = 0; i < len; i++) g.code.push(1 + Math.floor(Math.random() * 9));
       g.in = 0; g.press = -1; g.pt = 9;
@@ -1019,7 +1036,7 @@
       var xs = [g.fr.x + 44, g.fr.x + 120, g.fr.x + 196];
       g.slots = [];
       for (var i = 0; i < 9; i++) {              /* 電卓と同じで、1が左下 */
-        g.slots.push({ x: xs[i % 3], y: g.fr.y + 80 + (2 - Math.floor(i / 3)) * 62 });
+        g.slots.push({ x: xs[i % 3], y: g.fr.y + 76 + (2 - Math.floor(i / 3)) * 64 });
       }
     },
     act: function (g, i) {
