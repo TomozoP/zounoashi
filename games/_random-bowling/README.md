@@ -1,6 +1,6 @@
 # ランダムボーリングの下書き
 
-左右と少しの高さ調整で位置を決める → 角度を決めて離す → タップでパワーを止めて投球。赤い投球線そのものが1.8秒周期で伸び縮みし、長いほど強く投げる。独立したゲージや文字は出さない。
+左右で位置を決める → 角度と高さを決めて離す → タップでパワーを止めて投球。赤い投球線そのものが1.8秒周期で伸び縮みし、長いほど強く投げる。独立したゲージや文字は出さない。
 球は画面下から一球ずつ届き、停止後に投球位置へ移る。受け取りレーンは置かない。球名と投球線は到着後に出る。
 10投の倒した本数を合計し、結果更新時だけスコア欄を二秒表示する。
 
@@ -43,3 +43,5 @@ node games/_tools/tests/random-bowling-render.js
   ビルドの要らない従来形式を固定版で同梱。
 
 物理の材質設定は [ContactMaterial](https://pmndrs.github.io/cannon-es/docs/classes/ContactMaterial.html)、描画の粗さと金属感は [MeshStandardMaterial](https://threejs.org/docs/pages/MeshStandardMaterial.html) を使用。
+
+球は投球するまで半透明にし、投球時に不透明へ戻す。
