@@ -4,17 +4,18 @@
   var CY = 480;
   var eye, basis, focal, queue, centers = [];
   var still = document.createElement('canvas'), stillKey = '';
-  var shots = [2.1, 2.6, 2.8], duration = 7.5;
+  var shots = [0.7, 2.6/3, 2.8/3], duration = 2.5;
   function place() { CY = H * 0.49; }
   function newRound() {
     state = 'ready'; score = 0; T = 0; elapsed = 0;
     first = null; selected = false; focus = 0; impact = -1; held = false;
   }
-  function start() { first = Math.random() < 0.5; state = 'lottery'; T = 0; }
+  function start() { first = null; state = 'lottery'; T = 0; }
+  function lotteryFirst() { return Math.floor(T / .12) % 2 === 0; }
+  function startButton() { return {x:140,y:H*.79,w:260,h:68}; }
   function capture() { state = 'cinema'; T = 0; impact = -1; selected = false; score = 1; }
   function update(dt) {
     elapsed += dt; T += dt;
-    if (state === 'lottery' && T >= 2.2) { state = first ? 'play' : 'reply'; T = 0; tone(440, 0.18, 0.05); }
     if (state === 'reply' && T >= 1.3) capture();
     if (state === 'cinema') {
       var s = shot();
@@ -38,7 +39,8 @@
   function hit(b,x,y) { return x >= b.x && x <= b.x+b.w && y >= b.y && y <= b.y+b.h; }
   function down(x,y) {
     audioOn();
-    if (state === 'ready') { if (x == null || hit({x:120,y:CY-190,w:300,h:390},x,y)) start(); return; }
+    if (state === 'ready') { if (x == null || hit(startButton(),x,y)) start(); return; }
+    if (state === 'lottery') { first=lotteryFirst(); state=first?'play':'reply'; T=0; tone(440,.18,.05); return; }
     if (state === 'result') {
       var b = x == null ? buttons()[focus] : buttons().filter(function(b){return hit(b,x,y);})[0];
       if (b && b.id === 'retry') newRound();
@@ -107,10 +109,8 @@
     else if(cinematic) camera([3.5-p*.7,-7.8,11.8],[0,0,-.12],990+120*p);
     else camera([0,-.1,11.5],[0,0,0],Math.min(820,H*.94));
     queue=[];
-    // 畳と縁。ゲームのマスは盤の二つだけ。
+    // 線のない床。
     flat([[-12,-12,-1.58],[12,-12,-1.58],[12,12,-1.58],[-12,12,-1.58]],'#79775a');
-    for(var j=-12;j<12;j+=.16)flat([[-12,j,-1.578],[12,j,-1.578],[12,j+.012,-1.578],[-12,j+.012,-1.578]],'rgba(38,43,26,.15)');
-    flat([[-4,-12,-1.572],[-3.7,-12,-1.572],[-3.7,12,-1.572],[-4,12,-1.572]],'#303c32');
     flat([[-2.78,-2.74,-1.57],[3.10,-2.74,-1.57],[3.10,3.22,-1.57],[-2.78,3.22,-1.57]],'rgba(21,24,14,.24)');
     model(MODEL.board,{x:0,y:0,z:0,r:0},1);
     var progress=cinematic?ease((p-.12)/.58):state==='result'?1:0;
@@ -164,23 +164,18 @@
     var shade=ctx.createRadialGradient(270,CY,150,270,CY,H*.7);
     shade.addColorStop(0,'rgba(16,18,12,0)');shade.addColorStop(1,'rgba(16,18,12,.75)');ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);
     if(state==='cinema'){
-      var s=shot(),opening=Math.min(1,T/.3);ctx.fillStyle='#11110e';ctx.fillRect(0,0,W,80*opening);ctx.fillRect(0,H-80*opening,W,80*opening);
+      var s=shot(),opening=Math.min(1,T/.1);ctx.fillStyle='#11110e';ctx.fillRect(0,0,W,80*opening);ctx.fillRect(0,H-80*opening,W,80*opening);
       var flash=Math.max(0,1-Math.abs(s.progress-.70)*35);if(flash){ctx.fillStyle='rgba(255,240,203,'+(flash*.22)+')';ctx.fillRect(0,80,W,H-160);}
       return;
     }
-    text('王将棋',270,Math.max(91,H*.13),52);
-    ctx.strokeStyle='#a89a77';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(224,H*.13+46);ctx.lineTo(316,H*.13+46);ctx.stroke();
     if(state==='ready'){
-      var a=.35+.18*Math.sin(elapsed*2);ctx.strokeStyle='rgba(255,239,192,'+a+')';ctx.lineWidth=2;
-      var c=centers[0];ctx.beginPath();ctx.arc(c.x,c.y,68,0,Math.PI*2);ctx.stroke();
+      var b=startButton();ctx.fillStyle='#e6d7b7';ctx.fillRect(b.x,b.y,b.w,b.h);
+      ctx.strokeStyle='#a89a77';ctx.strokeRect(b.x+4,b.y+4,b.w-8,b.h-8);
+      text('対局開始',270,b.y+b.h/2,28,'#30291e');
     }
-    if(state==='lottery'){
-      var flip=Math.floor(T*(T<1.4?12:5))%2===0;
-      plaque(flip?'先手':'後手',270,H*.77,true);
-    }
-    if(state==='play'||state==='reply'){
-      plaque(first?'先手':'後手',270,H*.77,first);
-      plaque(first?'後手':'先手',270,H*.21,!first);
+    if(state==='lottery'||state==='play'||state==='reply'){
+      var turn=state==='lottery'?lotteryFirst():first;
+      text('あなたは'+(turn?'先攻':'後攻')+'です',270,H*.79+34,30);
     }
     if(state==='result'){
       ctx.fillStyle='rgba(19,19,15,.76)';ctx.fillRect(0,H*.25,W,H*.7);
@@ -194,7 +189,7 @@
   }
   window.__probe={
     now:function(){return {state:state,score:score,W:W,H:H,first:first,selected:selected,camera:state==='cinema'?shot().index:null,
-      time:T,cells:2,pieces:state==='result'?1:2,playerPiece:'王将',opponentPiece:'玉将',centers:centers,buttons:buttons(),duration:duration};},
+      time:T,cells:2,pieces:state==='result'?1:2,playerPiece:'王将',opponentPiece:'玉将',centers:centers,buttons:buttons(),duration:duration,startButton:startButton(),lotteryFirst:lotteryFirst()};},
     step:function(n){for(var i=0;i<(n||1);i++){update(1/60);draw();}},reset:newRound
   };
   /* ============ ループ ============ */

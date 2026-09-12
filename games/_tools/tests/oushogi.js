@@ -9,15 +9,17 @@ assert(!meshes.opponent.some(function(o){return o.name==='墨文字王';}));
 assert.equal(meshes.board.filter(function(o){return o.name.indexOf('盤の線')===0;}).length,3);
 function advance(g,n){for(var i=0;i<n;i++){g.step(1);g.drawn.length=0;}}
 function begin(g,first,kind){
-  var random=Math.random;
-  try {
-    Math.random=function(){return first?.1:.9;};
-    if(kind==='tap')g.tap(g.probe.now().centers[0].x,g.probe.now().centers[0].y);
-    else if(kind==='pad'){g.pad({press:true});advance(g,1);g.pad({press:false});advance(g,1);}
-    else g.press(' ');
-  } finally {Math.random=random;}
+  var b=g.probe.now().startButton;
+  if(kind==='tap')g.tap(b.x+30,b.y+30);
+  else if(kind==='pad'){g.pad({press:true});advance(g,1);g.pad({press:false});advance(g,1);}
+  else g.press(' ');
   assert.equal(g.probe.now().state,'lottery');
-  advance(g,133);assert.equal(g.probe.now().first,first);
+  advance(g,600);assert.equal(g.probe.now().state,'lottery');
+  while(g.probe.now().lotteryFirst!==first)advance(g,1);
+  if(kind==='tap')g.tap(270,400);
+  else if(kind==='pad'){g.pad({press:true});advance(g,1);g.pad({press:false});advance(g,1);}
+  else g.press(' ');
+  assert.equal(g.probe.now().first,first);
 }
 function confirm(g,kind,target){
   if(kind==='tap'){var p=g.probe.now().centers[target];g.tap(p.x,p.y);}
@@ -43,7 +45,7 @@ function confirm(g,kind,target){
     assert.equal(g.probe.now().state,'result');
     assert.equal(g.probe.now().score,1);assert.equal(g.probe.now().pieces,1);
     assert.equal(g.probe.now().first,first);
-    assert(frames>=440 && frames<=452);
+    assert(frames>=140 && frames<=152);
     var bs=g.probe.now().buttons;
     g.tap(bs[1].x+30,bs[1].y+30);
     assert.equal(g.shared[0],'王将棋 '+(first?'勝ち':'負け')+' 1手');
@@ -64,4 +66,4 @@ load.SHAPES.forEach(function(v){
   assert.equal(g.probe.now().state,'ready');
   console.log('OK '+v.join('×')+' 押しどころの中心間 '+Math.round(Math.hypot(a.x-b.x,a.y-b.y)))
 });
-console.log('問題なし。くじ2.2秒、後手の待ち1.3秒、決着の演出7.5秒。');
+console.log('問題なし。先後はタップ確定、後手の待ち1.3秒、決着の演出2.5秒。');
