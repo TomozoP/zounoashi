@@ -13,9 +13,9 @@ var ZWrestlePhysics=(function(C){
     {id:'shin'+tag,shape:'shin',p:[s*.20,.19,0],size:[.16,.34,.17],mass:5});});
   function vector(a){return new C.Vec3(a[0]*humanScale,a[1]*humanScale,a[2]*humanScale);}
   function pose(b){return {x:b.position.x,y:b.position.y,z:b.position.z,q:{x:b.quaternion.x,y:b.quaternion.y,z:b.quaternion.z,w:b.quaternion.w},vx:b.velocity.x,vy:b.velocity.y,vz:b.velocity.z};}
-  function swingPose(angle){
+  function swingPose(angle,ringZ){
     var yaw=new C.Quaternion(),flat=new C.Quaternion();yaw.setFromEuler(0,-angle,0);flat.setFromEuler(0,0,-Math.PI/2);var roll=new C.Quaternion();roll.setFromEuler(0,-Math.PI/2,0);var q=yaw.mult(flat).mult(roll),origin=vector([1.25*Math.cos(angle),1.5,1.25*Math.sin(angle)]);
-    return parts.map(function(part){var p=q.vmult(vector(part.p)).vadd(origin);return {id:part.id,x:p.x,y:p.y,z:p.z,q:{x:q.x,y:q.y,z:q.z,w:q.w}};});
+    origin.z+=ringZ||0;return parts.map(function(part){var p=q.vmult(vector(part.p)).vadd(origin);return {id:part.id,x:p.x,y:p.y,z:p.z,q:{x:q.x,y:q.y,z:q.z,w:q.w}};});
   }
   function Game(){
     this.world=new C.World({gravity:new C.Vec3(0,-9.81,0),allowSleep:true});this.world.solver.iterations=30;this.world.solver.tolerance=.0001;
@@ -26,13 +26,13 @@ var ZWrestlePhysics=(function(C){
     this.world.addContactMaterial(new C.ContactMaterial(this.pinMat,this.humanMat,{friction:.32,restitution:.25}));
     var self=this;
     function box(x,y,z,w,h,d){self.world.addBody(new C.Body({mass:0,material:self.floorMat,collisionFilterGroup:1,shape:new C.Box(new C.Vec3(w/2,h/2,d/2)),position:new C.Vec3(x,y,z)}));}
-    box(0,-.2,36.5,20,.4,79);box(0,-.2,-1,12,.4,10);
+    box(0,-.2,36.5,20,.4,79);box(0,-.2,-1,12,.4,10);this.platform=this.world.bodies[this.world.bodies.length-1];
     [-1,1].forEach(function(s){box(s*10.5,-.4,36.5,1,.3,79);box(s*11.06,.1,36.5,.12,.8,79);});
     box(0,-.3,77.5,22,.4,3);box(0,3.2,79,22,7,.3);
     this.pins=[];this.bodies=[];this.joints=[];this.grabs=[];this.hands=[];this.reset();
   }
   Game.prototype.reset=function(distance){
-    this.pinDistance=distance==null?43.5:distance;
+    this.pinDistance=58;this.ringZ=58-(distance==null?43.5:distance);this.firstPinHit=false;this.platform.position.z=this.ringZ-1;this.platform.aabbNeedsUpdate=true;
     var self=this;this.releaseHands();this.released=false;this.joints.forEach(function(j){self.world.removeConstraint(j);});this.bodies.forEach(function(b){self.world.removeBody(b);});this.pins.forEach(function(p){self.world.removeBody(p.body);});
     this.bodies=[];this.joints=[];this.pins=[];this.time=0;this.accumulator=0;this.impact=0;
     for(var row=0;row<4;row++)for(var col=0;col<=row;col++){
@@ -41,14 +41,14 @@ var ZWrestlePhysics=(function(C){
       b.addShape(new C.Cylinder(.105*scale,.26*scale,.35*scale,12),new C.Vec3(0,.225*scale,0));
       b.addShape(new C.Cylinder(.105*scale,.105*scale,.23*scale,12),new C.Vec3(0,.515*scale,0));
       b.addShape(new C.Sphere(.17*scale),new C.Vec3(0,.70*scale,0));
-      b.sleepSpeedLimit=.1;b.sleepTimeLimit=.7;b.addEventListener('collide',function(e){self.impact=Math.max(self.impact,Math.abs(e.contact.getImpactVelocityAlongNormal()));});
+      b.sleepSpeedLimit=.1;b.sleepTimeLimit=.7;b.addEventListener('collide',function(e){self.impact=Math.max(self.impact,Math.abs(e.contact.getImpactVelocityAlongNormal()));if(self.released&&e.body.collisionFilterGroup===4)self.firstPinHit=true;});
       this.world.addBody(b);this.pins.push({body:b,down:false});
     }
     for(var i=0;i<60;i++)this.world.step(1/180);
   };
   Game.prototype.createHuman=function(angle){
     if(this.bodies.length)return;
-    var poses=swingPose(angle),self=this,lookup={};
+    var poses=swingPose(angle,this.ringZ),self=this,lookup={};
     parts.forEach(function(part,i){var p=poses[i],b=new C.Body({mass:part.mass,material:self.humanMat,collisionFilterGroup:4,collisionFilterMask:3,linearDamping:.035,angularDamping:.15});
       b.addShape(new C.Box(new C.Vec3(part.size[0]*.9*humanScale,part.size[1]*.9*humanScale,part.size[2]*.9*humanScale)));b.position.set(p.x,p.y,p.z);b.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);
       b.sleepSpeedLimit=.12;b.sleepTimeLimit=.65;self.world.addBody(b);self.bodies.push(b);lookup[part.id]=b;
@@ -66,9 +66,9 @@ var ZWrestlePhysics=(function(C){
       self.world.addBody(hand);self.hands.push(hand);var grip=new C.PointToPointConstraint(hand,new C.Vec3(),body,pivot,1e6);grip.collideConnected=false;self.world.addConstraint(grip);self.grabs.push(grip);});
   };
   Game.prototype.swing=function(dt,angle){
-    if(!this.holding)return;var steps=Math.max(1,Math.ceil(dt*720)),step=dt/steps,start=this.holdAngle;
+    if(!this.holding)return;var steps=Math.max(1,Math.ceil(dt*720)),step=dt/steps,start=this.holdAngle,ringZ=this.ringZ;
     for(var i=0;i<steps;i++){var a=start+(angle-start)*(i+1)/steps;
-      this.hands.forEach(function(hand,j){var side=j===0?-1:1,x=1.25*Math.cos(a)-side*.2*Math.sin(a),z=1.25*Math.sin(a)+side*.2*Math.cos(a);hand.velocity.set((x*humanScale-hand.position.x)/step,(1.5*humanScale-hand.position.y)/step,(z*humanScale-hand.position.z)/step);});
+      this.hands.forEach(function(hand,j){var side=j===0?-1:1,x=1.25*Math.cos(a)-side*.2*Math.sin(a),z=1.25*Math.sin(a)+side*.2*Math.cos(a);hand.velocity.set((x*humanScale-hand.position.x)/step,(1.5*humanScale-hand.position.y)/step,(z*humanScale+ringZ-hand.position.z)/step);});
       this.world.step(step);
     }this.holdAngle=angle;
   };
@@ -84,8 +84,8 @@ var ZWrestlePhysics=(function(C){
     while(this.accumulator>=1/180){var fast=this.bodies.some(function(b){return b.velocity.length()>35;}),steps=fast?4:2;for(var i=0;i<steps;i++)this.world.step(1/180/steps);this.accumulator-=1/180;this.time+=1/180;}
     this.pins.forEach(function(p){var up=p.body.quaternion.vmult(new C.Vec3(0,1,0));if(up.y<.7||p.body.position.y<.23*scale||Math.abs(p.body.position.x)>10)p.down=true;});
   };
-  Game.prototype.snapshot=function(){return {pinDistance:this.pinDistance,pins:this.pins.map(function(p){var v=pose(p.body);v.down=p.down;return v;}),human:this.bodies.map(function(b,i){var v=pose(b);v.id=parts[i].id;return v;}),time:this.time};};
-  Game.prototype.finished=function(){if(!this.bodies.length||this.holding)return false;if(this.time>9)return true;var center=this.bodies[0].position,still=this.pins.every(function(p){return p.body.velocity.length()<.2&&p.body.angularVelocity.length()<.3;});return this.time>2.5&&still&&(center.y<-3||center.z<-8||Math.abs(center.x)>24||this.bodies.every(function(b){return b.velocity.length()<.4;})||center.z>this.pinDistance+18);};
+  Game.prototype.snapshot=function(){return {pinDistance:this.pinDistance,ringZ:this.ringZ,firstPinHit:this.firstPinHit,pins:this.pins.map(function(p){var v=pose(p.body);v.down=p.down;return v;}),human:this.bodies.map(function(b,i){var v=pose(b);v.id=parts[i].id;return v;}),time:this.time};};
+  Game.prototype.finished=function(){if(!this.bodies.length||this.holding)return false;if(this.time>9)return true;var center=this.bodies[0].position,still=this.pins.every(function(p){return p.body.velocity.length()<.2&&p.body.angularVelocity.length()<.3;});return this.time>2.5&&still&&(center.y<-3||center.z<this.ringZ-8||Math.abs(center.x)>24||this.bodies.every(function(b){return b.velocity.length()<.4;})||center.z>this.pinDistance+18);};
   return {Game:Game,parts:parts,humanScale:humanScale,pinScale:scale,swingPose:swingPose,throwDirection:throwDirection};
 })(typeof CANNON!=='undefined'?CANNON:require('./vendor/cannon.js'));
 if(typeof module!=='undefined')module.exports=ZWrestlePhysics;

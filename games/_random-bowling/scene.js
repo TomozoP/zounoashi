@@ -46,6 +46,7 @@ var ZWrestleScene=(function(){
       g.scale.setScalar(ZWrestlePhysics.pinScale);this.scene.add(g);this.pins.push(g);
     }
 
+    var ringStart=this.scene.children.length;
     // 四角いマットと三段ロープ。レーン側は投球用に開ける。
     box(0,-.3,-1,12,.6,10,mat('#152735',.85));
     box(0,.006,-1,11.7,.02,9.7,mat('#477887',.95));
@@ -61,6 +62,7 @@ var ZWrestleScene=(function(){
       [.65,1.25,1.85].forEach(function(y,i){rope([side*5.7,y,-5.7],[side*5.7,y,3.7],ropeMats[i]);});
     });
     [.65,1.25,1.85].forEach(function(y,i){rope([-5.7,y,-5.7],[5.7,y,-5.7],ropeMats[i]);});
+    this.ringRoot=new T.Group();this.scene.children.slice(ringStart).forEach(function(m){self.ringRoot.add(m);});this.scene.add(this.ringRoot);
     this.red=this.makeWrestler('#df2437');this.blue=this.makeWrestler('#2466e7');this.modelReady=false;
     function geometry(d){var g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(d.position,3));g.setAttribute('normal',new T.Float32BufferAttribute(d.normal,3));return g;}
     Promise.all([fetch('models.json').then(function(r){return r.json();}),fetch('wrestlers.json').then(function(r){return r.json();})]).then(function(data){
@@ -87,13 +89,13 @@ var ZWrestleScene=(function(){
       for(var i=0;i<3;i++){c.fillStyle='#2c414c';c.fillRect(24+i*248,16,224,160);c.fillStyle='#c2d2d7';c.fillText(history[i]==null?'·':String(history[i]),136+i*248,100);}
       this.scoreTexture.needsUpdate=true;this.scoreKey=scoreKey;
     }
-    var T=THREE;this.logicalH=H;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(data.pinDistance-7,body.z-2)):0;
+    var T=THREE;this.logicalH=H;var ringZ=data.ringZ||0;this.ringRoot.position.z=ringZ;this.red.root.position.z=ringZ;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(data.pinDistance-ringZ-7,body.z-ringZ-2)):0;
     this.follow+=(target-this.follow)*(1-Math.exp(-4*dt));this.followX+=((flying&&body?Math.max(-2,Math.min(2,body.x*.3)):0)-this.followX)*(1-Math.exp(-3*dt));
     // 振り回される青を少しだけ追い、投球後は滑らかに元の追従へ戻す。
     var swinging=phase==='swing'&&body,blend=1-Math.exp(-7*dt);
     this.swingX+=((swinging?Math.max(-.6,Math.min(.6,body.x*.2)):0)-this.swingX)*blend;
-    this.swingZ+=((swinging?Math.max(-.45,Math.min(.45,body.z*.15)):0)-this.swingZ)*blend;
-    this.camera.position.set(-this.followX-this.swingX,9-Math.min(1,this.follow/36.5)*3.5,-16+this.follow+this.swingZ);this.camera.lookAt(-this.followX*.5-this.swingX*1.5,.8,12+this.follow*.65+this.swingZ);this.camera.updateMatrixWorld();
+    this.swingZ+=((swinging?Math.max(-.45,Math.min(.45,(body.z-ringZ)*.15)):0)-this.swingZ)*blend;
+    this.camera.position.set(-this.followX-this.swingX,9-Math.min(1,this.follow/36.5)*3.5,ringZ-16+this.follow+this.swingZ);this.camera.lookAt(-this.followX*.5-this.swingX*1.5,.8,ringZ+12+this.follow*.65+this.swingZ);this.camera.updateMatrixWorld();
     this.pins.forEach(function(g,i){var p=data.pins[i];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
     var red=this.red;red.root.rotation.y=Math.PI/2-angle;red.root.position.y=phase==='swing'?Math.sin(angle*2)*.04:0;
     // 赤は足を踏み替え、両手で青の足首を持つ。
@@ -103,7 +105,7 @@ var ZWrestleScene=(function(){
       segment('upperArm'+tag,shoulder,elbow);segment('forearm'+tag,elbow,hand);
       red.parts['thigh'+tag].rotation.x=Math.sin(angle*2+side)*.1;red.parts['shin'+tag].rotation.x=-Math.sin(angle*2+side)*.1;
     });
-    var human=data.human.length?data.human:ZWrestlePhysics.swingPose(angle),blue=this.blue;
+    var human=data.human.length?data.human:ZWrestlePhysics.swingPose(angle,ringZ),blue=this.blue;
     human.forEach(function(p){var g=blue.parts[p.id];g.position.set(p.x/ZWrestlePhysics.humanScale,p.y/ZWrestlePhysics.humanScale,p.z/ZWrestlePhysics.humanScale);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
     this.renderer.render(this.scene,this.camera);ctx.drawImage(this.renderer.domElement,0,0,W,H);
   };

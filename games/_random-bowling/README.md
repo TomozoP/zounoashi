@@ -42,4 +42,4 @@ node games/_tools/tests/random-bowling-render.js
 - [cannon-es 0.20.0](https://github.com/pmndev/cannon-es/releases/tag/v0.20.0)：MIT。`vendor/cannon-LICENSE`。
 - [Three.js r160](https://github.com/mrdoob/three.js/tree/r160)：MIT。配布版0.160.1。`vendor/three-LICENSE`。
 
-投球位置から先頭ピンまで、1投目29・2投目43.5・3投目58。レーンと奥壁は3投目の配置まで届く長さにする。
+ピンは58の位置に固定。リングを29→14.5→0へ下げ、距離を29→43.5→58にする。各投球でレスラーが初めてピンに当たると0.4秒のスローを入れる。
