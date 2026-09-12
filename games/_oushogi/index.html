@@ -98,7 +98,7 @@
   var thumbMode = /(?:^|[?&])thumb=1(?:&|$)/.test(location.search || '');
   var state, score, T, elapsed, first, selected, focus, impact, held = false;
   var CY = 480;
-  var eye, basis, focal, queue, centers = [];
+  var eye, basis, focal, queue, centers = [], shakeX = 0, shakeY = 0;
   var still = document.createElement('canvas'), stillKey = '';
   var shots = [0.7, 2.6/3, 4.1], duration = 0.7+2.6/3+4.1;
   var confirmedAt = null, lotteryBeat = 0;
@@ -122,9 +122,11 @@
     if (state === 'cinema') {
       var s = shot();
       if (s.progress >= 0.70 && impact !== s.index) {
-        impact = s.index; noiseHit(0.10, 1600, 0.20, 2.5);
-        tone(150, 0.20, 0.17, 'sine', 45);
-        if (s.index === 2) tone(60, 1.25, 0.18, 'sine', 28);
+        impact = s.index;
+        noiseHit(.24, 150, .34, .7);
+        noiseHit(.07, 1100, .11, 1.5);
+        tone(92, .42, .22, 'sine', 34);
+        tone(48, .62, .15, 'triangle', 25, .02);
       }
       if (T >= duration) {
         state = 'result'; T = 0;
@@ -146,8 +148,9 @@
     var offset = n === 0 ? 0 : n === 1 ? shots[0] : shots[0] + shots[1];
     /* 三つ目は着手をゆっくり見せ、取った後もカメラだけが寄り続ける。 */
     var local=T-offset;
-    return { index: n, progress: Math.min(1, local / (n===2?1.8:shots[n])),
-      close: n===2?ease((local-1.26)/(shots[2]-1.26)):0 };
+    var motion=n===2?1.8:shots[n];
+    return { index: n, local:local, motion:motion, progress:Math.min(1,local/motion),
+      close:n===2?ease((local-1.26)/(shots[2]-1.26)):0 };
   }
   function buttons() {
     return [{ id:'retry', x:52, y:H * 0.64, w:202, h:68, label:'もう一度' },
@@ -188,7 +191,7 @@
     eye=pos; var front=norm(sub(target,pos)),right=norm(cross(front,[0,0,1])),up=cross(right,front);
     basis=[right,up,front]; focal=zoom;
   }
-  function project(p){var d=sub(p,eye),z=dot(d,basis[2]);return {x:270+dot(d,basis[0])*focal/z,y:CY-dot(d,basis[1])*focal/z,z:z};}
+  function project(p){var d=sub(p,eye),z=dot(d,basis[2]);return {x:270+dot(d,basis[0])*focal/z+shakeX,y:CY-dot(d,basis[1])*focal/z+shakeY,z:z};}
   function path(points){ctx.beginPath();points.forEach(function(p,i){if(i)ctx.lineTo(p.x,p.y);else ctx.moveTo(p.x,p.y);});ctx.closePath();}
   function worldPath(points){path(points.map(project));}
   function transform(p,m){var c=Math.cos(m.r),s=Math.sin(m.r);return [p[0]*c-p[1]*s+m.x,p[0]*s+p[1]*c+m.y,p[2]+m.z];}
@@ -221,6 +224,15 @@
   function scene(){
     var cinematic=state==='cinema',s=cinematic?shot():{index:0,progress:0};
     var p=s.progress,sgn=first===false?-1:1;
+    shakeX=shakeY=0;
+    if(cinematic){
+      var hitAge=s.local-s.motion*.70;
+      if(hitAge>=0 && hitAge<.42){
+        var power=11*Math.pow(1-hitAge/.42,2);
+        shakeX=Math.sin(hitAge*155)*power;
+        shakeY=Math.cos(hitAge*127)*power*.72;
+      }
+    }
     if(state==='ready' && thumbMode){
       /* 一覧の絵だけは、二枚の駒と盤の厚みが読める斜め上から撮る。 */
       camera([4.7,-7.8,12.5],[0,0,-.22],Math.min(900,H));
@@ -331,7 +343,7 @@
   window.__probe={
     now:function(){return {state:state,score:score,W:W,H:H,first:first,selected:selected,camera:state==='cinema'?shot().index:null,
       time:T,cells:2,pieces:state==='result'?1:2,playerPiece:'王将',opponentPiece:'玉将',resultLabel:state==='result'?resultLabel():null,
-      centers:centers,buttons:buttons(),duration:duration,startButton:startButton(),lotteryFirst:lotteryFirst()};},
+      centers:centers,buttons:buttons(),shake:{x:shakeX,y:shakeY},duration:duration,startButton:startButton(),lotteryFirst:lotteryFirst()};},
     step:function(n){for(var i=0;i<(n||1);i++){update(1/60);draw();}},reset:newRound
   };
   /* ============ ループ ============ */

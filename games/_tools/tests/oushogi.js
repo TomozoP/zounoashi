@@ -35,13 +35,16 @@ function confirm(g,kind,target){
       confirm(g,kind,0);assert(g.probe.now().selected);
       confirm(g,kind,1);assert.equal(g.probe.now().state,'cinema');
     } else {assert.equal(g.probe.now().state,'reply');advance(g,80);}
-    var seen=new Set(),frames=0;
+    var seen=new Set(),frames=0,seenShake=false;
     while(g.probe.now().state==='cinema' && frames<460){
       seen.add(g.probe.now().camera);
+      var shake=g.probe.now().shake;
+      if(Math.hypot(shake.x,shake.y)>5)seenShake=true;
       if(frames%60===0)g.press(' ');
       advance(g,1);frames++;
     }
     assert.deepEqual(Array.from(seen),[0,1,2]);
+    assert(seenShake,'駒を取る瞬間にカメラが揺れる');
     assert.equal(g.probe.now().state,'result');
     assert.equal(g.probe.now().resultLabel,first?'先手勝ち':'後手負け');
     assert.equal(g.probe.now().score,1);assert.equal(g.probe.now().pieces,1);
