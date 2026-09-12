@@ -55,8 +55,8 @@
       close: n===2?ease((local-1.26)/(shots[2]-1.26)):0 };
   }
   function buttons() {
-    return [{ id:'retry', x:52, y:H * 0.79, w:202, h:68, label:'もう一度' },
-            { id:'share', x:286, y:H * 0.79, w:202, h:68, label:'Xでシェア' }];
+    return [{ id:'retry', x:52, y:H * 0.64, w:202, h:68, label:'もう一度' },
+            { id:'share', x:286, y:H * 0.64, w:202, h:68, label:'Xでシェア' }];
   }
   function hit(b,x,y) { return x >= b.x && x <= b.x+b.w && y >= b.y && y <= b.y+b.h; }
   function down(x,y) {
@@ -223,8 +223,8 @@
     }
     turnLabel();
     if(state==='result'){
-      ctx.fillStyle='rgba(19,19,15,.76)';ctx.fillRect(0,H*.25,W,H*.7);
-      text(first?'勝ち':'負け',270,H*.40,64);text('1手',270,H*.53,38,'#cbbc99');
+      ctx.fillStyle='rgba(19,19,15,.76)';ctx.fillRect(0,H*.12,W,H*.76);
+      text(first?'勝ち':'負け',270,H*.33,64);text('1手',270,H*.46,38,'#cbbc99');
       buttons().forEach(function(b,i){
         ctx.fillStyle=focus===i?'#e6d7b7':'#302f28';ctx.fillRect(b.x,b.y,b.w,b.h);
         ctx.strokeStyle='#c4b38a';ctx.strokeRect(b.x+4,b.y+4,b.w-8,b.h-8);
