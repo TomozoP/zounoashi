@@ -102,28 +102,24 @@
   });
 
 
-  /* 指で円を描いて回し、離した瞬間の接線方向へ投げる。 */
-  var S={PLAY:'play',RESULT:'result'},state,score,T,held,phase,shot,elapsed,history,scoreTime=0,angle=-Math.PI/2,omega=0,swingTime=0,snapshot,keySwing=false,lastPolar=null,lastMove=0;
+  /* 長押しで加速し、離した瞬間の頭の方向へ投げる。 */
+  var S={PLAY:'play',RESULT:'result'},state,score,T,held,phase,shot,elapsed,history,scoreTime=0,angle=-Math.PI/2,omega=0,swingTime=0,snapshot;
   function place(){}
   function syncPhysics(){snapshot=world.snapshot();}
   function nextThrow(){held=false;phase='ready';angle=-Math.PI/2;omega=0;swingTime=0;elapsed=0;world.reset();syncPhysics();}
   function newRound(){state=S.PLAY;score=0;scoreTime=0;shot=0;history=[];T=0;nextThrow();}
   function update(dt){
     frameDt=dt;T+=dt;scoreTime=Math.max(0,scoreTime-dt);if(state!==S.PLAY)return;elapsed+=dt;
-    if(phase==='swing'){swingTime+=dt;if(keySwing){omega=1.8+5.2*(1-Math.exp(-swingTime/1.15));angle+=omega*dt;}else if(T-lastMove>.1)omega*=Math.exp(-4*dt);}
+    if(phase==='swing'){swingTime+=dt;omega=1.8+12.2*(1-Math.exp(-swingTime/1.15));var old=angle;angle+=omega*dt;world.swing(dt,angle);syncPhysics();if(Math.floor(angle/(Math.PI*2))!==Math.floor(old/(Math.PI*2)))noiseHit(.1,380+omega*20,.04);}
     if(phase==='flight'){world.step(dt);syncPhysics();if(world.impact>1){noiseHit(.12,420+world.impact*35,Math.min(.2,world.impact*.008));world.impact=0;}if(world.finished()){var fallen=snapshot.pins.filter(function(p){return p.down;}).length;score+=fallen;history.push(fallen);shot++;scoreTime=2;phase='settle';elapsed=0;}}
     else if(phase==='settle'&&elapsed>1.2){if(shot===10)state=S.RESULT;else nextThrow();}
   }
-  function down(x,y){audioOn();if(state===S.RESULT){var hit=x==null?'retry':hitButton(x,y);if(hit==='share')doShare();else if(hit==='retry')newRound();return;}if(phase!=='ready'||held)return;held=true;phase='swing';swingTime=0;keySwing=x==null;omega=keySwing?1.8:0;lastPolar=keySwing?null:polar(x,y);lastMove=T;}
-  function spinCenter(){return view3d?view3d.project(0,1.3,0):{x:W/2,y:H*.73};}
-  function polar(x,y){var c=spinCenter(),dx=x-c.x,dy=(c.y-y)*1.65;return dx*dx+dy*dy<625?null:Math.atan2(dy,dx);}
-  function move(x,y){if(!held||phase!=='swing'||keySwing)return;var p=polar(x,y);if(p==null){lastPolar=null;return;}if(lastPolar!=null){var delta=Math.atan2(Math.sin(p-lastPolar),Math.cos(p-lastPolar));delta=Math.max(-.65,Math.min(.65,delta));var dt=Math.max(1/120,Math.min(.12,T-lastMove));angle+=delta;omega=Math.max(-10,Math.min(10,omega*.55+delta/dt*.45));if(Math.abs(delta)>.02&&Math.floor(angle/(Math.PI*2))!==Math.floor((angle-delta)/(Math.PI*2)))noiseHit(.12,400,.05);}lastPolar=p;lastMove=T;}
+  function down(x,y){audioOn();if(state===S.RESULT){var hit=x==null?'retry':hitButton(x,y);if(hit==='share')doShare();else if(hit==='retry')newRound();return;}if(phase!=='ready'||held)return;held=true;phase='swing';swingTime=0;omega=1.8;world.startSwing(angle);syncPhysics();}
   function up(){if(!held||phase!=='swing')return;if(Math.abs(omega)<.7){cancelHold();return;}held=false;world.launch(angle,omega);syncPhysics();phase='flight';elapsed=0;tone(130,.22,.09,'sine',45);}
-  function cancelHold(){if(phase==='swing'){held=false;phase='ready';angle=-Math.PI/2;omega=0;swingTime=0;}}
+  function cancelHold(){if(phase==='swing')nextThrow();}
   function atCanvas(e){var r=canvas.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*W,y:(e.clientY-r.top)/r.height*H};}
   var activePointer=null;
   wrap.addEventListener('pointerdown',function(e){if(activePointer!==null)return;e.preventDefault();activePointer=e.pointerId;if(wrap.setPointerCapture)wrap.setPointerCapture(e.pointerId);var p=atCanvas(e);down(p.x,p.y);});
-  wrap.addEventListener('pointermove',function(e){if(activePointer!==e.pointerId)return;e.preventDefault();var p=atCanvas(e);move(p.x,p.y);});
   wrap.addEventListener('pointerup',function(e){if(activePointer!==e.pointerId)return;e.preventDefault();activePointer=null;up();});
   wrap.addEventListener('pointercancel',function(){activePointer=null;cancelHold();});
   window.addEventListener('blur',function(){activePointer=null;cancelHold();});
@@ -212,8 +208,8 @@
   /* ============ 覗き穴 ============
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
-  window.__probe={now:function(){return {state:state,phase:phase,held:held,score:score,shot:shot,history:history.slice(),scoreTime:scoreTime,angle:angle,omega:omega,swingTime:swingTime,spinCenter:spinCenter(),W:W,H:H,pins:snapshot.pins,human:snapshot.human,cameraFollow:view3d?view3d.follow:0,modelsReady:view3d?view3d.modelReady:false};},step:function(n){for(var i=0;i<(n||1);i++){update(1/60);draw();}},reset:newRound};
-  window.__recording={sound:function(){audioOn();return AC;},run:async function(r){for(var i=0;i<10;i++){if(!await r.until(function(){return phase==='ready';},12))throw Error('次の投球に進まない');down();await r.until(function(){return swingTime>2&&Math.cos(angle)>.99&&Math.abs(Math.sin(angle))<.08;},7);up();await r.wait(500);}await r.until(function(){return state===S.RESULT;},12);await r.wait(1500);}};
+  window.__probe={now:function(){return {state:state,phase:phase,held:held,score:score,shot:shot,history:history.slice(),scoreTime:scoreTime,angle:angle,omega:omega,swingTime:swingTime,W:W,H:H,pins:snapshot.pins,human:snapshot.human,cameraFollow:view3d?view3d.follow:0,modelsReady:view3d?view3d.modelReady:false};},step:function(n){for(var i=0;i<(n||1);i++){update(1/60);draw();}},reset:newRound};
+  window.__recording={sound:function(){audioOn();return AC;},run:async function(r){for(var i=0;i<10;i++){if(!await r.until(function(){return phase==='ready';},12))throw Error('次の投球に進まない');down();await r.until(function(){return swingTime>2&&ZWrestlePhysics.headDirection(snapshot.human).z>.99&&Math.abs(ZWrestlePhysics.headDirection(snapshot.human).x)<.08;},7);up();await r.wait(500);}await r.until(function(){return state===S.RESULT;},12);await r.wait(1500);}};
 
   /* ============ ループ ============ */
   newRound();

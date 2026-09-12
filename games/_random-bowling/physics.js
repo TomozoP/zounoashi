@@ -29,10 +29,10 @@ var ZWrestlePhysics=(function(C){
     box(0,-.2,18,8,.4,40);box(0,-.2,-1,12,.4,10);
     [-1,1].forEach(function(s){box(s*4.45,-.4,20,.9,.3,36);box(s*4.96,.1,20,.12,.8,36);});
     box(0,-.3,39.5,10,.4,3);box(0,1.5,41,10,3,.3);
-    this.pins=[];this.bodies=[];this.joints=[];this.reset();
+    this.pins=[];this.bodies=[];this.joints=[];this.grabs=[];this.hands=[];this.reset();
   }
   Game.prototype.reset=function(){
-    var self=this;this.joints.forEach(function(j){self.world.removeConstraint(j);});this.bodies.forEach(function(b){self.world.removeBody(b);});this.pins.forEach(function(p){self.world.removeBody(p.body);});
+    var self=this;this.releaseHands();this.released=false;this.joints.forEach(function(j){self.world.removeConstraint(j);});this.bodies.forEach(function(b){self.world.removeBody(b);});this.pins.forEach(function(p){self.world.removeBody(p.body);});
     this.bodies=[];this.joints=[];this.pins=[];this.time=0;this.accumulator=0;this.impact=0;
     for(var row=0;row<4;row++)for(var col=0;col<=row;col++){
       var b=new C.Body({mass:6,material:this.pinMat,collisionFilterGroup:2,position:new C.Vec3((col-row/2)*1.5,.47*scale,29+row*1.4),linearDamping:.22,angularDamping:.24});
@@ -45,27 +45,46 @@ var ZWrestlePhysics=(function(C){
     }
     for(var i=0;i<60;i++)this.world.step(1/180);
   };
-  Game.prototype.launch=function(angle,omega){
+  Game.prototype.createHuman=function(angle){
     if(this.bodies.length)return;
-    var poses=swingPose(angle),self=this,lookup={},speed=(12+Math.abs(omega)*2.7)*(omega<0?-1:1);
+    var poses=swingPose(angle),self=this,lookup={};
     parts.forEach(function(part,i){var p=poses[i],b=new C.Body({mass:part.mass,material:self.humanMat,collisionFilterGroup:4,collisionFilterMask:3,linearDamping:.035,angularDamping:.15});
       b.addShape(new C.Box(new C.Vec3(part.size[0]*.9,part.size[1]*.9,part.size[2]*.9)));b.position.set(p.x,p.y,p.z);b.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);
-      // 手を離した瞬間の接線方向。各部位の速度差も回転として引き継ぐ。
-      b.velocity.set(-Math.sin(angle)*speed-omega*(p.z-poses[0].z)*.3,2.5+Math.abs(omega)*.12,Math.cos(angle)*speed+omega*(p.x-poses[0].x)*.3);
-      b.angularVelocity.set(0,-omega*.3,1.2);b.sleepSpeedLimit=.12;b.sleepTimeLimit=.65;self.world.addBody(b);self.bodies.push(b);lookup[part.id]=b;
+      b.sleepSpeedLimit=.12;b.sleepTimeLimit=.65;self.world.addBody(b);self.bodies.push(b);lookup[part.id]=b;
     });
     function joint(a,b,p,angleLimit){var ba=lookup[a],bb=lookup[b],pa=parts.find(function(d){return d.id===a;}),pb=parts.find(function(d){return d.id===b;}),va=vector(p).vsub(vector(pa.p)),vb=vector(p).vsub(vector(pb.p));
       var c=new C.ConeTwistConstraint(ba,bb,{pivotA:va,pivotB:vb,axisA:new C.Vec3(0,1,0),axisB:new C.Vec3(0,1,0),angle:angleLimit,twistAngle:.6,maxForce:1e5,collideConnected:false});self.world.addConstraint(c);self.joints.push(c);}
     joint('pelvis','torso',[0,1.30,0],.45);joint('torso','head',[0,2.03,0],.65);
     ['L','R'].forEach(function(tag){var s=tag==='L'?-1:1;joint('torso','upperArm'+tag,[s*.43,1.84,0],1.6);joint('upperArm'+tag,'forearm'+tag,[s*.63,1.32,0],1.3);joint('pelvis','thigh'+tag,[s*.2,.94,0],1.1);joint('thigh'+tag,'shin'+tag,[s*.2,.44,0],1.2);});
   };
+  function headDirection(human){var p=human[0],head=human[2],dx=head.x-p.x,dz=head.z-p.z,length=Math.hypot(dx,dz)||1;return {x:dx/length,z:dz/length};}
+  Game.prototype.releaseHands=function(){var self=this;(this.grabs||[]).forEach(function(c){self.world.removeConstraint(c);});(this.hands||[]).forEach(function(b){self.world.removeBody(b);});this.grabs=[];this.hands=[];this.holding=false;};
+  Game.prototype.startSwing=function(angle){
+    this.createHuman(angle);this.holding=true;this.holdAngle=angle;var self=this;
+    ['L','R'].forEach(function(tag){var index=parts.findIndex(function(p){return p.id==='shin'+tag;}),body=self.bodies[index],pivot=new C.Vec3(0,-.19,0),pos=body.pointToWorldFrame(pivot),hand=new C.Body({mass:0,type:C.Body.KINEMATIC,collisionFilterMask:0,position:pos});
+      self.world.addBody(hand);self.hands.push(hand);var grip=new C.PointToPointConstraint(hand,new C.Vec3(),body,pivot,1e6);grip.collideConnected=false;self.world.addConstraint(grip);self.grabs.push(grip);});
+  };
+  Game.prototype.swing=function(dt,angle){
+    if(!this.holding)return;var steps=Math.max(1,Math.ceil(dt*720)),step=dt/steps,start=this.holdAngle;
+    for(var i=0;i<steps;i++){var a=start+(angle-start)*(i+1)/steps;
+      this.hands.forEach(function(hand,j){var side=j===0?-1:1,x=1.25*Math.cos(a)-side*.2*Math.sin(a),z=1.25*Math.sin(a)+side*.2*Math.cos(a);hand.velocity.set((x-hand.position.x)/step,(1.5-hand.position.y)/step,(z-hand.position.z)/step);});
+      this.world.step(step);
+    }this.holdAngle=angle;
+  };
+  Game.prototype.launch=function(angle,omega){
+    if(this.released)return;if(!this.bodies.length)this.createHuman(angle);
+    var direction=headDirection(this.snapshot().human),speed=12+Math.abs(omega)*2.7;
+    this.releaseHands();this.released=true;this.time=0;this.accumulator=0;
+    // 現在の頭側へ押し出す。振り回されていた姿勢と各部位の回転は保つ。
+    this.bodies.forEach(function(b){b.wakeUp();b.velocity.set(direction.x*speed,2.5+Math.abs(omega)*.12,direction.z*speed);var spin=b.angularVelocity.length();if(spin>18)b.angularVelocity.scale(18/spin,b.angularVelocity);});
+  };
   Game.prototype.step=function(dt){
-    if(!this.bodies.length)return;this.accumulator+=Math.min(dt,.1);
-    while(this.accumulator>=1/180){this.world.step(1/360);this.world.step(1/360);this.accumulator-=1/180;this.time+=1/180;}
+    if(!this.bodies.length||this.holding)return;this.accumulator+=Math.min(dt,.1);
+    while(this.accumulator>=1/180){var fast=this.bodies.some(function(b){return b.velocity.length()>35;}),steps=fast?4:2;for(var i=0;i<steps;i++)this.world.step(1/180/steps);this.accumulator-=1/180;this.time+=1/180;}
     this.pins.forEach(function(p){var up=p.body.quaternion.vmult(new C.Vec3(0,1,0));if(up.y<.7||p.body.position.y<.23*scale||Math.abs(p.body.position.x)>4)p.down=true;});
   };
   Game.prototype.snapshot=function(){return {pins:this.pins.map(function(p){var v=pose(p.body);v.down=p.down;return v;}),human:this.bodies.map(function(b,i){var v=pose(b);v.id=parts[i].id;return v;}),time:this.time};};
-  Game.prototype.finished=function(){if(!this.bodies.length)return false;if(this.time>9)return true;var center=this.bodies[0].position,still=this.pins.every(function(p){return p.body.velocity.length()<.2&&p.body.angularVelocity.length()<.3;});return this.time>2.5&&still&&(center.y<-3||center.z<-8||Math.abs(center.x)>12||this.bodies.every(function(b){return b.velocity.length()<.4;})||center.z>37);};
-  return {Game:Game,parts:parts,pinScale:scale,swingPose:swingPose};
+  Game.prototype.finished=function(){if(!this.bodies.length||this.holding)return false;if(this.time>9)return true;var center=this.bodies[0].position,still=this.pins.every(function(p){return p.body.velocity.length()<.2&&p.body.angularVelocity.length()<.3;});return this.time>2.5&&still&&(center.y<-3||center.z<-8||Math.abs(center.x)>12||this.bodies.every(function(b){return b.velocity.length()<.4;})||center.z>37);};
+  return {Game:Game,parts:parts,pinScale:scale,swingPose:swingPose,headDirection:headDirection};
 })(typeof CANNON!=='undefined'?CANNON:require('./vendor/cannon.js'));
 if(typeof module!=='undefined')module.exports=ZWrestlePhysics;

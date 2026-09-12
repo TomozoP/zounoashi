@@ -77,10 +77,10 @@ var ZWrestleScene=(function(){
       segment('upperArm'+tag,shoulder,elbow);segment('forearm'+tag,elbow,hand);
       red.parts['thigh'+tag].rotation.x=Math.sin(angle*2+side)*.1;red.parts['shin'+tag].rotation.x=-Math.sin(angle*2+side)*.1;
     });
-    var human=flying?data.human:ZWrestlePhysics.swingPose(angle),blue=this.blue;
+    var human=data.human.length?data.human:ZWrestlePhysics.swingPose(angle),blue=this.blue;
     human.forEach(function(p){var g=blue.parts[p.id];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
-    // 接線方向を短い矢印で示す。向きの補正や自動照準はしない。
-    this.direction.visible=phase==='swing';if(this.direction.visible){var p=human[0],direction=omega<0?-1:1,dx=-Math.sin(angle)*direction,dz=Math.cos(angle)*direction,nx=dz*.12,nz=-dx*.12,len=1.2+Math.abs(omega)*.12,x=p.x+dx*.6,z=p.z+dz*.6;
+    // 頭の方向を短い矢印で示す。向きの補正や自動照準はしない。
+    this.direction.visible=phase==='swing';if(this.direction.visible){var p=human[0],direction=ZWrestlePhysics.headDirection(human),dx=direction.x,dz=direction.z,nx=dz*.12,nz=-dx*.12,len=1.2+Math.abs(omega)*.12,x=p.x+dx*.6,z=p.z+dz*.6;
       var verts=[x+nx,.025,z+nz,x-nx,.025,z-nz,x+dx*len,.025,z+dz*len,x+dx*len+nx*2,.025,z+dz*len+nz*2,x+dx*len-nx*2,.025,z+dz*len-nz*2,x+dx*(len+.5),.025,z+dz*(len+.5)];this.direction.geometry.dispose();this.direction.geometry=new T.BufferGeometry();this.direction.geometry.setAttribute('position',new T.Float32BufferAttribute(verts,3));}
     this.renderer.render(this.scene,this.camera);ctx.drawImage(this.renderer.domElement,0,0,W,H);
   };
