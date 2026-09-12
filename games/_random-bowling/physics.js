@@ -74,7 +74,7 @@ var ZWrestlePhysics=(function(C){
   };
   Game.prototype.launch=function(angle,omega){
     if(this.released)return;if(!this.bodies.length)this.createHuman(angle);
-    var direction=throwDirection(angle),speed=3+68.5*Math.pow(Math.min(1,Math.abs(omega)/20.02),1.5);
+    var direction=throwDirection(angle),speed=3+57.5*Math.pow(Math.min(1,Math.abs(omega)/16.94),1.5);
     this.releaseHands();this.released=true;this.time=0;this.accumulator=0;
     // 赤レスラーが向く方向へ押し出す。振り回されていた姿勢と各部位の回転は保つ。
     this.bodies.forEach(function(b){b.wakeUp();b.velocity.set(direction.x*speed,2.5+Math.abs(omega)*.12,direction.z*speed);var spin=b.angularVelocity.length();if(spin>18)b.angularVelocity.scale(18/spin,b.angularVelocity);});
