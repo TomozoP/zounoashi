@@ -75,8 +75,18 @@ var ZWrestleScene=(function(){
     var T=THREE,root=new T.Group(),parts={},skin=new T.MeshStandardMaterial({color:'#c88759',roughness:.5}),pants=new T.MeshStandardMaterial({color:color,roughness:.65}),black=new T.MeshStandardMaterial({color:'#090f19',roughness:.6}),white=new T.MeshStandardMaterial({color:'#fff3dc',roughness:.6});
     // レスラーだけ環境光を抑え、体の陰影と衣装の色をはっきりさせる。
     [skin,pants,black,white].forEach(function(m){m.onBeforeCompile=function(shader){shader.fragmentShader=shader.fragmentShader.replace('#include <lights_fragment_end>','#include <lights_fragment_end>\nreflectedLight.indirectDiffuse *= 0.5;');};m.customProgramCacheKey=function(){return 'wrestler-contrast';};});
-    ZWrestlePhysics.parts.forEach(function(p){var g=new T.Group(),geo=new T.SphereGeometry(1,16,12);geo.scale(p.size[0],p.size[1],p.size[2]);var body=new T.Mesh(geo,p.shape==='pelvis'?pants:skin);body.castShadow=true;body.receiveShadow=true;g.add(body);g.position.set(p.p[0],p.p[1],p.p[2]);root.add(g);parts[p.id]=g;
+    ZWrestlePhysics.parts.forEach(function(p){var g=new T.Group(),geo=new T.SphereGeometry(1,16,12);geo.scale(p.size[0],p.size[1],p.size[2]);var body=new T.Mesh(geo,(p.shape==='pelvis'||p.shape==='head')?pants:skin);body.castShadow=true;body.receiveShadow=true;g.add(body);g.position.set(p.p[0],p.p[1],p.p[2]);root.add(g);parts[p.id]=g;
       function ellipsoid(x,y,z,sx,sy,sz,m){var mesh=new T.Mesh(new T.SphereGeometry(1,12,8),m);mesh.position.set(x,y,z);mesh.scale.set(sx,sy,sz);mesh.castShadow=true;g.add(mesh);}
+      // 覆面は衣装と同色。白い縁取りと暗い開口部だけで顔を示す。
+      if(p.shape==='head'){
+        ellipsoid(0,0,0,.028,.295,.234,white);
+        [-1,1].forEach(function(side){
+          ellipsoid(side*.092,.048,.206,.083,.058,.035,white);
+          ellipsoid(side*.092,.048,.235,.054,.030,.013,black);
+        });
+        ellipsoid(0,-.125,.204,.077,.052,.034,white);
+        ellipsoid(0,-.125,.233,.050,.029,.013,black);
+      }
       if(p.shape==='shin'){ellipsoid(0,-.16,.065,.18,.22,.25,black);ellipsoid(0,.15,.035,.18,.10,.18,pants);}
       if(p.shape==='forearm'){ellipsoid(0,-.14,0,.155,.07,.15,white);ellipsoid(0,-.26,0,.15,.12,.14,skin);}
     });
