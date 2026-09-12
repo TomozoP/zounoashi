@@ -46,10 +46,21 @@ var ZWrestleScene=(function(){
       g.scale.setScalar(ZWrestlePhysics.pinScale);this.scene.add(g);this.pins.push(g);
     }
 
-    box(0,-.14,-1,12,.3,10,mat('#233e4c',.8));
-    // 床上面は高さ0.01。線を少し離し、同じ深度で競合させない。
-    var ringMaterial=mat('#e9d7b1',.7);ringMaterial.polygonOffset=true;ringMaterial.polygonOffsetFactor=-1;ringMaterial.polygonOffsetUnits=-1;
-    var ring=new T.Mesh(new T.RingGeometry(3.9,4.02,128),ringMaterial);ring.rotation.x=-Math.PI/2;ring.position.y=.025;this.scene.add(ring);
+    // 四角いマットと三段ロープ。レーン側は投球用に開ける。
+    box(0,-.3,-1,12,.6,10,mat('#152735',.85));
+    box(0,.006,-1,11.7,.02,9.7,mat('#477887',.95));
+    var edge=mat('#c6d6d7',.85);
+    [-1,1].forEach(function(side){box(side*5.55,.023,-1,.09,.012,9.1,edge);box(0,.023,-1+side*4.55,11.1,.012,.09,edge);});
+    var postMat=mat('#283741',.4,.5),ropeMats=[mat('#d84c51',.7),mat('#e5e3d8',.8),mat('#3d68a1',.7)];
+    function rope(a,b,material){var from=new T.Vector3(a[0],a[1],a[2]),to=new T.Vector3(b[0],b[1],b[2]),d=to.clone().sub(from),mesh=new T.Mesh(new T.CylinderGeometry(.045,.045,d.length(),8),material);mesh.position.copy(from).add(to).multiplyScalar(.5);mesh.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),d.normalize());mesh.castShadow=true;self.scene.add(mesh);}
+    [-1,1].forEach(function(side){
+      [-5.7,3.7].forEach(function(z){
+        box(side*5.7,1.05,z,.19,2.1,.19,postMat);
+        [.65,1.25,1.85].forEach(function(y){box(side*5.56,y,z,.3,.23,.32,mat(side<0?'#c63746':'#315daf',.8));});
+      });
+      [.65,1.25,1.85].forEach(function(y,i){rope([side*5.7,y,-5.7],[side*5.7,y,3.7],ropeMats[i]);});
+    });
+    [.65,1.25,1.85].forEach(function(y,i){rope([-5.7,y,-5.7],[5.7,y,-5.7],ropeMats[i]);});
     this.red=this.makeWrestler('#df2437');this.blue=this.makeWrestler('#2466e7');this.modelReady=false;
     function geometry(d){var g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(d.position,3));g.setAttribute('normal',new T.Float32BufferAttribute(d.normal,3));return g;}
     Promise.all([fetch('models.json').then(function(r){return r.json();}),fetch('wrestlers.json').then(function(r){return r.json();})]).then(function(data){
