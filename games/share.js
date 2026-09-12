@@ -6,7 +6,8 @@
        done: function (result) { ... }   // "shared" / "opened" / "cancel" / "blocked"
      });
 
-   iframeの中で動いている場合は、埋め込んでいるページのURLを共有する。
+   公開ゲームはタイトルとサムネのある共有ページを使う。
+   下書きなどは、埋め込んでいるページのURLを共有する。
 
    スマホでは、まず端末の共有シート（Web Share）を試す。
    window.open はポップアップとして止められることがあり、
@@ -17,10 +18,20 @@
   "use strict";
 
   function pageUrl() {
+    var game = global.location.pathname.match(/^\/games\/([a-z0-9-]+)\/(?:index\.html)?$/);
+    var current = global.location.href;
     try {
-      if (global.parent && global.parent !== global) return global.parent.location.href;
+      if (global.parent && global.parent !== global) current = global.parent.location.href;
     } catch (e) {}
-    return location.href;
+    if (!game) return current;
+    var page = new URL(current);
+    var query = page.hash.indexOf("#/game/" + game[1]) === 0
+      ? page.hash.slice(page.hash.indexOf("?")) : page.search;
+    if (query.charAt(0) !== "?") query = "";
+    var params = new URLSearchParams(query);
+    params.delete("v");
+    var search = params.toString();
+    return global.location.origin + "/share/" + game[1] + "/" + (search ? "?" + search : "");
   }
 
   function isPhone() {

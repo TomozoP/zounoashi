@@ -42,7 +42,7 @@ if (!inputs.length) {
   process.exit(1);
 }
 
-var OK = /\.(png|jpe?g|webp|gif|bmp)$/i;
+var OK = /\.(png|jpe?g|webp|gif|bmp|svg)$/i;
 var files = [];
 inputs.forEach(function (p) {
   var full = path.resolve(p);
@@ -59,7 +59,13 @@ if (!files.length) { console.log("変換する画像がない"); process.exit(1)
 var jobs = files.map(function (f, n) {
   var base = path.basename(f).replace(/\.[^.]+$/, "") + ext;
   var dir = outDir ? path.resolve(outDir) : path.dirname(f);
-  return { n: n, src: f, out: path.join(dir, base), was: fs.statSync(f).size };
+  var job = { n: n, src: f, out: path.join(dir, base), was: fs.statSync(f).size };
+  /* 大きさの指定がないSVGも、元の座標の細かさで書き出す。 */
+  if (/\.svg$/i.test(f)) {
+    var box = fs.readFileSync(f, "utf8").match(/viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']/);
+    if (box) { job.width = Number(box[1]); job.height = Number(box[2]); }
+  }
+  return job;
 });
 jobs.forEach(function (j) { fs.mkdirSync(path.dirname(j.out), { recursive: true }); });
 
@@ -71,7 +77,7 @@ if (over.length) {
 
 /* ---------------- 受け取る側 ---------------- */
 var MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-             ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp" };
+             ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp", ".svg": "image/svg+xml" };
 
 var page =
 '<!doctype html><meta charset="utf-8"><body style="background:#111">\n' +
@@ -82,7 +88,7 @@ var page =
 '    var im = new Image();\n' +
 '    im.onerror = function () { done({ n: j.n, err: "読めない" }); };\n' +
 '    im.onload = function () {\n' +
-'      var w = im.naturalWidth, h = im.naturalHeight, s = 1;\n' +
+'      var w = j.width || im.naturalWidth, h = j.height || im.naturalHeight, s = 1;\n' +
 '      if (MAXW && w > MAXW) s = Math.min(s, MAXW / w);\n' +
 '      if (MAXH && h > MAXH) s = Math.min(s, MAXH / h);\n' +
 '      var cw = Math.max(1, Math.round(w * s)), ch = Math.max(1, Math.round(h * s));\n' +
@@ -116,7 +122,7 @@ var server = http.createServer(function (req, res) {
   if (u === "/") {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(page
-      .replace("__JOBS__", JSON.stringify(jobs.map(function (j) { return { n: j.n }; })))
+      .replace("__JOBS__", JSON.stringify(jobs.map(function (j) { return { n: j.n, width: j.width, height: j.height }; })))
       .replace("__MAXW__", String(maxW))
       .replace("__MAXH__", String(maxH))
       .replace("__Q__", String(quality))

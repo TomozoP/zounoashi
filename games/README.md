@@ -75,6 +75,12 @@ g.until(function () { return g.probe.now().state === "result"; });
 
 ## 一覧に出るまで
 
+共有ボタンは `/share/<id>/` を使います。ここにゲームのタイトルとサムネのOGPを置き、
+開くと従来のプレイ画面へ移ります。ゲーム本体のURLにも同じOGPを設定します。
+以前の `/#/game/<id>` をそのまま投稿した場合は、サイト共通のOGPになります。
+`publish.js` が共有ページを作ります。公開済みゲームのタイトルやサムネを変えたら、
+`node games/_tools/ogp.js` で更新してください。SVGのサムネは共有用PNGも作ります。
+
 - 下書きの間は `games/_local.js` に1行（`new.js` が書きます）。**localhost のときだけ**読まれます
 - 公開すると `index.html` の `GAMES` に移ります（`publish.js` がやります）
 - `id` は半角小文字の英数字・ハイフン。URL（`#/game/<id>`）とプレイ数の集計に使います

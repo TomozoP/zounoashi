@@ -44,6 +44,8 @@ fs.writeFileSync(idxPath, idx);
 /* 4) 下書きの行を消す */
 fs.writeFileSync(localPath, local.replace(re, "").replace(/\n{3,}/g, "\n\n"));
 
+cp.execFileSync(process.execPath, [path.join(__dirname, "ogp.js")], { cwd: root, stdio: "inherit" });
+
 console.log("公開の形にしました:");
 console.log("  games/" + id + "/");
 console.log("  index.html の GAMES に追加");
