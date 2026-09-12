@@ -108,7 +108,7 @@
     {name:'スーパーボール', color:'#f079cf', r:.29, mass:2.3, speed:16, curve:0, hop:1.15, skin:9}
   ];
   var S = { PLAY:'play', RESULT:'result' };
-  var state, score, T, held, keyMode=false, phase, shot, pins, ball, kind, aim, manual, elapsed, history, queue, refill;
+  var state, score, T, held, keyMode=false, phase, shot, pins, ball, kind, aim, manual, elapsed, history;
   function place() {}
   function clamp(v,a,b) { return Math.max(a,Math.min(b,v)); }
   function rack() {
@@ -117,18 +117,16 @@
       pins.push({x:(col-row/2)*.88,z:18+row*.81,vx:0,vz:0,down:false,fall:0,dx:0,dz:1});
   }
   function nextBall() {
-    if(!queue.length) {for(var i=0;i<3;i++) queue.push(kinds[Math.floor(Math.random()*kinds.length)]);refill=false;}
-    else {queue.unshift(kinds[Math.floor(Math.random()*kinds.length)]);refill=true;}
-    kind=queue[2];
+    kind=kinds[Math.floor(Math.random()*kinds.length)];
     phase='return'; aim=0; manual=false; elapsed=0; ball=null; rack();
   }
   function newRound() {
-    state=S.PLAY; score=0; T=0; held=false; shot=0; history=[]; queue=[]; nextBall();
+    state=S.PLAY; score=0; T=0; held=false; shot=0; history=[]; nextBall();
   }
   function launch() {
     if(state!==S.PLAY || phase!=='aim') return;
     ball={x:0,z:.65,y:kind.r,vx:aim*kind.speed,vz:kind.speed,gutter:false,spin:0};
-    queue.pop();phase='place'; elapsed=0;
+    phase='roll'; elapsed=0;
     tone(110,.16,.06,'sine',55);
   }
   function knock(p,vx,vz) {
@@ -177,8 +175,8 @@
     T+=dt;
     if(state!==S.PLAY) return;
     elapsed+=dt;
-    if(phase==='return') {if(elapsed>=1.2) {phase='aim';elapsed=0;}return;}
-    if(phase==='place') {if(elapsed>=.3) {phase='roll';elapsed=0;}return;}
+    if(phase==='return') {if(elapsed>=1.2) {phase='place';elapsed=0;}return;}
+    if(phase==='place') {if(elapsed>=.4) {phase='aim';elapsed=0;}return;}
     if(phase==='aim') {if(!manual) aim=Math.sin(elapsed*.95)*.17;return;}
     if(phase==='roll') {
       for(var i=0;i<4;i++) physics(dt/4);
@@ -193,15 +191,11 @@
       return;
     }
     if(phase!=='aim') return;
-    if(x==null) {launch();return;}
-    if(y<80) return;
-    held=true;
+    if(x!=null && y<80) return;
+    launch();
   }
-  function move(x,y) {
-    if(!held || phase!=='aim') return;
-    manual=true;aim=clamp((x-270)/1100,-.2,.2);
-  }
-  function up() {if(held) {held=false;launch();}}
+  function move(x,y) {}
+  function up() {held=false;}
 
   function atCanvas(e) {
     var r = canvas.getBoundingClientRect();
@@ -313,7 +307,7 @@
     g.addColorStop(0,k.skin===6?'#ffffff':'rgba(255,255,255,.55)');g.addColorStop(.42,'rgba(255,255,255,.02)');g.addColorStop(1,'rgba(0,0,0,.75)');
     ctx.fillStyle=g;ctx.fillRect(-r,-r,r*2,r*2);ctx.restore();
   }
-  /* 左から補充し、右端の球から投げる三球分の受け取りレーン。 */
+  /* 左から一球を中央へ運び、投球位置へ持ち上げる。 */
   function drawReturn() {
     var y=H-62;
     ctx.fillStyle='#0c1c26';ctx.fillRect(0,H-145,W,145);
@@ -325,22 +319,19 @@
     ctx.fillStyle='#07121a';roundRect(0,y+39,450,13,6);ctx.fill();
     ctx.fillStyle='#354b57';ctx.fillRect(120,y+22,13,28);ctx.fillRect(393,y+22,13,28);
     rail(y-27,'#56707c',12);rail(y-29,'#9dafb4',3);
-    queue.forEach(function(k,i) {
-      var slot=i;
-      var target=130+slot*130,x=target,spin=0;
-      if(phase==='return') {
-        var t=clamp(elapsed/1.2,0,1),ease=1-Math.pow(1-t,2);
-        var start=refill?(i===0?-65:target-130):target-470;
-        x=start+(target-start)*ease;spin=(x-start)/Math.max(18,k.r*78);
-      }
-      var r=clamp(k.r*78,18,46);
+    var r=clamp(kind.r*78,18,46),fromY=y+15-r*(kind.skin===8?1.35:1);
+    if(phase==='return') {
+      var t=clamp(elapsed/1.2,0,1),ease=1-Math.pow(1-t,2),x=-65+335*ease;
       ctx.save();ctx.translate(x,y+7);ctx.scale(1,.24);disk(0,0,r,'rgba(0,0,0,.4)');ctx.restore();
-      ballDraw(x,y+15-r*(k.skin===8?1.35:1),r,k,spin);
-    });
-    if(phase==='place') {
-      var t=clamp(elapsed/.3,0,1),q=project(0,kind.r,.65),r=clamp(kind.r*78,18,46);
-      var fromY=y+15-r*(kind.skin===8?1.35:1);
-      ballDraw(390+(q.x-390)*t,fromY+(q.y-fromY)*t,r+(q.k*kind.r-r)*t,kind,t*2);
+      ballDraw(x,fromY,r,kind,ease*335/r);
+    }
+    if(phase==='place'||phase==='aim') {
+      var t=phase==='aim'?1:clamp(elapsed/.4,0,1),ease=t*t*(3-2*t),q=project(0,kind.r,.65);
+      ballDraw(270,fromY+(q.y-fromY)*ease,r+(q.k*kind.r-r)*ease,kind,0);
+      if(phase==='aim') {
+        ctx.fillStyle='#ecf2ee';ctx.font='600 20px sans-serif';ctx.textAlign='center';
+        ctx.fillText(kind.name,270,q.y+q.k*kind.r*(kind.skin===8?1.35:1)+27);
+      }
     }
     rail(y+22,'#56707c',13);rail(y+19,'#c2ced0',3);
     /* 左端の覆いで球を隠し、画面の外から現れるようにする。 */
@@ -432,7 +423,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state:state,score:score,W:W,H:H,phase:phase,queue:queue.map(function(k){return k.name;}),shot:shot,aim:aim,kind:kind.name,history:history.slice(),ball:ball?Object.assign({},ball):null,pins:pins.map(function(p){return {x:p.x,z:p.z,down:p.down};}),kinds:kinds.map(function(k){return Object.assign({},k);}) }; },
+    now: function () { return { state:state,score:score,W:W,H:H,phase:phase,shot:shot,aim:aim,kind:kind.name,history:history.slice(),ball:ball?Object.assign({},ball):null,pins:pins.map(function(p){return {x:p.x,z:p.z,down:p.down};}),kinds:kinds.map(function(k){return Object.assign({},k);}) }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
