@@ -106,8 +106,10 @@ node games/_tools/record.js hoge --manual  # 自分で操作し、F9で録画開
 録画フォルダはGitの対象外です。自動操作は各ゲームの `window.__recording.run` に書き、
 新しいゲームには雛形から入ります。
 手動撮影でもcanvasだけを録るので、操作中のマウスカーソルは動画に入りません。
-F9の撮影は音の同期を優先してWebMで保存します。`record.js` から撮る場合は、
-同じWebMを手元の変換器で時刻を揃えたMP4にも変換します。
+F9の保存前に `node games/_tools/record-server.js` を起動しておきます。
+録画停止後、手元のFFmpeg（`games/_tools/_bin/ffmpeg.exe`）でMP4へ変換して保存します。
+音と絵の相対時刻を保ち、固定60fpsとシーク用の情報を持つMP4を作ります。
+変換前後の控えは `games/_recordings/` に残ります。
 
 ## ジョイパッド
 

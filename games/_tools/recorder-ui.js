@@ -53,7 +53,7 @@
       ['正方形 720×720','720x720']
     ],'size'));
     panel.appendChild(row('画質',[['標準','4'],['高画質','8'],['最高画質','14']],'quality'));
-    status = make('div','ゲーム画面と音だけをWebMで録画します');
+    status = make('div','ゲーム画面と音だけをMP4で保存します');
     status.style.cssText='min-height:20px;color:#cabb99;font-size:13px';panel.appendChild(status);
     var buttons=make('div');buttons.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px';
     var close=make('button','閉じる'),start=make('button','録画開始');
@@ -87,6 +87,10 @@
   }
   async function begin() {
     if (started) return;
+    try {
+      var health=await fetch('http://127.0.0.1:8736/health');
+      if(!health.ok)throw Error();
+    }catch(e){throw Error('MP4保存係を起動してください：node games/_tools/record-server.js');}
     var mode=panel.querySelector('[name=mode]').value;
     var size=panel.querySelector('[name=size]').value,width,height;
     if(size==='auto'){
@@ -106,7 +110,7 @@
     if(window.__zRecorderSound)tracks=tracks.concat(window.__zRecorderSound.stream.getAudioTracks());
     recorder=new MediaRecorder(new MediaStream(tracks),{mimeType:type,videoBitsPerSecond:rate,audioBitsPerSecond:192000});
     chunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data);};
-    recorder.onstop=save;recorder.onerror=function(e){fail(e.error||'録画に失敗しました');};
+    recorder.onstop=function(){save().catch(fail);};recorder.onerror=function(e){fail(e.error||'録画に失敗しました');};
     started=true;panel.style.display='none';recorder.start(250);
     if(mode==='auto'){
       if(!recipe||!recipe.run)throw Error('このゲームには自動運転がありません');
@@ -116,12 +120,15 @@
     }
   }
   function stop(){if(recorder&&recorder.state==='recording')recorder.stop();}
-  function save(){
+  async function save(){
     cancelAnimationFrame(paintId);
-    var type=recorder.mimeType,ext=type.indexOf('mp4')>=0?'mp4':'webm';
-    var blob=new Blob(chunks,{type:type}),a=document.createElement('a');
+    status.textContent='MP4に変換中';panel.style.display='grid';
+    var raw=new Blob(chunks,{type:recorder.mimeType});
+    var response=await fetch('http://127.0.0.1:8736/convert',{method:'POST',body:raw});
+    if(!response.ok)throw Error(await response.text());
+    var blob=await response.blob(),a=document.createElement('a');
     var id=(location.pathname.split('/').filter(Boolean).slice(-2)[0]||'game').replace(/^_/,'');
-    a.href=URL.createObjectURL(blob);a.download=id+'-'+new Date().toISOString().replace(/[:.]/g,'-')+'.'+ext;a.click();
+    a.href=URL.createObjectURL(blob);a.download=id+'-'+new Date().toISOString().replace(/[:.]/g,'-')+'.mp4';a.click();
     setTimeout(function(){URL.revokeObjectURL(a.href);},30000);
     started=false;window.__zRecorderSound=null;if(!panel)build();status.textContent='保存しました';panel.style.display='grid';
   }
