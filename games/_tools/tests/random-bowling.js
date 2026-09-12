@@ -4,20 +4,21 @@ var load = require('../harness');
 var file = 'games/_random-bowling/index.html';
 var g = load(file, { inject: `
   window.__dbg = {
-    set: function(k,a) {kind=kinds[k];aim=a;manual=true;},
+    set: function(k,a) {kind=kinds[k];queue[2]=kind;aim=a;manual=true;},
     tick: function(n,dt) {for(var i=0;i<n;i++) update(dt||1/60);},
     sample: function(r) {
       var saved=Math.random;
-      try {Math.random=function(){return r;};nextBall();return kind.name;}
+      try {Math.random=function(){return r;};queue=[];nextBall();return kind.name;}
       finally {Math.random=saved;}
     }
   };
 ` });
 function now() {return g.probe.now();}
+function ready() {for(var i=0;i<200&&now().phase!=='aim';i++) g.dbg.tick(1);assert.equal(now().phase,'aim');}
 function shot(k,a) {
-  g.esc();g.dbg.set(k,a);g.press(' ');
+  g.esc();ready();g.dbg.set(k,a);g.press(' ');
   var maxY=0;
-  for(var i=0;i<320;i++) {
+  for(var i=0;i<340;i++) {
     g.dbg.tick(1);
     var p=now();
     maxY=Math.max(maxY,p.ball.y);
@@ -34,6 +35,13 @@ for(var k=0;k<10;k++) names.add(g.dbg.sample((k+.5)/10));
 assert.equal(names.size,10,'抽選範囲の10等分すべてから別の球が出る');
 assert.equal(g.dbg.sample(0),g.dbg.sample(.099999));
 assert(names.has(g.dbg.sample(.999999)));
+g.esc();ready();
+var beforeQueue=now().queue.slice();
+assert.equal(now().kind,beforeQueue[2],'右端の球を使う');
+g.press(' ');g.dbg.tick(500);ready();
+assert.equal(now().queue.length,3,'投球後に三球へ補充される');
+assert.deepEqual(now().queue.slice(1),beforeQueue.slice(0,2),'待機していた二球は順番を保って前へ詰まる');
+assert.equal(now().kind,beforeQueue[1]);
 var measurements=[];
 for(var k=0;k<10;k++) {
   var center=shot(k,0),left=shot(k,-.09),right=shot(k,.09),gutter=shot(k,.2);
@@ -48,12 +56,13 @@ measurements.forEach(function(row){console.log(row.join(' / '));});
 
 g.esc();
 for(var k=0;k<10;k++) {
-  g.dbg.set(k,0);
+  ready();g.dbg.set(k,0);
   if(k%2) g.tap(270,g.H-70);else g.press(' ');
   g.press(' ');g.tap(270,g.H-70);
   g.dbg.tick(380);
   assert.equal(now().shot,k+1,'連打しても投数は増えない');
 }
+g.dbg.tick(30);
 assert.equal(now().state,'result');
 assert.equal(now().score,now().history.reduce(function(a,b){return a+b;},0));
 g.tap(380,g.H*.62+34);
@@ -61,18 +70,25 @@ assert.equal(g.shared.length,1);
 assert(g.shared[0].includes(now().score+'/100'));
 g.tap(160,g.H*.62+34);
 assert.equal(now().score,0);
-assert.equal(now().phase,'aim');
+assert.equal(now().phase,'return');
+assert.equal(now().queue.length,3);
+g.press(' ');assert.equal(now().phase,'return','補充中は投げない');
+ready();
+var waiting=now().queue.slice();
 g.pad({dx:1});g.step(1);g.pad({});g.step(1);
 assert(now().aim>0);
 g.pad({press:true});g.step(1);g.pad({});g.step(1);
-assert.equal(now().phase,'roll');
+assert.equal(now().phase,'place');
+assert.deepEqual(now().queue,waiting.slice(0,2));
 g.dbg.tick(30);g.esc();
 assert.equal(now().shot,0);
 assert.equal(now().ball,null);
+ready();
 g.key('ArrowLeft');assert(now().aim<0);
-g.tap(454,g.H-69);assert.equal(now().aim,0);
 g.win.fire('keydown',{key:' ',code:'Space',repeat:true,preventDefault:function(){}});
 assert.equal(now().phase,'aim','押しっぱなしでは投げない');
+g.down(270,g.H-70);g.moveTo(380,g.H-100);assert(now().aim>0);g.up();
+assert.equal(now().phase,'place');
 load.SHAPES.forEach(function(v){
   g.view(v[0],v[1]);g.step(1);g.drawn.length=0;
   assert(now().H>=780&&now().H<=1700);
