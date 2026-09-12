@@ -272,5 +272,12 @@
   requestAnimationFrame(loop);
 })();
 </script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement('script');
+  recorderScript.src = '../_tools/recorder-ui.js';
+  document.head.appendChild(recorderScript);
+}
+</script>
 </body>
 </html>

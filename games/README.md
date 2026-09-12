@@ -92,6 +92,10 @@ node games/_tools/thumb.js hoge --top 200  # 切り取り位置をずらす
 
 SNS用の動画は、手元だけで次のように撮れます。
 
+ローカルでゲームを開いて `F9` を押すと撮影パネルが出ます。手動・自動、
+540×960・720×1280・1080×1920、標準・高画質・最高画質を選べます。
+手動撮影はもう一度 `F9` を押すと停止します。
+
 ```bash
 node games/_tools/record.js hoge
 node games/_tools/record.js hoge --manual  # 自分で操作し、F9で録画開始・停止

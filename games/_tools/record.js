@@ -222,7 +222,7 @@ server.listen(0, '127.0.0.1', function () {
   var exe = browser();
   if (!exe) { why = 'EdgeもChromeも見つかりません'; finish(); return; }
   var profile = fs.mkdtempSync(path.join(os.tmpdir(), 'zrecord-'));
-  var url = 'http://127.0.0.1:' + server.address().port + gameUrl;
+  var url = 'http://127.0.0.1:' + server.address().port + gameUrl + '?recorder-cli=1';
   var browserArgs = [
     '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     '--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling',
