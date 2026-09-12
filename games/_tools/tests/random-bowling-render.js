@@ -2,36 +2,22 @@
 var fs=require('fs'),path=require('path'),http=require('http'),os=require('os'),cp=require('child_process');
 var root=path.resolve(__dirname,'../../..'),out=fs.mkdtempSync(path.join(os.tmpdir(),'bowling-view-'));
 var child,timer;
-var hook=`
-  window.__visual={placement:function(){phase='angle';var start=project(0,ZBowlingPhysics.releaseHeight(kind),.65);for(var z of [-.3,2.4]){heightOffset=0;down(start.x,start.y);var p=project(0,ZBowlingPhysics.releaseHeight(kind)+z,.65);move(p.x,p.y);if(Math.abs(heightOffset-z)>.001)throw Error('高さ調整が一致しない');held=false;}heightOffset=0;phase='position';draw();var mat=view3d.ballMeshes[kind.skin].children[0].material;for(var stage of ['position','angle','power','roll']){var wasTransparent=mat.transparent,version=mat.version;phase=stage;draw();if(wasTransparent!==mat.transparent&&mat.version<=version)throw Error('透明切替時に描画設定が更新されない');if(mat.opacity!==((stage==='angle'||stage==='power')?.45:1))throw Error('段階ごとの透明度が違う');}phase='position';draw();},supply:function(t){phase='return';elapsed=t;view3d.follow=0;draw();var p=view3d.ballMeshes[kind.skin].position;return project(p.x,p.y,p.z);},bottom:function(){return view3d.pins.every(function(p){return p.children.some(function(m){return m.geometry.type==='CircleGeometry'&&m.material.side===THREE.DoubleSide;});});},pick:function(i){scoreTime=0;history=[];shot=0;state=S.PLAY;kind=kinds[i];world.reset(kind);syncPhysics();phase='position';position=0;aim=.01;view3d.follow=0;view3d.followX=0;draw();return project(0,ZBowlingPhysics.releaseHeight(kind),.65);},fit:function(h){H=h;view3d.resize(540,h);draw();var p=project(2.1,kind.r,.65);layout();return p.x;}};
-`;
+var hook=`window.__visual={gesture:function(){var c=spinCenter();down(c.x+100,c.y);for(var i=1;i<=135;i++){update(1/60);var a=i*Math.PI*2/60;move(c.x+100*Math.cos(a),c.y-100*Math.sin(a)/1.65);}draw();if(omega<5)throw Error('円運動で回転しない');},fit:function(){var oldH=H,oldAngle=angle;for(var h of [780,960,1200,1700]){H=h;view3d.resize(540,h);for(var a of [0,Math.PI/2,Math.PI,-Math.PI/2]){angle=a;draw();for(var p of ZWrestlePhysics.swingPose(a)){var screen=view3d.project(p.x,p.y,p.z);if(screen.x<8||screen.x>532||screen.y<20||screen.y>h-20)throw Error('回転するレスラーが画面外に出る');}}}H=oldH;angle=oldAngle;layout();draw();},side:function(){angle=.35;draw();}};`;
+
 var runner=`<script>
 window.__recordManual=true;
 (async function(){
-  function key(){window.dispatchEvent(new KeyboardEvent('keydown',{key:' ',code:'Space'}));window.dispatchEvent(new KeyboardEvent('keyup',{key:' ',code:'Space'}));}
-  async function save(name,cv){await fetch('/__save/'+name,{method:'POST',body:await new Promise(function(resolve){cv.toBlob(resolve,'image/png');})});}
-  try {
-    for(var i=0;i<100&&!window.__probe.now().modelsReady;i++)await new Promise(function(r){setTimeout(r,50);});
-    if(!window.__probe.now().modelsReady)throw Error('Blenderの模型が読み込まれない');
-    var cv=document.getElementById('c'),all=document.createElement('canvas');all.width=1200;all.height=480;var c=all.getContext('2d');c.fillStyle='#142a37';c.fillRect(0,0,1200,480);
-    for(var i=0;i<10;i++){
-      var p=window.__visual.pick(i),scale=cv.width/540;
-      c.drawImage(cv,(p.x-82)*scale,(p.y-74)*scale,164*scale,164*scale,(i%5)*240,Math.floor(i/5)*240,240,240);
-    }
-    await save('種類.png',all);
-    window.__visual.pick(0);window.__visual.placement();var entry=window.__visual.supply(0),arrived=window.__visual.supply(1.2);if(entry.y<window.__probe.now().H||arrived.y>=entry.y||Math.abs(arrived.x-270)>1)throw Error('球が画面下から中央へ補充されない');if(!window.__visual.bottom())throw Error('ピンの底板がない');window.__visual.pick(0);await save('投球前.png',cv);key();key();window.__probe.step(27);await save('パワー.png',cv);key();
-    for(var i=0;i<90;i++)window.__probe.step(1);
-    var first=window.__probe.now();await save('追従.png',cv);
-    for(var i=0;i<90;i++)window.__probe.step(1);
-    var second=window.__probe.now();await save('衝突.png',cv);
-    if(first.cameraFollow<3||second.cameraFollow<8)throw Error('カメラが球を追っていない');
-    var until=0;while(window.__probe.now().phase!=='position'&&until++<1000)window.__probe.step(1);
-    for(var i=0;i<120;i++)window.__probe.step(1);
-    if(window.__probe.now().cameraFollow>.1)throw Error('カメラが投球位置へ戻らない');
-    var edges=[780,960,1200,1700].map(function(h){return window.__visual.fit(h);});
-    if(edges.some(function(x){return x>515||x<270;}))throw Error('縦横比によって投球位置が画面から外れる');
-    await fetch('/__done',{method:'POST',body:JSON.stringify({models:true,edges:edges,follow:first.cameraFollow,nearPins:second.cameraFollow,returned:window.__probe.now().cameraFollow})});
-  }catch(e){await fetch('/__fail',{method:'POST',body:e.stack});}
+ function key(up){window.dispatchEvent(new KeyboardEvent(up?'keyup':'keydown',{key:' ',code:'Space'}));}
+ async function save(name){var cv=document.getElementById('c');await fetch('/__save/'+name,{method:'POST',body:await new Promise(function(r){cv.toBlob(r,'image/png');})});}
+ try{
+  for(var i=0;i<100&&!window.__probe.now().modelsReady;i++)await new Promise(function(r){setTimeout(r,50);});
+  if(!window.__probe.now().modelsReady)throw Error('模型を読み込めない');window.__probe.step(1);if(window.__probe.now().scoreTime!==0)throw Error('初期スコアが表示中');window.__visual.fit();await save('構え.png');window.__visual.side();await save('横向き.png');window.__probe.reset();
+  window.__visual.gesture();await save('スイング.png');window.__probe.reset();key();window.__probe.step(90);
+  for(var i=0;i<500;i++){window.__probe.step(1);var n=window.__probe.now();if(n.swingTime>2&&Math.cos(n.angle)>0&&Math.sin(n.angle)>.07&&Math.sin(n.angle)<.18)break;}
+  key(true);window.__probe.step(18);await save('投げ.png');window.__probe.step(60);await save('衝突.png');var follow=window.__probe.now().cameraFollow;if(follow<5)throw Error('投げたレスラーを追っていない');
+  var frames=0;while(window.__probe.now().phase!=='ready'&&frames++<900)window.__probe.step(1);window.__probe.step(150);var final=window.__probe.now();if(final.phase!=='ready'||final.shot!==1||final.cameraFollow>.1)throw Error('次の投球へ戻れない');
+  await fetch('/__done',{method:'POST',body:JSON.stringify({models:true,score:final.score,follow:follow,returned:final.cameraFollow})});
+ }catch(e){await fetch('/__fail',{method:'POST',body:e.stack});}
 })();</script>`;
 var server=http.createServer(function(req,res){
   var u=decodeURIComponent(req.url.split('?')[0]);

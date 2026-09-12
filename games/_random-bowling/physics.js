@@ -1,96 +1,71 @@
-/* 三次元の剛体。描画から独立させ、同じ計算を自動確認でも使う。 */
-var ZBowlingPhysics=(function(C){
+/* レッスルボウル。関節でつないだレスラーと大型ピンの剛体計算。 */
+var ZWrestlePhysics=(function(C){
   'use strict';
-  var kinds=[
-    {name:'ボーリング',color:'#5941ae',r:.34,mass:6.4,speed:12,friction:.12,bounce:.12,drag:.015,skin:0},
-    {name:'サッカー',color:'#f5f3e9',r:.39,mass:.43,speed:12.5,friction:.24,bounce:.68,drag:.035,skin:1},
-    {name:'バスケット',color:'#c96928',r:.43,mass:.62,speed:11.5,friction:.32,bounce:.8,drag:.035,skin:2},
-    {name:'テニス',color:'#ccdf35',r:.23,mass:.058,speed:16,friction:.3,bounce:.74,drag:.045,skin:3},
-    {name:'ゴルフ',color:'#f4f1e9',r:.16,mass:.046,speed:20,friction:.08,bounce:.52,drag:.012,skin:4},
-    {name:'ビーチ',color:'#ffe6a1',r:.62,mass:.16,speed:10,friction:.28,bounce:.56,drag:.12,skin:5},
-    {name:'鉄球',color:'#8797a1',r:.37,mass:12,speed:10,friction:.06,bounce:.08,drag:.01,skin:6},
-    {name:'スイカ',color:'#4c883b',r:.54,mass:4.5,speed:10.5,friction:.23,bounce:.18,drag:.04,skin:7},
-    {name:'ラグビー',color:'#9d512c',r:.34,mass:.45,speed:12,friction:.28,bounce:.58,drag:.03,skin:8},
-    {name:'スーパーボール',color:'#e768ac',r:.29,mass:.12,speed:15,friction:.2,bounce:.94,drag:.018,skin:9}
+  var scale=1.8,parts=[
+    {id:'pelvis',shape:'pelvis',p:[0,1.08,0],size:[.33,.22,.23],mass:16},
+    {id:'torso',shape:'torso',p:[0,1.64,0],size:[.43,.40,.24],mass:28},
+    {id:'head',shape:'head',p:[0,2.30,0],size:[.24,.29,.23],mass:6}
   ];
-  function releaseHeight(k){return k.r+.45+(k.skin===8?.15:0);}
-  function Game(){
-    this.world=new C.World({gravity:new C.Vec3(0,-9.81,0),allowSleep:true});
-    this.world.solver.iterations=24;this.world.solver.tolerance=.0001;
-    this.floorMat=new C.Material('床');this.pinMat=new C.Material('ピン');this.ballMat=new C.Material('球');
-    this.world.addContactMaterial(new C.ContactMaterial(this.floorMat,this.pinMat,{friction:.28,restitution:.08}));
-    this.world.addContactMaterial(new C.ContactMaterial(this.pinMat,this.pinMat,{friction:.22,restitution:.23}));
-    this.floorContact=new C.ContactMaterial(this.floorMat,this.ballMat,{friction:.12,restitution:.12});
-    this.pinContact=new C.ContactMaterial(this.pinMat,this.ballMat,{friction:.14,restitution:.2});
-    this.world.addContactMaterial(this.floorContact);this.world.addContactMaterial(this.pinContact);
-    this.world.defaultContactMaterial.contactEquationStiffness=1e7;
-    this.world.defaultContactMaterial.contactEquationRelaxation=3;
-    var self=this;
-    function box(x,y,z,sx,sy,sz){var b=new C.Body({mass:0,material:self.floorMat,shape:new C.Box(new C.Vec3(sx/2,sy/2,sz/2)),position:new C.Vec3(x,y,z)});self.world.addBody(b);}
-    box(0,-.18,16.5,5.3,.36,39);
-    box(-2.96,-.42,16.5,.62,.24,39);box(2.96,-.42,16.5,.62,.24,39);
-    box(-3.32,.06,16.5,.12,.9,39);box(3.32,.06,16.5,.12,.9,39);
-    box(0,-.25,37.5,6.8,.4,3);box(0,.65,39,6.8,1.8,.25);
-    this.pins=[];this.ball=null;this.time=0;this.accumulator=0;this.impact=0;this.reset(kinds[0]);
+  [-1,1].forEach(function(s){var tag=s<0?'L':'R';parts.push(
+    {id:'upperArm'+tag,shape:'upperArm',p:[s*.60,1.59,0],size:[.18,.29,.18],mass:4},
+    {id:'forearm'+tag,shape:'forearm',p:[s*.64,1.07,0],size:[.14,.28,.14],mass:3},
+    {id:'thigh'+tag,shape:'thigh',p:[s*.20,.69,0],size:[.22,.34,.23],mass:9},
+    {id:'shin'+tag,shape:'shin',p:[s*.20,.19,0],size:[.16,.34,.17],mass:5});});
+  function vector(a){return new C.Vec3(a[0],a[1],a[2]);}
+  function pose(b){return {x:b.position.x,y:b.position.y,z:b.position.z,q:{x:b.quaternion.x,y:b.quaternion.y,z:b.quaternion.z,w:b.quaternion.w},vx:b.velocity.x,vy:b.velocity.y,vz:b.velocity.z};}
+  function swingPose(angle){
+    var yaw=new C.Quaternion(),flat=new C.Quaternion();yaw.setFromEuler(0,-angle,0);flat.setFromEuler(0,0,-Math.PI/2);var roll=new C.Quaternion();roll.setFromEuler(0,-Math.PI/2,0);var q=yaw.mult(flat).mult(roll),origin=new C.Vec3(1.25*Math.cos(angle),1.5,1.25*Math.sin(angle));
+    return parts.map(function(part){var p=q.vmult(vector(part.p)).vadd(origin);return {id:part.id,x:p.x,y:p.y,z:p.z,q:{x:q.x,y:q.y,z:q.z,w:q.w}};});
   }
-  Game.prototype.reset=function(kind){
+  function Game(){
+    this.world=new C.World({gravity:new C.Vec3(0,-9.81,0),allowSleep:true});this.world.solver.iterations=30;this.world.solver.tolerance=.0001;
+    this.floorMat=new C.Material('床');this.pinMat=new C.Material('ピン');this.humanMat=new C.Material('レスラー');
+    this.world.addContactMaterial(new C.ContactMaterial(this.floorMat,this.pinMat,{friction:.28,restitution:.08}));
+    this.world.addContactMaterial(new C.ContactMaterial(this.pinMat,this.pinMat,{friction:.22,restitution:.18}));
+    this.world.addContactMaterial(new C.ContactMaterial(this.floorMat,this.humanMat,{friction:.24,restitution:.16}));
+    this.world.addContactMaterial(new C.ContactMaterial(this.pinMat,this.humanMat,{friction:.32,restitution:.25}));
     var self=this;
-    this.pins.forEach(function(p){self.world.removeBody(p.body);});
-    if(this.ball)this.world.removeBody(this.ball);
-    this.ball=null;this.kind=kind;this.time=0;this.accumulator=0;this.impact=0;this.pins=[];
+    function box(x,y,z,w,h,d){self.world.addBody(new C.Body({mass:0,material:self.floorMat,collisionFilterGroup:1,shape:new C.Box(new C.Vec3(w/2,h/2,d/2)),position:new C.Vec3(x,y,z)}));}
+    box(0,-.2,18,8,.4,40);box(0,-.2,-1,12,.4,10);
+    [-1,1].forEach(function(s){box(s*4.45,-.4,20,.9,.3,36);box(s*4.96,.1,20,.12,.8,36);});
+    box(0,-.3,39.5,10,.4,3);box(0,1.5,41,10,3,.3);
+    this.pins=[];this.bodies=[];this.joints=[];this.reset();
+  }
+  Game.prototype.reset=function(){
+    var self=this;this.joints.forEach(function(j){self.world.removeConstraint(j);});this.bodies.forEach(function(b){self.world.removeBody(b);});this.pins.forEach(function(p){self.world.removeBody(p.body);});
+    this.bodies=[];this.joints=[];this.pins=[];this.time=0;this.accumulator=0;this.impact=0;
     for(var row=0;row<4;row++)for(var col=0;col<=row;col++){
-      var b=new C.Body({mass:1.5,material:this.pinMat,position:new C.Vec3((col-row/2)*.88,.47,30+row*.81),linearDamping:.2,angularDamping:.22});
-      b.addShape(new C.Cylinder(.26,.21,.5,12),new C.Vec3(0,-.20,0));
-      b.addShape(new C.Cylinder(.105,.26,.35,12),new C.Vec3(0,.225,0));
-      b.addShape(new C.Cylinder(.105,.105,.23,12),new C.Vec3(0,.515,0));
-      b.addShape(new C.Sphere(.17),new C.Vec3(0,.70,0));
-      b.sleepSpeedLimit=.08;b.sleepTimeLimit=.65;
-      b.addEventListener('collide',function(e){self.impact=Math.max(self.impact,Math.abs(e.contact.getImpactVelocityAlongNormal()));});
+      var b=new C.Body({mass:6,material:this.pinMat,collisionFilterGroup:2,position:new C.Vec3((col-row/2)*1.5,.47*scale,29+row*1.4),linearDamping:.22,angularDamping:.24});
+      b.addShape(new C.Cylinder(.26*scale,.21*scale,.5*scale,12),new C.Vec3(0,-.20*scale,0));
+      b.addShape(new C.Cylinder(.105*scale,.26*scale,.35*scale,12),new C.Vec3(0,.225*scale,0));
+      b.addShape(new C.Cylinder(.105*scale,.105*scale,.23*scale,12),new C.Vec3(0,.515*scale,0));
+      b.addShape(new C.Sphere(.17*scale),new C.Vec3(0,.70*scale,0));
+      b.sleepSpeedLimit=.1;b.sleepTimeLimit=.7;b.addEventListener('collide',function(e){self.impact=Math.max(self.impact,Math.abs(e.contact.getImpactVelocityAlongNormal()));});
       this.world.addBody(b);this.pins.push({body:b,down:false});
     }
     for(var i=0;i<60;i++)this.world.step(1/180);
-    this.floorContact.friction=kind.friction;this.floorContact.restitution=kind.bounce;
-    this.pinContact.friction=kind.friction*.6;this.pinContact.restitution=kind.bounce*.7;
   };
-  Game.prototype.launch=function(x,angle,power,heightOffset){
-    if(this.ball)return;
-    var k=this.kind,b=new C.Body({mass:k.mass,material:this.ballMat,linearDamping:k.drag,angularDamping:k.drag*.6});
-    if(k.skin===8){
-      // 楕円体の当たり形。球の上を上下させる演出ではなく、形そのもので跳ねる。
-      var vertices=[],faces=[],rings=9,sides=16;
-      for(var j=0;j<rings;j++){var t=.03+(Math.PI-.06)*j/(rings-1);for(var i=0;i<sides;i++){var a=i*Math.PI*2/sides;vertices.push(new C.Vec3(Math.sin(t)*Math.cos(a)*k.r,Math.cos(t)*k.r*1.45,Math.sin(t)*Math.sin(a)*k.r));}}
-      for(var j=0;j<rings-1;j++)for(var i=0;i<sides;i++){var n=(i+1)%sides;faces.push([j*sides+i,(j+1)*sides+i,(j+1)*sides+n,j*sides+n]);}
-      faces.push(Array.from({length:sides},function(_,i){return sides-1-i;}));faces.push(Array.from({length:sides},function(_,i){return (rings-1)*sides+i;}));
-      faces.forEach(function(f,i){if(i<(rings-1)*sides)f.reverse();});
-      b.addShape(new C.ConvexPolyhedron({vertices:vertices,faces:faces}));b.quaternion.setFromEuler(.25,0,.45);
-    }else b.addShape(new C.Sphere(k.r));
-    // 少し浮かせて前へ放り、着地と跳ね返りは素材の物理に任せる。
-    b.position.set(x,releaseHeight(k)+Math.max(-.3,Math.min(2.4,heightOffset||0)),.65);
-    var speed=k.speed*1.35*(power==null?1:Math.max(.4,Math.min(3.2,power)));
-    b.velocity.set(angle*speed,.65,speed);
-    b.angularVelocity.set(speed/k.r*.72,0,-angle*speed/k.r*.72);
-    b.sleepSpeedLimit=.08;b.sleepTimeLimit=.6;
-    this.world.addBody(b);this.ball=b;
+  Game.prototype.launch=function(angle,omega){
+    if(this.bodies.length)return;
+    var poses=swingPose(angle),self=this,lookup={},speed=(12+Math.abs(omega)*2.7)*(omega<0?-1:1);
+    parts.forEach(function(part,i){var p=poses[i],b=new C.Body({mass:part.mass,material:self.humanMat,collisionFilterGroup:4,collisionFilterMask:3,linearDamping:.035,angularDamping:.15});
+      b.addShape(new C.Box(new C.Vec3(part.size[0]*.9,part.size[1]*.9,part.size[2]*.9)));b.position.set(p.x,p.y,p.z);b.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);
+      // 手を離した瞬間の接線方向。各部位の速度差も回転として引き継ぐ。
+      b.velocity.set(-Math.sin(angle)*speed-omega*(p.z-poses[0].z)*.3,2.5+Math.abs(omega)*.12,Math.cos(angle)*speed+omega*(p.x-poses[0].x)*.3);
+      b.angularVelocity.set(0,-omega*.3,1.2);b.sleepSpeedLimit=.12;b.sleepTimeLimit=.65;self.world.addBody(b);self.bodies.push(b);lookup[part.id]=b;
+    });
+    function joint(a,b,p,angleLimit){var ba=lookup[a],bb=lookup[b],pa=parts.find(function(d){return d.id===a;}),pb=parts.find(function(d){return d.id===b;}),va=vector(p).vsub(vector(pa.p)),vb=vector(p).vsub(vector(pb.p));
+      var c=new C.ConeTwistConstraint(ba,bb,{pivotA:va,pivotB:vb,axisA:new C.Vec3(0,1,0),axisB:new C.Vec3(0,1,0),angle:angleLimit,twistAngle:.6,maxForce:1e5,collideConnected:false});self.world.addConstraint(c);self.joints.push(c);}
+    joint('pelvis','torso',[0,1.30,0],.45);joint('torso','head',[0,2.03,0],.65);
+    ['L','R'].forEach(function(tag){var s=tag==='L'?-1:1;joint('torso','upperArm'+tag,[s*.43,1.84,0],1.6);joint('upperArm'+tag,'forearm'+tag,[s*.63,1.32,0],1.3);joint('pelvis','thigh'+tag,[s*.2,.94,0],1.1);joint('thigh'+tag,'shin'+tag,[s*.2,.44,0],1.2);});
   };
   Game.prototype.step=function(dt){
-    if(!this.ball)return;
-    this.accumulator+=Math.min(dt,.1);
-    while(this.accumulator>=1/180){var parts=Math.max(1,Math.ceil(this.ball.velocity.length()/180/(this.kind.r*.45)));for(var i=0;i<parts;i++)this.world.step(1/180/parts);this.accumulator-=1/180;this.time+=1/180;}
-    this.pins.forEach(function(p){
-      var up=p.body.quaternion.vmult(new C.Vec3(0,1,0));
-      if(up.y<.70||p.body.position.y<.23||Math.abs(p.body.position.x)>2.65)p.down=true;
-    });
+    if(!this.bodies.length)return;this.accumulator+=Math.min(dt,.1);
+    while(this.accumulator>=1/180){this.world.step(1/360);this.world.step(1/360);this.accumulator-=1/180;this.time+=1/180;}
+    this.pins.forEach(function(p){var up=p.body.quaternion.vmult(new C.Vec3(0,1,0));if(up.y<.7||p.body.position.y<.23*scale||Math.abs(p.body.position.x)>4)p.down=true;});
   };
-  Game.prototype.snapshot=function(){
-    function pose(b){return {x:b.position.x,y:b.position.y,z:b.position.z,q:{x:b.quaternion.x,y:b.quaternion.y,z:b.quaternion.z,w:b.quaternion.w},vx:b.velocity.x,vy:b.velocity.y,vz:b.velocity.z};}
-    return {ball:this.ball?pose(this.ball):null,pins:this.pins.map(function(p){var v=pose(p.body);v.down=p.down;return v;}),time:this.time};
-  };
-  Game.prototype.finished=function(){
-    if(!this.ball)return false;
-    if(this.time>9)return true;
-    var still=this.pins.every(function(p){return p.body.velocity.length()<.15&&p.body.angularVelocity.length()<.2;});
-    return this.time>2.5&&still&&(this.ball.position.z>35||this.ball.velocity.length()<.25||this.ball.position.y<-2||this.ball.velocity.z<-.3);
-  };
-  return {Game:Game,kinds:kinds,releaseHeight:releaseHeight};
+  Game.prototype.snapshot=function(){return {pins:this.pins.map(function(p){var v=pose(p.body);v.down=p.down;return v;}),human:this.bodies.map(function(b,i){var v=pose(b);v.id=parts[i].id;return v;}),time:this.time};};
+  Game.prototype.finished=function(){if(!this.bodies.length)return false;if(this.time>9)return true;var center=this.bodies[0].position,still=this.pins.every(function(p){return p.body.velocity.length()<.2&&p.body.angularVelocity.length()<.3;});return this.time>2.5&&still&&(center.y<-3||center.z<-8||Math.abs(center.x)>12||this.bodies.every(function(b){return b.velocity.length()<.4;})||center.z>37);};
+  return {Game:Game,parts:parts,pinScale:scale,swingPose:swingPose};
 })(typeof CANNON!=='undefined'?CANNON:require('./vendor/cannon.js'));
-if(typeof module!=='undefined')module.exports=ZBowlingPhysics;
+if(typeof module!=='undefined')module.exports=ZWrestlePhysics;

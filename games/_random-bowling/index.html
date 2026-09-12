@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>ランダムボーリング</title>
+<title>レッスルボウル</title>
 <style>
   html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -23,15 +23,15 @@
 <script src="../share.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* ランダムボーリング。奥行きのある座標で動かし、透視投影して描く。 */
+/* レッスルボウル。奥行きのある座標で動かし、透視投影して描く。 */
 (function () {
   "use strict";
 
   var canvas = document.getElementById("c");
   var ctx = canvas.getContext("2d");
   var wrap = document.getElementById("wrap");
-  var view3d=window.WebGLRenderingContext?new ZBowlingScene():null;
-  var world=new ZBowlingPhysics.Game();
+  var view3d=window.WebGLRenderingContext?new ZWrestleScene():null;
+  var world=new ZWrestlePhysics.Game();
   var frameDt=1/60;
 
   /* ============ 画面 ============
@@ -102,119 +102,39 @@
   });
 
 
-  /* 半径・質量・摩擦・反発・速度。毎投、独立した等確率の抽選。 */
-  var kinds=ZBowlingPhysics.kinds;
-  var S = { PLAY:'play', RESULT:'result' };
-  var state, score, T, held, keyMode=false, phase, shot, pins, ball, kind, aim, elapsed, history, scoreTime=0, position=0, heightOffset=0, dragX=0, dragY=0, dragAim=0, dragHeight=0, power=1;
-  function place() {}
-  function clamp(v,a,b) { return Math.max(a,Math.min(b,v)); }
-  function syncPhysics() {var snapshot=world.snapshot();pins=snapshot.pins;ball=snapshot.ball;}
-  function nextBall() {
-    kind=kinds[Math.floor(Math.random()*kinds.length)];
-    phase='return';power=1;position=0;heightOffset=0;held=false;aim=0;elapsed=0;world.reset(kind);syncPhysics();
+  /* 指で円を描いて回し、離した瞬間の接線方向へ投げる。 */
+  var S={PLAY:'play',RESULT:'result'},state,score,T,held,phase,shot,elapsed,history,scoreTime=0,angle=-Math.PI/2,omega=0,swingTime=0,snapshot,keySwing=false,lastPolar=null,lastMove=0;
+  function place(){}
+  function syncPhysics(){snapshot=world.snapshot();}
+  function nextThrow(){held=false;phase='ready';angle=-Math.PI/2;omega=0;swingTime=0;elapsed=0;world.reset();syncPhysics();}
+  function newRound(){state=S.PLAY;score=0;scoreTime=0;shot=0;history=[];T=0;nextThrow();}
+  function update(dt){
+    frameDt=dt;T+=dt;scoreTime=Math.max(0,scoreTime-dt);if(state!==S.PLAY)return;elapsed+=dt;
+    if(phase==='swing'){swingTime+=dt;if(keySwing){omega=1.8+5.2*(1-Math.exp(-swingTime/1.15));angle+=omega*dt;}else if(T-lastMove>.1)omega*=Math.exp(-4*dt);}
+    if(phase==='flight'){world.step(dt);syncPhysics();if(world.impact>1){noiseHit(.12,420+world.impact*35,Math.min(.2,world.impact*.008));world.impact=0;}if(world.finished()){var fallen=snapshot.pins.filter(function(p){return p.down;}).length;score+=fallen;history.push(fallen);shot++;scoreTime=2;phase='settle';elapsed=0;}}
+    else if(phase==='settle'&&elapsed>1.2){if(shot===10)state=S.RESULT;else nextThrow();}
   }
-  function newRound() {
-    state=S.PLAY;scoreTime=0;score=0;T=0;held=false;shot=0;history=[];nextBall();
-  }
-  function startPower() {phase='power';elapsed=0;power=1;}
-  function launch() {
-    if(state!==S.PLAY||phase!=='power')return;
-    world.launch(position,aim,.75+2.45*Math.pow((power-.35)/.65,2),heightOffset);syncPhysics();phase='roll';elapsed=0;tone(100,.18,.06,'sine',45);
-  }
-  function update(dt) {
-    frameDt=dt;T+=dt;
-    scoreTime=Math.max(0,scoreTime-dt);
-    if(state!==S.PLAY) return;
-    elapsed+=dt;
-    if(phase==='return') {if(elapsed>=1.2) {phase='receive';elapsed=0;}return;}
-    if(phase==='receive') {if(elapsed>=.2) {phase='place';elapsed=0;}return;}
-    if(phase==='place') {if(elapsed>=.4) {phase='position';elapsed=0;}return;}
-    if(phase==='power') {power=.35+.65*(.5+.5*Math.cos(elapsed*Math.PI*2/1.8));return;}
-    if(phase==='receive'||phase==='position'||phase==='angle') return;
-    if(phase==='roll') {
-      world.step(dt);syncPhysics();
-      if(world.impact>1) {noiseHit(.06+Math.min(.15,world.impact*.006),500+world.impact*70,Math.min(.2,world.impact*.009));world.impact=0;}
-      if(world.finished()) {var fallen=pins.filter(function(p){return p.down;}).length;history.push(fallen);score+=fallen;shot++;scoreTime=2;phase='settle';elapsed=0;}
-    } else if(elapsed>1) {if(shot===10) state=S.RESULT;else nextBall();}
-  }
-  function movePosition(x,y) {
-    var p=view3d?view3d.screenPosition(x,y):{x:(x-270)*9.65/720,y:ZBowlingPhysics.releaseHeight(kind)+(H-210-y)/80};
-    position=clamp(p.x,-2.1,2.1);
-  }
-  function down(x,y) {
-    audioOn();
-    if(state===S.RESULT) {
-      var hit=x==null?'retry':hitButton(x,y);
-      if(hit==='share') doShare();else if(hit==='retry') newRound();
-      return;
-    }
-    if(x==null) {
-      if(phase==='position') phase='angle';
-      else if(phase==='angle') startPower();
-      else if(phase==='power') launch();
-      return;
-    }
-    if(y<80) return;
-    if(phase==='power') {launch();return;}
-    if(phase!=='position'&&phase!=='angle') return;
-    if(phase==='position') movePosition(x,y);
-    held=true;dragX=x;dragY=y;dragAim=aim;dragHeight=heightOffset;
-  }
-  function move(x,y) {
-    if(!held) return;
-    if(phase==='position') movePosition(x,y);
-    else if(phase==='angle') {aim=clamp(dragAim+(x-dragX)/600,-.3,.3);var dy=view3d?view3d.screenPosition(x,y).y-view3d.screenPosition(dragX,dragY).y:(dragY-y)/80;heightOffset=clamp(dragHeight+dy,-.3,2.4);}
-  }
-  function up() {
-    if(!held) return;
-    held=false;
-    if(phase==='position') phase='angle';
-    else if(phase==='angle') startPower();
-  }
-
-  function atCanvas(e) {
-    var r = canvas.getBoundingClientRect();
-    return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
-  }
-  wrap.addEventListener("pointerdown", function (e) {
-    e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y);
-  });
-  wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
-  });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { held=false; });
-  window.addEventListener("blur", function () { held=false; });
-
-  window.addEventListener("keydown", function (e) {
-    var esc = e.key === "Escape";
-    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
-    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
-    var forward=e.key==='ArrowUp'||e.key==='w'||e.key==='W',back=e.key==='ArrowDown'||e.key==='s'||e.key==='S';
-    if (!esc && !go && !left && !right && !forward && !back) return;
-    e.preventDefault();
-    if (!esc) keyMode = true;
-    if (esc) { if (!e.repeat) newRound(); return; }
-    if(forward||back) {if(state===S.PLAY&&phase==='angle')heightOffset=clamp(heightOffset+(forward?.12:-.12),-.3,2.4);return;}
-    if (left || right) {
-      if (state !== S.PLAY) return;
-      if(phase==='position') position=clamp(position+(left?-.12:.12),-2.1,2.1);
-      else if(phase==='angle') aim=clamp(aim+(left?-.012:.012),-.3,.3);
-      return;
-    }
-    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
-    down();
-  });
-  window.addEventListener("keyup", function (e) {
-    if (e.code === "Space" || e.key === " " || e.key === "Enter") up();
-  });
+  function down(x,y){audioOn();if(state===S.RESULT){var hit=x==null?'retry':hitButton(x,y);if(hit==='share')doShare();else if(hit==='retry')newRound();return;}if(phase!=='ready'||held)return;held=true;phase='swing';swingTime=0;keySwing=x==null;omega=keySwing?1.8:0;lastPolar=keySwing?null:polar(x,y);lastMove=T;}
+  function spinCenter(){return view3d?view3d.project(0,1.3,0):{x:W/2,y:H*.73};}
+  function polar(x,y){var c=spinCenter(),dx=x-c.x,dy=(c.y-y)*1.65;return dx*dx+dy*dy<625?null:Math.atan2(dy,dx);}
+  function move(x,y){if(!held||phase!=='swing'||keySwing)return;var p=polar(x,y);if(p==null){lastPolar=null;return;}if(lastPolar!=null){var delta=Math.atan2(Math.sin(p-lastPolar),Math.cos(p-lastPolar));delta=Math.max(-.65,Math.min(.65,delta));var dt=Math.max(1/120,Math.min(.12,T-lastMove));angle+=delta;omega=Math.max(-10,Math.min(10,omega*.55+delta/dt*.45));if(Math.abs(delta)>.02&&Math.floor(angle/(Math.PI*2))!==Math.floor((angle-delta)/(Math.PI*2)))noiseHit(.12,400,.05);}lastPolar=p;lastMove=T;}
+  function up(){if(!held||phase!=='swing')return;if(Math.abs(omega)<.7){cancelHold();return;}held=false;world.launch(angle,omega);syncPhysics();phase='flight';elapsed=0;tone(130,.22,.09,'sine',45);}
+  function cancelHold(){if(phase==='swing'){held=false;phase='ready';angle=-Math.PI/2;omega=0;swingTime=0;}}
+  function atCanvas(e){var r=canvas.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*W,y:(e.clientY-r.top)/r.height*H};}
+  var activePointer=null;
+  wrap.addEventListener('pointerdown',function(e){if(activePointer!==null)return;e.preventDefault();activePointer=e.pointerId;if(wrap.setPointerCapture)wrap.setPointerCapture(e.pointerId);var p=atCanvas(e);down(p.x,p.y);});
+  wrap.addEventListener('pointermove',function(e){if(activePointer!==e.pointerId)return;e.preventDefault();var p=atCanvas(e);move(p.x,p.y);});
+  wrap.addEventListener('pointerup',function(e){if(activePointer!==e.pointerId)return;e.preventDefault();activePointer=null;up();});
+  wrap.addEventListener('pointercancel',function(){activePointer=null;cancelHold();});
+  window.addEventListener('blur',function(){activePointer=null;cancelHold();});
+  document.addEventListener('visibilitychange',function(){if(document.hidden){activePointer=null;cancelHold();}});
+  window.addEventListener('keydown',function(e){var go=e.code==='Space'||e.key===' '||e.key==='Enter';if(e.key!=='Escape'&&!go)return;e.preventDefault();if(e.repeat)return;if(e.key==='Escape'){activePointer=null;newRound();}else down();});
+  window.addEventListener('keyup',function(e){if(e.code==='Space'||e.key===' '||e.key==='Enter'){e.preventDefault();up();}});
 
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    zShare({ text: score + "/100 #ランダムボーリング" });
+    zShare({ text: score + "/100 #レッスルボウル" });
   }
 
   /* ============ 描画 ============ */
@@ -229,47 +149,9 @@
   }
 
 
-  /* ガイドと球名を、三次元の球と同じ画面位置へ重ねる。 */
-  function project(x,y,z) {
-    if(view3d)return view3d.project(x,y,z);
-    var d=z+9;return {x:270+720*x/d,y:100+((H-260)*9-720*y)/d,k:720/d};
-  }
-  /* 位置は上下左右、角度は弧を描く矢印で示す。文字は足さない。 */
-  function drawGuide() {
-    if(state!==S.PLAY || (phase!=='position'&&phase!=='angle')) return;
-    var center=project(position,ZBowlingPhysics.releaseHeight(kind)+heightOffset,.65);
-    ctx.save();ctx.translate(center.x,center.y-65);
-    var size=Math.min(1,(Math.min(center.x,W-center.x)-8)/161);ctx.scale(size,size);ctx.fillStyle='#ee3025';
-    [-1,1].forEach(function(side) {
-      ctx.save();ctx.scale(side,1);
-      ctx.beginPath();
-      if(phase==='position') {
-        ctx.moveTo(62,-7);ctx.lineTo(119,-7);ctx.lineTo(119,-19);
-        ctx.lineTo(161,0);ctx.lineTo(119,19);ctx.lineTo(119,7);ctx.lineTo(62,7);
-      } else {
-        ctx.moveTo(99,31);ctx.bezierCurveTo(152,16,157,-11,111,-28);
-        ctx.lineTo(119,-42);ctx.lineTo(72,-35);ctx.lineTo(102,-6);
-        ctx.lineTo(104,-18);ctx.bezierCurveTo(130,-7,129,8,89,17);
-      }
-      ctx.closePath();ctx.fill();ctx.restore();
-    });
-    ctx.restore();
-    if(phase==='angle') {
-      // 球の横に上下を置き、球名と重ならないようにする。
-      var radius=center.k*kind.r,guideX=center.x+(center.x>W/2?-1:1)*(radius+28);
-      ctx.save();ctx.translate(guideX,center.y);ctx.fillStyle='#ee3025';
-      [-1,1].forEach(function(side){ctx.save();ctx.scale(1,side);ctx.beginPath();ctx.moveTo(-5,12);ctx.lineTo(5,12);ctx.lineTo(5,35);ctx.lineTo(15,35);ctx.lineTo(0,57);ctx.lineTo(-15,35);ctx.lineTo(-5,35);ctx.closePath();ctx.fill();ctx.restore();});
-      ctx.restore();
-    }
-  }
-  function draw() {
+  function draw(){
     ctx.fillStyle='#142a37';ctx.fillRect(0,0,W,H);
-    if(view3d)view3d.draw(ctx,W,H,{pins:pins,ball:ball},kind,phase,elapsed,position,aim,frameDt,power,heightOffset);
-    if(phase==='position'||phase==='angle'||phase==='power') {
-      var p=project(position,ZBowlingPhysics.releaseHeight(kind)+heightOffset,.65);
-      ctx.fillStyle='#f5f2eb';ctx.font='600 20px sans-serif';ctx.textAlign='center';
-      ctx.shadowColor='rgba(0,0,0,.7)';ctx.shadowBlur=5;ctx.fillText(kind.name,p.x,p.y+p.k*kind.r*(kind.skin===8?1.45:1)+29);ctx.shadowBlur=0;
-    }
+    if(view3d)view3d.draw(ctx,W,H,snapshot,phase,angle,omega,frameDt);
     /* 投球結果を書き込んだときだけ、背景付きで二秒間見せる。 */
     if(scoreTime>0) {
       ctx.save();ctx.globalAlpha=Math.min(1,scoreTime/.25);
@@ -280,7 +162,6 @@
     }
       ctx.restore();
     }
-    drawGuide();
     if(state===S.RESULT) drawResult();
   }
 
@@ -331,32 +212,15 @@
   /* ============ 覗き穴 ============
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
-  window.__probe = {
-    now: function () { return { state:state,score:score,scoreTime:scoreTime,W:W,H:H,phase:phase,position:position,heightOffset:heightOffset,shot:shot,aim:aim,power:power,kind:kind.name,history:history.slice(),ball:ball?Object.assign({},ball):null,cameraFollow:view3d?view3d.follow:0,modelsReady:view3d?view3d.modelReady:false,pins:pins.map(function(p){return Object.assign({},p);}),kinds:kinds.map(function(k){return Object.assign({},k);}) }; },
-    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
-    reset: function () { newRound(); }
-  };
-
-  /* ============ 手元用の動画撮影 ============
-     record.js が呼ぶ自動操作。ゲームに合わせて run の中だけ書き換える。 */
-  window.__recording = {
-    sound: function () { audioOn(); return AC; },
-    run: async function (r) {
-      for(var i=0;i<10;i++) {
-        if(!await r.until(function(){return phase==='position';},3)) throw Error('球が出てこない');
-        r.key();await r.wait(350);r.key();await r.wait(450);r.key();
-        if(!await r.until(function(){return phase==='position'||state===S.RESULT;},14)) throw Error('投球が終わらない');
-      }
-      await r.wait(1500);
-    }
-  };
+  window.__probe={now:function(){return {state:state,phase:phase,held:held,score:score,shot:shot,history:history.slice(),scoreTime:scoreTime,angle:angle,omega:omega,swingTime:swingTime,spinCenter:spinCenter(),W:W,H:H,pins:snapshot.pins,human:snapshot.human,cameraFollow:view3d?view3d.follow:0,modelsReady:view3d?view3d.modelReady:false};},step:function(n){for(var i=0;i<(n||1);i++){update(1/60);draw();}},reset:newRound};
+  window.__recording={sound:function(){audioOn();return AC;},run:async function(r){for(var i=0;i<10;i++){if(!await r.until(function(){return phase==='ready';},12))throw Error('次の投球に進まない');down();await r.until(function(){return swingTime>2&&Math.cos(angle)>.99&&Math.abs(Math.sin(angle))<.08;},7);up();await r.wait(500);}await r.until(function(){return state===S.RESULT;},12);await r.wait(1500);}};
 
   /* ============ ループ ============ */
   newRound();
   layout();
   var last = performance.now();
   function loop(now) {
-    var dt = Math.min(0.033, (now - last) / 1000);   /* 戻ってきたとき飛ばないように上限 */
+    var dt = Math.max(0,Math.min(0.033, (now - last) / 1000));   /* 戻ってきたとき飛ばないように上限 */
     last = now;
     if (!window.__recordManual) { update(dt); draw(); }
     requestAnimationFrame(loop);
