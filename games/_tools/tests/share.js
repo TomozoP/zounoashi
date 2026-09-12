@@ -28,6 +28,7 @@ games.forEach(function (g) {
   var html = fs.readFileSync(path.join(root, "share", g.id, "index.html"), "utf8");
   var game = fs.readFileSync(path.join(root, g.play), "utf8");
   [html, game].forEach(function (text) {
+    assert(text.includes('<meta name="twitter:card" content="summary">'), g.id + "の共有カードは正方形サムネにする");
     assert(text.includes('property="og:title" content="' + g.title + '"'));
     assert.equal((text.match(/property="og:title"/g) || []).length, 1);
     var image = text.match(/property="og:image" content="([^"]+)"/)[1];

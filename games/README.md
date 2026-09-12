@@ -40,7 +40,7 @@ git add -A && git commit && git push origin main    # 公開（push は言われ
 | 押す間隔 | **スマホ(横375px)で44px以上。＝ゲーム座標で63以上**離す |
 | リセット | Esc でいつでも最初から（押しっぱなしで連発しない） |
 | 終わり方 | 結果画面に数字と「もう一度」「Xでシェア」 |
-| シェア | `share.js` の `zShare`（Xの投稿画面がリンク付きで開く） |
+| シェア | `share.js` の `zShare`を使う。左に正方形のサムネ、右にゲーム名が並ぶ共有カードに揃える |
 | 音 | 最初の操作より後でしか鳴らせない。画面を離れたら止める |
 | 覗き穴 | `window.__probe` を残しておく（テストが中を見るため） |
 
@@ -75,11 +75,17 @@ g.until(function () { return g.probe.now().state === "result"; });
 
 ## 一覧に出るまで
 
-共有ボタンは `/share/<id>/` を使います。ここにゲームのタイトルとサムネのOGPを置き、
+共有ボタンは `/share/<id>/?card=square2` を自動で使います。ここにゲームのタイトルとサムネのOGPを置き、
 開くと従来のプレイ画面へ移ります。ゲーム本体のURLにも同じOGPを設定します。
 以前の `/#/game/<id>` をそのまま投稿した場合は、サイト共通のOGPになります。
 `publish.js` が共有ページを作ります。公開済みゲームのタイトルやサムネを変えたら、
 `node games/_tools/ogp.js` で更新してください。SVGのサムネは共有用PNGも作ります。
+
+新しいゲームも、雛形の `share.js` と `zShare` をそのまま使い、`publish.js` で公開準備すれば
+同じ表示になります。カード形式は `twitter:card = summary`（左に正方形のサムネ、右にゲーム名）。
+`summary_large_image` に変えたり、ゲームごとに共有URLを組み立てたりしないでください。
+`card=square2` は以前の大きいカードがXに残るのを避けるための指定で、共通処理が付けます。
+公開準備の後は `node games/_tools/tests/share.js` で、共有リンクとカード設定を確認します。
 
 - 下書きの間は `games/_local.js` に1行（`new.js` が書きます）。**localhost のときだけ**読まれます
 - 公開すると `index.html` の `GAMES` に移ります（`publish.js` がやります）

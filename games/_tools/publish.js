@@ -6,6 +6,7 @@
      1. games/_hoge → games/hoge （_ を外すと GitHub Pages が配信する）
      2. index.html の GAMES に1行入れる（実験場の先頭）
      3. games/_local.js から下書きの行を消す
+     4. 正方形サムネの共有ページと、ゲーム本体のOGPを作る
    ここまでで止まる。git の commit と push は自分でやる。 */
 
 var fs = require("fs");
