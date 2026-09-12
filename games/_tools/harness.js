@@ -33,7 +33,7 @@ function load(file, opts) {
   html.replace(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/script>/g, function (m, src, body) {
     if (!src) { parts.push(body); found++; return m; }
     if (/share\.js$/.test(src) || /^https?:/.test(src)) return m;
-    if (!opts.withScripts && !/pad\.js$/.test(src)) return m;
+    if (!opts.withScripts && !/(?:pad|action-icons)\.js$/.test(src)) return m;
     var p = path.join(dir, src);
     if (fs.existsSync(p)) parts.push(fs.readFileSync(p, "utf8"));
     return m;
