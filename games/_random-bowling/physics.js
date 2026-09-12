@@ -57,7 +57,7 @@ var ZWrestlePhysics=(function(C){
     joint('pelvis','torso',[0,1.30,0],.45);joint('torso','head',[0,2.03,0],.65);
     ['L','R'].forEach(function(tag){var s=tag==='L'?-1:1;joint('torso','upperArm'+tag,[s*.43,1.84,0],1.6);joint('upperArm'+tag,'forearm'+tag,[s*.63,1.32,0],1.3);joint('pelvis','thigh'+tag,[s*.2,.94,0],1.1);joint('thigh'+tag,'shin'+tag,[s*.2,.44,0],1.2);});
   };
-  function headDirection(human){var p=human[0],head=human[2],dx=head.x-p.x,dz=head.z-p.z,length=Math.hypot(dx,dz)||1;return {x:dx/length,z:dz/length};}
+  function throwDirection(angle){return {x:Math.cos(angle),z:Math.sin(angle)};}
   Game.prototype.releaseHands=function(){var self=this;(this.grabs||[]).forEach(function(c){self.world.removeConstraint(c);});(this.hands||[]).forEach(function(b){self.world.removeBody(b);});this.grabs=[];this.hands=[];this.holding=false;};
   Game.prototype.startSwing=function(angle){
     this.createHuman(angle);this.holding=true;this.holdAngle=angle;var self=this;
@@ -73,9 +73,9 @@ var ZWrestlePhysics=(function(C){
   };
   Game.prototype.launch=function(angle,omega){
     if(this.released)return;if(!this.bodies.length)this.createHuman(angle);
-    var direction=headDirection(this.snapshot().human),speed=12+Math.abs(omega)*2.7;
+    var direction=throwDirection(angle),speed=12+Math.abs(omega)*2.7;
     this.releaseHands();this.released=true;this.time=0;this.accumulator=0;
-    // 現在の頭側へ押し出す。振り回されていた姿勢と各部位の回転は保つ。
+    // 赤レスラーが向く方向へ押し出す。振り回されていた姿勢と各部位の回転は保つ。
     this.bodies.forEach(function(b){b.wakeUp();b.velocity.set(direction.x*speed,2.5+Math.abs(omega)*.12,direction.z*speed);var spin=b.angularVelocity.length();if(spin>18)b.angularVelocity.scale(18/spin,b.angularVelocity);});
   };
   Game.prototype.step=function(dt){
@@ -85,6 +85,6 @@ var ZWrestlePhysics=(function(C){
   };
   Game.prototype.snapshot=function(){return {pins:this.pins.map(function(p){var v=pose(p.body);v.down=p.down;return v;}),human:this.bodies.map(function(b,i){var v=pose(b);v.id=parts[i].id;return v;}),time:this.time};};
   Game.prototype.finished=function(){if(!this.bodies.length||this.holding)return false;if(this.time>9)return true;var center=this.bodies[0].position,still=this.pins.every(function(p){return p.body.velocity.length()<.2&&p.body.angularVelocity.length()<.3;});return this.time>2.5&&still&&(center.y<-3||center.z<-8||Math.abs(center.x)>24||this.bodies.every(function(b){return b.velocity.length()<.4;})||center.z>47);};
-  return {Game:Game,parts:parts,pinScale:scale,swingPose:swingPose,headDirection:headDirection};
+  return {Game:Game,parts:parts,pinScale:scale,swingPose:swingPose,throwDirection:throwDirection};
 })(typeof CANNON!=='undefined'?CANNON:require('./vendor/cannon.js'));
 if(typeof module!=='undefined')module.exports=ZWrestlePhysics;

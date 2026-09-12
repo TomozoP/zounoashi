@@ -9,7 +9,7 @@ var ZWrestleScene=(function(){
     this.scene=new T.Scene();this.scene.scale.x=-1;this.scene.background=new T.Color('#142a37');this.scene.fog=new T.Fog('#142a37',65,150);
     this.camera=new T.PerspectiveCamera(52,540/960,.08,350);
     this.camera.position.set(0,9,-12);this.camera.lookAt(0,0,14);
-    this.follow=0;this.followX=0;this.look=new T.Vector3(0,.8,12);this.followY=0;this.w=540;this.h=960;
+    this.follow=0;this.followX=0;this.w=540;this.h=960;
     this.scene.add(new T.HemisphereLight('#deefff','#625743',2.1));
     var light=new T.DirectionalLight('#fff1d5',3.3);light.position.set(-4,14,18);light.castShadow=true;
     light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-18,right:18,top:35,bottom:-35,near:1,far:90});light.target.position.set(0,0,20);light.shadow.bias=-.0002;this.scene.add(light,light.target);
@@ -64,12 +64,9 @@ var ZWrestleScene=(function(){
   Scene.prototype.resize=function(w,h){this.w=w;this.h=h;this.renderer.setSize(w,h,false);this.camera.aspect=w/h;this.camera.fov=2*Math.atan(Math.tan(31*Math.PI/180)*(h/w)/(960/540))*180/Math.PI;this.camera.updateProjectionMatrix();};
   Scene.prototype.project=function(x,y,z){var v=new THREE.Vector3(-x,y,z).project(this.camera);return {x:(v.x*.5+.5)*540,y:(.5-v.y*.5)*this.logicalH};};
   Scene.prototype.draw=function(ctx,W,H,data,phase,angle,omega,dt){
-    var T=THREE;this.logicalH=H;var flying=phase==='flight'||phase==='settle',body=data.human[0];
-    // 前進量を上限で止めず、青レスラーの左右・高さ・奥行きを追う。
-    var track=flying&&body,blend=1-Math.exp(-8*dt);this.follow+=((track?body.z:0)-this.follow)*blend;this.followX+=((track?body.x:0)-this.followX)*blend;this.followY+=((track?body.y:0)-this.followY)*blend;
-    var eye=track?new T.Vector3(-this.followX,this.followY+6.5,this.follow-10):new T.Vector3(0,9,-12);
-    this.camera.position.lerp(eye,1-Math.exp(-9*dt));
-    this.look.lerp(track?new T.Vector3(-body.x,body.y+.4,body.z):new T.Vector3(0,.8,12),1-Math.exp(-12*dt));this.camera.lookAt(this.look);this.camera.updateMatrixWorld();
+    var T=THREE;this.logicalH=H;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(22,body.z-2)):0;
+    this.follow+=(target-this.follow)*(1-Math.exp(-4*dt));this.followX+=((flying&&body?Math.max(-2,Math.min(2,body.x*.3)):0)-this.followX)*(1-Math.exp(-3*dt));
+    this.camera.position.set(-this.followX,9-this.follow/22*3.5,-12+this.follow);this.camera.lookAt(-this.followX*.5,.8,12+this.follow*.65);this.camera.updateMatrixWorld();
     this.pins.forEach(function(g,i){var p=data.pins[i];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
     var red=this.red;red.root.rotation.y=Math.PI/2-angle;red.root.position.y=phase==='swing'?Math.sin(angle*2)*.04:0;
     // 赤は足を踏み替え、両手で青の足首を持つ。
@@ -81,8 +78,8 @@ var ZWrestleScene=(function(){
     });
     var human=data.human.length?data.human:ZWrestlePhysics.swingPose(angle),blue=this.blue;
     human.forEach(function(p){var g=blue.parts[p.id];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
-    // 頭の方向を短い矢印で示す。向きの補正や自動照準はしない。
-    this.direction.visible=phase==='swing';if(this.direction.visible){var p=human[0],direction=ZWrestlePhysics.headDirection(human),dx=direction.x,dz=direction.z,nx=dz*.12,nz=-dx*.12,len=1.2+Math.abs(omega)*.12,x=p.x+dx*.6,z=p.z+dz*.6;
+    // 赤レスラーの向きを短い矢印で示す。向きの補正や自動照準はしない。
+    this.direction.visible=phase==='swing';if(this.direction.visible){var p=human[0],direction=ZWrestlePhysics.throwDirection(angle),dx=direction.x,dz=direction.z,nx=dz*.12,nz=-dx*.12,len=1.2+Math.abs(omega)*.12,x=p.x+dx*.6,z=p.z+dz*.6;
       var verts=[x+nx,.025,z+nz,x-nx,.025,z-nz,x+dx*len,.025,z+dz*len,x+dx*len+nx*2,.025,z+dz*len+nz*2,x+dx*len-nx*2,.025,z+dz*len-nz*2,x+dx*(len+.5),.025,z+dz*(len+.5)];this.direction.geometry.dispose();this.direction.geometry=new T.BufferGeometry();this.direction.geometry.setAttribute('position',new T.Float32BufferAttribute(verts,3));}
     this.renderer.render(this.scene,this.camera);ctx.drawImage(this.renderer.domElement,0,0,W,H);
   };
