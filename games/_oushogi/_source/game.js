@@ -76,6 +76,12 @@
   function model(objects,m,layer){
     objects.forEach(function(o){
       var world=o.v.map(function(v){return transform(v,m);}),screen=world.map(project);
+      /* 文字の三角形はまとめて塗り、境目に白い細線が出るのを防ぐ。 */
+      if(o.name.indexOf('墨文字')===0){
+        queue.push({paths:o.f.map(function(f){return f.map(function(i){return screen[i];});}),
+          z:screen.reduce(function(a,p){return a+p.z;},0)/screen.length,layer:layer+1,color:'#090704'});
+        return;
+      }
       o.f.forEach(function(f){
         var vs=f.map(function(i){return world[i];}),ps=f.map(function(i){return screen[i];});
         var n=norm(cross(sub(vs[1],vs[0]),sub(vs[2],vs[0])));
@@ -98,35 +104,39 @@
     var p=s.progress,sgn=first===false?-1:1;
     if(cinematic && s.index===1)camera([5.9,-4.2+1.1*p,2.8],[0,.05,.14],780);
     else if(cinematic && s.index===2)camera([0,-.1,10.4-1.1*p],[0,0,0],980+160*p);
-    else camera([3.5-(cinematic?p*.7:0),-7.8,11.8],[0,0,-.12],cinematic?990+120*p:820);
+    else if(cinematic) camera([3.5-p*.7,-7.8,11.8],[0,0,-.12],990+120*p);
+    else camera([0,-.1,11.5],[0,0,0],Math.min(820,H*.94));
     queue=[];
     // 畳と縁。ゲームのマスは盤の二つだけ。
-    flat([[-12,-12,-1.0],[12,-12,-1.0],[12,12,-1.0],[-12,12,-1.0]],'#79775a');
-    for(var j=-12;j<12;j+=.16)flat([[-12,j,-.998],[12,j,-.998],[12,j+.012,-.998],[-12,j+.012,-.998]],'rgba(38,43,26,.15)');
-    flat([[-4,-12,-.992],[-3.7,-12,-.992],[-3.7,12,-.992],[-4,12,-.992]],'#303c32');
-    shadow(.20,.18,-.984,.28);
-    flat([[-1.34,-2.16,-.98],[1.52,-2.16,-.98],[1.52,2.40,-.98],[-1.34,2.40,-.98]],'rgba(21,24,14,.24)');
+    flat([[-12,-12,-1.58],[12,-12,-1.58],[12,12,-1.58],[-12,12,-1.58]],'#79775a');
+    for(var j=-12;j<12;j+=.16)flat([[-12,j,-1.578],[12,j,-1.578],[12,j+.012,-1.578],[-12,j+.012,-1.578]],'rgba(38,43,26,.15)');
+    flat([[-4,-12,-1.572],[-3.7,-12,-1.572],[-3.7,12,-1.572],[-4,12,-1.572]],'#303c32');
+    flat([[-2.78,-2.74,-1.57],[3.10,-2.74,-1.57],[3.10,3.22,-1.57],[-2.78,3.22,-1.57]],'rgba(21,24,14,.24)');
     model(MODEL.board,{x:0,y:0,z:0,r:0},1);
     var progress=cinematic?ease((p-.12)/.58):state==='result'?1:0;
     var lift=cinematic?Math.sin(progress*Math.PI)*.94:0;
     var active={x:0,y:sgn*(-1.02+2.04*progress),z:lift+.012,r:sgn===1?0:Math.PI};
     var passive={x:0,y:sgn*1.02,z:.012,r:sgn===1?Math.PI:0};
     var activeNear=project([active.x,active.y,active.z]).z<project([passive.x,passive.y,passive.z]).z;
-    if(progress<.92){shadow(passive.x,passive.y,.015,.16);model(MODEL.piece,passive,activeNear?4:6);}
+    if(progress<.92){shadow(passive.x,passive.y,.015,.16);model(first===false?MODEL.piece:MODEL.opponent,passive,activeNear?4:6);}
     shadow(active.x+lift*.15,active.y+.03,.016,.16/(1+lift));
-    model(MODEL.piece,active,activeNear?6:4);
+    model(first===false?MODEL.opponent:MODEL.piece,active,activeNear?6:4);
     if(state==='play' && selected){
       flat([[-.94,-1.94,.019],[.94,-1.94,.019],[.94,-.10,.019],[-.94,-.10,.019]],'rgba(252,230,148,.20)',3);
       flat([[-.94,.1,.019],[.94,.1,.019],[.94,1.94,.019],[-.94,1.94,.019]],'rgba(252,230,148,.29)',3);
     }
     queue.sort(function(a,b){return a.layer-b.layer || b.z-a.z;});
     queue.forEach(function(f){
+      if(f.paths){
+        ctx.beginPath();f.paths.forEach(function(ps){ps.forEach(function(p,i){if(i)ctx.lineTo(p.x,p.y);else ctx.moveTo(p.x,p.y);});ctx.closePath();});
+        ctx.fillStyle=f.color;ctx.fill();return;
+      }
       path(f.p);ctx.fillStyle=f.color;ctx.fill();
       if(f.grain){
         ctx.save();ctx.clip();ctx.strokeStyle='rgba(86,43,12,.13)';ctx.lineWidth=.65;
         var z=f.vs[0][2]+.0001;
-        for(var k=-1.3;k<=1.3;k+=.062){
-          ctx.beginPath();for(var t=-2.4;t<=2.4;t+=.3){var pp=project([k+.014*Math.sin(t*3+k*29),t,z]);if(t===-2.4)ctx.moveTo(pp.x,pp.y);else ctx.lineTo(pp.x,pp.y);}ctx.stroke();
+        for(var k=-3;k<=3;k+=.062){
+          ctx.beginPath();for(var t=-3;t<=3;t+=.3){var pp=project([k+.014*Math.sin(t*3+k*29),t,z]);if(t===-3)ctx.moveTo(pp.x,pp.y);else ctx.lineTo(pp.x,pp.y);}ctx.stroke();
         }ctx.restore();
       }
     });
@@ -170,7 +180,7 @@
     }
     if(state==='play'||state==='reply'){
       plaque(first?'先手':'後手',270,H*.77,first);
-      plaque(first?'後手':'先手',270,H*.26,!first);
+      plaque(first?'後手':'先手',270,H*.21,!first);
     }
     if(state==='result'){
       ctx.fillStyle='rgba(19,19,15,.76)';ctx.fillRect(0,H*.25,W,H*.7);
@@ -184,7 +194,7 @@
   }
   window.__probe={
     now:function(){return {state:state,score:score,W:W,H:H,first:first,selected:selected,camera:state==='cinema'?shot().index:null,
-      time:T,cells:2,pieces:state==='result'?1:2,centers:centers,buttons:buttons(),duration:duration};},
+      time:T,cells:2,pieces:state==='result'?1:2,playerPiece:'王将',opponentPiece:'玉将',centers:centers,buttons:buttons(),duration:duration};},
     step:function(n){for(var i=0;i<(n||1);i++){update(1/60);draw();}},reset:newRound
   };
   /* ============ ループ ============ */

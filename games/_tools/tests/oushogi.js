@@ -2,6 +2,11 @@
 var assert = require('assert');
 var load = require('../harness');
 var file = 'games/_oushogi/index.html';
+var meshes=require('../../_oushogi/_source/meshes.json');
+assert(meshes.piece.some(function(o){return o.name==='墨文字王';}));
+assert(meshes.opponent.some(function(o){return o.name==='墨文字玉';}));
+assert(!meshes.opponent.some(function(o){return o.name==='墨文字王';}));
+assert.equal(meshes.board.filter(function(o){return o.name.indexOf('盤の線')===0;}).length,3);
 function advance(g,n){for(var i=0;i<n;i++){g.step(1);g.drawn.length=0;}}
 function begin(g,first,kind){
   var random=Math.random;
