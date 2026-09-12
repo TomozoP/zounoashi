@@ -25,10 +25,14 @@ node games/_tools/new.js hoge "ほげゲーム" "ひとこと説明"
 node games/_tools/smoke.js games/_hoge/index.html   # 壊れていないか
 node games/_tools/thumb.js hoge                     # サムネを画面から作る
 node games/_tools/publish.js hoge                   # 公開の形にする
-git add -A && git commit && git push origin main    # 公開（push は言われてから）
+git add -A && git commit && git push origin main    # 新しいゲームの公開は承認を受けてから
 ```
 
 ## 揃えるかたち
+
+新しいゲームを公開するかどうかなどの大きな判断は、持ち主に確認します。
+頼まれた細かい修正や道具・手順書の更新は、必要な確認を済ませて追加の許可なく
+commit・push まで進めます。くわしくはリポジトリ直下の `AGENTS.md` に従ってください。
 
 | | |
 |---|---|
