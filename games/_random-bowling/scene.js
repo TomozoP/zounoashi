@@ -28,7 +28,7 @@ var ZWrestleScene=(function(){
     var lane=new T.Mesh(new T.PlaneGeometry(20,79),new T.MeshStandardMaterial({map:wt,roughness:.3,metalness:.05}));lane.rotation.x=-Math.PI/2;lane.position.set(0,.002,36.5);lane.receiveShadow=true;this.scene.add(lane);
     box(0,-.22,36.5,22,.4,79,mat('#273d49',.5));
     [-1,1].forEach(function(s){box(s*10.5,-.12,36.5,1,.13,79,mat('#0a1820',.28,.4));box(s*11.06,.1,36.5,.12,.38,79,mat('#70838b',.28,.65));});
-    box(0,-.28,77.5,22,.3,3,mat('#101d25',.85));box(0,3.2,79,22,7,.3,mat('#10222d',.75));
+    box(0,-.28,77.5,22,.3,3,mat('#101d25',.85));box(0,49.8,79,160,100,.3,mat('#10222d',.75));
     // 黒い奥壁より上に離して得点を常設する。
     this.scoreCanvas=document.createElement('canvas');this.scoreCanvas.width=768;this.scoreCanvas.height=192;
     this.scoreTexture=new T.CanvasTexture(this.scoreCanvas);this.scoreTexture.colorSpace=T.SRGBColorSpace;
@@ -48,7 +48,7 @@ var ZWrestleScene=(function(){
     }
 
     var ringStart=this.scene.children.length;
-    // 四角いマットと三段ロープ。レーン側は投球用に開ける。
+    // 四角いマットと三段ロープ。四辺をロープで囲む。
     box(0,-.3,-1,12,.6,10,mat('#152735',.85));
     box(0,.006,-1,11.7,.02,9.7,mat('#477887',.95));
     var edge=mat('#c6d6d7',.85);
@@ -62,7 +62,7 @@ var ZWrestleScene=(function(){
       });
       [.65,1.25,1.85].forEach(function(y,i){rope([side*5.7,y,-5.7],[side*5.7,y,3.7],ropeMats[i]);});
     });
-    [.65,1.25,1.85].forEach(function(y,i){rope([-5.7,y,-5.7],[5.7,y,-5.7],ropeMats[i]);});
+    [.65,1.25,1.85].forEach(function(y,i){rope([-5.7,y,-5.7],[5.7,y,-5.7],ropeMats[i]);rope([-5.7,y,3.7],[5.7,y,3.7],ropeMats[i]);});
     this.ringRoot=new T.Group();this.scene.children.slice(ringStart).forEach(function(m){self.ringRoot.add(m);});this.scene.add(this.ringRoot);
     this.red=this.makeWrestler('#c9162f');this.blue=this.makeWrestler('#1546ce');this.modelReady=false;
     function geometry(d){var g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(d.position,3));g.setAttribute('normal',new T.Float32BufferAttribute(d.normal,3));return g;}
@@ -102,7 +102,7 @@ var ZWrestleScene=(function(){
       for(var i=0;i<3;i++){c.fillStyle='#2c414c';c.fillRect(24+i*248,16,224,160);c.fillStyle='#c2d2d7';c.font=history[i]===10?'600 76px sans-serif':'600 112px sans-serif';c.fillText(history[i]===10?'▶︎◀︎':history[i]==null?'·':String(history[i]),136+i*248,100);}
       this.scoreTexture.needsUpdate=true;this.scoreKey=scoreKey;
     }
-    var T=THREE;this.logicalH=H;var ringZ=data.ringZ||0;this.ringRoot.position.z=ringZ;this.red.root.position.z=ringZ;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(data.pinDistance-ringZ-7,body.z-ringZ-2)):0;
+    var T=THREE;this.logicalH=H;var ringZ=data.ringZ||0;this.ringRoot.position.set(0,ZWrestlePhysics.ringHeight,ringZ);this.red.root.position.z=ringZ;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(data.pinDistance-ringZ-7,body.z-ringZ-2)):0;
     this.follow+=(target-this.follow)*(1-Math.exp(-4*dt));this.followX+=((flying&&body?Math.max(-2,Math.min(2,body.x*.3)):0)-this.followX)*(1-Math.exp(-3*dt));
     // 振り回される青を少しだけ追い、投球後は滑らかに元の追従へ戻す。
     var swinging=phase==='swing'&&body,blend=1-Math.exp(-7*dt);
@@ -111,7 +111,7 @@ var ZWrestleScene=(function(){
     this.readyLift+=((flying?0:3)-this.readyLift)*(1-Math.exp(-4*dt));
     this.camera.position.set(-this.followX-this.swingX,9+this.readyLift-Math.min(1,this.follow/36.5)*3.5,ringZ-16+this.follow+this.swingZ);this.camera.lookAt(-this.followX*.5-this.swingX*1.5,.8,ringZ+12+this.follow*.65+this.swingZ);this.camera.updateMatrixWorld();
     this.pins.forEach(function(g,i){var p=data.pins[i];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
-    var red=this.red;red.root.rotation.y=Math.PI/2-angle;red.root.position.y=phase==='swing'?Math.sin(angle*2)*.04:0;
+    var red=this.red;red.root.rotation.y=Math.PI/2-angle;red.root.position.y=ZWrestlePhysics.ringHeight+(phase==='swing'?Math.sin(angle*2)*.04:0);
     // 赤は足を踏み替え、両手で青の足首を持つ。
     ['L','R'].forEach(function(tag){var side=tag==='L'?-1:1;
       var shoulder=new T.Vector3(side*.43,1.84,0),elbow=new T.Vector3(side*.43,1.5,.62),hand=new T.Vector3(side*.2,1.5,1.25);
