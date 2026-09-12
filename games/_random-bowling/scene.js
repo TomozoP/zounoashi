@@ -87,7 +87,7 @@ var ZWrestleScene=(function(){
     if(this.scoreKey!==scoreKey){
       var c=this.scoreCanvas.getContext('2d');c.clearRect(0,0,768,192);
       c.textAlign='center';c.textBaseline='middle';c.font='600 112px sans-serif';
-      for(var i=0;i<3;i++){c.fillStyle='#2c414c';c.fillRect(24+i*248,16,224,160);c.fillStyle='#c2d2d7';c.fillText(history[i]==null?'·':String(history[i]),136+i*248,100);}
+      for(var i=0;i<3;i++){c.fillStyle='#2c414c';c.fillRect(24+i*248,16,224,160);c.fillStyle='#c2d2d7';c.font=history[i]===10?'600 76px sans-serif':'600 112px sans-serif';c.fillText(history[i]===10?'▶︎◀︎':history[i]==null?'·':String(history[i]),136+i*248,100);}
       this.scoreTexture.needsUpdate=true;this.scoreKey=scoreKey;
     }
     var T=THREE;this.logicalH=H;var ringZ=data.ringZ||0;this.ringRoot.position.z=ringZ;this.red.root.position.z=ringZ;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(data.pinDistance-ringZ-7,body.z-ringZ-2)):0;
