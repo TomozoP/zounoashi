@@ -10,7 +10,7 @@ g.dbg.tick(73);assert.equal(now().phase,'receive');g.press(' ');assert.equal(now
 g.dbg.tick(13);assert.equal(now().phase,'place');g.press(' ');assert.equal(now().phase,'place');
 ready();assert.equal(now().ball,null);
 var cy=g.H-210;
-g.down(270,cy);g.moveTo(345,g.H-210);assert.equal(now().phase,'position');g.up();assert.equal(now().phase,'angle');assert(now().position>0.9);
+g.down(330,cy);assert(now().position>.7,'押した瞬間にその横位置へ移動する');g.moveTo(345,g.H-210);assert.equal(now().phase,'position');g.up();assert.equal(now().phase,'angle');assert(now().position>0.9);
 var pos=now().position;g.down(345,g.H-210);g.moveTo(300,g.H-260);g.up();assert.equal(now().phase,'power');assert(now().aim<0);assert.equal(now().position,pos);
 g.dbg.tick(24);assert(now().power>.4&&now().power<.6);g.tap(270,g.H-160);assert.equal(now().phase,'roll');assert.equal(now().ball.x,pos);
 var speed=now().ball.vz;g.tap(270,g.H-160);assert.equal(now().ball.vz,speed,'連打しても投げ直さない');
