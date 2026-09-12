@@ -4,7 +4,7 @@ var g=load('games/_random-bowling/index.html',{withScripts:true,quiet:true,injec
 function now(){return g.probe.now();}function tick(n){g.dbg.tick(n);}function ready(){for(var i=0;i<800&&now().phase!=='ready'&&now().state!=='result';i++)tick(1);}
 assert.equal(now().phase,'ready');g.down(270,600);tick(30);var slow=now().omega;tick(150);assert(now().omega>13&&now().omega<14);assert(now().omega>slow);var before=now().angle;g.moveTo(40,100);assert.equal(now().angle,before);assert.equal(now().human.length,11);
 var direction=P.throwDirection(now().angle);var angle=now().angle;g.up();assert.equal(now().phase,'flight');assert.equal(now().human.length,11);var pelvis=now().human[0];assert(Math.abs(pelvis.vx-direction.x*(12+now().omega*2.7))<.001);assert(Math.abs(pelvis.vz-direction.z*(12+now().omega*2.7))<.001);
-tick(6);assert(now().simulationTime>.05&&now().simulationTime<.07,'投げた瞬間は微スロー');tick(24);assert.equal(now().playbackRate,1,'すぐ通常速度に戻る');g.down(270,600);g.up();assert.equal(now().phase,'flight');ready();assert.equal(now().shot,1);
+tick(3);assert(now().simulationTime>.010&&now().simulationTime<.016,'投げた瞬間は30％速');tick(10);assert.equal(now().playbackRate,1,'すぐ通常速度に戻る');g.down(270,600);g.up();assert.equal(now().phase,'flight');ready();assert.equal(now().shot,1);
 g.esc();g.down(270,600);tick(10);g.wrap.fire('pointercancel',{});assert.equal(now().phase,'ready');assert.equal(now().human.length,0);
 g.esc();g.key(' ');tick(150);assert.equal(now().phase,'swing');g.key(' ',true);assert.equal(now().phase,'flight');ready();
 g.esc();g.pad({press:true});g.step(5);assert.equal(now().phase,'swing');g.pad({});g.step(1);assert.equal(now().phase,'flight');

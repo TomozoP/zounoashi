@@ -9,7 +9,7 @@ var ZWrestleScene=(function(){
     this.scene=new T.Scene();this.scene.scale.x=-1;this.scene.background=new T.Color('#142a37');this.scene.fog=new T.Fog('#142a37',65,150);
     this.camera=new T.PerspectiveCamera(52,540/960,.08,350);
     this.camera.position.set(0,9,-12);this.camera.lookAt(0,0,14);
-    this.follow=0;this.followX=0;this.w=540;this.h=960;
+    this.follow=0;this.followX=0;this.swingX=0;this.swingZ=0;this.w=540;this.h=960;
     this.scene.add(new T.HemisphereLight('#deefff','#625743',2.1));
     var light=new T.DirectionalLight('#fff1d5',3.3);light.position.set(-4,14,18);light.castShadow=true;
     light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-18,right:18,top:35,bottom:-35,near:1,far:90});light.target.position.set(0,0,20);light.shadow.bias=-.0002;this.scene.add(light,light.target);
@@ -66,7 +66,11 @@ var ZWrestleScene=(function(){
   Scene.prototype.draw=function(ctx,W,H,data,phase,angle,omega,dt){
     var T=THREE;this.logicalH=H;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(22,body.z-2)):0;
     this.follow+=(target-this.follow)*(1-Math.exp(-4*dt));this.followX+=((flying&&body?Math.max(-2,Math.min(2,body.x*.3)):0)-this.followX)*(1-Math.exp(-3*dt));
-    this.camera.position.set(-this.followX,9-this.follow/22*3.5,-12+this.follow);this.camera.lookAt(-this.followX*.5,.8,12+this.follow*.65);this.camera.updateMatrixWorld();
+    // 振り回される青を少しだけ追い、投球後は滑らかに元の追従へ戻す。
+    var swinging=phase==='swing'&&body,blend=1-Math.exp(-7*dt);
+    this.swingX+=((swinging?Math.max(-.6,Math.min(.6,body.x*.2)):0)-this.swingX)*blend;
+    this.swingZ+=((swinging?Math.max(-.45,Math.min(.45,body.z*.15)):0)-this.swingZ)*blend;
+    this.camera.position.set(-this.followX-this.swingX,9-this.follow/22*3.5,-12+this.follow+this.swingZ);this.camera.lookAt(-this.followX*.5-this.swingX*1.5,.8,12+this.follow*.65+this.swingZ);this.camera.updateMatrixWorld();
     this.pins.forEach(function(g,i){var p=data.pins[i];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
     var red=this.red;red.root.rotation.y=Math.PI/2-angle;red.root.position.y=phase==='swing'?Math.sin(angle*2)*.04:0;
     // 赤は足を踏み替え、両手で青の足首を持つ。
