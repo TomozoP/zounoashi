@@ -13,6 +13,7 @@ var ZBowlingPhysics=(function(C){
     {name:'ラグビー',color:'#9d512c',r:.34,mass:.45,speed:12,friction:.28,bounce:.58,drag:.03,skin:8},
     {name:'スーパーボール',color:'#e768ac',r:.29,mass:.12,speed:15,friction:.2,bounce:.94,drag:.018,skin:9}
   ];
+  function releaseHeight(k){return k.r+.45+(k.skin===8?.15:0);}
   function Game(){
     this.world=new C.World({gravity:new C.Vec3(0,-9.81,0),allowSleep:true});
     this.world.solver.iterations=24;this.world.solver.tolerance=.0001;
@@ -63,9 +64,10 @@ var ZBowlingPhysics=(function(C){
       faces.forEach(function(f,i){if(i<(rings-1)*sides)f.reverse();});
       b.addShape(new C.ConvexPolyhedron({vertices:vertices,faces:faces}));b.quaternion.setFromEuler(.25,0,.45);
     }else b.addShape(new C.Sphere(k.r));
-    b.position.set(x,k.r+(k.skin===8?.25:.16),.65);
-    var speed=k.speed*(power==null?1:Math.max(.4,Math.min(1.3,power)));
-    b.velocity.set(angle*speed,-.25,speed);
+    // 少し浮かせて前へ放り、着地と跳ね返りは素材の物理に任せる。
+    b.position.set(x,releaseHeight(k),.65);
+    var speed=k.speed*1.35*(power==null?1:Math.max(.4,Math.min(1.3,power)));
+    b.velocity.set(angle*speed,.65,speed);
     b.angularVelocity.set(speed/k.r*.72,0,-angle*speed/k.r*.72);
     b.sleepSpeedLimit=.08;b.sleepTimeLimit=.6;
     this.world.addBody(b);this.ball=b;
@@ -89,6 +91,6 @@ var ZBowlingPhysics=(function(C){
     var still=this.pins.every(function(p){return p.body.velocity.length()<.15&&p.body.angularVelocity.length()<.2;});
     return this.time>2.5&&still&&(this.ball.position.z>35||this.ball.velocity.length()<.25||this.ball.position.y<-2||this.ball.velocity.z<-.3);
   };
-  return {Game:Game,kinds:kinds};
+  return {Game:Game,kinds:kinds,releaseHeight:releaseHeight};
 })(typeof CANNON!=='undefined'?CANNON:require('./vendor/cannon.js'));
 if(typeof module!=='undefined')module.exports=ZBowlingPhysics;

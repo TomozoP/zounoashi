@@ -15,3 +15,6 @@ console.log(JSON.stringify({鉄球:heavy.score,ビーチ球:light.score,低反�
 
 // 同じ球でも、止めたパワーが初速と回転へ反映される。
 var weakShot=new P.Game(),strongShot=new P.Game();weakShot.launch(0,.1,.7475);strongShot.launch(0,.1,1.3);assert(strongShot.ball.velocity.z>weakShot.ball.velocity.z*1.7);assert(strongShot.ball.angularVelocity.x>weakShot.ball.angularVelocity.x*1.7);
+
+// 床から離れた位置で放し、空中を進んでから自然に着地する。
+var loft=new P.Game();loft.launch(0,0);assert(loft.ball.position.y-P.kinds[0].r>=.44);assert(loft.ball.velocity.z>=16);var landed=false;for(var i=0;i<180;i++){loft.step(1/180);if(loft.ball.position.y<P.kinds[0].r+.015){landed=true;assert(loft.ball.position.z>4);break;}}assert(landed,'浮かせた球が着地する');
