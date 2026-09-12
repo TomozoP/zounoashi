@@ -28,7 +28,7 @@ function confirm(g,kind,target){
 }
 ['tap','key','pad'].forEach(function(kind){
   [true,false].forEach(function(first){
-    var g=load(file);begin(g,first,kind);
+    var g=load(file,{inject:"window.__dbg={resultSounds:[]}; tone=function(freq){if(state==='result')window.__dbg.resultSounds.push(freq);};"});begin(g,first,kind);
     if(first){
       assert.equal(g.probe.now().state,'play');
       if(kind==='tap'){confirm(g,kind,1);assert.equal(g.probe.now().state,'play');}
@@ -45,7 +45,11 @@ function confirm(g,kind,target){
     assert.equal(g.probe.now().state,'result');
     assert.equal(g.probe.now().score,1);assert.equal(g.probe.now().pieces,1);
     assert.equal(g.probe.now().first,first);
-    assert(frames>=312 && frames<=324);
+    assert(frames>=330 && frames<=342);
+    var sounds=g.dbg.resultSounds;
+    assert.equal(sounds.length,3);
+    assert(first?sounds[0]<sounds[1]&&sounds[1]<sounds[2]:sounds[0]>sounds[1]&&sounds[1]>sounds[2]);
+    advance(g,60);assert.equal(sounds.length,3);
     var bs=g.probe.now().buttons;
     g.tap(bs[1].x+30,bs[1].y+30);
     assert.equal(g.shared[0],'王将棋 '+(first?'勝ち':'負け')+' 1手');
@@ -66,4 +70,4 @@ load.SHAPES.forEach(function(v){
   assert.equal(g.probe.now().state,'ready');
   console.log('OK '+v.join('×')+' 押しどころの中心間 '+Math.round(Math.hypot(a.x-b.x,a.y-b.y)))
 });
-console.log('問題なし。先後はタップ確定、後手の待ち1.3秒、決着の演出約5.37秒（三回目はスローと着地後の寄り）。');
+console.log('問題なし。先後はタップ確定、後手の待ち1.3秒、決着の演出約5.67秒（三回目はスローと着地後の寄り）。');
