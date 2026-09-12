@@ -12,6 +12,6 @@ g.esc();g.key(' ');tick(150);assert.equal(now().phase,'swing');g.key(' ',true);a
 g.esc();g.pad({press:true});g.step(5);assert.equal(now().phase,'swing');g.pad({});g.step(1);assert.equal(now().phase,'flight');
 g.esc();for(var shot=0;shot<3;shot++){ready();assert(Math.abs(now().pins[0].z-58)<.01&&now().ringZ===29-shot*14.5,'ピン固定でリングが下がる');g.key(' ');for(var i=0;i<500;i++){tick(1);if(now().swingTime>4&&P.throwDirection(now().angle).z>.99&&Math.abs(P.throwDirection(now().angle).x)<.08)break;}g.key(' ',true);var hitSeen=false;for(var f=0;f<800&&now().phase==='flight';f++){tick(1);if(now().firstPinHit&&!hitSeen){hitSeen=true;tick(1);assert(now().playbackRate<.4,'初回ピン衝突でスロー');}}ready();assert.equal(now().shot,shot+1);if(shot===0)assert(hitSeen,'正面投球がピンに当たる');}
 assert.equal(now().state,'result');assert.equal(now().score,now().history.reduce(function(a,b){return a+b;},0));assert(now().score>0);
-g.tap(380,g.H*.62+34);assert(g.shared[0].includes('/30 #レッスルボウル'));g.tap(160,g.H*.62+34);assert.equal(now().state,'play');assert.equal(now().score,0);
+g.tap(380,g.H*.62+34);assert(g.shared[0].includes('/30 #STRONGBOWL'));g.tap(160,g.H*.62+34);assert.equal(now().state,'play');assert.equal(now().score,0);
 load.SHAPES.forEach(function(v){g.view(v[0],v[1]);g.step(1);assert(now().H>=780&&now().H<=1700);});
 console.log('長押し加速・最大回転・離す方向・入力取消・ジョイパッド・3投完走・共有・画面6通り：問題なし');
