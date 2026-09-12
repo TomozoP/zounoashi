@@ -28,6 +28,11 @@ var ZWrestleScene=(function(){
     box(0,-.22,22,22,.4,50,mat('#273d49',.5));
     [-1,1].forEach(function(s){box(s*10.5,-.12,22,1,.13,50,mat('#0a1820',.28,.4));box(s*11.06,.1,22,.12,.38,50,mat('#70838b',.28,.65));});
     box(0,-.28,48.5,22,.3,3,mat('#101d25',.85));box(0,3.2,50,22,7,.3,mat('#10222d',.75));
+    // 黒い奥壁より上に離して得点を常設する。
+    this.scoreCanvas=document.createElement('canvas');this.scoreCanvas.width=768;this.scoreCanvas.height=192;
+    this.scoreTexture=new T.CanvasTexture(this.scoreCanvas);this.scoreTexture.colorSpace=T.SRGBColorSpace;
+    this.scoreBoard=new T.Mesh(new T.PlaneGeometry(16,4),new T.MeshBasicMaterial({map:this.scoreTexture,transparent:true,toneMapped:false}));
+    this.scoreBoard.rotation.y=Math.PI;this.scoreBoard.scale.x=-1;this.scoreBoard.position.set(0,12,49.8);this.scene.add(this.scoreBoard);this.scoreKey=null;
     // 隣のレーンは暗く控えめに置き、奥行きを見せる。
     [-1,1].forEach(function(s){box(s*23,-.05,22,20,.1,50,mat('#675846',.48));box(s*12,.22,22,.2,.4,50,mat('#304751',.5));});
     this.pinMaterial=mat('#f5f0e6',.24,.04);this.redMaterial=mat('#c52d40',.3);
@@ -63,7 +68,14 @@ var ZWrestleScene=(function(){
   };
   Scene.prototype.resize=function(w,h){this.w=w;this.h=h;this.renderer.setSize(w,h,false);this.camera.aspect=w/h;this.camera.fov=2*Math.atan(Math.tan(31*Math.PI/180)*(h/w)/(960/540))*180/Math.PI;this.camera.updateProjectionMatrix();};
   Scene.prototype.project=function(x,y,z){var v=new THREE.Vector3(-x,y,z).project(this.camera);return {x:(v.x*.5+.5)*540,y:(.5-v.y*.5)*this.logicalH};};
-  Scene.prototype.draw=function(ctx,W,H,data,phase,angle,omega,dt){
+  Scene.prototype.draw=function(ctx,W,H,data,phase,angle,omega,dt,history){
+    history=history||[];var scoreKey=history.join(',');
+    if(this.scoreKey!==scoreKey){
+      var c=this.scoreCanvas.getContext('2d');c.clearRect(0,0,768,192);
+      c.textAlign='center';c.textBaseline='middle';c.font='600 112px sans-serif';
+      for(var i=0;i<3;i++){c.fillStyle='#2c414c';c.fillRect(24+i*248,16,224,160);c.fillStyle='#c2d2d7';c.fillText(history[i]==null?'·':String(history[i]),136+i*248,100);}
+      this.scoreTexture.needsUpdate=true;this.scoreKey=scoreKey;
+    }
     var T=THREE;this.logicalH=H;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(22,body.z-2)):0;
     this.follow+=(target-this.follow)*(1-Math.exp(-4*dt));this.followX+=((flying&&body?Math.max(-2,Math.min(2,body.x*.3)):0)-this.followX)*(1-Math.exp(-3*dt));
     // 振り回される青を少しだけ追い、投球後は滑らかに元の追従へ戻す。
