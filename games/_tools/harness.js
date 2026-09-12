@@ -173,9 +173,12 @@ function load(file, opts) {
     FakeImage, location_, FakeKeyboardEvent
   );
 
+  /* 触るのを wrap で受けるゲームと window で受けるゲームがあるので、両方へ流す。
+     ただし wrap（＝絵の入れ物）は canvas とぴったり同じ大きさなので、
+     絵の外を指しているぶんは本物のブラウザでは届かない。ここでも届けない */
   function poke(name, x, y) {
     var ev = { clientX: x, clientY: y, preventDefault: noop, pointerId: 1, button: 0 };
-    wrap.fire(name, ev);
+    if (x >= 0 && x <= 540 && y >= 0 && y <= gameH()) wrap.fire(name, ev);
     win.fire(name, ev);
   }
 
