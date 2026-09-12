@@ -30,6 +30,8 @@
     if (query.charAt(0) !== "?") query = "";
     var params = new URLSearchParams(query);
     params.delete("v");
+    /* 大きいカードの保存済み表示を避け、確認済みの正方形カードのURLを使う。 */
+    params.set("card", "square2");
     var search = params.toString();
     return global.location.origin + "/share/" + game[1] + "/" + (search ? "?" + search : "");
   }

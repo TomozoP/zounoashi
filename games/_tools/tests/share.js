@@ -15,11 +15,12 @@ function share(url, parent, native) {
   return result;
 }
 var origin = "https://www.zounoashi.com";
-assert.equal(share(origin + "/games/wanko/index.html?v=1", origin + "/#/game/wanko"), origin + "/share/wanko/");
-assert.equal(share(origin + "/games/wanko/", null, true), origin + "/share/wanko/");
+assert.equal(share(origin + "/games/wanko/index.html?v=1", origin + "/#/game/wanko"), origin + "/share/wanko/?card=square2");
+assert.equal(share(origin + "/games/wanko/", null, true), origin + "/share/wanko/?card=square2");
+assert.equal(share(origin + "/games/wanko/", origin + "/#/game/wanko?card=old"), origin + "/share/wanko/?card=square2");
 var result = "A".repeat(30);
-assert.equal(share(origin + "/games/type16oku/index.html", origin + "/#/game/type16oku?r=" + result), origin + "/share/type16oku/?r=" + result);
-assert.equal(share(origin + "/games/type16oku/index.html?r=" + result), origin + "/share/type16oku/?r=" + result);
+assert.equal(share(origin + "/games/type16oku/index.html", origin + "/#/game/type16oku?r=" + result), origin + "/share/type16oku/?r=" + result + "&card=square2");
+assert.equal(share(origin + "/games/type16oku/index.html?r=" + result), origin + "/share/type16oku/?r=" + result + "&card=square2");
 assert.equal(share("http://localhost/games/_new/index.html", "http://localhost/#/game/new"), "http://localhost/#/game/new");
 var source = fs.readFileSync(path.join(root, "index.html"), "utf8");
 var games = vm.runInNewContext(source.match(/var GAMES = (\[[\s\S]*?\n\]);/)[1], { UR: "", KY: "" }).filter(function (g) { return g.id && g.play; });
