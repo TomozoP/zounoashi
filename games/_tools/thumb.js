@@ -27,13 +27,14 @@ var cp = require("child_process");
 
 /* ---------------- 言われたことを読む ---------------- */
 var args = process.argv.slice(2);
-var id = null, secs = 3, firstKey = " ", topY = 90, topH = 170, quality = 90;
+var id = null, secs = 3, firstKey = " ", topY = 90, topH = 170, quality = 90, query = "";
 for (var i = 0; i < args.length; i++) {
   var a = args[i];
   if (a === "-t") secs = Number(args[++i]);
   else if (a === "-k") { var k = args[++i]; firstKey = (k === "なし" || k === "none") ? null : k; }
   else if (a === "--top") topY = Number(args[++i]);
   else if (a === "--toph") topH = Number(args[++i]);
+  else if (a === "--query") query = args[++i] || "";
   else if (a === "-q") quality = Number(args[++i]);
   else if (a[0] === "-") { console.log("知らない指定: " + a); process.exit(1); }
   else id = a;
@@ -97,6 +98,7 @@ var MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; chars
              ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg" };
 
 var gameUrl = "/games/" + dir + "/index.html";
+var pageUrl = gameUrl + (query ? "?" + query.replace(/^\?/, "") : "");
 var ended = false, why = null;
 
 var server = http.createServer(function (req, res) {
@@ -153,7 +155,7 @@ function browser() {
 var child = null, timer = null;
 
 server.listen(0, "127.0.0.1", function () {
-  var url = "http://127.0.0.1:" + server.address().port + gameUrl;
+  var url = "http://127.0.0.1:" + server.address().port + pageUrl;
   var exe = browser();
   if (!exe) {
     console.log("EdgeもChromeも見つかりません。");

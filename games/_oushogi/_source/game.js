@@ -1,5 +1,6 @@
   /* Blenderで作った面を、奥から順にcanvasへ描く。追加の読込や道具は要らない。 */
   var MODEL = __MODEL__;
+  var thumbMode = /(?:^|[?&])thumb=1(?:&|$)/.test(location.search || '');
   var state, score, T, elapsed, first, selected, focus, impact, held = false;
   var CY = 480;
   var eye, basis, focal, queue, centers = [];
@@ -125,7 +126,7 @@
   function scene(){
     var cinematic=state==='cinema',s=cinematic?shot():{index:0,progress:0};
     var p=s.progress,sgn=first===false?-1:1;
-    if(state==='ready'){
+    if(state==='ready' && !thumbMode){
       /* 開始前だけ、30秒で一周する。開始後は盤を真上から見せる。 */
       var angle=elapsed*Math.PI*2/30;
       camera([Math.sin(angle)*9,-Math.cos(angle)*9,11.5],[0,0,-.25],Math.min(760,H*.84));
@@ -211,7 +212,7 @@
       turnLabel();
       return;
     }
-    if(state==='ready'){
+    if(state==='ready' && !thumbMode){
       var b=startButton();ctx.fillStyle='#e6d7b7';ctx.fillRect(b.x,b.y,b.w,b.h);
       ctx.strokeStyle='#a89a77';ctx.strokeRect(b.x+4,b.y+4,b.w-8,b.h-8);
       text('対局開始',270,b.y+b.h/2,28,'#30291e');
