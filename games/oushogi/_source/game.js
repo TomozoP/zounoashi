@@ -251,10 +251,24 @@
       centers:centers,buttons:buttons(),shake:{x:shakeX,y:shakeY},duration:duration,startButton:startButton(),lotteryFirst:lotteryFirst()};},
     step:function(n){for(var i=0;i<(n||1);i++){update(1/60);draw();}},reset:newRound
   };
+  /* 手元の録画では、先手を引いて一局を最後まで自動で見せる。 */
+  window.__recording={
+    sound:function(){audioOn();return AC;},
+    run:async function(r){
+      await r.wait(1400);r.key();
+      if(!await r.until(function(){return state==='lottery';},2))throw Error('抽選が始まらない');
+      await r.wait(900);
+      if(!await r.until(function(){return lotteryFirst();},1))throw Error('先攻表示にならない');
+      r.key();await r.wait(1100);
+      if(state==='play'){r.key();await r.wait(280);r.key();}
+      if(!await r.until(function(){return state==='result';},10))throw Error('勝敗が出ない');
+      await r.wait(1800);
+    }
+  };
   /* ============ ループ ============ */
   newRound();layout();draw();
   var last=performance.now();
-  function loop(now){var dt=Math.min(.033,(now-last)/1000);last=now;update(dt);draw();requestAnimationFrame(loop);}
+  function loop(now){var dt=Math.min(.033,(now-last)/1000);last=now;if(!window.__recordManual){update(dt);draw();}requestAnimationFrame(loop);}
   requestAnimationFrame(loop);
 })();
 </script>

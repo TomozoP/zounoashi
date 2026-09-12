@@ -90,6 +90,19 @@ node games/_tools/thumb.js hoge --top 200  # 切り取り位置をずらす
 裏でブラウザを画面なしで借りて**実際に遊ばせた画面**を撮ります。手は要りません。
 最初にスペースを1回押すので、タイトルから始まるゲームでもそのまま中身が写ります。
 
+SNS用の動画は、手元だけで次のように撮れます。
+
+```bash
+node games/_tools/record.js hoge
+node games/_tools/record.js hoge --manual  # 自分で操作し、F9で録画開始・停止
+```
+
+540×960の縦画面で自動運転し、`games/_recordings/` に保存します。
+ゲームのcanvasと音だけを録るため、マウスカーソルやサイトの外枠は映りません。
+録画フォルダはGitの対象外です。自動操作は各ゲームの `window.__recording.run` に書き、
+新しいゲームには雛形から入ります。
+手動撮影でもcanvasだけを録るので、操作中のマウスカーソルは動画に入りません。
+
 ## ジョイパッド
 
 `games/pad.js` を1行読むだけで効きます。雛形には入っています。
@@ -152,6 +165,7 @@ node games/_tools/img.js 拾った絵/ -o games/_hoge/img -w 1080   # 横1080ま
 | `smoke.js` | 落ちないかの共通確認（読み込み・30秒・画面6通り・でたらめ操作・やり直し） |
 | `harness.js` | 偽DOMの台。ゲームごとのテストはこれを使って書く |
 | `thumb.js` | 動いている画面からサムネ（600x600 webp）を作る |
+| `record.js` | ゲームを自動運転し、手元用の縦動画を撮る |
 | `img.js` | 素材の png/jpg を webp にする（縮小もできる） |
 | `publish.js` | `_` を外して `GAMES` に入れる（commit と push はしない） |
 | `tests/` | ゲームごとのテスト。`wanko-*.js` が書き方の見本、`pad.js` は全ゲーム共通の確認 |
