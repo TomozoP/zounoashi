@@ -114,8 +114,17 @@
     else if(cinematic) camera([3.5-p*.7,-7.8,11.8],[0,0,-.12],990+120*p);
     else camera([0,-.1,11.5],[0,0,0],Math.min(820,H*.94));
     queue=[];
-    // 線のない床。
+    // 畳の縁や継ぎ目は描かず、短い織り目だけを床に重ねる。
     flat([[-12,-12,-1.58],[12,-12,-1.58],[12,12,-1.58],[-12,12,-1.58]],'#79775a');
+    for(var row=-30;row<=30;row++){
+      for(var col=-30;col<=30;col++){
+        var tx=col*.25+(row%2)*.125,ty=row*.25;
+        var weave=project([tx,ty,-1.579]);
+        if(weave.x<-12||weave.x>W+12||weave.y<-12||weave.y>H+12)continue;
+        flat([[tx,ty,-1.579],[tx+.17,ty,-1.579],[tx+.17,ty+.018,-1.579],[tx,ty+.018,-1.579]],
+          (row+col)%3===0?'rgba(213,201,142,.14)':'rgba(41,49,26,.10)',.1);
+      }
+    }
     flat([[-2.78,-2.74,-1.57],[3.10,-2.74,-1.57],[3.10,3.22,-1.57],[-2.78,3.22,-1.57]],'rgba(21,24,14,.24)');
     model(MODEL.board,{x:0,y:0,z:0,r:0},1);
     var progress=cinematic?ease((p-.12)/.58):state==='result'?1:0;
