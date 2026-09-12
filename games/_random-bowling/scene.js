@@ -30,7 +30,6 @@ var ZWrestleScene=(function(){
     box(0,-.28,48.5,22,.3,3,mat('#101d25',.85));box(0,3.2,50,22,7,.3,mat('#10222d',.75));
     // 隣のレーンは暗く控えめに置き、奥行きを見せる。
     [-1,1].forEach(function(s){box(s*23,-.05,22,20,.1,50,mat('#675846',.48));box(s*12,.22,22,.2,.4,50,mat('#304751',.5));});
-    for(var i=-3;i<=3;i++){var shape=new T.Shape();shape.moveTo(-.055,0);shape.lineTo(.055,0);shape.lineTo(0,.22);shape.closePath();var arrow=new T.Mesh(new T.ShapeGeometry(shape),mat('#765331',.8));arrow.rotation.x=-Math.PI/2;arrow.position.set(i*.55,.009,6.5+Math.abs(i)*.3);this.scene.add(arrow);}
     this.pinMaterial=mat('#f5f0e6',.24,.04);this.redMaterial=mat('#c52d40',.3);
     var profile=[[0,0],[0,.19],[.05,.22],[.19,.26],[.42,.25],[.64,.19],[.81,.105],[1.02,.105],[1.1,.16],[1.24,.17],[1.33,.09],[1.35,.001]];
     var pinGeo=new T.LatheGeometry(profile.map(function(p){return new T.Vector2(p[1],p[0]-.47);}),32);
@@ -50,7 +49,6 @@ var ZWrestleScene=(function(){
       var pg=geometry(data[0].pin);self.pins.forEach(function(p){p.children[0].geometry=pg;});
       ZWrestlePhysics.parts.forEach(function(p){var geo=geometry(data[1][p.shape]);self.red.parts[p.id].children[0].geometry=geo;self.blue.parts[p.id].children[0].geometry=geo;});self.modelReady=true;
     }).catch(function(e){console.error('模型を読めない',e);});
-    this.direction=new T.Mesh(new T.BufferGeometry(),new T.MeshBasicMaterial({color:'#f35644',side:T.DoubleSide,transparent:true,opacity:.85}));this.scene.add(this.direction);
   }
   Scene.prototype.makeWrestler=function(color){
     var T=THREE,root=new T.Group(),parts={},skin=new T.MeshStandardMaterial({color:'#d69c74',roughness:.65}),pants=new T.MeshStandardMaterial({color:color,roughness:.65}),black=new T.MeshStandardMaterial({color:'#17202b',roughness:.6}),white=new T.MeshStandardMaterial({color:'#fff3dc',roughness:.6});
@@ -78,9 +76,6 @@ var ZWrestleScene=(function(){
     });
     var human=data.human.length?data.human:ZWrestlePhysics.swingPose(angle),blue=this.blue;
     human.forEach(function(p){var g=blue.parts[p.id];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
-    // 赤レスラーの向きを短い矢印で示す。向きの補正や自動照準はしない。
-    this.direction.visible=phase==='swing';if(this.direction.visible){var p=human[0],direction=ZWrestlePhysics.throwDirection(angle),dx=direction.x,dz=direction.z,nx=dz*.12,nz=-dx*.12,len=1.2+Math.abs(omega)*.12,x=p.x+dx*.6,z=p.z+dz*.6;
-      var verts=[x+nx,.025,z+nz,x-nx,.025,z-nz,x+dx*len,.025,z+dz*len,x+dx*len+nx*2,.025,z+dz*len+nz*2,x+dx*len-nx*2,.025,z+dz*len-nz*2,x+dx*(len+.5),.025,z+dz*(len+.5)];this.direction.geometry.dispose();this.direction.geometry=new T.BufferGeometry();this.direction.geometry.setAttribute('position',new T.Float32BufferAttribute(verts,3));}
     this.renderer.render(this.scene,this.camera);ctx.drawImage(this.renderer.domElement,0,0,W,H);
   };
   return Scene;
