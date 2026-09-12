@@ -72,7 +72,7 @@ var ZWrestleScene=(function(){
     }).catch(function(e){console.error('模型を読めない',e);});
   }
   Scene.prototype.makeWrestler=function(color){
-    var T=THREE,root=new T.Group(),parts={},skin=new T.MeshStandardMaterial({color:'#c88759',roughness:.5}),pants=new T.MeshStandardMaterial({color:color,roughness:.65}),black=new T.MeshStandardMaterial({color:'#090f19',roughness:.6}),white=new T.MeshStandardMaterial({color:'#fff3dc',roughness:.6});
+    var T=THREE,root=new T.Group(),parts={},skin=new T.MeshPhysicalMaterial({color:'#c88759',roughness:.3,clearcoat:.3,clearcoatRoughness:.24}),pants=new T.MeshStandardMaterial({color:color,roughness:.65}),black=new T.MeshStandardMaterial({color:'#090f19',roughness:.6}),white=new T.MeshStandardMaterial({color:'#fff3dc',roughness:.6});
     // レスラーだけ環境光を抑え、体の陰影と衣装の色をはっきりさせる。
     [skin,pants,black,white].forEach(function(m){m.onBeforeCompile=function(shader){shader.fragmentShader=shader.fragmentShader.replace('#include <lights_fragment_end>','#include <lights_fragment_end>\nreflectedLight.indirectDiffuse *= 0.5;');};m.customProgramCacheKey=function(){return 'wrestler-contrast';};});
     ZWrestlePhysics.parts.forEach(function(p){var g=new T.Group(),geo=new T.SphereGeometry(1,16,12);geo.scale(p.size[0],p.size[1],p.size[2]);var body=new T.Mesh(geo,(p.shape==='pelvis'||p.shape==='head')?pants:skin);body.castShadow=true;body.receiveShadow=true;g.add(body);g.position.set(p.p[0],p.p[1],p.p[2]);root.add(g);parts[p.id]=g;
