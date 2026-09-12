@@ -6,4 +6,8 @@
 
    足すのは games/_tools/new.js、公開は games/_tools/publish.js が面倒を見ます。 */
 window.DRAFT_GAMES = [
+  { type: "lab", tags: [], id: "oushogi", title: "王将棋", year: 2026, date: "2026-09-12",
+    plays: null, url: "", img: "games/_oushogi/img/thumb.webp",
+    play: "games/_oushogi/index.html", full: true,
+    catch: "" },
 ];
