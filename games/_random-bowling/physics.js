@@ -66,7 +66,7 @@ var ZWrestlePhysics=(function(C){
       self.world.addBody(hand);self.hands.push(hand);var grip=new C.PointToPointConstraint(hand,new C.Vec3(),body,pivot,1e6);grip.collideConnected=false;self.world.addConstraint(grip);self.grabs.push(grip);});
   };
   Game.prototype.swing=function(dt,angle){
-    if(!this.holding)return;var steps=Math.max(1,Math.ceil(dt*720)),step=dt/steps,start=this.holdAngle,ringZ=this.ringZ;
+    if(!this.holding||dt<=0)return;var steps=Math.max(1,Math.ceil(dt*720)),step=dt/steps,start=this.holdAngle,ringZ=this.ringZ;
     for(var i=0;i<steps;i++){var a=start+(angle-start)*(i+1)/steps;
       this.hands.forEach(function(hand,j){var side=j===0?-1:1,x=1.25*Math.cos(a)-side*.2*Math.sin(a),z=1.25*Math.sin(a)+side*.2*Math.cos(a);hand.velocity.set((x*humanScale-hand.position.x)/step,(1.5*humanScale+ringHeight-hand.position.y)/step,(z*humanScale+ringZ-hand.position.z)/step);});
       this.world.step(step);
