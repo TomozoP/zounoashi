@@ -1,5 +1,8 @@
-/* 絵の外（上下左右の黒い余白）のタップと、ジョイパッドの効きを確かめる。
-   ねらいの要る面は外では効かない＝誤爆しない、が大事なところ。 */
+/* わんこボマーの、ジョイパッドと「絵の外は相手にしない」の確かめ。
+
+   絵の外（上下左右の黒い余白）を叩いても、何も起きないのが正解です。
+   ボタンでないところを押して何か起きるのはおかしい、ということで
+   一度入れたものをやめた経緯があります。 */
 var load = require("../harness");
 var FILE = "games/wanko/index.html";
 var bad = [];
@@ -8,7 +11,7 @@ function ok(label, cond, extra) {
   if (!cond) bad.push(label);
 }
 
-/* その仕掛けが出るまで作り直す（TYPE_KEYS は覗き穴から触らない方針なので、引くまで回す） */
+/* その仕掛けが出るまで作り直す */
 function fresh(kind) {
   for (var i = 0; i < 300; i++) {
     var g = load(FILE, { quiet: true });
@@ -23,42 +26,24 @@ function need(kind) {
   return g;
 }
 
-/* ---- 余白のタップ ---- */
-console.log("■ 余白のタップ");
-/* 押すだけの面は、余白でも「触った」ことが伝わればよい。
-   でたらめに押しているので、解けても間違えて爆発してもかまわない。
-   導火線が尽きるより早く動きが出たことを、コマ数で見る */
-["pump", "hold", "time"].forEach(function (kind) {
+var ALL = ["wire", "color", "sw", "screw", "keypad", "trace", "dial", "pump", "hold", "time"];
+
+/* ---- 絵の外 ---- */
+console.log("■ 絵の外のタップ（何も起きないのが正解）");
+ALL.forEach(function (kind) {
   var g = need(kind);
   if (!g) return;
-  var before = g.probe.now().score, frames = 0, moved = false;
-  for (var i = 0; i < 30 && !moved; i++) {
-    g.down(270, -120);                                      /* 絵の上の余白 */
-    if (kind === "hold") { g.step(20); frames += 20; }       /* 長押しは少し溜める */
-    g.up();
-    g.step(2); frames += 2;
-    var v = g.probe.now();
-    moved = v.score > before || v.state !== "play";
-  }
-  var w = g.probe.now();
-  ok("余白を叩くと " + kind + " に届く", moved && frames < 150,
-     "皿 " + before + " → " + w.score + " / " + w.state + " / " + frames + "コマ（導火線は174コマ以上）");
-});
-
-["wire", "color", "sw", "screw", "keypad", "trace", "dial"].forEach(function (kind) {
-  var g = need(kind);                                       /* ねらいの要る面 */
-  if (!g) return;
   var s0 = g.probe.now();
-  for (var i = 0; i < 20; i++) {                            /* 四方の余白をひととおり */
+  for (var i = 0; i < 20; i++) {                   /* 四方の余白をひととおり */
     g.tap(-80, 400); g.tap(620, 400); g.tap(270, -100); g.tap(270, g.H + 100);
     g.step(1);
   }
   var s1 = g.probe.now();
-  ok("余白を叩いても " + kind + " は動かない（誤爆しない）",
-     s1.state === s0.state && s1.score === s0.score, s1.state);
+  ok(kind + " は余白を叩いても動かない",
+     s1.state === s0.state && s1.score === s0.score, s1.state + " / 皿 " + s1.score);
 });
 
-/* 端ちょうどは中扱い（0 と W/H はゲームの中） */
+/* 端ちょうどは中（0 と W/H はゲームの中） */
 (function () {
   var g = need("pump");
   if (!g) return;
@@ -76,8 +61,8 @@ console.log("■ ジョイパッド");
   if (!g) return;
   var before = g.probe.now().score;
   for (var i = 0; i < 30; i++) {
-    g.pad({ press: true }); g.step(2);                      /* 押す */
-    g.pad({ press: false }); g.step(2);                     /* 離す */
+    g.pad({ press: true }); g.step(2);
+    g.pad({ press: false }); g.step(2);
     if (g.probe.now().score > before) break;
   }
   ok("ボタンで連打の面が進む", g.probe.now().score > before,
@@ -93,12 +78,11 @@ console.log("■ ジョイパッド");
      "皿 " + before + " → " + g.probe.now().score);
 })();
 
-/* パッドの便りが途切れたら、押したままにせず離した扱いにする。
-   長押しの面は「離した」ときに判定が出るので、動きが出れば伝わった証拠 */
+/* 長押しの面は「離した」ときに判定が出る。動きが出れば伝わった証拠 */
 (function () {
   var g = need("hold");
   if (!g) return;
-  g.pad({ press: true });                                   /* 押して、そのあと送らない */
+  g.pad({ press: true });                          /* 押して、そのあと送らない */
   var frames = 0;
   g.until(function () { frames++; return g.probe.now().state !== "play"; }, 60);
   var v = g.probe.now();
@@ -107,17 +91,15 @@ console.log("■ ジョイパッド");
 })();
 
 (function () {
-  var g = need("keypad");                                   /* 十字キーで選ぶところが動くか */
+  var g = need("keypad");
   if (!g) return;
-  var before = JSON.stringify(g.probe.spots());
   g.pad({ dx: 1 }); g.step(2);
   g.pad({ dx: 0 }); g.step(2);
-  var v = g.probe.now();
-  ok("十字キーを入れても壊れない", v.state === "play" && !!before, v.state);
+  ok("十字キーを入れても壊れない", g.probe.now().state === "play", g.probe.now().state);
 })();
 
 (function () {
-  var g = need("time");                                     /* 結果画面でボタン → やり直し */
+  var g = need("time");                            /* 結果画面でボタン → やり直し */
   if (!g) return;
   g.until(function () { return g.probe.now().state === "result"; }, 3000);
   if (g.probe.now().state !== "result") { bad.push("結果画面まで行かない"); return; }

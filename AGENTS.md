@@ -55,6 +55,7 @@ counter.gs        プレイ数カウンター（Google Apps Script。置きか�
 games/
   README.md       ゲームを足す手順
   share.js        Xへのシェア（zShare）
+  pad.js          ジョイパッドをキーに化けさせる共通の受け口
   _local.js       下書きの一覧。localhost のときだけ読まれる
   _template/      雛形
   _tools/         道具（下記）
@@ -161,3 +162,4 @@ npx --yes http-server . -p 8735 -c-1
 | 下書きが一覧に出ない | `games/_local.js` に行があるか、`localhost` で見ているか |
 | 押しどころが近すぎる | スマホ（横375px）で44px以上 ＝ **ゲーム座標で63以上**。面板を広げる・2段にする |
 | キーが効かない | 枠の外をクリックするとフォーカスが外れます。タップでも遊べるようにしておく |
+| ジョイパッドが効かない | `<script src="../pad.js"></script>` を読んでいるか（雛形には入っています） |

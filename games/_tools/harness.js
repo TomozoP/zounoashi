@@ -7,6 +7,7 @@
      g.step(60);                  // 1秒ぶん進める
      g.tap(270, 400);             // ゲーム座標で触る
      g.key(" ");                  // スペース
+     g.pad({ press: true });      // ジョイパッド（キーに化ける）
      g.view(390, 844);            // 画面の形を変える
      g.probe.now();               // ゲーム側の覗き穴（window.__probe）
 
@@ -23,21 +24,21 @@ function load(file, opts) {
   var dir = path.dirname(full);
   var parts = [];
 
-  /* 同じフォルダの .js も読む場合（share.js は zShare として渡すので読まない）。
-     別ファイルに分けているゲームだけ opts.withScripts で有効にする */
-  var srcs = opts.withScripts ? (html.match(/<script src="([^"]+)"><\/script>/g) || []) : [];
-  srcs.forEach(function (tag) {
-    var src = tag.match(/src="([^"]+)"/)[1];
-    if (/share\.js$/.test(src) || /^https?:/.test(src)) return;
+  /* <script> を、HTMLに出てくる順につなぐ。順番が入れかわると、
+     先に決めておく設定が、後から効くことになってしまう。
+     share.js は zShare として渡すので読まない。
+     pad.js はどのゲームも使う共通の受け口なので、いつでも読む。
+     それ以外の別ファイルは opts.withScripts のときだけ */
+  var found = 0;
+  html.replace(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/script>/g, function (m, src, body) {
+    if (!src) { parts.push(body); found++; return m; }
+    if (/share\.js$/.test(src) || /^https?:/.test(src)) return m;
+    if (!opts.withScripts && !/pad\.js$/.test(src)) return m;
     var p = path.join(dir, src);
     if (fs.existsSync(p)) parts.push(fs.readFileSync(p, "utf8"));
+    return m;
   });
-
-  var blocks = html.match(/<script>[\s\S]*?<\/script>/g);
-  if (!blocks) throw new Error("ゲームの <script> が見つからない: " + file);
-  blocks.forEach(function (b) {
-    parts.push(b.replace(/^<script>/, "").replace(/<\/script>$/, ""));
-  });
+  if (!found) throw new Error("ゲームの <script> が見つからない: " + file);
   var code = parts.join("\n;\n");
   if (opts.inject) {                       /* テストのときだけ覗き穴を足したいとき */
     code = code.replace("  /* ============ ループ ============ */",
@@ -88,7 +89,9 @@ function load(file, opts) {
       focus: function () {}, blur: function () {}, click: function () { e.fire("click", {}); },
       play: function () { return { then: function () {}, catch: function () {} }; },
       /* 表示サイズ＝ゲーム座標。テストはゲーム座標のまま触れる */
-      getBoundingClientRect: function () { return { left: 0, top: 0, width: 540, height: gameH() }; },
+      getBoundingClientRect: function () {
+        return { left: 0, top: 0, right: 540, bottom: gameH(), width: 540, height: gameH() };
+      },
       fire: function (n, ev) { (h[n] || []).forEach(function (f) { f(ev || {}); }); }
     };
     return e;
@@ -109,6 +112,13 @@ function load(file, opts) {
     querySelectorAll: function () { return []; },
     addEventListener: doc.addEventListener,
     removeEventListener: function () {},
+    /* document に投げたものは、上へ伝わって window でも受け取れる（本物と同じ） */
+    dispatchEvent: function (ev) {
+      doc.fire(ev.type, ev);
+      win.fire(ev.type, ev);
+      return true;
+    },
+    activeElement: null,
     hidden: false,
     createElement: function (t) { return el(t); },
     documentElement: el("html"),
@@ -140,14 +150,27 @@ function load(file, opts) {
   window_.location = location_;
   window_.Image = FakeImage;
 
+  /* pad.js が作るキーの出来事。本物と同じ形にしておく */
+  function FakeKeyboardEvent(type, o) {
+    o = o || {};
+    this.type = type;
+    this.key = o.key || "";
+    this.code = o.code || "";
+    this.repeat = !!o.repeat;
+    this.bubbles = !!o.bubbles;
+    this.preventDefault = noop;
+    this.stopPropagation = noop;
+  }
+  window_.KeyboardEvent = FakeKeyboardEvent;
+
   new Function("window", "document", "performance", "requestAnimationFrame", "zShare",
-               "console", "Image", "location", code)(
+               "console", "Image", "location", "KeyboardEvent", code)(
     window_, document_,
     { now: function () { return T; } },
     function (f) { raf.push(f); },
     function (o) { shared.push(o && o.text); },
     opts.quiet ? { log: noop, warn: noop, error: noop } : console,
-    FakeImage, location_
+    FakeImage, location_, FakeKeyboardEvent
   );
 
   function poke(name, x, y) {
