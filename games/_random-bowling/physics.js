@@ -1,7 +1,7 @@
 /* レッスルボウル。関節でつないだレスラーと大型ピンの剛体計算。 */
 var ZWrestlePhysics=(function(C){
   'use strict';
-  var scale=1.8,parts=[
+  var scale=4.5,parts=[
     {id:'pelvis',shape:'pelvis',p:[0,1.08,0],size:[.33,.22,.23],mass:16},
     {id:'torso',shape:'torso',p:[0,1.64,0],size:[.43,.40,.24],mass:28},
     {id:'head',shape:'head',p:[0,2.30,0],size:[.24,.29,.23],mass:6}
@@ -26,16 +26,16 @@ var ZWrestlePhysics=(function(C){
     this.world.addContactMaterial(new C.ContactMaterial(this.pinMat,this.humanMat,{friction:.32,restitution:.25}));
     var self=this;
     function box(x,y,z,w,h,d){self.world.addBody(new C.Body({mass:0,material:self.floorMat,collisionFilterGroup:1,shape:new C.Box(new C.Vec3(w/2,h/2,d/2)),position:new C.Vec3(x,y,z)}));}
-    box(0,-.2,18,8,.4,40);box(0,-.2,-1,12,.4,10);
-    [-1,1].forEach(function(s){box(s*4.45,-.4,20,.9,.3,36);box(s*4.96,.1,20,.12,.8,36);});
-    box(0,-.3,39.5,10,.4,3);box(0,1.5,41,10,3,.3);
+    box(0,-.2,22,20,.4,50);box(0,-.2,-1,12,.4,10);
+    [-1,1].forEach(function(s){box(s*10.5,-.4,22,1,.3,50);box(s*11.06,.1,22,.12,.8,50);});
+    box(0,-.3,48.5,22,.4,3);box(0,3.2,50,22,7,.3);
     this.pins=[];this.bodies=[];this.joints=[];this.grabs=[];this.hands=[];this.reset();
   }
   Game.prototype.reset=function(){
     var self=this;this.releaseHands();this.released=false;this.joints.forEach(function(j){self.world.removeConstraint(j);});this.bodies.forEach(function(b){self.world.removeBody(b);});this.pins.forEach(function(p){self.world.removeBody(p.body);});
     this.bodies=[];this.joints=[];this.pins=[];this.time=0;this.accumulator=0;this.impact=0;
     for(var row=0;row<4;row++)for(var col=0;col<=row;col++){
-      var b=new C.Body({mass:6,material:this.pinMat,collisionFilterGroup:2,position:new C.Vec3((col-row/2)*1.5,.47*scale,29+row*1.4),linearDamping:.22,angularDamping:.24});
+      var b=new C.Body({mass:12,material:this.pinMat,collisionFilterGroup:2,position:new C.Vec3((col-row/2)*3.75,.47*scale,29+row*3.5),linearDamping:.22,angularDamping:.24});
       b.addShape(new C.Cylinder(.26*scale,.21*scale,.5*scale,12),new C.Vec3(0,-.20*scale,0));
       b.addShape(new C.Cylinder(.105*scale,.26*scale,.35*scale,12),new C.Vec3(0,.225*scale,0));
       b.addShape(new C.Cylinder(.105*scale,.105*scale,.23*scale,12),new C.Vec3(0,.515*scale,0));
@@ -81,10 +81,10 @@ var ZWrestlePhysics=(function(C){
   Game.prototype.step=function(dt){
     if(!this.bodies.length||this.holding)return;this.accumulator+=Math.min(dt,.1);
     while(this.accumulator>=1/180){var fast=this.bodies.some(function(b){return b.velocity.length()>35;}),steps=fast?4:2;for(var i=0;i<steps;i++)this.world.step(1/180/steps);this.accumulator-=1/180;this.time+=1/180;}
-    this.pins.forEach(function(p){var up=p.body.quaternion.vmult(new C.Vec3(0,1,0));if(up.y<.7||p.body.position.y<.23*scale||Math.abs(p.body.position.x)>4)p.down=true;});
+    this.pins.forEach(function(p){var up=p.body.quaternion.vmult(new C.Vec3(0,1,0));if(up.y<.7||p.body.position.y<.23*scale||Math.abs(p.body.position.x)>10)p.down=true;});
   };
   Game.prototype.snapshot=function(){return {pins:this.pins.map(function(p){var v=pose(p.body);v.down=p.down;return v;}),human:this.bodies.map(function(b,i){var v=pose(b);v.id=parts[i].id;return v;}),time:this.time};};
-  Game.prototype.finished=function(){if(!this.bodies.length||this.holding)return false;if(this.time>9)return true;var center=this.bodies[0].position,still=this.pins.every(function(p){return p.body.velocity.length()<.2&&p.body.angularVelocity.length()<.3;});return this.time>2.5&&still&&(center.y<-3||center.z<-8||Math.abs(center.x)>12||this.bodies.every(function(b){return b.velocity.length()<.4;})||center.z>37);};
+  Game.prototype.finished=function(){if(!this.bodies.length||this.holding)return false;if(this.time>9)return true;var center=this.bodies[0].position,still=this.pins.every(function(p){return p.body.velocity.length()<.2&&p.body.angularVelocity.length()<.3;});return this.time>2.5&&still&&(center.y<-3||center.z<-8||Math.abs(center.x)>24||this.bodies.every(function(b){return b.velocity.length()<.4;})||center.z>47);};
   return {Game:Game,parts:parts,pinScale:scale,swingPose:swingPose,headDirection:headDirection};
 })(typeof CANNON!=='undefined'?CANNON:require('./vendor/cannon.js'));
 if(typeof module!=='undefined')module.exports=ZWrestlePhysics;

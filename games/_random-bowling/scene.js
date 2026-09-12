@@ -6,13 +6,13 @@ var ZWrestleScene=(function(){
     this.renderer=new T.WebGLRenderer({antialias:true,alpha:false,preserveDrawingBuffer:true});
     this.renderer.setPixelRatio(1);this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=T.PCFSoftShadowMap;
     this.renderer.outputColorSpace=T.SRGBColorSpace;this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.25;
-    this.scene=new T.Scene();this.scene.scale.x=-1;this.scene.background=new T.Color('#142a37');this.scene.fog=new T.Fog('#142a37',42,85);
-    this.camera=new T.PerspectiveCamera(52,540/960,.08,100);
+    this.scene=new T.Scene();this.scene.scale.x=-1;this.scene.background=new T.Color('#142a37');this.scene.fog=new T.Fog('#142a37',65,150);
+    this.camera=new T.PerspectiveCamera(52,540/960,.08,350);
     this.camera.position.set(0,9,-12);this.camera.lookAt(0,0,14);
-    this.follow=0;this.followX=0;this.look=new T.Vector3(0,0,9);this.w=540;this.h=960;
+    this.follow=0;this.followX=0;this.look=new T.Vector3(0,.8,12);this.followY=0;this.w=540;this.h=960;
     this.scene.add(new T.HemisphereLight('#deefff','#625743',2.1));
     var light=new T.DirectionalLight('#fff1d5',3.3);light.position.set(-4,14,18);light.castShadow=true;
-    light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-8,right:8,top:28,bottom:-28,near:1,far:65});light.target.position.set(0,0,20);light.shadow.bias=-.0002;this.scene.add(light,light.target);
+    light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-18,right:18,top:35,bottom:-35,near:1,far:90});light.target.position.set(0,0,20);light.shadow.bias=-.0002;this.scene.add(light,light.target);
     var fill=new T.DirectionalLight('#9dcede',1.3);fill.position.set(5,6,-8);this.scene.add(fill);
     function mat(color,roughness,metalness){return new T.MeshStandardMaterial({color:color,roughness:roughness==null?.5:roughness,metalness:metalness||0});}
     function box(x,y,z,w,h,d,m){var mesh=new T.Mesh(new T.BoxGeometry(w,h,d),m);mesh.position.set(x,y,z);mesh.receiveShadow=true;mesh.castShadow=true;self.scene.add(mesh);return mesh;}
@@ -24,12 +24,12 @@ var ZWrestleScene=(function(){
       for(var y=100+(i%4)*150;y<1024;y+=470){c.fillStyle='rgba(74,48,26,.13)';c.fillRect(i*25.6,y,25.6,1);}
     }
     var wt=new T.CanvasTexture(wood);wt.colorSpace=T.SRGBColorSpace;wt.anisotropy=Math.min(8,this.renderer.capabilities.getMaxAnisotropy());
-    var lane=new T.Mesh(new T.PlaneGeometry(8,39),new T.MeshStandardMaterial({map:wt,roughness:.3,metalness:.05}));lane.rotation.x=-Math.PI/2;lane.position.set(0,.002,16.5);lane.receiveShadow=true;this.scene.add(lane);
-    box(0,-.22,16.5,10,.4,39,mat('#273d49',.5));
-    [-1,1].forEach(function(s){box(s*4.45,-.12,16.5,.9,.13,39,mat('#0a1820',.28,.4));box(s*4.96,.1,16.5,.12,.38,39,mat('#70838b',.28,.65));});
-    box(0,-.28,37.5,10,.3,3,mat('#101d25',.85));box(0,.9,41,10,3,.3,mat('#10222d',.75));
+    var lane=new T.Mesh(new T.PlaneGeometry(20,50),new T.MeshStandardMaterial({map:wt,roughness:.3,metalness:.05}));lane.rotation.x=-Math.PI/2;lane.position.set(0,.002,22);lane.receiveShadow=true;this.scene.add(lane);
+    box(0,-.22,22,22,.4,50,mat('#273d49',.5));
+    [-1,1].forEach(function(s){box(s*10.5,-.12,22,1,.13,50,mat('#0a1820',.28,.4));box(s*11.06,.1,22,.12,.38,50,mat('#70838b',.28,.65));});
+    box(0,-.28,48.5,22,.3,3,mat('#101d25',.85));box(0,3.2,50,22,7,.3,mat('#10222d',.75));
     // 隣のレーンは暗く控えめに置き、奥行きを見せる。
-    [-1,1].forEach(function(s){box(s*10,-.05,16,5.3,.1,40,mat('#675846',.48));box(s*6.2,.22,16,.2,.4,40,mat('#304751',.5));});
+    [-1,1].forEach(function(s){box(s*23,-.05,22,20,.1,50,mat('#675846',.48));box(s*12,.22,22,.2,.4,50,mat('#304751',.5));});
     for(var i=-3;i<=3;i++){var shape=new T.Shape();shape.moveTo(-.055,0);shape.lineTo(.055,0);shape.lineTo(0,.22);shape.closePath();var arrow=new T.Mesh(new T.ShapeGeometry(shape),mat('#765331',.8));arrow.rotation.x=-Math.PI/2;arrow.position.set(i*.55,.009,6.5+Math.abs(i)*.3);this.scene.add(arrow);}
     this.pinMaterial=mat('#f5f0e6',.24,.04);this.redMaterial=mat('#c52d40',.3);
     var profile=[[0,0],[0,.19],[.05,.22],[.19,.26],[.42,.25],[.64,.19],[.81,.105],[1.02,.105],[1.1,.16],[1.24,.17],[1.33,.09],[1.35,.001]];
@@ -56,7 +56,6 @@ var ZWrestleScene=(function(){
     var T=THREE,root=new T.Group(),parts={},skin=new T.MeshStandardMaterial({color:'#d69c74',roughness:.65}),pants=new T.MeshStandardMaterial({color:color,roughness:.65}),black=new T.MeshStandardMaterial({color:'#17202b',roughness:.6}),white=new T.MeshStandardMaterial({color:'#fff3dc',roughness:.6});
     ZWrestlePhysics.parts.forEach(function(p){var g=new T.Group(),geo=new T.SphereGeometry(1,16,12);geo.scale(p.size[0],p.size[1],p.size[2]);var body=new T.Mesh(geo,p.shape==='pelvis'?pants:skin);body.castShadow=true;body.receiveShadow=true;g.add(body);g.position.set(p.p[0],p.p[1],p.p[2]);root.add(g);parts[p.id]=g;
       function ellipsoid(x,y,z,sx,sy,sz,m){var mesh=new T.Mesh(new T.SphereGeometry(1,12,8),m);mesh.position.set(x,y,z);mesh.scale.set(sx,sy,sz);mesh.castShadow=true;g.add(mesh);}
-      if(p.shape==='head'){ellipsoid(0,.13,-.03,.245,.18,.22,black);[-1,1].forEach(function(s){ellipsoid(s*.085,.025,.205,.035,.035,.025,white);ellipsoid(s*.085,.025,.226,.014,.020,.008,black);});ellipsoid(0,-.035,.235,.047,.05,.035,skin);ellipsoid(0,-.14,.20,.095,.018,.02,black);}
       if(p.shape==='shin'){ellipsoid(0,-.16,.065,.18,.22,.25,black);ellipsoid(0,.15,.035,.18,.10,.18,pants);}
       if(p.shape==='forearm'){ellipsoid(0,-.14,0,.155,.07,.15,white);ellipsoid(0,-.26,0,.15,.12,.14,skin);}
     });
@@ -65,9 +64,12 @@ var ZWrestleScene=(function(){
   Scene.prototype.resize=function(w,h){this.w=w;this.h=h;this.renderer.setSize(w,h,false);this.camera.aspect=w/h;this.camera.fov=2*Math.atan(Math.tan(31*Math.PI/180)*(h/w)/(960/540))*180/Math.PI;this.camera.updateProjectionMatrix();};
   Scene.prototype.project=function(x,y,z){var v=new THREE.Vector3(-x,y,z).project(this.camera);return {x:(v.x*.5+.5)*540,y:(.5-v.y*.5)*this.logicalH};};
   Scene.prototype.draw=function(ctx,W,H,data,phase,angle,omega,dt){
-    var T=THREE;this.logicalH=H;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(22,body.z-2)):0;
-    this.follow+=(target-this.follow)*(1-Math.exp(-4*dt));this.followX+=((flying&&body?Math.max(-2,Math.min(2,body.x*.3)):0)-this.followX)*(1-Math.exp(-3*dt));
-    this.camera.position.set(-this.followX,9-this.follow/22*3.5,-12+this.follow);this.camera.lookAt(-this.followX*.5,.8,12+this.follow*.65);this.camera.updateMatrixWorld();
+    var T=THREE;this.logicalH=H;var flying=phase==='flight'||phase==='settle',body=data.human[0];
+    // 前進量を上限で止めず、青レスラーの左右・高さ・奥行きを追う。
+    var track=flying&&body,blend=1-Math.exp(-8*dt);this.follow+=((track?body.z:0)-this.follow)*blend;this.followX+=((track?body.x:0)-this.followX)*blend;this.followY+=((track?body.y:0)-this.followY)*blend;
+    var eye=track?new T.Vector3(-this.followX,this.followY+6.5,this.follow-10):new T.Vector3(0,9,-12);
+    this.camera.position.lerp(eye,1-Math.exp(-9*dt));
+    this.look.lerp(track?new T.Vector3(-body.x,body.y+.4,body.z):new T.Vector3(0,.8,12),1-Math.exp(-12*dt));this.camera.lookAt(this.look);this.camera.updateMatrixWorld();
     this.pins.forEach(function(g,i){var p=data.pins[i];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
     var red=this.red;red.root.rotation.y=Math.PI/2-angle;red.root.position.y=phase==='swing'?Math.sin(angle*2)*.04:0;
     // 赤は足を踏み替え、両手で青の足首を持つ。

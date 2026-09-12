@@ -2,7 +2,7 @@
 var fs=require('fs'),path=require('path'),http=require('http'),os=require('os'),cp=require('child_process');
 var root=path.resolve(__dirname,'../../..'),out=fs.mkdtempSync(path.join(os.tmpdir(),'bowling-view-'));
 var child,timer;
-var hook=`window.__visual={hold:function(){down(270,600);for(var i=0;i<180;i++)update(1/60);draw();if(omega<13)throw Error('長押しで最大回転へ加速しない');},fit:function(){var oldH=H,oldAngle=angle;for(var h of [780,960,1200,1700]){H=h;view3d.resize(540,h);for(var a of [0,Math.PI/2,Math.PI,-Math.PI/2]){angle=a;draw();for(var p of ZWrestlePhysics.swingPose(a)){var screen=view3d.project(p.x,p.y,p.z);if(screen.x<8||screen.x>532||screen.y<20||screen.y>h-20)throw Error('回転するレスラーが画面外に出る');}}}H=oldH;angle=oldAngle;layout();draw();},side:function(){angle=.35;draw();}};`;
+var hook=`window.__visual={appearance:function(){if(view3d.red.parts.head.children.length!==1||view3d.blue.parts.head.children.length!==1)throw Error('顔や髪が残っている');},tracking:function(){var p=snapshot.human[0],screen=view3d.project(p.x,p.y,p.z);if(screen.x<60||screen.x>480||screen.y<100||screen.y>H-100)throw Error('飛行中のレスラーが画面から外れる');},hold:function(){down(270,600);for(var i=0;i<180;i++)update(1/60);draw();if(omega<13)throw Error('長押しで最大回転へ加速しない');},fit:function(){var oldH=H,oldAngle=angle;for(var h of [780,960,1200,1700]){H=h;view3d.resize(540,h);for(var a of [0,Math.PI/2,Math.PI,-Math.PI/2]){angle=a;draw();for(var p of ZWrestlePhysics.swingPose(a)){var screen=view3d.project(p.x,p.y,p.z);if(screen.x<8||screen.x>532||screen.y<20||screen.y>h-20)throw Error('回転するレスラーが画面外に出る');}}}H=oldH;angle=oldAngle;layout();draw();},side:function(){angle=.35;draw();}};`;
 
 var runner=`<script>
 window.__recordManual=true;
@@ -11,10 +11,10 @@ window.__recordManual=true;
  async function save(name){var cv=document.getElementById('c');await fetch('/__save/'+name,{method:'POST',body:await new Promise(function(r){cv.toBlob(r,'image/png');})});}
  try{
   for(var i=0;i<100&&!window.__probe.now().modelsReady;i++)await new Promise(function(r){setTimeout(r,50);});
-  if(!window.__probe.now().modelsReady)throw Error('模型を読み込めない');window.__probe.step(1);if(window.__probe.now().scoreTime!==0)throw Error('初期スコアが表示中');window.__visual.fit();await save('構え.png');window.__visual.side();await save('横向き.png');window.__probe.reset();
+  if(!window.__probe.now().modelsReady)throw Error('模型を読み込めない');window.__probe.step(1);if(window.__probe.now().scoreTime!==0)throw Error('初期スコアが表示中');window.__visual.fit();window.__visual.appearance();await save('構え.png');window.__visual.side();await save('横向き.png');window.__probe.reset();
   window.__visual.hold();await save('スイング.png');window.__probe.reset();key();window.__probe.step(90);
   for(var i=0;i<500;i++){window.__probe.step(1);var n=window.__probe.now();if(n.swingTime>2&&n.human[2].z>n.human[0].z&&Math.abs((n.human[2].x-n.human[0].x)/(n.human[2].z-n.human[0].z))<.08)break;}
-  key(true);window.__probe.step(18);await save('投げ.png');window.__probe.step(60);await save('衝突.png');var follow=window.__probe.now().cameraFollow;if(follow<5)throw Error('投げたレスラーを追っていない');
+  key(true);window.__probe.step(18);await save('投げ.png');window.__probe.step(60);await save('衝突.png');window.__visual.tracking();var follow=window.__probe.now().cameraFollow;if(follow<30)throw Error('投げたレスラーを追っていない');
   var frames=0;while(window.__probe.now().phase!=='ready'&&frames++<900)window.__probe.step(1);window.__probe.step(150);var final=window.__probe.now();if(final.phase!=='ready'||final.shot!==1||final.cameraFollow>.1)throw Error('次の投球へ戻れない');
   await fetch('/__done',{method:'POST',body:JSON.stringify({models:true,score:final.score,follow:follow,returned:final.cameraFollow})});
  }catch(e){await fetch('/__fail',{method:'POST',body:e.stack});}
