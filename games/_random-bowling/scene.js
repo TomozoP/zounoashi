@@ -42,7 +42,9 @@ var ZWrestleScene=(function(){
     }
 
     box(0,-.14,-1,12,.3,10,mat('#233e4c',.8));
-    var ring=new T.Mesh(new T.RingGeometry(3.9,4.02,80),mat('#e9d7b1',.7));ring.rotation.x=-Math.PI/2;ring.position.y=.01;this.scene.add(ring);
+    // 床上面は高さ0.01。線を少し離し、同じ深度で競合させない。
+    var ringMaterial=mat('#e9d7b1',.7);ringMaterial.polygonOffset=true;ringMaterial.polygonOffsetFactor=-1;ringMaterial.polygonOffsetUnits=-1;
+    var ring=new T.Mesh(new T.RingGeometry(3.9,4.02,128),ringMaterial);ring.rotation.x=-Math.PI/2;ring.position.y=.025;this.scene.add(ring);
     this.red=this.makeWrestler('#df2437');this.blue=this.makeWrestler('#2466e7');this.modelReady=false;
     function geometry(d){var g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(d.position,3));g.setAttribute('normal',new T.Float32BufferAttribute(d.normal,3));return g;}
     Promise.all([fetch('models.json').then(function(r){return r.json();}),fetch('wrestlers.json').then(function(r){return r.json();})]).then(function(data){
