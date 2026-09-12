@@ -185,6 +185,7 @@
     if(state==='play' && selected){var q=centers[1];ctx.strokeStyle='#fff0b0';ctx.lineWidth=2;ctx.beginPath();ctx.arc(q.x,q.y,53,0,Math.PI*2);ctx.stroke();}
   }
   function text(str,x,y,size,color){ctx.fillStyle=color||'#f1e6cf';ctx.font=size+'px "Yu Mincho", "Hiragino Mincho ProN", serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(str,x,y);}
+  function resultLabel(){ return first?'先手勝ち':'後手負け'; }
   function turnLabel(){
     if(state==='lottery'||(confirmedAt!==null&&elapsed-confirmedAt<1)){
       var turn=state==='lottery'?lotteryFirst():first;
@@ -224,7 +225,7 @@
     turnLabel();
     if(state==='result'){
       ctx.fillStyle='rgba(19,19,15,.76)';ctx.fillRect(0,H*.12,W,H*.76);
-      text(first?'勝ち':'負け',270,H*.33,64);text('1手',270,H*.46,38,'#cbbc99');
+      text(resultLabel(),270,H*.33,54);text('1手',270,H*.46,38,'#cbbc99');
       buttons().forEach(function(b,i){
         ctx.fillStyle=focus===i?'#e6d7b7':'#302f28';ctx.fillRect(b.x,b.y,b.w,b.h);
         ctx.strokeStyle='#c4b38a';ctx.strokeRect(b.x+4,b.y+4,b.w-8,b.h-8);
@@ -234,7 +235,8 @@
   }
   window.__probe={
     now:function(){return {state:state,score:score,W:W,H:H,first:first,selected:selected,camera:state==='cinema'?shot().index:null,
-      time:T,cells:2,pieces:state==='result'?1:2,playerPiece:'王将',opponentPiece:'玉将',centers:centers,buttons:buttons(),duration:duration,startButton:startButton(),lotteryFirst:lotteryFirst()};},
+      time:T,cells:2,pieces:state==='result'?1:2,playerPiece:'王将',opponentPiece:'玉将',resultLabel:state==='result'?resultLabel():null,
+      centers:centers,buttons:buttons(),duration:duration,startButton:startButton(),lotteryFirst:lotteryFirst()};},
     step:function(n){for(var i=0;i<(n||1);i++){update(1/60);draw();}},reset:newRound
   };
   /* ============ ループ ============ */

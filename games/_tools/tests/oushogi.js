@@ -43,6 +43,7 @@ function confirm(g,kind,target){
     }
     assert.deepEqual(Array.from(seen),[0,1,2]);
     assert.equal(g.probe.now().state,'result');
+    assert.equal(g.probe.now().resultLabel,first?'先手勝ち':'後手負け');
     assert.equal(g.probe.now().score,1);assert.equal(g.probe.now().pieces,1);
     assert.equal(g.probe.now().first,first);
     assert(frames>=330 && frames<=342);
