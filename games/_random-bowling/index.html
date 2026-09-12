@@ -60,12 +60,16 @@
   window.addEventListener("orientationchange", layout);
 
   /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
-  var AC = null, NOISE = null;
+  var AC = null, NOISE = null, MASTER = null;
   function audioOn() {
     if (AC) { if (AC.state === "suspended") AC.resume(); return; }
     var C = window.AudioContext || window.webkitAudioContext;
     if (!C) return;
     try { AC = new C(); } catch (e) { return; }
+    // 全音をまとめて増幅し、重なった大きな音だけ抑える。
+    MASTER=AC.createGain();MASTER.gain.value=2.5;
+    var limiter=AC.createDynamicsCompressor();limiter.threshold.value=-6;limiter.knee.value=4;limiter.ratio.value=12;limiter.attack.value=.003;limiter.release.value=.12;
+    MASTER.connect(limiter);limiter.connect(AC.destination);
     var len = Math.floor(AC.sampleRate * 2);
     NOISE = AC.createBuffer(1, len, AC.sampleRate);
     var d = NOISE.getChannelData(0);
@@ -81,7 +85,7 @@
     g.gain.setValueAtTime(0.0001, n);
     g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    o.connect(g); g.connect(AC.destination);
+    o.connect(g); g.connect(MASTER);
     o.start(n); o.stop(n + dur + 0.05);
   }
   function noiseHit(dur, freq, vol, q, attack, to, pan, delay) {
@@ -94,7 +98,7 @@
     g.gain.setValueAtTime(attack?0.0001:vol,n);if(attack)g.gain.exponentialRampToValueAtTime(vol,n+attack);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
     s.connect(f); f.connect(g);
-    if(AC.createStereoPanner){var p=AC.createStereoPanner();p.pan.value=pan||0;g.connect(p);p.connect(AC.destination);}else g.connect(AC.destination);
+    if(AC.createStereoPanner){var p=AC.createStereoPanner();p.pan.value=pan||0;g.connect(p);p.connect(MASTER);}else g.connect(MASTER);
     s.start(n,Math.random()); s.stop(n + dur + 0.05);
   }
   // 風が近づいて抜ける音。速さに応じて短く、明るくする。
@@ -112,7 +116,7 @@
     for(var ch=0;ch<2;ch++){var data=impulse.getChannelData(ch);for(var n=0;n<length;n++){var t=n/AC.sampleRate;data[n]=t<.022?0:(Math.random()*2-1)*Math.exp(-t*24)*.35;}}
     room.buffer=impulse;dry.gain.value=.8;wet.gain.value=.28;filter.type='lowpass';filter.frequency.value=3800;
     limit.threshold.value=-19;limit.knee.value=12;limit.ratio.value=3;limit.attack.value=.008;limit.release.value=.15;
-    crowdBus.connect(dry);dry.connect(limit);crowdBus.connect(room);room.connect(filter);filter.connect(wet);wet.connect(limit);var voiceVolume=AC.createGain();voiceVolume.gain.value=1.6;limit.connect(voiceVolume);voiceVolume.connect(AC.destination);return crowdBus;
+    crowdBus.connect(dry);dry.connect(limit);crowdBus.connect(room);room.connect(filter);filter.connect(wet);wet.connect(limit);var voiceVolume=AC.createGain();voiceVolume.gain.value=1.6;limit.connect(voiceVolume);voiceVolume.connect(MASTER);return crowdBus;
   }
   // 声の高さと発声を少しずらし、「ハ」から「イ」へ響きを移す。
   function crowdChant(speed){
