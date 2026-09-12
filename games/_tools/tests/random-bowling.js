@@ -25,7 +25,7 @@ g.esc();for(var i=0;i<10;i++){ready();keys();g.dbg.tick(40);g.press(' ');g.dbg.t
 assert.equal(now().state,'result');assert.equal(now().score,now().history.reduce(function(a,b){return a+b;},0));
 g.tap(380,g.H*.62+34);assert.equal(g.shared.length,1);g.tap(160,g.H*.62+34);assert.equal(now().score,0);
 ready();g.pad({press:true});g.step(1);g.pad({});g.step(1);assert.equal(now().phase,'angle');g.pad({dx:1});g.step(1);g.pad({});g.step(1);assert(now().aim>0);
-g.esc();ready();g.down(270,cy);g.moveTo(270,cy-200);assert.equal(now().heightOffset,.8);g.moveTo(270,cy+200);assert.equal(now().heightOffset,-.3);g.up();g.press(' ');assert.equal(now().phase,'power');assert.equal(now().heightOffset,-.3);
+g.esc();ready();g.down(270,cy);g.moveTo(270,cy-200);assert.equal(now().heightOffset,2.4);g.moveTo(270,cy+200);assert.equal(now().heightOffset,-.3);g.up();g.press(' ');assert.equal(now().phase,'power');assert.equal(now().heightOffset,-.3);
 g.esc();ready();g.press('ArrowUp');assert(now().heightOffset>0);g.press('ArrowDown');assert(Math.abs(now().heightOffset)<.001);
 g.esc();assert.equal(now().ball,null);assert.equal(now().phase,'return');
 load.SHAPES.forEach(function(v){g.view(v[0],v[1]);g.step(1);g.drawn.length=0;assert(now().H>=780&&now().H<=1700);});
