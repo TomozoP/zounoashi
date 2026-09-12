@@ -6,7 +6,22 @@
 
   var source = document.querySelector('canvas');
   if (!source || !window.MediaRecorder || !source.captureStream) return;
-  var panel, status, recorder, chunks, paintId, output, started = false;
+  var panel, status, recorder, chunks, paintId, output, started = false, saving = false, silence;
+  var audioClock=null, frames=[];
+  var badge, preparing=false;
+  function mark(label){
+    if(!badge){
+      var host=document;
+      try{if(parent!==window&&parent.location.origin===location.origin)host=parent.document;}catch(e){}
+      badge=host.createElement('button');
+      badge.style.cssText='position:fixed;z-index:2147483647;right:12px;top:10px;padding:8px 12px;border:0;border-radius:18px;background:#302c24;color:white;font:14px sans-serif;cursor:pointer';
+      badge.onclick=function(){if(started&&!saving)stop();else if(!preparing&&!saving)show();};
+      host.body.appendChild(badge);
+      window.addEventListener('pagehide',function(){badge.remove();});
+    }
+    badge.textContent=label;badge.style.display=label?'block':'none';
+    badge.style.background=label.indexOf('録画中')>=0?'#a71c2a':'#302c24';
+  }
 
   /* ゲーム音の最終出口を、録画用の音声にも分ける。 */
   if (window.AudioNode && !AudioNode.prototype.__zRecorderOriginal) {
@@ -79,14 +94,26 @@
       .filter(function(t){return MediaRecorder.isTypeSupported(t);})[0];
   }
   function drawOutput() {
-    var c=output.getContext('2d'),sw=source.width,sh=source.height;
-    c.fillStyle='#12100e';c.fillRect(0,0,output.width,output.height);
-    var scale=Math.min(output.width/sw,output.height/sh),w=sw*scale,h=sh*scale;
-    c.drawImage(source,(output.width-w)/2,(output.height-h)/2,w,h);
+    var now=performance.now(),delay=0;
+    if(audioClock&&audioClock.getOutputTimestamp){
+      var stamp=audioClock.getOutputTimestamp();
+      if(stamp.contextTime>0)delay=Math.max(0,Math.min(250,(audioClock.currentTime-stamp.contextTime)*1000));
+    }
+    // 音声出力待ちと同じ時間だけ映像を保持する。固定の補正値は使わない。
+    var frame=document.createElement('canvas');frame.width=output.width;frame.height=output.height;
+    var fc=frame.getContext('2d'),sw=source.width,sh=source.height;
+    fc.fillStyle='#12100e';fc.fillRect(0,0,frame.width,frame.height);
+    var fit=Math.min(frame.width/sw,frame.height/sh);
+    fc.drawImage(source,(frame.width-sw*fit)/2,(frame.height-sh*fit)/2,sw*fit,sh*fit);
+    frames.push({time:now,image:frame});
+    while(frames.length>1&&frames[1].time<=now-delay)frames.shift();
+    var c=output.getContext('2d');
+    c.drawImage(frames[0].image,0,0);
     paintId=requestAnimationFrame(drawOutput);
   }
   async function begin() {
-    if (started) return;
+    if (started || saving || preparing) return;
+    preparing=true;mark('録画準備中');
     try {
       var health=await fetch('http://127.0.0.1:8736/health');
       if(!health.ok)throw Error();
@@ -104,14 +131,23 @@
     var rate=Number(panel.querySelector('[name=quality]').value)*1000000;
     var type=mime();if(!type)throw Error('このブラウザでは録画できません');
     var recipe=window.__recording,context=recipe&&recipe.sound?recipe.sound():null;
-    if(context){window.__zRecorderSound=context.createMediaStreamDestination();}
+    audioClock=context;frames=[];
+    if(context){
+      await context.resume();
+      // 効果音のない時間も音声トラックを稼働させ、録画の時計を途切れさせない。
+      if(!window.__zRecorderSound || window.__zRecorderSound.context!==context)
+        window.__zRecorderSound=context.createMediaStreamDestination();
+      silence=context.createConstantSource();silence.offset.value=0;
+      silence.connect(window.__zRecorderSound);silence.start();
+      await wait(100);
+    }
     output=document.createElement('canvas');output.width=width;output.height=height;drawOutput();
     var stream=output.captureStream(60),tracks=stream.getVideoTracks();
     if(window.__zRecorderSound)tracks=tracks.concat(window.__zRecorderSound.stream.getAudioTracks());
     recorder=new MediaRecorder(new MediaStream(tracks),{mimeType:type,videoBitsPerSecond:rate,audioBitsPerSecond:192000});
     chunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data);};
     recorder.onstop=function(){save().catch(fail);};recorder.onerror=function(e){fail(e.error||'録画に失敗しました');};
-    started=true;panel.style.display='none';recorder.start(250);
+    preparing=false;started=true;panel.style.display='none';recorder.start(250);mark('● 録画中（停止）');
     if(mode==='auto'){
       if(!recipe||!recipe.run)throw Error('このゲームには自動運転がありません');
       if(window.__probe&&window.__probe.reset)window.__probe.reset();
@@ -121,19 +157,25 @@
   }
   function stop(){if(recorder&&recorder.state==='recording')recorder.stop();}
   async function save(){
+    saving=true;
+    mark('MP4保存中');
     cancelAnimationFrame(paintId);
+    recorder.stream.getTracks().filter(function(t){return t.kind==='video';}).forEach(function(t){t.stop();});
+    if(silence){silence.stop();silence.disconnect();silence=null;}
     status.textContent='MP4に変換中';panel.style.display='grid';
     var raw=new Blob(chunks,{type:recorder.mimeType});
     var response=await fetch('http://127.0.0.1:8736/convert',{method:'POST',body:raw});
-    if(!response.ok)throw Error(await response.text());
+    if(!response.ok)throw Error((await response.text())||('MP4保存に失敗しました（'+response.status+'）'));
     var blob=await response.blob(),a=document.createElement('a');
     var id=(location.pathname.split('/').filter(Boolean).slice(-2)[0]||'game').replace(/^_/,'');
     a.href=URL.createObjectURL(blob);a.download=id+'-'+new Date().toISOString().replace(/[:.]/g,'-')+'.mp4';a.click();
     setTimeout(function(){URL.revokeObjectURL(a.href);},30000);
-    started=false;window.__zRecorderSound=null;if(!panel)build();status.textContent='保存しました';panel.style.display='grid';
+    started=false;saving=false;mark('');frames=[];if(!panel)build();status.textContent='保存しました';panel.style.display='grid';
   }
   function fail(error){
-    cancelAnimationFrame(paintId);if(recorder&&recorder.state==='recording')recorder.stop();started=false;
+    preparing=false;mark('録画エラー');
+    cancelAnimationFrame(paintId);if(recorder&&recorder.state==='recording'){recorder.onstop=null;recorder.stop();}started=false;saving=false;
+    if(silence){silence.stop();silence.disconnect();silence=null;}
     if(!panel)build();status.textContent=String(error&&error.message||error);panel.style.display='grid';
   }
 
