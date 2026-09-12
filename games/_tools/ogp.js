@@ -26,7 +26,7 @@ games.filter(function (g) { return g.id && g.play; }).forEach(function (g) {
     '<meta property="og:url" content="' + url + '">\n' +
     '<meta property="og:image" content="' + esc(image) + '">\n' +
     '<meta property="og:image:alt" content="' + esc(g.title) + '">\n' +
-    '<meta name="twitter:card" content="summary_large_image">\n' +
+    '<meta name="twitter:card" content="summary">\n' +
     '<meta name="twitter:title" content="' + esc(g.title) + '">\n' +
     '<meta name="twitter:image" content="' + esc(image) + '">\n' +
     '<!-- ゲームのOGPここまで -->';
