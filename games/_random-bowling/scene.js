@@ -64,7 +64,7 @@ var ZWrestleScene=(function(){
     });
     [.65,1.25,1.85].forEach(function(y,i){rope([-5.7,y,-5.7],[5.7,y,-5.7],ropeMats[i]);});
     this.ringRoot=new T.Group();this.scene.children.slice(ringStart).forEach(function(m){self.ringRoot.add(m);});this.scene.add(this.ringRoot);
-    this.red=this.makeWrestler('#df2437');this.blue=this.makeWrestler('#2466e7');this.modelReady=false;
+    this.red=this.makeWrestler('#c9162f');this.blue=this.makeWrestler('#1546ce');this.modelReady=false;
     function geometry(d){var g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(d.position,3));g.setAttribute('normal',new T.Float32BufferAttribute(d.normal,3));return g;}
     Promise.all([fetch('models.json').then(function(r){return r.json();}),fetch('wrestlers.json').then(function(r){return r.json();})]).then(function(data){
       var pg=geometry(data[0].pin);self.pins.forEach(function(p){p.children[0].geometry=pg;});
@@ -72,7 +72,9 @@ var ZWrestleScene=(function(){
     }).catch(function(e){console.error('模型を読めない',e);});
   }
   Scene.prototype.makeWrestler=function(color){
-    var T=THREE,root=new T.Group(),parts={},skin=new T.MeshStandardMaterial({color:'#d69c74',roughness:.65}),pants=new T.MeshStandardMaterial({color:color,roughness:.65}),black=new T.MeshStandardMaterial({color:'#17202b',roughness:.6}),white=new T.MeshStandardMaterial({color:'#fff3dc',roughness:.6});
+    var T=THREE,root=new T.Group(),parts={},skin=new T.MeshStandardMaterial({color:'#c88759',roughness:.5}),pants=new T.MeshStandardMaterial({color:color,roughness:.65}),black=new T.MeshStandardMaterial({color:'#090f19',roughness:.6}),white=new T.MeshStandardMaterial({color:'#fff3dc',roughness:.6});
+    // レスラーだけ環境光を抑え、体の陰影と衣装の色をはっきりさせる。
+    [skin,pants,black,white].forEach(function(m){m.onBeforeCompile=function(shader){shader.fragmentShader=shader.fragmentShader.replace('#include <lights_fragment_end>','#include <lights_fragment_end>\nreflectedLight.indirectDiffuse *= 0.5;');};m.customProgramCacheKey=function(){return 'wrestler-contrast';};});
     ZWrestlePhysics.parts.forEach(function(p){var g=new T.Group(),geo=new T.SphereGeometry(1,16,12);geo.scale(p.size[0],p.size[1],p.size[2]);var body=new T.Mesh(geo,p.shape==='pelvis'?pants:skin);body.castShadow=true;body.receiveShadow=true;g.add(body);g.position.set(p.p[0],p.p[1],p.p[2]);root.add(g);parts[p.id]=g;
       function ellipsoid(x,y,z,sx,sy,sz,m){var mesh=new T.Mesh(new T.SphereGeometry(1,12,8),m);mesh.position.set(x,y,z);mesh.scale.set(sx,sy,sz);mesh.castShadow=true;g.add(mesh);}
       if(p.shape==='shin'){ellipsoid(0,-.16,.065,.18,.22,.25,black);ellipsoid(0,.15,.035,.18,.10,.18,pants);}
