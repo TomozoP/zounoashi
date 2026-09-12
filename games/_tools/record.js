@@ -88,10 +88,8 @@ var recorder = String.raw`<script>
       var tracks = video.getVideoTracks();
       if (window.__recordSound) tracks = tracks.concat(window.__recordSound.stream.getAudioTracks());
       var stream = new MediaStream(tracks);
-      var types = [
-        'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4',
-        'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'
-      ];
+      /* ChromeのMP4直接録画は音の開始時刻がずれるため、まずWebMで一つの時計に録る。 */
+      var types = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
       var mime = types.filter(function (t) { return MediaRecorder.isTypeSupported(t); })[0];
       if (!mime) throw Error('このブラウザは動画を書き出せない');
       var chunks = [];
@@ -234,8 +232,25 @@ function finish() {
     process.exitCode = 1;
     return;
   }
+  var ffmpeg = path.join(__dirname, '_bin', 'ffmpeg.exe');
+  if (path.extname(output) === '.webm' && fs.existsSync(ffmpeg)) {
+    var mp4 = path.join(outDir, id + '.mp4');
+    var converted = cp.spawnSync(ffmpeg, [
+      '-y', '-i', output,
+      '-vf', 'setpts=PTS-STARTPTS',
+      '-af', 'asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0',
+      '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', mp4
+    ], { encoding: 'utf8', windowsHide: true });
+    if (converted.status !== 0 || !fs.existsSync(mp4)) {
+      console.log('NG  MP4への変換に失敗しました');
+      if (converted.stderr) console.log(converted.stderr.split(/\r?\n/).slice(-12).join('\n'));
+      process.exitCode = 1; return;
+    }
+    output = mp4;
+  }
   var size = Math.round(fs.statSync(output).size / 1024);
   console.log('OK  ' + path.relative(root, output).replace(/\\/g, '/') + '  ' + size + 'KB');
   if (recordingInfo) console.log(recordingInfo.width + '×' + recordingInfo.height + '  ' + recordingInfo.seconds + '秒  音声' + (recordingInfo.audio === '0' ? 'なし' : 'あり'));
-  console.log('ゲーム画面と音だけを録画しました。マウスカーソルは映っていません。');
+  console.log('映像と音を同じ時計で録画し、時刻を揃えてMP4にしました。マウスカーソルは映っていません。');
 }

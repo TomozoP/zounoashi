@@ -53,7 +53,7 @@
       ['正方形 720×720','720x720']
     ],'size'));
     panel.appendChild(row('画質',[['標準','4'],['高画質','8'],['最高画質','14']],'quality'));
-    status = make('div','ゲーム画面と音だけを録画します');
+    status = make('div','ゲーム画面と音だけをWebMで録画します');
     status.style.cssText='min-height:20px;color:#cabb99;font-size:13px';panel.appendChild(status);
     var buttons=make('div');buttons.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px';
     var close=make('button','閉じる'),start=make('button','録画開始');
@@ -75,7 +75,7 @@
     window.dispatchEvent(new KeyboardEvent('keyup',o));
   }
   function mime() {
-    return ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
+    return ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
       .filter(function(t){return MediaRecorder.isTypeSupported(t);})[0];
   }
   function drawOutput() {
