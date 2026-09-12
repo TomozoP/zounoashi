@@ -24,7 +24,7 @@ var server=http.createServer(function(req,res){
   if(u.startsWith('/__')){var parts=[];req.on('data',function(b){parts.push(b);});req.on('end',function(){var data=Buffer.concat(parts);res.end('ok');if(u.startsWith('/__save/'))fs.writeFileSync(path.join(out,path.basename(u)),data);else finish(u==='/__done'?0:1,data.toString());});return;}
   var file=path.resolve(root,'.'+u);if(!file.startsWith(root+path.sep)){res.writeHead(403);res.end();return;}
   try {var data=fs.readFileSync(file);res.setHeader('Content-Type',file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json');
-    if(u==='/games/_random-bowling/index.html')data=data.toString().replace('  /* ============ ループ ============ */',hook+'\n  /* ============ ループ ============ */').replace('</body>',runner+'</body>');
+    if(u==='/games/random-bowling/index.html')data=data.toString().replace('  /* ============ ループ ============ */',hook+'\n  /* ============ ループ ============ */').replace('</body>',runner+'</body>');
     res.end(data);
   }catch(e){res.writeHead(404);res.end();}
 });
@@ -32,6 +32,6 @@ function finish(code,message){clearTimeout(timer);if(child)child.kill();server.c
 server.listen(0,'127.0.0.1',function(){
   var exe=['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(fs.existsSync);
   if(!exe)return finish(1,'ブラウザが見つからない');
-  child=cp.spawn(exe,['--headless=new','--no-first-run','--no-default-browser-check','--enable-unsafe-swiftshader','--window-size=540,1080','--user-data-dir='+path.join(out,'profile'),'http://127.0.0.1:'+server.address().port+'/games/_random-bowling/index.html'],{stdio:'ignore'});
+  child=cp.spawn(exe,['--headless=new','--no-first-run','--no-default-browser-check','--enable-unsafe-swiftshader','--window-size=540,1080','--user-data-dir='+path.join(out,'profile'),'http://127.0.0.1:'+server.address().port+'/games/random-bowling/index.html'],{stdio:'ignore'});
   child.on('error',function(e){finish(1,e.message);});timer=setTimeout(function(){finish(1,'時間切れ');},90000);
 });

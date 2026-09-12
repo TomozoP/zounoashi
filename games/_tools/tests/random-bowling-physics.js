@@ -1,5 +1,5 @@
 /* ラグドールの関節が離れず、実際の衝突でピンを倒すことを確認する。 */
-var assert=require('assert'),P=require('../../_random-bowling/physics');
+var assert=require('assert'),P=require('../../random-bowling/physics');
 function shot(angle,dt,omega){var g=new P.Game();g.launch(angle,omega||14);var gap=0;while(!g.finished()){g.step(dt);g.joints.forEach(function(j){gap=Math.max(gap,j.bodyA.pointToWorldFrame(j.pivotA).distanceTo(j.bodyB.pointToWorldFrame(j.pivotB)));});g.bodies.forEach(function(b){assert(Number.isFinite(b.position.x+b.position.y+b.position.z));});}assert(gap<.08,'関節が離れない');return {score:g.pins.filter(function(p){return p.down;}).length,gap:gap,g:g};}
 var forward=shot(Math.PI/2+.03,1/60),side=shot(0,1/60),back=shot(-Math.PI/2,1/60);assert(forward.score>0);assert.equal(side.score,0);assert.equal(back.score,0);assert.equal(forward.g.bodies.length,11);assert.equal(forward.g.joints.length,10);assert.equal(P.pinScale,4.5);
 var a=shot(Math.PI/2+.03,1/30),b=shot(Math.PI/2+.03,1/120);assert.equal(a.score,forward.score);assert.equal(b.score,forward.score);

@@ -4,7 +4,7 @@ var root=path.resolve(__dirname,'../../..'),out=fs.mkdtempSync(path.join(os.tmpd
 var child,timer;
 var runner=`<script>
 (async function(){try{
-var dirs=['_template','momotarogue','melos','wanko','macho','hato','gyaku-mizukiri','oushogi','type16oku','_random-bowling'];
+var dirs=['_template','momotarogue','melos','wanko','macho','hato','gyaku-mizukiri','oushogi','type16oku','random-bowling'];
 var id=location.pathname.split('/')[2];await new Promise(r=>setTimeout(r,800));
 if(window.__errors.length)throw Error(id+': '+window.__errors.join(','));
 if(id==='type16oku'||id==='melos'){for(var b of document.querySelectorAll('button[aria-label]'))if(/もう一度|Xで/.test(b.getAttribute('aria-label'))&&!b.querySelector('svg'))throw Error('ボタンのアイコンなし');}

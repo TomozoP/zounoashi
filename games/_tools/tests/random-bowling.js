@@ -1,6 +1,6 @@
 /* 長押し・赤レスラーの向き・関節・大型ピン・3投の完走を確認する。 */
-var assert=require('assert'),load=require('../harness'),P=require('../../_random-bowling/physics');
-var g=load('games/_random-bowling/index.html',{withScripts:true,quiet:true,inject:'window.__dbg={tick:function(n){for(var i=0;i<n;i++)update(1/60);}};'});
+var assert=require('assert'),load=require('../harness'),P=require('../../random-bowling/physics');
+var g=load('games/random-bowling/index.html',{withScripts:true,quiet:true,inject:'window.__dbg={tick:function(n){for(var i=0;i<n;i++)update(1/60);}};'});
 function now(){return g.probe.now();}function tick(n){g.dbg.tick(n);}function ready(){for(var i=0;i<800&&now().phase!=='ready'&&now().state!=='result';i++)tick(1);}
 assert.equal(now().phase,'ready');g.down(270,600);tick(30);var slow=now().omega;assert(slow<5.4,'序盤はゆっくり加速する');tick(150);assert(now().omega>12.8&&now().omega<12.9);assert(now().omega>slow);var before=now().angle;g.moveTo(40,100);assert.equal(now().angle,before);assert.equal(now().human.length,11);
 for(var i=0;i<100&&P.throwDirection(now().angle).z<.99;i++)tick(1);
