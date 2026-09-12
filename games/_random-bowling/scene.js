@@ -11,8 +11,9 @@ var ZWrestleScene=(function(){
     this.camera.position.set(0,9,-12);this.camera.lookAt(0,0,14);
     this.follow=0;this.followX=0;this.swingX=0;this.swingZ=0;this.w=540;this.h=960;
     this.scene.add(new T.HemisphereLight('#deefff','#625743',2.1));
-    var light=new T.DirectionalLight('#fff1d5',3.3);light.position.set(-4,14,18);light.castShadow=true;
-    light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-18,right:18,top:35,bottom:-35,near:1,far:90});light.target.position.set(0,0,20);light.shadow.bias=-.0002;this.scene.add(light,light.target);
+    // 移動するリングから奥のピンまで、床と頭上を影の範囲に収める。
+    var light=new T.DirectionalLight('#fff1d5',3.3);light.position.set(-12,42,34);light.castShadow=true;
+    light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-55,right:55,top:55,bottom:-55,near:1,far:140});light.target.position.set(0,0,40);light.shadow.bias=-.0002;this.scene.add(light,light.target);this.shadowLight=light;
     var fill=new T.DirectionalLight('#9dcede',1.3);fill.position.set(5,6,-8);this.scene.add(fill);
     function mat(color,roughness,metalness){return new T.MeshStandardMaterial({color:color,roughness:roughness==null?.5:roughness,metalness:metalness||0});}
     function box(x,y,z,w,h,d,m){var mesh=new T.Mesh(new T.BoxGeometry(w,h,d),m);mesh.position.set(x,y,z);mesh.receiveShadow=true;mesh.castShadow=true;self.scene.add(mesh);return mesh;}
