@@ -237,9 +237,10 @@ function finish() {
     var mp4 = path.join(outDir, id + '.mp4');
     var converted = cp.spawnSync(ffmpeg, [
       '-y', '-i', output,
-      '-vf', 'setpts=PTS-STARTPTS',
-      '-af', 'asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0',
+      /* 元の相対時刻を残し、音の無い区間だけを補う。別々に0秒へ詰めると音が前へずれる。 */
+      '-af', 'aresample=async=1',
       '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+      '-r', '60', '-fps_mode', 'cfr',
       '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', mp4
     ], { encoding: 'utf8', windowsHide: true });
     if (converted.status !== 0 || !fs.existsSync(mp4)) {
