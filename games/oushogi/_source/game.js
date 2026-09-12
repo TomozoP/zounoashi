@@ -69,7 +69,7 @@
     if (state === 'result') {
       var b = x == null ? buttons()[focus] : buttons().filter(function(b){return hit(b,x,y);})[0];
       if (b && b.id === 'retry') newRound();
-      if (b && b.id === 'share') zShare({text:'迄1手で'+(first?'先手の勝ち':'後手の負け')+'です。 #王将棋'});
+      if (b && b.id === 'share') zShare({text:'迄1手で'+(first?'先手の勝ち':'後手の負け')+'です。 #王だけ将棋'});
       return;
     }
     if (state !== 'play') return;

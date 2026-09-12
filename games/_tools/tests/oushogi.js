@@ -56,7 +56,7 @@ function confirm(g,kind,target){
     advance(g,60);assert.equal(sounds.length,3);
     var bs=g.probe.now().buttons;
     g.tap(bs[1].x+30,bs[1].y+30);
-    assert.equal(g.shared[0],'迄1手で'+(first?'先手の勝ち':'後手の負け')+'です。 #王将棋');
+    assert.equal(g.shared[0],'迄1手で'+(first?'先手の勝ち':'後手の負け')+'です。 #王だけ将棋');
     g.tap(bs[0].x+30,bs[0].y+30);assert.equal(g.probe.now().state,'ready');
     assert.equal(g.probe.now().score,0);
     console.log('OK '+kind+' '+(first?'先手の勝ち':'後手の負け')+'、一手、三視点、結果、再対局');
