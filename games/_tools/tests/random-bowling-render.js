@@ -19,7 +19,7 @@ window.__recordManual=true;
       c.drawImage(cv,(p.x-82)*scale,(p.y-74)*scale,164*scale,164*scale,(i%5)*240,Math.floor(i/5)*240,240,240);
     }
     await save('種類.png',all);
-    window.__visual.pick(0);var entry=window.__visual.supply(0),arrived=window.__visual.supply(1.2);if(entry.y<window.__probe.now().H||arrived.y>=entry.y||Math.abs(arrived.x-270)>1)throw Error('球が画面下から中央へ補充されない');if(!window.__visual.bottom())throw Error('ピンの底板がない');window.__visual.pick(0);await save('投球前.png',cv);key();key();
+    window.__visual.pick(0);var entry=window.__visual.supply(0),arrived=window.__visual.supply(1.2);if(entry.y<window.__probe.now().H||arrived.y>=entry.y||Math.abs(arrived.x-270)>1)throw Error('球が画面下から中央へ補充されない');if(!window.__visual.bottom())throw Error('ピンの底板がない');window.__visual.pick(0);await save('投球前.png',cv);key();key();window.__probe.step(27);await save('パワー.png',cv);key();
     for(var i=0;i<90;i++)window.__probe.step(1);
     var first=window.__probe.now();await save('追従.png',cv);
     for(var i=0;i<90;i++)window.__probe.step(1);

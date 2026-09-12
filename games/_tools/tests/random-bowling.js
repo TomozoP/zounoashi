@@ -1,4 +1,4 @@
-/* 位置・角度の二回のドラッグで投球、各球の投球を確認する。 */
+/* 位置・角度の二回のドラッグ後にパワーを止めて投球、各球の投球を確認する。 */
 var assert=require('assert'),load=require('../harness');
 var g=load('games/_random-bowling/index.html',{withScripts:true,inject:'window.__dbg={set:function(k,a){kind=kinds[k];aim=a;world.reset(kind);syncPhysics();},tick:function(n){for(var i=0;i<n;i++)update(1/60);}};'});
 function now(){return g.probe.now();}
@@ -11,17 +11,17 @@ g.dbg.tick(13);assert.equal(now().phase,'place');g.press(' ');assert.equal(now()
 ready();assert.equal(now().ball,null);
 var cy=g.H-210;
 g.down(330,cy);assert(now().position>.7,'押した瞬間にその横位置へ移動する');g.moveTo(345,g.H-210);assert.equal(now().phase,'position');g.up();assert.equal(now().phase,'angle');assert(now().position>0.9);
-var pos=now().position;g.down(345,g.H-210);g.moveTo(300,g.H-260);g.up();assert.equal(now().phase,'roll');assert(now().aim<0);assert.equal(now().position,pos);
+var pos=now().position;g.down(345,g.H-210);g.moveTo(300,g.H-260);g.up();assert.equal(now().phase,'power');assert.equal(now().ball,null);g.dbg.tick(54);var weak=now().power;assert(weak<.36);g.dbg.tick(54);assert(now().power>.99);g.tap(270,cy);assert.equal(now().phase,'roll');assert(now().aim<0);assert.equal(now().position,pos);
 assert.equal(now().phase,'roll');assert.equal(now().ball.x,pos);
 var speed=now().ball.vz;g.tap(270,g.H-160);assert.equal(now().ball.vz,speed,'連打しても投げ直さない');
 for(var n=0;n<10;n++) {
  for(var a of [0,.2]) {
-  g.esc();ready();keys();g.dbg.set(n,a);g.dbg.tick(47);g.press(' ');
+  g.esc();ready();keys();g.dbg.set(n,a);g.dbg.tick(47);g.press(' ');assert.equal(now().phase,'power');g.dbg.tick(30);g.press(' ');
   until('settle');assert(now().score>=0&&now().score<=10);assert.equal(now().score,now().pins.filter(function(p){return p.down;}).length);assert(now().scoreTime>1.9);
   g.dbg.tick(125);assert.equal(now().scoreTime,0);
  }
 }
-g.esc();for(var i=0;i<10;i++){ready();keys();g.dbg.tick(40);g.press(' ');until('settle');g.dbg.tick(62);assert.equal(now().shot,i+1);}
+g.esc();for(var i=0;i<10;i++){ready();keys();g.dbg.tick(40);g.press(' ');g.dbg.tick(30);g.press(' ');until('settle');g.dbg.tick(62);assert.equal(now().shot,i+1);}
 assert.equal(now().state,'result');assert.equal(now().score,now().history.reduce(function(a,b){return a+b;},0));
 g.tap(380,g.H*.62+34);assert.equal(g.shared.length,1);g.tap(160,g.H*.62+34);assert.equal(now().score,0);
 ready();g.pad({press:true});g.step(1);g.pad({});g.step(1);assert.equal(now().phase,'angle');g.pad({dx:1});g.step(1);g.pad({});g.step(1);assert(now().aim>0);

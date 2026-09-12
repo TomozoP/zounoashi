@@ -85,7 +85,7 @@ var ZBowlingScene=(function(){
   Scene.prototype.resize=function(w,h){this.w=w;this.h=h;this.renderer.setSize(w,h,false);this.camera.aspect=w/h;this.camera.fov=2*Math.atan(Math.tan(26*Math.PI/180)*(h/w)/(960/540))*180/Math.PI;this.camera.updateProjectionMatrix();};
   Scene.prototype.project=function(x,y,z){var v=new THREE.Vector3(-x,y,z).project(this.camera),v2=new THREE.Vector3(-x-1,y,z).project(this.camera);return {x:(v.x*.5+.5)*540,y:(.5-v.y*.5)*this.logicalH,k:Math.abs(v2.x-v.x)*270};};
   Scene.prototype.screenX=function(x){var v=new THREE.Vector3((x/540)*2-1,0,.5).unproject(this.camera),dir=v.sub(this.camera.position).normalize();return -(this.camera.position.x+dir.x*(.65-this.camera.position.z)/dir.z);};
-  Scene.prototype.draw=function(ctx,W,H,data,kind,phase,elapsed,position,aim,dt){
+  Scene.prototype.draw=function(ctx,W,H,data,kind,phase,elapsed,position,aim,dt,power){
     this.logicalH=H;var T=THREE;
     var rolling=phase==='roll'||phase==='settle',target=rolling&&data.ball?Math.max(0,Math.min(24,data.ball.z-1.2)):0;
     this.follow+=(target-this.follow)*(1-Math.exp(-3.2*dt));
@@ -101,8 +101,8 @@ var ZBowlingScene=(function(){
     else if(phase==='receive')m.position.set(0,kind.r,-.75);
     else if(phase==='place'){var t=Math.min(1,elapsed/.4),ease=t*t*(3-2*t);m.position.set(0,kind.r+Math.sin(t*Math.PI)*.12,-.75+1.4*ease);}
     else m.position.set(position,kind.r,.65);
-    this.aimLine.visible=phase==='position'||phase==='angle';
-    if(this.aimLine.visible){var vertices=[];for(var z=.65;z<30;z+=.85){var end=Math.min(z+.48,30),x=position+aim*(z-.65),ex=position+aim*(end-.65),w=.055;vertices.push(x-w,.025,z,x+w,.025,z,ex+w,.025,end,x-w,.025,z,ex+w,.025,end,ex-w,.025,end);}this.aimLine.geometry.dispose();this.aimLine.geometry=new T.BufferGeometry();this.aimLine.geometry.setAttribute('position',new T.Float32BufferAttribute(vertices,3));}
+    this.aimLine.visible=phase==='position'||phase==='angle'||phase==='power';
+    if(this.aimLine.visible){var length=phase==='power'?.65+29.35*power:30,vertices=[];for(var z=.65;z<length;z+=.85){var end=Math.min(z+.48,length),x=position+aim*(z-.65),ex=position+aim*(end-.65),w=.055;vertices.push(x-w,.025,z,x+w,.025,z,ex+w,.025,end,x-w,.025,z,ex+w,.025,end,ex-w,.025,end);}this.aimLine.geometry.dispose();this.aimLine.geometry=new T.BufferGeometry();this.aimLine.geometry.setAttribute('position',new T.Float32BufferAttribute(vertices,3));}
     this.renderer.render(this.scene,this.camera);ctx.drawImage(this.renderer.domElement,0,0,W,H);
   };
   return Scene;

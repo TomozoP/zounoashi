@@ -51,7 +51,7 @@ var ZBowlingPhysics=(function(C){
     this.floorContact.friction=kind.friction;this.floorContact.restitution=kind.bounce;
     this.pinContact.friction=kind.friction*.6;this.pinContact.restitution=kind.bounce*.7;
   };
-  Game.prototype.launch=function(x,angle){
+  Game.prototype.launch=function(x,angle,power){
     if(this.ball)return;
     var k=this.kind,b=new C.Body({mass:k.mass,material:this.ballMat,linearDamping:k.drag,angularDamping:k.drag*.6});
     if(k.skin===8){
@@ -64,8 +64,9 @@ var ZBowlingPhysics=(function(C){
       b.addShape(new C.ConvexPolyhedron({vertices:vertices,faces:faces}));b.quaternion.setFromEuler(.25,0,.45);
     }else b.addShape(new C.Sphere(k.r));
     b.position.set(x,k.r+(k.skin===8?.25:.16),.65);
-    b.velocity.set(angle*k.speed,-.25,k.speed);
-    b.angularVelocity.set(k.speed/k.r*.72,0,-angle*k.speed/k.r*.72);
+    var speed=k.speed*(power==null?1:Math.max(.4,Math.min(1.3,power)));
+    b.velocity.set(angle*speed,-.25,speed);
+    b.angularVelocity.set(speed/k.r*.72,0,-angle*speed/k.r*.72);
     b.sleepSpeedLimit=.08;b.sleepTimeLimit=.6;
     this.world.addBody(b);this.ball=b;
   };

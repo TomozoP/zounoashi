@@ -105,20 +105,21 @@
   /* 半径・質量・摩擦・反発・速度。毎投、独立した等確率の抽選。 */
   var kinds=ZBowlingPhysics.kinds;
   var S = { PLAY:'play', RESULT:'result' };
-  var state, score, T, held, keyMode=false, phase, shot, pins, ball, kind, aim, elapsed, history, scoreTime=0, position=0, dragX=0, dragY=0, dragAim=0;
+  var state, score, T, held, keyMode=false, phase, shot, pins, ball, kind, aim, elapsed, history, scoreTime=0, position=0, dragX=0, dragY=0, dragAim=0, power=1;
   function place() {}
   function clamp(v,a,b) { return Math.max(a,Math.min(b,v)); }
   function syncPhysics() {var snapshot=world.snapshot();pins=snapshot.pins;ball=snapshot.ball;}
   function nextBall() {
     kind=kinds[Math.floor(Math.random()*kinds.length)];
-    phase='return';position=0;held=false;aim=0;elapsed=0;world.reset(kind);syncPhysics();
+    phase='return';power=1;position=0;held=false;aim=0;elapsed=0;world.reset(kind);syncPhysics();
   }
   function newRound() {
     state=S.PLAY;scoreTime=0;score=0;T=0;held=false;shot=0;history=[];nextBall();
   }
+  function startPower() {phase='power';elapsed=0;power=1;}
   function launch() {
-    if(state!==S.PLAY||phase!=='angle')return;
-    world.launch(position,aim);syncPhysics();phase='roll';elapsed=0;tone(100,.18,.06,'sine',45);
+    if(state!==S.PLAY||phase!=='power')return;
+    world.launch(position,aim,.45+.85*power);syncPhysics();phase='roll';elapsed=0;tone(100,.18,.06,'sine',45);
   }
   function update(dt) {
     frameDt=dt;T+=dt;
@@ -128,6 +129,7 @@
     if(phase==='return') {if(elapsed>=1.2) {phase='receive';elapsed=0;}return;}
     if(phase==='receive') {if(elapsed>=.2) {phase='place';elapsed=0;}return;}
     if(phase==='place') {if(elapsed>=.4) {phase='position';elapsed=0;}return;}
+    if(phase==='power') {power=.35+.65*(.5+.5*Math.cos(elapsed*Math.PI*2/1.8));return;}
     if(phase==='receive'||phase==='position'||phase==='angle') return;
     if(phase==='roll') {
       world.step(dt);syncPhysics();
@@ -144,10 +146,12 @@
     }
     if(x==null) {
       if(phase==='position') phase='angle';
-      else if(phase==='angle') launch();
+      else if(phase==='angle') startPower();
+      else if(phase==='power') launch();
       return;
     }
     if(y<80) return;
+    if(phase==='power') {launch();return;}
     if(phase!=='position'&&phase!=='angle') return;
     if(phase==='position') position=clamp((view3d?view3d.screenX(x):(x-270)*9.65/720),-2.1,2.1);
     held=true;dragX=x;dragY=y;dragAim=aim;
@@ -161,7 +165,7 @@
     if(!held) return;
     held=false;
     if(phase==='position') phase='angle';
-    else if(phase==='angle') launch();
+    else if(phase==='angle') startPower();
   }
 
   function atCanvas(e) {
@@ -247,8 +251,8 @@
   }
   function draw() {
     ctx.fillStyle='#142a37';ctx.fillRect(0,0,W,H);
-    if(view3d)view3d.draw(ctx,W,H,{pins:pins,ball:ball},kind,phase,elapsed,position,aim,frameDt);
-    if(phase==='position'||phase==='angle') {
+    if(view3d)view3d.draw(ctx,W,H,{pins:pins,ball:ball},kind,phase,elapsed,position,aim,frameDt,power);
+    if(phase==='position'||phase==='angle'||phase==='power') {
       var p=project(position,kind.r,.65);
       ctx.fillStyle='#f5f2eb';ctx.font='600 20px sans-serif';ctx.textAlign='center';
       ctx.shadowColor='rgba(0,0,0,.7)';ctx.shadowBlur=5;ctx.fillText(kind.name,p.x,p.y+p.k*kind.r*(kind.skin===8?1.45:1)+29);ctx.shadowBlur=0;
@@ -315,7 +319,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state:state,score:score,scoreTime:scoreTime,W:W,H:H,phase:phase,position:position,shot:shot,aim:aim,kind:kind.name,history:history.slice(),ball:ball?Object.assign({},ball):null,cameraFollow:view3d?view3d.follow:0,modelsReady:view3d?view3d.modelReady:false,pins:pins.map(function(p){return Object.assign({},p);}),kinds:kinds.map(function(k){return Object.assign({},k);}) }; },
+    now: function () { return { state:state,score:score,scoreTime:scoreTime,W:W,H:H,phase:phase,position:position,shot:shot,aim:aim,power:power,kind:kind.name,history:history.slice(),ball:ball?Object.assign({},ball):null,cameraFollow:view3d?view3d.follow:0,modelsReady:view3d?view3d.modelReady:false,pins:pins.map(function(p){return Object.assign({},p);}),kinds:kinds.map(function(k){return Object.assign({},k);}) }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
@@ -327,7 +331,7 @@
     run: async function (r) {
       for(var i=0;i<10;i++) {
         if(!await r.until(function(){return phase==='position';},3)) throw Error('球が出てこない');
-        r.key();await r.wait(350);r.key();
+        r.key();await r.wait(350);r.key();await r.wait(450);r.key();
         if(!await r.until(function(){return phase==='position'||state===S.RESULT;},14)) throw Error('投球が終わらない');
       }
       await r.wait(1500);

@@ -12,3 +12,6 @@ var base=run(P.kinds[0],1/60,.01),low=run(P.kinds[0],1/30,.01),high=run(P.kinds[
 assert.equal(base.score,low.score);assert.equal(base.score,high.score);assert(base.rotation>.8,'球は姿勢を回転させて転がる');
 var rugby=run(P.kinds[8],1/60);assert(Math.abs(rugby.state.ball.x)>.2,'楕円体の形で軌道が変わる');
 console.log(JSON.stringify({鉄球:heavy.score,ビーチ球:light.score,低反発の高さ:soft,ゴムの高さ:rubber,毎秒30枚:low.score,毎秒60枚:base.score,毎秒120枚:high.score,ラグビーの横ずれ:rugby.state.ball.x}));
+
+// 同じ球でも、止めたパワーが初速と回転へ反映される。
+var weakShot=new P.Game(),strongShot=new P.Game();weakShot.launch(0,.1,.7475);strongShot.launch(0,.1,1.3);assert(strongShot.ball.velocity.z>weakShot.ball.velocity.z*1.7);assert(strongShot.ball.angularVelocity.x>weakShot.ball.angularVelocity.x*1.7);
