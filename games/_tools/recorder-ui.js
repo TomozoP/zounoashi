@@ -46,7 +46,12 @@
     panel.style.cssText = 'position:fixed;z-index:2147483647;inset:50% auto auto 50%;transform:translate(-50%,-50%);width:310px;box-sizing:border-box;padding:20px;display:none;gap:13px;background:#171612;color:#f4ead5;border:1px solid #aa9872;box-shadow:0 14px 50px #000b;font:16px sans-serif';
     panel.appendChild(make('div','動画撮影'));
     panel.appendChild(row('操作',[['自分で操作','manual'],['自動運転','auto']],'mode'));
-    panel.appendChild(row('大きさ',[['540×960','540'],['720×1280','720'],['1080×1920','1080']],'size'));
+    panel.appendChild(row('大きさ',[
+      ['ゲームに合わせる','auto'],
+      ['縦 540×960','540x960'],['縦 720×1280','720x1280'],['縦 1080×1920','1080x1920'],
+      ['横 960×540','960x540'],['横 1280×720','1280x720'],['横 1920×1080','1920x1080'],
+      ['正方形 720×720','720x720']
+    ],'size'));
     panel.appendChild(row('画質',[['標準','4'],['高画質','8'],['最高画質','14']],'quality'));
     status = make('div','ゲーム画面と音だけを録画します');
     status.style.cssText='min-height:20px;color:#cabb99;font-size:13px';panel.appendChild(status);
@@ -83,7 +88,15 @@
   async function begin() {
     if (started) return;
     var mode=panel.querySelector('[name=mode]').value;
-    var width=Number(panel.querySelector('[name=size]').value),height=Math.round(width*16/9);
+    var size=panel.querySelector('[name=size]').value,width,height;
+    if(size==='auto'){
+      var gameSize=window.__probe&&window.__probe.now?window.__probe.now():null;
+      var sw=gameSize&&gameSize.W||source.width,sh=gameSize&&gameSize.H||source.height;
+      var scale=960/Math.max(sw,sh);
+      width=Math.max(2,Math.round(sw*scale/2)*2);height=Math.max(2,Math.round(sh*scale/2)*2);
+    }else{
+      var pair=size.split('x');width=Number(pair[0]);height=Number(pair[1]);
+    }
     var rate=Number(panel.querySelector('[name=quality]').value)*1000000;
     var type=mime();if(!type)throw Error('このブラウザでは録画できません');
     var recipe=window.__recording,context=recipe&&recipe.sound?recipe.sound():null;
