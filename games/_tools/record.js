@@ -79,19 +79,6 @@ var recorder = String.raw`<script>
       if (stage) { stage.style.width = '540px'; stage.style.height = '960px'; }
       window.dispatchEvent(new Event('resize'));
       await wait(80);
-      async function gameWait(ms) {
-        var frames = Math.max(1, Math.round(ms / (1000 / 60)));
-        for (var i = 0; i < frames; i++) { probe.step(1); await wait(1000 / 60); }
-      }
-      async function gameUntil(test, seconds) {
-        var frames = Math.round(seconds * 60);
-        for (var i = 0; i < frames; i++) {
-          if (test()) return true;
-          probe.step(1); await wait(1000 / 60);
-        }
-        return false;
-      }
-
       var recipe = window.__recording;
       var sound = recipe && recipe.sound ? recipe.sound() : null;
       if (sound && !window.__recordSound) window.__recordSound = sound.createMediaStreamDestination();
@@ -140,14 +127,13 @@ var recorder = String.raw`<script>
         return;
       }
 
-      window.__recordManual = true;
       startedAt = performance.now(); rec.start(250);
-      var helper = { wait: gameWait, key: key, until: gameUntil, now: probe.now };
+      var helper = { wait: wait, key: key, until: until, now: probe.now };
       if (recipe && recipe.run) await recipe.run(helper);
       else {
-        await gameWait(1000); key();
-        if (!await gameUntil(function () { return probe.now().state === 'result'; }, 20)) throw Error('勝敗が出ない');
-        await gameWait(1500);
+        await wait(1000); key();
+        if (!await until(function () { return probe.now().state === 'result'; }, 20)) throw Error('勝敗が出ない');
+        await wait(1500);
       }
       rec.stop();
     } catch (e) {
