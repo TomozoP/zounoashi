@@ -9,7 +9,7 @@ var ZWrestleScene=(function(){
     this.scene=new T.Scene();this.scene.scale.x=-1;this.scene.background=new T.Color('#142a37');this.scene.fog=new T.Fog('#142a37',65,150);
     this.camera=new T.PerspectiveCamera(52,540/960,.08,350);
     this.camera.position.set(0,9,-12);this.camera.lookAt(0,0,14);
-    this.follow=0;this.followX=0;this.swingX=0;this.swingZ=0;this.w=540;this.h=960;
+    this.readyLift=3;this.follow=0;this.followX=0;this.swingX=0;this.swingZ=0;this.w=540;this.h=960;
     this.scene.add(new T.HemisphereLight('#deefff','#625743',2.1));
     // 移動するリングから奥のピンまで、床と頭上を影の範囲に収める。
     var light=new T.DirectionalLight('#fff1d5',3.3);light.position.set(-12,42,34);light.castShadow=true;
@@ -108,7 +108,8 @@ var ZWrestleScene=(function(){
     var swinging=phase==='swing'&&body,blend=1-Math.exp(-7*dt);
     this.swingX+=((swinging?Math.max(-.6,Math.min(.6,body.x*.2)):0)-this.swingX)*blend;
     this.swingZ+=((swinging?Math.max(-.45,Math.min(.45,(body.z-ringZ)*.15)):0)-this.swingZ)*blend;
-    this.camera.position.set(-this.followX-this.swingX,9-Math.min(1,this.follow/36.5)*3.5,ringZ-16+this.follow+this.swingZ);this.camera.lookAt(-this.followX*.5-this.swingX*1.5,.8,ringZ+12+this.follow*.65+this.swingZ);this.camera.updateMatrixWorld();
+    this.readyLift+=((flying?0:3)-this.readyLift)*(1-Math.exp(-4*dt));
+    this.camera.position.set(-this.followX-this.swingX,9+this.readyLift-Math.min(1,this.follow/36.5)*3.5,ringZ-16+this.follow+this.swingZ);this.camera.lookAt(-this.followX*.5-this.swingX*1.5,.8,ringZ+12+this.follow*.65+this.swingZ);this.camera.updateMatrixWorld();
     this.pins.forEach(function(g,i){var p=data.pins[i];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
     var red=this.red;red.root.rotation.y=Math.PI/2-angle;red.root.position.y=phase==='swing'?Math.sin(angle*2)*.04:0;
     // 赤は足を踏み替え、両手で青の足首を持つ。
