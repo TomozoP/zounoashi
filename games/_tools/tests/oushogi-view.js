@@ -15,7 +15,7 @@ window.addEventListener('load',async function(){
   p.step(1);shot();
   var rand=Math.random;Math.random=function(){return .1;};press();Math.random=rand;
   p.step(15);press();press();press();
-  var start=performance.now();p.step(23);shot();p.step(47);shot();p.step(47);shot();p.step(112);shot();
+  var start=performance.now();p.step(23);shot();p.step(47);shot();p.step(220);shot();p.step(42);shot();
   if(p.now().state!=='result')throw Error('結果に到達しません');
   await fetch('/__save',{method:'POST',body:JSON.stringify({image:sheet.toDataURL('image/png'),ms:performance.now()-start})});
  }catch(e){await fetch('/__fail',{method:'POST',body:String(e.stack||e)});}
@@ -29,7 +29,7 @@ var server=http.createServer(function(req,res){
    if(req.url==='/__fail'){console.error(raw);finish(1);return;}
    var data=JSON.parse(raw),target=path.join(out,'五場面.png');
    fs.writeFileSync(target,Buffer.from(data.image.split(',')[1],'base64'));
-   console.log(target);console.log('229コマの実描画: '+Math.round(data.ms)+'ミリ秒');finish(0);
+   console.log(target);console.log('332コマの実描画: '+Math.round(data.ms)+'ミリ秒');finish(0);
   });return;
  }
  var file=path.resolve(root,'.'+decodeURIComponent(req.url.split('?')[0]));

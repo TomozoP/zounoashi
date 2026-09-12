@@ -4,7 +4,7 @@
   var CY = 480;
   var eye, basis, focal, queue, centers = [];
   var still = document.createElement('canvas'), stillKey = '';
-  var shots = [0.7, 2.6/3, 2.8/3+1.2], duration = 3.7;
+  var shots = [0.7, 2.6/3, 3.8], duration = 0.7+2.6/3+3.8;
   var confirmedAt = null, lotteryBeat = 0;
   function place() { CY = H * 0.49; }
   function newRound() {
@@ -36,8 +36,10 @@
   function shot() {
     var n = T < shots[0] ? 0 : T < shots[0] + shots[1] ? 1 : 2;
     var offset = n === 0 ? 0 : n === 1 ? shots[0] : shots[0] + shots[1];
-    /* 三つ目は動きの速さを保ち、着地後に1.2秒止めて余韻を残す。 */
-    return { index: n, progress: Math.min(1, (T - offset) / (n===2?2.8/3:shots[n])) };
+    /* 三つ目は着手をゆっくり見せ、取った後もカメラだけが寄り続ける。 */
+    var local=T-offset;
+    return { index: n, progress: Math.min(1, local / (n===2?1.8:shots[n])),
+      close: n===2?ease((local-1.26)/(shots[2]-1.26)):0 };
   }
   function buttons() {
     return [{ id:'retry', x:52, y:H * 0.79, w:202, h:68, label:'もう一度' },
@@ -117,7 +119,8 @@
       camera([Math.sin(angle)*9,-Math.cos(angle)*9,11.5],[0,0,-.25],Math.min(760,H*.84));
     }
     else if(cinematic && s.index===1)camera([5.9,-4.2+1.1*p,2.8],[0,.05,.14],780);
-    else if(cinematic && s.index===2)camera([0,-.1,10.4-1.1*p],[0,0,0],980+160*p);
+    else if(cinematic && s.index===2)camera([0,-.1+sgn*1.02*s.close,10.4-.8*p-1.2*s.close],
+      [0,sgn*1.02*s.close,0],980+100*p+140*s.close);
     else if(cinematic) camera([3.5-p*.7,-7.8,11.8],[0,0,-.12],990+120*p);
     else camera([0,-.1,11.5],[0,0,0],Math.min(820,H*.94));
     queue=[];
