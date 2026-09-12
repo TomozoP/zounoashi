@@ -66,7 +66,7 @@ var ZBowlingPhysics=(function(C){
     }else b.addShape(new C.Sphere(k.r));
     // 少し浮かせて前へ放り、着地と跳ね返りは素材の物理に任せる。
     b.position.set(x,releaseHeight(k)+Math.max(-.3,Math.min(2.4,heightOffset||0)),.65);
-    var speed=k.speed*1.35*(power==null?1:Math.max(.4,Math.min(1.3,power)));
+    var speed=k.speed*1.35*(power==null?1:Math.max(.4,Math.min(3.2,power)));
     b.velocity.set(angle*speed,.65,speed);
     b.angularVelocity.set(speed/k.r*.72,0,-angle*speed/k.r*.72);
     b.sleepSpeedLimit=.08;b.sleepTimeLimit=.6;
@@ -75,7 +75,7 @@ var ZBowlingPhysics=(function(C){
   Game.prototype.step=function(dt){
     if(!this.ball)return;
     this.accumulator+=Math.min(dt,.1);
-    while(this.accumulator>=1/180){this.world.step(1/180);this.accumulator-=1/180;this.time+=1/180;}
+    while(this.accumulator>=1/180){var parts=Math.max(1,Math.ceil(this.ball.velocity.length()/180/(this.kind.r*.45)));for(var i=0;i<parts;i++)this.world.step(1/180/parts);this.accumulator-=1/180;this.time+=1/180;}
     this.pins.forEach(function(p){
       var up=p.body.quaternion.vmult(new C.Vec3(0,1,0));
       if(up.y<.70||p.body.position.y<.23||Math.abs(p.body.position.x)>2.65)p.down=true;

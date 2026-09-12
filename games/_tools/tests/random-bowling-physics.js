@@ -18,3 +18,6 @@ var weakShot=new P.Game(),strongShot=new P.Game();weakShot.launch(0,.1,.7475);st
 
 // 床から離れた位置で放し、空中を進んでから自然に着地する。
 var loft=new P.Game();loft.launch(0,0);assert(loft.ball.position.y-P.kinds[0].r>=.44);assert(loft.ball.velocity.z>=16);var landed=false;for(var i=0;i<180;i++){loft.step(1/180);if(loft.ball.position.y<P.kinds[0].r+.015){landed=true;assert(loft.ball.position.z>4);break;}}assert(landed,'浮かせた球が着地する');
+
+// 軽い球でも最大出力でピンへ強く打ち込める。
+function soccerShot(power){var g=new P.Game();g.reset(P.kinds[1]);g.launch(0,0,power);while(!g.finished())g.step(1/60);return g.pins.filter(function(p){return p.down;}).length;}assert(soccerShot(3.2)>soccerShot(1.3),'最大出力で軽い球の押し込みが増える');
