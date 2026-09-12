@@ -10,7 +10,7 @@ for(var side of [1,-1]){g.esc();g.down(270,600);for(var i=0;i<100&&P.throwDirect
 g.esc();g.down(270,600);tick(10);g.wrap.fire('pointercancel',{});assert.equal(now().phase,'ready');assert.equal(now().human.length,0);
 g.esc();g.key(' ');tick(150);assert.equal(now().phase,'swing');g.key(' ',true);assert.equal(now().phase,'flight');ready();
 g.esc();g.pad({press:true});g.step(5);assert.equal(now().phase,'swing');g.pad({});g.step(1);assert.equal(now().phase,'flight');
-g.esc();for(var shot=0;shot<3;shot++){ready();g.key(' ');for(var i=0;i<500;i++){tick(1);if(now().swingTime>4&&P.throwDirection(now().angle).z>.99&&Math.abs(P.throwDirection(now().angle).x)<.08)break;}g.key(' ',true);ready();assert.equal(now().shot,shot+1);}
+g.esc();for(var shot=0;shot<3;shot++){ready();assert(Math.abs(now().pins[0].z-(29+shot*14.5))<.01,'投球ごとにピンが遠くなる');g.key(' ');for(var i=0;i<500;i++){tick(1);if(now().swingTime>4&&P.throwDirection(now().angle).z>.99&&Math.abs(P.throwDirection(now().angle).x)<.08)break;}g.key(' ',true);ready();assert.equal(now().shot,shot+1);}
 assert.equal(now().state,'result');assert.equal(now().score,now().history.reduce(function(a,b){return a+b;},0));assert(now().score>0);
 g.tap(380,g.H*.62+34);assert(g.shared[0].includes('/30 #レッスルボウル'));g.tap(160,g.H*.62+34);assert.equal(now().state,'play');assert.equal(now().score,0);
 load.SHAPES.forEach(function(v){g.view(v[0],v[1]);g.step(1);assert(now().H>=780&&now().H<=1700);});
