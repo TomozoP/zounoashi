@@ -4,6 +4,7 @@ var g=load('games/_random-bowling/index.html',{inject:
  'window.__dbg={set:function(k,a){kind=kinds[k];aim=a;manual=true;},tick:function(n){for(var i=0;i<n;i++)update(1/60);}};'});
 function now(){return g.probe.now();}
 function ready(){for(var i=0;i<200&&now().phase!=='aim';i++)g.dbg.tick(1);assert.equal(now().phase,'aim');}
+assert.equal(now().scoreTime,0);
 assert.equal(now().phase,'return');g.press(' ');assert.equal(now().ball,null);
 g.dbg.tick(73);assert.equal(now().phase,'place');g.press(' ');assert.equal(now().ball,null);
 ready();g.dbg.tick(120);assert.equal(now().phase,'aim');assert.equal(now().shot,0);
@@ -12,6 +13,8 @@ for(var k=0;k<10;k++) {
   g.esc();ready();g.dbg.set(k,a);g.press(' ');assert.equal(now().phase,'roll');
   g.dbg.tick(320);assert.equal(now().history.length,1);
   assert(a===0?now().score>0:now().score===0);
+  assert(now().scoreTime>1.8,'結果更新時にヘッダーを表示');
+  g.dbg.tick(125);assert.equal(now().scoreTime,0,'二秒後に隠れる');
  }
 }
 g.esc();
