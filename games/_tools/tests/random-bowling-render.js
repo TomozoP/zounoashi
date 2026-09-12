@@ -13,7 +13,7 @@ window.__recordManual=true;
   for(var i=0;i<100&&!window.__probe.now().modelsReady;i++)await new Promise(function(r){setTimeout(r,50);});
   if(!window.__probe.now().modelsReady)throw Error('模型を読み込めない');window.__probe.step(1);if(window.__probe.now().scoreTime!==0)throw Error('初期スコアが表示中');window.__visual.fit();window.__visual.appearance();await save('構え.png');window.__visual.side();await save('横向き.png');window.__probe.reset();
   window.__visual.hold();await save('スイング.png');window.__probe.reset();key();window.__probe.step(90);
-  for(var i=0;i<500;i++){window.__probe.step(1);var n=window.__probe.now();if(n.swingTime>2&&Math.sin(n.angle)>.99&&Math.abs(Math.cos(n.angle))<.08)break;}
+  for(var i=0;i<500;i++){window.__probe.step(1);var n=window.__probe.now();if(n.swingTime>4&&Math.sin(n.angle)>.99&&Math.abs(Math.cos(n.angle))<.08)break;}
   key(true);window.__probe.step(18);await save('投げ.png');window.__probe.step(60);await save('衝突.png');window.__visual.tracking();var follow=window.__probe.now().cameraFollow;if(follow<5)throw Error('投げたレスラーを追っていない');
   var frames=0;while(window.__probe.now().phase!=='ready'&&frames++<900)window.__probe.step(1);window.__probe.step(150);window.__visual.tracking();await save('得点.png');var final=window.__probe.now();if(final.phase!=='ready'||final.shot!==1||final.cameraFollow>.1)throw Error('次の投球へ戻れない');
   await fetch('/__done',{method:'POST',body:JSON.stringify({models:true,score:final.score,follow:follow,returned:final.cameraFollow})});
