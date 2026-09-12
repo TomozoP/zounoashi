@@ -44,4 +44,4 @@ node games/_tools/tests/random-bowling-render.js
 
 物理の材質設定は [ContactMaterial](https://pmndrs.github.io/cannon-es/docs/classes/ContactMaterial.html)、描画の粗さと金属感は [MeshStandardMaterial](https://threejs.org/docs/pages/MeshStandardMaterial.html) を使用。
 
-球は投球するまで半透明にし、投球時に不透明へ戻す。
+球は位置・角度決めまで不透明。パワー調整中だけ半透明にし、投球時に不透明へ戻す。
