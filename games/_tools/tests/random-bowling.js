@@ -11,8 +11,8 @@ g.dbg.tick(13);assert.equal(now().phase,'place');g.press(' ');assert.equal(now()
 ready();assert.equal(now().ball,null);
 var cy=g.H-210;
 g.down(330,cy);assert(now().position>.7,'押した瞬間にその横位置へ移動する');g.moveTo(345,g.H-210);assert.equal(now().phase,'position');g.up();assert.equal(now().phase,'angle');assert(now().position>0.9);
-var pos=now().position,depth=now().positionZ;g.down(345,g.H-210);g.moveTo(300,g.H-260);g.up();assert.equal(now().phase,'power');assert.equal(now().ball,null);g.dbg.tick(54);var weak=now().power;assert(weak<.36);g.dbg.tick(54);assert(now().power>.99);g.tap(270,cy);assert.equal(now().phase,'roll');assert(now().aim<0);assert.equal(now().position,pos);
-assert.equal(now().phase,'roll');assert.equal(now().ball.x,pos);assert.equal(now().ball.z,depth);
+var pos=now().position,depth=now().heightOffset;g.down(345,g.H-210);g.moveTo(300,g.H-260);g.up();assert.equal(now().phase,'power');assert.equal(now().ball,null);g.dbg.tick(54);var weak=now().power;assert(weak<.36);g.dbg.tick(54);assert(now().power>.99);g.tap(270,cy);assert.equal(now().phase,'roll');assert(now().aim<0);assert.equal(now().position,pos);
+assert.equal(now().phase,'roll');assert.equal(now().ball.x,pos);assert.equal(now().ball.z,.65);assert(Math.abs(now().ball.y-(now().kinds.find(function(k){return k.name===now().kind;}).r+.45+depth))<.001);
 var speed=now().ball.vz;g.tap(270,g.H-160);assert.equal(now().ball.vz,speed,'連打しても投げ直さない');
 for(var n=0;n<10;n++) {
  for(var a of [0,.2]) {
@@ -25,8 +25,8 @@ g.esc();for(var i=0;i<10;i++){ready();keys();g.dbg.tick(40);g.press(' ');g.dbg.t
 assert.equal(now().state,'result');assert.equal(now().score,now().history.reduce(function(a,b){return a+b;},0));
 g.tap(380,g.H*.62+34);assert.equal(g.shared.length,1);g.tap(160,g.H*.62+34);assert.equal(now().score,0);
 ready();g.pad({press:true});g.step(1);g.pad({});g.step(1);assert.equal(now().phase,'angle');g.pad({dx:1});g.step(1);g.pad({});g.step(1);assert(now().aim>0);
-g.esc();ready();g.down(270,cy);g.moveTo(270,cy-200);assert.equal(now().positionZ,1.6);g.moveTo(270,cy+200);assert.equal(now().positionZ,-.15);g.up();g.press(' ');assert.equal(now().phase,'power');assert.equal(now().positionZ,-.15);
-g.esc();ready();g.press('ArrowUp');assert(now().positionZ>.65);g.press('ArrowDown');assert(Math.abs(now().positionZ-.65)<.001);
+g.esc();ready();g.down(270,cy);g.moveTo(270,cy-200);assert.equal(now().heightOffset,.8);g.moveTo(270,cy+200);assert.equal(now().heightOffset,-.3);g.up();g.press(' ');assert.equal(now().phase,'power');assert.equal(now().heightOffset,-.3);
+g.esc();ready();g.press('ArrowUp');assert(now().heightOffset>0);g.press('ArrowDown');assert(Math.abs(now().heightOffset)<.001);
 g.esc();assert.equal(now().ball,null);assert.equal(now().phase,'return');
 load.SHAPES.forEach(function(v){g.view(v[0],v[1]);g.step(1);g.drawn.length=0;assert(now().H>=780&&now().H<=1700);});
 console.log('二回のドラッグ・位置保持・連打防止・10種類・10投完走・共有・やり直し・ジョイパッド・画面6通り：問題なし');
