@@ -88,7 +88,6 @@ var ZWrestleScene=(function(){
         ellipsoid(0,-.125,.233,.050,.029,.013,black);
       }
       if(p.shape==='shin'){ellipsoid(0,-.16,.065,.18,.22,.25,black);ellipsoid(0,.15,.035,.18,.10,.18,pants);}
-      if(p.shape==='upperArm'){var side=p.id.endsWith('L')?-1:1;ellipsoid(-side*.17,.25,0,.19,.19,.19,skin);ellipsoid(side*.03,-.27,0,.16,.16,.16,skin);}
       if(p.shape==='forearm'){ellipsoid(0,-.14,0,.155,.07,.15,white);ellipsoid(0,-.26,0,.15,.12,.14,skin);}
     });
     root.scale.setScalar(ZWrestlePhysics.humanScale);this.scene.add(root);return {root:root,parts:parts};
