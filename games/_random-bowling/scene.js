@@ -6,13 +6,13 @@ var ZBowlingScene=(function(){
     this.renderer=new T.WebGLRenderer({antialias:true,alpha:false,preserveDrawingBuffer:true});
     this.renderer.setPixelRatio(1);this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=T.PCFSoftShadowMap;
     this.renderer.outputColorSpace=T.SRGBColorSpace;this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.25;
-    this.scene=new T.Scene();this.scene.scale.x=-1;this.scene.background=new T.Color('#142a37');this.scene.fog=new T.Fog('#142a37',24,65);
+    this.scene=new T.Scene();this.scene.scale.x=-1;this.scene.background=new T.Color('#142a37');this.scene.fog=new T.Fog('#142a37',42,85);
     this.camera=new T.PerspectiveCamera(52,540/960,.08,100);
-    this.camera.position.set(0,6.6,-8.7);this.camera.lookAt(0,0,9);
+    this.camera.position.set(0,5.4,-8.7);this.camera.lookAt(0,0,14);
     this.follow=0;this.followX=0;this.look=new T.Vector3(0,0,9);this.w=540;this.h=960;
     this.scene.add(new T.HemisphereLight('#deefff','#625743',2.1));
-    var light=new T.DirectionalLight('#fff1d5',3.3);light.position.set(-4,10,6);light.castShadow=true;
-    light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-8,right:8,top:20,bottom:-18,near:1,far:40});light.target.position.set(0,0,11);light.shadow.bias=-.0002;this.scene.add(light,light.target);
+    var light=new T.DirectionalLight('#fff1d5',3.3);light.position.set(-4,14,18);light.castShadow=true;
+    light.shadow.mapSize.set(2048,2048);Object.assign(light.shadow.camera,{left:-8,right:8,top:28,bottom:-28,near:1,far:65});light.target.position.set(0,0,20);light.shadow.bias=-.0002;this.scene.add(light,light.target);
     var fill=new T.DirectionalLight('#9dcede',1.3);fill.position.set(5,6,-8);this.scene.add(fill);
     function mat(color,roughness,metalness){return new T.MeshStandardMaterial({color:color,roughness:roughness==null?.5:roughness,metalness:metalness||0});}
     function box(x,y,z,w,h,d,m){var mesh=new T.Mesh(new T.BoxGeometry(w,h,d),m);mesh.position.set(x,y,z);mesh.receiveShadow=true;mesh.castShadow=true;self.scene.add(mesh);return mesh;}
@@ -24,23 +24,20 @@ var ZBowlingScene=(function(){
       for(var y=100+(i%4)*150;y<1024;y+=470){c.fillStyle='rgba(74,48,26,.13)';c.fillRect(i*25.6,y,25.6,1);}
     }
     var wt=new T.CanvasTexture(wood);wt.colorSpace=T.SRGBColorSpace;wt.anisotropy=Math.min(8,this.renderer.capabilities.getMaxAnisotropy());
-    var lane=new T.Mesh(new T.PlaneGeometry(5.3,27),new T.MeshStandardMaterial({map:wt,roughness:.3,metalness:.05}));lane.rotation.x=-Math.PI/2;lane.position.set(0,.002,10.5);lane.receiveShadow=true;this.scene.add(lane);
-    box(0,-.22,10.5,6.8,.4,27,mat('#273d49',.5));
-    [-1,1].forEach(function(s){box(s*2.96,-.12,10.5,.61,.13,27,mat('#0a1820',.28,.4));box(s*3.32,.1,10.5,.12,.38,27,mat('#70838b',.28,.65));});
-    box(0,-.28,25.5,6.7,.3,3,mat('#101d25',.85));box(0,.9,27,7,2.3,.3,mat('#10222d',.75));
+    var lane=new T.Mesh(new T.PlaneGeometry(5.3,39),new T.MeshStandardMaterial({map:wt,roughness:.3,metalness:.05}));lane.rotation.x=-Math.PI/2;lane.position.set(0,.002,16.5);lane.receiveShadow=true;this.scene.add(lane);
+    box(0,-.22,16.5,6.8,.4,39,mat('#273d49',.5));
+    [-1,1].forEach(function(s){box(s*2.96,-.12,16.5,.61,.13,39,mat('#0a1820',.28,.4));box(s*3.32,.1,16.5,.12,.38,39,mat('#70838b',.28,.65));});
+    box(0,-.28,37.5,6.7,.3,3,mat('#101d25',.85));box(0,.9,39,7,2.3,.3,mat('#10222d',.75));
     // 隣のレーンは暗く控えめに置き、奥行きを見せる。
-    [-1,1].forEach(function(s){box(s*7,-.05,10,5.3,.1,28,mat('#675846',.48));box(s*4.05,.22,10,.2,.4,28,mat('#304751',.5));});
+    [-1,1].forEach(function(s){box(s*7,-.05,16,5.3,.1,40,mat('#675846',.48));box(s*4.05,.22,16,.2,.4,40,mat('#304751',.5));});
     for(var i=-3;i<=3;i++){var shape=new T.Shape();shape.moveTo(-.055,0);shape.lineTo(.055,0);shape.lineTo(0,.22);shape.closePath();var arrow=new T.Mesh(new T.ShapeGeometry(shape),mat('#765331',.8));arrow.rotation.x=-Math.PI/2;arrow.position.set(i*.55,.009,6.5+Math.abs(i)*.3);this.scene.add(arrow);}
-    this.returnGroup=new T.Group();this.returnGroup.position.z=.6;this.scene.add(this.returnGroup);
-    function returnBox(x,y,z,w,h,d,color){var m=new T.Mesh(new T.BoxGeometry(w,h,d),mat(color,.3,.45));m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;self.returnGroup.add(m);}
-    returnBox(-.7,.08,-2,5.2,.18,.92,'#0b1821');
-    [-2.4,-1.6].forEach(function(z){returnBox(-.7,.22,z,5.2,.10,.10,'#91a3ab');});
-    returnBox(-2.9,.47,-2,.65,1.15,1.12,'#354e5c');returnBox(-2.56,.38,-2,.05,.68,.69,'#07131a');returnBox(1.86,.24,-2,.12,.33,.96,'#82949b');
     this.pinMaterial=mat('#f5f0e6',.24,.04);this.redMaterial=mat('#c52d40',.3);
-    var profile=[[0,.19],[.05,.22],[.19,.26],[.42,.25],[.64,.19],[.81,.105],[1.02,.105],[1.1,.16],[1.24,.17],[1.33,.09],[1.35,.001]];
+    var profile=[[0,0],[0,.19],[.05,.22],[.19,.26],[.42,.25],[.64,.19],[.81,.105],[1.02,.105],[1.1,.16],[1.24,.17],[1.33,.09],[1.35,.001]];
     var pinGeo=new T.LatheGeometry(profile.map(function(p){return new T.Vector2(p[1],p[0]-.47);}),32);
     this.pins=[];
     for(var i=0;i<10;i++){var g=new T.Group(),body=new T.Mesh(pinGeo,this.pinMaterial);body.castShadow=true;g.add(body);
+      // 底面は読み込み前後とも塞ぎ、裏側から見ても抜けない円板にする。
+      var cap=new T.Mesh(new T.CircleGeometry(.195,32),new T.MeshStandardMaterial({color:'#f5f0e6',roughness:.4,side:T.DoubleSide}));cap.rotation.x=Math.PI/2;cap.position.y=-.4705;g.add(cap);
       [.88,1.0].forEach(function(y){var ring=new T.Mesh(new T.CylinderGeometry(.108,.108,.06,24),self.redMaterial);ring.position.y=y-.47;ring.castShadow=true;g.add(ring);});
       this.scene.add(g);this.pins.push(g);
     }
@@ -50,7 +47,7 @@ var ZBowlingScene=(function(){
       var pg=geometry(data.pin);self.pins.forEach(function(p){p.children[0].geometry=pg;});
       var bg=geometry(data.bowling);self.ballMeshes[0].children[0].geometry=bg;self.modelReady=true;
     }).catch(function(e){console.warn(e.message);});
-    this.aimLine=new T.Line(new T.BufferGeometry(),new T.LineDashedMaterial({color:'#f9f1db',dashSize:.36,gapSize:.3,transparent:true,opacity:.82}));this.scene.add(this.aimLine);
+    this.aimLine=new T.Mesh(new T.BufferGeometry(),new T.MeshBasicMaterial({color:'#ee3025',side:T.DoubleSide}));this.scene.add(this.aimLine);
   }
   Scene.prototype.makeBall=function(k){
     var T=THREE,group=new T.Group(),canvas=document.createElement('canvas');canvas.width=512;canvas.height=256;
@@ -90,23 +87,22 @@ var ZBowlingScene=(function(){
   Scene.prototype.screenX=function(x){var v=new THREE.Vector3((x/540)*2-1,0,.5).unproject(this.camera),dir=v.sub(this.camera.position).normalize();return -(this.camera.position.x+dir.x*(.65-this.camera.position.z)/dir.z);};
   Scene.prototype.draw=function(ctx,W,H,data,kind,phase,elapsed,position,aim,dt){
     this.logicalH=H;var T=THREE;
-    var rolling=phase==='roll'||phase==='settle',target=rolling&&data.ball?Math.max(0,Math.min(12,data.ball.z-1.2)):0;
+    var rolling=phase==='roll'||phase==='settle',target=rolling&&data.ball?Math.max(0,Math.min(24,data.ball.z-1.2)):0;
     this.follow+=(target-this.follow)*(1-Math.exp(-3.2*dt));
     this.followX+=((rolling&&data.ball?Math.max(-.7,Math.min(.7,data.ball.x*.16)):0)-this.followX)*(1-Math.exp(-3*dt));
-    var ratio=this.follow/12;
+    var ratio=this.follow/24;
     // 投球後だけ低い位置へ滑らかに寄り、ピンの手前で追従を止める。
-    this.camera.position.set(-this.followX,6.6-ratio*2.4,-8.7+this.follow);
-    this.camera.lookAt(-this.followX*.5,.15,9+this.follow*.75);this.camera.updateMatrixWorld();
+    this.camera.position.set(-this.followX,5.4-ratio*1.2,-8.7+this.follow);
+    this.camera.lookAt(-this.followX*.5,.15,14+this.follow*.65);this.camera.updateMatrixWorld();
     for(var i=0;i<this.pins.length;i++){var p=data.pins[i];if(!p)continue;this.pins[i].position.set(p.x,p.y,p.z);this.pins[i].quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);}
     this.ballMeshes.forEach(function(m){m.visible=false;});var m=this.ballMeshes[kind.skin];m.visible=true;m.scale.setScalar(kind.r);m.quaternion.identity();
     if(rolling&&data.ball){var b=data.ball;m.position.set(b.x,b.y,b.z);m.quaternion.set(b.q.x,b.q.y,b.q.z,b.q.w);}
-    else if(phase==='return'){var t=Math.min(1,elapsed/1.2),ease=1-(1-t)*(1-t);m.position.set(-3.8+3.8*ease,.25+kind.r,-1.4);m.rotation.z=-ease*3.8/kind.r;}
-    else if(phase==='receive')m.position.set(0,.25+kind.r,-1.4);
-    else if(phase==='place'){var t=Math.min(1,elapsed/.4),ease=t*t*(3-2*t);m.position.set(0,kind.r+.25*(1-ease)+Math.sin(t*Math.PI)*.25,-1.4+2.05*ease);}
+    else if(phase==='return'){var t=Math.min(1,elapsed/1.2),ease=1-(1-t)*(1-t);m.position.set(0,kind.r,-9+8.25*ease);m.rotation.x=ease*8.25/kind.r;}
+    else if(phase==='receive')m.position.set(0,kind.r,-.75);
+    else if(phase==='place'){var t=Math.min(1,elapsed/.4),ease=t*t*(3-2*t);m.position.set(0,kind.r+Math.sin(t*Math.PI)*.12,-.75+1.4*ease);}
     else m.position.set(position,kind.r,.65);
-    this.returnGroup.visible=this.follow<1.5;
     this.aimLine.visible=phase==='position'||phase==='angle';
-    if(this.aimLine.visible){var points=[];for(var z=.65;z<=18;z+=.4)points.push(new T.Vector3(position+aim*(z-.65),.018,z));this.aimLine.geometry.dispose();this.aimLine.geometry=new T.BufferGeometry().setFromPoints(points);this.aimLine.computeLineDistances();}
+    if(this.aimLine.visible){var vertices=[];for(var z=.65;z<30;z+=.85){var end=Math.min(z+.48,30),x=position+aim*(z-.65),ex=position+aim*(end-.65),w=.055;vertices.push(x-w,.025,z,x+w,.025,z,ex+w,.025,end,x-w,.025,z,ex+w,.025,end,ex-w,.025,end);}this.aimLine.geometry.dispose();this.aimLine.geometry=new T.BufferGeometry();this.aimLine.geometry.setAttribute('position',new T.Float32BufferAttribute(vertices,3));}
     this.renderer.render(this.scene,this.camera);ctx.drawImage(this.renderer.domElement,0,0,W,H);
   };
   return Scene;

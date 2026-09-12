@@ -3,7 +3,7 @@ var fs=require('fs'),path=require('path'),http=require('http'),os=require('os'),
 var root=path.resolve(__dirname,'../../..'),out=fs.mkdtempSync(path.join(os.tmpdir(),'bowling-view-'));
 var child,timer;
 var hook=`
-  window.__visual={pick:function(i){scoreTime=0;history=[];shot=0;state=S.PLAY;kind=kinds[i];world.reset(kind);syncPhysics();phase='position';position=0;aim=.01;view3d.follow=0;view3d.followX=0;draw();return project(0,kind.r,.65);},fit:function(h){H=h;view3d.resize(540,h);draw();var p=project(2.1,kind.r,.65);layout();return p.x;}};
+  window.__visual={supply:function(t){phase='return';elapsed=t;view3d.follow=0;draw();var p=view3d.ballMeshes[kind.skin].position;return project(p.x,p.y,p.z);},bottom:function(){return view3d.pins.every(function(p){return p.children.some(function(m){return m.geometry.type==='CircleGeometry'&&m.material.side===THREE.DoubleSide;});});},pick:function(i){scoreTime=0;history=[];shot=0;state=S.PLAY;kind=kinds[i];world.reset(kind);syncPhysics();phase='position';position=0;aim=.01;view3d.follow=0;view3d.followX=0;draw();return project(0,kind.r,.65);},fit:function(h){H=h;view3d.resize(540,h);draw();var p=project(2.1,kind.r,.65);layout();return p.x;}};
 `;
 var runner=`<script>
 window.__recordManual=true;
@@ -19,7 +19,7 @@ window.__recordManual=true;
       c.drawImage(cv,(p.x-82)*scale,(p.y-74)*scale,164*scale,164*scale,(i%5)*240,Math.floor(i/5)*240,240,240);
     }
     await save('種類.png',all);
-    window.__visual.pick(0);await save('投球前.png',cv);key();key();
+    window.__visual.pick(0);var entry=window.__visual.supply(0),arrived=window.__visual.supply(1.2);if(entry.y<window.__probe.now().H||arrived.y>=entry.y||Math.abs(arrived.x-270)>1)throw Error('球が画面下から中央へ補充されない');if(!window.__visual.bottom())throw Error('ピンの底板がない');window.__visual.pick(0);await save('投球前.png',cv);key();key();
     for(var i=0;i<90;i++)window.__probe.step(1);
     var first=window.__probe.now();await save('追従.png',cv);
     for(var i=0;i<90;i++)window.__probe.step(1);

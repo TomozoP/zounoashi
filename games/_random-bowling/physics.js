@@ -26,10 +26,10 @@ var ZBowlingPhysics=(function(C){
     this.world.defaultContactMaterial.contactEquationRelaxation=3;
     var self=this;
     function box(x,y,z,sx,sy,sz){var b=new C.Body({mass:0,material:self.floorMat,shape:new C.Box(new C.Vec3(sx/2,sy/2,sz/2)),position:new C.Vec3(x,y,z)});self.world.addBody(b);}
-    box(0,-.18,10.5,5.3,.36,27);
-    box(-2.96,-.42,10.5,.62,.24,27);box(2.96,-.42,10.5,.62,.24,27);
-    box(-3.32,.06,10.5,.12,.9,27);box(3.32,.06,10.5,.12,.9,27);
-    box(0,-.25,25.5,6.8,.4,3);box(0,.65,27,6.8,1.8,.25);
+    box(0,-.18,16.5,5.3,.36,39);
+    box(-2.96,-.42,16.5,.62,.24,39);box(2.96,-.42,16.5,.62,.24,39);
+    box(-3.32,.06,16.5,.12,.9,39);box(3.32,.06,16.5,.12,.9,39);
+    box(0,-.25,37.5,6.8,.4,3);box(0,.65,39,6.8,1.8,.25);
     this.pins=[];this.ball=null;this.time=0;this.accumulator=0;this.impact=0;this.reset(kinds[0]);
   }
   Game.prototype.reset=function(kind){
@@ -38,7 +38,7 @@ var ZBowlingPhysics=(function(C){
     if(this.ball)this.world.removeBody(this.ball);
     this.ball=null;this.kind=kind;this.time=0;this.accumulator=0;this.impact=0;this.pins=[];
     for(var row=0;row<4;row++)for(var col=0;col<=row;col++){
-      var b=new C.Body({mass:1.5,material:this.pinMat,position:new C.Vec3((col-row/2)*.88,.47,18+row*.81),linearDamping:.2,angularDamping:.22});
+      var b=new C.Body({mass:1.5,material:this.pinMat,position:new C.Vec3((col-row/2)*.88,.47,30+row*.81),linearDamping:.2,angularDamping:.22});
       b.addShape(new C.Cylinder(.26,.21,.5,12),new C.Vec3(0,-.20,0));
       b.addShape(new C.Cylinder(.105,.26,.35,12),new C.Vec3(0,.225,0));
       b.addShape(new C.Cylinder(.105,.105,.23,12),new C.Vec3(0,.515,0));
@@ -86,7 +86,7 @@ var ZBowlingPhysics=(function(C){
     if(!this.ball)return false;
     if(this.time>9)return true;
     var still=this.pins.every(function(p){return p.body.velocity.length()<.15&&p.body.angularVelocity.length()<.2;});
-    return this.time>2.5&&still&&(this.ball.position.z>23||this.ball.velocity.length()<.25||this.ball.position.y<-2||this.ball.velocity.z<-.3);
+    return this.time>2.5&&still&&(this.ball.position.z>35||this.ball.velocity.length()<.25||this.ball.position.y<-2||this.ball.velocity.z<-.3);
   };
   return {Game:Game,kinds:kinds};
 })(typeof CANNON!=='undefined'?CANNON:require('./vendor/cannon.js'));
