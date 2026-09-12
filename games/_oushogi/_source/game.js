@@ -126,7 +126,11 @@
   function scene(){
     var cinematic=state==='cinema',s=cinematic?shot():{index:0,progress:0};
     var p=s.progress,sgn=first===false?-1:1;
-    if(state==='ready' && !thumbMode){
+    if(state==='ready' && thumbMode){
+      /* 一覧の絵だけは、二枚の駒と盤の厚みが読める斜め上から撮る。 */
+      camera([4.7,-7.8,12.5],[0,0,-.22],Math.min(900,H));
+    }
+    else if(state==='ready'){
       /* 開始前だけ、30秒で一周する。開始後は盤を真上から見せる。 */
       var angle=elapsed*Math.PI*2/30;
       camera([Math.sin(angle)*9,-Math.cos(angle)*9,11.5],[0,0,-.25],Math.min(760,H*.84));
