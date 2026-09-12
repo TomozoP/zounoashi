@@ -45,7 +45,7 @@ function confirm(g,kind,target){
     assert.equal(g.probe.now().state,'result');
     assert.equal(g.probe.now().score,1);assert.equal(g.probe.now().pieces,1);
     assert.equal(g.probe.now().first,first);
-    assert(frames>=140 && frames<=152);
+    assert(frames>=212 && frames<=224);
     var bs=g.probe.now().buttons;
     g.tap(bs[1].x+30,bs[1].y+30);
     assert.equal(g.shared[0],'王将棋 '+(first?'勝ち':'負け')+' 1手');
@@ -66,4 +66,4 @@ load.SHAPES.forEach(function(v){
   assert.equal(g.probe.now().state,'ready');
   console.log('OK '+v.join('×')+' 押しどころの中心間 '+Math.round(Math.hypot(a.x-b.x,a.y-b.y)))
 });
-console.log('問題なし。先後はタップ確定、後手の待ち1.3秒、決着の演出2.5秒。');
+console.log('問題なし。先後はタップ確定、後手の待ち1.3秒、決着の演出3.7秒（最後の余韻1.2秒）。');

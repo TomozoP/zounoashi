@@ -99,18 +99,24 @@
   var CY = 480;
   var eye, basis, focal, queue, centers = [];
   var still = document.createElement('canvas'), stillKey = '';
-  var shots = [0.7, 2.6/3, 2.8/3], duration = 2.5;
+  var shots = [0.7, 2.6/3, 2.8/3+1.2], duration = 3.7;
+  var confirmedAt = null, lotteryBeat = 0;
   function place() { CY = H * 0.49; }
   function newRound() {
     state = 'ready'; score = 0; T = 0; elapsed = 0;
     first = null; selected = false; focus = 0; impact = -1; held = false;
+    confirmedAt = null;
   }
-  function start() { first = null; state = 'lottery'; T = 0; stillKey = ''; }
+  function start() { first = null; state = 'lottery'; T = 0; stillKey = ''; lotteryBeat=0; tone(620,.035,.025,'sine'); }
   function lotteryFirst() { return Math.floor(T / .12) % 2 === 0; }
   function startButton() { return {x:140,y:H*.79,w:260,h:68}; }
   function capture() { state = 'cinema'; T = 0; impact = -1; selected = false; score = 1; }
   function update(dt) {
     elapsed += dt; T += dt;
+    if(state==='lottery'){
+      var beat=Math.floor(T/.12);
+      if(beat!==lotteryBeat){lotteryBeat=beat;tone(beat%2?520:620,.035,.025,'sine');}
+    }
     if (state === 'reply' && T >= 1.3) capture();
     if (state === 'cinema') {
       var s = shot();
@@ -125,7 +131,8 @@
   function shot() {
     var n = T < shots[0] ? 0 : T < shots[0] + shots[1] ? 1 : 2;
     var offset = n === 0 ? 0 : n === 1 ? shots[0] : shots[0] + shots[1];
-    return { index: n, progress: Math.min(1, (T - offset) / shots[n]) };
+    /* 三つ目は動きの速さを保ち、着地後に1.2秒止めて余韻を残す。 */
+    return { index: n, progress: Math.min(1, (T - offset) / (n===2?2.8/3:shots[n])) };
   }
   function buttons() {
     return [{ id:'retry', x:52, y:H * 0.79, w:202, h:68, label:'もう一度' },
@@ -135,7 +142,7 @@
   function down(x,y) {
     audioOn();
     if (state === 'ready') { if (x == null || hit(startButton(),x,y)) start(); return; }
-    if (state === 'lottery') { first=lotteryFirst(); state=first?'play':'reply'; T=0; tone(440,.18,.05); return; }
+    if (state === 'lottery') { first=lotteryFirst(); confirmedAt=elapsed; state=first?'play':'reply'; T=0; tone(440,.18,.05); return; }
     if (state === 'result') {
       var b = x == null ? buttons()[focus] : buttons().filter(function(b){return hit(b,x,y);})[0];
       if (b && b.id === 'retry') newRound();
@@ -253,6 +260,12 @@
     if(state==='play' && selected){var q=centers[1];ctx.strokeStyle='#fff0b0';ctx.lineWidth=2;ctx.beginPath();ctx.arc(q.x,q.y,53,0,Math.PI*2);ctx.stroke();}
   }
   function text(str,x,y,size,color){ctx.fillStyle=color||'#f1e6cf';ctx.font=size+'px "Yu Mincho", "Hiragino Mincho ProN", serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(str,x,y);}
+  function turnLabel(){
+    if(state==='lottery'||(confirmedAt!==null&&elapsed-confirmedAt<1)){
+      var turn=state==='lottery'?lotteryFirst():first;
+      text('あなたは'+(turn?'先攻':'後攻')+'です',270,H*.79+34,30);
+    }
+  }
   function plaque(str,x,y,on){
     ctx.fillStyle=on?'#e8d6ad':'#302d25';ctx.fillRect(x-52,y-28,104,56);
     ctx.strokeStyle=on?'#f8e9c7':'#77705b';ctx.lineWidth=1;ctx.strokeRect(x-48,y-24,96,48);
@@ -275,6 +288,7 @@
     if(state==='cinema'){
       var s=shot(),opening=Math.min(1,T/.1);ctx.fillStyle='#11110e';ctx.fillRect(0,0,W,80*opening);ctx.fillRect(0,H-80*opening,W,80*opening);
       var flash=Math.max(0,1-Math.abs(s.progress-.70)*35);if(flash){ctx.fillStyle='rgba(255,240,203,'+(flash*.22)+')';ctx.fillRect(0,80,W,H-160);}
+      turnLabel();
       return;
     }
     if(state==='ready'){
@@ -282,10 +296,7 @@
       ctx.strokeStyle='#a89a77';ctx.strokeRect(b.x+4,b.y+4,b.w-8,b.h-8);
       text('対局開始',270,b.y+b.h/2,28,'#30291e');
     }
-    if(state==='lottery'||state==='play'||state==='reply'){
-      var turn=state==='lottery'?lotteryFirst():first;
-      text('あなたは'+(turn?'先攻':'後攻')+'です',270,H*.79+34,30);
-    }
+    turnLabel();
     if(state==='result'){
       ctx.fillStyle='rgba(19,19,15,.76)';ctx.fillRect(0,H*.25,W,H*.7);
       text(first?'勝ち':'負け',270,H*.40,64);text('1手',270,H*.53,38,'#cbbc99');
