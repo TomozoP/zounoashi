@@ -1,8 +1,8 @@
 /* 先後、三つの視点、一手だけの決着、操作と画面の大きさを確かめる。 */
 var assert = require('assert');
 var load = require('../harness');
-var file = 'games/_oushogi/index.html';
-var meshes=require('../../_oushogi/_source/meshes.json');
+var file = 'games/oushogi/index.html';
+var meshes=require('../../oushogi/_source/meshes.json');
 assert(meshes.piece.some(function(o){return o.name==='墨文字王';}));
 assert(meshes.opponent.some(function(o){return o.name==='墨文字玉';}));
 assert(!meshes.opponent.some(function(o){return o.name==='墨文字王';}));

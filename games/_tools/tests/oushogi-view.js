@@ -40,7 +40,7 @@ var server=http.createServer(function(req,res){
  }else res.end(fs.readFileSync(file));
 });
 server.listen(0,'127.0.0.1',function(){
- child=cp.spawn(browser,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--window-size=430,900','--user-data-dir='+path.join(out,'browser'),'http://127.0.0.1:'+server.address().port+'/games/_oushogi/index.html'],{stdio:'ignore',windowsHide:true});
+ child=cp.spawn(browser,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--window-size=430,900','--user-data-dir='+path.join(out,'browser'),'http://127.0.0.1:'+server.address().port+'/games/oushogi/index.html'],{stdio:'ignore',windowsHide:true});
  child.on('error',function(e){console.error(e.message);finish(1);});
  timer=setTimeout(function(){console.error('撮影が時間切れになりました');finish(1);},30000);
 });
