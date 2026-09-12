@@ -24,17 +24,17 @@ var ZWrestleScene=(function(){
       for(var y=100+(i%4)*150;y<1024;y+=470){c.fillStyle='rgba(74,48,26,.13)';c.fillRect(i*25.6,y,25.6,1);}
     }
     var wt=new T.CanvasTexture(wood);wt.colorSpace=T.SRGBColorSpace;wt.anisotropy=Math.min(8,this.renderer.capabilities.getMaxAnisotropy());
-    var lane=new T.Mesh(new T.PlaneGeometry(20,50),new T.MeshStandardMaterial({map:wt,roughness:.3,metalness:.05}));lane.rotation.x=-Math.PI/2;lane.position.set(0,.002,22);lane.receiveShadow=true;this.scene.add(lane);
-    box(0,-.22,22,22,.4,50,mat('#273d49',.5));
-    [-1,1].forEach(function(s){box(s*10.5,-.12,22,1,.13,50,mat('#0a1820',.28,.4));box(s*11.06,.1,22,.12,.38,50,mat('#70838b',.28,.65));});
-    box(0,-.28,48.5,22,.3,3,mat('#101d25',.85));box(0,3.2,50,22,7,.3,mat('#10222d',.75));
+    var lane=new T.Mesh(new T.PlaneGeometry(20,64.5),new T.MeshStandardMaterial({map:wt,roughness:.3,metalness:.05}));lane.rotation.x=-Math.PI/2;lane.position.set(0,.002,29.25);lane.receiveShadow=true;this.scene.add(lane);
+    box(0,-.22,29.25,22,.4,64.5,mat('#273d49',.5));
+    [-1,1].forEach(function(s){box(s*10.5,-.12,29.25,1,.13,64.5,mat('#0a1820',.28,.4));box(s*11.06,.1,29.25,.12,.38,64.5,mat('#70838b',.28,.65));});
+    box(0,-.28,63,22,.3,3,mat('#101d25',.85));box(0,3.2,64.5,22,7,.3,mat('#10222d',.75));
     // 黒い奥壁より上に離して得点を常設する。
     this.scoreCanvas=document.createElement('canvas');this.scoreCanvas.width=768;this.scoreCanvas.height=192;
     this.scoreTexture=new T.CanvasTexture(this.scoreCanvas);this.scoreTexture.colorSpace=T.SRGBColorSpace;
     this.scoreBoard=new T.Mesh(new T.PlaneGeometry(16,4),new T.MeshBasicMaterial({map:this.scoreTexture,transparent:true,toneMapped:false}));
-    this.scoreBoard.rotation.y=Math.PI;this.scoreBoard.scale.x=-1;this.scoreBoard.position.set(0,12,49.8);this.scene.add(this.scoreBoard);this.scoreKey=null;
+    this.scoreBoard.rotation.y=Math.PI;this.scoreBoard.scale.x=-1;this.scoreBoard.position.set(0,12,64.3);this.scene.add(this.scoreBoard);this.scoreKey=null;
     // 隣のレーンは暗く控えめに置き、奥行きを見せる。
-    [-1,1].forEach(function(s){box(s*23,-.05,22,20,.1,50,mat('#675846',.48));box(s*12,.22,22,.2,.4,50,mat('#304751',.5));});
+    [-1,1].forEach(function(s){box(s*23,-.05,29.25,20,.1,64.5,mat('#675846',.48));box(s*12,.22,29.25,.2,.4,64.5,mat('#304751',.5));});
     this.pinMaterial=mat('#f5f0e6',.24,.04);this.redMaterial=mat('#c52d40',.3);
     var profile=[[0,0],[0,.19],[.05,.22],[.19,.26],[.42,.25],[.64,.19],[.81,.105],[1.02,.105],[1.1,.16],[1.24,.17],[1.33,.09],[1.35,.001]];
     var pinGeo=new T.LatheGeometry(profile.map(function(p){return new T.Vector2(p[1],p[0]-.47);}),32);
@@ -64,7 +64,7 @@ var ZWrestleScene=(function(){
       if(p.shape==='shin'){ellipsoid(0,-.16,.065,.18,.22,.25,black);ellipsoid(0,.15,.035,.18,.10,.18,pants);}
       if(p.shape==='forearm'){ellipsoid(0,-.14,0,.155,.07,.15,white);ellipsoid(0,-.26,0,.15,.12,.14,skin);}
     });
-    this.scene.add(root);return {root:root,parts:parts};
+    root.scale.setScalar(ZWrestlePhysics.humanScale);this.scene.add(root);return {root:root,parts:parts};
   };
   Scene.prototype.resize=function(w,h){this.w=w;this.h=h;this.renderer.setSize(w,h,false);this.camera.aspect=w/h;this.camera.fov=2*Math.atan(Math.tan(31*Math.PI/180)*(h/w)/(960/540))*180/Math.PI;this.camera.updateProjectionMatrix();};
   Scene.prototype.project=function(x,y,z){var v=new THREE.Vector3(-x,y,z).project(this.camera);return {x:(v.x*.5+.5)*540,y:(.5-v.y*.5)*this.logicalH};};
@@ -76,13 +76,13 @@ var ZWrestleScene=(function(){
       for(var i=0;i<3;i++){c.fillStyle='#2c414c';c.fillRect(24+i*248,16,224,160);c.fillStyle='#c2d2d7';c.fillText(history[i]==null?'·':String(history[i]),136+i*248,100);}
       this.scoreTexture.needsUpdate=true;this.scoreKey=scoreKey;
     }
-    var T=THREE;this.logicalH=H;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(22,body.z-2)):0;
+    var T=THREE;this.logicalH=H;var flying=phase==='flight'||phase==='settle',body=data.human[0],target=flying&&body?Math.max(0,Math.min(36.5,body.z-2)):0;
     this.follow+=(target-this.follow)*(1-Math.exp(-4*dt));this.followX+=((flying&&body?Math.max(-2,Math.min(2,body.x*.3)):0)-this.followX)*(1-Math.exp(-3*dt));
     // 振り回される青を少しだけ追い、投球後は滑らかに元の追従へ戻す。
     var swinging=phase==='swing'&&body,blend=1-Math.exp(-7*dt);
     this.swingX+=((swinging?Math.max(-.6,Math.min(.6,body.x*.2)):0)-this.swingX)*blend;
     this.swingZ+=((swinging?Math.max(-.45,Math.min(.45,body.z*.15)):0)-this.swingZ)*blend;
-    this.camera.position.set(-this.followX-this.swingX,9-this.follow/22*3.5,-12+this.follow+this.swingZ);this.camera.lookAt(-this.followX*.5-this.swingX*1.5,.8,12+this.follow*.65+this.swingZ);this.camera.updateMatrixWorld();
+    this.camera.position.set(-this.followX-this.swingX,9-this.follow/36.5*3.5,-16+this.follow+this.swingZ);this.camera.lookAt(-this.followX*.5-this.swingX*1.5,.8,12+this.follow*.65+this.swingZ);this.camera.updateMatrixWorld();
     this.pins.forEach(function(g,i){var p=data.pins[i];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
     var red=this.red;red.root.rotation.y=Math.PI/2-angle;red.root.position.y=phase==='swing'?Math.sin(angle*2)*.04:0;
     // 赤は足を踏み替え、両手で青の足首を持つ。
@@ -93,7 +93,7 @@ var ZWrestleScene=(function(){
       red.parts['thigh'+tag].rotation.x=Math.sin(angle*2+side)*.1;red.parts['shin'+tag].rotation.x=-Math.sin(angle*2+side)*.1;
     });
     var human=data.human.length?data.human:ZWrestlePhysics.swingPose(angle),blue=this.blue;
-    human.forEach(function(p){var g=blue.parts[p.id];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
+    human.forEach(function(p){var g=blue.parts[p.id];g.position.set(p.x/ZWrestlePhysics.humanScale,p.y/ZWrestlePhysics.humanScale,p.z/ZWrestlePhysics.humanScale);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
     this.renderer.render(this.scene,this.camera);ctx.drawImage(this.renderer.domElement,0,0,W,H);
   };
   return Scene;
