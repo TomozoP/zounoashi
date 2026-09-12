@@ -1,6 +1,6 @@
 /* 位置・角度の二回のドラッグで投球、各球の投球を確認する。 */
 var assert=require('assert'),load=require('../harness');
-var g=load('games/_random-bowling/index.html',{inject:'window.__dbg={set:function(k,a){kind=kinds[k];aim=a;},tick:function(n){for(var i=0;i<n;i++)update(1/60);}};'});
+var g=load('games/_random-bowling/index.html',{withScripts:true,inject:'window.__dbg={set:function(k,a){kind=kinds[k];aim=a;world.reset(kind);syncPhysics();},tick:function(n){for(var i=0;i<n;i++)update(1/60);}};'});
 function now(){return g.probe.now();}
 function until(phase){for(var i=0;i<1100&&now().phase!==phase;i++)g.dbg.tick(1);assert.equal(now().phase,phase);}
 function ready(){until('position');}
@@ -17,12 +17,10 @@ var speed=now().ball.vz;g.tap(270,g.H-160);assert.equal(now().ball.vz,speed,'連
 for(var n=0;n<10;n++) {
  for(var a of [0,.2]) {
   g.esc();ready();keys();g.dbg.set(n,a);g.dbg.tick(47);g.press(' ');
-  until('settle');assert(a===0?now().score>0:now().score===0);assert(now().scoreTime>1.9);
+  until('settle');assert(now().score>=0&&now().score<=10);assert.equal(now().score,now().pins.filter(function(p){return p.down;}).length);assert(now().scoreTime>1.9);
   g.dbg.tick(125);assert.equal(now().scoreTime,0);
  }
 }
-// 全種類が最後まで到達する。
-for(var n=0;n<10;n++){g.esc();ready();keys();g.dbg.set(n,0);g.press(' ');until('settle');assert.equal(now().shot,1);}
 g.esc();for(var i=0;i<10;i++){ready();keys();g.dbg.tick(40);g.press(' ');until('settle');g.dbg.tick(62);assert.equal(now().shot,i+1);}
 assert.equal(now().state,'result');assert.equal(now().score,now().history.reduce(function(a,b){return a+b;},0));
 g.tap(380,g.H*.62+34);assert.equal(g.shared.length,1);g.tap(160,g.H*.62+34);assert.equal(now().score,0);

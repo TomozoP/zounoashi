@@ -16,6 +16,10 @@
 <div id="stage"><div id="wrap">
   <canvas id="c"></canvas>
 </div></div>
+<script src="vendor/three.min.js"></script>
+<script src="vendor/cannon.js"></script>
+<script src="physics.js"></script>
+<script src="scene.js"></script>
 <script src="../share.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
@@ -26,6 +30,9 @@
   var canvas = document.getElementById("c");
   var ctx = canvas.getContext("2d");
   var wrap = document.getElementById("wrap");
+  var view3d=window.WebGLRenderingContext?new ZBowlingScene():null;
+  var world=new ZBowlingPhysics.Game();
+  var frameDt=1/60;
 
   /* ============ 画面 ============
      タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
@@ -47,6 +54,7 @@
     canvas.height = Math.round(H * scale * dpr);
     var k = canvas.width / W;
     ctx.setTransform(k, 0, 0, k, 0, 0);
+    if(view3d)view3d.resize(canvas.width,canvas.height);
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
@@ -94,87 +102,26 @@
   });
 
 
-  /* 半径・質量・速度・曲がり・跳ねる高さ。毎投、独立した等確率の抽選。 */
-  var kinds = [
-    {name:'ボーリング', color:'#654ce7', r:.34, mass:6, speed:12, curve:0, hop:0, skin:0},
-    {name:'サッカー', color:'#f1f4ee', r:.39, mass:1.2, speed:13, curve:.016, hop:.16, skin:1},
-    {name:'バスケット', color:'#ed863d', r:.43, mass:1.8, speed:12, curve:0, hop:.65, skin:2},
-    {name:'テニス', color:'#cfe74b', r:.23, mass:.65, speed:15, curve:-.045, hop:.28, skin:3},
-    {name:'ゴルフ', color:'#ecf5ef', r:.16, mass:1.4, speed:19, curve:0, hop:.08, skin:4},
-    {name:'ビーチ', color:'#ffe780', r:.62, mass:.5, speed:9, curve:.035, hop:.35, skin:5},
-    {name:'鉄球', color:'#9aaebb', r:.37, mass:12, speed:10, curve:0, hop:0, skin:6},
-    {name:'スイカ', color:'#489e51', r:.54, mass:5, speed:11, curve:-.018, hop:.08, skin:7},
-    {name:'ラグビー', color:'#ae6340', r:.34, mass:1.8, speed:12, curve:0, hop:.4, skin:8},
-    {name:'スーパーボール', color:'#f079cf', r:.29, mass:2.3, speed:16, curve:0, hop:1.15, skin:9}
-  ];
+  /* 半径・質量・摩擦・反発・速度。毎投、独立した等確率の抽選。 */
+  var kinds=ZBowlingPhysics.kinds;
   var S = { PLAY:'play', RESULT:'result' };
-  var state, score, T, held, keyMode=false, phase, shot, pins, ball, kind, aim, manual, elapsed, history, scoreTime=0, position=0, dragX=0, dragY=0, dragAim=0, rollTime=5.2;
+  var state, score, T, held, keyMode=false, phase, shot, pins, ball, kind, aim, elapsed, history, scoreTime=0, position=0, dragX=0, dragY=0, dragAim=0;
   function place() {}
   function clamp(v,a,b) { return Math.max(a,Math.min(b,v)); }
-  function rack() {
-    pins=[];
-    for(var row=0;row<4;row++) for(var col=0;col<=row;col++)
-      pins.push({x:(col-row/2)*.88,z:18+row*.81,vx:0,vz:0,down:false,fall:0,dx:0,dz:1});
-  }
+  function syncPhysics() {var snapshot=world.snapshot();pins=snapshot.pins;ball=snapshot.ball;}
   function nextBall() {
     kind=kinds[Math.floor(Math.random()*kinds.length)];
-    phase='return'; position=0;held=false;aim=0; manual=false; elapsed=0; ball=null; rack();
+    phase='return';position=0;held=false;aim=0;elapsed=0;world.reset(kind);syncPhysics();
   }
   function newRound() {
-    state=S.PLAY; scoreTime=0; score=0; T=0; held=false; shot=0; history=[]; nextBall();
+    state=S.PLAY;scoreTime=0;score=0;T=0;held=false;shot=0;history=[];nextBall();
   }
   function launch() {
-    if(state!==S.PLAY || phase!=='angle') return;
-    var speed=kind.speed;
-    rollTime=Math.max(5.2,24/speed+1.3);
-    ball={x:position,z:.65,y:kind.r,vx:aim*speed,vz:speed,gutter:false,spin:0};
-    phase='roll'; elapsed=0;
-    tone(110,.16,.06,'sine',55);
-  }
-  function knock(p,vx,vz) {
-    if(!p.down) { p.down=true; score++; noiseHit(.09,900+Math.random()*900,.07); }
-    p.vx+=vx; p.vz+=vz;
-    var len=Math.hypot(p.vx,p.vz)||1; p.dx=p.vx/len; p.dz=p.vz/len;
-  }
-  /* 小刻みに進め、速い小球でもピンをすり抜けないようにする。 */
-  function physics(dt) {
-    if(ball.z<25) {
-      ball.spin+=ball.vz*dt/kind.r;
-      if(!ball.gutter) {
-        ball.vx+=kind.curve*ball.vz*dt;
-        if(kind.skin===8) ball.vx+=Math.sin(ball.z*2.7)*2.8*dt;
-        ball.x+=ball.vx*dt;
-        if(Math.abs(ball.x)>2.65) {ball.gutter=true;ball.x=Math.sign(ball.x)*2.94;ball.vx=0;}
-      }
-      ball.z+=ball.vz*dt;
-      ball.y=ball.gutter?-.12:kind.r+kind.hop*Math.abs(Math.sin(ball.z*(kind.skin===9?1.45:2.1)));
-      pins.forEach(function(p) {
-        if(p.down || ball.gutter || ball.y-kind.r>1.05) return;
-        var dx=p.x-ball.x,dz=p.z-ball.z,dist=Math.hypot(dx,dz),reach=kind.r+.22;
-        if(dist<reach) {
-          var nx=dx/(dist||1),nz=dz/(dist||1);
-          var impulse=clamp(kind.mass*.8+ball.vz*.2,1.3,8);
-          knock(p,nx*impulse,Math.max(.4,nz)*impulse);
-          ball.vx-=nx*1.1/kind.mass;ball.vz=Math.max(5,ball.vz-.7/kind.mass);
-          ball.x-=nx*.025;
-        }
-      });
-    }
-    pins.forEach(function(p) {
-      if(!p.down) return;
-      p.fall=Math.min(1,p.fall+dt*3.6);
-      p.x+=p.vx*dt; p.z+=p.vz*dt;
-      p.vx*=Math.exp(-2.1*dt);p.vz*=Math.exp(-2.1*dt);
-      if(Math.abs(p.x)>3.1) {p.x=clamp(p.x,-3.1,3.1);p.vx*=-.25;}
-      pins.forEach(function(q) {
-        if(p===q || q.down || Math.hypot(p.vx,p.vz)<.65) return;
-        var dx=q.x-p.x,dz=q.z-p.z,d=Math.hypot(dx,dz);
-        if(d<.67) {knock(q,p.vx*.64+dx*1.8,p.vz*.64+dz*1.8);p.vx*=.55;p.vz*=.55;}
-      });
-    });
+    if(state!==S.PLAY||phase!=='angle')return;
+    world.launch(position,aim);syncPhysics();phase='roll';elapsed=0;tone(100,.18,.06,'sine',45);
   }
   function update(dt) {
-    T+=dt;
+    frameDt=dt;T+=dt;
     scoreTime=Math.max(0,scoreTime-dt);
     if(state!==S.PLAY) return;
     elapsed+=dt;
@@ -183,8 +130,9 @@
     if(phase==='place') {if(elapsed>=.4) {phase='position';elapsed=0;}return;}
     if(phase==='receive'||phase==='position'||phase==='angle') return;
     if(phase==='roll') {
-      for(var i=0;i<4;i++) physics(dt/4);
-      if(elapsed>rollTime) {history.push(pins.filter(function(p){return p.down;}).length);shot++;scoreTime=2;phase='settle';elapsed=0;}
+      world.step(dt);syncPhysics();
+      if(world.impact>1) {noiseHit(.06+Math.min(.15,world.impact*.006),500+world.impact*70,Math.min(.2,world.impact*.009));world.impact=0;}
+      if(world.finished()) {var fallen=pins.filter(function(p){return p.down;}).length;history.push(fallen);score+=fallen;shot++;scoreTime=2;phase='settle';elapsed=0;}
     } else if(elapsed>1) {if(shot===10) state=S.RESULT;else nextBall();}
   }
   function down(x,y) {
@@ -201,7 +149,7 @@
     }
     if(y<80) return;
     if(phase!=='position'&&phase!=='angle') return;
-    if(phase==='position') position=clamp((x-270)*9.65/720,-2.1,2.1);
+    if(phase==='position') position=clamp((view3d?view3d.screenX(x):(x-270)*9.65/720),-2.1,2.1);
     held=true;dragX=x;dragY=y;dragAim=aim;
   }
   function move(x,y) {
@@ -271,100 +219,10 @@
   }
 
 
-  /* 三次元の点を、手前のカメラから見た位置に写す。 */
+  /* ガイドと球名を、三次元の球と同じ画面位置へ重ねる。 */
   function project(x,y,z) {
-    var d=z+9;
-    return {x:270+720*x/d,y:100+((H-260)*9-720*y)/d,k:720/d};
-  }
-  function poly(points,color) {
-    ctx.beginPath();points.forEach(function(p,i){if(i)ctx.lineTo(p.x,p.y);else ctx.moveTo(p.x,p.y);});ctx.closePath();ctx.fillStyle=color;ctx.fill();
-  }
-  function floor(x1,z1,x2,z2,color) {
-    poly([project(x1,0,z1),project(x2,0,z1),project(x2,0,z2),project(x1,0,z2)],color);
-  }
-  function disk(x,y,r,color) {ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();}
-  function pinDraw(p) {
-    var profile=[[0,.19],[.12,.25],[.4,.26],[.62,.19],[.81,.105],[1,.105],[1.08,.16],[1.23,.17],[1.34,.09],[1.37,0]];
-    var a=p.fall*Math.PI*.48;
-    function point(h,r,angle) {
-      var x=Math.cos(angle)*r,z=Math.sin(angle)*r;
-      return project(p.x+x+p.dx*h*Math.sin(a),.04+h*Math.cos(a),p.z+z+p.dz*h*Math.sin(a));
-    }
-    var faces=[];
-    for(var j=0;j<profile.length-1;j++) for(var i=0;i<12;i++) {
-      var t=i*Math.PI/6,u=(i+1)*Math.PI/6;
-      var shade=Math.round(192+53*Math.cos(t+1));
-      var red=j===4||j===6;
-      faces.push({depth:Math.sin(t),pts:[point(profile[j][0],profile[j][1],t),point(profile[j][0],profile[j][1],u),point(profile[j+1][0],profile[j+1][1],u),point(profile[j+1][0],profile[j+1][1],t)],color:red?'rgb('+shade+',55,64)':'rgb('+shade+','+shade+','+Math.min(255,shade+5)+')'});
-    }
-    faces.sort(function(a,b){return b.depth-a.depth;}).forEach(function(f){poly(f.pts,f.color);});
-  }
-  function ballDraw(x,y,r,k,spin) {
-    ctx.save();ctx.translate(x,y);
-    if(k.skin===8) {ctx.rotate(Math.sin(spin)*.45);ctx.scale(1,1.35);}
-    ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);ctx.clip();
-    ctx.fillStyle=k.color;ctx.fillRect(-r,-r,r*2,r*2);
-    ctx.lineWidth=Math.max(1,r*.045);ctx.strokeStyle=k.skin===3?'#fffbd9':'#302c32';
-    if(k.skin===2||k.skin===3||k.skin===7||k.skin===5||k.skin===8) {
-      for(var i=-2;i<=2;i++) {
-        ctx.beginPath();
-        ctx.ellipse(Math.sin(spin*.15+i)*r*.25,0,Math.max(1,Math.abs(Math.cos(spin*.15+i))*r),r*1.08,.25,0,Math.PI*2);
-        ctx.strokeStyle=k.skin===7?'#235b38':k.skin===5?['#fc6d70','#3dbcc9','#fff7d2'][Math.abs(i)%3]:k.skin===3?'#fffde2':'#4b352d';
-        ctx.lineWidth=k.skin===7?r*.12:k.skin===5?r*.36:Math.max(1,r*.04);ctx.stroke();
-      }
-    }
-    if(k.skin===0) {disk(-r*.2,-r*.28,r*.13,'#201b4e');disk(r*.15,-r*.38,r*.13,'#201b4e');disk(r*.15,-r*.02,r*.14,'#201b4e');}
-    if(k.skin===1||k.skin===4) {
-      for(var j=-3;j<=3;j++) for(var i=-3;i<=3;i++) {
-        var u=i*.51+(j%2)*.25,v=j*.47+Math.sin(spin*.3)*.18;
-        if(u*u+v*v>.88)continue;
-        if(k.skin===4) disk(u*r,v*r,r*.047,'#9baeb5');
-        else {var pts=[];for(var n=0;n<5;n++)pts.push({x:u*r+Math.cos(n*Math.PI*.4)*r*.17,y:v*r+Math.sin(n*Math.PI*.4)*r*.17});poly(pts,'#25313a');}
-      }
-    }
-    if(k.skin===9) {disk(r*.35,r*.15,r*.48,'#74e8e5');disk(-r*.2,-r*.3,r*.32,'#a098f4');}
-    var g=ctx.createRadialGradient(-r*.35,-r*.45,r*.05,r*.1,r*.15,r*1.2);
-    g.addColorStop(0,k.skin===6?'#ffffff':'rgba(255,255,255,.55)');g.addColorStop(.42,'rgba(255,255,255,.02)');g.addColorStop(1,'rgba(0,0,0,.75)');
-    ctx.fillStyle=g;ctx.fillRect(-r,-r,r*2,r*2);ctx.restore();
-  }
-  /* 左から一球を中央へ運び、投球位置へ持ち上げる。 */
-  function drawReturn() {
-    var y=H-62;
-    ctx.fillStyle='#0c1c26';ctx.fillRect(0,H-145,W,145);
-    poly([{x:0,y:y-24},{x:423,y:y-24},{x:445,y:y+28},{x:0,y:y+28}],'#08131c');
-    function rail(yy,color,width) {
-      ctx.beginPath();ctx.moveTo(-10,yy);ctx.lineTo(425,yy);
-      ctx.lineCap='round';ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke();
-    }
-    ctx.fillStyle='#07121a';roundRect(0,y+39,450,13,6);ctx.fill();
-    ctx.fillStyle='#354b57';ctx.fillRect(120,y+22,13,28);ctx.fillRect(393,y+22,13,28);
-    rail(y-27,'#56707c',12);rail(y-29,'#9dafb4',3);
-    var r=clamp(kind.r*78,18,46),fromY=y+15-r*(kind.skin===8?1.35:1);
-    if(phase==='return') {
-      var t=clamp(elapsed/1.2,0,1),ease=1-Math.pow(1-t,2),x=-65+335*ease;
-      ctx.save();ctx.translate(x,y+7);ctx.scale(1,.24);disk(0,0,r,'rgba(0,0,0,.4)');ctx.restore();
-      ballDraw(x,fromY,r,kind,ease*335/r);
-    }
-    if(phase==='receive') {
-      ballDraw(270,fromY,r,kind,0);
-    }
-    if(phase==='place') {
-      var t=clamp(elapsed/.4,0,1),ease=t*t*(3-2*t),dest=project(0,kind.r,.65);
-      ballDraw(270,fromY+(dest.y-fromY)*ease,r+(dest.k*kind.r-r)*ease,kind,0);
-    }
-    if(phase==='position'||phase==='angle') {
-      var q=project(position,kind.r,.65);
-      ballDraw(q.x,q.y,q.k*kind.r,kind,0);
-      ctx.fillStyle='#ecf2ee';ctx.font='600 20px sans-serif';ctx.textAlign='center';
-      ctx.fillText(kind.name,q.x,q.y+q.k*kind.r*(kind.skin===8?1.35:1)+27);
-    }
-    rail(y+22,'#56707c',13);rail(y+19,'#c2ced0',3);
-    /* 左端の覆いで球を隠し、画面の外から現れるようにする。 */
-    ctx.fillStyle='#3c5866';roundRect(-52,y-88,108,124,25);ctx.fill();
-    ctx.fillStyle='#77949f';roundRect(-43,y-87,90,16,8);ctx.fill();
-    ctx.fillStyle='#203744';roundRect(-35,y-61,82,89,21);ctx.fill();
-    ctx.fillStyle='#0a1821';roundRect(37,y-55,16,77,7);ctx.fill();
-    ctx.fillStyle='#617b87';roundRect(425,y-31,12,64,5);ctx.fill();
+    if(view3d)return view3d.project(x,y,z);
+    var d=z+9;return {x:270+720*x/d,y:100+((H-260)*9-720*y)/d,k:720/d};
   }
   /* 位置は横向き、角度は弧を描く矢印で示す。文字は足さない。 */
   function drawGuide() {
@@ -388,30 +246,13 @@
     ctx.restore();
   }
   function draw() {
-    ctx.fillStyle='#101f29';ctx.fillRect(0,0,W,H);
-    var bg=ctx.createLinearGradient(0,120,0,H);bg.addColorStop(0,'#1d3d4d');bg.addColorStop(1,'#091620');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
-    floor(-3.35,0,3.35,25,'#334853');
-    floor(-3.2,0,-2.65,24,'#081721');floor(2.65,0,3.2,24,'#081721');
-    for(var i=0;i<20;i++) {
-      var x=-2.65+i*5.3/20;
-      floor(x,0,x+5.3/20,24,i%3===0?'#c49966':i%3===1?'#ddba82':'#d3ac72');
-      for(var z=1+i%3;z<24;z+=4) floor(x,z,x+5.3/20,z+.025,'#b08758');
+    ctx.fillStyle='#142a37';ctx.fillRect(0,0,W,H);
+    if(view3d)view3d.draw(ctx,W,H,{pins:pins,ball:ball},kind,phase,elapsed,position,aim,frameDt);
+    if(phase==='position'||phase==='angle') {
+      var p=project(position,kind.r,.65);
+      ctx.fillStyle='#f5f2eb';ctx.font='600 20px sans-serif';ctx.textAlign='center';
+      ctx.shadowColor='rgba(0,0,0,.7)';ctx.shadowBlur=5;ctx.fillText(kind.name,p.x,p.y+p.k*kind.r*(kind.skin===8?1.45:1)+29);ctx.shadowBlur=0;
     }
-    for(var i=-3;i<=3;i++) {
-      var a=project(i*.55,0,6.5+Math.abs(i)*.32);
-      poly([{x:a.x,y:a.y-7},{x:a.x-4,y:a.y+5},{x:a.x+4,y:a.y+5}],'#785839');
-    }
-    if((phase==='position'||phase==='angle')&&state===S.PLAY) {
-      ctx.beginPath();
-      for(var z=1;z<=18;z+=.4) {var p=project(position+aim*(z-.65),.025,z);if(z===1)ctx.moveTo(p.x,p.y);else ctx.lineTo(p.x,p.y);}
-      ctx.setLineDash([8,10]);ctx.strokeStyle='rgba(255,255,255,.65)';ctx.lineWidth=3;ctx.stroke();ctx.setLineDash([]);
-    }
-    var objects=pins.map(function(p){return {z:p.z,p:p};});
-    if(ball&&ball.z<26) objects.push({z:ball.z,b:ball});
-    objects.sort(function(a,b){return b.z-a.z;}).forEach(function(o){
-      if(o.p) {var q=project(o.p.x,0,o.p.z);ctx.save();ctx.translate(q.x,q.y);ctx.scale(1,.3);disk(0,0,q.k*.34,'rgba(0,0,0,.2)');ctx.restore();pinDraw(o.p);}
-      else {var b=o.b,q=project(b.x,b.y,b.z),sh=project(b.x,0,b.z);ctx.save();ctx.translate(sh.x,sh.y);ctx.scale(1,.3);disk(0,0,sh.k*kind.r,'rgba(0,0,0,.27)');ctx.restore();ballDraw(q.x,q.y,q.k*kind.r,kind,b.spin);}
-    });
     /* 投球結果を書き込んだときだけ、背景付きで二秒間見せる。 */
     if(scoreTime>0) {
       ctx.save();ctx.globalAlpha=Math.min(1,scoreTime/.25);
@@ -422,7 +263,6 @@
     }
       ctx.restore();
     }
-    drawReturn();
     drawGuide();
     if(state===S.RESULT) drawResult();
   }
@@ -475,7 +315,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state:state,score:score,scoreTime:scoreTime,W:W,H:H,phase:phase,position:position,shot:shot,aim:aim,kind:kind.name,history:history.slice(),ball:ball?Object.assign({},ball):null,pins:pins.map(function(p){return {x:p.x,z:p.z,down:p.down};}),kinds:kinds.map(function(k){return Object.assign({},k);}) }; },
+    now: function () { return { state:state,score:score,scoreTime:scoreTime,W:W,H:H,phase:phase,position:position,shot:shot,aim:aim,kind:kind.name,history:history.slice(),ball:ball?Object.assign({},ball):null,cameraFollow:view3d?view3d.follow:0,modelsReady:view3d?view3d.modelReady:false,pins:pins.map(function(p){return Object.assign({},p);}),kinds:kinds.map(function(k){return Object.assign({},k);}) }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
@@ -488,7 +328,7 @@
       for(var i=0;i<10;i++) {
         if(!await r.until(function(){return phase==='position';},3)) throw Error('球が出てこない');
         r.key();await r.wait(350);r.key();
-        if(!await r.until(function(){return phase==='position'||state===S.RESULT;},9)) throw Error('投球が終わらない');
+        if(!await r.until(function(){return phase==='position'||state===S.RESULT;},14)) throw Error('投球が終わらない');
       }
       await r.wait(1500);
     }
