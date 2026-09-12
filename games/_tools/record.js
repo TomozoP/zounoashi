@@ -2,7 +2,7 @@
 
      node games/_tools/record.js oushogi
 
-   games/_recordings/<id>.mp4 または .webm に保存する。
+   完成した動画をデスクトップに保存する。変換前後の控えは games/_recordings/。
    canvasを直接録るため、マウスカーソルやサイトの外枠は映らない。 */
 
 var http = require('http');
@@ -251,6 +251,9 @@ function finish() {
     output = mp4;
   }
   var size = Math.round(fs.statSync(output).size / 1024);
+  var saved = path.join(require('./record-folder')(), id + '-' + new Date().toISOString().replace(/[:.]/g, '-') + path.extname(output));
+  fs.copyFileSync(output, saved, fs.constants.COPYFILE_EXCL);
+  output = saved;
   console.log('OK  ' + path.relative(root, output).replace(/\\/g, '/') + '  ' + size + 'KB');
   if (recordingInfo) console.log(recordingInfo.width + '×' + recordingInfo.height + '  ' + recordingInfo.seconds + '秒  音声' + (recordingInfo.audio === '0' ? 'なし' : 'あり'));
   console.log('映像と音を同じ時計で録画し、時刻を揃えてMP4にしました。マウスカーソルは映っていません。');

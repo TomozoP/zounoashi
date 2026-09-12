@@ -164,12 +164,11 @@
     if(silence){silence.stop();silence.disconnect();silence=null;}
     status.textContent='MP4に変換中';panel.style.display='grid';
     var raw=new Blob(chunks,{type:recorder.mimeType});
-    var response=await fetch('http://127.0.0.1:8736/convert',{method:'POST',body:raw});
-    if(!response.ok)throw Error((await response.text())||('MP4保存に失敗しました（'+response.status+'）'));
-    var blob=await response.blob(),a=document.createElement('a');
     var id=(location.pathname.split('/').filter(Boolean).slice(-2)[0]||'game').replace(/^_/,'');
-    a.href=URL.createObjectURL(blob);a.download=id+'-'+new Date().toISOString().replace(/[:.]/g,'-')+'.mp4';a.click();
-    setTimeout(function(){URL.revokeObjectURL(a.href);},30000);
+    var response=await fetch('http://127.0.0.1:8736/convert?game='+encodeURIComponent(id),{method:'POST',body:raw});
+    if(!response.ok)throw Error((await response.text())||('MP4保存に失敗しました（'+response.status+'）'));
+    if(!(response.headers.get('Content-Type')||'').includes('application/json'))throw Error('MP4保存係を再起動してください');
+    await response.json();
     started=false;saving=false;mark('');frames=[];if(!panel)build();status.textContent='保存しました';panel.style.display='grid';
   }
   function fail(error){

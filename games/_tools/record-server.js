@@ -3,6 +3,7 @@ const http=require('http'),fs=require('fs'),path=require('path'),cp=require('chi
 const folder=path.resolve(__dirname,'../_recordings');
 fs.mkdirSync(folder,{recursive:true});
 const exe=path.join(__dirname,'_bin/ffmpeg.exe');
+const desktop=require('./record-folder')();
 http.createServer(async function(req,res){
   const origin=req.headers.origin||'';
   if(!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)){res.writeHead(403);res.end();return;}
@@ -25,7 +26,10 @@ http.createServer(async function(req,res){
       const child=cp.spawn(exe,['-y','-i',input,'-af','aresample=async=1','-c:v','libx264','-preset','medium','-crf','18','-pix_fmt','yuv420p','-r','60','-fps_mode','cfr','-c:a','aac','-b:a','192k','-movflags','+faststart',output],{windowsHide:true,stdio:'ignore'});
       child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(Error('MP4変換に失敗しました')));
     });
-    res.setHeader('Content-Type','video/mp4');res.setHeader('Content-Length',fs.statSync(output).size);
-    fs.createReadStream(output).pipe(res);
+    const id=(url.searchParams.get('game')||'game').replace(/[^a-z0-9-]/gi,'').slice(0,40)||'game';
+    const saved=path.join(desktop,id+'-'+path.basename(stem)+'.mp4');
+    fs.copyFileSync(output,saved,fs.constants.COPYFILE_EXCL);
+    res.setHeader('Content-Type','application/json; charset=utf-8');
+    res.end(JSON.stringify({saved:saved}));
   }catch(e){res.writeHead(500);res.end(e.message);}
 }).listen(8736,'127.0.0.1',()=>console.log('F9のMP4保存を受付中（8736）'));
