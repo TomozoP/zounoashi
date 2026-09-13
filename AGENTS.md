@@ -73,7 +73,7 @@ games/
 
 制作中の確認に毎回使う固定リンクは `https://www.zounoashi.com/preview/`。
 実体は `preview/index.html`。一覧には載せず、制作するゲームに合わせて中身を差し替えます。
-今は空のページです。正式公開するときはゲーム固有の場所と正式リンクを使い、
+今はロゴが回転する待機ページです。正式公開するときはゲーム固有の場所と正式リンクを使い、
 `/preview/` は次の制作でも同じURLのまま使います。
 `preview/auto-reload.js` が表示中は30秒ごと、画面へ戻ったとき・通信復帰時にも更新を確認します。
 制作中の内容を更新するcommitでは、`preview/index.html` の `preview-version` を必ず新しい値にします。
