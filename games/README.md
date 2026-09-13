@@ -28,6 +28,31 @@ node games/_tools/publish.js hoge                   # 公開の形にする
 git add -A && git commit && git push origin main    # 新しいゲームの公開は承認を受けてから
 ```
 
+## 制作中の隠しリンク
+
+一覧に出さず、URLを知っている人が遊べる形でも公開できます。
+
+```bash
+node games/_tools/publish.js hoge --unlisted
+```
+
+動作確認後に commit・push すると、`https://www.zounoashi.com/games/hoge/` で
+遊べます。フォルダは `games/hoge/` に移り、その中を更新して制作を続けます。
+サイトの一覧には載らず、手元の一覧には残ります。サムネはまだなくても構いません。
+検索に載せない指定も付けますが、パスワード付きの非公開ではありません。
+ゲーム内の共有も、この制作中のURLを使います。
+
+完成して正式公開の指示を受けたら、サムネを用意して次を実行します。
+
+```bash
+node games/_tools/thumb.js hoge
+node games/_tools/publish.js hoge
+```
+
+commit・push 後は一覧に載り、正式リンク `https://www.zounoashi.com/#/game/hoge` と
+共有カードが使えます。検索に載せない指定は外れ、制作中に渡した直接リンクも引き続き開けます。
+道具は公開準備までを行います。対象ゲームの制作中公開・正式公開は、それぞれ持ち主の指示に従います。
+
 ## 揃えるかたち
 
 新しいゲームを公開するかどうかなどの大きな判断は、持ち主に確認します。

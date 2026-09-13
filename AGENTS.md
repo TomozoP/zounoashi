@@ -76,6 +76,10 @@ GitHub Pages（Jekyll）は `_` で始まるファイル・フォルダを配信
 道具やテスト（`_tools/`）も公開されません。
 
 サイトの一覧に載せるゲームは `index.html` の `GAMES` 配列に直接書きます。
+一覧に載せない制作中の公開は `node games/_tools/publish.js <id> --unlisted`。
+本体は `games/<id>/`、登録は `games/_local.js` に残し、直接URLで開きます。
+完成後は通常の `publish.js <id>` で一覧と正式な共有ページへ切り替えます。
+くわしくは `games/README.md` の「制作中の隠しリンク」を参照してください。
 下書きのうちは `games/_local.js` に書いておくと、**localhost で見たときだけ**カードが出ます。
 
 ---

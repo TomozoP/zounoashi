@@ -18,6 +18,12 @@
   "use strict";
 
   function pageUrl() {
+    /* 制作中は正式な共有ページがまだないので、本体へ案内する。 */
+    if (global.document && global.document.querySelector('meta[name="zounoashi-unlisted"]')) {
+      var direct = new URL(global.location.href);
+      direct.searchParams.delete("v");
+      return direct.href;
+    }
     var game = global.location.pathname.match(/^\/games\/([a-z0-9-]+)\/(?:index\.html)?$/);
     var current = global.location.href;
     try {

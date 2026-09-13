@@ -10,7 +10,7 @@ var games = vm.runInNewContext(source.match(/var GAMES = (\[[\s\S]*?\n\]);/)[1],
 function esc(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-games.filter(function (g) { return g.id && g.play; }).forEach(function (g) {
+games.filter(function (g) { return g.id && g.play && (!process.argv[2] || g.id === process.argv[2]); }).forEach(function (g) {
   var img = g.img;
   if (/\.svg$/i.test(img)) {
     cp.execFileSync(process.execPath, [path.join(__dirname, "img.js"), path.join(root, img), "--png"], { stdio: "inherit" });

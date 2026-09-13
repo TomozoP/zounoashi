@@ -5,16 +5,18 @@ var path = require("path");
 var vm = require("vm");
 var root = path.resolve(__dirname, "../../..");
 var script = fs.readFileSync(path.join(root, "games/share.js"), "utf8");
-function share(url, parent, native) {
+function share(url, parent, native, unlisted) {
   var result;
   var win = { location: new URL(url), navigator: {}, open: function (to) { result = new URL(to).searchParams.get("url"); return {}; } };
   win.parent = parent ? { location: new URL(parent) } : win;
+  if (unlisted) win.document = { querySelector: function () { return {}; } };
   if (native) win.navigator = { userAgent: "iPhone", share: function (data) { result = data.url; return Promise.resolve(); } };
   vm.runInNewContext(script, { window: win, URL: URL, URLSearchParams: URLSearchParams });
   win.zShare({ text: "共有の確認", native: !!native });
   return result;
 }
 var origin = "https://www.zounoashi.com";
+assert.equal(share(origin + "/games/sample/?r=abc&v=1", null, false, true), origin + "/games/sample/?r=abc");
 assert.equal(share(origin + "/games/wanko/index.html?v=1", origin + "/#/game/wanko"), origin + "/share/wanko/?card=square2");
 assert.equal(share(origin + "/games/wanko/", null, true), origin + "/share/wanko/?card=square2");
 assert.equal(share(origin + "/games/wanko/", origin + "/#/game/wanko?card=old"), origin + "/share/wanko/?card=square2");
