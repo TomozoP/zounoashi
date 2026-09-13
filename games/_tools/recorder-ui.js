@@ -29,8 +29,11 @@
     AudioNode.prototype.__zRecorderOriginal = original;
     AudioNode.prototype.connect = function (destination) {
       var result = original.apply(this, arguments);
-      var tap = window.__zRecorderSound;
-      if (tap && destination instanceof AudioDestinationNode && this.context === tap.context && !this.__zRecorderTapped) {
+      if (window.AudioDestinationNode && destination instanceof AudioDestinationNode && !this.__zRecorderTapped) {
+        // 録画開始前に作った音の出口も、その時点で録画用につなぐ。
+        var tap = window.__zRecorderSound;
+        if (!tap || tap.context !== this.context)
+          tap = window.__zRecorderSound = this.context.createMediaStreamDestination();
         this.__zRecorderTapped = true;
         original.call(this, tap);
       }
