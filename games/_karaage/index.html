@@ -36,93 +36,811 @@ button svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:1.8
 <script>
 (function(){
 'use strict';
-var canvas=document.getElementById('c'),ctx=canvas.getContext('2d'),wrap=document.getElementById('wrap');
-var start=document.getElementById('start'),pick=document.getElementById('pick'),act=document.getElementById('act'),save=document.getElementById('save'),again=document.getElementById('again'),share=document.getElementById('share'),file=document.getElementById('file'),error=document.getElementById('error');
-var W=540,H=960,state='intro',elapsed=0,clock=0,transition=0,loadId=0,busy=false,keyHeld=false,pointer=null,focused=true;
-var original=document.createElement('canvas'),fried=document.createElement('canvas'),exported=document.createElement('canvas');
-var pixels=null,relief=null,grain=null,lastBake=-1,AC=null,hiss=null,volume=null;
-function layout(){H=Math.max(780,Math.min(1700,Math.round(W*window.innerHeight/window.innerWidth)));var k=Math.min(window.innerWidth/W,window.innerHeight/H);wrap.style.width=W+'px';wrap.style.height=H+'px';wrap.style.transform='scale('+k+')';var d=Math.min(window.devicePixelRatio||1,2);canvas.width=W*d;canvas.height=H*d;ctx.setTransform(d,0,0,d,0,0);draw();}
-window.addEventListener('resize',layout);window.addEventListener('orientationchange',layout);
-function plateY(){return H*.285;}function panY(){return H*.66;}
-function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
-function hash(x,y){var v=Math.sin(x*127.1+y*311.7+73.2)*43758.5453;return v-Math.floor(v);}
-function noise(x,y){var i=Math.floor(x),j=Math.floor(y),u=x-i,v=y-j;u=u*u*(3-2*u);v=v*v*(3-2*v);return (hash(i,j)*(1-u)+hash(i+1,j)*u)*(1-v)+(hash(i,j+1)*(1-u)+hash(i+1,j+1)*u)*v;}
-function oval(x,y,rx,ry,color){ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();}
-function round(x,y,w,h,r,color){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=color;ctx.fill();}
-// 最初から触って試せる、星形の食材。外部の画像は読み込まない。
-function sample(){original.width=original.height=320;var c=original.getContext('2d');c.beginPath();for(var i=0;i<10;i++){var a=i*Math.PI/5-Math.PI/2,r=i%2?71:138;c.lineTo(160+Math.cos(a)*r,160+Math.sin(a)*r);}c.closePath();var g=c.createLinearGradient(30,20,250,300);g.addColorStop(0,'#84b6a0');g.addColorStop(1,'#235f59');c.fillStyle=g;c.fill();c.lineWidth=8;c.strokeStyle='#b2d5b3';c.stroke();prepare();}
-// 端につながる単色の背景だけを抜く。写真の複雑な背景には手を加えない。
-function removePlainBackground(data,w,h){var a=data.data,ref=[a[0],a[1],a[2]],ok=0,count=0,transparent=false;
- for(var y=0;y<h;y++)for(var x=0;x<w;x++){var p=(y*w+x)*4;if(a[p+3]<245&&(x===0||y===0||x===w-1||y===h-1))transparent=true;if(x===0||y===0||x===w-1||y===h-1){count++;if(Math.max(Math.abs(a[p]-ref[0]),Math.abs(a[p+1]-ref[1]),Math.abs(a[p+2]-ref[2]))<22)ok++;}}
- if(transparent||ok/count<.96)return;
- var seen=new Uint8Array(w*h),q=new Int32Array(w*h),head=0,tail=0;
- function add(p){if(seen[p])return;seen[p]=1;var i=p*4;if(Math.max(Math.abs(a[i]-ref[0]),Math.abs(a[i+1]-ref[1]),Math.abs(a[i+2]-ref[2]))>30)return;q[tail++]=p;}
- for(var x=0;x<w;x++){add(x);add((h-1)*w+x);}for(var y=0;y<h;y++){add(y*w);add(y*w+w-1);}
- while(head<tail){var p=q[head++],x=p%w,y=Math.floor(p/w);if(x)add(p-1);if(x<w-1)add(p+1);if(y)add(p-w);if(y<h-1)add(p+w);}
- if(tail>w*h*.97)return;
- for(var i=0;i<tail;i++)a[q[i]*4+3]=0;
+var canvas=document.getElementById('c');
+var ctx=canvas.getContext('2d');
+var wrap=document.getElementById('wrap');
+var start=document.getElementById('start');
+var pick=document.getElementById('pick');
+var act=document.getElementById('act');
+var save=document.getElementById('save');
+var again=document.getElementById('again');
+var share=document.getElementById('share');
+var file=document.getElementById('file');
+var error=document.getElementById('error');
+
+var W=540;
+var H=960;
+var state='intro';
+var elapsed=0;
+var clock=0;
+var loadId=0;
+var busy=false;
+var pointerId=null;
+var focused=true;
+var original=document.createElement('canvas');
+var fried=document.createElement('canvas');
+var exported=document.createElement('canvas');
+var pixels=null;
+var relief=null;
+var grain=null;
+var coat=null;
+var lastBake=-1;
+var AC=null;
+var hiss=null;
+var volume=null;
+var popBuffer=null;
+
+var panX=270;
+var panY=0;
+var foodX=270;
+var foodY=250;
+var foodBase=250;
+var foodOil=214;
+var dragging=false;
+var dragDx=0;
+var dragDy=0;
+var oilTouch=false;
+var nextPop=0;
+
+function layout(){
+  H=Math.max(780,Math.min(1700,Math.round(W*window.innerHeight/window.innerWidth)));
+  var k=Math.min(window.innerWidth/W,window.innerHeight/H);
+  wrap.style.width=W+'px';
+  wrap.style.height=H+'px';
+  wrap.style.transform='scale('+k+')';
+  var d=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=W*d;
+  canvas.height=H*d;
+  ctx.setTransform(d,0,0,d,0,0);
+  draw();
 }
-function prepare(){var w=original.width,h=original.height,c=original.getContext('2d');pixels=c.getImageData(0,0,w,h);fried.width=w;fried.height=h;relief=new Float32Array(w*h);grain=new Float32Array(w*h);
- for(var y=0;y<h;y++)for(var x=0;x<w;x++){var p=y*w+x;relief[p]=noise(x*.12,y*.12)*.55+noise(x*.32,y*.32)*.30+noise(x*.8,y*.8)*.15;grain[p]=hash(x,y);}
- lastBake=-1;bake(0);
+
+window.addEventListener('resize',layout);
+window.addEventListener('orientationchange',layout);
+
+function clamp(v,a,b){
+  return Math.max(a,Math.min(b,v));
 }
-// 元の明暗を残しつつ、多段の粒と斜めからの光で衣を描く。
-function bake(seconds){var bucket=Math.floor(seconds*5);if(bucket===lastBake)return;lastBake=bucket;var w=original.width,h=original.height,c=fried.getContext('2d'),out=c.getImageData(0,0,w,h),a=pixels.data,b=out.data,t=clamp(seconds/8,0,1),burn=clamp((seconds-11)/7,0,1);
- for(var y=0;y<h;y++)for(var x=0;x<w;x++){var p=y*w+x,i=p*4;if(!a[i+3]){b[i+3]=0;continue;}var n=relief[p],slope=n-relief[Math.max(0,y-2)*w+Math.max(0,x-2)],lum=(a[i]*.2126+a[i+1]*.7152+a[i+2]*.0722)/255;
- var l=(n-.5)*72+slope*145+(grain[p]-.5)*25+(lum-.5)*47;var pit=n<.34?-24:0;var crust=t*.94;
- var r=(211+l+pit)*(1-burn*.66),g=(157-t*50+l*.79+pit)*(1-burn*.8),bl=(83-t*57+l*.42+pit*.5)*(1-burn*.84);
- b[i]=a[i]*(1-crust)+r*crust;b[i+1]=a[i+1]*(1-crust)+g*crust;b[i+2]=a[i+2]*(1-crust)+bl*crust;b[i+3]=a[i+3];}
- c.putImageData(out,0,0);
+
+function hash(x,y){
+  var v=Math.sin(x*127.1+y*311.7+73.2)*43758.5453;
+  return v-Math.floor(v);
 }
-function controls(){var intro=state==='intro',result=state==='result';start.hidden=!intro;pick.hidden=intro;pick.disabled=busy||state==='frying'||state==='lifting';act.hidden=intro||result;act.disabled=busy||state==='lifting';act.setAttribute('aria-label',state==='frying'?'引き上げる':'油に入れる');document.getElementById('down-icon').hidden=state==='frying';document.getElementById('up-icon').hidden=state!=='frying';save.hidden=intro;save.disabled=!result||busy;again.hidden=!result;share.hidden=!result;save.classList.toggle('result',result);pick.classList.toggle('result',result);}
-function reset(){elapsed=0;transition=0;state='play';keyHeld=false;pointer=null;lastBake=-1;bake(0);silence();controls();draw();}
-function go(){if(busy)return;if(state==='intro'){soundOn();reset();return;}soundOn();if(state==='play'){state='frying';elapsed=0;controls();}else if(state==='frying'){state='lifting';transition=0;silence();controls();}else if(state==='result')reset();}
-function update(dt){clock+=dt;if(state==='frying'){elapsed=Math.min(18,elapsed+dt);bake(elapsed);if(volume&&AC&&AC.state==='running'&&focused)volume.gain.setTargetAtTime(.045,AC.currentTime,.1);if(elapsed>=18){state='lifting';transition=0;silence();controls();}}else if(state==='lifting'){transition=Math.min(1,transition+dt/.65);if(transition>=1){state='result';makeExport();controls();}}}
-function soundOn(){try{var C=window.AudioContext||window.webkitAudioContext;if(!C)return;if(!AC){AC=new C();var buffer=AC.createBuffer(1,AC.sampleRate*2,AC.sampleRate),d=buffer.getChannelData(0);for(var i=0;i<d.length;i++)d[i]=Math.random()*2-1;hiss=AC.createBufferSource();hiss.buffer=buffer;hiss.loop=true;var f=AC.createBiquadFilter();f.type='highpass';f.frequency.value=1700;volume=AC.createGain();volume.gain.value=0;hiss.connect(f);f.connect(volume);volume.connect(AC.destination);hiss.start();}if(AC.state!=='closed'&&AC.state!=='running')AC.resume().catch(function(){});}catch(e){}}
-function silence(){if(volume&&AC)volume.gain.setTargetAtTime(0,AC.currentTime,.03);}
-document.addEventListener('visibilitychange',function(){if(document.hidden){silence();if(AC&&AC.state!=='closed')AC.suspend().catch(function(){});}else if(AC)soundOn();});
-function drawFood(image,x,y,size,angle){ctx.save();ctx.translate(x,y);ctx.rotate(angle||0);var k=size/Math.max(image.width,image.height);ctx.shadowColor='rgba(70,37,10,.26)';ctx.shadowBlur=13;ctx.shadowOffsetY=8;ctx.drawImage(image,-image.width*k/2,-image.height*k/2,image.width*k,image.height*k);ctx.restore();}
-function draw(){ctx.clearRect(0,0,W,H);ctx.fillStyle='#eee7db';ctx.fillRect(0,0,W,H);
- // 白いタイルと、台の継ぎ目。
- ctx.strokeStyle='#e1d8c9';ctx.lineWidth=1;for(var y=0;y<H;y+=90){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}for(var x=0;x<W;x+=90){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
- var py=plateY(),fy=panY();
- ctx.save();ctx.translate(270,py);ctx.rotate(-.09);ctx.shadowColor='#c9bdad';ctx.shadowBlur=18;ctx.shadowOffsetY=12;round(-193,-145,386,290,29,'#faf7ed');ctx.shadowBlur=0;ctx.shadowOffsetY=0;round(-177,-129,354,258,21,'#e9e5da');round(-173,-125,346,250,19,'#fffdf5');ctx.restore();
- // 鉄鍋と油。食材の前後で泡を分ける。
- oval(270,fy+45,220,126,'#d4c7b4');round(13,fy-25,63,50,17,'#233a35');round(464,fy-25,63,50,17,'#233a35');round(23,fy-14,34,27,8,'#eee7db');round(483,fy-14,34,27,8,'#eee7db');oval(270,fy+16,221,133,'#1c302c');oval(270,fy,221,126,'#3a5049');oval(270,fy-4,208,112,'#142922');
- var oil=ctx.createRadialGradient(240,fy-48,10,270,fy,210);oil.addColorStop(0,'#e3b94d');oil.addColorStop(.65,'#bd7e20');oil.addColorStop(1,'#764015');oval(270,fy-4,197,103,oil);
- ctx.strokeStyle='rgba(255,222,136,.25)';ctx.lineWidth=2;for(var i=0;i<6;i++){ctx.beginPath();ctx.ellipse(270,fy-5,65+i*23,30+i*12,0,0,Math.PI*2);ctx.stroke();}
- var active=state==='frying',lift=state==='lifting',finished=state==='result',image=(active||lift||finished)?fried:original;
- var drop=clamp(elapsed/.5,0,1);var foodY=active?py+(fy-12-py)*drop*drop:lift?(fy-12)+(py-(fy-12))*(1-Math.pow(1-transition,3)):py;
- var jiggle=active?Math.sin(clock*19)*.016:0;drawFood(image,270,foodY,active?214:250,jiggle-.07);
- if(active){for(var i=0;i<94;i++){var a=hash(i,9)*Math.PI*2,r=35+hash(i,7)*130,life=(clock*(.5+hash(i,2))+hash(i,3))%1;var bx=270+Math.cos(a)*r,by=fy-6+Math.sin(a)*r*.52-life*23;var br=(2+hash(i,4)*7)*Math.sin(life*Math.PI);oval(bx,by,br,br*.8,'rgba(255,234,173,'+(.72*(1-life))+')');}}
- // 油の中の時間を小さな針で示す。
- if(active||lift||finished){var gx=270,gy=py+172;ctx.lineWidth=5;ctx.strokeStyle='#d6c9b6';ctx.beginPath();ctx.arc(gx,gy,17,-Math.PI/2,Math.PI*1.5);ctx.stroke();ctx.strokeStyle='#ad672b';ctx.beginPath();ctx.arc(gx,gy,17,-Math.PI/2,-Math.PI/2+Math.PI*2*elapsed/18);ctx.stroke();}
- if(busy){ctx.strokeStyle='#284d43';ctx.lineWidth=5;ctx.beginPath();ctx.arc(270,py,29,clock*4,clock*4+4);ctx.stroke();}
+
+function noise(x,y){
+  var i=Math.floor(x),j=Math.floor(y);
+  var u=x-i,v=y-j;
+  u=u*u*(3-2*u);
+  v=v*v*(3-2*v);
+  return (hash(i,j)*(1-u)+hash(i+1,j)*u)*(1-v)+(hash(i,j+1)*(1-u)+hash(i+1,j+1)*u)*v;
 }
-function makeExport(){exported.width=exported.height=1080;var c=exported.getContext('2d');c.fillStyle='#f3eee2';c.fillRect(0,0,1080,1080);c.fillStyle='#fffdf7';c.beginPath();c.roundRect(70,70,940,940,85);c.shadowColor='#b9a88d';c.shadowBlur=32;c.shadowOffsetY=16;c.fill();c.shadowBlur=0;c.shadowOffsetY=0;c.strokeStyle='#e9e2d5';c.lineWidth=3;c.beginPath();c.roundRect(100,100,880,880,66);c.stroke();var k=760/Math.max(fried.width,fried.height);c.save();c.translate(540,540);c.rotate(-.07);c.shadowColor='rgba(70,37,10,.24)';c.shadowBlur=25;c.shadowOffsetY=16;c.drawImage(fried,-fried.width*k/2,-fried.height*k/2,fried.width*k,fried.height*k);c.restore();}
-function showError(message){error.textContent=message;error.hidden=false;}
-async function acceptImage(f){if(!f)return;var id=++loadId;error.hidden=true;if(f.size>25*1024*1024){showError('25MB以下の画像を選んでください');return;}if(!/^image\/(png|jpeg|webp|gif|avif|bmp)$/.test(f.type)){showError('PNG・JPEG・WebPなどの画像を選んでください');return;}busy=true;controls();var url=URL.createObjectURL(f);
- try{var im=new Image();await new Promise(function(resolve,reject){im.onload=resolve;im.onerror=reject;im.src=url;});if(id!==loadId)return;if(!im.naturalWidth||!im.naturalHeight)throw Error();var k=Math.min(1,512/Math.max(im.naturalWidth,im.naturalHeight));var next=document.createElement('canvas');next.width=Math.max(1,Math.round(im.naturalWidth*k));next.height=Math.max(1,Math.round(im.naturalHeight*k));var c=next.getContext('2d');c.drawImage(im,0,0,next.width,next.height);var data=c.getImageData(0,0,next.width,next.height);removePlainBackground(data,next.width,next.height);c.putImageData(data,0,0);
- // 透明な余白を詰め、皿の中央に置く。
- var x0=next.width,y0=next.height,x1=-1,y1=-1;for(var y=0;y<next.height;y++)for(var x=0;x<next.width;x++)if(data.data[(y*next.width+x)*4+3]>15){x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}if(x1<0)throw Error();original.width=x1-x0+1;original.height=y1-y0+1;original.getContext('2d').drawImage(next,x0,y0,original.width,original.height,0,0,original.width,original.height);prepare();busy=false;reset();
- }catch(e){if(id===loadId)showError('画像を読み込めませんでした');}finally{URL.revokeObjectURL(url);if(id===loadId){busy=false;controls();}}
+
+function plateY(){
+  return H*.285;
 }
-file.addEventListener('change',function(){acceptImage(file.files[0]);file.value='';});
-pick.addEventListener('click',function(){if(!pick.disabled)file.click();});act.addEventListener('click',go);start.addEventListener('click',go);again.addEventListener('click',reset);
-save.addEventListener('click',function(){if(state!=='result')return;exported.toBlob(function(blob){if(!blob){showError('画像を保存できませんでした');return;}var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='唐揚げ.png';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},60000);},'image/png');});
-share.addEventListener('click',function(){if(state==='result')zShare({text:'',native:false});});
-// 開始の指離しは、そのまま鍋の操作へ流さない。
-document.addEventListener('pointerdown',function(e){if(state!=='intro'||e.isPrimary===false||e.button>0)return;pointer=e.pointerId;},true);
-document.addEventListener('pointerup',function(e){if(state!=='intro'||pointer!==e.pointerId)return;pointer=null;e.preventDefault();e.stopImmediatePropagation();go();},true);
-document.addEventListener('pointercancel',function(){pointer=null;keyHeld=false;},true);
-wrap.addEventListener('pointerdown',function(e){if(e.target!==canvas||e.isPrimary===false||e.button>0||state==='intro')return;pointer=e.pointerId;});
-wrap.addEventListener('pointerup',function(e){if(e.target!==canvas||pointer!==e.pointerId||state==='intro')return;pointer=null;var r=canvas.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*W,y=(e.clientY-r.top)/r.height*H;if(Math.abs(x-270)<210&&Math.abs(y-panY())<120)go();});
-window.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();if(!e.repeat){loadId++;busy=false;error.hidden=true;reset();}return;}if(e.code==='Space'||e.key===' '||e.key==='Enter'){if(e.target&&e.target.tagName==='BUTTON')return;e.preventDefault();if(!e.repeat)keyHeld=true;}});
-window.addEventListener('keyup',function(e){if(e.code==='Space'||e.key===' '||e.key==='Enter'){if(e.target&&e.target.tagName==='BUTTON')return;e.preventDefault();if(keyHeld){keyHeld=false;go();}}});
-window.addEventListener('blur',function(){focused=false;keyHeld=false;pointer=null;silence();});window.addEventListener('focus',function(){focused=true;});
-window.__probe={now:function(){return {state:state,seconds:elapsed,W:W,H:H,busy:busy,imageWidth:original.width,imageHeight:original.height};},step:function(n){for(var i=0;i<(n||1);i++)update(1/60);draw();},reset:reset};
+
+function panYPos(){
+  return H*.66;
+}
+
+function oval(x,y,rx,ry,color){
+  ctx.beginPath();
+  ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);
+  ctx.fillStyle=color;
+  ctx.fill();
+}
+
+function sample(){
+  original.width=original.height=320;
+  var c=original.getContext('2d');
+  c.beginPath();
+  for(var i=0;i<10;i++){
+    var a=i*Math.PI/5-Math.PI/2;
+    var r=i%2?71:138;
+    c.lineTo(160+Math.cos(a)*r,160+Math.sin(a)*r);
+  }
+  c.closePath();
+  var g=c.createLinearGradient(30,20,250,300);
+  g.addColorStop(0,'#84b6a0');
+  g.addColorStop(1,'#235f59');
+  c.fillStyle=g;
+  c.fill();
+  c.lineWidth=8;
+  c.strokeStyle='#b2d5b3';
+  c.stroke();
+  prepare();
+}
+
+function removePlainBackground(data,w,h){
+  var a=data.data;
+  var r0=a[0],g0=a[1],b0=a[2];
+  var hit=0,sample=0,cutout=false;
+  for(var y=0;y<h;y++)for(var x=0;x<w;x++){
+    var p=(y*w+x)*4;
+    if(a[p+3]<245&&(x===0||y===0||x===w-1||y===h-1))cutout=true;
+    if(x===0||y===0||x===w-1||y===h-1){
+      sample++;
+      if(Math.max(Math.abs(a[p]-r0),Math.abs(a[p+1]-g0),Math.abs(a[p+2]-b0))<22)hit++;
+    }
+  }
+  if(cutout||hit/sample<.96)return;
+
+  var seen=new Uint8Array(w*h);
+  var q=new Int32Array(w*h);
+  var head=0,tail=0;
+  function add(p){
+    if(seen[p])return;
+    seen[p]=1;
+    var i=p*4;
+    if(Math.max(Math.abs(a[i]-r0),Math.abs(a[i+1]-g0),Math.abs(a[i+2]-b0))>30)return;
+    q[tail++]=p;
+  }
+  for(var x=0;x<w;x++){add(x);add((h-1)*w+x);}
+  for(var y=0;y<h;y++){add(y*w);add(y*w+w-1);}
+  while(head<tail){
+    var p=q[head++],x=p%w,y=Math.floor(p/w);
+    if(x>0)add(p-1);
+    if(x<w-1)add(p+1);
+    if(y>0)add(p-w);
+    if(y<h-1)add(p+w);
+  }
+  if(tail>w*h*.97)return;
+  for(var i=0;i<tail;i++)a[q[i]*4+3]=0;
+}
+
+function nearestToInside(w,h,alpha,outside){
+  var n=w*h;
+  var dist=new Int16Array(n);
+  for(var i=0;i<n;i++)dist[i]=-1;
+  var q=new Int32Array(n);
+  var head=0,tail=0;
+  for(var y=0;y<h;y++)for(var x=0;x<w;x++){
+    var p=y*w+x;
+    if(alpha[p]){dist[p]=0;q[tail++]=p;}
+  }
+  while(head<tail){
+    var p=q[head++];
+    var d=dist[p]+1;
+    var x=p%w,y=Math.floor(p/w);
+    if(x>0&&dist[p-1]===-1&&outside[p-1]){dist[p-1]=d;q[tail++]=p-1;}
+    if(x<w-1&&dist[p+1]===-1&&outside[p+1]){dist[p+1]=d;q[tail++]=p+1;}
+    if(y>0&&dist[p-w]===-1&&outside[p-w]){dist[p-w]=d;q[tail++]=p-w;}
+    if(y<h-1&&dist[p+w]===-1&&outside[p+w]){dist[p+w]=d;q[tail++]=p+w;}
+  }
+  return dist;
+}
+
+function prepare(){
+  var w=original.width;
+  var h=original.height;
+  var c=original.getContext('2d');
+  pixels=c.getImageData(0,0,w,h);
+  fried.width=w;
+  fried.height=h;
+  relief=new Float32Array(w*h);
+  grain=new Float32Array(w*h);
+  coat=new Float32Array(w*h);
+
+  var a=pixels.data;
+  var alpha=new Uint8Array(w*h);
+  var n=w*h;
+  for(var i=0;i<n;i++)alpha[i]=a[i*4]>10?1:0;
+
+  var outside=new Uint8Array(n);
+  var q=new Int32Array(n);
+  var hA=0,hB=0;
+  function addOutside(p){
+    if(outside[p])return;
+    outside[p]=1;
+    if(!alpha[p])q[hB++]=p;
+  }
+  for(var x=0;x<w;x++){
+    addOutside(x);
+    addOutside((h-1)*w+x);
+  }
+  for(var y=0;y<h;y++){
+    addOutside(y*w);
+    addOutside(y*w+w-1);
+  }
+  while(hA<hB){
+    var p=q[hA++];
+    var x=p%w,y=Math.floor(p/w);
+    if(x>0)addOutside(p-1);
+    if(x<w-1)addOutside(p+1);
+    if(y>0)addOutside(p-w);
+    if(y<h-1)addOutside(p+w);
+  }
+
+  var dist=nearestToInside(w,h,alpha,outside);
+  var maxSpread=7;
+  for(var y=0;y<h;y++)for(var x=0;x<w;x++){
+    var p=y*w+x;
+    relief[p]=noise(x*.12,y*.12)*.55+noise(x*.32,y*.32)*.30+noise(x*.8,y*.8)*.15;
+    grain[p]=hash(x,y);
+    if(outside[p]&&alpha[p]===0){
+      var d=dist[p];
+      if(d>0&&d<=maxSpread){
+        var f=(maxSpread-d)/maxSpread;
+        f*=0.6+noise(x*.14,y*.21)*.5;
+        coat[p]=Math.min(1,f*(0.55+grain[p]*0.35));
+      }
+    }
+  }
+
+  lastBake=-1;
+  bake(0);
+}
+
+function inOil(x,y,size){
+  var cy=panYPos()-8;
+  var rx=195*(size/250);
+  var ry=92*(size/250);
+  var dx=x-panX;
+  var dy=y-cy;
+  if(dy<-20||dy>ry+24)return false;
+  return(dx*dx)/(rx*rx)+(dy*dy)/((ry+24)*(ry+24))<=1;
+}
+
+function updateContact(){
+  var size=state==='frying'?(foodOil):(foodBase);
+  oilTouch=inOil(foodX,foodY,size);
+}
+
+function bake(seconds){
+  var bucket=Math.floor(seconds*6);
+  if(bucket===lastBake)return;
+  lastBake=bucket;
+  var w=original.width;
+  var h=original.height;
+  var c=fried.getContext('2d');
+  var out=c.getImageData(0,0,w,h);
+  var a=pixels.data;
+  var b=out.data;
+  var t=clamp(seconds/10,0,1);
+  var burn=clamp((seconds-11)/7,0,1);
+  for(var y=0;y<h;y++)for(var x=0;x<w;x++){
+    var p=y*w+x;
+    var i=p*4;
+    if(!a[i+3]){
+      if(coat[p]){
+        var edge=coat[p];
+        var rr=210+noise(x*.28,y*.31)*30+edge*90;
+        var gg=136+noise(x*.31,y*.22)*40+edge*40;
+        var bb=66+noise(x*.24,y*.18)*35+edge*20;
+        b[i]=rr;
+        b[i+1]=gg;
+        b[i+2]=bb;
+        b[i+3]=Math.round(170*edge*(0.5+t*0.5));
+      } else {
+        b[i+3]=0;
+      }
+      continue;
+    }
+
+    var n=relief[p];
+    var slope=n-relief[Math.max(0,y-2)*w+Math.max(0,x-2)];
+    var lum=(a[i]*.2126+a[i+1]*.7152+a[i+2]*.0722)/255;
+    var rough=(n-.5)*72+slope*145+(grain[p]-.5)*25+(lum-.5)*47;
+    var pit=n<.34?-24:0;
+    var crust=t*0.94;
+
+    var r=(211+rough+pit)*(1-burn*.66);
+    var g=(157-t*50+rough*.79+pit)*(1-burn*.8);
+    var bcol=(83-t*57+rough*.42+pit*.5)*(1-burn*.84);
+
+    var edge=coat[p];
+    if(edge){
+      var e=edge*(0.5+t)*130;
+      r=Math.min(255,r+e);
+      g=Math.min(255,g+e*0.7);
+      bcol=Math.min(255,bcol+e*0.3);
+    }
+    b[i]=a[i]*(1-crust)+r*crust;
+    b[i+1]=a[i+1]*(1-crust)+g*crust;
+    b[i+2]=a[i+2]*(1-crust)+bcol*crust;
+    b[i+3]=255;
+  }
+  c.putImageData(out,0,0);
+}
+
+function controls(){
+  var intro=state==='intro';
+  var result=state==='result';
+  start.hidden=!intro;
+  pick.hidden=intro;
+  pick.disabled=busy||state==='frying'||state==='result';
+  act.hidden=intro||result;
+  act.disabled=busy;
+  act.setAttribute('aria-label',state==='frying'?'引き上げる':'油に入れる');
+  document.getElementById('down-icon').hidden=state==='frying';
+  document.getElementById('up-icon').hidden=state!=='frying';
+  save.hidden=intro;
+  save.disabled=!result||busy;
+  again.hidden=!result;
+  share.hidden=!result;
+  save.classList.toggle('result',result);
+  pick.classList.toggle('result',result);
+}
+
+function reset(){
+  state='play';
+  elapsed=0;
+  foodX=panX;
+  foodY=plateY();
+  lastBake=-1;
+  oilTouch=false;
+  dragging=false;
+  pointerId=null;
+  bake(0);
+  if(volume)volume.gain.setTargetAtTime(0,AC&&AC.currentTime||0,.03);
+  controls();
+  draw();
+}
+
+function go(){
+  if(busy)return;
+  if(state==='intro'){
+    soundOn();
+    reset();
+    return;
+  }
+  soundOn();
+  if(state==='result'){
+    reset();
+    return;
+  }
+  if(state==='play'){
+    if(oilTouch)state='frying';
+  } else if(state==='frying'){
+    state='result';
+    makeExport();
+  }
+  controls();
+}
+
+function update(dt){
+  clock+=dt;
+  updateContact();
+
+  if(state==='play'&&oilTouch)state='frying';
+
+  if(state==='frying'){
+    var rate=oilTouch?1:0.2;
+    elapsed=Math.min(18,elapsed+dt*rate);
+    if(elapsed>0){
+      bake(elapsed);
+      if(rate>0 && dragging && oilTouch && volume){
+        volume.gain.setTargetAtTime(.12,AC.currentTime,.05);
+      } else if(volume && oilTouch){
+        volume.gain.setTargetAtTime(.05,AC.currentTime,.1);
+      }
+      if(dragging&&oilTouch&&AC&&clock>nextPop){
+        popNoise();
+        nextPop=clock+0.09+hash(clock,9)*0.12;
+      }
+    }
+
+    if(elapsed>=18){
+      state='result';
+      makeExport();
+      controls();
+      return;
+    }
+
+    if(!dragging&&elapsed===0&&!oilTouch)state='play';
+  }
+
+  if(state==='result')return;
+
+  if(!volume)return;
+  if(state==='frying'&&oilTouch){
+    volume.gain.setTargetAtTime(.05,AC.currentTime,.1);
+  } else {
+    volume.gain.setTargetAtTime(0,AC.currentTime,.05);
+  }
+}
+
+function soundOn(){
+  if(!window.AudioContext&&!window.webkitAudioContext)return;
+  if(AC)return;
+  try{
+    var C=window.AudioContext||window.webkitAudioContext;
+    AC=new C();
+    var buffer=AC.createBuffer(1,AC.sampleRate*2,AC.sampleRate);
+    var d=buffer.getChannelData(0);
+    for(var i=0;i<d.length;i++)d[i]=Math.random()*2-1;
+    hiss=AC.createBufferSource();
+    hiss.buffer=buffer;
+    hiss.loop=true;
+    var f=AC.createBiquadFilter();
+    f.type='highpass';
+    f.frequency.value=1700;
+    volume=AC.createGain();
+    volume.gain.value=0;
+    hiss.connect(f);
+    f.connect(volume);
+    volume.connect(AC.destination);
+    hiss.start();
+
+    var p=AC.createBuffer(1,AC.sampleRate*1,AC.sampleRate);
+    var dp=p.getChannelData(0);
+    for(var i=0;i<dp.length;i++)dp[i]=Math.random()*2-1;
+    popBuffer=p;
+    if(AC.state!=='running')AC.resume().catch(function(){});
+  }catch(e){}
+}
+
+function popNoise(){
+  if(!AC||!popBuffer)return;
+  var s=AC.createBufferSource();
+  s.buffer=popBuffer;
+  s.playbackRate.value=0.7+hash(clock,2)*0.8;
+  var f=AC.createBiquadFilter();
+  f.type='bandpass';
+  f.frequency.value=2200;
+  var g=AC.createGain();
+  g.gain.value=0.0001;
+  g.gain.exponentialRampToValueAtTime(0.06,AC.currentTime+0.01);
+  g.gain.exponentialRampToValueAtTime(0.001,AC.currentTime+0.07);
+  s.connect(f);
+  f.connect(g);
+  g.connect(AC.destination);
+  s.start();
+}
+
+function silence(){
+  if(!volume)return;
+  volume.gain.setTargetAtTime(0,AC.currentTime,.03);
+}
+
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden){
+    focused=false;
+    if(AC&&AC.state!=='closed')AC.suspend().catch(function(){});
+    silence();
+  } else {
+    focused=true;
+    if(AC&&AC.state!=='running')soundOn();
+  }
+});
+
+function drawFood(image,x,y,size,angle){
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(angle||0);
+  var k=size/Math.max(image.width,image.height);
+  ctx.shadowColor='rgba(70,37,10,.26)';
+  ctx.shadowBlur=13;
+  ctx.shadowOffsetY=8;
+  ctx.drawImage(image,-image.width*k/2,-image.height*k/2,image.width*k,image.height*k);
+  ctx.restore();
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#eee7db';
+  ctx.fillRect(0,0,W,H);
+
+  ctx.strokeStyle='#e1d8c9';
+  ctx.lineWidth=1;
+  for(var y=0;y<H;y+=90){
+    ctx.beginPath();
+    ctx.moveTo(0,y);
+    ctx.lineTo(W,y);
+    ctx.stroke();
+  }
+  for(var x=0;x<W;x+=90){
+    ctx.beginPath();
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,H);
+    ctx.stroke();
+  }
+
+  var py=plateY();
+  panY=panYPos();
+  oval(panX,panY+45,220,126,'#d4c7b4');
+  oval(panX,panY,221,126,'#3a5049');
+  oval(panX,panY-4,208,112,'#142922');
+  var oil=ctx.createRadialGradient(248,panY-46,10,270,panY,214);
+  oil.addColorStop(0,'#e3b94d');
+  oil.addColorStop(.65,'#bd7e20');
+  oil.addColorStop(1,'#764015');
+  oval(panX,panY-4,197,104,oil);
+
+  var px=clamp(foodX,110,W-110);
+  var py2=clamp(foodY,80,H-260);
+  var size=state==='frying'||state==='result'?foodOil:foodBase;
+  var active=state==='frying';
+  var image=(state==='result'||state==='frying')?fried:original;
+  var jiggle=(active&&dragging)?Math.sin(clock*16)*.014:0;
+  drawFood(image,px,py2,size,jiggle-(active||state==='result'?-0.07:0));
+
+  if(active){
+    ctx.fillStyle='rgba(255,220,140,0.24)';
+    for(var i=0;i<30;i++){
+      var a=hash(i,9)*Math.PI*2;
+      var r=35+hash(i,7)*130;
+      var life=(clock*(.5+hash(i,2))+hash(i,3))%1;
+      var bx=panX+Math.cos(a)*r;
+      var by=panY-6+Math.sin(a)*r*.52-life*23;
+      var br=(2+hash(i,4)*7)*Math.sin(life*Math.PI);
+      ctx.beginPath();
+      ctx.ellipse(bx,by,br,br*.8,0,0,Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  if(active||state==='result'){
+    var gx=270,gy=py+172;
+    ctx.lineWidth=5;
+    ctx.strokeStyle='#d6c9b6';
+    ctx.beginPath();
+    ctx.arc(gx,gy,17,-Math.PI/2,Math.PI*1.5);
+    ctx.stroke();
+    ctx.strokeStyle='#ad672b';
+    ctx.beginPath();
+    ctx.arc(gx,gy,17,-Math.PI/2,-Math.PI/2+Math.PI*2*(elapsed/18));
+    ctx.stroke();
+  }
+
+  if(state!=='play'){
+    ctx.fillStyle=oilTouch?'rgba(236,164,62,.35)':'rgba(236,164,62,.12)';
+    ctx.beginPath();
+    ctx.arc(px,py2,18,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  if(busy){
+    ctx.strokeStyle='#284d43';
+    ctx.lineWidth=5;
+    ctx.beginPath();
+    ctx.arc(270,py,29,clock*4,clock*4+4);
+    ctx.stroke();
+  }
+}
+
+function makeExport(){
+  exported.width=1080;
+  exported.height=1080;
+  var c=exported.getContext('2d');
+  c.clearRect(0,0,1080,1080);
+  var k=760/Math.max(fried.width,fried.height);
+  c.save();
+  c.translate(540,540);
+  c.rotate(-0.07);
+  c.shadowColor='rgba(70,37,10,.24)';
+  c.shadowBlur=25;
+  c.shadowOffsetY=16;
+  c.drawImage(fried,-fried.width*k/2,-fried.height*k/2,fried.width*k,fried.height*k);
+  c.restore();
+}
+
+function showError(message){
+  error.textContent=message;
+  error.hidden=false;
+}
+
+async function acceptImage(f){
+  if(!f)return;
+  var id=++loadId;
+  error.hidden=true;
+  if(f.size>25*1024*1024){
+    showError('25MB以下の画像を選んでください');
+    return;
+  }
+  if(!/^image\/(png|jpeg|webp|gif|avif|bmp)$/.test(f.type)){
+    showError('PNG・JPEG・WebPなどの画像を選んでください');
+    return;
+  }
+
+  busy=true;
+  controls();
+  var url=URL.createObjectURL(f);
+  try{
+    var im=new Image();
+    await new Promise(function(resolve,reject){
+      im.onload=resolve;
+      im.onerror=reject;
+      im.src=url;
+    });
+    if(id!==loadId)return;
+    if(!im.naturalWidth||!im.naturalHeight)throw Error();
+
+    var scale=Math.min(1,512/Math.max(im.naturalWidth,im.naturalHeight));
+    var next=document.createElement('canvas');
+    next.width=Math.max(1,Math.round(im.naturalWidth*scale));
+    next.height=Math.max(1,Math.round(im.naturalHeight*scale));
+    var c=next.getContext('2d');
+    c.drawImage(im,0,0,next.width,next.height);
+    var data=c.getImageData(0,0,next.width,next.height);
+    removePlainBackground(data,next.width,next.height);
+    c.putImageData(data,0,0);
+
+    var x0=next.width,y0=next.height,x1=-1,y1=-1;
+    for(var y=0;y<next.height;y++){
+      for(var x=0;x<next.width;x++){
+        if(data.data[(y*next.width+x)*4+3]>15){
+          if(x<x0)x0=x;
+          if(y<y0)y0=y;
+          if(x>x1)x1=x;
+          if(y>y1)y1=y;
+        }
+      }
+    }
+    if(x1<0)throw Error();
+
+    original.width=x1-x0+1;
+    original.height=y1-y0+1;
+    original.getContext('2d').drawImage(next,x0,y0,original.width,original.height,0,0,original.width,original.height);
+    prepare();
+    reset();
+  }catch(e){
+    if(id===loadId)showError('画像を読み込めませんでした');
+  }finally{
+    URL.revokeObjectURL(url);
+    if(id===loadId){
+      busy=false;
+      controls();
+    }
+  }
+}
+
+file.addEventListener('change',function(){
+  acceptImage(file.files[0]);
+  file.value='';
+});
+pick.addEventListener('click',function(){
+  if(!pick.disabled)file.click();
+});
+act.addEventListener('click',go);
+start.addEventListener('click',go);
+again.addEventListener('click',function(){if(state==='result')reset();});
+save.addEventListener('click',function(){
+  if(state!=='result')return;
+  exported.toBlob(function(blob){
+    if(!blob){
+      showError('画像を保存できませんでした');
+      return;
+    }
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url;
+    a.download='唐揚げ.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){URL.revokeObjectURL(url);},60000);
+  },'image/png');
+});
+share.addEventListener('click',function(){
+  if(state==='result')zShare({text:'',native:false});
+});
+
+document.addEventListener('pointerdown',function(e){
+  if(state!=='intro'||e.isPrimary===false||e.button>0)return;
+  pointerId=e.pointerId;
+},true);
+
+document.addEventListener('pointerup',function(e){
+  if(state!=='intro'||pointerId!==e.pointerId)return;
+  pointerId=null;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  go();
+},true);
+
+document.addEventListener('pointercancel',function(){
+  pointerId=null;
+  dragging=false;
+  if(volume)silence();
+});
+
+function pointerPos(ev){
+  var r=canvas.getBoundingClientRect();
+  return{
+    x:(ev.clientX-r.left)/r.width*W,
+    y:(ev.clientY-r.top)/r.height*H
+  };
+}
+
+wrap.addEventListener('pointerdown',function(e){
+  if(e.target!==canvas||state==='intro'||e.isPrimary===false||e.button>0||busy)return;
+  dragging=true;
+  pointerId=e.pointerId;
+  soundOn();
+  var p=pointerPos(e);
+  dragDx=p.x-foodX;
+  dragDy=p.y-foodY;
+  foodX=p.x-dragDx;
+  foodY=p.y-dragDy;
+  updateContact();
+  if(state==='play'&&oilTouch)state='frying';
+  controls();
+});
+
+wrap.addEventListener('pointermove',function(e){
+  if(!dragging||pointerId!==e.pointerId)return;
+  e.preventDefault();
+  var p=pointerPos(e);
+  foodX=clamp(p.x-dragDx,60,W-60);
+  foodY=clamp(p.y-dragDy,120,H-260);
+  updateContact();
+  if(state==='play'&&oilTouch)state='frying';
+});
+
+wrap.addEventListener('pointerup',function(e){
+  if(!dragging||pointerId!==e.pointerId)return;
+  dragging=false;
+  pointerId=null;
+  updateContact();
+  if(state==='frying'&&!oilTouch&&elapsed===0)state='play';
+  controls();
+  if(volume)volume.gain.setTargetAtTime(0,AC&&AC.currentTime||0,.05);
+});
+
+window.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){
+    e.preventDefault();
+    if(!e.repeat){
+      loadId++;
+      busy=false;
+      error.hidden=true;
+      reset();
+    }
+    return;
+  }
+  if(e.code==='Space'||e.key===' '||e.key==='Enter'){
+    if(e.target&&e.target.tagName==='BUTTON')return;
+    e.preventDefault();
+    if(!e.repeat)go();
+  }
+});
+
+window.addEventListener('blur',function(){
+  focused=false;
+  pointerId=null;
+  dragging=false;
+  if(AC&&AC.state!=='closed')AC.suspend().catch(function(){});
+  silence();
+});
+
+window.__probe={
+  now:function(){
+    return {
+      state:state,
+      seconds:elapsed,
+      W:W,
+      H:H,
+      busy:busy,
+      imageWidth:original.width,
+      imageHeight:original.height,
+      foodX:foodX,
+      foodY:foodY,
+      oil:oilTouch
+    };
+  },
+  step:function(n){
+    for(var i=0;i<(n||1);i++)update(1/60);
+    draw();
+  },
+  reset:reset
+};
+
 /* ============ ループ ============ */
-sample();controls();layout();var last=performance.now();function loop(now){var dt=Math.min(.033,(now-last)/1000);last=now;if(!document.hidden&&!window.__recordManual){update(dt);draw();}requestAnimationFrame(loop);}requestAnimationFrame(loop);
+sample();
+controls();
+layout();
+var last=performance.now();
+function loop(now){
+  var dt=Math.min(.033,(now-last)/1000);
+  last=now;
+  if(!document.hidden&&!window.__recordManual){
+    update(dt);
+    draw();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
 })();
 </script>
 </body>
