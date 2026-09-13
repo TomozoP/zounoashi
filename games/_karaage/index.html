@@ -81,6 +81,8 @@ var dragDx=0;
 var dragDy=0;
 var oilTouch=false;
 var nextPop=0;
+var steam=0;
+var liftSound=null;
 
 function layout(){
   H=Math.max(780,Math.min(1700,Math.round(W*window.innerHeight/window.innerWidth)));
@@ -287,7 +289,9 @@ function inOil(x,y,size){
 
 function updateContact(){
   var size=state==='frying'?(foodOil):(foodBase);
+  var wasInOil=oilTouch;
   oilTouch=inOil(foodX,foodY,size);
+  if(wasInOil&&!oilTouch&&state==='frying'&&elapsed>0)liftEffect();
 }
 
 function bake(seconds){
@@ -352,7 +356,7 @@ function controls(){
   var result=state==='result';
   start.hidden=!intro;
   pick.hidden=intro;
-  pick.disabled=busy||state==='frying'||state==='result';
+  pick.disabled=busy;
   act.hidden=intro||result;
   act.disabled=busy;
   act.setAttribute('aria-label',state==='frying'?'引き上げる':'油に入れる');
@@ -367,6 +371,8 @@ function controls(){
 }
 
 function reset(){
+  steam=0;
+  if(liftSound){try{liftSound.stop();}catch(e){}liftSound=null;}
   state='play';
   elapsed=0;
   foodX=panX;
@@ -396,14 +402,15 @@ function go(){
   if(state==='play'){
     if(oilTouch)state='frying';
   } else if(state==='frying'){
-    state='result';
-    makeExport();
+    finishFrying();
   }
   controls();
 }
 
 function update(dt){
   clock+=dt;
+  steam=Math.max(0,steam-dt);
+  if(busy)return;
   updateContact();
 
   if(state==='play'&&oilTouch)state='frying';
@@ -425,8 +432,7 @@ function update(dt){
     }
 
     if(elapsed>=18){
-      state='result';
-      makeExport();
+      finishFrying();
       controls();
       return;
     }
@@ -444,9 +450,38 @@ function update(dt){
   }
 }
 
+function finishFrying(){
+  if(oilTouch){foodY=plateY();oilTouch=false;liftEffect();}
+  state='result';
+  silence();
+  makeExport();
+}
+
+function liftEffect(){
+  // 油を離れる瞬間だけ、短い湯気と余韻を出す。
+  steam=2.4;
+  if(!AC||!popBuffer)return;
+  if(liftSound){try{liftSound.stop();}catch(e){}}
+  var source=AC.createBufferSource();
+  source.buffer=popBuffer;
+  var filter=AC.createBiquadFilter();
+  filter.type='lowpass';
+  filter.frequency.setValueAtTime(6500,AC.currentTime);
+  filter.frequency.exponentialRampToValueAtTime(700,AC.currentTime+1.1);
+  var gain=AC.createGain();
+  gain.gain.setValueAtTime(.001,AC.currentTime);
+  gain.gain.exponentialRampToValueAtTime(.22,AC.currentTime+.04);
+  gain.gain.exponentialRampToValueAtTime(.001,AC.currentTime+1.2);
+  source.loop=true;
+  source.connect(filter);filter.connect(gain);gain.connect(AC.destination);
+  source.start();source.stop(AC.currentTime+1.25);
+  liftSound=source;
+  source.onended=function(){source.disconnect();filter.disconnect();gain.disconnect();if(liftSound===source)liftSound=null;};
+}
+
 function soundOn(){
   if(!window.AudioContext&&!window.webkitAudioContext)return;
-  if(AC)return;
+  if(AC){if(AC.state!=='running'&&AC.state!=='closed')AC.resume().catch(function(){});return;}
   try{
     var C=window.AudioContext||window.webkitAudioContext;
     AC=new C();
@@ -543,6 +578,23 @@ function draw(){
   var image=(state==='result'||state==='frying')?fried:original;
   var jiggle=(active&&dragging)?Math.sin(clock*16)*.014:0;
   drawFood(image,px,py2,size,jiggle-(active||state==='result'?-0.07:0));
+
+  if(steam>0){
+    ctx.save();
+    for(var j=0;j<12;j++){
+      var age=(2.4-steam)-j*.065;
+      if(age<0)continue;
+      var fade=clamp(age/.15,0,1)*clamp((2.4-age)/1.6,0,1);
+      var sx=px+(hash(j,31)-.5)*size*.7+Math.sin(age*2+j)*16;
+      var sy=py2-size*.2-age*(40+hash(j,42)*25);
+      var radius=9+age*15;
+      var mist=ctx.createRadialGradient(sx,sy,0,sx,sy,radius);
+      mist.addColorStop(0,'rgba(255,255,245,'+(.38*fade)+')');
+      mist.addColorStop(1,'rgba(255,255,245,0)');
+      oval(sx,sy,radius,radius,mist);
+    }
+    ctx.restore();
+  }
 
   if(active){
     ctx.fillStyle='rgba(255,220,140,0.24)';
@@ -793,6 +845,8 @@ window.__probe={
       imageHeight:original.height,
       foodX:foodX,
       foodY:foodY,
+      steam:steam,
+      canPick:!pick.disabled,
       oil:oilTouch
     };
   },
