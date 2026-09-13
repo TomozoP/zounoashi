@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8"><meta name="preview-version" content="20260914-karaage-9">
+<meta charset="UTF-8"><meta name="preview-version" content="20260914-karaage-10">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>なんでも唐揚げ</title>
 <style>
@@ -31,8 +31,8 @@ button svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:1.8
 <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp">
 <p id="error" role="status" hidden></p>
 </div></div>
-<script src="../games/share.js?v=20260914-karaage-9"></script>
-<script src="../games/pad.js?v=20260914-karaage-9"></script>
+<script src="../games/share.js?v=20260914-karaage-10"></script>
+<script src="../games/pad.js?v=20260914-karaage-10"></script>
 <script>
 (function(){
 'use strict';
@@ -41,6 +41,7 @@ var ctx=canvas.getContext('2d');
 var wrap=document.getElementById('wrap');
 var pick=document.getElementById('pick');
 var save=document.getElementById('save');
+var saveIcon=save.innerHTML;
 var again=document.getElementById('again');
 var share=document.getElementById('share');
 var file=document.getElementById('file');
@@ -52,6 +53,10 @@ var state='play';
 var elapsed=0;
 var clock=0;
 var loadId=0;
+var cutting=null;
+var cutPoints=[];
+var cutDrawing=false;
+var pendingName='';
 var imageName='鶏肉';
 var busy=false;
 var pointerId=null;
@@ -144,7 +149,7 @@ function sample(){
     prepare();
     reset();
   };
-  im.src='./img/chicken.webp?v=20260914-karaage-9';
+  im.src='./img/chicken.webp?v=20260914-karaage-10';
 }
 
 function removePlainBackground(data,w,h){
@@ -357,11 +362,15 @@ function bake(seconds){
 }
 
 function controls(){
+  save.innerHTML=cutting?'<svg viewBox="0 0 32 32"><path d="m5 16 7 7L27 7"/></svg>':saveIcon;
+  share.disabled=!!cutting;
+  save.setAttribute('aria-label',cutting?'切り抜きを確定':'画像を保存');
   pick.disabled=busy;
   save.disabled=busy;
 }
 
 function reset(){
+  cutting=null;cutPoints=[];cutDrawing=false;
   steam=0;
   if(liftSound){try{liftSound.stop();}catch(e){}liftSound=null;}
   state='play';
@@ -380,6 +389,7 @@ function reset(){
 
 function go(){
   if(busy)return;
+  if(cutting){finishCut();return;}
   soundOn();
   foodY=oilTouch?plateY():panYPos()-8;
   updateContact();
@@ -390,7 +400,7 @@ function go(){
 function update(dt){
   clock+=dt;
   steam=Math.max(0,steam-dt);
-  if(busy)return;
+  if(busy||cutting)return;
   updateContact();
 
   if(state==='play'&&oilTouch)state='frying';
@@ -522,6 +532,7 @@ function drawFood(image,x,y,size,angle){
 }
 
 function draw(){
+  if(cutting){drawCut();return;}
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle='#eee7db';
   ctx.fillRect(0,0,W,H);
@@ -639,29 +650,11 @@ async function acceptImage(f){
     next.height=Math.max(1,Math.round(im.naturalHeight*scale));
     var c=next.getContext('2d');
     c.drawImage(im,0,0,next.width,next.height);
-    var data=c.getImageData(0,0,next.width,next.height);
-    removePlainBackground(data,next.width,next.height);
-    c.putImageData(data,0,0);
-
-    var x0=next.width,y0=next.height,x1=-1,y1=-1;
-    for(var y=0;y<next.height;y++){
-      for(var x=0;x<next.width;x++){
-        if(data.data[(y*next.width+x)*4+3]>15){
-          if(x<x0)x0=x;
-          if(y<y0)y0=y;
-          if(x>x1)x1=x;
-          if(y>y1)y1=y;
-        }
-      }
-    }
-    if(x1<0)throw Error();
-
-    original.width=x1-x0+1;
-    original.height=y1-y0+1;
-    original.getContext('2d').drawImage(next,x0,y0,original.width,original.height,0,0,original.width,original.height);
-    prepare();
-    imageName=f.name.replace(/\.[^.]+$/, '')||'画像';
-    reset();
+    cutting=next;
+    cutPoints=[];cutDrawing=false;dragging=false;pointerId=null;
+    pendingName=f.name.replace(/\.[^.]+$/, '')||'画像';
+    silence();
+    draw();
   }catch(e){
     if(id===loadId)showError('画像を読み込めませんでした');
   }finally{
@@ -680,9 +673,10 @@ file.addEventListener('change',function(){
 pick.addEventListener('click',function(){
   if(!pick.disabled)file.click();
 });
-again.addEventListener('click',function(){loadId++;busy=false;error.hidden=true;reset();});
+again.addEventListener('click',function(){if(cutting){cutPoints=[];draw();return;}loadId++;busy=false;error.hidden=true;reset();});
 save.addEventListener('click',function(){
   if(busy)return;
+  if(cutting){finishCut();return;}
   bake(elapsed);
   makeExport();
   var downloadName=imageName+'のから揚げ.png';
@@ -702,14 +696,48 @@ save.addEventListener('click',function(){
   },'image/png');
 });
 share.addEventListener('click',function(){
+  if(cutting)return;
   zShare({text:'',native:false});
 });
 
 document.addEventListener('pointercancel',function(){
+  if(cutting){cutDrawing=false;cutPoints=[];}
   pointerId=null;
   dragging=false;
   if(volume)silence();
 });
+
+function cutBox(){
+  var k=Math.min((W-60)/cutting.width,(H-80)/cutting.height);
+  return {k:k,x:(W-cutting.width*k)/2,y:(H-cutting.height*k)/2};
+}
+function drawCut(){
+  ctx.fillStyle='#eee7db';ctx.fillRect(0,0,W,H);
+  var r=cutBox();
+  ctx.drawImage(cutting,r.x,r.y,cutting.width*r.k,cutting.height*r.k);
+  if(cutPoints.length){
+    ctx.beginPath();
+    cutPoints.forEach(function(p,i){if(i)ctx.lineTo(r.x+p.x*r.k,r.y+p.y*r.k);else ctx.moveTo(r.x+p.x*r.k,r.y+p.y*r.k);});
+    if(!cutDrawing)ctx.closePath();
+    ctx.fillStyle='rgba(255,210,70,.18)';ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=5;ctx.stroke();
+    ctx.strokeStyle='#284d43';ctx.lineWidth=2;ctx.stroke();
+  }
+}
+function cutPoint(e){var p=pointerPos(e),r=cutBox();return {x:clamp((p.x-r.x)/r.k,0,cutting.width),y:clamp((p.y-r.y)/r.k,0,cutting.height)};}
+function finishCut(){
+  var next=document.createElement('canvas');next.width=cutting.width;next.height=cutting.height;
+  var c=next.getContext('2d');
+  if(cutPoints.length>=3){c.beginPath();cutPoints.forEach(function(p,i){if(i)c.lineTo(p.x,p.y);else c.moveTo(p.x,p.y);});c.closePath();c.clip();}
+  c.drawImage(cutting,0,0);
+  var data=c.getImageData(0,0,next.width,next.height).data;
+  var x0=next.width,y0=next.height,x1=-1,y1=-1;
+  for(var y=0;y<next.height;y++)for(var x=0;x<next.width;x++)if(data[(y*next.width+x)*4+3]>15){x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}
+  if(x1<x0||y1<y0){cutPoints=[];return;}
+  original.width=x1-x0+1;original.height=y1-y0+1;
+  original.getContext('2d').drawImage(next,x0,y0,original.width,original.height,0,0,original.width,original.height);
+  imageName=pendingName;prepare();reset();
+}
 
 function pointerPos(ev){
   var r=canvas.getBoundingClientRect();
@@ -721,6 +749,7 @@ function pointerPos(ev){
 
 wrap.addEventListener('pointerdown',function(e){
   if(e.target!==canvas||e.isPrimary===false||e.button>0||busy)return;
+  if(cutting){cutPoints=[cutPoint(e)];cutDrawing=true;pointerId=e.pointerId;canvas.setPointerCapture(e.pointerId);draw();return;}
   dragging=true;
   pointerId=e.pointerId;
   soundOn();
@@ -735,6 +764,7 @@ wrap.addEventListener('pointerdown',function(e){
 });
 
 wrap.addEventListener('pointermove',function(e){
+  if(cutting&&cutDrawing&&pointerId===e.pointerId){cutPoints.push(cutPoint(e));draw();return;}
   if(!dragging||pointerId!==e.pointerId)return;
   e.preventDefault();
   var p=pointerPos(e);
@@ -745,6 +775,7 @@ wrap.addEventListener('pointermove',function(e){
 });
 
 wrap.addEventListener('pointerup',function(e){
+  if(cutting&&cutDrawing&&pointerId===e.pointerId){cutDrawing=false;pointerId=null;if(cutPoints.length<3)cutPoints=[];draw();return;}
   if(!dragging||pointerId!==e.pointerId)return;
   dragging=false;
   pointerId=null;
@@ -822,6 +853,6 @@ function loop(now){
 requestAnimationFrame(loop);
 })();
 </script>
-  <script src="./auto-reload.js?v=20260914-karaage-9"></script>
+  <script src="./auto-reload.js?v=20260914-karaage-10"></script>
 </body>
 </html>
