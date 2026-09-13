@@ -28,6 +28,13 @@
 (function () {
   "use strict";
 
+  /* ゲームの絵では長押しメニューや画像のドラッグを出さない。 */
+  function stopCanvasMenu(e) {
+    if (e.target && e.target.tagName === "CANVAS") e.preventDefault();
+  }
+  document.addEventListener("contextmenu", stopCanvasMenu);
+  document.addEventListener("dragstart", stopCanvasMenu);
+
   /* 押しているもの。変わり目だけをキーにする */
   var want = { press: false, x: 0, y: 0 };
   var have = { press: false, x: 0, y: 0 };
