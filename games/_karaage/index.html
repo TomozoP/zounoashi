@@ -211,6 +211,14 @@ function nearestToInside(w,h,alpha,outside){
 }
 
 function prepare(){
+  // 衣が画像の外へ張り出すための余白。
+  var padded=document.createElement('canvas');
+  padded.width=original.width+56;
+  padded.height=original.height+56;
+  padded.getContext('2d').drawImage(original,28,28);
+  original.width=padded.width;
+  original.height=padded.height;
+  original.getContext('2d').drawImage(padded,0,0);
   var w=original.width;
   var h=original.height;
   var c=original.getContext('2d');
@@ -224,7 +232,7 @@ function prepare(){
   var a=pixels.data;
   var alpha=new Uint8Array(w*h);
   var n=w*h;
-  for(var i=0;i<n;i++)alpha[i]=a[i*4]>10?1:0;
+  for(var i=0;i<n;i++)alpha[i]=a[i*4+3]>10?1:0;
 
   var outside=new Uint8Array(n);
   var q=new Int32Array(n);
@@ -252,19 +260,14 @@ function prepare(){
   }
 
   var dist=nearestToInside(w,h,alpha,outside);
-  var maxSpread=10;
+  // 太い衣と細かい突起を重ね、元の輪郭から不規則に膨らませる。
   for(var y=0;y<h;y++)for(var x=0;x<w;x++){
     var p=y*w+x;
     relief[p]=noise(x*.12,y*.12)*.55+noise(x*.32,y*.32)*.30+noise(x*.8,y*.8)*.15;
     grain[p]=hash(x,y);
-    if(outside[p]&&alpha[p]===0){
-      var d=dist[p];
-      if(d>0&&d<=maxSpread){
-        var f=(maxSpread-d)/maxSpread;
-        var ripple=(Math.sin(x*0.31+y*0.21+d*1.2)+Math.cos(x*0.19-y*0.17+d*2.8))*0.14;
-        f*=0.65+noise(x*.14,y*.21)*0.5+ripple;
-        coat[p]=Math.min(1,f*(0.56+grain[p]*0.42));
-      }
+    if(outside[p]&&!alpha[p]){
+      var spread=5+noise(x*.075,y*.075)*19+noise(x*.27,y*.27)*5;
+      if(dist[p]>0)coat[p]=clamp((spread-dist[p])*1.5,0,1);
     }
   }
 
@@ -304,15 +307,13 @@ function bake(seconds){
     var i=p*4;
     if(!a[i+3]){
       if(coat[p]){
-        var edge=coat[p];
-        var rr=210+noise(x*.28,y*.31)*32+edge*92+grain[p]*16;
-        var gg=132+noise(x*.31,y*.22)*40+edge*36+grain[p]*14;
-        var bb=62+noise(x*.24,y*.18)*35+edge*22+grain[p]*10;
-        var e=edge*(0.56+t*0.5);
-        b[i]=rr;
-        b[i+1]=gg;
-        b[i+2]=bb;
-        b[i+3]=Math.round(150*e+edge*40*(Math.random()?0.82:1.18));
+        var n=relief[p];
+        var slope=n-relief[Math.max(0,y-2)*w+Math.max(0,x-2)];
+        var rough=(n-.5)*105+slope*180+(grain[p]-.5)*30;
+        b[i]=(218+rough)*(1-burn*.66);
+        b[i+1]=(155-t*48+rough*.76)*(1-burn*.8);
+        b[i+2]=(72-t*45+rough*.38)*(1-burn*.84);
+        b[i+3]=Math.round(255*coat[p]*clamp(seconds*1.5,0,1));
       } else {
         b[i+3]=0;
       }
@@ -523,21 +524,6 @@ function draw(){
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle='#eee7db';
   ctx.fillRect(0,0,W,H);
-
-  ctx.strokeStyle='#e1d8c9';
-  ctx.lineWidth=1;
-  for(var y=0;y<H;y+=90){
-    ctx.beginPath();
-    ctx.moveTo(0,y);
-    ctx.lineTo(W,y);
-    ctx.stroke();
-  }
-  for(var x=0;x<W;x+=90){
-    ctx.beginPath();
-    ctx.moveTo(x,0);
-    ctx.lineTo(x,H);
-    ctx.stroke();
-  }
 
   var py=plateY();
   panY=panYPos();
