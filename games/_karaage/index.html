@@ -17,10 +17,14 @@ button:active{translate:0 3px;box-shadow:0 2px 0 #d1c6b5}button:focus-visible{ou
 button svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 [hidden]{display:none!important}
 #file{display:none}#error{position:absolute;left:30px;right:30px;bottom:126px;text-align:center;color:#ad342c;font:600 18px sans-serif;margin:0}
+#modes{position:absolute;top:16px;left:110px;right:110px;display:flex;gap:12px}
+#modes button{position:relative;width:154px;height:64px;border-radius:18px;font:22px sans-serif;box-shadow:none;background:#ddd2c0}
+#modes button[aria-pressed="true"]{background:#284d43;color:#fffaf0}
 </style>
 </head>
 <body>
 <div id="stage"><div id="wrap">
+<nav id="modes"><button id="karaage-mode" aria-pressed="true">唐揚げ</button><button id="tempura-mode" aria-pressed="false">天ぷら</button></nav>
 <canvas id="c" aria-label="画像を唐揚げにする鍋"></canvas>
 <footer id="footer">
 <button id="pick" aria-label="画像を選ぶ"><svg viewBox="0 0 32 32"><rect x="3" y="5" width="26" height="23" rx="4"/><circle cx="11" cy="12" r="2"/><path d="m4 24 8-8 6 6 5-5 6 7"/></svg></button>
@@ -50,6 +54,7 @@ var error=document.getElementById('error');
 var W=540;
 var H=960;
 var state='play';
+var cookingMode='karaage';
 var elapsed=0;
 var clock=0;
 var loadId=0;
@@ -127,7 +132,7 @@ function noise(x,y){
 }
 
 function plateY(){
-  return H*.285;
+  return Math.max(215,H*.285);
 }
 
 function panYPos(){
@@ -329,6 +334,25 @@ function bake(seconds){
   for(var y=0;y<h;y++)for(var x=0;x<w;x++){
     var p=y*w+x;
     var i=p*4;
+    if(cookingMode==='tempura'){
+      var n=relief[p],slope=n-relief[Math.max(0,y-3)*w+Math.max(0,x-3)];
+      var airy=(n-.5)*48+slope*160+(grain[p]-.5)*16;
+      var golden=clamp(seconds/12,0,1),scorch=clamp((seconds-14)/4,0,1);
+      var r=(246+airy)*(1-scorch*.32);
+      var g=(237-golden*35+airy*.85)*(1-scorch*.48);
+      var blue=(199-golden*77+airy*.5)*(1-scorch*.64);
+      var batter=.76+golden*.21;
+      if(a[i+3]){
+        b[i]=a[i]*(1-batter)+r*batter;
+        b[i+1]=a[i+1]*(1-batter)+g*batter;
+        b[i+2]=a[i+2]*(1-batter)+blue*batter;
+        b[i+3]=a[i+3];
+      }else{
+        b[i]=r;b[i+1]=g;b[i+2]=blue;
+        b[i+3]=255*coat[p]*(.6+.4*clamp(seconds/2,0,1))*clamp((n-.25)*3,0,1);
+      }
+      continue;
+    }
     if(!a[i+3]){
       if(coat[p]){
         var n=relief[p];
@@ -372,12 +396,21 @@ function bake(seconds){
     b[i]=paleR*(1-crust)+r*crust;
     b[i+1]=paleG*(1-crust)+g*crust;
     b[i+2]=paleB*(1-crust)+bcol*crust;
-    b[i+3]=255;
+    // 揚げる前は下味の色と、まだらな打ち粉を重ねる。
+    var prep=1-clamp(seconds/4,0,1);
+    var flour=clamp((n-.35)*2,0,.7);
+    b[i]=b[i]*(1-prep)+(a[i]*.85*(1-flour)+239*flour)*prep;
+    b[i+1]=b[i+1]*(1-prep)+(a[i+1]*.72*(1-flour)+222*flour)*prep;
+    b[i+2]=b[i+2]*(1-prep)+(a[i+2]*.6*(1-flour)+185*flour)*prep;
+    b[i+3]=a[i+3];
   }
   c.putImageData(out,0,0);
 }
 
 function controls(){
+  document.getElementById('modes').hidden=!!cutting;
+  document.getElementById('karaage-mode').setAttribute('aria-pressed',cookingMode==='karaage');
+  document.getElementById('tempura-mode').setAttribute('aria-pressed',cookingMode==='tempura');
   save.innerHTML=cutting?'<svg viewBox="0 0 32 32"><path d="m5 16 7 7L27 7"/></svg>':saveIcon;
   share.hidden=!!cutting;
   save.setAttribute('aria-label',cutting?'切り抜きを確定':'画像を保存');
@@ -593,7 +626,7 @@ function draw(){
   var py2=clamp(foodY,80,H-110);
   var size=elapsed>0?foodOil:foodBase;
   var active=state==='frying'&&oilTouch;
-  var image=elapsed>0?fried:original;
+  var image=fried;
   var jiggle=(active&&dragging)?Math.sin(clock*16)*.014:0;
   ctx.save();
   if(oilTouch){
@@ -748,6 +781,12 @@ async function acceptImage(f){
   }
 }
 
+['karaage','tempura'].forEach(function(mode){
+  document.getElementById(mode+'-mode').addEventListener('click',function(){
+    if(cutting||mode===cookingMode)return;
+    cookingMode=mode;reset();
+  });
+});
 file.addEventListener('change',function(){
   acceptImage(file.files[0]);
   file.value='';
@@ -761,7 +800,7 @@ save.addEventListener('click',function(){
   if(cutting){finishCut();return;}
   bake(elapsed);
   makeExport();
-  var downloadName=imageName+'のから揚げ.png';
+  var downloadName=imageName+(cookingMode==='tempura'?'の天ぷら.png':'のから揚げ.png');
   // タップ直後の権限を保ったまま、画像ファイルを共有する。
   var encoded=atob(exported.toDataURL('image/png').split(',')[1]);
   var bytes=new Uint8Array(encoded.length);
@@ -905,6 +944,7 @@ window.addEventListener('blur',function(){
 window.__probe={
   now:function(){
     return {
+      mode:cookingMode,
       state:state,
       seconds:elapsed,
       W:W,
