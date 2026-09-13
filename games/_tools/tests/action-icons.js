@@ -7,7 +7,7 @@ var runner=`<script>
 var dirs=['_template','momotarogue','melos','wanko','macho','hato','gyaku-mizukiri','oushogi','type16oku','random-bowling'];
 var id=location.pathname.split('/')[2];await new Promise(r=>setTimeout(r,800));
 if(window.__errors.length)throw Error(id+': '+window.__errors.join(','));
-if(id==='wanko'||id==='melos'||id==='random-bowling'){
+if(id==='_template'||id==='wanko'||id==='melos'||id==='random-bowling'){
  var start=document.getElementById('start');if(!start||start.hidden||start.textContent!=='START')throw Error(id+': STARTがない');
  document.querySelector('canvas').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,isPrimary:true,pointerId:1,clientX:200,clientY:400}));
  if(start.hidden)throw Error(id+': 絵を触るだけで開始した');
