@@ -111,6 +111,7 @@ var ZWrestleScene=(function(){
     this.readyLift+=((flying?0:3)-this.readyLift)*(1-Math.exp(-4*dt));
     this.camera.position.set(-this.followX-this.swingX,9+this.readyLift-Math.min(1,this.follow/36.5)*3.5,ringZ-16+this.follow+this.swingZ);this.camera.lookAt(-this.followX*.5-this.swingX*1.5,.8,ringZ+12+this.follow*.65+this.swingZ);this.camera.updateMatrixWorld();
     this.pins.forEach(function(g,i){var p=data.pins[i];g.position.set(p.x,p.y,p.z);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
+    this.red.root.position.x=0;this.blue.root.position.set(0,0,0);this.blue.root.rotation.set(0,0,0);
     var red=this.red;red.root.rotation.y=Math.PI/2-angle;red.root.position.y=ZWrestlePhysics.ringHeight+(phase==='swing'?Math.sin(angle*2)*.04:0);
     // 赤は足を踏み替え、両手で青の足首を持つ。
     ['L','R'].forEach(function(tag){var side=tag==='L'?-1:1;
@@ -121,6 +122,13 @@ var ZWrestleScene=(function(){
     });
     var human=data.human.length?data.human:ZWrestlePhysics.swingPose(angle,ringZ),blue=this.blue;
     human.forEach(function(p){var g=blue.parts[p.id];g.position.set(p.x/ZWrestlePhysics.humanScale,p.y/ZWrestlePhysics.humanScale,p.z/ZWrestlePhysics.humanScale);g.quaternion.set(p.q.x,p.q.y,p.q.z,p.q.w);});
+    if(phase==='intro'){
+      [this.red,this.blue].forEach(function(w,i){
+        w.root.position.set(i===0?-1.8:1.8,ZWrestlePhysics.ringHeight,ringZ);
+        w.root.rotation.set(0,i===0?Math.PI/2:-Math.PI/2,0);
+        ZWrestlePhysics.parts.forEach(function(p){var g=w.parts[p.id];g.position.set(p.p[0],p.p[1],p.p[2]);g.rotation.set(0,0,0);g.scale.set(1,1,1);});
+      });
+    }
     this.renderer.render(this.scene,this.camera);ctx.drawImage(this.renderer.domElement,0,0,W,H);
   };
   return Scene;
