@@ -255,11 +255,15 @@ function prepare(){
   }
 
   var dist=nearestToInside(w,h,alpha,outside);
+  var empty=new Uint8Array(n),all=new Uint8Array(n);
+  for(var i=0;i<n;i++){empty[i]=alpha[i]?0:1;all[i]=1;}
+  var inward=nearestToInside(w,h,empty,all);
   // 太い衣と細かい突起を重ね、元の輪郭から不規則に膨らませる。
   for(var y=0;y<h;y++)for(var x=0;x<w;x++){
     var p=y*w+x;
-    relief[p]=noise(x*.12,y*.12)*.55+noise(x*.32,y*.32)*.30+noise(x*.8,y*.8)*.15;
-    grain[p]=hash(x,y);
+    relief[p]=noise(x*.04,y*.04)*.7+noise(x*.11,y*.11)*.25+noise(x*.28,y*.28)*.05;
+    grain[p]=noise(x*.4,y*.4);
+    if(alpha[p])coat[p]=clamp((20+noise(x*.055,y*.055)*16-inward[p])/12,0,1);
     if(outside[p]&&!alpha[p]){
       var spread=5+noise(x*.075,y*.075)*19+noise(x*.27,y*.27)*5;
       if(dist[p]>0)coat[p]=clamp((spread-dist[p])*1.5,0,1);
@@ -306,7 +310,7 @@ function bake(seconds){
     if(!a[i+3]){
       if(coat[p]){
         var n=relief[p];
-        var slope=n-relief[Math.max(0,y-2)*w+Math.max(0,x-2)];
+        var slope=n-relief[Math.max(0,y-5)*w+Math.max(0,x-5)];
         var rough=(n-.5)*105+slope*180+(grain[p]-.5)*30;
         b[i]=(218+rough)*(1-burn*.66);
         b[i+1]=(155-t*48+rough*.76)*(1-burn*.8);
@@ -319,23 +323,24 @@ function bake(seconds){
     }
 
     var n=relief[p];
-    var slope=n-relief[Math.max(0,y-2)*w+Math.max(0,x-2)];
+    var slope=n-relief[Math.max(0,y-5)*w+Math.max(0,x-5)];
     var lum=(a[i]*.2126+a[i+1]*.7152+a[i+2]*.0722)/255;
     var rough=(n-.5)*72+slope*145+(grain[p]-.5)*25+(lum-.5)*47;
     var pit=n<.34?-24:0;
-    var crust=t*0.94;
+    var coverage=clamp(seconds*1.5,0,1);
+    var clumps=clamp((n-.46)*4,0,.75);
+    var crust=Math.max(t*.94,coverage*Math.max(coat[p],clumps));
 
     var r=(211+rough+pit)*(1-burn*.66);
     var g=(157-t*50+rough*.79+pit)*(1-burn*.8);
     var bcol=(83-t*57+rough*.42+pit*.5)*(1-burn*.84);
 
-    var edge=coat[p];
-    if(edge){
-      var bump=1+0.32*(Math.sin(x*0.48+y*0.36+p*0.001)-0.5*noise(x*.09,y*.07));
-      var e=edge*(0.5+t)*130*bump;
-      r=Math.min(255,r+e);
-      g=Math.min(255,g+e*0.74);
-      bcol=Math.min(255,bcol+e*0.34);
+    // 輪郭の内外を同じ衣で覆い、肉の上に衣を重ねる。
+    if(coat[p]){
+      var rim=(n-.5)*105+slope*180+(grain[p]-.5)*30;
+      r=(218+rim)*(1-burn*.66);
+      g=(155-t*48+rim*.76)*(1-burn*.8);
+      bcol=(72-t*45+rim*.38)*(1-burn*.84);
     }
     // 先に肉の赤みが抜け、その後に揚げ色が付く。
     var shade=(lum-.5)*45;
