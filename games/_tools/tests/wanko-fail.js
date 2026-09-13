@@ -32,11 +32,11 @@ function el() {
     getBoundingClientRect: function () { return { left: 0, top: 0, width: 540, height: gameH() }; },
     fire: function (n, e) { (h[n] || []).forEach(function (f) { f(e || {}); }); } };
 }
-var canvas = el(), wrap = el(), win = el(), doc = el();
+var canvas = el(), wrap = el(), win = el(), doc = el(), start = el();
 
 /* 触るのは wrap でも window でも受けられるよう、wrap へ投げたぶんは window にも流す */
 (function () { var f = wrap.fire; wrap.fire = function (n, e) { f(n, e); win.fire(n, e); }; })();
-var document = { getElementById: function (id) { return id === "c" ? canvas : wrap; },
+var document = { getElementById: function (id) { return id === "c" ? canvas : id === "start" ? start : wrap; },
   addEventListener: doc.addEventListener, hidden: false,
   createElement: function () { return { style: {}, click: function () {} }; },
   body: { appendChild: function () {}, removeChild: function () {} } };

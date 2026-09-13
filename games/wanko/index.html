@@ -12,6 +12,8 @@
   canvas { display: block; background: #1d1714; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; z-index:4; left:50%; bottom:12%; transform:translateX(-50%); width:240px; height:76px; border:0; border-radius:38px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
 </style>
 <!-- ゲームのOGP：道具で更新 -->
 <meta property="og:type" content="website">
@@ -28,6 +30,7 @@
 <body>
 <div id="stage"><div id="wrap">
   <canvas id="c"></canvas>
+<button id="start" type="button">START</button>
 </div></div>
 <script src="../share.js"></script>
 <script src="../action-icons.js"></script>
@@ -1367,7 +1370,9 @@
     return n;
   }
 
+  var awaitingStart=false;
   function newRound() {
+    awaitingStart=false;document.getElementById('start').hidden=true;
     state = S.PLAY; phase = 0; score = 0; T = 0; INV = 1;
     parts = []; pile = []; shake = 0; flash = 0; lastKind = null;
     bombs = []; bomb = null; staff = [];
@@ -1424,6 +1429,7 @@
 
   /* ============ 進行 ============ */
   function update(dt) {
+    if(awaitingStart)return;
     T += dt;
     phase += dt;
     sayT += dt;
@@ -1556,6 +1562,7 @@
   }
 
   function down(x, y) {
+    if(awaitingStart)return;
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
@@ -1628,6 +1635,7 @@
                   e.key === "w" || e.key === "W" || e.key === "s" || e.key === "S";
     if (!esc && !go && !left && !right && !num && !swapKey) return;
     e.preventDefault();
+    if(awaitingStart&&!esc){if(go&&!e.repeat)document.getElementById('start').click();return;}
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
     if (swapKey) {                               /* 2台のときは、触る台を持ちかえる */
@@ -1952,12 +1960,12 @@
     if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
     drawBg();
     drawCrowd();
-    drawOkami();
+    if(!awaitingStart)drawOkami();
 
     drawPile();
     drawBomb();
     drawParts();
-    drawSay();
+    if(!awaitingStart)drawSay();
     if (flash > 0) {
       ctx.fillStyle = "rgba(255,238,200," + Math.min(1, flash) + ")";
       ctx.fillRect(-40, -40, W + 80, H + 80);
@@ -2003,7 +2011,24 @@
   };
 
   /* ============ ループ ============ */
-  newRound();
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
+  var startingPointer=null;
+  document.addEventListener('pointerdown',function(e){
+    if(!(awaitingStart))return;
+    if(e.isPrimary===false||e.button>0)return;
+    startingPointer=e.pointerId;
+    e.stopImmediatePropagation();
+  },true);
+  document.addEventListener('pointerup',function(e){
+    if(!(awaitingStart)||startingPointer!==e.pointerId)return;
+    startingPointer=null;e.preventDefault();e.stopImmediatePropagation();startButton.click();
+  },true);
+  document.addEventListener('pointercancel',function(){startingPointer=null;},true);
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  newRound();awaitingStart=true;startButton.hidden=false;
   layout();
   var last = performance.now();
   function loop(now) {
