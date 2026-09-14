@@ -19,8 +19,8 @@ function SharkWalk(parts) {
     var at=knee(a,c,length,i<2?1:-1),b=point(at.x,at.y,.65,8);
     if(equipment[name]!=='human'){
       var dx=i%2?10:-10;
-      b.x=a.x+dx;b.y=a.y+45;b.px=b.x;b.py=b.y;
-      c.x=a.x+dx;c.y=a.y+(equipment[name]==='wheel'?105:65);c.px=c.x;c.py=c.y;c.r=equipment[name]==='wheel'?28:17;c.wheel=equipment[name]==='wheel';
+      b.x=a.x+dx;b.y=a.y+12;b.px=b.x;b.py=b.y;
+      c.x=a.x+dx;c.y=a.y+(equipment[name]==='wheel'?32:14);c.px=c.x;c.py=c.y;c.r=equipment[name]==='wheel'?28:17;c.wheel=equipment[name]==='wheel';
       [b,c].forEach(function(p){[rear,front,back].forEach(function(root){mounts.push({a:root,b:p,length:Math.hypot(root.x-p.x,root.y-p.y)});});});
     }
     (i<2?knees:elbows).push(b);joints.push({a:a,b:b,c:c,length:length,name:name,sign:Math.sign(angle(a,b,c))});
