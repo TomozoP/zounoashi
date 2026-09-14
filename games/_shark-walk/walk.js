@@ -2,7 +2,7 @@
 function SharkWalk(parts) {
   parts=parts||{};var equipment={},spins={},wheelSpeed={},balloons={};
   var points=[], names=['leftLeg','rightLeg','leftArm','rightArm'];
-  var bends={},pressed={},contacts=0,cliff=40;
+  var bends={},pressed={},contacts=0,cliff=-100;
   names.forEach(function(k){bends[k]=0;pressed[k]=false;spins[k]=0;wheelSpeed[k]=0;equipment[k]=["leg","arm","wheel","jet","balloon"].indexOf(parts[k])>=0?parts[k]:(k.indexOf("Leg")>=0?"leg":"arm");});
   function point(x,y,m,r){var p={x:x,y:y,px:x,py:y,w:1/m,r:r};points.push(p);return p;}
   var rear=point(160,-141,5,27),front=point(285,-141,5,30);
