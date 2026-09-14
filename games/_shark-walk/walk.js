@@ -3,7 +3,7 @@ function SharkWalk(parts) {
   parts=parts||{};var equipment={},spins={},wheelSpeed={},balloons={};
   var points=[], names=['leftLeg','rightLeg','leftArm','rightArm'];
   var bends={},pressed={},contacts=0,cliff=-100;
-  names.forEach(function(k){bends[k]=0;pressed[k]=false;spins[k]=0;wheelSpeed[k]=0;equipment[k]=["leg","arm","wheel","jet","balloon"].indexOf(parts[k])>=0?parts[k]:(k.indexOf("Leg")>=0?"leg":"arm");});
+  names.forEach(function(k){bends[k]=0;pressed[k]=false;spins[k]=0;wheelSpeed[k]=0;equipment[k]=["leg","arm","wheel","jet","balloon","rod"].indexOf(parts[k])>=0?parts[k]:(k.indexOf("Leg")>=0?"leg":"arm");});
   function point(x,y,m,r){var p={x:x,y:y,px:x,py:y,w:1/m,r:r};points.push(p);return p;}
   var rear=point(160,-141,5,27),front=point(285,-141,5,30);
   // 背びれ側と腹側も地面に当たる。距離だけで形を保ち、向きは戻さない。
@@ -18,6 +18,7 @@ function SharkWalk(parts) {
   names.forEach(function(name,i){var a=i<2?rear:front,c=i<2?feet[i]:hands[i-2],length=equipment[name]==='leg'?76:equipment[name]==='arm'||equipment[name]==='balloon'?74:i<2?76:74;
     if(equipment[name]==='wheel'||equipment[name]==='jet'){c.r=equipment[name]==='wheel'?28:20;c.wheel=equipment[name]==='wheel';c.x=a.x+(i<2?-40:40)+(i%2?4:-4);c.px=c.x;c.y=-c.r;c.py=c.y;}
     if(equipment[name]==='balloon'){c.x=a.x+(i%2?18:-18);c.y=a.y-130;c.px=c.x;c.py=c.y;c.r=6;c.w=1/.8;balloons[name]=point(c.x,c.y-60,.3,15);}
+    if(equipment[name]==='rod'){length=70;c.x=a.x+(i%2?8:-8);c.y=a.y+Math.sqrt(140*140-64);c.px=c.x;c.py=c.y;c.r=9;}
     var at=knee(a,c,length,equipment[name]==='leg'?1:equipment[name]==='arm'||equipment[name]==='balloon'?-1:i<2?1:-1),b=point(at.x,at.y,.65,8);
     if(equipment[name]==='wheel'||equipment[name]==='jet')supports.push({a:back,b:a,c:b,name:name,rest:angle(back,a,b),support:true});
     (i<2?knees:elbows).push(b);joints.push({a:a,b:b,c:c,length:length,name:name,sign:Math.sign(angle(a,b,c)),jetOffset:-.35-Math.atan2(c.y-b.y,c.x-b.x)});
@@ -28,7 +29,7 @@ function SharkWalk(parts) {
   function distance(a,b,len){var dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,q=(d-len)/d/(a.w+b.w);a.x+=dx*q*a.w;a.y+=dy*q*a.w;b.x-=dx*q*b.w;b.y-=dy*q*b.w;}
   // 三点の角度への力は、関節を含む三点へ返す。人間の肩と股関節は自由。装備の付け根は胴体に対する角度をばねで支える。
   function bend(j,h){
-    if(equipment[j.name]==="balloon")return;
+    if(equipment[j.name]==="balloon"||equipment[j.name]==="rod")return;
     var suspension=equipment[j.name]==="wheel"||equipment[j.name]==="jet";if(suspension&&!h)return;
     var a=j.a,b=j.b,c=j.c,ux=a.x-b.x,uy=a.y-b.y,vx=c.x-b.x,vy=c.y-b.y;
     var u2=ux*ux+uy*uy,v2=vx*vx+vy*vy;if(u2<1||v2<1)return;
@@ -45,6 +46,21 @@ function SharkWalk(parts) {
     var weight=a.w*(ga.x*ga.x+ga.y*ga.y)+b.w*(gb.x*gb.x+gb.y*gb.y)+c.w*(gc.x*gc.x+gc.y*gc.y);
     var q=-error*.12/weight;
     [[a,ga],[b,gb],[c,gc]].forEach(function(pair){var p=pair[0],g=pair[1];p.x+=q*p.w*g.x;p.y+=q*p.w*g.y;});
+  }
+  // 棒の回転力と反動を、棒先・付け根・胴体へ返す。
+  function rotateRod(j,h){
+    var a=back,b=j.a,c=j.c,ux=a.x-b.x,uy=a.y-b.y,vx=c.x-b.x,vy=c.y-b.y;
+    var u2=ux*ux+uy*uy,v2=vx*vx+vy*vy;if(u2<1||v2<1)return;
+    var ga={x:uy/u2,y:-ux/u2},gc={x:-vy/v2,y:vx/v2},gb={x:-ga.x-gc.x,y:-ga.y-gc.y};
+    var rate=wrap(angle(a,b,c)-angle({x:a.px,y:a.py},{x:b.px,y:b.py},{x:c.px,y:c.py}))/h;
+    var torque=Math.max(-120000,Math.min(120000,18000*((pressed[j.name]?4:0)-rate)));
+    [[a,ga],[b,gb],[c,gc]].forEach(function(pair){var p=pair[0],g=pair[1];p.px-=torque*g.x*p.w*h*h;p.py-=torque*g.y*p.w*h*h;});
+  }
+  function straightRod(j){
+    var a=j.a,b=j.b,c=j.c,w=b.w+(a.w+c.w)/4;
+    var qx=-(b.x-(a.x+c.x)/2)/w,qy=-(b.y-(a.y+c.y)/2)/w;
+    b.x+=qx*b.w;b.y+=qy*b.w;a.x-=qx*a.w/2;a.y-=qy*a.w/2;c.x-=qx*c.w/2;c.y-=qy*c.w/2;
+    distance(a,c,140);
   }
   function slope(x){return (ground(x+.05)-ground(x-.05))/.1;}
   function wheelContact(p,h){
@@ -79,6 +95,7 @@ function SharkWalk(parts) {
       supports.forEach(function(j){bend(j,h);});
       joints.forEach(function(j){if(equipment[j.name]==='wheel'||equipment[j.name]==='jet')bend(j,h);});
       joints.forEach(function(j){var kind=equipment[j.name];
+        if(kind==='rod')rotateRod(j,h);
         if(kind==='balloon'){var balloon=balloons[j.name];balloon.r=15+22*bends[j.name];balloon.py+=(1000+5500*bends[j.name])*balloon.w*h*h;}
         if(kind==='wheel'){
           var dx=j.c.x-j.b.x,dy=j.c.y-j.b.y,l2=Math.max(1,dx*dx+dy*dy);
@@ -99,7 +116,7 @@ function SharkWalk(parts) {
       for(var n=0;n<18;n++){
         joints.forEach(function(j){bend(j);});
         bodyLinks.forEach(function(link){distance(link.a,link.b,link.length);});
-        joints.forEach(function(j){distance(j.a,j.b,j.length);distance(j.b,j.c,j.length);var balloon=balloons[j.name];if(balloon&&Math.hypot(j.c.x-balloon.x,j.c.y-balloon.y)>60)distance(j.c,balloon,60);});
+        joints.forEach(function(j){if(equipment[j.name]==='rod'){straightRod(j);return;}distance(j.a,j.b,j.length);distance(j.b,j.c,j.length);var balloon=balloons[j.name];if(balloon&&Math.hypot(j.c.x-balloon.x,j.c.y-balloon.y)>60)distance(j.c,balloon,60);});
         points.forEach(function(p){if(p.x<cliff){if(p.wheel)p.touch=null;return;}if(p.wheel){wheelContact(p,h);if(n===17&&p.touch)contacts++;return;}var g=ground(p.x)-p.r;if(p.y>g){p.y=g;if(n===17)contacts++;p.px=p.x-(p.x-p.px)*.12;p.py=p.y;}});
       }
       joints.forEach(function(j){if(equipment[j.name]!=='wheel')return;wheelFriction(j,h);spins[j.name]+=wheelSpeed[j.name]*h;});
