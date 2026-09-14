@@ -5,8 +5,8 @@ const g=load('games/_shark-walk/index.html',{withScripts:true});
 function now(){return g.probe.now();}
 function step(n){g.step(n);g.drawn.length=0;assert(now().finite);}
 function pointer(type,id,group){const b=now().controls.find(b=>b.id===group);g.wrap.fire(type,{pointerId:id,clientX:b.x,clientY:b.y,button:0,isPrimary:id===1,preventDefault(){}});}
-g.step(180);assert.equal(now().state,'intro');
-g.press(' ');assert.equal(now().state,'play');assert(!now().leftLegPressed&&!now().leftArmPressed);
+assert.equal(now().state,'play','開いた直後から遊べる');
+g.key(' ');assert(now().leftLegPressed,'最初のキー操作から四肢を動かせる');g.key(' ',true);g.step(180);assert(now().score>0,'待機せず時間が進む');
 step(600);assert(now().state==='play','放置してもゴール扱いにしない');assert(now().contacts>0);
 g.tap(270,200);assert(!now().leftLegPressed&&!now().leftArmPressed,'ボタン外では曲がらない');
 pointer('pointerdown',1,'leftLeg');step(30);assert(now().leftLeg>.95&&now().leftArm<.01,'脚だけ曲がる');
