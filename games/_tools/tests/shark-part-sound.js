@@ -9,7 +9,7 @@ assert.equal(frequencies.length,12);
 [62,66,69,71].forEach((note,i)=>assert(Math.abs(frequencies[i*3]-440*Math.pow(2,(note-69)/12))<.001));
 assert(outputs.every(o=>o===ac.destination),'録画と同じ出力に送る');hit('leftLeg');assert.equal(frequencies.length,15);ac.state='closed';hit('leftLeg');assert.equal(frequencies.length,15);
 const g=load('games/_shark-walk/index.html',{withScripts:true,inject:'  var heard=[];partSound=function(group){heard.push(group);};window.__probe.heard=function(){return heard.slice();};'});
-assert.deepEqual(g.probe.heard(),[],'操作前には音を鳴らさない');
+g.press(' ');assert.deepEqual(g.probe.heard(),[],'出発操作では四肢の音を鳴らさない');
 ['a','s','k','l'].forEach(k=>g.key(k));assert.deepEqual(g.probe.heard(),groups,'四つ同時に重ねられる');
 g.key('a');assert.equal(g.probe.heard().length,4,'長押しを重複させない');
 const b=g.probe.now().controls[0];g.down(b.x,b.y);g.key('a',true);assert.equal(g.probe.heard().length,4,'同じ部位に指を足しても重複しない');g.up();
