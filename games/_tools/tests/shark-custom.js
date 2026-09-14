@@ -23,6 +23,9 @@ assert(air.joints.every(j=>Math.abs(jointAngle(j)-2.3)<.6),'解放後にばね�
 assert(air.joints.every(j=>Math.abs(Math.hypot(j.b.x-j.c.x,j.b.y-j.c.y)-j.length)<1),'タイヤは関節の先に繋がる');
 assert(air.joints.every(j=>j.c.traction===0),'空中では摩擦による推進力がない');
 for(const type of ['wheel','jet']){
+  const standing=make(all(type));for(let i=0;i<600;i++)standing.update(1/60);
+  assert(standing.rear.y<-100&&standing.front.y<-100,'無操作で10秒経っても装備の脚が胴体を支える');
+  assert(Math.abs(standing.now().angle)<.15,'平地で前後の脚が釣り合う');
   const spring=make(all(type));spring.points.forEach(p=>{p.y-=4000;p.py=p.y;});
   const j=spring.joints[0],u=Math.atan2(j.a.y-j.b.y,j.a.x-j.b.x)+j.sign*.9;
   j.c.x=j.b.x+Math.cos(u)*j.length;j.c.y=j.b.y+Math.sin(u)*j.length;j.c.px=j.c.x;j.c.py=j.c.y;
