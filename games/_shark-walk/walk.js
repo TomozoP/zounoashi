@@ -81,7 +81,7 @@ function SharkWalk(parts) {
           var dx=j.c.x-j.b.x,dy=j.c.y-j.b.y,l2=Math.max(1,dx*dx+dy*dy);
           var speed=wrap(Math.atan2(dy,dx)-Math.atan2(j.c.py-j.b.py,j.c.px-j.b.px))/h;
           var relative=wheelSpeed[j.name]-speed,inertia=.5/j.c.w*j.c.r*j.c.r;
-          var torque=(pressed[j.name]?14000*Math.max(-1,Math.min(1,1-relative/24)):0)-35*relative;
+          var torque=(pressed[j.name]?20000*Math.max(-1,Math.min(1,1-relative/24)):0)-35*relative;
           wheelSpeed[j.name]+=torque*h/inertia;
           // 車軸の反動は下側の脚へ返し、前向きの力を直接加えない。
           var fx=torque*dy/l2,fy=-torque*dx/l2;
