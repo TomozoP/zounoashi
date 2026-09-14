@@ -3,11 +3,12 @@ const fs=require('fs'),assert=require('assert'),load=require('../harness');
 const make=new Function(fs.readFileSync('games/_shark-walk/walk.js','utf8')+';return SharkWalk;')();
 const groups=['leftLeg','rightLeg','leftArm','rightArm'];
 const g=load('games/_shark-walk/index.html',{withScripts:true});
-g.press('a');g.press('l');g.press('l');g.step(20);
+g.press('a');g.press('a');g.press('l');g.press('l');g.step(20);
 assert.equal(g.probe.now().state,'intro');assert.equal(g.probe.now().equipment.leftLeg,'wheel');assert.equal(g.probe.now().equipment.rightArm,'jet');
 g.press(' ');assert.equal(g.probe.now().state,'play');assert(!g.probe.now().leftLegPressed,'開始操作を駆動に混ぜない');
 g.esc();assert.equal(g.probe.now().equipment.rightArm,'jet','やり直しても選択を保持');
 g.tap(45,93);assert.equal(g.probe.now().state,'intro','歯車で選び直せる');g.press('a');assert.equal(g.probe.now().equipment.leftLeg,'jet');
+assert.equal(make({leftLeg:'arm'}).now().equipment.leftLeg,'arm','後ろ側にも腕を付けられる');assert.equal(make({rightArm:'leg'}).now().equipment.rightArm,'leg','前側にも脚を付けられる');
 function all(type){return Object.fromEntries(groups.map(k=>[k,type]));}
 function center(w){return w.points.reduce((s,p)=>s+p.x/p.w,0)/w.points.reduce((s,p)=>s+1/p.w,0);}
 const wheels=make(all('wheel'));let traction=false,roll=false;
@@ -35,12 +36,12 @@ for(const type of ['wheel','jet']){
   assert(Math.hypot(j.a.x-j.c.x,j.a.y-j.c.y)>100,'装置は胴体へ直付けせず脚の先にある');
 }
 for(const inverted of [false,true]){const jet=make(all('jet'));jet.points.forEach(p=>{if(inverted){p.x=445-p.x;p.y=-282-p.y;}p.y-=2000;p.px=p.x;p.py=p.y;});start=center(jet);groups.forEach(k=>jet.set(k,true));for(let i=0;i<15;i++)jet.update(1/60);assert(inverted?center(jet)<start-1:center(jet)>start+1,'噴射は胴体の向きに従う');}
-g.press('a');assert.equal(g.probe.now().equipment.leftLeg,'balloon','風船を選べる');g.press('a');assert.equal(g.probe.now().equipment.leftLeg,'human','風船の次は人間に戻る');
+g.press('a');assert.equal(g.probe.now().equipment.leftLeg,'balloon','風船を選べる');g.press('a');assert.equal(g.probe.now().equipment.leftLeg,'leg','風船の次は脚に戻る');
 function height(w){return w.points.reduce((s,p)=>s+p.y/p.w,0)/w.points.reduce((s,p)=>s+1/p.w,0);}
 let passiveHeight;
-for(const active of [false,true]){const w=make(all('balloon'));w.points.forEach(p=>{p.y-=3000;p.py=p.y;});const x=center(w),y=height(w);groups.forEach(k=>w.set(k,active));for(let i=0;i<120;i++)w.update(1/60);assert(height(w)<y-50,'風船の浮力で胴体ごと上がる');assert(Math.abs(center(w)-x)<.001,'風船は横向きの補正を加えない');if(active)assert(height(w)<passiveHeight-100,'押すと浮力が強まる');else passiveHeight=height(w);}
-for(let c=0;c<256;c++){let n=c,parts={};groups.forEach(k=>{parts[k]=['human','wheel','jet','balloon'][n%4];n=Math.floor(n/4);});const w=make(parts);for(let f=0;f<180;f++){groups.forEach((k,i)=>w.set(k,(f+i*17)%70<35));w.update(1/60);}assert(w.now().finite,'混ぜたパーツで計算が壊れない');}
-console.log('選択・開始・保持・選び直し・車輪の接地・噴射方向・256通りの組み合わせ：確認済み');
+for(const active of [false,true]){const w=make(all('balloon'));w.points.forEach(p=>{p.y-=3000;p.py=p.y;});const x=center(w),y=height(w);groups.forEach(k=>w.set(k,active));for(let i=0;i<120;i++)w.update(1/60);if(active)assert(height(w)<y-50,'風船の浮力で胴体ごと上がる');assert(w.balloons.leftLeg.r>(active?35:0)&&w.balloons.leftLeg.r<(active?38:16),'風船は非操作時にしぼむ');assert(Math.abs(center(w)-x)<.001,'風船は横向きの補正を加えない');if(active)assert(height(w)<passiveHeight-100,'押すと浮力が強まる');else passiveHeight=height(w);}
+for(let c=0;c<625;c++){let n=c,parts={};groups.forEach(k=>{parts[k]=['leg','arm','wheel','jet','balloon'][n%5];n=Math.floor(n/5);});const w=make(parts);for(let f=0;f<180;f++){groups.forEach((k,i)=>w.set(k,(f+i*17)%70<35));w.update(1/60);}assert(w.now().finite,'混ぜたパーツで計算が壊れない');}
+console.log('選択・開始・保持・選び直し・車輪の接地・噴射方向・625通りの組み合わせ：確認済み');
 
 assert.equal(g.probe.now().goal,3200,'延長したコースを保持');assert(make().ground(2220)<-80,'追加した山を保持');
 // 選択と出発は押した瞬間ではなく、同じ場所で離したときに確定する。
