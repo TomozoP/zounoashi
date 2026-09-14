@@ -16,12 +16,21 @@ assert(traction&&roll,'脚の動きと接地摩擦でタイヤが転がる');
 function jointAngle(j){let u=Math.atan2(j.a.y-j.b.y,j.a.x-j.b.x),v=Math.atan2(j.c.y-j.b.y,j.c.x-j.b.x);return Math.abs(Math.atan2(Math.sin(v-u),Math.cos(v-u)));}
 const air=make(all('wheel'));air.points.forEach(p=>{p.y-=2000;p.py-=2000;});let start=center(air);groups.forEach(k=>air.set(k,true));for(let i=0;i<30;i++)air.update(1/60);
 assert(Math.abs(center(air)-start)<.001,'空中で前進力を加えない');
-assert(air.joints.every(j=>jointAngle(j)<1.1),'押すとタイヤ付きの関節が曲がる');
-assert(groups.every(k=>air.now().wheelSpeed[k]===0),'押してもタイヤをモーターで回さない');
+assert(air.joints.every(j=>jointAngle(j)>1.2),'駆動ボタンで関節を折り畳まない');
+assert(groups.every(k=>air.now().wheelSpeed[k]>1),'押すと空中でもタイヤが回る');
 groups.forEach(k=>air.set(k,false));for(let i=0;i<30;i++)air.update(1/60);
-assert(air.joints.every(j=>jointAngle(j)>2.8),'離すとタイヤ付きの関節が伸びる');
+assert(air.joints.every(j=>Math.abs(jointAngle(j)-2.3)<.6),'解放後にばねの角度へ戻る');
 assert(air.joints.every(j=>Math.abs(Math.hypot(j.b.x-j.c.x,j.b.y-j.c.y)-j.length)<1),'タイヤは関節の先に繋がる');
 assert(air.joints.every(j=>j.c.traction===0),'空中では摩擦による推進力がない');
+for(const type of ['wheel','jet']){
+  const spring=make(all(type));spring.points.forEach(p=>{p.y-=4000;p.py=p.y;});
+  const j=spring.joints[0],u=Math.atan2(j.a.y-j.b.y,j.a.x-j.b.x)+j.sign*.9;
+  j.c.x=j.b.x+Math.cos(u)*j.length;j.c.y=j.b.y+Math.sin(u)*j.length;j.c.px=j.c.x;j.c.py=j.c.y;
+  assert(jointAngle(j)<1,'関節を圧縮した状態から確認');
+  for(let i=0;i<180;i++)spring.update(1/60);
+  assert(Math.abs(jointAngle(j)-2.3)<.25,'車輪とジェットのばねが自然角度へ戻る');
+  assert(Math.hypot(j.a.x-j.c.x,j.a.y-j.c.y)>100,'装置は胴体へ直付けせず脚の先にある');
+}
 for(const inverted of [false,true]){const jet=make(all('jet'));jet.points.forEach(p=>{if(inverted){p.x=445-p.x;p.y=-282-p.y;}p.y-=2000;p.px=p.x;p.py=p.y;});start=center(jet);groups.forEach(k=>jet.set(k,true));for(let i=0;i<15;i++)jet.update(1/60);assert(inverted?center(jet)<start-1:center(jet)>start+1,'噴射は胴体の向きに従う');}
 for(let c=0;c<81;c++){let n=c,parts={};groups.forEach(k=>{parts[k]=['human','wheel','jet'][n%3];n=Math.floor(n/3);});const w=make(parts);for(let f=0;f<180;f++){groups.forEach((k,i)=>w.set(k,(f+i*17)%70<35));w.update(1/60);}assert(w.now().finite,'混ぜたパーツで計算が壊れない');}
 console.log('選択・開始・保持・選び直し・車輪の接地・噴射方向・81通りの組み合わせ：確認済み');
