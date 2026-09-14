@@ -2,7 +2,7 @@
 function SharkWalk(parts) {
   parts=parts||{};var equipment={},spins={},wheelSpeed={},balloons={};
   var points=[], names=['leftLeg','rightLeg','leftArm','rightArm'];
-  var bends={},pressed={},contacts=0;
+  var bends={},pressed={},contacts=0,cliff=40;
   names.forEach(function(k){bends[k]=0;pressed[k]=false;spins[k]=0;wheelSpeed[k]=0;equipment[k]=["leg","arm","wheel","jet","balloon"].indexOf(parts[k])>=0?parts[k]:(k.indexOf("Leg")>=0?"leg":"arm");});
   function point(x,y,m,r){var p={x:x,y:y,px:x,py:y,w:1/m,r:r};points.push(p);return p;}
   var rear=point(160,-141,5,27),front=point(285,-141,5,30);
@@ -100,11 +100,11 @@ function SharkWalk(parts) {
         joints.forEach(function(j){bend(j);});
         bodyLinks.forEach(function(link){distance(link.a,link.b,link.length);});
         joints.forEach(function(j){distance(j.a,j.b,j.length);distance(j.b,j.c,j.length);var balloon=balloons[j.name];if(balloon&&Math.hypot(j.c.x-balloon.x,j.c.y-balloon.y)>60)distance(j.c,balloon,60);});
-        points.forEach(function(p){if(p.wheel){wheelContact(p,h);if(n===17&&p.touch)contacts++;return;}var g=ground(p.x)-p.r;if(p.y>g){p.y=g;if(n===17)contacts++;p.px=p.x-(p.x-p.px)*.12;p.py=p.y;}});
+        points.forEach(function(p){if(p.x<cliff){if(p.wheel)p.touch=null;return;}if(p.wheel){wheelContact(p,h);if(n===17&&p.touch)contacts++;return;}var g=ground(p.x)-p.r;if(p.y>g){p.y=g;if(n===17)contacts++;p.px=p.x-(p.x-p.px)*.12;p.py=p.y;}});
       }
       joints.forEach(function(j){if(equipment[j.name]!=='wheel')return;wheelFriction(j,h);spins[j.name]+=wheelSpeed[j.name]*h;});
     }
   }
-  function now(){var out={x:(rear.x+front.x)/2,y:rear.y,equipment:Object.assign({},equipment),spins:Object.assign({},spins),wheelSpeed:Object.assign({},wheelSpeed),angle:Math.atan2(front.y-rear.y,front.x-rear.x),contacts:contacts,finite:points.every(function(p){return Number.isFinite(p.x)&&Number.isFinite(p.y);})};names.forEach(function(k){out[k]=bends[k];out[k+'Pressed']=pressed[k];});return out;}
+  function now(){var out={cliff:cliff,fallen:(rear.y+front.y)/2>650,x:(rear.x+front.x)/2,y:rear.y,equipment:Object.assign({},equipment),spins:Object.assign({},spins),wheelSpeed:Object.assign({},wheelSpeed),angle:Math.atan2(front.y-rear.y,front.x-rear.x),contacts:contacts,finite:points.every(function(p){return Number.isFinite(p.x)&&Number.isFinite(p.y);})};names.forEach(function(k){out[k]=bends[k];out[k+'Pressed']=pressed[k];});return out;}
   return {balloons:balloons,rear:rear,front:front,feet:feet,hands:hands,knees:knees,elbows:elbows,points:points,joints:joints,ground:ground,set:set,update:update,now:now};
 }
