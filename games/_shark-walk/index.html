@@ -130,7 +130,7 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
-  var state, score, T;
+  var state, score, T, goalSnapshot=null;
   var pointers={}, keys={};
 
   var choices={leftLeg:"leg",rightLeg:"leg",leftArm:"arm",rightArm:"arm"};
@@ -145,7 +145,7 @@
   function newRound() {
     state = S.PLAY;
     if(music)music.start();
-    score = 0;
+    score = 0;goalSnapshot=null;
     T = 0;
     pointers={};keys={};
     walker=SharkWalk(choices);camera=0;accumulator=0;
@@ -153,25 +153,37 @@
 
   /* ============ 進行 ============ */
   function update(dt) {
-    if (state !== S.PLAY) return;
-    T += dt;
-
-    accumulator+=dt;while(accumulator>=1/60){walker.update(1/60);accumulator-=1/60;} camera=walker.now().x-222.5;
-    if(walker.now().fallen){newRound();return;}
-    score=Math.round(T*10)/10;
-    if(walker.now().x>=GOAL){state=S.RESULT;clearInput();tone(880,.3,.1); }
+    if (state === S.INTRO) return;
+    accumulator+=dt;
+    while(accumulator>=1/60){
+      walker.update(1/60);T+=1/60;accumulator-=1/60;camera=walker.now().x-222.5;
+      if(state===S.PLAY){
+        if(walker.now().fallen){newRound();return;}
+        score=Math.round(T*10)/10;
+        if(walker.now().x>=GOAL){
+          // 通過した物理更新の直後に一枚だけ保存する。
+          draw(true);goalSnapshot=document.createElement('canvas');goalSnapshot.width=W;goalSnapshot.height=390;
+          var floor=H*.64-Math.min(0,walker.now().y+160)*.88;
+          var sharkY=floor+(walker.rear.y+walker.front.y)/2*.88;
+          var cropY=Math.max(0,Math.min(H-390,sharkY-210));
+          var pixelScale=canvas.width/W;
+          goalSnapshot.getContext('2d').drawImage(canvas,0,cropY*pixelScale,canvas.width,390*pixelScale,0,0,W,390);
+          state=S.RESULT;tone(880,.3,.1);
+        }
+      }
+    }
   }
 
   /* 四肢を別々に操作する。複数の指やキーで押しても、それぞれ独立して離せる。 */
   var keyHints=window.matchMedia?window.matchMedia("(hover: hover) and (pointer: fine)"):{matches:false};
   function controls(){return [{id:"leftLeg",x:75,y:H*.82,r:54,label:"左脚",key:"A"},{id:"rightLeg",x:205,y:H*.82,r:54,label:"右脚",key:"S"},{id:"leftArm",x:335,y:H*.82,r:54,label:"左腕",key:"K"},{id:"rightArm",x:465,y:H*.82,r:54,label:"右腕",key:"L"}];}
-  function customize(){clearInput();state=S.INTRO;walker=SharkWalk(choices);camera=0;accumulator=0;if(music)music.stop();}
+  function customize(){goalSnapshot=null;clearInput();state=S.INTRO;walker=SharkWalk(choices);camera=0;accumulator=0;if(music)music.stop();}
   function choose(group){var options=['leg','arm','wheel','jet','balloon'];choices[group]=options[(options.indexOf(choices[group])+1)%options.length];walker=SharkWalk(choices);camera=0;}
   function controlAt(x,y){var bs=controls();for(var i=0;i<bs.length;i++){var b=bs[i];if(Math.hypot(x-b.x,y-b.y)<=b.r)return b.id;}return null;}
   function syncInput(){
     ["leftLeg","rightLeg","leftArm","rightArm"].forEach(function(group){
       var pressed=Object.keys(pointers).some(function(k){return pointers[k]===group;})||Object.keys(keys).some(function(k){return keys[k]===group;});
-      if(pressed && !walker.now()[group+"Pressed"] && state===S.PLAY && partSound)partSound(group);
+      if(pressed && !walker.now()[group+"Pressed"] && state!==S.INTRO && partSound)partSound(group);
       walker.set(group,pressed);
     });
   }
@@ -182,7 +194,7 @@
     var p=atCanvas(e);
     if(state===S.INTRO){if(e.isPrimary===false)return;menuPointer={id:e.pointerId,group:controlAt(p.x,p.y),go:Math.hypot(p.x-270,p.y-H*.94)<32};if(wrap.setPointerCapture)wrap.setPointerCapture(e.pointerId);return;}
     if(Math.hypot(p.x-45,p.y-93)<32){customize();return;}
-    if(state===S.RESULT){var hit=hitButton(p.x,p.y);if(hit==="retry")newRound();else if(hit==="share")doShare();return;}
+    if(state===S.RESULT){var hit=hitButton(p.x,p.y);if(hit==="retry"){newRound();return;}else if(hit==="share"){doShare();return;}}
     var group=controlAt(p.x,p.y);if(!group)return;
     e.preventDefault();audioOn();pointers[e.pointerId]=group;
     if(wrap.setPointerCapture)wrap.setPointerCapture(e.pointerId);
@@ -210,7 +222,7 @@
     if(e.key==="Escape"){e.preventDefault();if(!e.repeat){startingKey=null;menuPointer=null;customize();}return;}
     var group=keyGroup(e);if(!group)return;e.preventDefault();if(e.repeat)return;
     if(state===S.INTRO){if(e.key===" "||e.code==="Space"||e.key==="Enter")startingKey=e.key;else choose(group);return;}
-    if(state===S.RESULT){if(e.key===" "||e.code==="Space"||e.key==="Enter")newRound();return;}
+    if(state===S.RESULT&&(e.key===" "||e.code==="Space"||e.key==="Enter")){newRound();return;}
     audioOn();keys[e.key]=group;syncInput();
   });
   window.addEventListener("keyup",function(e){
@@ -235,7 +247,7 @@
     ctx.closePath();
   }
 
-  function draw() {
+  function draw(withoutResult) {
     ctx.clearRect(0, 0, W, H);
 
     var zoom=.88,viewLeft=camera-222.5*(1-zoom)/zoom,viewRight=viewLeft+W/zoom;
@@ -290,7 +302,7 @@
         for(var i=0;i<6;i++){ctx.rotate(Math.PI/3);ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(18,0);ctx.stroke();}ctx.fillStyle='#607e8d';ctx.beginPath();ctx.arc(0,0,7,0,Math.PI*2);ctx.fill();
       }else{
         ctx.rotate(Math.atan2(b.y-joint.b.y,b.x-joint.b.x)+joint.jetOffset);
-        if(on&&state===S.PLAY){ctx.fillStyle='#f49042';ctx.beginPath();ctx.moveTo(-22,-13);ctx.lineTo(-65-Math.sin(T*45)*13,0);ctx.lineTo(-22,13);ctx.fill();ctx.fillStyle='#fff0ac';ctx.beginPath();ctx.moveTo(-23,-7);ctx.lineTo(-46,0);ctx.lineTo(-23,7);ctx.fill();}
+        if(on&&state!==S.INTRO){ctx.fillStyle='#f49042';ctx.beginPath();ctx.moveTo(-22,-13);ctx.lineTo(-65-Math.sin(T*45)*13,0);ctx.lineTo(-22,13);ctx.fill();ctx.fillStyle='#fff0ac';ctx.beginPath();ctx.moveTo(-23,-7);ctx.lineTo(-46,0);ctx.lineTo(-23,7);ctx.fill();}
         ctx.fillStyle='#d85b32';ctx.strokeStyle='#26333e';ctx.lineWidth=3;roundRect(-22,-17,46,34,10);ctx.fill();ctx.stroke();ctx.fillStyle='#26333e';ctx.fillRect(-26,-15,9,30);ctx.fillStyle='#ffe0a0';ctx.fillRect(4,-15,7,30);ctx.fillStyle='#ffae72';ctx.fillRect(-12,-11,11,4);
       }
       ctx.restore();return true;
@@ -312,13 +324,15 @@
 
     if(state===S.INTRO){ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(270,H*.94,30,0,Math.PI*2);ctx.fill();ctx.fillStyle='#335f64';ctx.beginPath();ctx.moveTo(262,H*.94-14);ctx.lineTo(284,H*.94);ctx.lineTo(262,H*.94+14);ctx.closePath();ctx.fill();}
     if(state!==S.INTRO){ctx.save();ctx.translate(45,93);ctx.strokeStyle='#335f64';ctx.lineWidth=5;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(18,0);ctx.lineTo(-17,0);ctx.moveTo(-3,-15);ctx.lineTo(-18,0);ctx.lineTo(-3,15);ctx.stroke();ctx.restore();}
-    if (state === S.RESULT) drawResult();
+    if (state === S.RESULT&&!withoutResult) drawResult();
   }
 
-  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
+  // 背景の走行は続け、ゴール時の一枚と記録タイムを重ねる。
+  function snapshotLayout(){var h=Math.min(303,H*.36),w=h*W/390;return{x:(W-w)/2,y:H*.1,w:w,h:h};}
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var photo=snapshotLayout();
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = photo.y+photo.h+85;
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -333,16 +347,12 @@
     return null;
   }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.66)";
-    ctx.fillRect(0, 0, W, H);
-    ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
-    ctx.font = "800 108px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(String(score), W / 2, H * 0.45);
-    ctx.restore();
+    var photo=snapshotLayout();
+    ctx.fillStyle='rgba(20,43,48,.86)';roundRect(40,photo.y-16,W-80,photo.h+164,18);ctx.fill();
+    if(goalSnapshot)ctx.drawImage(goalSnapshot,photo.x,photo.y,photo.w,photo.h);
+    ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.strokeRect(photo.x,photo.y,photo.w,photo.h);
+    ctx.save();ctx.fillStyle='#fff';ctx.font='800 54px sans-serif';ctx.textAlign='center';
+    ctx.fillText(String(score)+'秒',W/2,photo.y+photo.h+64);ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
@@ -363,7 +373,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return Object.assign({ state: state, score: score, W: W, H: H, goal: GOAL, controls:controls() },walker.now()); },
+    now: function () { return Object.assign({ state: state, score: score, elapsed:T, snapshot:!!goalSnapshot, W: W, H: H, goal: GOAL, controls:controls() },walker.now()); },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
