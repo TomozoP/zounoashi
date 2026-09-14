@@ -39,3 +39,12 @@ for(let i=0;i<2400;i++){groups.forEach((k,j)=>reverse.set(k,(i+j*13)%90<45));rev
 assert(minX<172.5,'後退を許す');assert(maxAngle>Math.PI/2,'胴体の反転を許す');
 console.log('後退の最小位置：'+minX.toFixed(1)+'、最大の傾き：'+(maxAngle*180/Math.PI).toFixed(1)+'度');
 console.log('四肢独立・複数指・取消・画面6種類・空中の力・後退・反転：確認済み');
+
+// 起伏の継ぎ目と各斜面での計算を確認する。
+const course=scope.SharkWalk();assert.equal(now().goal,3200);
+let highest=0,lowest=0,steepest=0;
+for(let x=0;x<3200;x++){const y=course.ground(x);highest=Math.min(highest,y);lowest=Math.max(lowest,y);steepest=Math.max(steepest,Math.abs(course.ground(x+1)-y));}
+assert(highest<=-90&&lowest>=39);assert(steepest<.61,'急な段差を作らない');
+for(const edge of [450,800,1200,1640,1980,2460,2780,3060])assert(Math.abs(course.ground(edge-.001)-course.ground(edge+.001))<.001);
+for(const at of [550,930,1400,1780,2200,2620,2920]){const w=scope.SharkWalk();w.points.forEach(p=>{p.x+=at-222.5;p.px=p.x;p.y+=w.ground(p.x)-80;p.py=p.y;});for(let i=0;i<240;i++){groups.forEach((k,j)=>w.set(k,(i+j*13)%90<45));w.update(1/60);}assert(w.now().finite,'斜面でも計算が壊れない');}
+console.log('ゴール3200・7つの起伏・滑らかな継ぎ目・各斜面：確認済み');

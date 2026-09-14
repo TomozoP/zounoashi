@@ -18,7 +18,9 @@ function SharkWalk() {
     var at=knee(a,c,length,i<2?1:-1),b=point(at.x,at.y,.65,8);
     (i<2?knees:elbows).push(b);joints.push({a:a,b:b,c:c,length:length,name:name,sign:Math.sign(angle(a,b,c))});
   });
-  function ground(x){return x<600?0:x<1100?-18*Math.sin((x-600)/500*Math.PI):x<1500?0:x<1950?-28*Math.sin((x-1500)/450*Math.PI):0;}
+  // 山とくぼみを滑らかにつなぎ、継ぎ目に見えない段差を作らない。
+  var terrain=[[450,800,-42],[800,1200,34],[1200,1640,-72],[1640,1980,26],[1980,2460,-92],[2460,2780,40],[2780,3060,-38]];
+  function ground(x){for(var i=0;i<terrain.length;i++){var t=terrain[i];if(x>=t[0]&&x<t[1]){var u=(x-t[0])/(t[1]-t[0]);return t[2]*(1-Math.cos(u*Math.PI*2))/2;}}return 0;}
   function distance(a,b,len){var dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,q=(d-len)/d/(a.w+b.w);a.x+=dx*q*a.w;a.y+=dy*q*a.w;b.x-=dx*q*b.w;b.y-=dy*q*b.w;}
   // 三点の角度への力は、関節を含む三点へ返す。肩と股関節の向きは自由。
   function bend(j){
