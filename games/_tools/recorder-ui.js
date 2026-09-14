@@ -97,6 +97,7 @@
       .filter(function(t){return MediaRecorder.isTypeSupported(t);})[0];
   }
   function drawOutput() {
+    if(window.__recording&&window.__recording.frame)source=window.__recording.frame();
     var now=performance.now(),delay=0;
     if(audioClock&&audioClock.getOutputTimestamp){
       var stamp=audioClock.getOutputTimestamp();
@@ -124,7 +125,8 @@
     var mode=panel.querySelector('[name=mode]').value;
     var size=panel.querySelector('[name=size]').value,width,height;
     if(size==='auto'){
-      var gameSize=window.__probe&&window.__probe.now?window.__probe.now():null;
+      if(window.__recording&&window.__recording.frame)source=window.__recording.frame();
+      var gameSize=window.__recording&&window.__recording.frame?null:window.__probe&&window.__probe.now?window.__probe.now():null;
       var sw=gameSize&&gameSize.W||source.width,sh=gameSize&&gameSize.H||source.height;
       var scale=960/Math.max(sw,sh);
       width=Math.max(2,Math.round(sw*scale/2)*2);height=Math.max(2,Math.round(sh*scale/2)*2);

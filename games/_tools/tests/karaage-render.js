@@ -19,6 +19,8 @@ document.getElementById('tempura-mode').click();
 for(let i=0;i<100&&p.now().busy;i++)await new Promise(r=>setTimeout(r,20));
 check(p.now().mode==='tempura'&&!p.now().busy&&p.now().seconds===0,'天ぷら切り替え');key();p.step(600);key();
 await fetch('/__save/天ぷら.png',{method:'POST',body:await new Promise(r=>document.getElementById('c').toBlob(r))});
+window.__recording.frame();await new Promise(r=>setTimeout(r,150));
+await fetch('/__save/録画画面.png',{method:'POST',body:await new Promise(r=>window.__recording.frame().toBlob(r))});
 await fetch('/__done',{method:'POST',body:'初期画像・両モードの加熱と引き上げ・保存寸法を確認'});
 }catch(e){await fetch('/__fail',{method:'POST',body:e.stack});}})();</script>`;
 const server=http.createServer((req,res)=>{
