@@ -10,10 +10,18 @@ g.esc();assert.equal(g.probe.now().equipment.rightArm,'jet','やり直しても�
 g.tap(45,93);assert.equal(g.probe.now().state,'intro','歯車で選び直せる');g.press('a');assert.equal(g.probe.now().equipment.leftLeg,'jet');
 function all(type){return Object.fromEntries(groups.map(k=>[k,type]));}
 function center(w){return w.points.reduce((s,p)=>s+p.x/p.w,0)/w.points.reduce((s,p)=>s+1/p.w,0);}
-const wheels=make(all('wheel'));groups.forEach(k=>wheels.set(k,true));let peak=wheels.now().x,rollback=0,traction=false,spin=false;
-for(let i=0;i<600;i++){wheels.update(1/60);peak=Math.max(peak,wheels.now().x);rollback=Math.max(rollback,peak-wheels.now().x);for(const j of wheels.joints){const p=j.c;assert(Math.abs(p.traction)<=p.gripLimit+1e-9,'摩擦力は接地荷重による上限を超えない');traction=traction||Math.abs(p.traction)>.1;spin=spin||(!p.touch&&Math.abs(wheels.now().wheelSpeed[j.name])>5);}}
-assert(peak>300&&traction,'回転と接地摩擦で平地を進む');assert(rollback>10,'駆動中でも坂に押し戻される');assert(spin,'浮いた車輪は空転する');
-const air=make(all('wheel'));air.points.forEach(p=>{p.y-=2000;p.py-=2000;});let start=center(air);groups.forEach(k=>air.set(k,true));for(let i=0;i<30;i++)air.update(1/60);assert(Math.abs(center(air)-start)<.001,'空中で車輪の駆動力を加えない');assert(air.now().angle<-.01,'車輪の回転の反動を胴体へ返す');assert(air.now().wheelSpeed.leftLeg>1,'空中でも車輪自体は回転する');assert(air.joints.every(j=>j.c.traction===0),'空中では摩擦による推進力がない');
+const wheels=make(all('wheel'));let traction=false,roll=false;
+for(let i=0;i<600;i++){groups.forEach((k,n)=>wheels.set(k,(i+n*20)%90<45));wheels.update(1/60);for(const j of wheels.joints){const p=j.c;assert(Math.abs(p.traction)<=p.gripLimit+1e-9,'摩擦力は接地荷重による上限を超えない');traction=traction||Math.abs(p.traction)>.1;roll=roll||Math.abs(wheels.now().spins[j.name])>.1;}}
+assert(traction&&roll,'脚の動きと接地摩擦でタイヤが転がる');
+function jointAngle(j){let u=Math.atan2(j.a.y-j.b.y,j.a.x-j.b.x),v=Math.atan2(j.c.y-j.b.y,j.c.x-j.b.x);return Math.abs(Math.atan2(Math.sin(v-u),Math.cos(v-u)));}
+const air=make(all('wheel'));air.points.forEach(p=>{p.y-=2000;p.py-=2000;});let start=center(air);groups.forEach(k=>air.set(k,true));for(let i=0;i<30;i++)air.update(1/60);
+assert(Math.abs(center(air)-start)<.001,'空中で前進力を加えない');
+assert(air.joints.every(j=>jointAngle(j)<1.1),'押すとタイヤ付きの関節が曲がる');
+assert(groups.every(k=>air.now().wheelSpeed[k]===0),'押してもタイヤをモーターで回さない');
+groups.forEach(k=>air.set(k,false));for(let i=0;i<30;i++)air.update(1/60);
+assert(air.joints.every(j=>jointAngle(j)>2.8),'離すとタイヤ付きの関節が伸びる');
+assert(air.joints.every(j=>Math.abs(Math.hypot(j.b.x-j.c.x,j.b.y-j.c.y)-j.length)<1),'タイヤは関節の先に繋がる');
+assert(air.joints.every(j=>j.c.traction===0),'空中では摩擦による推進力がない');
 for(const inverted of [false,true]){const jet=make(all('jet'));jet.points.forEach(p=>{if(inverted){p.x=445-p.x;p.y=-282-p.y;}p.y-=2000;p.px=p.x;p.py=p.y;});start=center(jet);groups.forEach(k=>jet.set(k,true));for(let i=0;i<15;i++)jet.update(1/60);assert(inverted?center(jet)<start-1:center(jet)>start+1,'噴射は胴体の向きに従う');}
 for(let c=0;c<81;c++){let n=c,parts={};groups.forEach(k=>{parts[k]=['human','wheel','jet'][n%3];n=Math.floor(n/3);});const w=make(parts);for(let f=0;f<180;f++){groups.forEach((k,i)=>w.set(k,(f+i*17)%70<35));w.update(1/60);}assert(w.now().finite,'混ぜたパーツで計算が壊れない');}
 console.log('選択・開始・保持・選び直し・車輪の接地・噴射方向・81通りの組み合わせ：確認済み');

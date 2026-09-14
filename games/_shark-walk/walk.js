@@ -16,11 +16,12 @@ function SharkWalk(parts) {
   function angle(a,b,c){return wrap(Math.atan2(c.y-b.y,c.x-b.x)-Math.atan2(a.y-b.y,a.x-b.x));}
   var joints=[],knees=[],elbows=[];
   names.forEach(function(name,i){var a=i<2?rear:front,c=i<2?feet[i]:hands[i-2],length=i<2?76:74;
+    if(equipment[name]==='wheel'){c.r=28;c.wheel=true;c.y=-28;c.py=c.y;}
     var at=knee(a,c,length,i<2?1:-1),b=point(at.x,at.y,.65,8);
-    if(equipment[name]!=='human'){
+    if(equipment[name]==='jet'){
       var dx=i%2?10:-10;
       b.x=a.x+dx;b.y=a.y+12;b.px=b.x;b.py=b.y;
-      c.x=a.x+dx;c.y=a.y+(equipment[name]==='wheel'?32:14);c.px=c.x;c.py=c.y;c.r=equipment[name]==='wheel'?28:17;c.wheel=equipment[name]==='wheel';
+      c.x=a.x+dx;c.y=a.y+14;c.px=c.x;c.py=c.y;c.r=17;
       [b,c].forEach(function(p){[rear,front,back].forEach(function(root){mounts.push({a:root,b:p,length:Math.hypot(root.x-p.x,root.y-p.y)});});});
     }
     (i<2?knees:elbows).push(b);joints.push({a:a,b:b,c:c,length:length,name:name,sign:Math.sign(angle(a,b,c))});
@@ -31,7 +32,7 @@ function SharkWalk(parts) {
   function distance(a,b,len){var dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,q=(d-len)/d/(a.w+b.w);a.x+=dx*q*a.w;a.y+=dy*q*a.w;b.x-=dx*q*b.w;b.y-=dy*q*b.w;}
   // 三点の角度への力は、関節を含む三点へ返す。肩と股関節の向きは自由。
   function bend(j){
-    if(equipment[j.name]!=="human")return;
+    if(equipment[j.name]==="jet")return;
     var a=j.a,b=j.b,c=j.c,ux=a.x-b.x,uy=a.y-b.y,vx=c.x-b.x,vy=c.y-b.y;
     var u2=ux*ux+uy*uy,v2=vx*vx+vy*vy;if(u2<1||v2<1)return;
     var ga={x:uy/u2,y:-ux/u2},gc={x:-vy/v2,y:vx/v2},gb={x:-ga.x-gc.x,y:-ga.y-gc.y};
@@ -42,15 +43,6 @@ function SharkWalk(parts) {
     [[a,ga],[b,gb],[c,gc]].forEach(function(pair){var p=pair[0],g=pair[1];p.x+=q*p.w*g.x;p.y+=q*p.w*g.y;});
   }
   function slope(x){return (ground(x+.05)-ground(x-.05))/.1;}
-  // 駆動軸の反動を胴体へ返す。全体を押す並進力は加えない。
-  function chassisImpulse(impulse){
-    var rigid=points.filter(function(p){return p===rear||p===front||p===back||p===belly||mounts.some(function(link){return link.b===p;});});
-    var mass=0,cx=0,cy=0;rigid.forEach(function(p){var m=1/p.w;mass+=m;cx+=p.x*m;cy+=p.y*m;});cx/=mass;cy/=mass;
-    var inertia=0;rigid.forEach(function(p){inertia+=((p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy))/p.w;});
-    var dw=impulse/Math.max(1,inertia);
-    rigid.forEach(function(p){p.px+=(p.y-cy)*dw*currentStep;p.py-=(p.x-cx)*dw*currentStep;});
-  }
-  var currentStep=1/120;
   function wheelContact(p,h){
     var x=p.x;p.touch=null;
     // 曲面上の近い点を探し、その法線へ押し出す。
@@ -78,15 +70,12 @@ function SharkWalk(parts) {
   function set(group,value){if(names.indexOf(group)!==-1)pressed[group]=!!value;}
   function update(dt){
     for(var sub=0;sub<2;sub++){
-      var h=dt/2;currentStep=h;
+      var h=dt/2;
       names.forEach(function(k){bends[k]+=((pressed[k]?1:0)-bends[k])*Math.min(1,12*h);});
       var bodyAngle=Math.atan2(front.y-rear.y,front.x-rear.x);
-      var oldAngle=Math.atan2(front.py-rear.py,front.px-rear.px),bodySpeed=wrap(bodyAngle-oldAngle)/h;
       joints.forEach(function(j){var kind=equipment[j.name];
         if(kind==='wheel'){
-          var inertia=.5/j.c.w*j.c.r*j.c.r,relative=wheelSpeed[j.name]-bodySpeed;
-          var torque=(pressed[j.name]?14000*Math.max(-1,Math.min(1,1-relative/24)):0)-35*relative;
-          wheelSpeed[j.name]+=torque*h/inertia;chassisImpulse(-torque*h);
+          // タイヤは自由回転。ボタンの力は膝・肘の曲げ伸ばしにだけ使う。
           j.c.load=0;j.c.touch=null;j.c.slip=0;j.c.traction=0;j.c.gripLimit=0;
         }
         if(kind==='jet'&&pressed[j.name]){var dir=bodyAngle-.35;j.c.px-=Math.cos(dir)*11000*h*h;j.c.py-=Math.sin(dir)*11000*h*h;}
@@ -96,7 +85,7 @@ function SharkWalk(parts) {
       for(var n=0;n<18;n++){
         joints.forEach(bend);
         bodyLinks.forEach(function(link){distance(link.a,link.b,link.length);});
-        joints.forEach(function(j){if(equipment[j.name]!=="human")return;distance(j.a,j.b,j.length);distance(j.b,j.c,j.length);});
+        joints.forEach(function(j){if(equipment[j.name]==="jet")return;distance(j.a,j.b,j.length);distance(j.b,j.c,j.length);});
         mounts.forEach(function(link){distance(link.a,link.b,link.length);});
         points.forEach(function(p){if(p.wheel){wheelContact(p,h);if(n===17&&p.touch)contacts++;return;}var g=ground(p.x)-p.r;if(p.y>g){p.y=g;if(n===17)contacts++;p.px=p.x-(p.x-p.px)*.12;p.py=p.y;}});
       }
