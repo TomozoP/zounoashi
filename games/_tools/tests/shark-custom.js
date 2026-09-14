@@ -6,8 +6,8 @@ const g=load('games/_shark-walk/index.html',{withScripts:true});
 g.press('a');g.press('a');g.press('l');g.press('l');g.step(20);
 assert.equal(g.probe.now().state,'intro');assert.equal(g.probe.now().equipment.leftLeg,'wheel');assert.equal(g.probe.now().equipment.rightArm,'jet');
 g.press(' ');assert.equal(g.probe.now().state,'play');assert(!g.probe.now().leftLegPressed,'開始操作を駆動に混ぜない');
-g.esc();assert.equal(g.probe.now().equipment.rightArm,'jet','やり直しても選択を保持');
-g.tap(45,93);assert.equal(g.probe.now().state,'intro','歯車で選び直せる');g.press('a');assert.equal(g.probe.now().equipment.leftLeg,'jet');
+g.key('a');g.esc();assert.equal(g.probe.now().state,'intro','Escは改造画面に戻る');assert(!g.probe.now().leftLegPressed,'操作を解除する');g.step(60);assert.equal(g.probe.now().x,222.5,'編集中は走行しない');g.key('a',true);assert.equal(g.probe.now().equipment.rightArm,'jet','やり直しても選択を保持');
+g.press(' ');g.tap(45,93);assert.equal(g.probe.now().state,'intro','歯車で選び直せる');g.press('a');assert.equal(g.probe.now().equipment.leftLeg,'jet');
 assert.equal(make({leftLeg:'arm'}).now().equipment.leftLeg,'arm','後ろ側にも腕を付けられる');assert.equal(make({rightArm:'leg'}).now().equipment.rightArm,'leg','前側にも脚を付けられる');
 function all(type){return Object.fromEntries(groups.map(k=>[k,type]));}
 function center(w){return w.points.reduce((s,p)=>s+p.x/p.w,0)/w.points.reduce((s,p)=>s+1/p.w,0);}

@@ -15,15 +15,15 @@ pointer('pointerup',1,'leftLeg');step(30);assert(now().leftLeg<.01&&now().leftAr
 pointer('pointercancel',2,'leftArm');step(30);assert(!now().leftArmPressed&&now().leftArm<.01);
 g.key('a');pointer('pointerdown',1,'leftLeg');pointer('pointerup',1,'leftLeg');assert(now().leftLegPressed,'指を離してもキーで保持');
 g.key('k');g.win.fire('blur',{});assert(!now().leftLegPressed&&!now().leftArmPressed,'画面外へ移ると解除');
-g.esc();
+g.esc();assert.equal(now().state,'intro','Escで改造に戻る');g.press(' ');
 const groups=['leftLeg','rightLeg','leftArm','rightArm'];
 for(const group of groups){pointer('pointerdown',1,group);step(30);for(const other of groups)assert(other===group?now()[other]>.95:now()[other]<.01,'四肢の曲げ量が独立している');pointer('pointerup',1,group);step(30);}
 groups.forEach((group,i)=>pointer('pointerdown',i+1,group));step(30);assert(groups.every(group=>now()[group]>.95),'四本同時に保持できる');
 groups.forEach((group,i)=>{pointer('pointerup',i+1,group);assert(groups.every((other,j)=>now()[other+'Pressed']===(j>i)),'一本ずつ独立して離せる');});
-g.esc();
+g.esc();assert.equal(now().state,'intro','Escで改造に戻る');g.press(' ');
 // 前進できるようには調整しない。操作中の安定性だけを見る。
 for(let i=0;i<20;i++){g.key('a');g.key('s');step(21);g.key('k');g.key('l');step(21);g.key('a',true);g.key('s',true);step(21);g.key('k',true);g.key('l',true);step(21);}
-g.esc();assert.equal(now().state,'play');assert(!now().leftLegPressed&&!now().leftArmPressed);
+g.esc();assert.equal(now().state,'intro','Escで改造に戻る');g.press(' ');assert.equal(now().state,'play');assert(!now().leftLegPressed&&!now().leftArmPressed);
 load.SHAPES.forEach(v=>{g.view(v[0],v[1]);step(20);let b=now().controls;assert.equal(b.length,4);for(let i=1;i<4;i++){assert(b[i].x-b[i-1].x>63);assert(b[i].x-b[i-1].x>b[i].r+b[i-1].r);}assert(b.every(b=>b.y+b.r<now().H));});
 // 空中では筋力がサメ全体を横へ加速させない。地面の反力だけで進む。
 const scope={};vm.createContext(scope);vm.runInContext(fs.readFileSync('games/_shark-walk/walk.js','utf8'),scope);
