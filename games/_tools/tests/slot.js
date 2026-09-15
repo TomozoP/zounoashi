@@ -161,18 +161,18 @@ for(const digit of '1234567890')published.press(digit);
 assert.equal(published.probe.now().nextReel,0,'公開先では数字キーで飛ばない');
 console.log('ローカル数字キー10段階・公開先で無効・完走タイムの固定を確認。');
 
-const wide=load(file,{quiet:true});wide.press('0');
-assert.equal(wide.probe.now().cameraView.zoom,1,'完走直後は近い画面を保つ');
-wide.step(210);
-let whole=wide.probe.now().cameraView;
-assert.ok(whole.left<=35 && whole.right>=14085,'100本と筐体の両端が収まる');
-assert.ok(whole.zoom<0.04);
-wide.view(375,667);whole=wide.probe.now().cameraView;
-assert.ok(whole.left<=35 && whole.right>=14085,'画面変更後も全景を保つ');
-wide.esc();assert.equal(wide.probe.now().cameraView.zoom,1,'やり直すと元の大きさ');
-stopAs(wide,0);stopAs(wide,1);wide.step(210);
-assert.equal(wide.probe.now().cameraView.zoom,1,'失敗時には引かない');
-console.log('完走後の全100列の全景・画面変更・やり直し・失敗時のカメラを確認。');
+const tour=load(file,{quiet:true,inject:'window.__probe.viewAt=function(t){finishTime=t;return cameraView();};'});
+tour.press('0');
+for(const [seconds,expected] of [[0,13580],[31.2,6790],[61.2,0],[91.2,6790],[121.2,13580],[241.2,13580]]) {
+  const view=tour.probe.viewAt(seconds);
+  assert.equal(view.zoom,1,'完走後も元の大きさ');
+  assert.ok(Math.abs(view.left-expected)<1e-7,'端から端へ往復を続ける');
+}
+tour.view(375,667);assert.equal(tour.probe.now().cameraView.zoom,1);
+tour.esc();assert.equal(tour.probe.now().cameraView.left,0,'やり直すと先頭へ');
+stopAs(tour,0);stopAs(tour,1);
+assert.equal(tour.probe.viewAt(61.2).left,tour.probe.now().camera,'失敗では往復しない');
+console.log('完走後の等倍往復・折り返し・繰り返し・やり直しを確認。');
 
 const originalRandom=Math.random,pitches=[];
 try {
