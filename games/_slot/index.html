@@ -131,6 +131,7 @@
   var COUNT = 100, PITCH = 140;
   var reels = [], stopped = [], speed = 4;
   var nextReel = 0, camera = 0, streak = 0, targetSymbol = null;
+  var flash = 0, failed = false;
   // 一列揃えるごとの速度増分。チェリー、レモン、ダイヤ、7の順。
   var acceleration = [0.02, 0.045, 0.075, 0.11];
   function cameraTarget() {
@@ -153,17 +154,20 @@
     streak = 0;
     targetSymbol = null;
     speed = 4;
+    flash = 0;
+    failed = false;
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
+    flash = Math.max(0, flash - dt);
     // 止める列を追いかけて、長い本体に沿って右へ進む。
     camera += (cameraTarget() - camera) * (1 - Math.exp(-24 * dt));
     if (Math.abs(cameraTarget() - camera) < 0.1) camera = cameraTarget();
     if (state !== S.PLAY) return;
     T += dt;
 
-    for (var i = nextReel; i < COUNT; i++) reels[i] = (reels[i] + dt * speed) % 4;
+    for (var i = nextReel; i < COUNT; i++) reels[i] = ((reels[i] - dt * speed) % 4 + 4) % 4;
   }
 
   /* ============ 入力 ============
@@ -171,22 +175,24 @@
      x が null のときはキー操作（場所を指さない）。 */
   function down(x, y) {
     audioOn();
+    if (held) return;
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
       if (hit === "share") doShare();
-      else if (hit === "retry") newRound();
+      else if (hit === "retry") { newRound(); held = true; }
       return;
     }
     if (held || (x != null && Math.hypot(x - W / 2, y - (CY + 310)) > 54)) return;
     held = true;
+    flash = 0.18;
     var index = nextReel;
     if (index >= COUNT) return;
     stopped[index] = true;
     reels[index] = Math.round(reels[index]) % 4;
     if (index > 0 && reels[index] !== targetSymbol) {
       tone(180, 0.12, 0.07, "sine", 80);
-      newRound();
-      held = true; // 失敗した指を離すまで、次の列を止めない。
+      failed = true;
+      state = S.RESULT;
       return;
     }
     if (index === 0) targetSymbol = reels[index];
@@ -292,7 +298,7 @@
     box(78,CY-229,bodyWidth-86,61,20,"#812a39");
     var lampStart = Math.max(0, Math.floor((camera-110)/40));
     var lampEnd = Math.min(Math.floor((bodyWidth-120)/40), Math.ceil((camera+W-110)/40));
-    for(var j=lampStart;j<=lampEnd;j++) circle(110+j*40,CY-199,7,(state===S.RESULT&&score>1)||j%2===0?"#ffe2a0":"#d19068");
+    for(var j=lampStart;j<=lampEnd;j++) circle(110+j*40,CY-199,7,(state===S.RESULT&&!failed)||j%2===0?"#ffe2a0":"#d19068");
     box(55,CY-145,COUNT*PITCH+10,317,19,"#733342");
     // 画面に入る列だけ描き、100列でも描画の重さを増やさない。
     var first = Math.max(0,Math.floor((camera-195)/PITCH));
@@ -317,41 +323,44 @@
       box(W/2-14,CY+292+(held?5:0),28,28,5,"#ae3547");
     }
     ctx.fillStyle="#ffe1a0";ctx.font="800 64px Georgia";ctx.textAlign="center";
-    ctx.textBaseline="alphabetic";ctx.fillText(String(streak),270,CY-302);
+    ctx.textBaseline="alphabetic";ctx.fillText(String(COUNT - streak),270,CY-302);
     if(state===S.RESULT) drawResult();
+    // 全画面を白くせず、縁だけ短く光らせる。録画にも同じ絵が入る。
+    if(flash > 0) {
+      ctx.save();ctx.globalAlpha = flash / 0.18;
+      ctx.strokeStyle = failed ? "#ef8090" : "#ffe1a0";
+      ctx.shadowColor = ctx.strokeStyle;ctx.shadowBlur = 18;
+      ctx.lineWidth = 8;ctx.strokeRect(4,4,W-8,H-8);ctx.restore();
+    }
   }
 
-  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
+  /* 戻るボタンは停止ボタンと同じ場所。右に共有ボタンを置く。 */
   function resultButtons() {
-    var h = 70, gap = 24, wr = 86, ws = 86;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = CY + 275;
     return [
-      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
-      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+      { id: "retry", x: W/2, y: CY+310, r: 54, label: "もう一度" },
+      { id: "share", x: W/2+140, y: CY+310, r: 44, label: "Xでシェア" }
     ];
   }
-  function hitButton(x, y) {
-    var bs = resultButtons();
-    for (var i = 0; i < bs.length; i++) {
-      var b = bs[i];
-      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+  function hitButton(x,y) {
+    var buttons = resultButtons();
+    for(var i=0;i<buttons.length;i++) {
+      var b=buttons[i];
+      if(Math.hypot(x-b.x,y-b.y)<=b.r) return b.id;
     }
     return null;
   }
   function drawResult() {
-    resultButtons().forEach(function (b) {
-      ctx.save();
-      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
-      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
-      ctx.fillStyle = "#fff"; ctx.fill();
-      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
-      ctx.fillStyle = "#16202e";
-      ctx.font = "800 24px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      if (!window.zActionIcon || !window.zActionIcon(ctx,b.label,0,1,30)) ctx.fillText(b.label, 0, 1);
-      ctx.restore();
-      ctx.textBaseline = "alphabetic";
+    resultButtons().forEach(function(b) {
+      circle(b.x,b.y+7,b.r+4,"#202123");
+      circle(b.x,b.y,b.r+2,"#812a39");
+      circle(b.x,b.y-4,b.r-4,"#ffe1a0");
+      ctx.fillStyle="#ae3547";
+      if(b.id==="retry") {
+        ctx.save();ctx.translate(b.x,b.y-4);ctx.strokeStyle="#ae3547";
+        ctx.lineWidth=5;ctx.lineCap="round";ctx.lineJoin="round";
+        ctx.beginPath();ctx.moveTo(-5,-14);ctx.lineTo(-19,0);ctx.lineTo(-5,14);
+        ctx.moveTo(-19,0);ctx.lineTo(17,0);ctx.stroke();ctx.restore();
+      } else window.zActionIcon(ctx,b.label,b.x,b.y-4,32);
     });
   }
 
@@ -359,7 +368,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, W: W, H: H, reels: reels.slice(), stopped: stopped.slice(), speed: speed, buttonY: CY + 310, count: COUNT, nextReel: nextReel, camera: camera, cameraTarget: cameraTarget(), streak: streak, targetSymbol: targetSymbol, acceleration: targetSymbol == null ? 0 : acceleration[targetSymbol] }; },
+    now: function () { return { state: state, score: score, W: W, H: H, reels: reels.slice(), stopped: stopped.slice(), speed: speed, buttonY: CY + 310, count: COUNT, nextReel: nextReel, camera: camera, cameraTarget: cameraTarget(), streak: streak, remaining: COUNT - streak, flash: flash, failed: failed, targetSymbol: targetSymbol, acceleration: targetSymbol == null ? 0 : acceleration[targetSymbol] }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
@@ -371,7 +380,7 @@
     run: async function (r) {
       await r.wait(1000);
       for(var i=0;i<COUNT;i++){await r.wait(180);r.key();}
-      // 失敗で先頭へ戻る様子も、そのまま撮影する。
+      // 失敗画面と、戻る操作もそのまま撮影する。
       await r.wait(1500);
     }
   };
