@@ -136,3 +136,10 @@ const beforeFanfare=voices.length;voiced.step(120);
 assert.ok(voices.length>beforeFanfare+26,'完走後も歓声とファンファーレが続く');
 voiced.step(400);assert.equal(voiced.probe.now().celebration,0);
 console.log('10連の歓声、8秒の完走演出、7だけの虹色、やり直し時の解除を確認。');
+
+voiced.probe.reset();stopAs(voiced,0);
+const beforeFailure=voices.filter(v=>v.type==='sawtooth').length;
+stopAs(voiced,1);
+assert.equal(voiced.probe.now().failed,true);
+assert.equal(voices.filter(v=>v.type==='sawtooth').length-beforeFailure,30,'停止の掛け声と落胆の声を両方鳴らす');
+console.log('失敗時の落胆の声を確認。');
