@@ -107,16 +107,47 @@
     o.connect(g); g.connect(AC.destination);
     o.start(n); o.stop(n + dur + 0.05);
   }
-  function noiseHit(dur, freq, vol, q) {
+  function noiseHit(dur, freq, vol, q, attack, to, pan, delay) {
     if (!AC || !NOISE) return;
     var s = AC.createBufferSource(); s.buffer = NOISE;
     var f = AC.createBiquadFilter();
     f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
-    var g = AC.createGain(), n = AC.currentTime;
-    g.gain.setValueAtTime(vol, n);
+    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
+    if(to)f.frequency.exponentialRampToValueAtTime(to,n+dur);
+    g.gain.setValueAtTime(attack?0.0001:vol,n);if(attack)g.gain.exponentialRampToValueAtTime(vol,n+attack);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    s.connect(f); f.connect(g); g.connect(AC.destination);
-    s.start(n); s.stop(n + dur + 0.05);
+    s.connect(f); f.connect(g);
+    if(AC.createStereoPanner){var p=AC.createStereoPanner();p.pan.value=pan||0;g.connect(p);p.connect(AC.destination);}else g.connect(AC.destination);
+    s.start(n,Math.random()); s.stop(n + dur + 0.05);
+  }
+  // ボーリングと同じ観客の掛け声。
+  var crowdBus=null;
+  function crowdOutput(){
+    if(crowdBus)return crowdBus;
+    // 観客席の短い反射音を共有し、遠近のある一団にまとめる。
+    crowdBus=AC.createGain();var dry=AC.createGain(),wet=AC.createGain(),room=AC.createConvolver(),filter=AC.createBiquadFilter(),limit=AC.createDynamicsCompressor();
+    var length=Math.floor(AC.sampleRate*.24),impulse=AC.createBuffer(2,length,AC.sampleRate);
+    for(var ch=0;ch<2;ch++){var data=impulse.getChannelData(ch);for(var n=0;n<length;n++){var t=n/AC.sampleRate;data[n]=t<.022?0:(Math.random()*2-1)*Math.exp(-t*24)*.35;}}
+    room.buffer=impulse;dry.gain.value=.8;wet.gain.value=.28;filter.type='lowpass';filter.frequency.value=3800;
+    limit.threshold.value=-19;limit.knee.value=12;limit.ratio.value=3;limit.attack.value=.008;limit.release.value=.15;
+    crowdBus.connect(dry);dry.connect(limit);crowdBus.connect(room);room.connect(filter);filter.connect(wet);wet.connect(limit);var voiceVolume=AC.createGain();voiceVolume.gain.value=3.2;limit.connect(voiceVolume);voiceVolume.connect(AC.destination);return crowdBus;
+  }
+  // 声の高さと発声を少しずらし、「ハ」から「イ」へ響きを移す。
+  function crowdChant(speed){
+    if(!AC)return;
+    var duration=Math.min(.28,(.8-.55*Math.max(0,Math.min(1,(speed-1.8)/15.14)))*.8);
+    for(var i=0;i<20;i++){
+      var start=AC.currentTime+Math.random()*.09,pitch=85+(i%7)*27+Math.random()*24,pan=(i/19*2-1)*.9,timbre=.78+Math.random()*.44,volume=.0035+Math.random()*.0035;
+      var voice=AC.createOscillator(),envelope=AC.createGain();voice.type=i%4===0?'triangle':'sawtooth';voice.detune.setValueAtTime(Math.random()*32-16,start);voice.detune.linearRampToValueAtTime(Math.random()*38-19,start+duration*.6);
+      voice.frequency.setValueAtTime(pitch,start);voice.frequency.linearRampToValueAtTime(pitch*1.1,start+.05);voice.frequency.exponentialRampToValueAtTime(pitch*.9,start+duration);
+      envelope.gain.setValueAtTime(.0001,start);envelope.gain.exponentialRampToValueAtTime(volume,start+.035);envelope.gain.setValueAtTime(volume,start+duration*.55);envelope.gain.exponentialRampToValueAtTime(.0001,start+duration);
+      [[780,330,5,1],[1200,2250,7,.65],[2700,2950,9,.22]].forEach(function(v){
+        var filter=AC.createBiquadFilter(),level=AC.createGain();filter.type='bandpass';filter.Q.value=v[2];filter.frequency.setValueAtTime(v[0]*timbre,start);filter.frequency.setValueAtTime(v[0]*timbre,start+duration*.35);filter.frequency.exponentialRampToValueAtTime(v[1]*timbre,start+duration*.85);level.gain.value=v[3];voice.connect(filter);filter.connect(level);level.connect(envelope);
+      });
+      if(AC.createStereoPanner){var stereo=AC.createStereoPanner();stereo.pan.value=pan;envelope.connect(stereo);stereo.connect(crowdOutput());}else envelope.connect(crowdOutput());
+      voice.start(start);voice.stop(start+duration+.02);
+      noiseHit(.055,1500,.004,.6,.008,900,pan,start-AC.currentTime);
+    }
   }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
@@ -131,9 +162,9 @@
   var COUNT = 100, PITCH = 140;
   var reels = [], stopped = [], speed = 4;
   var nextReel = 0, camera = 0, streak = 0, targetSymbol = null;
-  var flash = 0, failed = false;
-  // 一列揃えるごとの速度増分。チェリー、レモン、ダイヤ、7の順。
-  var acceleration = [0.02, 0.045, 0.075, 0.11];
+  var flash = 0, failed = false, milestone = 0;
+  // 10列揃えるごとの速度増分。チェリー、レモン、ダイヤ、7の順。
+  var acceleration = [0.2, 0.45, 0.75, 1.1];
   function cameraTarget() {
     return Math.max(0, Math.min(COUNT - 3, nextReel - 1)) * PITCH;
   }
@@ -156,11 +187,13 @@
     speed = 4;
     flash = 0;
     failed = false;
+    milestone = 0;
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
     flash = Math.max(0, flash - dt);
+    milestone = Math.max(0, milestone - dt);
     // 止める列を追いかけて、長い本体に沿って右へ進む。
     camera += (cameraTarget() - camera) * (1 - Math.exp(-24 * dt));
     if (Math.abs(cameraTarget() - camera) < 0.1) camera = cameraTarget();
@@ -187,18 +220,24 @@
     flash = 0.18;
     var index = nextReel;
     if (index >= COUNT) return;
+    crowdChant(speed);
     stopped[index] = true;
     reels[index] = Math.round(reels[index]) % 4;
     if (index > 0 && reels[index] !== targetSymbol) {
       tone(180, 0.12, 0.07, "sine", 80);
       failed = true;
+      milestone = 0;
       state = S.RESULT;
       return;
     }
     if (index === 0) targetSymbol = reels[index];
     nextReel++;
     streak = nextReel;
-    speed = 4 + acceleration[targetSymbol] * (nextReel - 1);
+    speed = 4 + acceleration[targetSymbol] * Math.floor(nextReel / 10);
+    if (nextReel % 10 === 0) {
+      milestone = 0.8;
+      [659,830,988].forEach(function(f,i) { tone(f,0.16,0.035,"sine",null,i*0.075); });
+    }
     score = Math.max(score, streak);
     tone(420 + Math.min(streak, 12) * 40, 0.09, 0.08, "sine");
     if (nextReel === COUNT) {
@@ -298,7 +337,7 @@
     box(78,CY-229,bodyWidth-86,61,20,"#812a39");
     var lampStart = Math.max(0, Math.floor((camera-110)/40));
     var lampEnd = Math.min(Math.floor((bodyWidth-120)/40), Math.ceil((camera+W-110)/40));
-    for(var j=lampStart;j<=lampEnd;j++) circle(110+j*40,CY-199,7,(state===S.RESULT&&!failed)||j%2===0?"#ffe2a0":"#d19068");
+    for(var j=lampStart;j<=lampEnd;j++) circle(110+j*40,CY-199,7,(state===S.RESULT&&!failed)||milestone>0||j%2===0?"#ffe2a0":"#d19068");
     box(55,CY-145,COUNT*PITCH+10,317,19,"#733342");
     // 画面に入る列だけ描き、100列でも描画の重さを増やさない。
     var first = Math.max(0,Math.floor((camera-195)/PITCH));
@@ -322,8 +361,22 @@
       circle(W/2,CY+306+(held?5:0),50,held?"#e8bd7c":"#ffe1a0");
       box(W/2-14,CY+292+(held?5:0),28,28,5,"#ae3547");
     }
+    ctx.save();ctx.translate(270,CY-302);
+    var bounce = 1 + (milestone>0 ? Math.sin((1-milestone/0.8)*Math.PI)*0.2 : 0);
+    ctx.scale(bounce,bounce);
     ctx.fillStyle="#ffe1a0";ctx.font="800 64px Georgia";ctx.textAlign="center";
-    ctx.textBaseline="alphabetic";ctx.fillText(String(COUNT - streak),270,CY-302);
+    ctx.textBaseline="alphabetic";ctx.fillText(String(COUNT - streak),0,0);ctx.restore();
+    if(milestone>0) {
+      var progress=1-milestone/0.8;
+      ctx.save();ctx.globalAlpha=(1-progress)*0.8;ctx.fillStyle="#ffe1a0";
+      for(var spark=0;spark<24;spark++) {
+        var angle=spark*Math.PI*2/24, radius=48+progress*(65+(spark%3)*18);
+        ctx.save();ctx.translate(270+Math.cos(angle)*radius,CY-327+Math.sin(angle)*radius*0.32);
+        ctx.rotate(angle+progress*2);ctx.fillRect(-2,-4,4,8);ctx.restore();
+      }
+      ctx.strokeStyle="#ffe1a0";ctx.lineWidth=3;ctx.shadowColor="#ffe1a0";ctx.shadowBlur=18;
+      ctx.strokeRect(6,6,W-12,H-12);ctx.restore();
+    }
     if(state===S.RESULT) drawResult();
     // 全画面を白くせず、縁だけ短く光らせる。録画にも同じ絵が入る。
     if(flash > 0) {
@@ -368,7 +421,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, W: W, H: H, reels: reels.slice(), stopped: stopped.slice(), speed: speed, buttonY: CY + 310, count: COUNT, nextReel: nextReel, camera: camera, cameraTarget: cameraTarget(), streak: streak, remaining: COUNT - streak, flash: flash, failed: failed, targetSymbol: targetSymbol, acceleration: targetSymbol == null ? 0 : acceleration[targetSymbol] }; },
+    now: function () { return { state: state, score: score, W: W, H: H, reels: reels.slice(), stopped: stopped.slice(), speed: speed, buttonY: CY + 310, count: COUNT, nextReel: nextReel, camera: camera, cameraTarget: cameraTarget(), streak: streak, remaining: COUNT - streak, flash: flash, failed: failed, milestone: milestone, targetSymbol: targetSymbol, acceleration: targetSymbol == null ? 0 : acceleration[targetSymbol] }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };

@@ -23,6 +23,8 @@ function play(sequence, shape, keyboard) {
     let now = g.probe.now();
     assert.equal(now.nextReel, i + 1);
     assert.equal(now.remaining, 99-i);
+    assert.equal(now.speed,4+increments[target]*Math.floor((i+1)/10));
+    if((i+1)%10===0) assert.equal(now.milestone,0.8,"10連ごとに節目の演出");
     assert.ok(now.flash>0);
     assert.equal(now.reels[i], target);
     assert.ok(now.stopped.slice(0, i+1).every(Boolean));
@@ -54,7 +56,7 @@ function play(sequence, shape, keyboard) {
   return longest;
 }
 const shapes = [[375,667],[390,844],[768,1024],[1280,720]];
-const increments = [0.02,0.045,0.075,0.11];
+const increments = [0.2,0.45,0.75,1.1];
 for(let target=0;target<4;target++) {
   assert.equal(play(Array(100).fill(target),shapes[target],target%2===0),100);
 }
@@ -70,7 +72,7 @@ for(let target=0;target<4;target++) {
     const g=load(file,{quiet:true});
     for(let i=0;i<8;i++) {
       stopAs(g,target);
-      assert.equal(g.probe.now().speed,4+increments[target]*i);
+      assert.equal(g.probe.now().speed,4+increments[target]*Math.floor((i+1)/10));
       assert.equal(g.probe.now().targetSymbol,target);
     }
     g.step(30);assert.ok(g.probe.now().camera>0);
@@ -103,4 +105,20 @@ const before=direction.probe.now().reels[0];direction.step(1);
 assert.ok(Math.abs(direction.probe.now().reels[0]-((before-4/60+4)%4))<1e-9,'以前と逆方向に回る');
 direction.tap(20,20);assert.equal(direction.probe.now().flash,0,'枠外のタップでは光らない');
 console.log('4絵柄100連、100→0表示、12通りの失敗停止・共有・戻る、枠の光と逆回転を確認。');
-console.log('100列目の停止猶予（ミリ秒）: '+increments.map(a=>(1000/(4+a*98)).toFixed(1)).join(' / '));
+console.log('100列目の停止猶予（ミリ秒）: '+increments.map(a=>(1000/(4+a*9)).toFixed(1)).join(' / '));
+
+// 音声の接続先と発声数を、音を出さない台で確かめる。
+const voiced=load(file,{quiet:true,inject:'window.__probe.setAudio=function(C){window.AudioContext=C;};'});const voices=[];
+function param(){return {value:0,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){}};}
+function node(){return {connect(){},disconnect(){},start(){},stop(){},gain:param(),frequency:param(),detune:param(),pan:param(),Q:param(),threshold:param(),knee:param(),ratio:param(),attack:param(),release:param()};}
+voiced.probe.setAudio(function(){
+  this.state='running';this.sampleRate=1000;this.currentTime=0;this.destination=node();
+  this.createBuffer=()=>({getChannelData:()=>new Float32Array(2000)});
+  this.createBufferSource=node;this.createGain=node;this.createBiquadFilter=node;
+  this.createConvolver=node;this.createDynamicsCompressor=node;this.createStereoPanner=node;
+  this.createOscillator=()=>{const n=node();voices.push(n);return n;};
+});
+stopAs(voiced,0);stopAs(voiced,0);
+assert.equal(voices.filter(v=>v.type==='sawtooth'||v.type==='triangle').length,40,'停止2回で20人の掛け声を2回');
+assert.ok(voices.every(v=>v.type),'音声処理が最後まで組み立てられる');
+console.log('ボーリングの掛け声が停止ごとに鳴る接続を確認。');
