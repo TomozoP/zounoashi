@@ -137,7 +137,7 @@
     if(!AC)return;
     var duration=Math.min(.28,(.8-.55*Math.max(0,Math.min(1,(speed-1.8)/15.14)))*.8);
     for(var i=0;i<20;i++){
-      var start=AC.currentTime+Math.random()*.09,pitch=85+(i%7)*27+Math.random()*24,pan=(i/19*2-1)*.9,timbre=.78+Math.random()*.44,volume=.0035+Math.random()*.0035;
+      var start=AC.currentTime+Math.random()*.09,pitch=85+(i%7)*27+Math.random()*24,pan=(i/19*2-1)*.9,timbre=.78+Math.random()*.44,volume=(.0035+Math.random()*.0035)*1.35;
       var voice=AC.createOscillator(),envelope=AC.createGain();voice.type=i%4===0?'triangle':'sawtooth';voice.detune.setValueAtTime(Math.random()*32-16,start);voice.detune.linearRampToValueAtTime(Math.random()*38-19,start+duration*.6);
       voice.frequency.setValueAtTime(pitch,start);voice.frequency.linearRampToValueAtTime(pitch*1.1,start+.05);voice.frequency.exponentialRampToValueAtTime(pitch*.9,start+duration);
       envelope.gain.setValueAtTime(.0001,start);envelope.gain.exponentialRampToValueAtTime(volume,start+.035);envelope.gain.setValueAtTime(volume,start+duration*.55);envelope.gain.exponentialRampToValueAtTime(.0001,start+duration);
@@ -147,6 +147,23 @@
       if(AC.createStereoPanner){var stereo=AC.createStereoPanner();stereo.pan.value=pan;envelope.connect(stereo);stereo.connect(crowdOutput());}else envelope.connect(crowdOutput());
       voice.start(start);voice.stop(start+duration+.02);
       noiseHit(.055,1500,.004,.6,.008,900,pan,start-AC.currentTime);
+    }
+  }
+  // 投球には丸い「オオッ」、得点には開いた「ワーッ」を重ねる。
+  function crowdReaction(reaction){
+    if(!AC)return;
+    var gasp=reaction==='throw',cheer=reaction===true,count=cheer?26:20;
+    for(var i=0;i<count;i++){
+      var start=AC.currentTime+Math.random()*.13,duration=gasp?.4+Math.random()*.1:cheer?.85+Math.random()*.08:1+Math.random()*.2;
+      var pitch=(gasp?95:cheer?130:100)+(i%7)*16+Math.random()*20,voice=AC.createOscillator(),gain=AC.createGain(),volume=(cheer?.007:gasp?.0055:.007)*(.7+Math.random()*.6);voice.type=i%4===0?'triangle':'sawtooth';voice.detune.setValueAtTime(Math.random()*32-16,start);voice.detune.linearRampToValueAtTime(Math.random()*38-19,start+duration*.6);
+      voice.frequency.setValueAtTime(pitch,start);voice.frequency.exponentialRampToValueAtTime(pitch*(gasp?1.16:cheer?1.25:.68),start+duration*.5);
+      gain.gain.setValueAtTime(.0001,start);gain.gain.exponentialRampToValueAtTime(volume,start+.07);gain.gain.setValueAtTime(volume*.85,start+duration*.6);gain.gain.exponentialRampToValueAtTime(.0001,start+duration);
+      var vowels=gasp?[[400,500,5,1],[750,900,7,.65],[2300,2200,9,.15]]:cheer?[[430,900,4,1],[800,1400,6,.7],[2500,2800,8,.25]]:[[600,420,5,1],[1100,800,7,.55],[2600,2400,9,.18]],timbre=.78+Math.random()*.44;
+      vowels.forEach(function(v){
+        var f=AC.createBiquadFilter(),level=AC.createGain();f.type='bandpass';f.Q.value=v[2];f.frequency.setValueAtTime(v[0]*timbre,start);f.frequency.linearRampToValueAtTime(v[1]*timbre,start+duration*.3);level.gain.value=v[3];voice.connect(f);f.connect(level);level.connect(gain);
+      });
+      if(AC.createStereoPanner){var pan=AC.createStereoPanner();pan.pan.value=(i/(count-1)*2-1)*.9;gain.connect(pan);pan.connect(crowdOutput());}else gain.connect(crowdOutput());
+      voice.start(start);voice.stop(start+duration+.03);
     }
   }
   document.addEventListener("visibilitychange", function () {
@@ -163,6 +180,7 @@
   var reels = [], stopped = [], speed = 4;
   var nextReel = 0, camera = 0, streak = 0, targetSymbol = null;
   var flash = 0, failed = false, milestone = 0;
+  var celebration = 0, finishTime = 0, confetti = [], cheerBeat = 0, fanfareBeat = 0;
   // 10列揃えるごとの速度増分。チェリー、レモン、ダイヤ、7の順。
   var acceleration = [0.2, 0.45, 0.75, 1.1];
   function cameraTarget() {
@@ -188,12 +206,29 @@
     flash = 0;
     failed = false;
     milestone = 0;
+    celebration = 0; finishTime = 0; confetti = []; cheerBeat = 0; fanfareBeat = 0;
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
     flash = Math.max(0, flash - dt);
     milestone = Math.max(0, milestone - dt);
+    if (state === S.RESULT && !failed) finishTime += dt;
+    if (celebration > 0) {
+      celebration = Math.max(0, celebration - dt);
+      cheerBeat -= dt; fanfareBeat -= dt;
+      if (cheerBeat <= 0 && celebration > 1.5) { crowdReaction(true); cheerBeat = 1.3; }
+      if (fanfareBeat <= 0 && finishTime < 4.8) {
+        var notes = [523,659,784,1047,784,1047,1319,1568];
+        var note = notes[Math.min(7,Math.floor(finishTime/0.3)%8)];
+        tone(note,0.28,0.055,"triangle");tone(note/2,0.32,0.035,"sine");fanfareBeat=0.3;
+      }
+      for(var c=0;c<confetti.length;c++) {
+        var paper=confetti[c];paper.x+=paper.vx*dt;paper.y+=paper.vy*dt;paper.angle+=paper.spin*dt;
+        if(paper.y>H+20 && celebration>2)paper.y=-20;
+        if(paper.x>W+20)paper.x=-20;if(paper.x<-20)paper.x=W+20;
+      }
+    }
     // 止める列を追いかけて、長い本体に沿って右へ進む。
     camera += (cameraTarget() - camera) * (1 - Math.exp(-24 * dt));
     if (Math.abs(cameraTarget() - camera) < 0.1) camera = cameraTarget();
@@ -236,13 +271,20 @@
     speed = 4 + acceleration[targetSymbol] * Math.floor(nextReel / 10);
     if (nextReel % 10 === 0) {
       milestone = 0.8;
+      if(nextReel < COUNT) crowdReaction(true);
       [659,830,988].forEach(function(f,i) { tone(f,0.16,0.035,"sine",null,i*0.075); });
     }
     score = Math.max(score, streak);
     tone(420 + Math.min(streak, 12) * 40, 0.09, 0.08, "sine");
     if (nextReel === COUNT) {
       state = S.RESULT;
-      if (score) [523,659,784,1047].forEach(function(f,j){tone(f,0.18,0.06,"sine",null,j*0.12);});
+      celebration = 8;finishTime = 0;cheerBeat = 1.3;fanfareBeat = 0;
+      crowdReaction(true);
+      confetti = Array.from({length:220},function(_,i){return {
+        x:Math.random()*W,y:-Math.random()*H,vx:(Math.random()-.5)*90,
+        vy:140+Math.random()*180,angle:Math.random()*Math.PI,spin:(Math.random()-.5)*8,
+        color:["#ffe1a0","#ed667c","#79d3b3","#83b8ff","#c695e8"][i%5]
+      };});
     }
   }
   function move(x, y) {
@@ -332,8 +374,15 @@
     ctx.save();
     ctx.translate(-camera,0);
     box(35,CY-250,bodyWidth,470,42,"#202123");
-    box(35,CY-264,bodyWidth,470,42,"#a52e42");
-    box(48,CY-251,bodyWidth-26,444,33,"#bf3e50");
+    var rainbow=state===S.RESULT&&!failed&&targetSymbol===3;
+    var cabinet="#bf3e50";
+    if(rainbow) {
+      cabinet=ctx.createLinearGradient(camera,0,camera+W,CY+206);
+      for(var band=0;band<=6;band++)cabinet.addColorStop(band/6,"hsl("+((band*60+finishTime*65)%360)+",85%,62%)");
+      ctx.shadowColor="hsl("+((finishTime*65)%360)+",90%,65%)";ctx.shadowBlur=22;
+    }
+    box(35,CY-264,bodyWidth,470,42,rainbow?cabinet:"#a52e42");
+    box(48,CY-251,bodyWidth-26,444,33,cabinet);ctx.shadowBlur=0;
     box(78,CY-229,bodyWidth-86,61,20,"#812a39");
     var lampStart = Math.max(0, Math.floor((camera-110)/40));
     var lampEnd = Math.min(Math.floor((bodyWidth-120)/40), Math.ceil((camera+W-110)/40));
@@ -378,6 +427,11 @@
       ctx.strokeRect(6,6,W-12,H-12);ctx.restore();
     }
     if(state===S.RESULT) drawResult();
+    if(celebration>0) {
+      ctx.save();ctx.globalAlpha=Math.min(1,celebration);
+      confetti.forEach(function(paper){ctx.save();ctx.translate(paper.x,paper.y);ctx.rotate(paper.angle);ctx.fillStyle=paper.color;ctx.fillRect(-3,-6,6,12);ctx.restore();});
+      ctx.restore();
+    }
     // 全画面を白くせず、縁だけ短く光らせる。録画にも同じ絵が入る。
     if(flash > 0) {
       ctx.save();ctx.globalAlpha = flash / 0.18;
@@ -421,7 +475,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, W: W, H: H, reels: reels.slice(), stopped: stopped.slice(), speed: speed, buttonY: CY + 310, count: COUNT, nextReel: nextReel, camera: camera, cameraTarget: cameraTarget(), streak: streak, remaining: COUNT - streak, flash: flash, failed: failed, milestone: milestone, targetSymbol: targetSymbol, acceleration: targetSymbol == null ? 0 : acceleration[targetSymbol] }; },
+    now: function () { return { state: state, score: score, W: W, H: H, reels: reels.slice(), stopped: stopped.slice(), speed: speed, buttonY: CY + 310, count: COUNT, nextReel: nextReel, camera: camera, cameraTarget: cameraTarget(), streak: streak, remaining: COUNT - streak, flash: flash, failed: failed, milestone: milestone, celebration: celebration, confetti: confetti.length, rainbow: state===S.RESULT&&!failed&&targetSymbol===3, targetSymbol: targetSymbol, acceleration: targetSymbol == null ? 0 : acceleration[targetSymbol] }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
