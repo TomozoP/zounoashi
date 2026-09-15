@@ -1,8 +1,8 @@
 /* 組み替えと車輪・ジェットの力を確認する。 */
 const fs=require('fs'),assert=require('assert'),load=require('../harness');
-const make=new Function(fs.readFileSync('games/_shark-walk/walk.js','utf8')+';return SharkWalk;')();
+const make=new Function(fs.readFileSync('games/shark-walk/walk.js','utf8')+';return SharkWalk;')();
 const groups=['leftLeg','rightLeg','leftArm','rightArm'];
-const g=load('games/_shark-walk/index.html',{withScripts:true});
+const g=load('games/shark-walk/index.html',{withScripts:true});
 g.press('a');g.press('a');g.press('l');g.press('l');g.step(20);
 assert.equal(g.probe.now().state,'intro');assert.equal(g.probe.now().equipment.leftLeg,'wheel');assert.equal(g.probe.now().equipment.rightArm,'jet');
 g.press(' ');assert.equal(g.probe.now().state,'play');assert(!g.probe.now().leftLegPressed,'開始操作を駆動に混ぜない');
@@ -48,4 +48,4 @@ assert.equal(g.probe.now().goal,3200,'延長したコースを保持');assert(ma
 function fire(name,x,y){g.wrap.fire(name,{pointerId:7,clientX:x,clientY:y,button:0,isPrimary:true,preventDefault(){}});}
 let b=g.probe.now().controls[1],before=g.probe.now().equipment.rightLeg;fire('pointerdown',b.x,b.y);assert.equal(g.probe.now().equipment.rightLeg,before);fire('pointercancel',b.x,b.y);assert.equal(g.probe.now().equipment.rightLeg,before);fire('pointerdown',b.x,b.y);fire('pointerup',b.x,b.y);assert.notEqual(g.probe.now().equipment.rightLeg,before);
 let y=g.probe.now().H*.94;fire('pointerdown',270,y);assert.equal(g.probe.now().state,'intro');fire('pointerup',270,y);assert.equal(g.probe.now().state,'play');assert(!g.probe.now().leftLegPressed&&!g.probe.now().rightArmPressed);
-assert(!fs.readFileSync('games/_shark-walk/index.html','utf8').includes('id="start"'),'STARTボタンは戻さない');
+assert(!fs.readFileSync('games/shark-walk/index.html','utf8').includes('id="start"'),'STARTボタンは戻さない');

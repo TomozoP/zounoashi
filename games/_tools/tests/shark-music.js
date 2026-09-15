@@ -1,6 +1,6 @@
 /* 自作曲の波形と、再挑戦時に重複しないことを確認する。 */
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
-const scope={SharkMusic:new Function(fs.readFileSync('games/_shark-walk/music.js','utf8')+';return SharkMusic;')()};
+const scope={SharkMusic:new Function(fs.readFileSync('games/shark-walk/music.js','utf8')+';return SharkMusic;')()};
 let channels=[],sources=0,starts=0,stops=0,loop=false;
 const ac={state:'running',destination:{},createBuffer(c,n,rate){assert.equal(c,2);assert.equal(n/rate,48);channels=Array.from({length:c},()=>new Float32Array(n));return{getChannelData(i){return channels[i];}};},createBufferSource(){sources++;return{connect(){},disconnect(){},start(){starts++;loop=this.loop;},stop(){stops++;}};}};
 const music=scope.SharkMusic(ac);assert.equal(sources,0,'開始前には再生しない');

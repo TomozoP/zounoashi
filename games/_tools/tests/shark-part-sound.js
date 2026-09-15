@@ -1,6 +1,6 @@
 /* 四つの音程と、指・キーの押し始めだけで鳴ることを確認する。 */
 const fs=require('fs'),assert=require('assert'),load=require('../harness');
-const make=new Function(fs.readFileSync('games/_shark-walk/music.js','utf8')+';return SharkPartSound;')();
+const make=new Function(fs.readFileSync('games/shark-walk/music.js','utf8')+';return SharkPartSound;')();
 const frequencies=[],outputs=[];
 function param(){return{setValueAtTime(){},exponentialRampToValueAtTime(){},cancelScheduledValues(){},setTargetAtTime(){}};}
 const ac={currentTime:1,state:'running',destination:{},createOscillator(){const f=param();f.exponentialRampToValueAtTime=v=>frequencies.push(v);return{frequency:f,connect(){},disconnect(){},start(){},stop(){}};},createGain(){return{gain:param(),connect(to){outputs.push(to);},disconnect(){}};}};
@@ -8,7 +8,7 @@ const hit=make(ac),groups=['leftLeg','rightLeg','leftArm','rightArm'];groups.for
 assert.equal(frequencies.length,12);
 [62,66,69,71].forEach((note,i)=>assert(Math.abs(frequencies[i*3]-440*Math.pow(2,(note-69)/12))<.001));
 assert(outputs.every(o=>o===ac.destination),'録画と同じ出力に送る');hit('leftLeg');assert.equal(frequencies.length,15);ac.state='closed';hit('leftLeg');assert.equal(frequencies.length,15);
-const g=load('games/_shark-walk/index.html',{withScripts:true,inject:'  var heard=[];partSound=function(group){heard.push(group);};window.__probe.heard=function(){return heard.slice();};'});
+const g=load('games/shark-walk/index.html',{withScripts:true,inject:'  var heard=[];partSound=function(group){heard.push(group);};window.__probe.heard=function(){return heard.slice();};'});
 g.press(' ');assert.deepEqual(g.probe.heard(),[],'出発操作では四肢の音を鳴らさない');
 ['a','s','k','l'].forEach(k=>g.key(k));assert.deepEqual(g.probe.heard(),groups,'四つ同時に重ねられる');
 g.key('a');assert.equal(g.probe.heard().length,4,'長押しを重複させない');
