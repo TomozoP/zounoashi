@@ -40,11 +40,12 @@ function SharkMusic(ac) {
   };
 }
 
-/* 四肢をレ・ファ♯・ラ・シに割り当て、箏風の余韻を重ねる。 */
+/* 四つの位置をレ・ファ♯・ラ・シに割り当て、装備と衝突で音色を変える。 */
 function SharkPartSound(ac) {
   var notes={leftLeg:62,rightLeg:66,leftArm:69,rightArm:71},active={};
-  return function(group){
+  return function(group,kind,strength){
     if(!(group in notes)||ac.state==='closed')return;
+    kind=kind||'leg';strength=strength===undefined?1:strength;
     var now=ac.currentTime,old=active[group];
     if(old)old.forEach(function(v){
       if(v.g.gain.cancelAndHoldAtTime)v.g.gain.cancelAndHoldAtTime(now);
@@ -53,12 +54,19 @@ function SharkPartSound(ac) {
       v.o.stop(now+.04);
     });
     var voices=[],frequency=440*Math.pow(2,(notes[group]-69)/12);
+    if(kind==='wheel')frequency/=2;
     [1,2,3].forEach(function(partial,i){
       var o=ac.createOscillator(),g=ac.createGain(),duration=[1.05,.55,.25][i];
-      o.type='sine';o.frequency.setValueAtTime(frequency*partial*1.012,now);
+      // タイヤは低い回転音、ジェットは噴射音、風船は膨らむ笛の音。
+      if(kind==='leg'||kind==='arm')duration=[.22,.12,.07][i];
+      if(kind==='wheel')duration=[.38,.24,.16][i];
+      if(kind==='jet')duration=[.55,.35,.2][i];
+      if(kind==='balloon')duration=[.7,.5,.3][i];
+      o.type=kind==='wheel'?'triangle':kind==='jet'?'sawtooth':'sine';
+      o.frequency.setValueAtTime(frequency*partial*(kind==='balloon'?.55:kind==='wheel'?.7:1.012),now);
       o.frequency.exponentialRampToValueAtTime(frequency*partial,now+.035);
       g.gain.setValueAtTime(.0001,now);
-      g.gain.exponentialRampToValueAtTime([.065,.019,.008][i],now+.009);
+      g.gain.exponentialRampToValueAtTime([.065,.019,.008][i]*strength*(kind==='jet'?.55:1),now+.009);
       g.gain.exponentialRampToValueAtTime(.0001,now+duration);
       o.connect(g);g.connect(ac.destination);o.start(now);o.stop(now+duration+.04);
       o.onended=function(){o.disconnect();g.disconnect();if(i===0&&active[group]===voices)delete active[group];};
