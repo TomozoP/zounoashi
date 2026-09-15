@@ -79,6 +79,7 @@ games/
 ### 制作中はローカルプレビューを開く
 
 制作・修正後はローカルHTTP配信の最新版を開く。公開反映待ちを通常の確認手順にしない。
+ローカル配信は `node games/_tools/preview-server.js` で起動する。既存配信がある場合もこの道具を裏で起動し、MP4保存係を自動で補う。Windowsでは窓を表示せず起動する。
 録画を使う場合はF9の録画パネルとMP4保存係も使える状態にする。
 外部確認用に固定リンクが必要なときだけ、preview/index.html と必要な素材を更新する。
 その場合は preview-version と素材・スクリプトの ?v= を更新し、自動更新スクリプトを残す。
@@ -181,7 +182,7 @@ g.until(function () { return g.probe.now().state === "result"; });
 一覧の読み込みなどが動きません）。ポートは何でも構いません。
 
 ```bash
-npx --yes http-server . -p 8735 -c-1
+node games/_tools/preview-server.js
 ```
 
 `localhost` のときだけ、下書き一覧が読まれ、プレイ数は数えられず、

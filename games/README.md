@@ -189,7 +189,7 @@ DOMの要素は window.__recording.frame() で録画用canvasへ合成できま�
 録画フォルダはGitの対象外です。自動操作は各ゲームの `window.__recording.run` に書き、
 新しいゲームには雛形から入ります。
 手動撮影でも同じ全要素を含めます。録画用の画面を書き出して、欠落や見切れを確認します。
-F9の保存前に `node games/_tools/record-server.js` を起動しておきます。
+ローカルプレビューは `node games/_tools/preview-server.js` で起動します。MP4保存係も自動で起動し、停止した場合も再起動します。既存の8735番の配信がある場合は、そのまま再利用します。保存係だけを手動起動する必要はありません。
 録画停止後、手元のFFmpeg（`games/_tools/_bin/ffmpeg.exe`）でMP4へ変換して保存します。
 音と絵の相対時刻を保ち、固定60fpsとシーク用の情報を持つMP4を作ります。
 変換前後の控えは `games/_recordings/` に残ります。
