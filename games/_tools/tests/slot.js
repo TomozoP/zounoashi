@@ -143,3 +143,20 @@ stopAs(voiced,1);
 assert.equal(voiced.probe.now().failed,true);
 assert.equal(voices.filter(v=>v.type==='sawtooth').length-beforeFailure,30,'停止の掛け声と落胆の声を両方鳴らす');
 console.log('失敗時の落胆の声を確認。');
+
+const jump=load(file,{quiet:true});jump.step(120);
+for(let digit=1;digit<=9;digit++) {
+  jump.press(String(digit));assert.equal(jump.probe.now().nextReel,digit*10);
+  assert.equal(jump.probe.now().milestone,0.8);
+}
+jump.press('0');assert.equal(jump.probe.now().state,'result');
+assert.equal(jump.probe.now().remaining,0);
+const clearTime=jump.probe.now().time;
+assert.ok(Math.abs(clearTime-2)<1e-8);
+jump.step(120);assert.equal(jump.probe.now().time,clearTime,'完走後はタイムを固定');
+jump.press('3');assert.equal(jump.probe.now().nextReel,30);assert.equal(jump.probe.now().state,'play');
+jump.esc();assert.equal(jump.probe.now().time,0);
+const published=load(file,{quiet:true,inject:'location.hostname="www.zounoashi.com";'});
+for(const digit of '1234567890')published.press(digit);
+assert.equal(published.probe.now().nextReel,0,'公開先では数字キーで飛ばない');
+console.log('ローカル数字キー10段階・公開先で無効・完走タイムの固定を確認。');
