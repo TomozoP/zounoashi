@@ -46,7 +46,7 @@ function play(sequence, shape, keyboard) {
   const end = now.reels.slice();
   g.step(60);
   assert.deepEqual(g.probe.now().reels, end, '終了後は全列が止まる');
-  g.tap(270, now.H/2+310);
+  g.tap(270, now.buttonY);
   assert.equal(g.probe.now().state, 'play');
   assert.equal(g.probe.now().camera, 0);
   assert.equal(g.probe.now().celebration,0);
