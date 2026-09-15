@@ -8,7 +8,7 @@ for(const mode of ['desktop','mobile','cancel','failure']){
  window.navigator={userAgent:${JSON.stringify(mode==='desktop'?'PC':'iPhone')},canShare:function(){return true;},share:function(){saved.shares++;return{catch:function(fn){${mode==='cancel'?"fn({name:'AbortError'});":mode==='failure'?"fn({name:'Error'});":''}}};}};
  window.__dbg={finish:function(){walker.points.forEach(function(p){p.x+=3201-222.5;p.px=p.x;});},save:function(){saved.width=goalPrint.width;saved.height=goalPrint.height;goalPrint.toDataURL=function(){return 'data:image/png;base64,UE5H';};saveGoalImage();return saved;}};`;
  const g=load('games/shark-walk/index.html',{withScripts:true,inject});g.press(' ');g.dbg.finish();g.step(2);const result=g.dbg.save();
- assert.equal(result.width,840);assert.equal(result.height,800);assert.equal(result.file.type,'image/png');assert(result.file.name.startsWith('スーパーカスタムシャーク-'));
+ assert.equal(result.width,840);assert.equal(result.height,800);assert.equal(result.file.type,'image/png');assert(result.file.name.startsWith('スーパーカスタムシャークレース-'));
  assert.equal(result.shares,mode==='desktop'?0:1);assert.equal(result.downloads,mode==='desktop'||mode==='failure'?1:0);
 }
 console.log('枠付きPNG・PC保存・スマホ共有・共有取消・保存への切替：確認済み');
