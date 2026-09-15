@@ -61,7 +61,7 @@ function play(sequence, shape, keyboard) {
   return longest;
 }
 const shapes = [[375,667],[390,844],[768,1024],[1280,720]];
-const increments = [0.2,0.45,0.75,1.1];
+const increments = [0.15,0.3,0.45,0.65];
 for(let target=0;target<4;target++) {
   assert.equal(play(Array(100).fill(target),shapes[target],target%2===0),100);
 }
