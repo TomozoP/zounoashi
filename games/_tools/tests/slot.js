@@ -5,10 +5,10 @@ const file = 'games/_slot/index.html';
 function play(sequence, shape, keyboard) {
   const g = load(file, {quiet:true});
   g.view(...shape);
-  g.key(' ');
-  assert.equal(g.probe.now().state, 'intro', '開始は指を離してから');
-  g.key(' ', true);
-  assert.equal(g.probe.now().nextReel, 0, '開始操作は停止に混ぜない');
+  assert.equal(g.probe.now().state, 'play', '開いたらすぐ回る');
+  const initial=g.probe.now().reels.slice();g.step(1);
+  assert.notDeepEqual(g.probe.now().reels,initial,'入力なしで回転する');
+  assert.equal(g.probe.now().nextReel, 0);
   assert.equal(g.probe.now().reels.length, 100);
   g.tap(130, g.probe.now().H / 2);
   assert.equal(g.probe.now().nextReel, 0, '本体を押しても止まらない');
@@ -38,7 +38,7 @@ function play(sequence, shape, keyboard) {
   const end = now.reels.slice();
   g.step(60);
   assert.deepEqual(g.probe.now().reels, end, '終了後は全列が止まる');
-  g.tap(215, now.H/2+220);
+  g.tap(215, now.H/2+310);
   assert.equal(g.probe.now().state, 'play');
   assert.equal(g.probe.now().camera, 0);
   assert.equal(g.probe.now().nextReel, 0);
@@ -46,7 +46,8 @@ function play(sequence, shape, keyboard) {
   assert.equal(g.probe.now().nextReel, 1, '押しっぱなしでは連続停止しない');
   g.key(' ', true);
   g.esc();
-  assert.equal(g.probe.now().state, 'intro');
+  assert.equal(g.probe.now().state, 'play');
+  assert.equal(g.probe.now().streak, 0);
   return longest;
 }
 const shapes = [[375,667],[390,844],[768,1024],[1280,720]];
@@ -63,7 +64,7 @@ function stopAs(g,target) {
 for(let target=0;target<4;target++) {
   for(let wrong=0;wrong<4;wrong++) {
     if(target===wrong)continue;
-    const g=load(file,{quiet:true});g.press(' ');
+    const g=load(file,{quiet:true});
     for(let i=0;i<8;i++) {
       stopAs(g,target);
       assert.equal(g.probe.now().speed,4+increments[target]*i);
