@@ -163,19 +163,19 @@ console.log('ローカル数字キー10段階・公開先で無効・完走タ�
 
 const tour=load(file,{quiet:true,inject:'window.__probe.viewAt=function(t){finishTime=t;return cameraView();};'});
 tour.press('0');
-for(const [seconds,expected] of [[0,13580],[11.2,1697.5],[21.2,0],[31.2,11882.5],[41.2,13580],[81.2,13580]]) {
+for(const [seconds,expected] of [[0,13580],[11.2,6790],[21.2,0],[31.2,6790],[41.2,13580],[81.2,13580]]) {
   const view=tour.probe.viewAt(seconds);
-  assert.equal(view.zoom,1,'完走後も元の大きさ');
-  assert.ok(Math.abs(view.left-expected)<1e-7,'端から端へ往復を続ける');
+  assert.equal(view.zoom,seconds===0?1:0.85,'完走後は少しだけ引く');
+  assert.ok(Math.abs(view.center-270-expected)<1e-7,'端から端へ往復を続ける');
 }
-const earlyTravel=tour.probe.viewAt(1.2).left-tour.probe.viewAt(3.2).left;
-const lateTravel=tour.probe.viewAt(19.2).left-tour.probe.viewAt(21.2).left;
-assert.ok(earlyTravel>lateTravel,'最初は速く、端へ向かって減速');
-tour.view(375,667);assert.equal(tour.probe.now().cameraView.zoom,1);
+const edgeTravel=tour.probe.viewAt(1.2).center-tour.probe.viewAt(3.2).center;
+const middleTravel=tour.probe.viewAt(10.2).center-tour.probe.viewAt(12.2).center;
+assert.ok(middleTravel>edgeTravel,'端はゆっくり、途中は速い');
+tour.view(375,667);assert.equal(tour.probe.now().cameraView.zoom,0.85);
 tour.esc();assert.equal(tour.probe.now().cameraView.left,0,'やり直すと先頭へ');
 stopAs(tour,0);stopAs(tour,1);
 assert.equal(tour.probe.viewAt(61.2).left,tour.probe.now().camera,'失敗では往復しない');
-console.log('完走後の等倍往復・折り返し・繰り返し・やり直しを確認。');
+console.log('完走後の少し引いた往復・折り返し・繰り返し・やり直しを確認。');
 
 const originalRandom=Math.random,pitches=[];
 try {
