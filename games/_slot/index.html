@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>スロット</title>
+<title>100連スロット</title>
 <style>
   html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -25,7 +25,7 @@
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* スロット
+/* 100連スロット
 
    書き換えるところの目印は3つ。
      ▼UPDATE … 進行と入力
@@ -131,7 +131,12 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
 
+  var COUNT = 100, PITCH = 140;
   var reels = [], stopped = [], speed = 4;
+  var nextReel = 0, camera = 0, streak = 0;
+  function cameraTarget() {
+    return Math.max(0, Math.min(COUNT - 3, nextReel - 1)) * PITCH;
+  }
   var CY;                                      /* 高さから決まる置き場所 */
   function place() {
     CY = Math.round(H * 0.5);                  /* ▼UPDATE: 置き場所の計算 */
@@ -143,16 +148,22 @@
     score = 0;
     T = 0;
     held = false;
-    reels = [0, 1, 2].map(function(v) { return v + Math.random() * 3; });
-    stopped = [false, false, false];
+    reels = Array.from({ length: COUNT }, function() { return Math.random() * 4; });
+    stopped = Array(COUNT).fill(false);
+    nextReel = 0;
+    camera = 0;
+    streak = 0;
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
+    // 止める列を追いかけて、長い本体に沿って右へ進む。
+    camera += (cameraTarget() - camera) * (1 - Math.exp(-24 * dt));
+    if (Math.abs(cameraTarget() - camera) < 0.1) camera = cameraTarget();
     if (state !== S.PLAY) return;
     T += dt;
 
-    for (var i = 0; i < 3; i++) if (!stopped[i]) reels[i] = (reels[i] + dt * speed) % 4;
+    for (var i = nextReel; i < COUNT; i++) reels[i] = (reels[i] + dt * speed) % 4;
   }
 
   /* ============ 入力 ============
@@ -167,19 +178,17 @@
       else if (hit === "retry") newRound();
       return;
     }
+    if (held || (x != null && Math.hypot(x - W / 2, y - (CY + 220)) > 54)) return;
     held = true;
-    var index = stopped.indexOf(false);
-    if (x != null) {
-      index = -1;
-      for (var i = 0; i < 3; i++) if (Math.hypot(x - (130 + i * 140), y - (CY + 155)) <= 44) index = i;
-    }
-    if (index < 0 || stopped[index]) return;
+    var index = nextReel;
+    if (index >= COUNT) return;
     stopped[index] = true;
     reels[index] = Math.round(reels[index]) % 4;
-    tone(420 + index * 160, 0.09, 0.08, "sine");
-    if (stopped.every(Boolean)) {
-      score = reels[0] === reels[1] && reels[1] === reels[2] ? (reels[0] === 3 ? 777 : 100) :
-        (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2] ? 10 : 0);
+    nextReel++;
+    streak = index > 0 && reels[index] === reels[index - 1] ? streak + 1 : 1;
+    score = Math.max(score, streak);
+    tone(420 + Math.min(streak, 12) * 40, 0.09, 0.08, "sine");
+    if (nextReel === COUNT) {
       state = S.RESULT;
       if (score) [523,659,784,1047].forEach(function(f,j){tone(f,0.18,0.06,"sine",null,j*0.12);});
     }
@@ -233,7 +242,7 @@
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    zShare({ text: score + "点でした #スロット" });
+    zShare({ text: score + "連でした #100連スロット" });
   }
 
   /* ============ 描画 ============ */
@@ -268,23 +277,39 @@
   function draw() {
     ctx.fillStyle="#eee6d6";ctx.fillRect(0,0,W,H);
     for(var y=24;y<H;y+=32) {circle(22,y,2,"#d9cebb");circle(518,y,2,"#d9cebb");}
-    box(35,CY-250,470,505,42,"#d4c6ae");
-    box(35,CY-264,470,505,42,"#a52e42");
-    box(48,CY-251,444,478,33,"#bf3e50");
-    box(78,CY-229,384,61,20,"#812a39");
-    for(var j=0;j<9;j++) circle(110+j*40,CY-199,7,(state===S.RESULT&&score>0)||j%2===0?"#ffe2a0":"#d19068");
-    box(65,CY-145,410,237,19,"#733342");
-    for(var i=0;i<3;i++) {
-      var x=65+i*140;
+    var bodyWidth = COUNT * PITCH + 50;
+    ctx.save();
+    ctx.translate(-camera,0);
+    box(35,CY-250,bodyWidth,390,42,"#d4c6ae");
+    box(35,CY-264,bodyWidth,390,42,"#a52e42");
+    box(48,CY-251,bodyWidth-26,364,33,"#bf3e50");
+    box(78,CY-229,bodyWidth-86,61,20,"#812a39");
+    var lampStart = Math.max(0, Math.floor((camera-110)/40));
+    var lampEnd = Math.min(Math.floor((bodyWidth-120)/40), Math.ceil((camera+W-110)/40));
+    for(var j=lampStart;j<=lampEnd;j++) circle(110+j*40,CY-199,7,(state===S.RESULT&&score>1)||j%2===0?"#ffe2a0":"#d19068");
+    box(55,CY-145,COUNT*PITCH+10,237,19,"#733342");
+    // 画面に入る列だけ描き、100列でも描画の重さを増やさない。
+    var first = Math.max(0,Math.floor((camera-195)/PITCH));
+    var last = Math.min(COUNT-1,Math.ceil((camera+W-65)/PITCH));
+    for(var i=first;i<=last;i++) {
+      var x=65+i*PITCH;
       box(x,CY-135,130,217,12,"#fff9e9");
       ctx.save();roundRect(x,CY-135,130,217,12);ctx.clip();
       var base=Math.floor(reels[i]),fraction=reels[i]-base;
       for(var k=-2;k<=2;k++) symbol(((base+k)%4+4)%4,x+65,CY-26+(k-fraction)*106);
       var shade=ctx.createLinearGradient(0,CY-135,0,CY+82);shade.addColorStop(0,"rgba(84,54,31,.24)");shade.addColorStop(.3,"rgba(84,54,31,0)");shade.addColorStop(.7,"rgba(84,54,31,0)");shade.addColorStop(1,"rgba(84,54,31,.24)");ctx.fillStyle=shade;ctx.fillRect(x,CY-135,130,217);ctx.restore();
-      circle(130+i*140,CY+161,44,"#812a39");circle(130+i*140,CY+155,40,stopped[i]?"#be8b76":"#ffe1a0");
-      box(119+i*140,CY+144,22,22,4,stopped[i]?"#936654":"#ae3547");
+      if(i===nextReel && state!==S.RESULT) {
+        roundRect(x,CY-135,130,217,12);ctx.strokeStyle="#ffe1a0";ctx.lineWidth=4;ctx.stroke();
+      }
     }
-    ctx.strokeStyle="#c99853";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(65,CY-26);ctx.lineTo(475,CY-26);ctx.stroke();
+    ctx.strokeStyle="#c99853";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(65,CY-26);ctx.lineTo(55+COUNT*PITCH,CY-26);ctx.stroke();
+    ctx.restore();
+    if(state!==S.RESULT) {
+      circle(W/2,CY+227,58,"#d4c6ae");
+      circle(W/2,CY+220,56,"#812a39");
+      circle(W/2,CY+216+(held?5:0),50,held?"#e8bd7c":"#ffe1a0");
+      box(W/2-14,CY+202+(held?5:0),28,28,5,"#ae3547");
+    }
     if(state===S.RESULT) {
       ctx.fillStyle="#7e2b3b";ctx.font="800 64px Georgia";ctx.textAlign="center";ctx.fillText(String(score),270,CY-302);
       drawResult();
@@ -294,7 +319,7 @@
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
   function resultButtons() {
     var h = 70, gap = 24, wr = 86, ws = 86;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = CY + 280;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = CY + 185;
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -329,7 +354,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, W: W, H: H, reels: reels.slice(), stopped: stopped.slice(), speed: speed, buttonY: CY + 155 }; },
+    now: function () { return { state: state, score: score, W: W, H: H, reels: reels.slice(), stopped: stopped.slice(), speed: speed, buttonY: CY + 220, count: COUNT, nextReel: nextReel, camera: camera, cameraTarget: cameraTarget(), streak: streak }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
@@ -341,7 +366,7 @@
     run: async function (r) {
       await r.wait(1000);
       r.key();
-      for(var i=0;i<3;i++){await r.wait(700);r.key();}
+      for(var i=0;i<COUNT;i++){await r.wait(180);r.key();}
       if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("勝敗が出ない");
       await r.wait(1500);
     }

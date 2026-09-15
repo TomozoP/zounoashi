@@ -1,35 +1,61 @@
-/* 全64通りの判定と、狙って止める操作を確かめる。 */
+/* 100列の停止順、横移動、同じ絵柄の連続数を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
 const file = 'games/_slot/index.html';
-for (let a=0;a<4;a++) for (let b=0;b<4;b++) for (let c=0;c<4;c++) {
-  const g=load(file,{quiet:true});
-  g.press(' ');
-  assert.equal(g.probe.now().state,'play');
-  assert.ok(g.probe.now().stopped.every(v=>!v),'開始操作で止まらない');
-  [a,b,c].forEach((target,i)=>{
-    let frames=0;
-    while(Math.round(g.probe.now().reels[i])%4!==target && frames++<61) g.step(1);
-    assert.ok(frames<=61,'一周以内に狙った絵柄へ届く');
-    const y=g.probe.now().buttonY;
-    g.tap(130+i*140,y);
-    assert.equal(g.probe.now().reels[i],target);
-    g.step(3);
-    assert.equal(g.probe.now().reels[i],target,'止めた列は動かない');
+function play(sequence, shape, keyboard) {
+  const g = load(file, {quiet:true});
+  g.view(...shape);
+  g.key(' ');
+  assert.equal(g.probe.now().state, 'intro', '開始は指を離してから');
+  g.key(' ', true);
+  assert.equal(g.probe.now().nextReel, 0, '開始操作は停止に混ぜない');
+  assert.equal(g.probe.now().reels.length, 100);
+  g.tap(130, g.probe.now().H / 2);
+  assert.equal(g.probe.now().nextReel, 0, '本体を押しても止まらない');
+  let longest = 0, run = 0;
+  sequence.forEach((target, i) => {
+    let frames = 0;
+    while (Math.round(g.probe.now().reels[i]) % 4 !== target && frames++ < 61) g.step(1);
+    assert.ok(frames <= 61, '一周以内に狙った絵柄が来る');
+    if (keyboard) g.press(' ');
+    else g.tap(270, g.probe.now().buttonY);
+    let now = g.probe.now();
+    assert.equal(now.nextReel, i + 1);
+    assert.equal(now.reels[i], target);
+    assert.ok(now.stopped.slice(0, i+1).every(Boolean));
+    assert.ok(now.stopped.slice(i+1).every(v => !v));
+    assert.equal(now.state, i === 99 ? 'result' : 'play', '100列目でだけ終了');
+    run = i > 0 && sequence[i-1] === target ? run+1 : 1;
+    longest = Math.max(longest, run);
+    assert.equal(now.score, longest);
+    g.step(12);
+    assert.equal(g.probe.now().reels[i], target, '止めた列は動かない');
   });
-  const expected=a===b&&b===c?(a===3?777:100):(a===b||b===c||a===c?10:0);
-  assert.equal(g.probe.now().state,'result');
-  assert.equal(g.probe.now().score,expected);
-  g.press(' ');
-  assert.equal(g.probe.now().state,'play');
+  g.step(30);
+  const now = g.probe.now();
+  assert.equal(now.camera, 97*140, '末尾まで移動する');
+  assert.ok(now.buttonY+58 < now.H, 'ボタンが画面内に収まる');
+  const end = now.reels.slice();
+  g.step(60);
+  assert.deepEqual(g.probe.now().reels, end, '終了後は全列が止まる');
+  g.tap(215, now.H/2+220);
+  assert.equal(g.probe.now().state, 'play');
+  assert.equal(g.probe.now().camera, 0);
+  assert.equal(g.probe.now().nextReel, 0);
+  g.key(' ');g.key(' ');
+  assert.equal(g.probe.now().nextReel, 1, '押しっぱなしでは連続停止しない');
+  g.key(' ', true);
   g.esc();
-  assert.equal(g.probe.now().state,'intro');
+  assert.equal(g.probe.now().state, 'intro');
+  return longest;
 }
-for(const shape of [[375,667],[390,844],[768,1024],[1280,720]]) {
-  const g=load(file,{quiet:true});g.view(...shape);g.press(' ');
-  g.tap(20,20);assert.ok(g.probe.now().stopped.every(v=>!v));
-  g.press(' ');g.step(20);g.press(' ');g.step(20);g.press(' ');
-  assert.equal(g.probe.now().state,'result');
-  assert.ok(g.probe.now().H/2+350<=g.probe.now().H,'結果のボタンが収まる');
-}
-console.log('全64通りの判定、開始・停止・再挑戦、4画面の確認済み。絵柄の停止猶予250ミリ秒、ボタン間隔140。');
+assert.equal(play(Array(100).fill(3), [375,667], false), 100);
+assert.equal(play(Array.from({length:100},(_,i)=>i%4), [390,844], true), 1);
+assert.equal(play(Array.from({length:100},(_,i)=>Math.floor(i/7)%4), [768,1024], false), 7);
+assert.equal(play(Array.from({length:100},(_,i)=>i<90?i%2:2), [1280,720], true), 10);
+// 高速で押しても100列からはみ出さず、末尾まで追従する。
+const fast=load(file,{quiet:true});fast.press(' ');
+for(let i=0;i<100;i++)fast.press(' ');
+assert.equal(fast.probe.now().state,'result');
+fast.step(60);assert.equal(fast.probe.now().camera,97*140);
+console.log('100列×4画面の停止順・連続判定・末尾追従・再挑戦を確認。停止猶予250ミリ秒、停止ボタン直径108。');
