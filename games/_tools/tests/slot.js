@@ -114,7 +114,7 @@ console.log('100列目の停止猶予（ミリ秒）: '+increments.map(a=>(1000/
 
 // 音声の接続先と発声数を、音を出さない台で確かめる。
 const voiced=load(file,{quiet:true,inject:'window.__probe.setAudio=function(C){window.AudioContext=C;};'});const voices=[];
-function param(){return {value:0,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){}};}
+function param(){return {value:0,setValueAtTime(v){if(this.first===undefined)this.first=v;},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){}};}
 function node(){return {connect(){},disconnect(){},start(){},stop(){},gain:param(),frequency:param(),detune:param(),pan:param(),Q:param(),threshold:param(),knee:param(),ratio:param(),attack:param(),release:param()};}
 voiced.probe.setAudio(function(){
   this.state='running';this.sampleRate=1000;this.currentTime=0;this.destination=node();
@@ -173,3 +173,15 @@ wide.esc();assert.equal(wide.probe.now().cameraView.zoom,1,'やり直すと元�
 stopAs(wide,0);stopAs(wide,1);wide.step(210);
 assert.equal(wide.probe.now().cameraView.zoom,1,'失敗時には引かない');
 console.log('完走後の全100列の全景・画面変更・やり直し・失敗時のカメラを確認。');
+
+const originalRandom=Math.random,pitches=[];
+try {
+  Math.random=()=>0.5;voiced.probe.reset();
+  for(let i=0;i<11;i++) {
+    const before=voices.length;stopAs(voiced,0);
+    pitches.push(voices[before].frequency.first);
+  }
+} finally {Math.random=originalRandom;}
+for(let i=1;i<10;i++)assert.ok(Math.abs(pitches[i]/pitches[i-1]-Math.pow(2,1/24))<1e-9);
+assert.equal(pitches[10],pitches[0],'11回目の掛け声は最初の高さに戻る');
+console.log('掛け声の1〜10回の音程上昇と11回目のリセットを確認。');
