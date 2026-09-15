@@ -160,3 +160,16 @@ const published=load(file,{quiet:true,inject:'location.hostname="www.zounoashi.c
 for(const digit of '1234567890')published.press(digit);
 assert.equal(published.probe.now().nextReel,0,'公開先では数字キーで飛ばない');
 console.log('ローカル数字キー10段階・公開先で無効・完走タイムの固定を確認。');
+
+const wide=load(file,{quiet:true});wide.press('0');
+assert.equal(wide.probe.now().cameraView.zoom,1,'完走直後は近い画面を保つ');
+wide.step(210);
+let whole=wide.probe.now().cameraView;
+assert.ok(whole.left<=35 && whole.right>=14085,'100本と筐体の両端が収まる');
+assert.ok(whole.zoom<0.04);
+wide.view(375,667);whole=wide.probe.now().cameraView;
+assert.ok(whole.left<=35 && whole.right>=14085,'画面変更後も全景を保つ');
+wide.esc();assert.equal(wide.probe.now().cameraView.zoom,1,'やり直すと元の大きさ');
+stopAs(wide,0);stopAs(wide,1);wide.step(210);
+assert.equal(wide.probe.now().cameraView.zoom,1,'失敗時には引かない');
+console.log('完走後の全100列の全景・画面変更・やり直し・失敗時のカメラを確認。');
