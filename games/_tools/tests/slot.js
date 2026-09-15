@@ -49,13 +49,39 @@ function play(sequence, shape, keyboard) {
   assert.equal(g.probe.now().state, 'intro');
   return longest;
 }
-assert.equal(play(Array(100).fill(3), [375,667], false), 100);
-assert.equal(play(Array.from({length:100},(_,i)=>i%4), [390,844], true), 1);
-assert.equal(play(Array.from({length:100},(_,i)=>Math.floor(i/7)%4), [768,1024], false), 7);
-assert.equal(play(Array.from({length:100},(_,i)=>i<90?i%2:2), [1280,720], true), 10);
-// 高速で押しても100列からはみ出さず、末尾まで追従する。
-const fast=load(file,{quiet:true});fast.press(' ');
-for(let i=0;i<100;i++)fast.press(' ');
-assert.equal(fast.probe.now().state,'result');
-fast.step(60);assert.equal(fast.probe.now().camera,97*140);
-console.log('100列×4画面の停止順・連続判定・末尾追従・再挑戦を確認。停止猶予250ミリ秒、停止ボタン直径108。');
+const shapes = [[375,667],[390,844],[768,1024],[1280,720]];
+const increments = [0.02,0.045,0.075,0.11];
+for(let target=0;target<4;target++) {
+  assert.equal(play(Array(100).fill(target),shapes[target],target%2===0),100);
+}
+function stopAs(g,target) {
+  let frames=0;
+  while(Math.round(g.probe.now().reels[g.probe.now().nextReel])%4!==target && frames++<61)g.step(1);
+  assert.ok(frames<=61);
+  g.press(' ');
+}
+for(let target=0;target<4;target++) {
+  for(let wrong=0;wrong<4;wrong++) {
+    if(target===wrong)continue;
+    const g=load(file,{quiet:true});g.press(' ');
+    for(let i=0;i<8;i++) {
+      stopAs(g,target);
+      assert.equal(g.probe.now().speed,4+increments[target]*i);
+      assert.equal(g.probe.now().targetSymbol,target);
+    }
+    g.step(30);assert.ok(g.probe.now().camera>0);
+    stopAs(g,wrong);
+    const now=g.probe.now();
+    assert.equal(now.state,'play','失敗後は開始画面を挟まずやり直す');
+    assert.equal(now.nextReel,0);
+    assert.equal(now.camera,0);
+    assert.equal(now.speed,4);
+    assert.equal(now.targetSymbol,null);
+    assert.equal(now.score,0);
+    assert.ok(now.stopped.every(v=>!v));
+    stopAs(g,(target+1)%4);
+    assert.equal(g.probe.now().targetSymbol,(target+1)%4,'やり直しで別の絵柄を選べる');
+  }
+}
+console.log('4絵柄それぞれ100連成功、12通りの不一致リセット、絵柄別の加速、4画面を確認。');
+console.log('100列目の停止猶予（ミリ秒）: '+increments.map(a=>(1000/(4+a*98)).toFixed(1)).join(' / '));

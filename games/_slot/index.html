@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>100連スロット</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; overscroll-behavior: none; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
-  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #12100e; touch-action: none; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
   #wrap { position: relative; touch-action: none; }
-  canvas { display: block; background: #1d1714; }
+  canvas { display: block; background: #000; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
@@ -133,7 +133,9 @@
 
   var COUNT = 100, PITCH = 140;
   var reels = [], stopped = [], speed = 4;
-  var nextReel = 0, camera = 0, streak = 0;
+  var nextReel = 0, camera = 0, streak = 0, targetSymbol = null;
+  // 一列揃えるごとの速度増分。チェリー、レモン、ダイヤ、7の順。
+  var acceleration = [0.02, 0.045, 0.075, 0.11];
   function cameraTarget() {
     return Math.max(0, Math.min(COUNT - 3, nextReel - 1)) * PITCH;
   }
@@ -153,6 +155,8 @@
     nextReel = 0;
     camera = 0;
     streak = 0;
+    targetSymbol = null;
+    speed = 4;
   }
 
   /* ============ 進行 ============ */
@@ -184,8 +188,16 @@
     if (index >= COUNT) return;
     stopped[index] = true;
     reels[index] = Math.round(reels[index]) % 4;
+    if (index > 0 && reels[index] !== targetSymbol) {
+      tone(180, 0.12, 0.07, "sine", 80);
+      newRound();
+      held = true; // 失敗した指を離すまで、次の列を止めない。
+      return;
+    }
+    if (index === 0) targetSymbol = reels[index];
     nextReel++;
-    streak = index > 0 && reels[index] === reels[index - 1] ? streak + 1 : 1;
+    streak = nextReel;
+    speed = 4 + acceleration[targetSymbol] * (nextReel - 1);
     score = Math.max(score, streak);
     tone(420 + Math.min(streak, 12) * 40, 0.09, 0.08, "sine");
     if (nextReel === COUNT) {
@@ -275,8 +287,7 @@
     ctx.restore();
   }
   function draw() {
-    ctx.fillStyle="#eee6d6";ctx.fillRect(0,0,W,H);
-    for(var y=24;y<H;y+=32) {circle(22,y,2,"#d9cebb");circle(518,y,2,"#d9cebb");}
+    ctx.fillStyle="#000";ctx.fillRect(0,0,W,H);
     var bodyWidth = COUNT * PITCH + 50;
     ctx.save();
     ctx.translate(-camera,0);
@@ -311,7 +322,7 @@
       box(W/2-14,CY+202+(held?5:0),28,28,5,"#ae3547");
     }
     if(state===S.RESULT) {
-      ctx.fillStyle="#7e2b3b";ctx.font="800 64px Georgia";ctx.textAlign="center";ctx.fillText(String(score),270,CY-302);
+      ctx.fillStyle="#ffe1a0";ctx.font="800 64px Georgia";ctx.textAlign="center";ctx.fillText(String(score),270,CY-302);
       drawResult();
     }
   }
@@ -354,7 +365,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, W: W, H: H, reels: reels.slice(), stopped: stopped.slice(), speed: speed, buttonY: CY + 220, count: COUNT, nextReel: nextReel, camera: camera, cameraTarget: cameraTarget(), streak: streak }; },
+    now: function () { return { state: state, score: score, W: W, H: H, reels: reels.slice(), stopped: stopped.slice(), speed: speed, buttonY: CY + 220, count: COUNT, nextReel: nextReel, camera: camera, cameraTarget: cameraTarget(), streak: streak, targetSymbol: targetSymbol, acceleration: targetSymbol == null ? 0 : acceleration[targetSymbol] }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
@@ -367,7 +378,7 @@
       await r.wait(1000);
       r.key();
       for(var i=0;i<COUNT;i++){await r.wait(180);r.key();}
-      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("勝敗が出ない");
+      // 失敗で先頭へ戻る様子も、そのまま撮影する。
       await r.wait(1500);
     }
   };
