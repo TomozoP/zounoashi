@@ -80,7 +80,10 @@ function SharkWalk(parts) {
       supports.forEach(function(j){bend(j,h);});
       joints.forEach(function(j){if(equipment[j.name]==='wheel'||equipment[j.name]==='jet')bend(j,h);});
       joints.forEach(function(j){var kind=equipment[j.name];
-        if(kind==='balloon'){var balloon=balloons[j.name];balloon.r=15+22*bends[j.name];balloon.py+=(1000+5500*bends[j.name])*balloon.w*h*h;balloon.px-=450*bends[j.name]*balloon.w*h*h;}
+        if(kind==='balloon'){var balloon=balloons[j.name];balloon.r=15+22*bends[j.name];balloon.py+=(1000+5500*bends[j.name])*balloon.w*h*h;var forwardX=front.x-rear.x,forwardY=front.y-rear.y,forwardLength=Math.hypot(forwardX,forwardY)||1;
+          // 浮力は上向き、追加の力は胴体の尾から頭への向きに沿わせる。
+          var thrust=450*bends[j.name]*balloon.w*h*h;
+          balloon.px-=thrust*forwardX/forwardLength;balloon.py-=thrust*forwardY/forwardLength;}
         if(kind==='wheel'){
           var dx=j.c.x-j.b.x,dy=j.c.y-j.b.y,l2=Math.max(1,dx*dx+dy*dy);
           var speed=wrap(Math.atan2(dy,dx)-Math.atan2(j.c.py-j.b.py,j.c.px-j.b.px))/h;
