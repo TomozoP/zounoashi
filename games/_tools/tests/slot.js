@@ -126,13 +126,13 @@ voiced.probe.setAudio(function(){
   this.createOscillator=()=>{const n=node();voices.push(n);return n;};
 });
 stopAs(voiced,0);stopAs(voiced,0);
-assert.equal(voices.filter(v=>v.detune.first!==undefined).length,40,'停止2回で20人の掛け声を2回');
+assert.equal(voices.filter(v=>v.detune.first!==undefined).length,0,'通常の停止では掛け声を鳴らさない');
 assert.equal(voices.filter(v=>v.frequency.first===165).length,2,'停止ごとに低い衝撃音を重ねる');
 assert.ok(voices.every(v=>v.type),'音声処理が最後まで組み立てられる');
-console.log('ボーリングの掛け声が停止ごとに鳴る接続を確認。');
+console.log('通常停止の掛け声は休止し、停止音が残ることを確認。');
 
 for(let i=2;i<10;i++)stopAs(voiced,0);
-assert.equal(voices.filter(v=>v.type==='sawtooth').length,10*15+19,'10連で26人の歓声を追加');
+assert.equal(voices.filter(v=>v.type==='sawtooth').length,19,'10連で26人の歓声を追加');
 assert.equal(voiced.probe.now().confetti,28,'10連は少量の紙吹雪');
 const milestoneVoices=voices.length;voiced.step(60);
 assert.equal(voices.length,milestoneVoices,'途中の紙吹雪では完走の歓声とファンファーレを鳴らさない');
@@ -182,15 +182,3 @@ tour.esc();assert.equal(tour.probe.now().cameraView.left,0,'やり直すと先�
 stopAs(tour,0);stopAs(tour,1);
 assert.equal(tour.probe.viewAt(61.2).left,tour.probe.now().camera,'失敗では往復しない');
 console.log('完走後の少し引いた往復・折り返し・繰り返し・やり直しを確認。');
-
-const originalRandom=Math.random,pitches=[];
-try {
-  Math.random=()=>0.5;voiced.probe.reset();
-  for(let i=0;i<11;i++) {
-    const before=voices.length;stopAs(voiced,0);
-    pitches.push(voices[before].frequency.first);
-  }
-} finally {Math.random=originalRandom;}
-for(let i=1;i<10;i++)assert.ok(Math.abs(pitches[i]/pitches[i-1]-Math.pow(2,1/24))<1e-9);
-assert.equal(pitches[10],pitches[0],'11回目の掛け声は最初の高さに戻る');
-console.log('掛け声の1〜10回の音程上昇と11回目のリセットを確認。');
