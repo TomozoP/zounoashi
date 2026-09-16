@@ -6,14 +6,14 @@ for(const shape of [[375,812],[700,700],[500,1600]]){
   g.probe.reset();g.tap(270,100);assert.equal(g.probe.now().state,'play');
   assert(g.until(()=>g.probe.now().elapsed>=0,1200),'手刀が出る');
   let s=g.probe.now();assert.equal(s.people.length,20,'最初の群衆は20人');assert(Math.abs(s.people[s.attacker].x-s.people[s.victim].x)<88,'近くの相手に手刀');
-  for(let i=0;i<s.people.length;i++)for(let j=i+1;j<s.people.length;j++){if(i===s.victim||j===s.victim)continue;assert(Math.hypot(s.people[i].x-s.people[j].x,s.people[i].y-s.people[j].y)>=31,'人同士の間隔');}
+  for(let i=0;i<s.people.length;i++)for(let j=i+1;j<s.people.length;j++){if(i===s.victim||j===s.victim)continue;assert(Math.hypot(s.people[i].x-s.people[j].x,s.people[i].y-s.people[j].y)>=39,'人同士の間隔');}
   if(round%3===0){g.probe.step(119);assert.equal(g.probe.now().state,'play');g.probe.step(1);assert.equal(g.probe.now().outcome,'miss');assert.equal(g.probe.now().elapsed,5);assert.equal(g.probe.now().resultText,'見逃した');}
   else if(round%3===1){g.probe.step(48);s=g.probe.now();const p=s.people[s.attacker];g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'caught');assert.equal(g.probe.now().resultText,'見逃さなかった');}
   else{let p=s.people.find(p=>p.id!==s.attacker&&p.id!==s.victim&&p.x>32&&p.x<508&&p.y>45&&p.y<s.H-45);g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'wrong');assert.equal(g.probe.now().resultText,'見逃した');}
   g.esc();assert.equal(g.probe.now().state,'play');g.drawn.length=0;
  }
 }
-console.log('OK 3画面×9回：開始待ち・隣の人への手刀・32の避け合う間隔・5秒の境界・正解・不正解・再挑戦');
+console.log('OK 3画面×9回：開始待ち・隣の人への手刀・40の避け合う間隔・5秒の境界・正解・不正解・再挑戦');
 
 // 結果後まで歩行だけ進め、再入場の全件が画面外か確認する。
 const crowd=load('games/_shuto/index.html',{inject:'window.__dbg={walk:function(){walkCrowd(1/60);}};'});
@@ -60,20 +60,20 @@ console.log('OK 3連続成功・表示中の連打・2秒の境界・失敗後�
 
 for(let level=1;level<=10;level++){
  streak.press(level===10?'0':String(level));let s=streak.probe.now();
- assert.equal(s.level,level);assert.equal(s.people.length,level*20);assert.equal(s.score,0);
+ assert.equal(s.level,Math.min(6,level));assert.equal(s.people.length,Math.min(6,level)*20);assert.equal(s.score,0);
  assert.equal(s.state,'play');assert.equal(s.elapsed,-1);
 }
 waitForAttack();let final=streak.probe.now(),target=final.people[final.attacker];streak.tap(target.x,target.y);
 for(let i=0;i<48;i++)streak.dbg.tick();
-assert.equal(streak.probe.now().people.length,200);assert.equal(streak.probe.now().level,10);assert.equal(streak.probe.now().score,1);
+assert.equal(streak.probe.now().people.length,120);assert.equal(streak.probe.now().level,6);assert.equal(streak.probe.now().score,1);
 streak.esc();assert.equal(streak.probe.now().people.length,20);assert.equal(streak.probe.now().score,0);
-console.log('OK 数字1〜9・0の段階移動、20人ずつ増加、上限200人、飛ばした分は得点にしない');
+console.log('OK 数字1〜9・0の段階移動、20人ずつ増加、上限120人、飛ばした分は得点にしない');
 
-// 200人でも広い空白を作らず、32の間隔で歩ける。
+// 120人でも広い空白を作らず、40の間隔で歩ける。
 const dense=load('games/_shuto/index.html',{w:700,h:700,inject:'window.__dbg={walk:function(){walkCrowd(1/24);}};'});
 dense.press('0');let ds=dense.probe.now();
-assert(ds.people.filter(p=>p.x>=0&&p.x<=540&&p.footY>=0&&p.footY<=ds.H).length>=190,'200人の大半を最初から画面内に置く');
+assert(ds.people.filter(p=>p.x>=0&&p.x<=540&&p.footY>=0&&p.footY<=ds.H).length>=114,'120人の大半を最初から画面内に置く');
 for(let frame=0;frame<240;frame++)dense.dbg.walk();ds=dense.probe.now();let nearest=Infinity;
 for(let i=0;i<ds.people.length;i++)for(let j=i+1;j<ds.people.length;j++)nearest=Math.min(nearest,Math.hypot(ds.people[i].x-ds.people[j].x,ds.people[i].y-ds.people[j].y));
-assert(nearest>=31&&nearest<40,'32付近まですれ違える');
-console.log('OK 200人を画面内に配置、10秒歩行後も間隔は32付近');
+assert(nearest>=39&&nearest<48,'40付近まですれ違える');
+console.log('OK 120人を画面内に配置、10秒歩行後も間隔は40付近');
