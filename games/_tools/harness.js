@@ -33,7 +33,7 @@ function load(file, opts) {
   html.replace(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/script>/g, function (m, src, body) {
     if (!src) { parts.push(body); found++; return m; }
     if (/share\.js$/.test(src) || /^https?:/.test(src)) return m;
-    if (!opts.withScripts && !/(?:pad|action-icons)\.js$/.test(src)) return m;
+    if (!opts.withScripts && !/(?:pad|action-icons|result-actions)\.js$/.test(src)) return m;
     var p = path.join(dir, src);
     if (fs.existsSync(p)) parts.push(fs.readFileSync(p, "utf8"));
     return m;
@@ -86,7 +86,7 @@ function load(file, opts) {
       setAttribute: function () {}, getAttribute: function () { return null; },
       querySelector: function () { return null; },
       querySelectorAll: function () { return []; },
-      focus: function () {}, blur: function () {}, click: function () { e.fire("click", {}); },
+      focus: function () {}, blur: function () {}, click: function () { e.fire("click", { preventDefault: noop, stopPropagation: noop }); },
       play: function () { return { then: function () {}, catch: function () {} }; },
       /* 表示サイズ＝ゲーム座標。テストはゲーム座標のまま触れる */
       getBoundingClientRect: function () {
@@ -215,7 +215,7 @@ function load(file, opts) {
     },
     key: function (k, up) {
       win.fire(up ? "keyup" : "keydown",
-               { key: k, code: k === " " ? "Space" : "", repeat: false, preventDefault: noop });
+               { key: k, code: k === " " ? "Space" : "", repeat: false, preventDefault: noop, stopPropagation: noop });
       return api;
     },
     press: function (k) { api.key(k); api.key(k, true); return api; },

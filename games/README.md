@@ -139,6 +139,55 @@ g.until(function () { return g.probe.now().state === "result"; });
 
 ## 一覧に出るまで
 
+### X共有・画像保存・総合共有の使い回し
+
+新作は雛形の `share.js` と `result-actions.js` を使います。Xボタンからは必ず
+`zResultActions.x` を呼びます。スマホでも端末の総合共有に切り替わりません。
+既存の `zShare` は互換性のため残しています。
+
+```html
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+```
+
+```js
+// 実際のbutton要素へ一度だけ登録。本文と画像はクリック時の最新結果を渡す。
+window.zResultActions.bind(xButton, function () {
+  window.zResultActions.x({ text: score + '点でした #ゲーム名' });
+});
+window.zResultActions.bind(saveButton, function () {
+  window.zResultActions.saveImage({ canvas: resultCanvas, name: '結果.png' });
+});
+window.zResultActions.bind(moreButton, function () {
+  window.zResultActions.share({ text: score + '点でした #ゲーム名' });
+});
+moreButton.hidden = !window.zResultActions.canShare();
+```
+
+- `x` は本文と共通の共有URLをXへ渡します。画像ファイルは添付しません。
+- `share` は端末の総合共有を開きます。非対応時は `unsupported` を返し、勝手にXへ移りません。
+- `saveImage` はPCではPNGをダウンロード、対応スマホでは画像の共有シートを開きます。
+  取消では何も保存せず、共有が失敗・非対応ならダウンロードへ切り替えます。
+  常にダウンロードしたい場合は `native: false` を指定します。
+- 保存画像の絵作りはゲーム側が担当します。DOMの見出しなども必要なら結果用canvasへ描きます。
+  事前に生成した画像は `canvas` の代わりに `blob` を渡せます。
+  非同期生成は結果表示時に済ませ、完成するまで保存ボタンを `disabled` にします。
+  クリック後に `await`・`toBlob`・タイマーを挟んで共有すると、スマホの操作権限を失う場合があります。
+- 操作は `pointerdown` で実行せず、実際のbuttonの `click` から直接呼びます。
+  `bind` はゲームへの入力伝播を止め、通常のクリックとキーボード操作を残します。
+  同じボタンへ二重登録せず、付け直す場合は戻り値の解除関数を呼びます。
+- canvasのアイコン上に透明buttonを置く場合は、雛形のCSSと
+  `zResultActions.place(button, {x,y,w,h}, W, H, 結果画面か)` を使います。
+  アイコンはcanvasにも描くので録画に残ります。非表示・再挑戦時にはbuttonも隠します。
+- 各操作の `done` で結果を受け取れます。Xは `opened / blocked`、総合共有は
+  `shared / cancel / unsupported / error`、保存は `saved / shared / cancel / error`。
+  `opened / saved` はブラウザへの依頼が済んだ意味で、投稿完了・端末への保存完了を保証しません。
+
+画像保存・総合共有ボタンは必要なゲームにだけ追加し、操作名は「画像を保存」「共有」などを
+`aria-label` に残します。雛形にはXボタンだけが入っています。
+共通処理を変えたら `node games/_tools/tests/result-actions.js` と
+`node games/_tools/tests/share.js` を実行します。
+
 共有ボタンは `/share/<id>/?card=square2` を自動で使います。ここにゲームのタイトルとサムネのOGPを置き、
 開くと従来のプレイ画面へ移ります。ゲーム本体のURLにも同じOGPを設定します。
 以前の `/#/game/<id>` をそのまま投稿した場合は、サイト共通のOGPになります。

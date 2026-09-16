@@ -96,4 +96,6 @@
     }
     openTab(to, done);
   };
+  /* 総合共有も同じ正式URL・診断結果を使う。 */
+  global.zShare.pageUrl = pageUrl;
 })(window);
