@@ -5,7 +5,7 @@ for(const shape of [[375,812],[700,700],[500,1600]]){
  for(let round=0;round<9;round++){
   g.probe.reset();g.tap(270,100);assert.equal(g.probe.now().state,'play');
   assert(g.until(()=>g.probe.now().elapsed>=0,1200),'手刀が出る');
-  let s=g.probe.now();assert.equal(s.people.length,100,'群衆は100人');assert(Math.abs(s.people[s.attacker].x-s.people[s.victim].x)<88,'近くの相手に手刀');
+  let s=g.probe.now();assert.equal(s.people.length,20,'最初の群衆は20人');assert(Math.abs(s.people[s.attacker].x-s.people[s.victim].x)<88,'近くの相手に手刀');
   for(let i=0;i<s.people.length;i++)for(let j=i+1;j<s.people.length;j++){if(i===s.victim||j===s.victim)continue;assert(Math.hypot(s.people[i].x-s.people[j].x,s.people[i].y-s.people[j].y)>=63,'押す間隔');}
   if(round%3===0){g.probe.step(119);assert.equal(g.probe.now().state,'play');g.probe.step(1);assert.equal(g.probe.now().outcome,'miss');assert.equal(g.probe.now().elapsed,5);assert.equal(g.probe.now().resultText,'見逃した');}
   else if(round%3===1){g.probe.step(48);s=g.probe.now();const p=s.people[s.attacker];g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'caught');assert.equal(g.probe.now().resultText,'見逃さなかった');}
@@ -51,9 +51,20 @@ for(let n=1;n<=3;n++){
  streak.tap(p.x,p.y);streak.press(' ');assert.equal(streak.probe.now().score,n);
  for(let i=0;i<47;i++)streak.dbg.tick();assert.equal(streak.probe.now().state,'success');
  streak.dbg.tick();assert.equal(streak.probe.now().state,'play');assert.equal(streak.probe.now().score,n);
- assert.equal(streak.probe.now().elapsed,-1);assert.equal(streak.probe.now().T,0);
+ assert.equal(streak.probe.now().elapsed,-1);assert.equal(streak.probe.now().T,0);assert.equal(streak.probe.now().people.length,(n+1)*20);
 }
 waitForAttack();for(let i=0;i<120;i++)streak.dbg.tick();
 assert.equal(streak.probe.now().state,'result');assert.equal(streak.probe.now().score,3);
 assert.equal(streak.probe.now().resultText,'見逃した');streak.press(' ');assert.equal(streak.probe.now().score,0);
 console.log('OK 3連続成功・表示中の連打・2秒の境界・失敗後の回数・再挑戦で0に戻る');
+
+for(let level=1;level<=10;level++){
+ streak.press(level===10?'0':String(level));let s=streak.probe.now();
+ assert.equal(s.level,level);assert.equal(s.people.length,level*20);assert.equal(s.score,0);
+ assert.equal(s.state,'play');assert.equal(s.elapsed,-1);
+}
+waitForAttack();let final=streak.probe.now(),target=final.people[final.attacker];streak.tap(target.x,target.y);
+for(let i=0;i<48;i++)streak.dbg.tick();
+assert.equal(streak.probe.now().people.length,200);assert.equal(streak.probe.now().level,10);assert.equal(streak.probe.now().score,1);
+streak.esc();assert.equal(streak.probe.now().people.length,20);assert.equal(streak.probe.now().score,0);
+console.log('OK 数字1〜9・0の段階移動、20人ずつ増加、上限200人、飛ばした分は得点にしない');
