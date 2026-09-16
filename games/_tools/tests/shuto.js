@@ -60,20 +60,20 @@ console.log('OK 3連続成功・表示中の連打・2秒の境界・失敗後�
 
 for(let level=1;level<=10;level++){
  streak.press(level===10?'0':String(level));let s=streak.probe.now();
- assert.equal(s.level,Math.min(6,level));assert.equal(s.people.length,Math.min(6,level)*20);assert.equal(s.score,0);
+ assert.equal(s.level,Math.min(7,level));assert.equal(s.people.length,Math.min(7,level)*20);assert.equal(s.score,0);
  assert.equal(s.state,'play');assert.equal(s.elapsed,-1);
 }
 waitForAttack();let final=streak.probe.now(),target=final.people[final.attacker];streak.tap(target.x,target.y);
 for(let i=0;i<20;i++)streak.dbg.tick();
-assert.equal(streak.probe.now().people.length,120);assert.equal(streak.probe.now().level,6);assert.equal(streak.probe.now().score,1);
+assert.equal(streak.probe.now().people.length,140);assert.equal(streak.probe.now().level,7);assert.equal(streak.probe.now().score,1);
 streak.esc();assert.equal(streak.probe.now().people.length,20);assert.equal(streak.probe.now().score,0);
-console.log('OK 数字1〜9・0の段階移動、20人ずつ増加、上限120人、飛ばした分は得点にしない');
+console.log('OK 数字1〜9・0の段階移動、20人ずつ増加、上限140人、飛ばした分は得点にしない');
 
-// 120人でも広い空白を作らず、40の間隔で歩ける。
+// 140人でも広い空白を作らず、40の間隔で歩ける。
 const dense=load('games/_shuto/index.html',{w:700,h:700,inject:'window.__dbg={walk:function(){walkCrowd(1/10);}};'});
 dense.press('0');let ds=dense.probe.now();
-assert(ds.people.filter(p=>p.x>=0&&p.x<=540&&p.footY>=0&&p.footY<=ds.H).length>=114,'120人の大半を最初から画面内に置く');
+assert(ds.people.filter(p=>p.x>=0&&p.x<=540&&p.footY>=0&&p.footY<=ds.H).length>=133,'140人の大半を最初から画面内に置く');
 for(let frame=0;frame<100;frame++)dense.dbg.walk();ds=dense.probe.now();let nearest=Infinity;
 for(let i=0;i<ds.people.length;i++)for(let j=i+1;j<ds.people.length;j++)nearest=Math.min(nearest,Math.hypot(ds.people[i].x-ds.people[j].x,ds.people[i].y-ds.people[j].y));
 assert(nearest>=39&&nearest<48,'40付近まですれ違える');
-console.log('OK 120人を画面内に配置、10秒歩行後も間隔は40付近');
+console.log('OK 140人を画面内に配置、10秒歩行後も間隔は40付近');
