@@ -93,7 +93,7 @@ for(let target=0;target<4;target++) {
     const frozen=now.reels.slice();g.step(30);
     assert.deepEqual(g.probe.now().reels,frozen,'失敗後は回らない');
     assert.equal(g.probe.now().flash,0,'枠の光は自然に消える');
-    g.step(1);assert.ok(g.probe.now().lampFlashes.every(v=>v===0),'ランプの光も消える');
+    g.step(1);assert.ok(g.probe.now().lampFlashes.every(v=>v===0),'停止時の強い発光は収まる');
     g.tap(410,now.buttonY);
     assert.equal(g.shared[0],'8連でした #100連スロット');
     assert.equal(g.probe.now().state,'result','共有しても勝手に戻らない');
@@ -126,7 +126,8 @@ voiced.probe.setAudio(function(){
   this.createOscillator=()=>{const n=node();voices.push(n);return n;};
 });
 stopAs(voiced,0);stopAs(voiced,0);
-assert.equal(voices.filter(v=>v.type==='sawtooth'||v.type==='triangle').length,40,'停止2回で20人の掛け声を2回');
+assert.equal(voices.filter(v=>v.detune.first!==undefined).length,40,'停止2回で20人の掛け声を2回');
+assert.equal(voices.filter(v=>v.frequency.first===165).length,2,'停止ごとに低い衝撃音を重ねる');
 assert.ok(voices.every(v=>v.type),'音声処理が最後まで組み立てられる');
 console.log('ボーリングの掛け声が停止ごとに鳴る接続を確認。');
 
