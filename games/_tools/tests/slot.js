@@ -1,7 +1,7 @@
 /* 100列の停止順、横移動、同じ絵柄の連続数を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
-const file = 'games/_slot/index.html';
+const file = 'games/slot/index.html';
 function play(sequence, shape, keyboard) {
   const g = load(file, {quiet:true});
   g.view(...shape);

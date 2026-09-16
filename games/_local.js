@@ -5,7 +5,4 @@
    （公開サイトでは読みに行かないので、名前もソースに残りません）
 
    足すのは games/_tools/new.js、公開は games/_tools/publish.js が面倒を見ます。 */
-window.DRAFT_GAMES = [
-  { type: "lab", tags: [], id: "slot", title: "100連スロット", year: 2026, date: "2026-09-16",
-    plays: null, url: "", img: "games/_slot/img/thumb.svg", play: "games/_slot/index.html", full: true, catch: "" }
-];
+window.DRAFT_GAMES = [];
