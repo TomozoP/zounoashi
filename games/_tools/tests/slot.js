@@ -171,13 +171,13 @@ const tour=load(file,{quiet:true,inject:'window.__probe.viewAt=function(t){finis
 tour.press('0');
 for(const [seconds,expected] of [[0,13580],[11.2,6790],[21.2,0],[31.2,6790],[41.2,13580],[81.2,13580]]) {
   const view=tour.probe.viewAt(seconds);
-  assert.equal(view.zoom,seconds===0?1:0.85,'完走後は少しだけ引く');
-  assert.ok(Math.abs(view.center-270-expected)<1e-7,'端から端へ往復を続ける');
+  assert.ok(Math.abs(view.zoom-(seconds===0?.8:.68))<1e-9,'通常は8割、完走後はさらに少し引く');
+  assert.ok(Math.abs(view.center-337.5-expected)<1e-7,'端から端へ往復を続ける');
 }
 const edgeTravel=tour.probe.viewAt(1.2).center-tour.probe.viewAt(3.2).center;
 const middleTravel=tour.probe.viewAt(10.2).center-tour.probe.viewAt(12.2).center;
 assert.ok(middleTravel>edgeTravel,'端はゆっくり、途中は速い');
-tour.view(375,667);assert.equal(tour.probe.now().cameraView.zoom,0.85);
+tour.view(375,667);assert.ok(Math.abs(tour.probe.now().cameraView.zoom-.68)<1e-9);
 tour.esc();assert.equal(tour.probe.now().cameraView.left,0,'やり直すと先頭へ');
 stopAs(tour,0);stopAs(tour,1);
 assert.equal(tour.probe.viewAt(61.2).left,tour.probe.now().camera,'失敗では往復しない');
