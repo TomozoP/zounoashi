@@ -8,6 +8,7 @@
   if (!source || !window.MediaRecorder || !source.captureStream) return;
   var panel, status, recorder, chunks, paintId, output, started = false, saving = false, silence;
   var audioClock=null, frames=[];
+  var microphone=null, microphoneMix=null, leaving=false;
   var badge, preparing=false;
   function mark(label){
     if(!badge){
@@ -71,7 +72,8 @@
       ['正方形 720×720','720x720']
     ],'size'));
     panel.appendChild(row('画質',[['標準','4'],['高画質','8'],['最高画質','14']],'quality'));
-    status = make('div','ゲーム画面と音だけをMP4で保存します');
+    panel.appendChild(row('マイク',[['入れない','off'],['一緒に録る','on']],'microphone'));
+    status = make('div','ゲーム画面と音をMP4で保存します');
     status.style.cssText='min-width:0;overflow-wrap:anywhere;min-height:20px;color:#cabb99;font-size:13px';panel.appendChild(status);
     var buttons=make('div');buttons.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px';
     var close=make('button','閉じる'),start=make('button','録画開始');
@@ -80,6 +82,32 @@
     start.onclick=function(){begin().catch(fail);};
     panel.appendChild(buttons);document.body.appendChild(panel);
   }
+
+  function releaseMicrophone() {
+    if(microphone){microphone.getTracks().forEach(function(t){t.stop();});microphone=null;}
+    if(microphoneMix){microphoneMix.close().catch(function(){});microphoneMix=null;}
+  }
+  async function microphoneTracks(gameSound) {
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw Error('このブラウザではマイクを使えません');
+    try {
+      microphone=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false});
+      if(leaving){releaseMicrophone();throw Error('録画を中止しました');}
+      var C=window.AudioContext||window.webkitAudioContext;
+      microphoneMix=new C();await microphoneMix.resume();
+      var mixed=microphoneMix.createMediaStreamDestination();
+      // 自分の声をスピーカーには返さず、録画用の出口だけへつなぐ。
+      microphoneMix.createMediaStreamSource(microphone).connect(mixed);
+      if(gameSound)microphoneMix.createMediaStreamSource(gameSound.stream).connect(mixed);
+      return mixed.stream.getAudioTracks();
+    } catch(e) {
+      releaseMicrophone();
+      if(e.name==='NotAllowedError')throw Error('マイクの使用が許可されていません。ブラウザの許可設定を確認してください');
+      if(e.name==='NotFoundError')throw Error('マイクが見つかりません');
+      if(e.name==='NotReadableError')throw Error('マイクを使用できません。他のアプリで使用中でないか確認してください');
+      throw e;
+    }
+  }
+  window.addEventListener('pagehide',function(){leaving=true;releaseMicrophone();});
 
   function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
   async function until(test, seconds) {
@@ -146,9 +174,11 @@
       silence.connect(window.__zRecorderSound);silence.start();
       await wait(100);
     }
+    var audioTracks=window.__zRecorderSound?window.__zRecorderSound.stream.getAudioTracks():[];
+    if(panel.querySelector('[name=microphone]').value==='on')audioTracks=await microphoneTracks(window.__zRecorderSound);
     output=document.createElement('canvas');output.width=width;output.height=height;drawOutput();
     var stream=output.captureStream(60),tracks=stream.getVideoTracks();
-    if(window.__zRecorderSound)tracks=tracks.concat(window.__zRecorderSound.stream.getAudioTracks());
+    tracks=tracks.concat(audioTracks);
     recorder=new MediaRecorder(new MediaStream(tracks),{mimeType:type,videoBitsPerSecond:rate,audioBitsPerSecond:192000});
     chunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data);};
     recorder.onstop=function(){save().catch(fail);};recorder.onerror=function(e){fail(e.error||'録画に失敗しました');};
@@ -160,8 +190,9 @@
       stop();
     }
   }
-  function stop(){if(recorder&&recorder.state==='recording')recorder.stop();}
+  function stop(){if(recorder&&recorder.state==='recording')recorder.stop();releaseMicrophone();}
   async function save(){
+    releaseMicrophone();
     saving=true;
     mark('MP4保存中');
     cancelAnimationFrame(paintId);
@@ -177,6 +208,7 @@
     started=false;saving=false;mark('');frames=[];if(!panel)build();status.textContent=result.message||'保存しました';panel.style.display='grid';
   }
   function fail(error){
+    releaseMicrophone();
     preparing=false;mark('録画エラー');
     cancelAnimationFrame(paintId);if(recorder&&recorder.state==='recording'){recorder.onstop=null;recorder.stop();}started=false;saving=false;
     if(silence){silence.stop();silence.disconnect();silence=null;}
