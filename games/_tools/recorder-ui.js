@@ -10,6 +10,7 @@
   var audioClock=null, frames=[];
   var microphone=null, microphoneMix=null, leaving=false;
   var badge, preparing=false;
+  var separateRecorder=null, separateDone=null, separateMode="combined", takeId="";
   function mark(label){
     if(!badge){
       var host=document;
@@ -73,7 +74,8 @@
     ],'size'));
     panel.appendChild(row('画質',[['標準','4'],['高画質','8'],['最高画質','14']],'quality'));
     panel.appendChild(row('マイク',[['入れない','off'],['一緒に録る','on']],'microphone'));
-    status = make('div','ゲーム画面と音をMP4で保存します');
+    panel.appendChild(row('保存',[['動画にまとめる','combined'],['マイクを別ファイル','microphone'],['音声を別ファイル','audio']],'separate'));
+    status = make('div','ゲーム画面と音を保存します');
     status.style.cssText='min-width:0;overflow-wrap:anywhere;min-height:20px;color:#cabb99;font-size:13px';panel.appendChild(status);
     var buttons=make('div');buttons.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px';
     var close=make('button','閉じる'),start=make('button','録画開始');
@@ -151,6 +153,11 @@
       if(!health.ok)throw Error();
     }catch(e){throw Error('MP4保存係を起動してください：node games/_tools/record-server.js');}
     var mode=panel.querySelector('[name=mode]').value;
+    separateMode=panel.querySelector('[name=separate]').value;
+    var useMicrophone=panel.querySelector('[name=microphone]').value==='on';
+    if(separateMode==='microphone'&&!useMicrophone)throw Error('マイクを「一緒に録る」にしてください');
+    separateRecorder=null;separateDone=null;
+    takeId=Date.now()+'-'+Math.random().toString(16).slice(2);
     var size=panel.querySelector('[name=size]').value,width,height;
     if(size==='auto'){
       if(window.__recording&&window.__recording.frame)source=window.__recording.frame();
@@ -175,14 +182,29 @@
       await wait(100);
     }
     var audioTracks=window.__zRecorderSound?window.__zRecorderSound.stream.getAudioTracks():[];
-    if(panel.querySelector('[name=microphone]').value==='on')audioTracks=await microphoneTracks(window.__zRecorderSound);
+    var gameTracks=audioTracks.slice(),separateTracks=[];
+    if(useMicrophone)audioTracks=await microphoneTracks(window.__zRecorderSound);
+    if(separateMode==='microphone'){separateTracks=microphone.getAudioTracks();audioTracks=gameTracks;}
+    if(separateMode==='audio'){separateTracks=audioTracks;audioTracks=[];}
+    if(separateMode!=='combined'&&!separateTracks.length)throw Error('録音する音声がありません');
+    if(separateTracks.length){
+      var audioType=['audio/webm;codecs=opus','audio/webm'].filter(function(t){return MediaRecorder.isTypeSupported(t);})[0];
+      if(!audioType)throw Error('このブラウザでは音声を別保存できません');
+      separateRecorder=new MediaRecorder(new MediaStream(separateTracks),{mimeType:audioType,audioBitsPerSecond:192000});
+      var audioChunks=[];
+      separateDone=new Promise(function(resolve){
+        separateRecorder.ondataavailable=function(e){if(e.data&&e.data.size)audioChunks.push(e.data);};
+        separateRecorder.onstop=function(){resolve(new Blob(audioChunks,{type:audioType}));};
+      });
+      separateRecorder.onerror=function(e){fail(e.error||'音声の録音に失敗しました');};
+    }
     output=document.createElement('canvas');output.width=width;output.height=height;drawOutput();
     var stream=output.captureStream(60),tracks=stream.getVideoTracks();
     tracks=tracks.concat(audioTracks);
     recorder=new MediaRecorder(new MediaStream(tracks),{mimeType:type,videoBitsPerSecond:rate,audioBitsPerSecond:192000});
     chunks=[];recorder.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data);};
     recorder.onstop=function(){save().catch(fail);};recorder.onerror=function(e){fail(e.error||'録画に失敗しました');};
-    preparing=false;started=true;panel.style.display='none';recorder.start(250);mark('● 録画中（停止）');
+    preparing=false;started=true;panel.style.display='none';if(separateRecorder)separateRecorder.start(250);recorder.start(250);mark('● 録画中（停止）');
     if(mode==='auto'){
       if(!recipe||!recipe.run)throw Error('このゲームには自動運転がありません');
       if(window.__probe&&window.__probe.reset)window.__probe.reset();
@@ -190,8 +212,9 @@
       stop();
     }
   }
-  function stop(){if(recorder&&recorder.state==='recording')recorder.stop();releaseMicrophone();}
+  function stop(){if(separateRecorder&&separateRecorder.state==='recording')separateRecorder.stop();if(recorder&&recorder.state==='recording')recorder.stop();releaseMicrophone();}
   async function save(){
+    if(separateRecorder&&separateRecorder.state==='recording')separateRecorder.stop();
     releaseMicrophone();
     saving=true;
     mark('MP4保存中');
@@ -201,13 +224,23 @@
     status.textContent='MP4に変換中';panel.style.display='grid';
     var raw=new Blob(chunks,{type:recorder.mimeType});
     var id=(location.pathname.split('/').filter(Boolean).slice(-2)[0]||'game').replace(/^_/,'');
-    var response=await fetch('http://127.0.0.1:8736/convert?game='+encodeURIComponent(id),{method:'POST',body:raw});
+    var response=await fetch('http://127.0.0.1:8736/convert?game='+encodeURIComponent(id)+'&take='+takeId,{method:'POST',body:raw});
     if(!response.ok)throw Error((await response.text())||('MP4保存に失敗しました（'+response.status+'）'));
     if(!(response.headers.get('Content-Type')||'').includes('application/json'))throw Error('MP4保存係を再起動してください');
     var result=await response.json();
+    if(separateDone){
+      try {
+        var audioBlob=await separateDone;
+        var audioResponse=await fetch('http://127.0.0.1:8736/convert?game='+encodeURIComponent(id)+'&take='+takeId+'&audio=1',{method:'POST',body:audioBlob});
+        if(!audioResponse.ok)throw Error(await audioResponse.text());
+        var audioResult=await audioResponse.json();
+        result.message='動画：'+result.saved+' ／ 音声：'+audioResult.saved;
+      } catch(e) {throw Error('動画は保存済み：'+result.saved+'。音声の保存に失敗しました：'+e.message);}
+    }
     started=false;saving=false;mark('');frames=[];if(!panel)build();status.textContent=result.message||'保存しました';panel.style.display='grid';
   }
   function fail(error){
+    if(separateRecorder&&separateRecorder.state==='recording'){separateRecorder.onerror=null;separateRecorder.stop();}
     releaseMicrophone();
     preparing=false;mark('録画エラー');
     cancelAnimationFrame(paintId);if(recorder&&recorder.state==='recording'){recorder.onstop=null;recorder.stop();}started=false;saving=false;
