@@ -27,6 +27,7 @@ function play(sequence, shape, keyboard) {
     if((i+1)%10===0) assert.equal(now.milestone,0.8,"10連ごとに節目の演出");
     assert.ok(now.flash>0);
     assert.equal(now.reels[i], target);
+    assert.equal(now.lampFlashes[i],0.5,"止めたリールのランプが光る");
     assert.ok(now.stopped.slice(0, i+1).every(Boolean));
     assert.ok(now.stopped.slice(i+1).every(v => !v));
     assert.equal(now.state, i === 99 ? 'result' : 'play', '100列目でだけ終了');
@@ -92,6 +93,7 @@ for(let target=0;target<4;target++) {
     const frozen=now.reels.slice();g.step(30);
     assert.deepEqual(g.probe.now().reels,frozen,'失敗後は回らない');
     assert.equal(g.probe.now().flash,0,'枠の光は自然に消える');
+    g.step(1);assert.ok(g.probe.now().lampFlashes.every(v=>v===0),'ランプの光も消える');
     g.tap(410,now.buttonY);
     assert.equal(g.shared[0],'8連でした #100連スロット');
     assert.equal(g.probe.now().state,'result','共有しても勝手に戻らない');
