@@ -141,10 +141,10 @@ voiced.step(400);assert.equal(voiced.probe.now().celebration,0);
 console.log('10連の歓声、8秒の完走演出、7だけの虹色、やり直し時の解除を確認。');
 
 voiced.probe.reset();stopAs(voiced,0);
-const beforeFailure=voices.filter(v=>v.type==='sawtooth').length;
+const beforeFailure=voices.length;
 stopAs(voiced,1);
 assert.equal(voiced.probe.now().failed,true);
-assert.equal(voices.filter(v=>v.type==='sawtooth').length-beforeFailure,30,'停止の掛け声と落胆の声を両方鳴らす');
+assert.equal(voices.length-beforeFailure,20,'失敗時は落胆の20人だけで掛け声と停止音は鳴らさない');
 console.log('失敗時の落胆の声を確認。');
 
 const jump=load(file,{quiet:true});jump.step(120);
