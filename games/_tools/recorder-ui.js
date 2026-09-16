@@ -48,10 +48,10 @@
   }
   function row(label, values, name) {
     var line = make('label');
-    line.style.cssText = 'display:grid;grid-template-columns:76px 1fr;align-items:center;gap:10px';
+    line.style.cssText = 'display:grid;grid-template-columns:76px minmax(0,1fr);align-items:center;gap:10px';
     line.appendChild(make('span', label));
     var select = make('select'); select.name = name;
-    select.style.cssText = 'font:inherit;padding:7px;background:#26241f;color:#f4ead5;border:1px solid #8d8064';
+    select.style.cssText = 'min-width:0;width:100%;box-sizing:border-box;font:inherit;padding:7px;background:#26241f;color:#f4ead5;border:1px solid #8d8064';
     values.forEach(function (v) { var o=make('option',v[0]);o.value=v[1];select.appendChild(o); });
     line.appendChild(select); return line;
   }
@@ -61,7 +61,7 @@
   }
   function build() {
     panel = make('div');
-    panel.style.cssText = 'position:fixed;z-index:2147483647;inset:50% auto auto 50%;transform:translate(-50%,-50%);width:310px;box-sizing:border-box;padding:20px;display:none;gap:13px;background:#171612;color:#f4ead5;border:1px solid #aa9872;box-shadow:0 14px 50px #000b;font:16px sans-serif';
+    panel.style.cssText = 'position:fixed;z-index:2147483647;inset:50% auto auto 50%;transform:translate(-50%,-50%);width:310px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);overflow:auto;min-width:0;box-sizing:border-box;padding:20px;display:none;gap:13px;background:#171612;color:#f4ead5;border:1px solid #aa9872;box-shadow:0 14px 50px #000b;font:16px sans-serif';
     panel.appendChild(make('div','動画撮影'));
     panel.appendChild(row('操作',[['自分で操作','manual'],['自動運転','auto']],'mode'));
     panel.appendChild(row('大きさ',[
@@ -72,7 +72,7 @@
     ],'size'));
     panel.appendChild(row('画質',[['標準','4'],['高画質','8'],['最高画質','14']],'quality'));
     status = make('div','ゲーム画面と音だけをMP4で保存します');
-    status.style.cssText='min-height:20px;color:#cabb99;font-size:13px';panel.appendChild(status);
+    status.style.cssText='min-width:0;overflow-wrap:anywhere;min-height:20px;color:#cabb99;font-size:13px';panel.appendChild(status);
     var buttons=make('div');buttons.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px';
     var close=make('button','閉じる'),start=make('button','録画開始');
     [close,start].forEach(function(b){b.style.cssText='padding:10px;font:inherit;border:1px solid #9c8c6b;background:#292720;color:#f4ead5;cursor:pointer';buttons.appendChild(b);});
@@ -173,8 +173,8 @@
     var response=await fetch('http://127.0.0.1:8736/convert?game='+encodeURIComponent(id),{method:'POST',body:raw});
     if(!response.ok)throw Error((await response.text())||('MP4保存に失敗しました（'+response.status+'）'));
     if(!(response.headers.get('Content-Type')||'').includes('application/json'))throw Error('MP4保存係を再起動してください');
-    await response.json();
-    started=false;saving=false;mark('');frames=[];if(!panel)build();status.textContent='保存しました';panel.style.display='grid';
+    var result=await response.json();
+    started=false;saving=false;mark('');frames=[];if(!panel)build();status.textContent=result.message||'保存しました';panel.style.display='grid';
   }
   function fail(error){
     preparing=false;mark('録画エラー');

@@ -28,8 +28,14 @@ http.createServer(async function(req,res){
     });
     const id=(url.searchParams.get('game')||'game').replace(/[^a-z0-9-]/gi,'').slice(0,40)||'game';
     const saved=path.join(desktop,id+'-'+path.basename(stem)+'.mp4');
-    fs.copyFileSync(output,saved,fs.constants.COPYFILE_EXCL);
+    let result={saved:saved};
+    try { fs.copyFileSync(output,saved,fs.constants.COPYFILE_EXCL); }
+    catch(e) {
+      // 変換済みの動画は残っている。複製先の失敗で録画全体を失敗扱いにしない。
+      if(!['EPERM','EACCES','ENOENT','ENOSPC','EEXIST'].includes(e.code))throw e;
+      result={saved:output,message:'デスクトップに保存できなかったため、動画を次の場所に保存しました：'+output};
+    }
     res.setHeader('Content-Type','application/json; charset=utf-8');
-    res.end(JSON.stringify({saved:saved}));
+    res.end(JSON.stringify(result));
   }catch(e){res.writeHead(500);res.end(e.message);}
 }).listen(8736,'127.0.0.1',()=>console.log('F9のMP4保存を受付中（8736）'));
