@@ -133,6 +133,9 @@ console.log('ボーリングの掛け声が停止ごとに鳴る接続を確認�
 
 for(let i=2;i<10;i++)stopAs(voiced,0);
 assert.equal(voices.filter(v=>v.type==='sawtooth').length,10*15+19,'10連で26人の歓声を追加');
+assert.equal(voiced.probe.now().confetti,28,'10連は少量の紙吹雪');
+const milestoneVoices=voices.length;voiced.step(60);
+assert.equal(voices.length,milestoneVoices,'途中の紙吹雪では完走の歓声とファンファーレを鳴らさない');
 for(let i=10;i<100;i++)stopAs(voiced,0);
 assert.equal(voiced.probe.now().celebration,8);
 const beforeFanfare=voices.length;voiced.step(120);
