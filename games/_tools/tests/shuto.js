@@ -5,8 +5,8 @@ for(const shape of [[375,812],[700,700],[500,1600]]){
  for(let round=0;round<9;round++){
   g.probe.reset();g.tap(270,100);assert.equal(g.probe.now().state,'play');
   assert(g.until(()=>g.probe.now().elapsed>=0,1200),'手刀が出る');
-  let s=g.probe.now();assert(Math.abs(s.people[s.attacker].x-s.people[s.victim].x)<88,'近くの相手に手刀');
-  for(let i=0;i<42;i++)for(let j=i+1;j<42;j++){if(i===s.victim||j===s.victim)continue;assert(Math.hypot(s.people[i].x-s.people[j].x,s.people[i].y-s.people[j].y)>=63,'押す間隔');}
+  let s=g.probe.now();assert.equal(s.people.length,50,'群衆は50人');assert(Math.abs(s.people[s.attacker].x-s.people[s.victim].x)<88,'近くの相手に手刀');
+  for(let i=0;i<s.people.length;i++)for(let j=i+1;j<s.people.length;j++){if(i===s.victim||j===s.victim)continue;assert(Math.hypot(s.people[i].x-s.people[j].x,s.people[i].y-s.people[j].y)>=63,'押す間隔');}
   if(round%3===0){g.step(179);assert.equal(g.probe.now().state,'play');g.step(1);assert.equal(g.probe.now().outcome,'miss');assert.equal(g.probe.now().elapsed,3);}
   else if(round%3===1){g.step(120);s=g.probe.now();const p=s.people[s.attacker];g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'caught');}
   else{let p=s.people.find(p=>p.id!==s.attacker&&p.id!==s.victim&&p.x>32&&p.x<508&&p.y>45&&p.y<s.H-45);g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'wrong');}

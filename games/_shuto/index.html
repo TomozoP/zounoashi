@@ -131,6 +131,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
 
+  var CROWD_SIZE=50;
   var people=[], attacker=-1, victim=-1, attackAt=0, elapsed=-1, outcome='', selected=0;
   var clothes=['#c76c50','#5d8790','#d5b76b','#697761','#6f7096','#b88188','#ded3b4'];
   var crowdHeight=960;
@@ -148,7 +149,7 @@
     held = false;
     attackAt=2.5+Math.random()*4; elapsed=-1; outcome=''; attacker=-1; victim=-1; selected=0;
     people=[];
-    for(var i=0;i<42;i++){
+    for(var i=0;i<CROWD_SIZE;i++){
       var p=makePerson(i),tries=0;
       do{p.x=15+Math.random()*510;p.y=40+Math.random()*(H-55);tries++;}
       while(tries<1000&&people.some(function(q){return Math.hypot(p.x-q.x,p.y-q.y)<66;}));
@@ -183,8 +184,22 @@
 
   // 行き先は画面外。退場してから、別の入口の外側へ戻す。
   function makePerson(id){
-    var angle=Math.random()*Math.PI*2,speed=19+Math.random()*16;
+    // ゆったり、大股、小刻み、弾む歩き、肩を揺らす歩き。
+    var styles=[
+      {speed:20,pace:4.2,stride:.6,arm:.45,bounce:.4,sway:.012,lean:.025},
+      {speed:32,pace:5.1,stride:1.35,arm:1.2,bounce:1.1,sway:.02,lean:.065},
+      {speed:29,pace:8.4,stride:.55,arm:.55,bounce:.7,sway:.012,lean:.04},
+      {speed:27,pace:6.3,stride:.95,arm:1.05,bounce:2.8,sway:.025,lean:.015},
+      {speed:22,pace:4.7,stride:.85,arm:.75,bounce:.5,sway:.065,lean:-.02}
+    ];
+    var gait=styles[id%styles.length],variation=.9+Math.random()*.2;
+    var builds=[{width:.78,waist:7,belly:8},{width:1,waist:8,belly:9},{width:1.3,waist:7,belly:9},{width:1.2,waist:11,belly:14}];
+    var build=builds[Math.floor(Math.random()*builds.length)];
+    var angle=Math.random()*Math.PI*2,speed=gait.speed*variation;
     return {id:id,x:0,y:0,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,speed:speed,
+      build:build.width,waist:build.waist,belly:build.belly,stature:.87+Math.random()*.26,
+      gait:id%styles.length,pace:gait.pace*variation,stride:gait.stride*(.9+Math.random()*.2),
+      arm:gait.arm,bounce:gait.bounce,sway:gait.sway,lean:gait.lean,asymmetry:Math.random()*.18,
       phase:Math.random()*6.28,color:clothes[Math.floor(Math.random()*clothes.length)],
       hair:Math.floor(Math.random()*3),skin:['#dbb395','#bf9276','#e5c6a8'][Math.floor(Math.random()*3)],
       trousers:['#384248','#575650','#4b505c'][Math.floor(Math.random()*3)],generation:0};
@@ -275,14 +290,14 @@
     var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
     var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
     var vertical=e.key==='ArrowUp'?-6:e.key==='ArrowDown'?6:0;
-    if(vertical){e.preventDefault();keyMode=true;if(state===S.PLAY)selected=(selected+vertical+42)%42;return;}
+    if(vertical){e.preventDefault();keyMode=true;if(state===S.PLAY)selected=(selected+vertical+people.length)%people.length;return;}
     if (!esc && !go && !left && !right) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
     if (left || right) {
       if (state !== S.PLAY) return;
-      selected=(selected+(left?-1:1)+42)%42;
+      selected=(selected+(left?-1:1)+people.length)%people.length;
       return;
     }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
@@ -324,31 +339,36 @@
   function drawPerson(p){
     var q=position(p),fallen=p.id===victim&&elapsed>=0;
     if(q.x< -95||q.x>W+95||q.y< -10||q.y>H+105)return;
-    var walk=Math.sin(T*p.speed*.25+p.phase),side=p.vx<0?-1:1;
+    var cycle=T*p.pace+p.phase,walk=Math.sin(cycle),side=p.vx<0?-1:1;
+    var stride=walk*p.stride,arm=Math.sin(cycle+.18)*p.arm;
     ctx.save();ctx.translate(q.x,q.y);
     ctx.fillStyle='rgba(41,43,39,.17)';ctx.beginPath();ctx.ellipse(9,1,18,5,-.2,0,Math.PI*2);ctx.fill();
-    if(fallen){ctx.translate(0,-5);ctx.rotate(Math.min(1,elapsed/.22)*Math.PI/2);walk=0;}
+    if(fallen){ctx.translate(0,-5);ctx.rotate(Math.min(1,elapsed/.22)*Math.PI/2);walk=0;stride=0;arm=0;}
     // 頭は全身の約七分の一。膝・肘を曲げながら歩く。
-    var bob=fallen?0:Math.abs(walk)*1.2;
+    var bob=fallen?0:Math.abs(walk)*p.bounce;
     ctx.translate(0,-bob);
-    line(-5,-39,-6+walk*4,-21,p.trousers,7);
-    line(-6+walk*4,-21,-6+walk*8,-3,p.trousers,6);
-    line(5,-39,6-walk*4,-21,p.trousers,7);
-    line(6-walk*4,-21,6-walk*8,-3,p.trousers,6);
-    line(-6+walk*8,-2,-6+walk*8+side*5,-1,'#303533',4);
-    line(6-walk*8,-2,6-walk*8+side*5,-1,'#303533',4);
-    ctx.fillStyle=p.color;ctx.beginPath();ctx.moveTo(-10,-69);ctx.lineTo(10,-69);ctx.lineTo(8,-40);ctx.lineTo(-8,-40);ctx.closePath();ctx.fill();
-    line(-10,-65,-13-walk*4,-51,p.color,6);line(-13-walk*4,-51,-12-walk*7,-38,p.skin,4);
+    ctx.scale(p.build,p.stature);
+    if(!fallen)ctx.rotate(side*p.lean+Math.sin(cycle)*p.sway);
+    line(-5,-39,-6+stride*4,-21,p.trousers,7);
+    line(-6+stride*4,-21,-6+stride*8,-3,p.trousers,6);
+    line(5,-39,6-stride*4*(1-p.asymmetry),-21,p.trousers,7);
+    line(6-stride*4*(1-p.asymmetry),-21,6-stride*8*(1-p.asymmetry),-3,p.trousers,6);
+    line(-6+stride*8,-2,-6+stride*8+side*5,-1,'#303533',4);
+    line(6-stride*8*(1-p.asymmetry),-2,6-stride*8*(1-p.asymmetry)+side*5,-1,'#303533',4);
+    ctx.fillStyle=p.color;ctx.beginPath();ctx.moveTo(-10,-69);ctx.lineTo(10,-69);ctx.quadraticCurveTo(p.belly+3,-52,p.waist,-40);ctx.lineTo(-p.waist,-40);ctx.quadraticCurveTo(-p.belly-3,-52,-10,-69);ctx.closePath();ctx.fill();
+    line(-10,-65,-13-arm*4,-51,p.color,6);line(-13-arm*4,-51,-12-arm*7,-38,p.skin,4);
     if(p.id===attacker&&elapsed>=0&&elapsed<.1){
-      var other=position(people[victim]),dx=other.x-q.x,dy=other.y-q.y;
+      var other=position(people[victim]),dx=(other.x-q.x)/p.build,dy=(other.y-q.y)/p.stature;
       line(dx<0?-9:9,-64,dx*.48,dy*.5-65,p.color,6);
-      line(dx*.48,dy*.5-65,dx,dy-72,p.skin,4);
+      line(dx*.48,dy*.5-65,dx,dy-72*people[victim].stature/p.stature,p.skin,4);
       line(dx*.35,-74,dx*.8,dy-78,'#f5eed4',1.5);
-    }else{line(10,-65,13+walk*4,-51,p.color,6);line(13+walk*4,-51,12+walk*7,-38,p.skin,4);}
+    }else{line(10,-65,13+arm*4,-51,p.color,6);line(13+arm*4,-51,12+arm*7,-38,p.skin,4);}
     line(0,-71,0,-75,p.skin,5);
+    ctx.save();ctx.scale(1/Math.sqrt(p.build),1);
     ctx.fillStyle=p.skin;ctx.beginPath();ctx.ellipse(0,-81,5.8,7.3,side*.08,0,Math.PI*2);ctx.fill();
     ctx.fillStyle=['#333a36','#665347','#999082'][p.hair];ctx.beginPath();ctx.ellipse(-side,-84,6,4.8,0,Math.PI,Math.PI*2);ctx.fill();
     if(p.vy< -8){ctx.fillRect(-5,-85,9,9);}else{ctx.fillStyle='#49473f';ctx.fillRect(side*3,-81,1.2,1.2);}
+    ctx.restore();
     ctx.restore();
     if(keyMode&&selected===p.id&&state===S.PLAY){ctx.strokeStyle='#fff6d3';ctx.lineWidth=2;roundRect(q.x-28,q.y-94,56,100,12);ctx.stroke();}
     if(state===S.RESULT&&p.id===attacker){ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(q.x,q.y-44,32,50,0,0,Math.PI*2);ctx.stroke();}
