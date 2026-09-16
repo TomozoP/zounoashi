@@ -77,3 +77,13 @@ for(let frame=0;frame<100;frame++)dense.dbg.walk();ds=dense.probe.now();let near
 for(let i=0;i<ds.people.length;i++)for(let j=i+1;j<ds.people.length;j++)nearest=Math.min(nearest,Math.hypot(ds.people[i].x-ds.people[j].x,ds.people[i].y-ds.people[j].y));
 assert(nearest>=39&&nearest<48,'40付近まですれ違える');
 console.log('OK 140人を画面内に配置、10秒歩行後も間隔は40付近');
+
+// X共有は指を置いた時ではなく、通常のボタンのクリックから一度だけ実行する。
+const share=load('games/_shuto/index.html',{inject:'window.__dbg={button:shareButton,result:function(){state=S.RESULT;score=3;draw();}};'});
+assert(share.dbg.button.hidden);share.dbg.result();assert.equal(share.dbg.button.hidden,false);
+share.down(363,share.H*.62+27);assert.equal(share.shared.length,0);
+share.dbg.button.fire('pointerdown',{stopPropagation:function(){}});assert.equal(share.shared.length,0);
+share.dbg.button.fire('click',{stopPropagation:function(){}});
+assert.equal(share.shared.length,1);assert.equal(share.shared[0],'3回連続で見逃さなかった #手刀を見逃さないゲーム');
+share.esc();assert(share.dbg.button.hidden);share.dbg.button.fire('click',{stopPropagation:function(){}});assert.equal(share.shared.length,1);
+console.log('OK Xボタン：結果時だけ表示、クリックで一度だけ共有、押した瞬間やプレイ中は共有しない');
