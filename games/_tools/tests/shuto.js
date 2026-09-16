@@ -5,11 +5,11 @@ for(const shape of [[375,812],[700,700],[500,1600]]){
  for(let round=0;round<9;round++){
   g.probe.reset();g.tap(270,100);assert.equal(g.probe.now().state,'play');
   assert(g.until(()=>g.probe.now().elapsed>=0,1200),'手刀が出る');
-  let s=g.probe.now();assert.equal(s.people.length,50,'群衆は50人');assert(Math.abs(s.people[s.attacker].x-s.people[s.victim].x)<88,'近くの相手に手刀');
+  let s=g.probe.now();assert.equal(s.people.length,60,'群衆は60人');assert(Math.abs(s.people[s.attacker].x-s.people[s.victim].x)<88,'近くの相手に手刀');
   for(let i=0;i<s.people.length;i++)for(let j=i+1;j<s.people.length;j++){if(i===s.victim||j===s.victim)continue;assert(Math.hypot(s.people[i].x-s.people[j].x,s.people[i].y-s.people[j].y)>=63,'押す間隔');}
-  if(round%3===0){g.step(179);assert.equal(g.probe.now().state,'play');g.step(1);assert.equal(g.probe.now().outcome,'miss');assert.equal(g.probe.now().elapsed,3);}
-  else if(round%3===1){g.step(120);s=g.probe.now();const p=s.people[s.attacker];g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'caught');}
-  else{let p=s.people.find(p=>p.id!==s.attacker&&p.id!==s.victim&&p.x>32&&p.x<508&&p.y>45&&p.y<s.H-45);g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'wrong');}
+  if(round%3===0){g.step(179);assert.equal(g.probe.now().state,'play');g.step(1);assert.equal(g.probe.now().outcome,'miss');assert.equal(g.probe.now().elapsed,3);assert.equal(g.probe.now().resultText,'見逃した');}
+  else if(round%3===1){g.step(120);s=g.probe.now();const p=s.people[s.attacker];g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'caught');assert.equal(g.probe.now().resultText,'見逃さなかった（2.00秒）');}
+  else{let p=s.people.find(p=>p.id!==s.attacker&&p.id!==s.victim&&p.x>32&&p.x<508&&p.y>45&&p.y<s.H-45);g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'wrong');assert.equal(g.probe.now().resultText,'見逃した');}
   g.esc();assert.equal(g.probe.now().state,'play');g.drawn.length=0;
  }
 }
@@ -28,3 +28,7 @@ for(let frame=0;frame<7200;frame++){
 }
 assert(entries>20,'画面外で出入りする');
 console.log('OK 120秒の歩行：'+entries+'回の画面外からの再入場・連続した移動');
+
+const strike=load('games/_shuto/index.html');strike.probe.reset();assert(strike.until(()=>strike.probe.now().elapsed>=0,1200));
+assert(strike.probe.now().strikeVisible);strike.step(1);assert(strike.probe.now().strikeVisible);strike.step(1);assert(!strike.probe.now().strikeVisible);
+console.log('OK 手刀は60fpsで2コマ、結果は成功時の秒数と失敗文言');
