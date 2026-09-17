@@ -2,7 +2,7 @@
 const assert = require('assert'); const load = require('../harness');
 const FILE = 'games/_baibai-quiz/index.html';
 const inject = 'window.__dbg={answer:function(){return Q.answer;},vel:function(){return vel;},build:build,' +
-  'data:{DIRECTIONS:DIRECTIONS,DIRECTION_Q:DIRECTION_Q,PLANETS:PLANETS,PLANET_Q:PLANET_Q,KANJI:KANJI,KANJI_Q:KANJI_Q,PEOPLE:PEOPLE,allFake:allFakeNames,TRUE_FALSE:TRUE_FALSE,ANIMALS:ANIMALS,PREFS:PREFS,ELEMENTS:ELEMENTS,ELEMENT_Q:ELEMENT_Q,CODES:CODES,CODE_Q:CODE_Q,WORDS:WORDS,WORD_Q:WORD_Q,EVENTS:EVENTS}};';
+  'data:{ANIMAL_NAMES:ANIMAL_NAMES,COLORS:COLORS,COLOR_Q:COLOR_Q,DIRECTIONS:DIRECTIONS,DIRECTION_Q:DIRECTION_Q,PLANETS:PLANETS,PLANET_Q:PLANET_Q,KANJI:KANJI,KANJI_Q:KANJI_Q,PEOPLE:PEOPLE,allFake:allFakeNames,TRUE_FALSE:TRUE_FALSE,ANIMALS:ANIMALS,PREFS:PREFS,ELEMENTS:ELEMENTS,ELEMENT_Q:ELEMENT_Q,CODES:CODES,CODE_Q:CODE_Q,EVENTS:EVENTS}};';
 const STAGES = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
 const center = c => [c.x + c.w / 2, c.y + c.h / 2];
 
@@ -16,9 +16,14 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
   d.ELEMENT_Q.forEach(s => assert(d.ELEMENTS.some(e => e[0] === s), s));
   assert(d.CODES.length >= 128 && uniq(d.CODES), '国コードは128以上で重複なし');
   d.CODE_Q.forEach(c => assert(d.CODES.includes(c[1]), c[1]));
-  assert(d.WORDS.length >= 256 && uniq(d.WORDS), '英単語は256以上で重複なし（' + d.WORDS.length + '）');
-  d.WORDS.concat(d.CODES).forEach(w => assert(/^[A-Z]{3}$/.test(w), w));
-  d.WORD_Q.forEach(w => assert(d.WORDS.includes(w[1]), w[1]));
+  d.CODES.forEach(w => assert(/^[A-Z]{3}$/.test(w), w));
+  assert(d.ANIMAL_NAMES.length >= 256 && uniq(d.ANIMAL_NAMES), '動物は256種類以上（' + d.ANIMAL_NAMES.length + '）');
+  d.ANIMAL_NAMES.forEach(a => assert(/^[ァ-ヶー]{1,7}$/.test(a), '動物名はカタカナ7文字まで: ' + a));
+  d.ANIMALS.forEach(a => assert(d.ANIMAL_NAMES.includes(a[0])));
+  // 答えの仲間（まぎらわしい動物）が候補に入っていない
+  ['ヒグマ','ツキノワグマ','ホッキョクグマ','コウテイペンギン','ウミガメ','ヒキガエル','ニホンザル','ヤギ','シャチ','ラマ','ワラビー','レッサーパンダ','ヤマアラシ','ハリセンボン','トキ','イタチ','イノシシ','ガ','ミツバチ','ヤドカリ','コビトカバ']
+    .forEach(a => assert(!d.ANIMAL_NAMES.includes(a), 'まぎらわしい動物: ' + a));
+  assert.equal(new Set(d.COLORS).size, 16); d.COLOR_Q.forEach(q => assert(d.COLORS.includes(q[1]), q[0]));
   assert(d.TRUE_FALSE.length >= 20 && uniq(d.TRUE_FALSE.map(t => t[0])), '○×問題は20以上');
   const tf = d.TRUE_FALSE.filter(t => t[1]).length; assert(tf >= 10 && d.TRUE_FALSE.length - tf >= 10, '○と×の両方が十分ある');
   d.EVENTS.forEach(e => assert(e[0] >= 1 && e[0] <= 2048));
@@ -44,7 +49,8 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
       const ev = d.EVENTS.filter(e => e[1] === q.text)[0];
       assert.equal(q.items[q.answer], String(ev[0])); assert(+q.items[0] >= 1 && +q.items[N - 1] <= 2048);
     }
-    if (N === 256) assert.equal(q.items[q.answer], d.WORD_Q.filter(w => '「' + w[0] + '」を英語で言うと？' === q.text)[0][1]);
+    if (N === 256) { assert.equal(q.items[q.answer], d.ANIMALS.filter(a => a[1] === q.text)[0][0]); assert.deepEqual(q.items, q.items.slice().sort()); }
+    if (N === 16) assert.equal(q.items[q.answer], d.COLOR_Q.filter(t => t[0] === q.text)[0][1]);
     if (N === 128) assert.equal(q.items[q.answer], d.CODE_Q.filter(w => q.text.startsWith(w[0] + 'の国コード'))[0][1]);
     if (N === 64) assert.equal(q.items[q.answer], d.ELEMENTS.filter(e => q.text === '元素記号が「' + e[0] + '」の元素は？')[0][1]);
     if (N === 32) assert.equal(q.items[q.answer], d.PREFS.filter(p => p[1] && q.text === '都道府県庁が' + p[1] + 'にあるのは？')[0][0]);
@@ -53,10 +59,9 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
     if (N === 512) { assert.equal(q.items[q.answer], d.KANJI_Q.filter(t => '「' + t[0] + '」を漢字1文字で書くと？' === q.text)[0][1]); assert.deepEqual(q.items, q.items.slice().sort()); }
     if (N === 2048) { const p = d.PEOPLE.filter(t => t[2] === q.text)[0]; assert.equal(q.items[q.answer], p[0]); d.PEOPLE.forEach(t => assert(q.items.includes(t[0]))); }
     if (N === 2) { assert.deepEqual(q.items, ['○', '×']); assert.equal(q.answer, d.TRUE_FALSE.filter(t => t[0] === q.text)[0][1] ? 0 : 1); }
-    else if (N === 16) assert.equal(q.items[q.answer], d.ANIMALS.filter(a => a[1] === q.text)[0][0]);
     assert(q.text.length >= 6, '文章題になっている: ' + q.text);
   }
-  console.log('OK 問題の中身：○×' + d.TRUE_FALSE.length + '・方角' + d.DIRECTION_Q.length + '・惑星' + d.PLANET_Q.length + '・動物' + d.ANIMALS.length + '・都道府県47・元素86・国コード' + d.CODES.length + '・英単語' + d.WORDS.length + '・漢字' + d.KANJI.length + '字/' + d.KANJI_Q.length + '問・出来事' + d.EVENTS.length + '・人物' + d.PEOPLE.length + '（架空' + fake.length + '）、11段×300回・段をまたぐ問題なし');
+  console.log('OK 問題の中身：○×' + d.TRUE_FALSE.length + '・方角' + d.DIRECTION_Q.length + '・惑星' + d.PLANET_Q.length + '・色' + d.COLOR_Q.length + '・都道府県47・元素86・国コード' + d.CODES.length + '・動物' + d.ANIMALS.length + '問/' + d.ANIMAL_NAMES.length + '種・漢字' + d.KANJI.length + '字/' + d.KANJI_Q.length + '問・出来事' + d.EVENTS.length + '・人物' + d.PEOPLE.length + '（架空' + fake.length + '）、11段×300回・段をまたぐ問題なし');
 }
 
 // 見えている押しどころ同士の間隔（中心どうし63以上）と、並びが全部そろっているか
