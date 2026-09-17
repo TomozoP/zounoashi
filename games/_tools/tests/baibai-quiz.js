@@ -2,7 +2,7 @@
 const assert = require('assert'); const load = require('../harness');
 const FILE = 'games/_baibai-quiz/index.html';
 const inject = 'window.__dbg={answer:function(){return Q.answer;},vel:function(){return vel;},build:build,' +
-  'data:{TRUE_FALSE:TRUE_FALSE,ANIMALS:ANIMALS,PREFS:PREFS,ELEMENTS:ELEMENTS,ELEMENT_Q:ELEMENT_Q,CODES:CODES,CODE_Q:CODE_Q,WORDS:WORDS,WORD_Q:WORD_Q,EVENTS:EVENTS}};';
+  'data:{DIRECTIONS:DIRECTIONS,DIRECTION_Q:DIRECTION_Q,PLANETS:PLANETS,PLANET_Q:PLANET_Q,KANJI:KANJI,KANJI_Q:KANJI_Q,PEOPLE:PEOPLE,allFake:allFakeNames,TRUE_FALSE:TRUE_FALSE,ANIMALS:ANIMALS,PREFS:PREFS,ELEMENTS:ELEMENTS,ELEMENT_Q:ELEMENT_Q,CODES:CODES,CODE_Q:CODE_Q,WORDS:WORDS,WORD_Q:WORD_Q,EVENTS:EVENTS}};';
 const STAGES = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
 const center = c => [c.x + c.w / 2, c.y + c.h / 2];
 
@@ -22,12 +22,25 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
   assert(d.TRUE_FALSE.length >= 20 && uniq(d.TRUE_FALSE.map(t => t[0])), '○×問題は20以上');
   const tf = d.TRUE_FALSE.filter(t => t[1]).length; assert(tf >= 10 && d.TRUE_FALSE.length - tf >= 10, '○と×の両方が十分ある');
   d.EVENTS.forEach(e => assert(e[0] >= 1 && e[0] <= 2048));
+  d.DIRECTION_Q.forEach(q => assert(d.DIRECTIONS.includes(q[1]), q[0]));
+  new Set(d.DIRECTIONS).forEach(x => assert(d.DIRECTION_Q.some(q => q[1] === x), x + 'が答えの問題がある'));
+  d.PLANET_Q.forEach(q => assert(d.PLANETS.includes(q[1]), q[0]));
+  assert(d.KANJI.length >= 512 && uniq(d.KANJI) && d.KANJI.every(k => k.length === 1), '漢字は512字以上');
+  d.KANJI_Q.forEach(q => assert(d.KANJI.includes(q[1]), q[1]));
+  assert(uniq(d.KANJI_Q.map(q => q[0])), '漢字のよみは重ならない');
+  assert(uniq(d.PEOPLE.map(p => p[0])) && uniq(d.PEOPLE.map(p => p[2])));
+  d.PEOPLE.forEach(p => assert(/^[ぁ-ん]+$/.test(p[1]), p[0] + 'のよみ'));
+  const fake = d.allFake(); assert(fake.length >= 2048, '架空の名前が足りる');
+  assert(uniq(fake.map(n => n[0])), '架空の名前は重ならない');
+  fake.forEach(n => assert(!d.PEOPLE.some(p => p[0] === n[0]), '実在の答えと同じ名前: ' + n[0]));
   // 何度作っても、答えが中にあり、並びが揃っている
+  const stageOf = {}; // 同じ問題文が2つの段に出ない
   for (let n = 0; n < 300; n++) for (const N of STAGES) {
     const q = g.dbg.build(N);
+    assert.equal(stageOf[q.text] || N, N, '段をまたいだ問題: ' + q.text); stageOf[q.text] = N;
     assert.equal(q.items.length, N); assert(uniq(q.items), N + '択に重複');
     assert(q.answer >= 0 && q.answer < N);
-    if (N >= 512) {
+    if (N === 1024) {
       const ev = d.EVENTS.filter(e => e[1] === q.text)[0];
       assert.equal(q.items[q.answer], String(ev[0])); assert(+q.items[0] >= 1 && +q.items[N - 1] <= 2048);
     }
@@ -35,11 +48,15 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
     if (N === 128) assert.equal(q.items[q.answer], d.CODE_Q.filter(w => q.text.startsWith(w[0] + 'の国コード'))[0][1]);
     if (N === 64) assert.equal(q.items[q.answer], d.ELEMENTS.filter(e => q.text === '元素記号が「' + e[0] + '」の元素は？')[0][1]);
     if (N === 32) assert.equal(q.items[q.answer], d.PREFS.filter(p => p[1] && q.text === '都道府県庁が' + p[1] + 'にあるのは？')[0][0]);
+    if (N === 4) assert.equal(q.items[q.answer], d.DIRECTION_Q.filter(t => t[0] === q.text)[0][1]);
+    if (N === 8) assert.equal(q.items[q.answer], d.PLANET_Q.filter(t => t[0] === q.text)[0][1]);
+    if (N === 512) { assert.equal(q.items[q.answer], d.KANJI_Q.filter(t => '「' + t[0] + '」を漢字1文字で書くと？' === q.text)[0][1]); assert.deepEqual(q.items, q.items.slice().sort()); }
+    if (N === 2048) { const p = d.PEOPLE.filter(t => t[2] === q.text)[0]; assert.equal(q.items[q.answer], p[0]); d.PEOPLE.forEach(t => assert(q.items.includes(t[0]))); }
     if (N === 2) { assert.deepEqual(q.items, ['○', '×']); assert.equal(q.answer, d.TRUE_FALSE.filter(t => t[0] === q.text)[0][1] ? 0 : 1); }
-    else if (N <= 16) assert.equal(q.items[q.answer], d.ANIMALS.filter(a => a[1] === q.text)[0][0]);
+    else if (N === 16) assert.equal(q.items[q.answer], d.ANIMALS.filter(a => a[1] === q.text)[0][0]);
     assert(q.text.length >= 6, '文章題になっている: ' + q.text);
   }
-  console.log('OK 問題の中身：動物' + d.ANIMALS.length + '・都道府県47・元素86・国コード' + d.CODES.length + '・英単語' + d.WORDS.length + '・出来事' + d.EVENTS.length + '、11段×300回');
+  console.log('OK 問題の中身：○×' + d.TRUE_FALSE.length + '・方角' + d.DIRECTION_Q.length + '・惑星' + d.PLANET_Q.length + '・動物' + d.ANIMALS.length + '・都道府県47・元素86・国コード' + d.CODES.length + '・英単語' + d.WORDS.length + '・漢字' + d.KANJI.length + '字/' + d.KANJI_Q.length + '問・出来事' + d.EVENTS.length + '・人物' + d.PEOPLE.length + '（架空' + fake.length + '）、11段×300回・段をまたぐ問題なし');
 }
 
 // 見えている押しどころ同士の間隔（中心どうし63以上）と、並びが全部そろっているか
