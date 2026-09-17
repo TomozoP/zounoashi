@@ -216,8 +216,8 @@ console.log('OK キー操作だけで2048・目印に合わせてスクロール
     assert.equal(g.probe.now().N, N);
     g.press('C'); assert.equal(g.probe.now().judge, 'ok', N + '択: C で正解');
     g.press('c'); assert.equal(g.probe.now().judge, 'ok', '判定中は効かない');
-    g.step(20); const s = g.probe.now(), c = s.cells.find(c => c.id === g.dbg.answer());
-    assert(c && c.y >= s.listTop && c.y + c.h <= s.listBottom, N + '択: 正解の位置まで流れる');
+    const seen = () => { const s = g.probe.now(), c = s.cells.find(c => c.id === g.dbg.answer()); return c && c.y >= s.listTop && c.y + c.h <= s.listBottom; };
+    assert(g.until(() => seen() || g.probe.now().judge !== 'ok', 45) && seen(), N + '択: 正解の位置まで流れる');
     waitPlay(g);
   }
   assert(g.probe.now().cleared);
@@ -241,3 +241,32 @@ console.log('OK 正解デバッグ：C で11段すべて正解・判定中と開
   assert(tried >= 5, '別の正解がある問題を試せた');
 }
 console.log('OK 2048択の漢字：同じ読みの別の漢字でも正解');
+
+// 全問正解の秒数とシェア文
+{
+  const share = 'share:function(){var t,o=window.zResultActions.x;window.zResultActions.x=function(a){t=a.text;};doShare();window.zResultActions.x=o;return t;},';
+  const g = load(FILE, { inject: inject.replace('window.__dbg={', 'window.__dbg={' + share) });
+  g.step(300); g.press(' ');
+  assert.equal(g.probe.now().clearTime, 0);
+  for (const N of STAGES) {
+    g.step(60);                                  // 1問に1秒ずつ考える
+    g.press('c');
+    if (N < 2048) assert(g.until(() => g.probe.now().N === N * 2, 300));
+  }
+  const t = g.probe.now().clearTime;
+  assert(t > 11 && t < 11 + 10 * 0.8 + 1, '11問×1秒＋判定の表示10回ぶんくらい: ' + t);
+  g.step(120); assert(g.probe.now().cleared);
+  assert.equal(g.probe.now().clearTime, t, '最後の正解のあとは増えない');
+  const text = g.dbg.share();
+  assert(/^2ⁿ択クイズを\d+\.\d秒で全問正解$/.test(text), text);
+  g.drawn.length = 0; g.step(1); assert(g.drawn.filter(x => x === 'fillText').length >= 2, '数字と秒数を描く');
+  g.probe.reset(); assert.equal(g.probe.now().clearTime, 0, 'やり直すと0');
+  // 途中で終わったときのシェア文
+  g.probe.reset(); g.press('c'); waitPlay(g);
+  let s = g.probe.now(); const wrong = s.cells.find(c => !g.dbg.answers().includes(c.id));
+  g.tap(...center(wrong)); waitPlay(g);
+  assert.equal(g.dbg.share(), '2ⁿ択クイズで4択まで到達');
+  // 開始前は数えない
+  const h = load(FILE, { inject }); h.step(600); h.press(' '); assert.equal(h.probe.now().clearTime, 0);
+}
+console.log('OK タイム：STARTから最後の正解まで・その後は増えない・シェア文・やり直しで0・途中終了のシェア文');
