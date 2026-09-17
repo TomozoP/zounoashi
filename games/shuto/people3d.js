@@ -67,6 +67,10 @@
   };
   People3D.prototype.render=function(people,time,attacker,victim,elapsed,fall,width,height,pixelWidth,pixelHeight){
     var T=global.THREE,self=this,focal=Math.max(1000,height),angle=48*Math.PI/180;
+    // 人物だけ縦横65％・横540画素までに抑え、文字や操作位置は元の解像度を保つ。
+    var resolution=Math.min(.65,540/pixelWidth);
+    pixelWidth=Math.max(1,Math.round(pixelWidth*resolution));
+    pixelHeight=Math.max(1,Math.round(pixelHeight*resolution));
     if(this.renderer.domElement.width!==pixelWidth||this.renderer.domElement.height!==pixelHeight)this.renderer.setSize(pixelWidth,pixelHeight,false);
     this.camera.fov=2*Math.atan(height/(2*focal))*180/Math.PI;this.camera.aspect=width/height;
     this.camera.near=10;this.camera.far=12000;this.camera.position.set(width/2,focal*Math.sin(angle),height/2+focal*Math.cos(angle));
