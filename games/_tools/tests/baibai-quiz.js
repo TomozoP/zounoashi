@@ -86,7 +86,10 @@ function checkLayout(s) {
   const room = s.listBottom - s.listTop, rows = Math.ceil(s.N / s.cols);
   if (s.N <= 32) assert.equal(s.maxScroll, 0, s.N + '択: 32択まではスクロールなし');
   assert.equal(s.maxScroll === 0, rows * 64 <= room, s.N + '択: 64で収まるときだけスクロールなし');
-  if (s.maxScroll === 0) assert(Math.abs(rows * s.rowH - room) < 1e-6, '選択肢の場所いっぱいに広がる'); else assert.equal(s.rowH, 64);
+  if (s.maxScroll === 0) {
+    assert(Math.abs(s.rowH - Math.min(140, room / rows)) < 1e-6, '場所いっぱいに広がる（1段140まで）');
+    const last = s.cells[s.cells.length - 1]; assert(Math.abs(last.y + last.h - s.listBottom) < 1e-6, '下に寄せる');
+  } else assert.equal(s.rowH, 64);
   if (s.maxScroll > 0) assert.equal(s.maxScroll, Math.ceil(s.N / s.cols) * s.rowH - (s.listBottom - s.listTop), '最後の段まで届く');
 }
 const settle = g => assert(g.until(() => !g.probe.now().moving, 600), 'スクロールが止まる');
