@@ -271,7 +271,7 @@ console.log('OK 2048択の漢字：同じ読みの別の漢字でも正解');
   g.probe.reset(); g.press('c'); waitPlay(g);
   let s = g.probe.now(); const wrong = s.cells.find(c => !g.dbg.answers().includes(c.id));
   g.tap(...center(wrong)); waitPlay(g);
-  assert.equal(g.dbg.share(), '4択まで到達 #2n択クイズ');
+  assert.equal(g.dbg.share(), '4択到達 #2n択クイズ');
   // 開始前は数えない
   const h = load(FILE, { inject }); h.step(600); h.press(' '); assert.equal(h.probe.now().clearTime, 0);
 }
