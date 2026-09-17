@@ -264,14 +264,14 @@ console.log('OK 2048択の漢字：同じ読みの別の漢字でも正解');
   g.step(120); assert(g.probe.now().cleared);
   assert.equal(g.probe.now().clearTime, t, '最後の正解のあとは増えない');
   const text = g.dbg.share();
-  assert(/^2ⁿ択クイズを\d+\.\d秒で全問正解$/.test(text), text);
+  assert(/^\d+\.\d秒で2048択クリア #2n択クイズ$/.test(text), text);
   g.drawn.length = 0; g.step(1); assert(g.drawn.filter(x => x === 'fillText').length >= 2, '数字と秒数を描く');
   g.probe.reset(); assert.equal(g.probe.now().clearTime, 0, 'やり直すと0');
   // 途中で終わったときのシェア文
   g.probe.reset(); g.press('c'); waitPlay(g);
   let s = g.probe.now(); const wrong = s.cells.find(c => !g.dbg.answers().includes(c.id));
   g.tap(...center(wrong)); waitPlay(g);
-  assert.equal(g.dbg.share(), '2ⁿ択クイズで4択まで到達');
+  assert.equal(g.dbg.share(), '4択まで到達 #2n択クイズ');
   // 開始前は数えない
   const h = load(FILE, { inject }); h.step(600); h.press(' '); assert.equal(h.probe.now().clearTime, 0);
 }
