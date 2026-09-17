@@ -10,7 +10,7 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
 {
   const g = load(FILE, { inject }); const d = g.dbg.data;
   const uniq = a => new Set(a).size === a.length;
-  assert(d.ANIMALS.length >= 16 && uniq(d.ANIMALS.map(a => a[1])), '動物は16種類以上で重複なし');
+  assert(d.ANIMALS.length >= 16 && uniq(d.ANIMALS.map(a => a[0])) && uniq(d.ANIMALS.map(a => a[1])), '動物は16種類以上で重複なし');
   assert.equal(d.PREFS.length, 47); assert(d.PREFS.filter(p => p[1]).length >= 10);
   assert.equal(d.ELEMENTS.length, 86); assert(uniq(d.ELEMENTS.map(e => e[0])) && uniq(d.ELEMENTS.map(e => e[1])));
   d.ELEMENT_Q.forEach(s => assert(d.ELEMENTS.some(e => e[0] === s), s));
@@ -29,10 +29,12 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
       const ev = d.EVENTS.filter(e => e[1] === q.text)[0];
       assert.equal(q.items[q.answer], String(ev[0])); assert(+q.items[0] >= 1 && +q.items[N - 1] <= 2048);
     }
-    if (N === 256) assert.equal(q.items[q.answer], d.WORD_Q.filter(w => w[0] === q.text)[0][1]);
-    if (N === 128) assert.equal(q.items[q.answer], d.CODE_Q.filter(w => w[0] === q.text)[0][1]);
-    if (N === 32) assert.equal(q.items[q.answer], d.PREFS.filter(p => p[1] === q.text)[0][0]);
-    if (N <= 16) assert.equal(q.items[q.answer], d.ANIMALS.filter(a => a[0] === q.text)[0][1]);
+    if (N === 256) assert.equal(q.items[q.answer], d.WORD_Q.filter(w => '「' + w[0] + '」を英語で言うと？' === q.text)[0][1]);
+    if (N === 128) assert.equal(q.items[q.answer], d.CODE_Q.filter(w => q.text.startsWith(w[0] + 'の国コード'))[0][1]);
+    if (N === 32) assert.equal(q.items[q.answer], d.PREFS.filter(p => p[1] && q.text === '都道府県庁が' + p[1] + 'にあるのは？')[0][0]);
+    if (N <= 16) assert.equal(q.items[q.answer], d.ANIMALS.filter(a => a[1] === q.text)[0][0]);
+    if (N === 64) assert.equal(q.items[q.answer], d.ELEMENTS.filter(e => q.text === '元素記号が「' + e[0] + '」の元素は？')[0][1]);
+    assert(q.text.length >= 8, '文章題になっている: ' + q.text);
   }
   console.log('OK 問題の中身：動物' + d.ANIMALS.length + '・都道府県47・元素86・国コード' + d.CODES.length + '・英単語' + d.WORDS.length + '・出来事' + d.EVENTS.length + '、10段×300回');
 }
