@@ -32,9 +32,10 @@ function load(file, opts) {
   var found = 0;
   html.replace(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/script>/g, function (m, src, body) {
     if (!src) { parts.push(body); found++; return m; }
-    if (/share\.js$/.test(src) || /^https?:/.test(src)) return m;
-    if (!opts.withScripts && !/(?:pad|action-icons|result-actions)\.js$/.test(src)) return m;
-    var p = path.join(dir, src);
+    var plain = src.split("?")[0];          /* preview の ?v=… は外して見る */
+    if (/share\.js$/.test(plain) || /^https?:/.test(plain)) return m;
+    if (!opts.withScripts && !/(?:pad|action-icons|result-actions)\.js$/.test(plain)) return m;
+    var p = path.join(dir, plain);
     if (fs.existsSync(p)) parts.push(fs.readFileSync(p, "utf8"));
     return m;
   });
