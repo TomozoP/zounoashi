@@ -193,3 +193,22 @@ console.log('OK スクロール：なぞりでは選ばない・慣性・止め�
   assert.equal(g.probe.now().cur, 1, '2択では右にしか動かない');
 }
 console.log('OK キー操作だけで2048・目印に合わせてスクロール');
+
+// 手元用の正解デバッグ（localhost のときだけ）。C で正解、V で印
+{
+  const g = load(FILE, { inject: inject.replace('window.__dbg={', 'window.__dbg={mark:function(){return debugMark;},') });
+  g.press('c'); assert.equal(g.probe.now().state, 'intro', '開始前は効かない');
+  g.press(' ');
+  for (const N of STAGES) {
+    assert.equal(g.probe.now().N, N);
+    g.press('C'); assert.equal(g.probe.now().judge, 'ok', N + '択: C で正解');
+    g.press('c'); assert.equal(g.probe.now().judge, 'ok', '判定中は効かない');
+    g.step(20); const s = g.probe.now(), c = s.cells.find(c => c.id === g.dbg.answer());
+    assert(c && c.y >= s.listTop && c.y + c.h <= s.listBottom, N + '択: 正解の位置まで流れる');
+    waitPlay(g);
+  }
+  assert(g.probe.now().cleared);
+  assert.equal(g.dbg.mark(), false); g.press('v'); assert.equal(g.dbg.mark(), true); g.press('V'); assert.equal(g.dbg.mark(), false);
+  g.esc(); g.press('v'); g.drawn.length = 0; g.step(1); assert(g.drawn.includes('arc'), '印を描く');
+}
+console.log('OK 正解デバッグ：C で11段すべて正解・判定中と開始前は効かない・V で印の切り替え');
