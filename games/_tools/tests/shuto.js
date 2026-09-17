@@ -46,6 +46,8 @@ streak.probe.reset();
 function waitForAttack(){for(let i=0;i<720&&streak.probe.now().elapsed<0;i++)streak.dbg.tick();assert(streak.probe.now().elapsed>=0);}
 for(let n=1;n<=3;n++){
  waitForAttack();let s=streak.probe.now(),p=s.people[s.attacker];streak.tap(p.x,p.y);
+ assert.equal(streak.probe.now().state,'replay');assert.equal(streak.probe.now().score,n);
+ for(let i=0;i<31;i++)streak.dbg.tick();
  assert.equal(streak.probe.now().state,'success');assert.equal(streak.probe.now().score,n);
  assert.equal(streak.probe.now().resultText,'見逃さなかった');
  streak.tap(p.x,p.y);streak.press(' ');assert.equal(streak.probe.now().score,n);
@@ -54,9 +56,10 @@ for(let n=1;n<=3;n++){
  assert.equal(streak.probe.now().elapsed,-1);assert.equal(streak.probe.now().T,0);assert.equal(streak.probe.now().people.length,(n+1)*20);
 }
 waitForAttack();for(let i=0;i<50;i++)streak.dbg.tick();
+assert.equal(streak.probe.now().state,'replay');for(let i=0;i<31;i++)streak.dbg.tick();
 assert.equal(streak.probe.now().state,'result');assert.equal(streak.probe.now().score,3);
 assert.equal(streak.probe.now().resultText,'見逃した');streak.press(' ');assert.equal(streak.probe.now().score,0);
-console.log('OK 3連続成功・表示中の連打・2秒の境界・失敗後の回数・再挑戦で0に戻る');
+console.log('OK 3連続成功・リプレイを挟む・表示中の連打・2秒の境界・失敗後の回数・再挑戦で0に戻る');
 
 for(let level=1;level<=10;level++){
  streak.press(level===10?'0':String(level));let s=streak.probe.now();

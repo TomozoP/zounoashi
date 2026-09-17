@@ -68,21 +68,21 @@
   handImage.src = 'img/pointing-hand.webp?v=2';
   function hideHand() {
     pointer.visible = false; pointer.clickedAt = -Infinity; wrap.classList.remove('photo-cursor');
-    if (people) draw();
+    if (people) drawFrame();
   }
   function pointHand(e) {
     if (e.pointerType !== 'mouse' || !handReady || state === S.INTRO) { hideHand(); return; }
     var p = atCanvas(e);
     pointer.x = p.x; pointer.y = p.y; pointer.visible = true;
     wrap.classList.add('photo-cursor');
-    draw();
+    drawFrame();
   }
   wrap.addEventListener('pointermove', pointHand, true);
   wrap.addEventListener('pointerdown', function (e) {
     pointHand(e);
     if (pointer.visible && e.button === 0) {
       pointer.clickedAt = performance.now();
-      draw();
+      drawFrame();
     }
   }, true);
   wrap.addEventListener('pointerleave', hideHand);
@@ -179,7 +179,7 @@
   });
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", SUCCESS: "success", RESULT: "result" };
+  var S = { INTRO: "intro", PLAY: "play", REPLAY: "replay", SUCCESS: "success", RESULT: "result" };
   var state, score, T, held, successWait=0, keyMode = false;
 
   var PERSONAL_SPACE=40, MAX_LEVEL=7;
@@ -205,6 +205,7 @@
     frameDebt=0;
     held = false;
     attackAt=6+Math.random()*4; elapsed=-1; outcome=''; attacker=-1; victim=-1; selected=0;
+    replayTape=[];replayTaped=false;replayAt=0;replayTimer=0;
     people=[];
     // 少人数でも自然に隣り合う人を用意し、手刀の相手がいない待ち時間を減らす。
     var pairY=H*(.4+Math.random()*.2),pairVX=(Math.random()-.5)*5,pairVY=(Math.random()-.5)*12;
@@ -218,8 +219,63 @@
     }
   }
 
+  /* ============ 手刀のリプレイ ============
+     手刀のコマまでを控えておき、勝敗が決まったら遅く流してから結果を出す。
+     控えるのは人の居場所と向き、歩きの時計、手刀の進み具合だけ。
+     3Dの模型は毎コマこれらから組み直すので、戻せばそのまま同じ絵になる。 */
+  var REPLAY_LEAD=6, REPLAY_SLOW=3, REPLAY_HOLD=1.3;
+  var replayTape=[], replayTaped=false, replayAt=0, replayTimer=0, replayNext="";
+
+  function record(){
+    if(replayTaped)return;
+    replayTape.push({T:T,elapsed:elapsed,
+      spots:people.map(function(p){return {x:p.x,y:p.y,vx:p.vx,vy:p.vy};})});
+    if(elapsed>=0){replayTaped=true;return;}   /* 手刀のコマを控えたら、そこで止める */
+    if(replayTape.length>REPLAY_LEAD)replayTape.shift();
+  }
+  function moveCrowd(spots){
+    spots.forEach(function(s,id){
+      var p=people[id];
+      if(!p)return;
+      p.x=s.x;p.y=s.y;p.vx=s.vx;p.vy=s.vy;
+    });
+  }
+  function finish(next){
+    state=next;
+    if(next===S.SUCCESS)successWait=0;
+  }
+  // 手刀が出る前に終わったときは流すものが無いので、そのまま結果へ。
+  function startReplay(next){
+    if(!replayTaped||replayTape.length<2){finish(next);return;}
+    replayAt=0;replayTimer=0;replayNext=next;
+    state=S.REPLAY;
+  }
+  function replayTick(dt){
+    replayTimer+=dt;
+    if(replayAt>=replayTape.length-1){          /* 手刀のコマ。印をつけて少し止める */
+      if(replayTimer>=REPLAY_HOLD-1e-9)finish(replayNext);
+      return;
+    }
+    if(replayTimer>=FRAME_SECONDS*REPLAY_SLOW-1e-9){replayTimer=0;replayAt++;}
+  }
+  // 控えたコマの姿に一時だけ差し替えて描く。進行と覗き穴には触らない。
+  function drawFrame(){
+    if(state!==S.REPLAY||!replayTape[replayAt]){draw();return;}
+    var liveT=T, liveElapsed=elapsed;
+    var live=people.map(function(p){return {x:p.x,y:p.y,vx:p.vx,vy:p.vy};});
+    T=replayTape[replayAt].T;elapsed=replayTape[replayAt].elapsed;
+    moveCrowd(replayTape[replayAt].spots);
+    try{draw();}
+    finally{T=liveT;elapsed=liveElapsed;moveCrowd(live);}
+  }
+  // 手刀のコマで止まっている間と、結果が出てからは、出した人に印をつける。
+  function revealAttacker(){
+    if(state===S.RESULT||state===S.SUCCESS)return true;
+    return state===S.REPLAY&&replayAt>=replayTape.length-1;
+  }
   /* ============ 進行 ============ */
   function update(dt) {
+    if(state===S.REPLAY){replayTick(dt);return;}
     if(state===S.SUCCESS){
       successWait+=dt;
       if(successWait>=2-1e-9)newRound(true);
@@ -247,8 +303,9 @@
       }
     }else if(elapsed>=0){
       elapsed+=dt;
-      if(elapsed>=GUESS_SECONDS-1e-9){elapsed=GUESS_SECONDS;outcome='miss';state=S.RESULT;}
+      if(elapsed>=GUESS_SECONDS-1e-9){elapsed=GUESS_SECONDS;outcome='miss';startReplay(S.RESULT);}
     }
+    record();
   }
 
   // 行き先は画面外。退場してから、別の入口の外側へ戻す。
@@ -312,7 +369,7 @@
      タップとスペースキーで同じことができるようにする。
      x が null のときはキー操作（場所を指さない）。 */
   function down(x, y) {
-    if(state===S.INTRO||state===S.SUCCESS)return;
+    if(state===S.INTRO||state===S.SUCCESS||state===S.REPLAY)return;
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
@@ -332,8 +389,8 @@
     if(id<0||id===victim)return;
     var caught=id===attacker;
     outcome=caught?'caught':'wrong';
-    if(caught){score++;successWait=0;state=S.SUCCESS;}
-    else state=S.RESULT;
+    if(caught)score++;
+    startReplay(caught?S.SUCCESS:S.RESULT);
     tone(caught?880:160,.18,.09,'sine');
   }
   function move(x, y) {
@@ -544,7 +601,7 @@
     ctx.restore();
     ctx.restore();
     if(keyMode&&selected===p.id&&state===S.PLAY){ctx.strokeStyle='#fff6d3';ctx.lineWidth=2;roundRect(q.x-28*q.scale,q.y-94*q.scale,56*q.scale,100*q.scale,12);ctx.stroke();}
-    if((state===S.RESULT||state===S.SUCCESS)&&p.id===attacker){ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(q.x,q.y-44*q.scale*p.stature,32*q.scale,50*q.scale*p.stature,0,0,Math.PI*2);ctx.stroke();}
+    if(revealAttacker()&&p.id===attacker){ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(q.x,q.y-44*q.scale*p.stature,32*q.scale,50*q.scale*p.stature,0,0,Math.PI*2);ctx.stroke();}
   }
 
   var cameraPrepared=false,cameraLines=null;
@@ -573,7 +630,7 @@
     if(people3D){
       ctx.drawImage(people3D.render(people,T,attacker,victim,elapsed,fallProgress(),W,H,canvas.width,canvas.height),0,0,W,H);
       if(keyMode&&state===S.PLAY&&people[selected]){var focus=position(people[selected]);ctx.strokeStyle='#fff6d3';ctx.lineWidth=2;roundRect(focus.x-28*focus.scale,focus.y-94*focus.scale,56*focus.scale,100*focus.scale,12);ctx.stroke();}
-      if((state===S.RESULT||state===S.SUCCESS)&&attacker>=0){
+      if(revealAttacker()&&attacker>=0){
         var marked=position(people[attacker]);ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(marked.x,marked.y-44*marked.scale,32*marked.scale,55*marked.scale,0,0,Math.PI*2);ctx.stroke();
       }
     }else people.slice().sort(function(a,b){return a.y-b.y;}).forEach(drawPerson);
@@ -644,8 +701,8 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, level:level, W: W, H: H, T:T, elapsed:elapsed, attackAt:attackAt, attacker:attacker, victim:victim, outcome:outcome, selected:selected, resultText:resultText(), fallProgress:fallProgress(), strikeVisible:attacker>=0&&elapsed>=0&&elapsed<STRIKE_SECONDS-1e-9, people:people.map(function(p){var q=position(p);return {id:p.id,x:q.x,y:q.y-44*q.scale*p.stature,footY:q.y,worldX:p.x,worldY:p.y,scale:q.scale,vx:p.vx,vy:p.vy,generation:p.generation};}) }; },
-    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(FRAME_SECONDS); draw(); } },
+    now: function () { return { state: state, score: score, level:level, W: W, H: H, T:T, elapsed:elapsed, attackAt:attackAt, attacker:attacker, victim:victim, outcome:outcome, selected:selected, resultText:resultText(), fallProgress:fallProgress(), strikeVisible:attacker>=0&&elapsed>=0&&elapsed<STRIKE_SECONDS-1e-9, replay:{taped:replayTape.length,at:replayAt,revealed:revealAttacker()}, people:people.map(function(p){var q=position(p);return {id:p.id,x:q.x,y:q.y-44*q.scale*p.stature,footY:q.y,worldX:p.x,worldY:p.y,scale:q.scale,vx:p.vx,vy:p.vy,generation:p.generation};}) }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(FRAME_SECONDS); drawFrame(); } },
     reset: function () { newRound(); }
   };
 
@@ -691,7 +748,7 @@
         var ticks=Math.floor((frameDebt+1e-9)/FRAME_SECONDS);
         frameDebt=Math.max(0,frameDebt-ticks*FRAME_SECONDS);
         // 表示と進行を10fpsに揃え、手刀の発生コマは必ず描く。
-        update(ticks*FRAME_SECONDS);draw();
+        update(ticks*FRAME_SECONDS);drawFrame();
       }
     }else frameDebt=0;
     requestAnimationFrame(loop);

@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="baibai-quiz-20260918062219">
+<meta name="preview-version" content="shuto-20260918074003">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>2ⁿ択クイズ</title>
+<title>手刀を見逃さないゲーム</title>
 <style>
   html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -14,11 +14,12 @@
   canvas { display: block; background: #1d1714; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-  #start { position:absolute; left:50%; top:58%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
   #start[hidden] { display:none; }
   #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #share-button[hidden] { display:none; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+  #wrap.photo-cursor, #wrap.photo-cursor * { cursor:none; }
 </style>
 </head>
 <body>
@@ -27,12 +28,14 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/share.js?v=baibai-quiz-20260918062219"></script>
-<script src="../games/result-actions.js?v=baibai-quiz-20260918062219"></script>
-<script src="../games/action-icons.js?v=baibai-quiz-20260918062219"></script>
-<script src="../games/pad.js?v=baibai-quiz-20260918062219"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/share.js?v=shuto-20260918074003"></script>
+<script src="../games/random-bowling/vendor/three.min.js?v=shuto-20260918074003"></script>
+<script src="./people3d.js?v=shuto-20260918074003"></script>
+<script src="../games/result-actions.js?v=shuto-20260918074003"></script>
+<script src="../games/action-icons.js?v=shuto-20260918074003"></script>
+<script src="../games/pad.js?v=shuto-20260918074003"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* 2ⁿ択クイズ
+/* 手刀を見逃さないゲーム
 
    書き換えるところの目印は3つ。
      ▼UPDATE … 進行と入力
@@ -46,7 +49,37 @@
   var ctx = canvas.getContext("2d");
   var wrap = document.getElementById("wrap");
   var shareButton = document.getElementById("share-button");
-  window.zResultActions.bind(shareButton, doShare);
+  var people3D=null;
+  if(window.WebGLRenderingContext&&window.ShutoPeople3D){try{people3D=new window.ShutoPeople3D();}catch(e){}}
+  // 指先を操作位置に合わせ、録画にも写るようゲームの絵へ重ねる。
+  var handImage = new Image(), handReady = false;
+  var pointer = { x:0, y:0, visible:false, clickedAt:-Infinity };
+  function handPress() { return Math.max(0, 1-(performance.now()-pointer.clickedAt)/240); }
+  handImage.onload = function () { handReady = true; };
+  handImage.src = 'img/pointing-hand.webp?v=shuto-20260918074003';
+  function hideHand() {
+    pointer.visible = false; pointer.clickedAt = -Infinity; wrap.classList.remove('photo-cursor');
+    if (people) drawFrame();
+  }
+  function pointHand(e) {
+    if (e.pointerType !== 'mouse' || !handReady || state === S.INTRO) { hideHand(); return; }
+    var p = atCanvas(e);
+    pointer.x = p.x; pointer.y = p.y; pointer.visible = true;
+    wrap.classList.add('photo-cursor');
+    drawFrame();
+  }
+  wrap.addEventListener('pointermove', pointHand, true);
+  wrap.addEventListener('pointerdown', function (e) {
+    pointHand(e);
+    if (pointer.visible && e.button === 0) {
+      pointer.clickedAt = performance.now();
+      drawFrame();
+    }
+  }, true);
+  wrap.addEventListener('pointerleave', hideHand);
+  wrap.addEventListener('pointercancel', hideHand);
+  window.addEventListener('blur', hideHand);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) hideHand(); });
 
   /* ============ 画面 ============
      タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
@@ -136,697 +169,229 @@
     else { try { AC.resume(); } catch (e) {} }
   });
 
-  /* ============ 問題 ============
-     どの段も文章題。
-     2択: ○× / 4択: 春夏秋冬 / 8択: 惑星 / 16択: 色 / 32択: 都道府県 / 64択: 元素
-     128択: 3文字の国コード / 256択: 動物 / 512択: 人名 / 1024択: 年 / 2048択: 漢字1文字 */
-  /* 256択: 動物。ヒントで1つに決まるよう、答えとまぎらわしい動物は候補に入れない */
-  var ANIMALS = [
-    ["ゾウ", "鼻が長く、陸でいちばん大きい動物は？"],
-    ["キリン", "陸でいちばん背が高い動物は？"],
-    ["パンダ", "白と黒の体で、竹やササを主に食べる動物は？"],
-    ["コアラ", "ユーカリの葉を主に食べ、木の上で暮らすオーストラリアの動物は？"],
-    ["ライオン", "「百獣の王」と呼ばれる動物は？"],
-    ["トラ", "黄色と黒のしま模様がある、いちばん大きなネコの仲間は？"],
-    ["クマ", "冬ごもりをすることで知られ、金太郎がすもうをとった相手の動物は？"],
-    ["ウサギ", "「月でもちつきをしている」と言われる動物は？"],
-    ["カエル", "おたまじゃくしが大きくなると何になる？"],
-    ["ペンギン", "空は飛べないが泳ぎが得意な、南極などにいる鳥は？"],
-    ["カメ", "かたい甲羅の中に、頭や手足を引っこめられる動物は？"],
-    ["ヘビ", "手足がなく、細長い体でにょろにょろ進む、は虫類は？"],
-    ["キツネ", "「コンコン」と鳴くとされる動物は？"],
-    ["サル", "干支で、ヒツジの次の動物は？"],
-    ["ウマ", "競馬で走る動物は？"],
-    ["ウシ", "「モー」と鳴く動物は？"],
-    ["ブタ", "「ブーブー」と鳴く動物は？"],
-    ["ヒツジ", "ウール（毛糸）の材料になる毛がとれ、「メェー」と鳴く動物は？"],
-    ["ニワトリ", "朝に「コケコッコー」と鳴く鳥は？"],
-    ["フクロウ", "夜に活動し、首がぐるりとよく回る鳥は？"],
-    ["イルカ", "頭がよく、水族館のショーでも人気の、小型のクジラの仲間は？"],
-    ["クジラ", "地球でいちばん大きな動物「シロナガス○○○」の、○○○に入る動物は？"],
-    ["サメ", "するどい歯が何度も生え変わる、三角の背びれの大きな魚は？"],
-    ["タコ", "足が8本あり、墨をはく海の生き物は？"],
-    ["カニ", "はさみを持ち、横に歩く生き物は？"],
-    ["チョウ", "幼虫はイモムシで、きれいな羽で花のみつを吸う虫は？"],
-    ["ハチ", "六角形の部屋が並んだ巣を作る虫は？"],
-    ["カタツムリ", "うずまきの殻を背負い、雨の日によく見る生き物は？"],
-    ["シマウマ", "白と黒のしま模様で、サバンナにすむウマの仲間は？"],
-    ["サイ", "鼻の上に大きな角がある動物は？"],
-    ["カバ", "汗が赤く見えることで知られる、アフリカの大きな草食動物は？"],
-    ["ワニ", "大きな口とするどい歯を持つ、水辺のは虫類は？"],
-    ["カンガルー", "おなかの袋で子どもを育て、跳ねて移動する動物は？"],
-    ["ハリネズミ", "危険を感じると体を丸めてトゲのボールになる、小さな動物は？"],
-    ["フラミンゴ", "片足で立って休むことが多い、ピンク色の鳥は？"],
-    ["ナマケモノ", "木にぶら下がって過ごす、動きがとてもゆっくりな動物は？"],
-    ["ラクダ", "背中にこぶがあり、砂漠を歩く動物は？"],
-    ["コウモリ", "空を飛ぶ哺乳類で、逆さまにぶら下がって眠るのは？"],
-    ["カワウソ", "川にすみ、魚をとって食べるイタチの仲間は？"],
-    ["アルパカ", "南米の高地で飼われる、ふわふわの毛のラクダの仲間は？"],
-    ["ヒョウ", "漢字で「豹」と書く動物は？"],
-    ["リス", "大きなしっぽを持ち、木の実をほおにためる動物は？"]
-  ];
-  /* 並び: 哺乳類 → 鳥 → は虫類・両生類 → 魚 → 虫 → そのほか。分類の中は五十音順。
-     答えにならない動物（7文字まで）も入れる。答えの仲間（ヒグマ・コウテイペンギンなど）は入れない */
-  var ANIMAL_GROUPS = [
-    "ゾウ キリン パンダ コアラ ライオン トラ クマ ウサギ サル ウマ ウシ ブタ ヒツジ イルカ クジラ シマウマ サイ " +
-    "カバ カンガルー ハリネズミ ナマケモノ ラクダ コウモリ カワウソ アルパカ ヒョウ リス キツネ " +
-    "アイアイ アザラシ アシカ アナグマ アライグマ アリクイ アルマジロ インパラ ウォンバット エランド オオカミ " +
-    "オカピ オコジョ オットセイ オポッサム オランウータン カピバラ カモシカ カラカル ガゼル キンシコウ クズリ ゲラダヒヒ " +
-    "コヨーテ ゴリラ サーバル ジャガー ジャッカル ジュゴン シカ スカンク セイウチ タヌキ チーター チンパンジー テン " +
-    "トナカイ ヌー ネコ ネズミ ハイエナ ハクビシン バク ハムスター ヒヒ ビーバー ピューマ フェレット ボノボ マーモット " +
-    "マナティー マングース ムササビ モグラ モモンガ モルモット ヤマネ ヤマネコ ラッコ リカオン ロバ イヌ ビントロング " +
-    "ヌートリア センザンコウ ヘラジカ カモノハシ オセロット ラーテル トド オオアリクイ ツパイ",
-    "ペンギン ニワトリ フクロウ フラミンゴ " +
-    "アオサギ アヒル アホウドリ インコ ウグイス ウズラ ウミネコ エナガ オウム オオワシ オシドリ カケス カッコウ カモ " +
-    "カモメ カラス カワセミ ガチョウ キジ キツツキ クジャク コウノトリ コンドル シジュウカラ スズメ ダチョウ タカ " +
-    "タンチョウ ツバメ トビ ハクチョウ ハシビロコウ ハト ハヤブサ ヒバリ ヒヨドリ ペリカン ホトトギス ムクドリ " +
-    "メジロ モズ ライチョウ ワシ エミュー キーウィ ヒクイドリ オオハシ ハチドリ ヨタカ カワウ " +
-    "シラサギ セキレイ カイツブリ オオルリ ルリビタキ",
-    "カエル カメ ヘビ ワニ イグアナ カメレオン トカゲ ヤモリ イモリ サンショウウオ",
-    "サメ アジ アユ イワシ ウナギ ウツボ エイ カサゴ カツオ カレイ キンギョ コイ サケ サバ サンマ スズキ タイ タラ " +
-    "ドジョウ ナマズ ニシン ハゼ ヒラメ フグ ブリ ホッケ マグロ マンボウ メダカ ワカサギ アンコウ カジキ " +
-    "トビウオ ピラニア クマノミ グッピー ベタ ネオンテトラ ハタハタ キス アナゴ ハモ シーラカンス " +
-    "フナ ヤマメ イワナ ニジマス カマス サヨリ ホウボウ オコゼ",
-    "チョウ ハチ アリ カブトムシ クワガタ カマキリ バッタ コオロギ スズムシ セミ トンボ ホタル " +
-    "テントウムシ カナブン ハエ カ アメンボ ミノムシ イナゴ キリギリス タガメ ゲンゴロウ シロアリ " +
-    "カゲロウ アブ ハサミムシ ミズスマシ ヤゴ",
-    "タコ カニ カタツムリ イカ エビ クラゲ ヒトデ ウニ ナマコ サザエ ホタテ アサリ ハマグリ カキ ザリガニ " +
-    "ミミズ ナメクジ ダンゴムシ ムカデ ヤスデ クモ サソリ オキアミ シャコ フジツボ イソギンチャク サンゴ " +
-    "ウミウシ オウムガイ ホヤ ヒル"
-  ].map(function (g) { return g.split(" ").sort(); });
-  var ANIMAL_NAMES = [].concat.apply([], ANIMAL_GROUPS);
-  /* 16択: 色（色相の順で固定） */
-  var COLORS = ["赤", "オレンジ", "黄色", "黄緑", "緑", "水色", "青", "紺色",
-                "紫", "ピンク", "茶色", "白", "灰色", "黒", "金色", "銀色"];
-  var COLOR_Q = [
-    ["信号機で「止まれ」を表す色は？", "赤"],
-    ["信号機の「進め」の色は、法律では何色と呼ばれる？", "青"],
-    ["信号機で「注意」を表す色は？", "黄色"],
-    ["赤と青の絵の具を混ぜるとできる色は？", "紫"],
-    ["赤と黄色の絵の具を混ぜるとできる色は？", "オレンジ"],
-    ["青と黄色の絵の具を混ぜるとできる色は？", "緑"],
-    ["白と黒の絵の具を混ぜるとできる色は？", "灰色"],
-    ["赤と白の絵の具を混ぜるとできる色は？", "ピンク"],
-    ["青と白の絵の具を混ぜるとできる色は？", "水色"],
-    ["オリンピックで1位のメダルの色は？", "金色"],
-    ["オリンピックで2位のメダルの色は？", "銀色"],
-    ["空から降ってくる雪の色は？", "白"],
-    ["ゴミ置き場などで見かけるカラスの羽の色は？", "黒"],
-    ["日本の郵便ポストの色は？", "赤"],
-    ["黒に近い、濃い青色を何という？", "紺色"],
-    ["チョコレートのような色は？", "茶色"],
-    ["「ネズミ色」とも呼ばれる色は？", "灰色"],
-    ["虹のいちばん内側の色は？", "紫"],
-    ["日本の救急車の車体の色は？", "白"],
-    ["若葉のような、黄色がかった緑色は？", "黄緑"]
-  ];
-  /* 北から順。県庁所在地が県名と同じところは問題にしない（null） */
-  var PREFS = [
-    ["北海道", "札幌市"], ["青森県", null], ["岩手県", "盛岡市"], ["宮城県", "仙台市"], ["秋田県", null],
-    ["山形県", null], ["福島県", null], ["茨城県", "水戸市"], ["栃木県", "宇都宮市"], ["群馬県", "前橋市"],
-    ["埼玉県", "さいたま市"], ["千葉県", null], ["東京都", null], ["神奈川県", "横浜市"], ["新潟県", null],
-    ["富山県", null], ["石川県", "金沢市"], ["福井県", null], ["山梨県", "甲府市"], ["長野県", null],
-    ["岐阜県", null], ["静岡県", null], ["愛知県", "名古屋市"], ["三重県", "津市"], ["滋賀県", "大津市"],
-    ["京都府", null], ["大阪府", null], ["兵庫県", "神戸市"], ["奈良県", null], ["和歌山県", null],
-    ["鳥取県", null], ["島根県", "松江市"], ["岡山県", null], ["広島県", null], ["山口県", null],
-    ["徳島県", null], ["香川県", "高松市"], ["愛媛県", "松山市"], ["高知県", null], ["福岡県", null],
-    ["佐賀県", null], ["長崎県", null], ["熊本県", null], ["大分県", null], ["宮崎県", null],
-    ["鹿児島県", null], ["沖縄県", "那覇市"]
-  ];
-  /* 原子番号の順（1〜86） */
-  var ELEMENTS = ("H 水素,He ヘリウム,Li リチウム,Be ベリリウム,B ホウ素,C 炭素,N 窒素,O 酸素,F フッ素,Ne ネオン," +
-    "Na ナトリウム,Mg マグネシウム,Al アルミニウム,Si ケイ素,P リン,S 硫黄,Cl 塩素,Ar アルゴン,K カリウム,Ca カルシウム," +
-    "Sc スカンジウム,Ti チタン,V バナジウム,Cr クロム,Mn マンガン,Fe 鉄,Co コバルト,Ni ニッケル,Cu 銅,Zn 亜鉛," +
-    "Ga ガリウム,Ge ゲルマニウム,As ヒ素,Se セレン,Br 臭素,Kr クリプトン,Rb ルビジウム,Sr ストロンチウム,Y イットリウム,Zr ジルコニウム," +
-    "Nb ニオブ,Mo モリブデン,Tc テクネチウム,Ru ルテニウム,Rh ロジウム,Pd パラジウム,Ag 銀,Cd カドミウム,In インジウム,Sn スズ," +
-    "Sb アンチモン,Te テルル,I ヨウ素,Xe キセノン,Cs セシウム,Ba バリウム,La ランタン,Ce セリウム,Pr プラセオジム,Nd ネオジム," +
-    "Pm プロメチウム,Sm サマリウム,Eu ユウロピウム,Gd ガドリニウム,Tb テルビウム,Dy ジスプロシウム,Ho ホルミウム,Er エルビウム,Tm ツリウム,Yb イッテルビウム," +
-    "Lu ルテチウム,Hf ハフニウム,Ta タンタル,W タングステン,Re レニウム,Os オスミウム,Ir イリジウム,Pt 白金,Au 金,Hg 水銀," +
-    "Tl タリウム,Pb 鉛,Bi ビスマス,Po ポロニウム,At アスタチン,Rn ラドン").split(",").map(function (s) { return s.split(" "); });
-  var ELEMENT_Q = "H He C N O Na Mg Al Si S Cl K Ca Ti Fe Ni Cu Zn Ag Sn I W Pt Au Hg Pb".split(" ");
-  var CODES = ("AFG ALB DZA AND AGO ARG ARM AUS AUT AZE BHS BHR BGD BRB BLR BEL BLZ BEN BTN BOL BIH BWA BRA BRN BGR BFA BDI " +
-    "KHM CMR CAN CPV CAF TCD CHL CHN COL COM COG COD CRI CIV HRV CUB CYP CZE DNK DJI DMA DOM ECU EGY SLV GNQ ERI EST SWZ " +
-    "ETH FJI FIN FRA GAB GMB GEO DEU GHA GRC GRD GTM GIN GNB GUY HTI HND HUN ISL IND IDN IRN IRQ IRL ISR ITA JAM JPN JOR " +
-    "KAZ KEN KIR PRK KOR KWT KGZ LAO LVA LBN LSO LBR LBY LIE LTU LUX MDG MWI MYS MDV MLI MLT MHL MRT MUS MEX FSM MDA MCO " +
-    "MNG MNE MAR MOZ MMR NAM NRU NPL NLD NZL NIC NER NGA MKD NOR OMN PAK PLW PAN PNG PRY PER PHL POL PRT QAT ROU RUS RWA " +
-    "KNA LCA VCT WSM SMR STP SAU SEN SRB SYC SLE SGP SVK SVN SLB SOM ZAF SSD ESP LKA SDN SUR SWE CHE SYR TJK TZA THA TLS " +
-    "TGO TON TTO TUN TUR TKM TUV UGA UKR ARE GBR USA URY UZB VUT VAT VEN VNM YEM ZMB ZWE").split(" ").sort();
-  var CODE_Q = [
-    ["日本", "JPN"], ["アメリカ", "USA"], ["イギリス", "GBR"], ["ドイツ", "DEU"], ["フランス", "FRA"],
-    ["スイス", "CHE"], ["スペイン", "ESP"], ["オランダ", "NLD"], ["オーストリア", "AUT"], ["オーストラリア", "AUS"],
-    ["韓国", "KOR"], ["中国", "CHN"], ["インド", "IND"], ["ブラジル", "BRA"], ["メキシコ", "MEX"],
-    ["カナダ", "CAN"], ["イタリア", "ITA"], ["ポルトガル", "PRT"], ["クロアチア", "HRV"], ["アイルランド", "IRL"],
-    ["南アフリカ", "ZAF"], ["アラブ首長国連邦", "ARE"], ["ニュージーランド", "NZL"], ["シンガポール", "SGP"],
-    ["フィリピン", "PHL"], ["ギリシャ", "GRC"], ["デンマーク", "DNK"], ["スウェーデン", "SWE"],
-    ["アルゼンチン", "ARG"], ["サウジアラビア", "SAU"], ["カンボジア", "KHM"], ["ベトナム", "VNM"]
-  ];
-  var EVENTS = [
-    [476, "西ローマ帝国が滅亡した年は？"], [603, "冠位十二階が定められた年は？"],
-    [604, "十七条の憲法が定められた年は？"], [645, "大化の改新が始まった年は？"],
-    [701, "大宝律令が定められた年は？"], [710, "平城京に都が移された年は？"],
-    [743, "墾田永年私財法が出された年は？"], [794, "平安京に都が移された年は？"],
-    [894, "遣唐使が停止された年は？"], [1185, "壇ノ浦の戦いが起きた年は？"],
-    [1206, "チンギス・ハンが即位した年は？"], [1215, "マグナ・カルタが制定された年は？"],
-    [1221, "承久の乱が起きた年は？"], [1274, "文永の役が起きた年は？"], [1281, "弘安の役が起きた年は？"],
-    [1467, "応仁の乱が始まった年は？"], [1492, "コロンブスがアメリカ大陸に到達した年は？"],
-    [1517, "ルターが九十五か条の論題を発表した年は？"], [1543, "日本に鉄砲が伝わった年は？"],
-    [1549, "ザビエルが日本に来た年は？"], [1575, "長篠の戦いが起きた年は？"],
-    [1600, "関ヶ原の戦いが起きた年は？"], [1603, "江戸幕府が開かれた年は？"],
-    [1637, "島原の乱が始まった年は？"], [1776, "アメリカ独立宣言が出された年は？"],
-    [1789, "フランス革命が始まった年は？"], [1804, "ナポレオンが皇帝に即位した年は？"],
-    [1853, "ペリーが浦賀に来航した年は？"], [1868, "明治元年は西暦何年？"],
-    [1872, "新橋・横浜間に鉄道が開業した年は？"], [1889, "大日本帝国憲法が発布された年は？"],
-    [1896, "第1回近代オリンピックが開かれた年は？"], [1903, "ライト兄弟が初飛行に成功した年は？"],
-    [1912, "大正元年は西暦何年？"], [1925, "日本でラジオ放送が始まった年は？"],
-    [1926, "昭和元年は西暦何年？"], [1929, "世界恐慌が始まった年は？"],
-    [1947, "日本国憲法が施行された年は？"], [1953, "日本でテレビ放送が始まった年は？"],
-    [1958, "東京タワーが完成した年は？"], [1964, "東海道新幹線が開業した年は？"],
-    [1969, "アポロ11号が月面着陸した年は？"], [1970, "大阪で日本万国博覧会が開かれた年は？"],
-    [1983, "東京ディズニーランドが開園した年は？"], [1988, "青函トンネルが開業した年は？"],
-    [1989, "平成元年は西暦何年？"], [1989, "ベルリンの壁が崩壊した年は？"],
-    [1994, "関西国際空港が開港した年は？"], [1998, "長野オリンピックが開かれた年は？"],
-    [2002, "サッカーのワールドカップが日本と韓国で開かれた年は？"],
-    [2012, "東京スカイツリーが開業した年は？"], [2019, "令和元年は西暦何年？"]
-  ];
-  /* ○×問題。true が ○ */
-  var TRUE_FALSE = [
-    ["富士山は日本でいちばん高い山である。", true],
-    ["日本の首都は大阪である。", false],
-    ["1年は12か月である。", true],
-    ["クジラは魚の仲間である。", false],
-    ["太陽は西から昇る。", false],
-    ["地球は太陽のまわりを回っている。", true],
-    ["野生のペンギンは北極にすんでいる。", false],
-    ["1日は25時間である。", false],
-    ["日本の国旗は「日の丸」である。", true],
-    ["月は地球のまわりを回っている。", true],
-    ["1メートルは10センチメートルである。", false],
-    ["三角形の3つの角を足すと180度になる。", true],
-    ["音は光より速く伝わる。", false],
-    ["日本でいちばん大きい湖は琵琶湖である。", true],
-    ["北海道は日本でいちばん面積が小さい都道府県である。", false],
-    ["日本でいちばん長い川は信濃川である。", true],
-    ["野球は1チーム11人で試合をする。", false],
-    ["サッカーは1チーム11人で試合をする。", true],
-    ["2は奇数である。", false],
-    ["7は素数である。", true],
-    ["太陽系でいちばん大きい惑星は地球である。", false],
-    ["太陽系でいちばん大きい惑星は木星である。", true],
-    ["1週間は8日である。", false],
-    ["食塩の主な成分は塩化ナトリウムである。", true],
-    ["コウモリは鳥の仲間である。", false],
-    ["イルカは哺乳類である。", true],
-    ["氷は水に沈む。", false],
-    ["1時間は60分である。", true],
-    ["日本でいちばん面積が小さい都道府県は東京都である。", false],
-    ["クモの足は8本である。", true]
-  ];
-  /* 4択: 季節（並びは固定）。日本の季節の感じ方で答えが1つに決まるものだけ */
-  var SEASONS = ["春", "夏", "秋", "冬"];
-  var SEASON_Q = [
-    ["ひな祭りがある季節は？", "春"],
-    ["お花見で桜を楽しむ季節は？", "春"],
-    ["入学式が多い季節は？", "春"],
-    ["たけのこがとれる季節は？", "春"],
-    ["海水浴をする季節は？", "夏"],
-    ["セミがたくさん鳴く季節は？", "夏"],
-    ["ひまわりが咲く季節は？", "夏"],
-    ["お盆がある季節は？", "夏"],
-    ["「土用の丑の日」にうなぎを食べるのは、主にどの季節？", "夏"],
-    ["俳句で「梅雨」を表す季語は、どの季節のもの？", "夏"],
-    ["お月見（十五夜）をする季節は？", "秋"],
-    ["紅葉狩りをする季節は？", "秋"],
-    ["スズムシの声を楽しむ季節は？", "秋"],
-    ["サンマがおいしくなる季節は？", "秋"],
-    ["俳句で「スイカ」を表す季語は、どの季節のもの？", "秋"],
-    ["俳句で「朝顔」を表す季語は、どの季節のもの？", "秋"],
-    ["大みそかがある季節は？", "冬"],
-    ["節分がある季節は？", "冬"],
-    ["雪合戦をする季節は？", "冬"],
-    ["クリスマスがある季節は？", "冬"],
-    ["年賀状を出す季節は？", "冬"]
-  ];
-  /* 8択: 太陽系の惑星（太陽に近い順で固定） */
-  var PLANETS = ["水星", "金星", "地球", "火星", "木星", "土星", "天王星", "海王星"];
-  var PLANET_Q = [
-    ["太陽にいちばん近い惑星は？", "水星"],
-    ["太陽からいちばん遠い惑星は？", "海王星"],
-    ["わたしたちが住んでいる惑星は？", "地球"],
-    ["太陽系でいちばん大きい惑星は？", "木星"],
-    ["太陽系でいちばん小さい惑星は？", "水星"],
-    ["大きな環（リング）で知られる惑星は？", "土星"],
-    ["「明けの明星」「宵の明星」と呼ばれる惑星は？", "金星"],
-    ["赤っぽく見え、「赤い惑星」と呼ばれる惑星は？", "火星"],
-    ["地球のすぐ外側を回る惑星は？", "火星"],
-    ["地球のすぐ内側を回る惑星は？", "金星"],
-    ["表面の温度がいちばん高い惑星は？", "金星"],
-    ["横だおしのような向きで自転している惑星は？", "天王星"],
-    ["「大赤斑」という大きなうずがある惑星は？", "木星"],
-    ["太陽から6番目の惑星は？", "土星"],
-    ["太陽から7番目の惑星は？", "天王星"],
-    ["計算で位置が予言されてから見つかった惑星は？", "海王星"],
-    ["探査車が何台も走ったことのある惑星は？", "火星"],
-    ["衛星（月）をちょうど1つ持つ惑星は？", "地球"]
-  ];
-  /* 2048択: 漢字1文字。よく使う漢字（JIS第1水準）から選ぶ。
-     並びは文字コード順（だいたい部首ごと、部首の中は画数順）。
-     読みが同じ漢字はどれでも正解（1文字目が代表の答え） */
-  var KANJI = (
-    "亜唖娃阿哀愛挨姶逢葵茜穐悪握渥旭葦芦鯵梓圧斡扱宛姐虻飴絢綾鮎或粟袷安庵按暗案闇鞍杏以伊位依偉囲夷委威尉惟意慰易椅為畏異移維緯胃萎衣謂違遺医井亥域育郁磯一壱溢逸稲" +
-    "茨芋鰯允印咽員因姻引飲淫胤蔭院陰隠韻吋右宇烏羽迂雨卯鵜窺丑碓臼渦嘘唄欝蔚鰻姥厩浦瓜閏噂云運雲荏餌叡営嬰影映曳栄永泳洩瑛盈穎頴英衛詠鋭液疫益駅悦謁越閲榎厭円園堰奄" +
-    "宴延怨掩援沿演炎焔煙燕猿縁艶苑薗遠鉛鴛塩於汚甥凹央奥往応押旺横欧殴王翁襖鴬鴎黄岡沖荻億屋憶臆桶牡乙俺卸恩温穏音下化仮何伽価佳加可嘉夏嫁家寡科暇果架歌河火珂禍禾稼" +
-    "箇花苛茄荷華菓蝦課嘩貨迦過霞蚊俄峨我牙画臥芽蛾賀雅餓駕介会解回塊壊廻快怪悔恢懐戒拐改魁晦械海灰界皆絵芥蟹開階貝凱劾外咳害崖慨概涯碍蓋街該鎧骸浬馨蛙垣柿蛎鈎劃嚇各" +
-    "廓拡撹格核殻獲確穫覚角赫較郭閣隔革学岳楽額顎掛笠樫橿梶鰍潟割喝恰括活渇滑葛褐轄且鰹叶椛樺鞄株兜竃蒲釜鎌噛鴨栢茅萱粥刈苅瓦乾侃冠寒刊勘勧巻喚堪姦完官寛干幹患感慣憾" +
-    "換敢柑桓棺款歓汗漢澗潅環甘監看竿管簡緩缶翰肝艦莞観諌貫還鑑間閑関陥韓館舘丸含岸巌玩癌眼岩翫贋雁頑顔願企伎危喜器基奇嬉寄岐希幾忌揮机旗既期棋棄機帰毅気汽畿祈季稀紀" +
-    "徽規記貴起軌輝飢騎鬼亀偽儀妓宜戯技擬欺犠疑祇義蟻誼議掬菊鞠吉吃喫桔橘詰砧杵黍却客脚虐逆丘久仇休及吸宮弓急救朽求汲泣灸球究窮笈級糾給旧牛去居巨拒拠挙渠虚許距鋸漁禦" +
-    "魚亨享京供侠僑兇競共凶協匡卿叫喬境峡強彊怯恐恭挟教橋況狂狭矯胸脅興蕎郷鏡響饗驚仰凝尭暁業局曲極玉桐粁僅勤均巾錦斤欣欽琴禁禽筋緊芹菌衿襟謹近金吟銀九倶句区狗玖矩苦" +
-    "躯駆駈駒具愚虞喰空偶寓遇隅串櫛釧屑屈掘窟沓靴轡窪熊隈粂栗繰桑鍬勲君薫訓群軍郡卦袈祁係傾刑兄啓圭珪型契形径恵慶慧憩掲携敬景桂渓畦稽系経継繋罫茎荊蛍計詣警軽頚鶏芸迎" +
-    "鯨劇戟撃激隙桁傑欠決潔穴結血訣月件倹倦健兼券剣喧圏堅嫌建憲懸拳捲検権牽犬献研硯絹県肩見謙賢軒遣鍵険顕験鹸元原厳幻弦減源玄現絃舷言諺限乎個古呼固姑孤己庫弧戸故枯湖" +
-    "狐糊袴股胡菰虎誇跨鈷雇顧鼓五互伍午呉吾娯後御悟梧檎瑚碁語誤護醐乞鯉交佼侯候倖光公功効勾厚口向后喉坑垢好孔孝宏工巧巷幸広庚康弘恒慌抗拘控攻昂晃更杭校梗構江洪浩港溝" +
-    "甲皇硬稿糠紅紘絞綱耕考肯肱腔膏航荒行衡講貢購郊酵鉱砿鋼閤降項香高鴻剛劫号合壕拷濠豪轟麹克刻告国穀酷鵠黒獄漉腰甑忽惚骨狛込此頃今困坤墾婚恨懇昏昆根梱混痕紺艮魂些佐" +
-    "叉唆嵯左差査沙瑳砂詐鎖裟坐座挫債催再最哉塞妻宰彩才採栽歳済災采犀砕砦祭斎細菜裁載際剤在材罪財冴坂阪堺榊肴咲崎埼碕鷺作削咋搾昨朔柵窄策索錯桜鮭笹匙冊刷察拶撮擦札殺" +
-    "薩雑皐鯖捌錆鮫皿晒三傘参山惨撒散桟燦珊産算纂蚕讃賛酸餐斬暫残仕仔伺使刺司史嗣四士始姉姿子屍市師志思指支孜斯施旨枝止死氏獅祉私糸紙紫肢脂至視詞詩試誌諮資賜雌飼歯事" +
-    "似侍児字寺慈持時次滋治爾璽痔磁示而耳自蒔辞汐鹿式識鴫竺軸宍雫七叱執失嫉室悉湿漆疾質実蔀篠偲柴芝屡蕊縞舎写射捨赦斜煮社紗者謝車遮蛇邪借勺尺杓灼爵酌釈錫若寂弱惹主取" +
-    "守手朱殊狩珠種腫趣酒首儒受呪寿授樹綬需囚収周宗就州修愁拾洲秀秋終繍習臭舟蒐衆襲讐蹴輯週酋酬集醜什住充十従戎柔汁渋獣縦重銃叔夙宿淑祝縮粛塾熟出術述俊峻春瞬竣舜駿准" +
-    "循旬楯殉淳準潤盾純巡遵醇順処初所暑曙渚庶緒署書薯藷諸助叙女序徐恕鋤除傷償勝匠升召哨商唱嘗奨妾娼宵将小少尚庄床廠彰承抄招掌捷昇昌昭晶松梢樟樵沼消渉湘焼焦照症省硝礁" +
-    "祥称章笑粧紹肖菖蒋蕉衝裳訟証詔詳象賞醤鉦鍾鐘障鞘上丈丞乗冗剰城場壌嬢常情擾条杖浄状畳穣蒸譲醸錠嘱埴飾拭植殖燭織職色触食蝕辱尻伸信侵唇娠寝審心慎振新晋森榛浸深申疹" +
-    "真神秦紳臣芯薪親診身辛進針震人仁刃塵壬尋甚尽腎訊迅陣靭笥諏須酢図厨逗吹垂帥推水炊睡粋翠衰遂酔錐錘随瑞髄崇嵩数枢趨雛据杉椙菅頗雀裾澄摺寸世瀬畝是凄制勢姓征性成政整" +
-    "星晴棲栖正清牲生盛精聖声製西誠誓請逝醒青静斉税脆隻席惜戚斥昔析石積籍績脊責赤跡蹟碩切拙接摂折設窃節説雪絶舌蝉仙先千占宣専尖川戦扇撰栓栴泉浅洗染潜煎煽旋穿箭線繊羨" +
-    "腺舛船薦詮賎践選遷銭銑閃鮮前善漸然全禅繕膳糎噌塑岨措曾曽楚狙疏疎礎祖租粗素組蘇訴阻遡鼠僧創双叢倉喪壮奏爽宋層匝惣想捜掃挿掻操早曹巣槍槽漕燥争痩相窓糟総綜聡草荘葬" +
-    "蒼藻装走送遭鎗霜騒像増憎臓蔵贈造促側則即息捉束測足速俗属賊族続卒袖其揃存孫尊損村遜他多太汰詑唾堕妥惰打柁舵楕陀駄騨体堆対耐岱帯待怠態戴替泰滞胎腿苔袋貸退逮隊黛鯛" +
-    "代台大第醍題鷹滝瀧卓啄宅托択拓沢濯琢託鐸濁諾茸凧蛸只叩但達辰奪脱巽竪辿棚谷狸鱈樽誰丹単嘆坦担探旦歎淡湛炭短端箪綻耽胆蛋誕鍛団壇弾断暖檀段男談値知地弛恥智池痴稚置" +
-    "致蜘遅馳築畜竹筑蓄逐秩窒茶嫡着中仲宙忠抽昼柱注虫衷註酎鋳駐樗瀦猪苧著貯丁兆凋喋寵帖帳庁弔張彫徴懲挑暢朝潮牒町眺聴脹腸蝶調諜超跳銚長頂鳥勅捗直朕沈珍賃鎮陳津墜椎槌" +
-    "追鎚痛通塚栂掴槻佃漬柘辻蔦綴鍔椿潰坪壷嬬紬爪吊釣鶴亭低停偵剃貞呈堤定帝底庭廷弟悌抵挺提梯汀碇禎程締艇訂諦蹄逓邸鄭釘鼎泥摘擢敵滴的笛適鏑溺哲徹撤轍迭鉄典填天展店添" +
-    "纏甜貼転顛点伝殿澱田電兎吐堵塗妬屠徒斗杜渡登菟賭途都鍍砥砺努度土奴怒倒党冬凍刀唐塔塘套宕島嶋悼投搭東桃梼棟盗淘湯涛灯燈当痘祷等答筒糖統到董蕩藤討謄豆踏逃透鐙陶頭" +
-    "騰闘働動同堂導憧撞洞瞳童胴萄道銅峠鴇匿得徳涜特督禿篤毒独読栃橡凸突椴届鳶苫寅酉瀞噸屯惇敦沌豚遁頓呑曇鈍奈那内乍凪薙謎灘捺鍋楢馴縄畷南楠軟難汝二尼弐迩匂賑肉虹廿日" +
-    "乳入如尿韮任妊忍認濡禰祢寧葱猫熱年念捻撚燃粘乃廼之埜嚢悩濃納能脳膿農覗蚤巴把播覇杷波派琶破婆罵芭馬俳廃拝排敗杯盃牌背肺輩配倍培媒梅楳煤狽買売賠陪這蝿秤矧萩伯剥博" +
-    "拍柏泊白箔粕舶薄迫曝漠爆縛莫駁麦函箱硲箸肇筈櫨幡肌畑畠八鉢溌発醗髪伐罰抜筏閥鳩噺塙蛤隼伴判半反叛帆搬斑板氾汎版犯班畔繁般藩販範釆煩頒飯挽晩番盤磐蕃蛮匪卑否妃庇彼" +
-    "悲扉批披斐比泌疲皮碑秘緋罷肥被誹費避非飛樋簸備尾微枇毘琵眉美鼻柊稗匹疋髭彦膝菱肘弼必畢筆逼桧姫媛紐百謬俵彪標氷漂瓢票表評豹廟描病秒苗錨鋲蒜蛭鰭品彬斌浜瀕貧賓頻敏" +
-    "瓶不付埠夫婦富冨布府怖扶敷斧普浮父符腐膚芙譜負賦赴阜附侮撫武舞葡蕪部封楓風葺蕗伏副復幅服福腹複覆淵弗払沸仏物鮒分吻噴墳憤扮焚奮粉糞紛雰文聞丙併兵塀幣平弊柄並蔽閉" +
-    "陛米頁僻壁癖碧別瞥蔑箆偏変片篇編辺返遍便勉娩弁鞭保舗鋪圃捕歩甫補輔穂募墓慕戊暮母簿菩倣俸包呆報奉宝峰峯崩庖抱捧放方朋法泡烹砲縫胞芳萌蓬蜂褒訪豊邦鋒飽鳳鵬乏亡傍剖" +
-    "坊妨帽忘忙房暴望某棒冒紡肪膨謀貌貿鉾防吠頬北僕卜墨撲朴牧睦穆釦勃没殆堀幌奔本翻凡盆摩磨魔麻埋妹昧枚毎哩槙幕膜枕鮪柾鱒桝亦俣又抹末沫迄侭繭麿万慢満漫蔓味未魅巳箕岬" +
-    "密蜜湊蓑稔脈妙粍民眠務夢無牟矛霧鵡椋婿娘冥名命明盟迷銘鳴姪牝滅免棉綿緬面麺摸模茂妄孟毛猛盲網耗蒙儲木黙目杢勿餅尤戻籾貰問悶紋門匁也冶夜爺耶野弥矢厄役約薬訳躍靖柳" +
-    "薮鑓愉愈油癒諭輸唯佑優勇友宥幽悠憂揖有柚湧涌猶猷由祐裕誘遊邑郵雄融夕予余与誉輿預傭幼妖容庸揚揺擁曜楊様洋溶熔用窯羊耀葉蓉要謡踊遥陽養慾抑欲沃浴翌翼淀羅螺裸来莱頼" +
-    "雷洛絡落酪乱卵嵐欄濫藍蘭覧利吏履李梨理璃痢裏裡里離陸律率立葎掠略劉流溜琉留硫粒隆竜龍侶慮旅虜了亮僚両凌寮料梁涼猟療瞭稜糧良諒遼量陵領力緑倫厘林淋燐琳臨輪隣鱗麟瑠" +
-    "塁涙累類令伶例冷励嶺怜玲礼苓鈴隷零霊麗齢暦歴列劣烈裂廉恋憐漣煉簾練聯蓮連錬呂魯櫓炉賂路露労婁廊弄朗楼榔浪漏牢狼篭老聾蝋郎六麓禄肋録論倭和話歪賄脇惑枠鷲亙亘鰐詫藁" +
-    "蕨椀湾碗腕"
-  ).split("").sort();
-  var KANJI_Q = [
-    ["さかな", "魚肴"], ["やま", "山"], ["そら", "空"], ["いぬ", "犬狗"], ["とり", "鳥酉禽鶏"], ["うま", "馬午"],
-    ["うし", "牛丑"], ["むし", "虫"], ["くるま", "車"], ["ほし", "星"], ["つき", "月槻"], ["ゆき", "雪"],
-    ["くも", "雲"], ["かぜ", "風"], ["いし", "石"], ["みず", "水"], ["うみ", "海"], ["はやし", "林"],
-    ["たけ", "竹岳丈茸"], ["いと", "糸絃"], ["みみ", "耳"], ["くち", "口"], ["あし", "足脚葦芦"], ["ほね", "骨"],
-    ["いえ", "家"], ["みせ", "店"], ["こめ", "米"], ["たまご", "卵"], ["さくら", "桜"], ["まめ", "豆"],
-    ["はこ", "箱函"], ["ふね", "船舟"], ["しま", "島嶋縞"], ["いけ", "池"], ["くさ", "草"], ["たに", "谷渓"],
-    ["はね", "羽"], ["かお", "顔"], ["こころ", "心"], ["ゆめ", "夢"], ["うた", "歌唄詩"], ["あお", "青蒼碧"],
-    ["あか", "赤朱紅緋"], ["くろ", "黒玄"], ["きた", "北"], ["みなみ", "南"], ["ひがし", "東"], ["にし", "西"],
-    ["はる", "春"], ["なつ", "夏"], ["あき", "秋穐"], ["ふゆ", "冬"], ["あさ", "朝麻"], ["よる", "夜"],
-    ["ひる", "昼蛭"], ["ひつじ", "羊未"], ["なみ", "波浪"], ["すな", "砂沙"], ["はし", "橋端箸"], ["ゆび", "指"],
-    ["むね", "胸棟旨宗"], ["いた", "板"], ["あに", "兄"], ["あね", "姉"], ["おとうと", "弟"], ["いもうと", "妹"],
-    ["はは", "母"], ["くに", "国邦"], ["かたな", "刀"], ["ゆみ", "弓"], ["ひかり", "光"], ["こおり", "氷郡"],
-    ["つち", "土槌鎚"], ["いわ", "岩巌磐"], ["はたけ", "畑畠"], ["あたま", "頭"], ["にじ", "虹"], ["おとこ", "男"],
-    ["おんな", "女"]
-  ];
-  /* 512択: 人名。実在の人物（問題） + 架空の名前。よみの五十音順に並べる */
-  var PEOPLE = [
-    ["伊藤博文", "いとうひろぶみ", "日本の初代内閣総理大臣は？"],
-    ["福沢諭吉", "ふくざわゆきち", "「学問のすゝめ」を書いた人物は？"],
-    ["紫式部", "むらさきしきぶ", "「源氏物語」を書いた人物は？"],
-    ["清少納言", "せいしょうなごん", "「枕草子」を書いた人物は？"],
-    ["徳川家康", "とくがわいえやす", "江戸幕府を開いた人物は？"],
-    ["源頼朝", "みなもとのよりとも", "鎌倉幕府を開いた人物は？"],
-    ["足利尊氏", "あしかがたかうじ", "室町幕府を開いた人物は？"],
-    ["夏目漱石", "なつめそうせき", "「坊っちゃん」を書いた作家は？"],
-    ["芥川龍之介", "あくたがわりゅうのすけ", "「羅生門」を書いた作家は？"],
-    ["太宰治", "だざいおさむ", "「走れメロス」を書いた作家は？"],
-    ["野口英世", "のぐちひでよ", "黄熱病の研究で知られる細菌学者は？"],
-    ["伊能忠敬", "いのうただたか", "全国を測量して、正確な日本地図を作った人物は？"],
-    ["杉田玄白", "すぎたげんぱく", "前野良沢らと「解体新書」を出版した人物は？"],
-    ["松尾芭蕉", "まつおばしょう", "「奥の細道」を書いた俳人は？"],
-    ["歌川広重", "うたがわひろしげ", "浮世絵「東海道五十三次」を描いた絵師は？"],
-    ["葛飾北斎", "かつしかほくさい", "浮世絵「富嶽三十六景」を描いた絵師は？"],
-    ["中臣鎌足", "なかとみのかまたり", "中大兄皇子とともに大化の改新を進めた人物は？"],
-    ["小野妹子", "おののいもこ", "遣隋使として隋に送られた人物は？"],
-    ["樋口一葉", "ひぐちいちよう", "「たけくらべ」を書いた作家は？"],
-    ["湯川秀樹", "ゆかわひでき", "日本人で初めてノーベル賞を受賞した物理学者は？"],
-    ["宮沢賢治", "みやざわけんじ", "「銀河鉄道の夜」を書いた作家は？"],
-    ["与謝野晶子", "よさのあきこ", "歌集「みだれ髪」を出した歌人は？"],
-    ["織田信長", "おだのぶなが", "「天下布武」の印を使った戦国武将は？"],
-    ["豊臣秀吉", "とよとみひでよし", "大阪城を築き、「太閤」と呼ばれた人物は？"],
-    ["坂本龍馬", "さかもとりょうま", "薩長同盟の仲立ちをした、土佐藩出身の人物は？"],
-    ["西郷隆盛", "さいごうたかもり", "東京の上野公園に銅像が立つ、薩摩藩出身の人物は？"],
-    ["聖徳太子", "しょうとくたいし", "十七条の憲法を定めたとされる人物は？"],
-    ["卑弥呼", "ひみこ", "邪馬台国の女王は？"],
-    ["渋沢栄一", "しぶさわえいいち", "2024年から一万円札の肖像になった人物は？"],
-    ["津田梅子", "つだうめこ", "2024年から五千円札の肖像になった人物は？"],
-    ["北里柴三郎", "きたさとしばさぶろう", "2024年から千円札の肖像になった人物は？"],
-    ["平清盛", "たいらのきよもり", "武士として初めて太政大臣になった人物は？"],
-    ["手塚治虫", "てづかおさむ", "「鉄腕アトム」を描いた漫画家は？"]
-  ];
-  var SURNAMES = ("佐藤さとう 鈴木すずき 高橋たかはし 田中たなか 渡辺わたなべ 伊藤いとう 山本やまもと 中村なかむら 小林こばやし 加藤かとう " +
-    "吉田よしだ 山田やまだ 佐々木ささき 山口やまぐち 松本まつもと 井上いのうえ 木村きむら 林はやし 斎藤さいとう 清水しみず " +
-    "山崎やまざき 森もり 池田いけだ 橋本はしもと 阿部あべ 石川いしかわ 山下やました 中島なかじま 石井いしい 小川おがわ " +
-    "前田まえだ 岡田おかだ 長谷川はせがわ 藤田ふじた 後藤ごとう 近藤こんどう 村上むらかみ 遠藤えんどう 青木あおき 坂本さかもと " +
-    "福田ふくだ 太田おおた 西村にしむら 藤井ふじい 金子かねこ 岡本おかもと 藤原ふじわら 三浦みうら 中野なかの 中川なかがわ " +
-    "原田はらだ 松田まつだ 竹内たけうち 小野おの 田村たむら 中山なかやま 和田わだ 石田いしだ 森田もりた 上田うえだ " +
-    "原はら 柴田しばた 酒井さかい 工藤くどう 横山よこやま 宮崎みやざき 宮本みやもと 内田うちだ 高木たかぎ 安藤あんどう " +
-    "島田しまだ 谷口たにぐち 大野おおの 丸山まるやま 今井いまい 河野こうの 藤本ふじもと 村田むらた 武田たけだ 上野うえの " +
-    "杉山すぎやま 増田ますだ 小山こやま 大塚おおつか 平野ひらの 菅原すがわら 久保くぼ 松井まつい 千葉ちば 岩崎いわさき " +
-    "桜井さくらい 木下きのした 野口のぐち 松尾まつお 菊地きくち 野村のむら 新井あらい 浅野あさの 秋山あきやま 大西おおにし").split(" ");
-  var GIVEN = ("太郎たろう 次郎じろう 三郎さぶろう 一郎いちろう 健一けんいち 誠まこと 大輔だいすけ 翔太しょうた 拓海たくみ 蓮れん " +
-    "陽斗はると 悠真ゆうま 湊みなと 大和やまと 颯太そうた 直樹なおき 和也かずや 浩ひろし 隆たかし 修おさむ " +
-    "茂しげる 勇いさむ 正雄まさお 清きよし 博之ひろゆき 智也ともや 康介こうすけ 亮りょう 光一こういち 学まなぶ " +
-    "花子はなこ 陽菜ひな 結衣ゆい 美咲みさき 葵あおい 凛りん 芽衣めい 紬つむぎ 真央まお 彩あや " +
-    "恵子けいこ 洋子ようこ 幸子さちこ 京子きょうこ 由美ゆみ 久美子くみこ 智子ともこ 裕子ゆうこ 直美なおみ 明美あけみ " +
-    "千尋ちひろ 舞まい 楓かえで 桃子ももこ 七海ななみ 沙織さおり 香織かおり 美穂みほ 左衛門さえもん 権兵衛ごんべえ " +
-    "与一よいち 弥助やすけ 伝七でんしち 平八へいはち 新之助しんのすけ 吉兵衛きちべえ").split(" ");
-  var KANA = /[ぁ-ん]/;
-  function splitName(s) { var i = s.search(KANA); return [s.slice(0, i), s.slice(i)]; }
-  var fakeNames = null;
-  function allFakeNames() {
-    if (fakeNames) return fakeNames;
-    var real = {};
-    PEOPLE.forEach(function (p) { real[p[0]] = true; });
-    fakeNames = [];
-    SURNAMES.forEach(function (s) {
-      var a = splitName(s);
-      GIVEN.forEach(function (g) {
-        var b = splitName(g);
-        if (!real[a[0] + b[0]]) fakeNames.push([a[0] + b[0], a[1] + b[1]]);
-      });
-    });
-    return fakeNames;
-  }
-  var LAST = 2048;
-
-  function rnd(n) { return Math.floor(Math.random() * n); }
-  function shuffle(a) {
-    a = a.slice();
-    for (var i = a.length - 1; i > 0; i--) { var j = rnd(i + 1), t = a[i]; a[i] = a[j]; a[j] = t; }
-    return a;
-  }
-  /* 同じ回のうちは同じ問題を出さない */
-  function pickQ(pool, key) {
-    var fresh = pool.filter(function (p) { return !used[key(p)]; });
-    var p = (fresh.length ? fresh : pool)[rnd((fresh.length ? fresh : pool).length)];
-    used[key(p)] = true;
-    return p;
-  }
-  /* 0..len-1 から keep を含む n 個を選び、元の順に並べる */
-  function sampleKeep(len, keep, n) {
-    var rest = [];
-    for (var i = 0; i < len; i++) if (i !== keep) rest.push(i);
-    return shuffle(rest).slice(0, n - 1).concat([keep]).sort(function (a, b) { return a - b; });
-  }
-  function fromPool(pool, keep, n, label) {
-    var idx = sampleKeep(pool.length, keep, n);
-    return { items: idx.map(function (i) { return label(pool[i]); }), answer: idx.indexOf(keep) };
-  }
-
-  function build(N) {
-    var p, r, q;
-    if (N === 2) {
-      p = pickQ(TRUE_FALSE, function (a) { return a[0]; });
-      return { text: p[0], items: ["○", "×"], answer: p[1] ? 0 : 1 };
-    }
-    if (N === 4) {
-      p = pickQ(SEASON_Q, function (a) { return a[0]; });
-      return { text: p[0], items: SEASONS.slice(), answer: SEASONS.indexOf(p[1]) };
-    }
-    if (N === 8) {
-      p = pickQ(PLANET_Q, function (a) { return a[0]; });
-      return { text: p[0], items: PLANETS.slice(), answer: PLANETS.indexOf(p[1]) };
-    }
-    if (N === 16) {
-      p = pickQ(COLOR_Q, function (a) { return a[0]; });
-      return { text: p[0], items: COLORS.slice(), answer: COLORS.indexOf(p[1]) };
-    }
-    if (N === 32) {
-      p = pickQ(PREFS.filter(function (a) { return a[1]; }), function (a) { return a[1]; });
-      r = fromPool(PREFS, PREFS.indexOf(p), N, function (a) { return a[0]; });
-      return { text: "都道府県庁が" + p[1] + "にあるのは？", items: r.items, answer: r.answer };
-    }
-    if (N === 64) {
-      q = pickQ(ELEMENT_Q, function (s) { return "el" + s; });
-      var at = ELEMENTS.map(function (e) { return e[0]; }).indexOf(q);
-      r = fromPool(ELEMENTS, at, N, function (e) { return e[1]; });
-      return { text: "元素記号が「" + q + "」の元素は？", items: r.items, answer: r.answer };
-    }
-    if (N === 128) {
-      p = pickQ(CODE_Q, function (a) { return a[0]; });
-      r = fromPool(CODES, CODES.indexOf(p[1]), N, function (c) { return c; });
-      return { text: p[0] + "の国コード（アルファベット3文字）は？", items: r.items, answer: r.answer };
-    }
-    if (N === 256) {
-      p = pickQ(ANIMALS, function (a) { return a[1]; });
-      r = fromPool(ANIMAL_NAMES, ANIMAL_NAMES.indexOf(p[0]), N, function (a) { return a; });
-      return { text: p[1], items: r.items, answer: r.answer };
-    }
-    if (N === 2048) {
-      p = pickQ(KANJI_Q, function (a) { return "k" + a[0]; });
-      r = fromPool(KANJI, KANJI.indexOf(p[1][0]), N, function (k) { return k; });
-      var alts = [];
-      r.items.forEach(function (k, i) { if (p[1].indexOf(k) >= 0) alts.push(i); });
-      return { text: "「" + p[0] + "」を漢字1文字で書くと？", items: r.items, answer: r.answer, answers: alts };
-    }
-    if (N === 512) {
-      p = pickQ(PEOPLE, function (a) { return a[2]; });
-      var fake = shuffle(allFakeNames()).slice(0, N - PEOPLE.length);
-      var list = PEOPLE.map(function (a) { return [a[0], a[1]]; }).concat(fake);
-      list.sort(function (a, b) { return a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : (a[0] < b[0] ? -1 : 1); });
-      var people = list.map(function (a) { return a[0]; });
-      return { text: p[2], items: people, answer: people.indexOf(p[0]) };
-    }
-    /* 年: 答えを含む連続した N 年ぶん（1〜2048年の中で位置はばらばら） */
-    p = pickQ(EVENTS, function (a) { return a[1]; });
-    var lo = Math.max(1, p[0] - N + 1), hi = Math.min(p[0], LAST - N + 1);
-    var start = lo + rnd(hi - lo + 1), years = [];
-    for (var y = 0; y < N; y++) years.push(String(start + y));
-    return { text: p[1], items: years, answer: p[0] - start };
-  }
-
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", JUDGE: "judge", RESULT: "result" };
-  var state, score, T, held, keyMode = false;
-  var N, Q, cols, rowH, cur, popT, judge, judgeT, picked, revealed, cleared, used, clearTime = 0;
-  var scrollY = 0, maxScroll = 0, scrollTo = null, vel = 0;
-  var drag = null;                             /* 押している指 */
+  var S = { INTRO: "intro", PLAY: "play", REPLAY: "replay", SUCCESS: "success", RESULT: "result" };
+  var state, score, T, held, successWait=0, keyMode = false;
 
-  var areaTop, areaBottom;                     /* 高さから決まる置き場所 */
+  var PERSONAL_SPACE=40, MAX_LEVEL=7;
+  var level=1, CROWD_SIZE=20, FRAME_SECONDS=1/10, STRIKE_SECONDS=1/30, GUESS_SECONDS=5;
+  var people=[], attacker=-1, victim=-1, attackAt=0, elapsed=-1, outcome='', selected=0;
+  var clothes=['#b95038','#356f83','#d5a52f','#45614a','#57558a','#ac5872','#f0e2be'];
+  var crowdHeight=960;
+  var CY;                                      /* 高さから決まる置き場所 */
   function place() {
-    /* 上に択数と問題文を小さくまとめ、その下は全部選択肢に使う。
-       高さ780でも8段×64以上（押す間隔63以上）が取れる */
-    areaTop = Q_BOTTOM + 12;
-    areaBottom = H - 24;
-    if (Q) fitRows();
+    if(people)people.forEach(function(p){p.y=p.y/crowdHeight*H;});crowdHeight=H;
+    CY = Math.round(H * 0.5);                  /* ▼UPDATE: 置き場所の計算 */
   }
-  function colsFor(n) { return n <= 16 ? 2 : n <= 64 || n === 256 || n === 512 ? 4 : 8; }
-  /* 1段の高さ。1段64で収まるなら選択肢の場所いっぱいに広げる（ただし1段140まで。少ない段は下に寄せる）。
-     収まらなければ1段64でスクロール */
-  var Q_TOP = 60, Q_BOTTOM = 184, ROW_MAX = 140;
-  function fitRows() {
-    var rows = Math.ceil(N / cols);
-    var room = areaBottom - areaTop;
-    rowH = rows * 64 <= room ? Math.min(ROW_MAX, room / rows) : 64;
-    maxScroll = Math.max(0, rows * rowH - (areaBottom - areaTop));
-    scrollY = clampScroll(scrollY);
-    Q.fs = null;
-  }
-  function clampScroll(y) { return Math.max(0, Math.min(maxScroll, y)); }
 
-  function newRound() {
-    shareButton.hidden = true;
+  function newRound(continueStreak, jumpLevel) {
     document.getElementById("start").hidden=true;
+    shareButton.hidden=true;
     state = S.PLAY;
-    score = 0;
+    if(!continueStreak){score=0;level=Math.min(MAX_LEVEL,jumpLevel||1);}
+    else level=Math.min(MAX_LEVEL,level+1);
+    CROWD_SIZE=level*20;
+    successWait=0;
     T = 0;
+    frameDebt=0;
     held = false;
-    used = {};
-    cleared = false;
-    clearTime = 0;
-    setStage(DEBUG_STAGE || 2);
-  }
-  function setStage(n) {
-    N = n;
-    state = S.PLAY;
-    Q = build(n);
-    if (!Q.answers) Q.answers = [Q.answer];
-    cols = colsFor(n);
-    scrollY = 0; scrollTo = null; vel = 0; drag = null;
-    fitRows();
-    judge = null; judgeT = 0; picked = -1; revealed = false;
-    cur = 0; popT = 0;
-  }
-
-  /* ============ 手元用の正解デバッグ ============
-     持ち主の指示で入れたもの。localhost / 127.0.0.1 で開いたときだけ効く（公開サイトでは動かない）。
-       C … 正解を選ぶ（正解の位置までスクロールする）
-       ?stage=2048 … 開始画面を飛ばし、その択数の段から始める
-     サムネ: node games/_tools/thumb.js baibai-quiz --query stage=2048 -k なし -t 2 --top 76 --toph 86
-       （上の帯は問題文だけ、下の帯は段のすき間から始まる切り取り） */
-  var DEBUG_OK = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
-  var DEBUG_STAGE = (function () {
-    var m = DEBUG_OK && /[?&]stage=(\d+)(?:&|$)/.exec(location.search), n = m ? +m[1] : 0;
-    return n >= 2 && n <= LAST && (n & (n - 1)) === 0 ? n : 0;
-  })();
-  function debugAnswer() {
-    if (!DEBUG_OK || state !== S.PLAY) return;
-    cur = Q.answer;
-    if (maxScroll > 0) scrollTo = scrollCenter(Q.answer);
-    choose(Q.answer);
-  }
-
-  /* ============ 並び ============ */
-  function gridTop() {
-    return maxScroll > 0 ? areaTop - scrollY : areaBottom - Math.ceil(N / cols) * rowH;
-  }
-  function cellAt(i, top) {
-    var cw = (W - 32) / cols;
-    return { id: i, a: Q.items[i], x: 16 + (i % cols) * cw, y: top + Math.floor(i / cols) * rowH, w: cw, h: rowH };
-  }
-  /* 見えている段のぶんだけ返す */
-  function visibleCells() {
-    var top = gridTop(), list = [];
-    var r0 = Math.max(0, Math.floor((areaTop - top) / rowH));
-    var r1 = Math.min(Math.ceil(N / cols) - 1, Math.floor((areaBottom - top) / rowH));
-    for (var r = r0; r <= r1; r++) for (var c = 0; c < cols; c++) {
-      var i = r * cols + c;
-      if (i < N) list.push(cellAt(i, top));
+    attackAt=6+Math.random()*4; elapsed=-1; outcome=''; attacker=-1; victim=-1; selected=0;
+    replayTape=[];replayTaped=false;replayAt=0;replayTimer=0;
+    people=[];
+    // 少人数でも自然に隣り合う人を用意し、手刀の相手がいない待ち時間を減らす。
+    var pairY=H*(.4+Math.random()*.2),pairVX=(Math.random()-.5)*5,pairVY=(Math.random()-.5)*12;
+    for(var i=0;i<CROWD_SIZE;i++){
+      var p=makePerson(i),tries=0;
+      do{var initial=groundAt(15+Math.random()*510,65+Math.random()*(H-80));p.x=initial.x;p.y=initial.y;tries++;}
+      while(tries<1000&&people.some(function(q){return Math.hypot(p.x-q.x,p.y-q.y)<PERSONAL_SPACE+2;}));
+      if(i<2){p.x=W/2+(i===0?-33:33);p.y=pairY;p.vx=pairVX;p.vy=pairVY;}
+      else if(tries>=1000)enter(p);
+      people.push(p);
     }
-    return list;
-  }
-  /* i 番が見える位置のスクロール量（まん中に寄せる / はみ出したぶんだけ寄せる） */
-  function scrollCenter(i) {
-    var room = areaBottom - areaTop;
-    return clampScroll(Math.floor(i / cols) * rowH - (room - rowH) / 2);
-  }
-  function ensureVisible(i) {
-    if (maxScroll <= 0) return;
-    var room = areaBottom - areaTop, y = Math.floor(i / cols) * rowH;
-    var now = scrollTo != null ? scrollTo : scrollY;
-    if (y < now) scrollTo = clampScroll(y);
-    else if (y + rowH > now + room) scrollTo = clampScroll(y + rowH - room);
   }
 
+  /* ============ 手刀のリプレイ ============
+     手刀のコマまでを控えておき、勝敗が決まったら遅く流してから結果を出す。
+     控えるのは人の居場所と向き、歩きの時計、手刀の進み具合だけ。
+     3Dの模型は毎コマこれらから組み直すので、戻せばそのまま同じ絵になる。 */
+  var REPLAY_LEAD=6, REPLAY_SLOW=3, REPLAY_HOLD=1.3;
+  var replayTape=[], replayTaped=false, replayAt=0, replayTimer=0, replayNext="";
+
+  function record(){
+    if(replayTaped)return;
+    replayTape.push({T:T,elapsed:elapsed,
+      spots:people.map(function(p){return {x:p.x,y:p.y,vx:p.vx,vy:p.vy};})});
+    if(elapsed>=0){replayTaped=true;return;}   /* 手刀のコマを控えたら、そこで止める */
+    if(replayTape.length>REPLAY_LEAD)replayTape.shift();
+  }
+  function moveCrowd(spots){
+    spots.forEach(function(s,id){
+      var p=people[id];
+      if(!p)return;
+      p.x=s.x;p.y=s.y;p.vx=s.vx;p.vy=s.vy;
+    });
+  }
+  function finish(next){
+    state=next;
+    if(next===S.SUCCESS)successWait=0;
+  }
+  // 手刀が出る前に終わったときは流すものが無いので、そのまま結果へ。
+  function startReplay(next){
+    if(!replayTaped||replayTape.length<2){finish(next);return;}
+    replayAt=0;replayTimer=0;replayNext=next;
+    state=S.REPLAY;
+  }
+  function replayTick(dt){
+    replayTimer+=dt;
+    if(replayAt>=replayTape.length-1){          /* 手刀のコマ。印をつけて少し止める */
+      if(replayTimer>=REPLAY_HOLD-1e-9)finish(replayNext);
+      return;
+    }
+    if(replayTimer>=FRAME_SECONDS*REPLAY_SLOW-1e-9){replayTimer=0;replayAt++;}
+  }
+  // 控えたコマの姿に一時だけ差し替えて描く。進行と覗き穴には触らない。
+  function drawFrame(){
+    if(state!==S.REPLAY||!replayTape[replayAt]){draw();return;}
+    var liveT=T, liveElapsed=elapsed;
+    var live=people.map(function(p){return {x:p.x,y:p.y,vx:p.vx,vy:p.vy};});
+    T=replayTape[replayAt].T;elapsed=replayTape[replayAt].elapsed;
+    moveCrowd(replayTape[replayAt].spots);
+    try{draw();}
+    finally{T=liveT;elapsed=liveElapsed;moveCrowd(live);}
+  }
+  // 手刀のコマで止まっている間と、結果が出てからは、出した人に印をつける。
+  function revealAttacker(){
+    if(state===S.RESULT||state===S.SUCCESS)return true;
+    return state===S.REPLAY&&replayAt>=replayTape.length-1;
+  }
   /* ============ 進行 ============ */
   function update(dt) {
-    popT += dt;
-    if (!drag || !drag.moved) {
-      if (scrollTo != null) {
-        scrollY += (scrollTo - scrollY) * Math.min(1, dt * 12);
-        if (Math.abs(scrollTo - scrollY) < 0.5) { scrollY = scrollTo; scrollTo = null; }
-      } else if (vel) {
-        /* 離したあとの慣性 */
-        var before = scrollY;
-        scrollY = clampScroll(scrollY + vel * dt);
-        vel *= Math.pow(0.05, dt);
-        if (Math.abs(vel) < 8 || scrollY === before) vel = 0;
+    if(state===S.REPLAY){replayTick(dt);return;}
+    if(state===S.SUCCESS){
+      successWait+=dt;
+      if(successWait>=2-1e-9)newRound(true);
+      return;
+    }
+    if (state !== S.PLAY) return;
+    T += dt;
+
+    walkCrowd(dt);
+    if(elapsed<0 && T>=attackAt){
+      var pairs=[];
+      people.forEach(function(p){
+        var screen=position(p);
+        if(screen.x<120||screen.x>W-120||screen.y<170||screen.y>H-130)return;
+        var end=position({x:p.x+p.vx*GUESS_SECONDS,y:p.y+p.vy*GUESS_SECONDS});
+        if(end.x<64||end.x>W-64||end.y<130||end.y>H-60)return;
+        people.forEach(function(q){
+          var distance=Math.hypot(p.x-q.x,p.y-q.y);
+          if(p.id!==q.id&&distance>=PERSONAL_SPACE-1&&distance<88&&Math.abs(p.y-q.y)<28)pairs.push([p.id,q.id]);
+        });
+      });
+      if(pairs.length){
+        var pair=pairs[Math.floor(Math.random()*pairs.length)];attacker=pair[0];victim=pair[1];
+        elapsed=0;
       }
+    }else if(elapsed>=0){
+      elapsed+=dt;
+      if(elapsed>=GUESS_SECONDS-1e-9){elapsed=GUESS_SECONDS;outcome='miss';startReplay(S.RESULT);}
     }
-    if (state === S.JUDGE) {
-      judgeT += dt;
-      if (judge === "ok" && judgeT >= 0.8) {
-        if (N >= LAST) { cleared = true; finish(); }
-        else { setStage(N * 2); tone(520, 0.12, 0.1, "triangle", 1040); }
-      } else if (judge === "ng") {
-        if (!revealed && judgeT >= 0.55) {
-          revealed = true;
-          vel = 0;
-          if (maxScroll > 0) scrollTo = scrollCenter(Q.answer);
-        }
-        if (judgeT >= 2.2) finish();
-      }
-    }
-    /* かかった時間。STARTから最後の正解を押すまで（判定の表示中も含む） */
-    if (state === S.PLAY || state === S.JUDGE) T += dt;
-  }
-  function finish() {
-    state = S.RESULT;
-    score = N;
-    if (cleared) {
-      [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.3, 0.12, "triangle", null, i * 0.1); });
-    }
+    record();
   }
 
-  function choose(id) {
-    picked = id;
-    state = S.JUDGE;
-    judgeT = 0;
-    vel = 0; drag = null;
-    if (Q.answers.indexOf(id) >= 0) {
-      judge = "ok";
-      if (N >= LAST) clearTime = T;
-      tone(660, 0.12, 0.13, "square");
-      tone(990, 0.2, 0.13, "square", null, 0.09);
-    } else {
-      judge = "ng";
-      tone(220, 0.45, 0.14, "sawtooth", 80);
-      noiseHit(0.2, 300, 0.2);
-    }
+  // 行き先は画面外。退場してから、別の入口の外側へ戻す。
+  function makePerson(id){
+    // ゆったり、大股、小刻み、弾む歩き、肩を揺らす歩き。
+    var styles=[
+      {speed:20,pace:4.2,stride:.6,arm:.45,bounce:.4,sway:.012,lean:.025},
+      {speed:32,pace:5.1,stride:1.35,arm:1.2,bounce:1.1,sway:.02,lean:.065},
+      {speed:29,pace:8.4,stride:.55,arm:.55,bounce:.7,sway:.012,lean:.04},
+      {speed:27,pace:6.3,stride:.95,arm:1.05,bounce:2.8,sway:.025,lean:.015},
+      {speed:22,pace:4.7,stride:.85,arm:.75,bounce:.5,sway:.065,lean:-.02}
+    ];
+    var gait=styles[id%styles.length],variation=.9+Math.random()*.2;
+    var builds=[{width:.78,waist:7,belly:8},{width:1,waist:8,belly:9},{width:1.3,waist:7,belly:9},{width:1.2,waist:11,belly:14}];
+    var build=builds[Math.floor(Math.random()*builds.length)];
+    var angle=Math.random()*Math.PI*2,speed=gait.speed*variation;
+    return {id:id,x:0,y:0,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,speed:speed,
+      build:build.width,waist:build.waist,belly:build.belly,stature:.87+Math.random()*.26,
+      gait:id%styles.length,pace:gait.pace*variation,stride:gait.stride*(.9+Math.random()*.2),
+      arm:gait.arm,bounce:gait.bounce,sway:gait.sway,lean:gait.lean,asymmetry:Math.random()*.18,
+      phase:Math.random()*6.28,color:clothes[Math.floor(Math.random()*clothes.length)],
+      hair:Math.floor(Math.random()*5),hairStyle:Math.floor(Math.random()*5),
+      hat:Math.random()<.32?1+Math.floor(Math.random()*3):0,
+      hatColor:['#394b61','#dcc592','#824b42','#dedbd1','#4c6451'][Math.floor(Math.random()*5)],
+      pattern:Math.floor(Math.random()*6),patternColor:Math.random()<.55?'#eee5d2':'#384951',
+      skin:['#dbb395','#bf9276','#e5c6a8'][Math.floor(Math.random()*3)],
+      trousers:['#384248','#575650','#4b505c'][Math.floor(Math.random()*3)],generation:0};
   }
-  function hitCell(x, y) {
-    if (y < areaTop || y >= areaBottom) return null;
-    var list = visibleCells();
-    for (var i = 0; i < list.length; i++) {
-      var c = list[i];
-      if (x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h) return c;
+  function enter(p){
+    p.generation++;
+    var target=groundAt(80+Math.random()*380,140+Math.random()*(H-260)),attempt=0;
+    do{
+      var edge=Math.floor(Math.random()*4);
+      var entry=groundAt(edge===0?-200:edge===1?W+200:Math.random()*W,
+        edge===2?-220:edge===3?H+360:Math.random()*H);
+      p.x=entry.x;p.y=entry.y;
+      attempt++;
+    }while(attempt<200&&people.some(function(q){return p!==q&&Math.hypot(p.x-q.x,p.y-q.y)<PERSONAL_SPACE+2;}));
+    var dx=target.x-p.x,dy=target.y-p.y,d=Math.hypot(dx,dy);
+    p.vx=dx/d*p.speed;p.vy=dy/d*p.speed;
+  }
+  function walkCrowd(dt){
+    people.forEach(function(p){
+      if(p.id===victim)return;
+      p.x+=p.vx*dt;p.y+=p.vy*dt;
+      var screen=position(p);
+      if(screen.depth<100||screen.x< -240||screen.x>W+240||screen.y< -260||screen.y>H+420)enter(p);
+    });
+    // 近づいた人同士が少しずつ道を譲り、肩が触れるくらいの間隔ですれ違う。
+    for(var pass=0;pass<5;pass++)for(var i=0;i<people.length;i++)for(var j=i+1;j<people.length;j++){
+      var p=people[i],q=people[j],dx=p.x-q.x,dy=p.y-q.y,d=Math.hypot(dx,dy);
+      if(d>=PERSONAL_SPACE)continue;
+      if(d<.001){dx=1;dy=0;d=1;}
+      var shift=(PERSONAL_SPACE-d)/2,px=dx/d*shift,py=dy/d*shift;
+      if(p.id!==victim){p.x+=px*(q.id===victim?2:1);p.y+=py*(q.id===victim?2:1);}
+      if(q.id!==victim){q.x-=px*(p.id===victim?2:1);q.y-=py*(p.id===victim?2:1);}
     }
-    return null;
   }
 
   /* ============ 入力 ============
      タップとスペースキーで同じことができるようにする。
-     x が null のときはキー操作（場所を指さない）。
-     選択肢は、なぞるとスクロール、なぞらずに離すと選ぶ。 */
+     x が null のときはキー操作（場所を指さない）。 */
   function down(x, y) {
-    if(state===S.INTRO)return;
+    if(state===S.INTRO||state===S.SUCCESS||state===S.REPLAY)return;
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
       if (hit === "retry") newRound();
       return;
     }
-    if (state !== S.PLAY) return;
-    if (x == null) { choose(cur); return; }
     held = true;
-    /* 流れている最中に触ったら、止めるだけで選ばない */
-    drag = { x0: x, y0: y, sy: scrollY, moved: false, stopOnly: Math.abs(vel) > 60 || scrollTo != null,
-             lastY: y, lastT: performance.now() / 1000 };
-    vel = 0; scrollTo = null;
+    if(elapsed<0)return;
+    var id=-1;
+    if(x==null)id=selected;
+    else if(people3D)id=people3D.pick(x,y,W,H);
+    else{
+      var nearest=Infinity;
+      people.forEach(function(p){if(p.id===victim)return;var q=position(p),distance=Math.hypot((x-q.x)/q.scale,(y-(q.y-44*q.scale*p.stature))/q.scale);
+        if(Math.abs(x-q.x)<=31*q.scale&&Math.abs(y-(q.y-44*q.scale*p.stature))<=43*q.scale*p.stature&&distance<nearest){nearest=distance;id=p.id;}});
+    }
+    if(id<0||id===victim)return;
+    var caught=id===attacker;
+    outcome=caught?'caught':'wrong';
+    if(caught)score++;
+    startReplay(caught?S.SUCCESS:S.RESULT);
+    tone(caught?880:160,.18,.09,'sine');
   }
   function move(x, y) {
-    if (!drag) return;
-    if (!drag.moved && maxScroll > 0 && Math.abs(y - drag.y0) > 12) drag.moved = true;
-    if (!drag.moved) return;
-    var t = performance.now() / 1000, d = Math.max(1 / 120, t - drag.lastT);
-    vel = vel * 0.4 + 0.6 * (drag.lastY - y) / d;
-    drag.lastY = y; drag.lastT = t;
-    scrollY = clampScroll(drag.sy - (y - drag.y0));
+    if (state !== S.PLAY || !held) return;
+    /* ▼UPDATE: なぞっているときの処理（要らなければ空のまま） */
   }
   function up() {
+    if (!held) return;
     held = false;
-    if (!drag) return;
-    var d = drag;
-    drag = null;
-    if (state !== S.PLAY) return;
-    if (d.moved) {
-      /* 止まってから離したら流さない */
-      if (performance.now() / 1000 - d.lastT > 0.1) vel = 0;
-      vel = Math.max(-4000, Math.min(4000, vel));
-      return;
-    }
-    vel = 0;
-    if (d.stopOnly) return;
-    var c = hitCell(d.x0, d.y0);
-    if (c) choose(c.id);
-  }
-  function cancel() { held = false; drag = null; }
-  /* 矢印キーで目印を動かす */
-  function arrow(dx, dy) {
-    if (dx) cur = Math.max(0, Math.min(N - 1, cur + dx));
-    if (dy > 0 && cur + cols < N) cur += cols;
-    if (dy < 0 && cur - cols >= 0) cur -= cols;
-    ensureVisible(cur);
+    /* ▼UPDATE: 離したときの処理（要らなければ空のまま） */
   }
 
   function atCanvas(e) {
@@ -834,55 +399,59 @@
     return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
   }
   wrap.addEventListener("pointerdown", function (e) {
+    if(e.isPrimary===false||e.button>0)return;
     e.preventDefault(); keyMode = false;
     var p = atCanvas(e); down(p.x, p.y);
   });
-  window.addEventListener("pointermove", function (e) {
-    if (!drag) return;
+  wrap.addEventListener("pointermove", function (e) {
     var p = atCanvas(e); move(p.x, p.y);
   });
-  window.addEventListener("pointerup", function (e) { if (drag) { e.preventDefault(); up(); } });
-  window.addEventListener("pointercancel", cancel);
-  window.addEventListener("blur", cancel);
-  wrap.addEventListener("wheel", function (e) {
-    if (state !== S.PLAY || maxScroll <= 0) return;
-    e.preventDefault();
-    var r = canvas.getBoundingClientRect();
-    var k = (e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? areaBottom - areaTop : 1) * (r.height ? H / r.height : 1);
-    vel = 0;
-    scrollTo = clampScroll((scrollTo != null ? scrollTo : scrollY) + e.deltaY * k);
-  }, { passive: false });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
 
   window.addEventListener("keydown", function (e) {
+    if(/^[0-9]$/.test(e.key)&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
+      e.preventDefault();
+      if(!e.repeat){audioOn();newRound(false,e.key==='0'?10:Number(e.key));}
+      return;
+    }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
     var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
     var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
-    var upk = e.key === "ArrowUp" || e.key === "w" || e.key === "W";
-    var dnk = e.key === "ArrowDown" || e.key === "s" || e.key === "S";
-    if (DEBUG_OK && !e.repeat && (e.key === "c" || e.key === "C")) { debugAnswer(); return; }
-    if (!esc && !go && !left && !right && !upk && !dnk) return;
+    var vertical=e.key==='ArrowUp'?-6:e.key==='ArrowDown'?6:0;
+    if(vertical){e.preventDefault();keyMode=true;if(state===S.PLAY)selected=(selected+vertical+people.length)%people.length;return;}
+    if (!esc && !go && !left && !right) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
-    if (left || right || upk || dnk) {
+    if (left || right) {
       if (state !== S.PLAY) return;
-      arrow(left ? -1 : right ? 1 : 0, upk ? -1 : dnk ? 1 : 0);
+      selected=(selected+(left?-1:1)+people.length)%people.length;
       return;
     }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
     down();
   });
   window.addEventListener("keyup", function (e) {
-    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else held = false; }
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
   });
 
-  function timeText() { return (Math.floor(clearTime * 10) / 10).toFixed(1) + "秒"; }
+  function resultText(){
+    return outcome==='caught'?'見逃さなかった':'見逃した';
+  }
+  // スマホでもユーザー操作として扱われる、通常のクリックから直接開く。
+  window.zResultActions.bind(shareButton,function(){
+    if(state===S.RESULT)doShare();
+  });
+  function syncShareButton(){
+    window.zResultActions.place(shareButton,resultButtons()[1],W,H,state===S.RESULT);
+  }
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    /* ハッシュタグの n は半角。「ⁿ」はタグとして認識されない */
-    window.zResultActions.x({ text: (cleared ? timeText() + "で" + score + "択クリア" : score + "択到達") + " #2n択クイズ" });
+    window.zResultActions.x({ text: score + "回連続で見逃さなかった #手刀を見逃さないゲーム" });
   }
 
   /* ============ 描画 ============ */
@@ -895,203 +464,180 @@
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
   }
-  /* 幅に収まるまで字を小さくして書く */
-  function fitText(s, x, y, maxW, size, weight, family) {
-    var px = size;
-    ctx.font = weight + " " + px + "px " + (family || "sans-serif");
-    var w = ctx.measureText(s).width;
-    if (w > maxW) { px = Math.max(8, Math.floor(px * maxW / w)); ctx.font = weight + " " + px + "px " + (family || "sans-serif"); }
-    ctx.fillText(s, x, y);
-    return px;
-  }
 
-  /* 真ん中上に「2ⁿ＝択数」 */
-  function drawPower(cx, y, e, size, color) {
-    var big = "800 " + size + "px sans-serif", small = "800 " + Math.round(size * 0.58) + "px sans-serif";
-    var rest = "＝" + Math.pow(2, e);
-    ctx.font = big;
-    var w2 = ctx.measureText("2").width, wr = ctx.measureText(rest).width;
-    ctx.font = small;
-    var we = ctx.measureText(String(e)).width;
-    var x = cx - (w2 + 2 + we + 4 + wr) / 2;
-    ctx.fillStyle = color;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
-    ctx.font = big;
-    ctx.fillText("2", x, y);
-    ctx.fillText(rest, x + w2 + 2 + we + 4, y);
-    ctx.font = small;
-    ctx.fillText(String(e), x + w2 + 2, y - size * 0.42);
+  // 地面を高さ0の平面として、上方48度の透視カメラから投影する。
+  // 人物は従来の絵をカメラへ向けて立て、同じ深度で拡縮する。
+  function position(p){
+    var focal=Math.max(1000,H),z=H/2-p.y;
+    var depth=focal+z*Math.cos(48*Math.PI/180),scale=focal/Math.max(1,depth);
+    return {x:W/2+(p.x-W/2)*scale,y:H/2-z*Math.sin(48*Math.PI/180)*scale,scale:scale,depth:depth};
   }
-
-  /* 開始画面: 題名と問題数だけ */
-  function drawIntro() {
-    var cy = H * 0.4, big = 72, sup = Math.round(big * 0.55);
-    var rest = "択クイズ";
-    ctx.textBaseline = "alphabetic";
-    ctx.textAlign = "left";
-    ctx.font = "800 " + big + "px sans-serif";
-    var w2 = ctx.measureText("2").width, wr = ctx.measureText(rest).width;
-    ctx.font = "800 " + sup + "px sans-serif";
-    var wn = ctx.measureText("n").width;
-    var x = (W - (w2 + 3 + wn + 6 + wr)) / 2;
-    ctx.fillStyle = "#f2ede4";
-    ctx.font = "800 " + big + "px sans-serif";
-    ctx.fillText("2", x, cy);
-    ctx.fillText(rest, x + w2 + 3 + wn + 6, cy);
-    ctx.font = "800 " + sup + "px sans-serif";
-    ctx.fillText("n", x + w2 + 3, cy - big * 0.42);
-    ctx.textAlign = "center";
-    ctx.font = "800 34px sans-serif";
-    ctx.fillText("全" + Math.round(Math.log(LAST) / Math.LN2) + "問", W / 2, cy + 70);
+  function groundAt(x,y){
+    var focal=Math.max(1000,H),dy=y-H/2;
+    var worldY=dy/(Math.sin(48*Math.PI/180)+dy*Math.cos(48*Math.PI/180)/focal);
+    var scale=focal/(focal-worldY*Math.cos(48*Math.PI/180));
+    return {x:W/2+(x-W/2)/scale,y:H/2+worldY};
   }
-
-  function drawQuestion() {
-    /* 択数の下の決まった場所に、小さめに置く */
-    var top = Q_TOP, bottom = Q_BOTTOM, mid = (top + bottom) / 2;
-    var room = bottom - top;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "#f2ede4";
-    /* 収まるいちばん大きい字で折り返す。
-       1. 「、」「。」の区切りの途中で折らずに収まる大きさ（22以上）
-       2. 途中で折るが、行の頭が「る、」のような切れ端にならない大きさ
-       3. それでもだめなら、収まる大きさ */
-    var lines, size, found = false;
-    for (var pass = 0; pass < 3 && !found; pass++) {
-      for (size = 30; size >= (pass ? 14 : 22); size -= 2) {
-        ctx.font = "800 " + size + "px sans-serif";
-        lines = wrapLines(Q.text, W - 60, pass === 0);
-        if (!lines || lines.length * size * 1.35 > room) continue;
-        if (pass === 1 && lines.some(function (l, i) { var k = l.search(/[、。]/); return i > 0 && k > 0 && k <= 2; })) continue;
-        found = true;
-        break;
+  function line(x,y,x2,y2,color,width){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x2,y2);ctx.stroke();}
+  function drawTown(){
+    var floor=ctx.createLinearGradient(0,0,0,H);
+    floor.addColorStop(0,'#cbd0cc');floor.addColorStop(1,'#b8bdb8');
+    ctx.fillStyle=floor;ctx.fillRect(0,0,W,H);
+    var far=groundAt(0,-20),near=groundAt(0,H+20);
+    var left=Math.min(far.x,near.x)-180,right=W-left;
+    for(var y=Math.floor(far.y/30)*30;y<near.y+30;y+=30){
+      var a=position({x:left,y:y}),b=position({x:right,y:y});
+      line(a.x,a.y,b.x,b.y,'#959b91',Math.max(.5,a.scale));
+      for(var x=Math.floor(left/60)*60+(Math.floor(y/30)%2)*30;x<right;x+=60){
+        var corners=[position({x:x+2,y:y+2}),position({x:x+58,y:y+2}),position({x:x+58,y:y+28}),position({x:x+2,y:y+28})];
+        ctx.beginPath();corners.forEach(function(p,i){if(i)ctx.lineTo(p.x,p.y);else ctx.moveTo(p.x,p.y);});ctx.closePath();
+        var shade=Math.sin(x*.13+y*.17)>0;
+        ctx.fillStyle=shade?'rgba(239,237,216,.12)':'rgba(60,65,53,.045)';ctx.fill();
+        line(corners[0].x,corners[0].y,corners[1].x,corners[1].y,'rgba(244,241,220,.40)',Math.max(.5,corners[0].scale*1.5));
+        line(corners[2].x,corners[2].y,corners[3].x,corners[3].y,'rgba(58,64,52,.16)',Math.max(.5,corners[2].scale*1.5));
+        a=position({x:x,y:y});b=position({x:x,y:y+30});
+        line(a.x,a.y,b.x,b.y,'#959b91',Math.max(.5,a.scale));
       }
     }
-    var lh = size * 1.35;
-    lines.forEach(function (s, i) {
-      ctx.fillText(s, W / 2, mid + (i - (lines.length - 1) / 2) * lh);
-    });
-    ctx.textBaseline = "alphabetic";
   }
-  /* 1文字ずつ詰めて折り返す。「、。？」」や小さい仮名は行頭に置かない。
-     keep のときは「、」「。」の区切りを途中で折らない（折るしかなければ null） */
-  var NO_HEAD = "、。？！」）ーっゃゅょぁぃぅぇぉッャュョァィゥェォ";
-  var RUN = /[ァ-ヶー]|[A-Za-z0-9]/;
-  function sameRun(a, b) {
-    return RUN.test(a) && RUN.test(b) && (/[ァ-ヶー]/.test(a) === /[ァ-ヶー]/.test(b));
-  }
-  function wrapLines(s, maxW, keep) {
-    var parts = keep ? s.match(/[^、。]+[、。]?/g) : [s];
-    var lines = [], line = "";
-    for (var p = 0; p < parts.length; p++) {
-      if (keep) {
-        if (ctx.measureText(parts[p]).width > maxW) return null;
-        if (line && ctx.measureText(line + parts[p]).width > maxW) { lines.push(line); line = ""; }
-        line += parts[p];
-        continue;
-      }
-      for (var i = 0; i < parts[p].length; i++) {
-        var ch = parts[p][i];
-        if (line && ctx.measureText(line + ch).width > maxW && NO_HEAD.indexOf(ch) < 0) {
-          /* カタカナや英数字の続きの途中なら、そのかたまりの前で折る */
-          var cut = line.length;
-          while (cut > 0 && sameRun(line[cut - 1], ch)) cut--;
-          if (cut === 0) cut = line.length;
-          lines.push(line.slice(0, cut)); line = line.slice(cut);
-        }
-        line += ch;
+  // 模様は服の輪郭で切り取り、歩いても本人の組み合わせを保つ。
+  function drawClothes(p){
+    if(!p.pattern)return;
+    ctx.save();ctx.clip();ctx.fillStyle=p.patternColor;
+    if(p.pattern===1||p.pattern===3){
+      for(var y=-65;y<-40;y+=7)ctx.fillRect(-20,y,40,p.pattern===3?1.6:2.7);
+    }
+    if(p.pattern===2||p.pattern===3){
+      for(var x=-12;x<=12;x+=6)ctx.fillRect(x,-70,p.pattern===3?1.6:2.2,32);
+    }
+    if(p.pattern===4){
+      for(var row=0;row<4;row++)for(var col=0;col<4;col++){
+        ctx.beginPath();ctx.arc(-10+col*7+(row%2)*3,-64+row*7,1.5,0,Math.PI*2);ctx.fill();
       }
     }
-    if (line) lines.push(line);
-    return lines;
-  }
-
-  function cellColor(c) {
-    if (state === S.JUDGE || state === S.RESULT) {
-      if (judge === "ok" ? c.id === picked : revealed && Q.answers.indexOf(c.id) >= 0) return "#5fd08a";
-      if (c.id === picked && judge === "ng") return "#ff6b5b";
-    }
-    return "#f2ede4";
-  }
-
-  /* 字の大きさは段ごとに揃える（いちばん長いものに合わせる）。段が変わったときだけ測る */
-  function stageFontSize(boxW, boxH) {
-    if (Q.fs != null) return Q.fs;
-    var size = N === 2 ? Math.min(160, boxH * 0.6) : Math.min(48, boxH * 0.42);
-    ctx.font = "800 100px sans-serif";
-    for (var i = 0; i < N; i++) size = Math.min(size, 100 * boxW / ctx.measureText(Q.items[i]).width);
-    return (Q.fs = Math.max(8, Math.floor(size)));
-  }
-
-  function drawCells() {
-    var list = visibleCells();
-    var p = Math.min(1, popT / 0.22), ease = 1 - Math.pow(1 - p, 3);
-    var pad = Math.min(5, ((W - 32) / cols) * 0.07);
-    var fs = stageFontSize((W - 32) / cols - pad * 2 - 8, rowH - pad * 2);
-    var scrolls = maxScroll > 0;
-    if (scrolls) {
-      ctx.save();
-      ctx.beginPath(); ctx.rect(0, areaTop, W, areaBottom - areaTop); ctx.clip();
-    }
-    list.forEach(function (c) {
-      var s = 0.7 + 0.3 * ease;
-      var w = (c.w - pad * 2) * s, h = (c.h - pad * 2) * s;
-      var cx = c.x + c.w / 2, cy = c.y + c.h / 2;
-      ctx.globalAlpha = ease;
-      roundRect(cx - w / 2, cy - h / 2, w, h, Math.min(14, h / 4));
-      ctx.fillStyle = cellColor(c);
-      ctx.fill();
-      if (keyMode && state === S.PLAY && c.id === cur) {
-        ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71";
-        roundRect(cx - w / 2 - 3, cy - h / 2 - 3, w + 6, h + 6, Math.min(16, h / 4 + 3)); ctx.stroke();
-      }
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "#16202e";
-      fitText(c.a, cx, cy + 1, w - 8, fs * s, "800");
-      ctx.globalAlpha = 1;
-    });
-    ctx.textBaseline = "alphabetic";
-    if (!scrolls) return;
-
-    /* 上下の端はぼかす（続きがあるときだけ） */
-    var fade = 22, g;
-    if (scrollY > 1) {
-      g = ctx.createLinearGradient(0, areaTop, 0, areaTop + fade);
-      g.addColorStop(0, "rgba(29,23,20,1)"); g.addColorStop(1, "rgba(29,23,20,0)");
-      ctx.fillStyle = g; ctx.fillRect(0, areaTop, W, fade);
-    }
-    if (scrollY < maxScroll - 1) {
-      g = ctx.createLinearGradient(0, areaBottom - fade, 0, areaBottom);
-      g.addColorStop(0, "rgba(29,23,20,0)"); g.addColorStop(1, "rgba(29,23,20,1)");
-      ctx.fillStyle = g; ctx.fillRect(0, areaBottom - fade, W, fade);
-    }
+    if(p.pattern===5){ctx.fillRect(-20,-61,40,9);ctx.fillRect(-20,-44,40,4);}
     ctx.restore();
-
-    /* 右端に、いまどのあたりかの細い線 */
-    var room = areaBottom - areaTop, total = room + maxScroll;
-    var barH = Math.max(28, room * room / total);
-    var barY = areaTop + (room - barH) * (scrollY / maxScroll);
-    ctx.fillStyle = "rgba(242,237,228,.14)";
-    roundRect(W - 9, areaTop, 5, room, 2.5); ctx.fill();
-    ctx.fillStyle = "rgba(247,204,113,.85)";
-    roundRect(W - 9, barY, 5, barH, 2.5); ctx.fill();
+  }
+  function drawHead(p,side){
+    var hairColor=['#303632','#654a39','#a9936a','#b9b7aa','#8b533d'][p.hair];
+    var back=p.vy< -8;
+    ctx.fillStyle=hairColor;
+    if(p.hairStyle===2){roundRect(-7,-87,14,20,4);ctx.fill();}
+    if(p.hairStyle===3){
+      ctx.beginPath();ctx.ellipse(-side*8,-78,3,8,-side*.3,0,Math.PI*2);ctx.fill();
+      line(-side*7,-82,-side*9,-81,p.hatColor,2);
+    }
+    ctx.fillStyle=p.skin;ctx.beginPath();ctx.ellipse(0,-81,5.8,7.3,side*.08,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=hairColor;
+    if(p.hairStyle===4){
+      for(var i=0;i<5;i++){ctx.beginPath();ctx.arc(-5+i*2.5,-86-(i%2)*1.5,3,0,Math.PI*2);ctx.fill();}
+    }else{
+      ctx.beginPath();ctx.ellipse(-side,-84,6,p.hairStyle===1?7:4.8,0,Math.PI,Math.PI*2);ctx.fill();
+      if(p.hairStyle===1){ctx.beginPath();ctx.moveTo(-6,-85);ctx.lineTo(5,-86);ctx.lineTo(-side*4,-79);ctx.closePath();ctx.fill();}
+    }
+    if(back){roundRect(-5.5,-86,11,p.hairStyle===2?18:11,3);ctx.fill();}
+    else{ctx.fillStyle='#49473f';ctx.fillRect(side*3,-81,1.2,1.2);}
+    ctx.fillStyle=p.hatColor;
+    if(p.hat===1){
+      ctx.beginPath();ctx.ellipse(0,-86,7,5,0,Math.PI,Math.PI*2);ctx.fill();
+      line(-6,-86,side*12,-86,p.hatColor,3);
+    }else if(p.hat===2){
+      roundRect(-6,-95,12,9,2);ctx.fill();
+      line(-11,-86,11,-86,p.hatColor,3);
+      line(-5,-89,5,-89,'#504a40',2);
+    }else if(p.hat===3){
+      ctx.beginPath();ctx.ellipse(0,-85,7,8,0,Math.PI,Math.PI*2);ctx.fill();
+      line(-6,-85,6,-85,p.hatColor,4);
+      ctx.beginPath();ctx.arc(0,-94,2.6,0,Math.PI*2);ctx.fill();
+    }
+  }
+  function fallProgress(){return Math.max(0,Math.min(1,(elapsed-.4)/1.1));}
+  // 影も地面上の座標から投影し、人物より先に描く。
+  function drawShadow(p){
+    var q=position(p);
+    if(q.depth<100||q.x< -120||q.x>W+120||q.y< -80||q.y>H+200)return;
+    ctx.save();ctx.fillStyle='rgba(35,40,33,.22)';
+    ctx.beginPath();ctx.ellipse(q.x,q.y,15*q.scale*p.build,6*q.scale,0,0,Math.PI*2);
+    ctx.fill();ctx.restore();
+  }
+  function drawPerson(p){
+    var q=position(p),fallen=p.id===victim&&elapsed>=0;
+    if(q.depth<100||q.x< -95*q.scale||q.x>W+95*q.scale||q.y< -10*q.scale||q.y>H+120*q.scale)return;
+    var cycle=T*p.pace+p.phase,walk=Math.sin(cycle),side=p.vx<0?-1:1;
+    var stride=walk*p.stride,arm=Math.sin(cycle+.18)*p.arm;
+    ctx.save();ctx.translate(q.x,q.y);ctx.scale(q.scale,q.scale);
+    if(fallen){var fall=fallProgress();ctx.translate(0,-5*fall);ctx.rotate(fall*fall*(3-2*fall)*Math.PI/2);walk=0;stride=0;arm=0;}
+    // 頭は全身の約七分の一。膝・肘を曲げながら歩く。
+    var bob=fallen?0:Math.abs(walk)*p.bounce;
+    ctx.translate(0,-bob);
+    ctx.scale(p.build,p.stature);
+    if(!fallen)ctx.rotate(side*p.lean+Math.sin(cycle)*p.sway);
+    line(-5,-39,-6+stride*4,-21,p.trousers,7);
+    line(-6+stride*4,-21,-6+stride*8,-3,p.trousers,6);
+    line(5,-39,6-stride*4*(1-p.asymmetry),-21,p.trousers,7);
+    line(6-stride*4*(1-p.asymmetry),-21,6-stride*8*(1-p.asymmetry),-3,p.trousers,6);
+    line(-6+stride*8,-2,-6+stride*8+side*5,-1,'#303533',4);
+    line(6-stride*8*(1-p.asymmetry),-2,6-stride*8*(1-p.asymmetry)+side*5,-1,'#303533',4);
+    ctx.fillStyle=p.color;ctx.beginPath();ctx.moveTo(-10,-69);ctx.lineTo(10,-69);ctx.quadraticCurveTo(p.belly+3,-52,p.waist,-40);ctx.lineTo(-p.waist,-40);ctx.quadraticCurveTo(-p.belly-3,-52,-10,-69);ctx.closePath();ctx.fill();
+    drawClothes(p);
+    line(-10,-65,-13-arm*4,-51,p.color,6);line(-13-arm*4,-51,-12-arm*7,-38,p.skin,4);
+    if(p.id===attacker&&elapsed>=0&&elapsed<STRIKE_SECONDS-1e-9){
+      var other=position(people[victim]),dx=(other.x-q.x)/(p.build*q.scale),dy=(other.y-q.y)/(p.stature*q.scale);
+      line(dx<0?-9:9,-64,dx*.48,dy*.5-65,p.color,6);
+      line(dx*.48,dy*.5-65,dx,dy-72*people[victim].stature*other.scale/(p.stature*q.scale),p.skin,4);
+    }else{line(10,-65,13+arm*4,-51,p.color,6);line(13+arm*4,-51,12+arm*7,-38,p.skin,4);}
+    line(0,-71,0,-75,p.skin,5);
+    ctx.save();ctx.scale(1/Math.sqrt(p.build),1);
+    drawHead(p,side);
+    ctx.restore();
+    ctx.restore();
+    if(keyMode&&selected===p.id&&state===S.PLAY){ctx.strokeStyle='#fff6d3';ctx.lineWidth=2;roundRect(q.x-28*q.scale,q.y-94*q.scale,56*q.scale,100*q.scale,12);ctx.stroke();}
+    if(revealAttacker()&&p.id===attacker){ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(q.x,q.y-44*q.scale*p.stature,32*q.scale,50*q.scale*p.stature,0,0,Math.PI*2);ctx.stroke();}
   }
 
+  var cameraPrepared=false,cameraLines=null;
+  function drawCamera(){
+    if(!cameraPrepared){
+      cameraPrepared=true;
+      var scan=document.createElement('canvas');scan.width=4;scan.height=4;
+      var sc=scan.getContext('2d');sc.fillStyle='rgba(12,27,25,.08)';sc.fillRect(0,0,4,1);
+      cameraLines=ctx.createPattern(scan,'repeat');
+    }
+    ctx.save();
+    // 走査線と冷たい色味だけを薄く重ねる。
+    ctx.globalCompositeOperation='saturation';ctx.globalAlpha=.10;
+    ctx.fillStyle='#888';ctx.fillRect(0,0,W,H);
+    ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+    ctx.fillStyle='rgba(38,69,63,.045)';ctx.fillRect(0,0,W,H);
+    if(cameraLines){ctx.fillStyle=cameraLines;ctx.fillRect(0,0,W,H);}
+    ctx.restore();
+  }
   function draw() {
-    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    syncShareButton();
     ctx.clearRect(0, 0, W, H);
 
-    ctx.fillStyle = "#1d1714";
-    ctx.fillRect(0, 0, W, H);
-    if (state === S.INTRO) { drawIntro(); return; }
+    drawTown();
+    people.forEach(drawShadow);
+    if(people3D){
+      ctx.drawImage(people3D.render(people,T,attacker,victim,elapsed,fallProgress(),W,H,canvas.width,canvas.height),0,0,W,H);
+      if(keyMode&&state===S.PLAY&&people[selected]){var focus=position(people[selected]);ctx.strokeStyle='#fff6d3';ctx.lineWidth=2;roundRect(focus.x-28*focus.scale,focus.y-94*focus.scale,56*focus.scale,100*focus.scale,12);ctx.stroke();}
+      if(revealAttacker()&&attacker>=0){
+        var marked=position(people[attacker]);ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(marked.x,marked.y-44*marked.scale,32*marked.scale,55*marked.scale,0,0,Math.PI*2);ctx.stroke();
+      }
+    }else people.slice().sort(function(a,b){return a.y-b.y;}).forEach(drawPerson);
+    drawCamera();
 
-    drawPower(W / 2, 44, Math.round(Math.log(N) / Math.LN2), 28, "#f7cc71");
-    drawQuestion();
-    drawCells();
-
-    if (state === S.RESULT) drawResult();
+    if (pointer.visible && handReady) {
+      var size = 120;
+      ctx.save();
+      ctx.translate(pointer.x, pointer.y);
+      var press = handPress();
+      ctx.rotate((-25-4*press)*Math.PI/180);
+      ctx.scale(1-.10*press, 1-.10*press);
+      ctx.drawImage(handImage, -size*.49, -size*.014, size, size);
+      ctx.restore();
+    }
+    if (state === S.RESULT||state===S.SUCCESS) drawResult();
   }
 
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
@@ -1112,22 +658,20 @@
     return null;
   }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.84)";
+    ctx.fillStyle = "rgba(10,24,28,.55)";
     ctx.fillRect(0, 0, W, H);
     ctx.save();
-    ctx.fillStyle = cleared ? "#f7cc71" : "#fff";
-    ctx.shadowColor = cleared ? "rgba(247,204,113,.8)" : "rgba(0,0,0,.6)";
-    ctx.shadowBlur = cleared ? 30 : 10;
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
     ctx.textAlign = "center";
-    if (cleared) fitText(score + "択クリア", W / 2, H * 0.45, W - 60, 108, "800");
-    else fitText(score + "択到達", W / 2, H * 0.45, W - 60, 108, "800");
+    ctx.font=state===S.SUCCESS?'800 42px sans-serif':'800 48px sans-serif';
+    ctx.fillText(resultText(), W / 2, H * 0.45);
     ctx.restore();
-    if (cleared) {
-      ctx.fillStyle = "#fff";
-      ctx.font = "800 44px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(timeText(), W / 2, H * 0.45 + 62);
-    }
+    ctx.fillStyle='#fff';ctx.font=state===S.SUCCESS?'800 34px sans-serif':'800 48px sans-serif';ctx.textAlign='center';
+    ctx.fillText(state===S.SUCCESS?'（'+score+'連続）':String(score),W/2,H*.54);
+    if(state===S.SUCCESS)return;
     resultButtons().forEach(function (b) {
       ctx.save();
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
@@ -1146,40 +690,21 @@
 
   /* ============ 覗き穴 ============
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
-     画面に見えているものだけを返す（正解は返さない）。 */
+     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () {
-      var list = state === S.INTRO ? [] : visibleCells();
-      return {
-        state: state, score: score, W: W, H: H, N: N, cols: cols, rowH: rowH, cleared: cleared,
-        judge: judge, question: Q && Q.text, cur: cur, clearTime: clearTime,
-        scroll: scrollY, maxScroll: maxScroll, moving: !!(vel || scrollTo != null),
-        listTop: areaTop, listBottom: areaBottom,
-        cells: list.map(function (c) { return { id: c.id, a: c.a, x: c.x, y: c.y, w: c.w, h: c.h }; })
-      };
-    },
-    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    now: function () { return { state: state, score: score, level:level, W: W, H: H, T:T, elapsed:elapsed, attackAt:attackAt, attacker:attacker, victim:victim, outcome:outcome, selected:selected, resultText:resultText(), fallProgress:fallProgress(), strikeVisible:attacker>=0&&elapsed>=0&&elapsed<STRIKE_SECONDS-1e-9, replay:{taped:replayTape.length,at:replayAt,revealed:revealAttacker()}, people:people.map(function(p){var q=position(p);return {id:p.id,x:q.x,y:q.y-44*q.scale*p.stature,footY:q.y,worldX:p.x,worldY:p.y,scale:q.scale,vx:p.vx,vy:p.vy,generation:p.generation};}) }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(FRAME_SECONDS); drawFrame(); } },
     reset: function () { newRound(); }
   };
 
   /* ============ 手元用の動画撮影 ============
-     record.js が呼ぶ自動操作。目印を正解へ動かして選ぶ（撮影専用）。 */
+     record.js が呼ぶ自動操作。ゲームに合わせて run の中だけ書き換える。 */
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
       await r.wait(1000);
       r.key();
-      for (var k = 0; k < 7; k++) {
-        await r.wait(1100);
-        keyMode = true;
-        var miss = k === 6;
-        cur = miss ? (Q.answer + 37) % N : Q.answer;
-        ensureVisible(cur);
-        await r.wait(900);
-        r.key();
-        if (!miss && !await r.until(function () { return state === S.PLAY; }, 5)) throw Error("次へ進まない");
-      }
-      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("勝敗が出ない");
+      if (!await r.until(function () { return state === S.RESULT; }, 20)) throw Error("勝敗が出ない");
       await r.wait(1500);
     }
   };
@@ -1201,15 +726,22 @@
   document.addEventListener('pointercancel',function(){startingPointer=null;},true);
 
   ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
-  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
-  layout();                                   /* 置き場所を決めてから最初の段を作る */
-  newRound();
-  if (!DEBUG_STAGE) { state=S.INTRO; startButton.hidden=false; }   /* ?stage= のときは開始画面を飛ばす */
-  var last = performance.now();
+  startButton.addEventListener('click',function(e){if(e.stopPropagation)e.stopPropagation();audioOn();resumeAudio();newRound();});
+  layout();
+  newRound();state=S.INTRO;startButton.hidden=false;
+  var last = performance.now(),frameDebt=0;
   function loop(now) {
-    var dt = Math.min(0.033, (now - last) / 1000);   /* 戻ってきたとき飛ばないように上限 */
-    last = now;
-    if (!window.__recordManual) { update(dt); draw(); }
+    var dt = Math.min(.1, Math.max(0,(now-last)/1000));
+    last=now;
+    if(!window.__recordManual&&!document.hidden){
+      frameDebt+=dt;
+      if(frameDebt>=FRAME_SECONDS-1e-9){
+        var ticks=Math.floor((frameDebt+1e-9)/FRAME_SECONDS);
+        frameDebt=Math.max(0,frameDebt-ticks*FRAME_SECONDS);
+        // 表示と進行を10fpsに揃え、手刀の発生コマは必ず描く。
+        update(ticks*FRAME_SECONDS);drawFrame();
+      }
+    }else frameDebt=0;
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
@@ -1218,10 +750,10 @@
 <script>
 if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = "../games/_tools/recorder-ui.js?v=baibai-quiz-20260918062219";
+  recorderScript.src = "../games/_tools/recorder-ui.js?v=shuto-20260918074003";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=baibai-quiz-20260918062219"></script>
+<script src="./auto-reload.js?v=shuto-20260918074003"></script>
 </body>
 </html>
