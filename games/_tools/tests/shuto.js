@@ -40,26 +40,23 @@ assert.equal(fps.drawn.filter(x=>x==='clearRect').length,10,'1秒で10回描画'
 assert(Math.abs(fps.probe.now().T-1)<1e-9,'10fpsでも時間は実時間と同じ');
 console.log('OK 10fps・手刀1コマ・0.4秒停止後1.1秒で倒れる・成功文言');
 
-// 成功の表示中は追加の入力を受けず、2秒後に回数を保って進む。
+// 成功の表示中は追加の入力を受けず、リプレイを見せ終えた5.1秒後に回数を保って進む。
 const streak=load('games/shuto/index.html',{inject:'window.__dbg={tick:function(){update(1/10);}};'});
 streak.probe.reset();
 function waitForAttack(){for(let i=0;i<720&&streak.probe.now().elapsed<0;i++)streak.dbg.tick();assert(streak.probe.now().elapsed>=0);}
 for(let n=1;n<=3;n++){
  waitForAttack();let s=streak.probe.now(),p=s.people[s.attacker];streak.tap(p.x,p.y);
- assert.equal(streak.probe.now().state,'replay');assert.equal(streak.probe.now().score,n);
- for(let i=0;i<31;i++)streak.dbg.tick();
  assert.equal(streak.probe.now().state,'success');assert.equal(streak.probe.now().score,n);
  assert.equal(streak.probe.now().resultText,'見逃さなかった');
  streak.tap(p.x,p.y);streak.press(' ');assert.equal(streak.probe.now().score,n);
- for(let i=0;i<19;i++)streak.dbg.tick();assert.equal(streak.probe.now().state,'success');
+ for(let i=0;i<50;i++)streak.dbg.tick();assert.equal(streak.probe.now().state,'success');
  streak.dbg.tick();assert.equal(streak.probe.now().state,'play');assert.equal(streak.probe.now().score,n);
  assert.equal(streak.probe.now().elapsed,-1);assert.equal(streak.probe.now().T,0);assert.equal(streak.probe.now().people.length,(n+1)*20);
 }
 waitForAttack();for(let i=0;i<50;i++)streak.dbg.tick();
-assert.equal(streak.probe.now().state,'replay');for(let i=0;i<31;i++)streak.dbg.tick();
 assert.equal(streak.probe.now().state,'result');assert.equal(streak.probe.now().score,3);
 assert.equal(streak.probe.now().resultText,'見逃した');streak.press(' ');assert.equal(streak.probe.now().score,0);
-console.log('OK 3連続成功・リプレイを挟む・表示中の連打・2秒の境界・失敗後の回数・再挑戦で0に戻る');
+console.log('OK 3連続成功・表示中の連打・5.1秒の境界・失敗後の回数・再挑戦で0に戻る');
 
 for(let level=1;level<=10;level++){
  streak.press(level===10?'0':String(level));let s=streak.probe.now();

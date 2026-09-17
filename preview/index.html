@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="shuto-20260918074003">
+<meta name="preview-version" content="shuto-20260918075836">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>手刀を見逃さないゲーム</title>
 <style>
@@ -28,12 +28,12 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/share.js?v=shuto-20260918074003"></script>
-<script src="../games/random-bowling/vendor/three.min.js?v=shuto-20260918074003"></script>
-<script src="./people3d.js?v=shuto-20260918074003"></script>
-<script src="../games/result-actions.js?v=shuto-20260918074003"></script>
-<script src="../games/action-icons.js?v=shuto-20260918074003"></script>
-<script src="../games/pad.js?v=shuto-20260918074003"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/share.js?v=shuto-20260918075836"></script>
+<script src="../games/random-bowling/vendor/three.min.js?v=shuto-20260918075836"></script>
+<script src="./people3d.js?v=shuto-20260918075836"></script>
+<script src="../games/result-actions.js?v=shuto-20260918075836"></script>
+<script src="../games/action-icons.js?v=shuto-20260918075836"></script>
+<script src="../games/pad.js?v=shuto-20260918075836"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* 手刀を見逃さないゲーム
 
@@ -56,7 +56,7 @@
   var pointer = { x:0, y:0, visible:false, clickedAt:-Infinity };
   function handPress() { return Math.max(0, 1-(performance.now()-pointer.clickedAt)/240); }
   handImage.onload = function () { handReady = true; };
-  handImage.src = 'img/pointing-hand.webp?v=shuto-20260918074003';
+  handImage.src = 'img/pointing-hand.webp?v=shuto-20260918075836';
   function hideHand() {
     pointer.visible = false; pointer.clickedAt = -Infinity; wrap.classList.remove('photo-cursor');
     if (people) drawFrame();
@@ -170,8 +170,8 @@
   });
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", REPLAY: "replay", SUCCESS: "success", RESULT: "result" };
-  var state, score, T, held, successWait=0, keyMode = false;
+  var S = { INTRO: "intro", PLAY: "play", SUCCESS: "success", RESULT: "result" };
+  var state, score, T, held, sinceResult=0, keyMode = false;
 
   var PERSONAL_SPACE=40, MAX_LEVEL=7;
   var level=1, CROWD_SIZE=20, FRAME_SECONDS=1/10, STRIKE_SECONDS=1/30, GUESS_SECONDS=5;
@@ -191,12 +191,12 @@
     if(!continueStreak){score=0;level=Math.min(MAX_LEVEL,jumpLevel||1);}
     else level=Math.min(MAX_LEVEL,level+1);
     CROWD_SIZE=level*20;
-    successWait=0;
+    sinceResult=0;
     T = 0;
     frameDebt=0;
     held = false;
     attackAt=6+Math.random()*4; elapsed=-1; outcome=''; attacker=-1; victim=-1; selected=0;
-    replayTape=[];replayTaped=false;replayAt=0;replayTimer=0;
+    replayTape=[];replayTaped=false;
     people=[];
     // 少人数でも自然に隣り合う人を用意し、手刀の相手がいない待ち時間を減らす。
     var pairY=H*(.4+Math.random()*.2),pairVX=(Math.random()-.5)*5,pairVY=(Math.random()-.5)*12;
@@ -214,8 +214,10 @@
      手刀のコマまでを控えておき、勝敗が決まったら遅く流してから結果を出す。
      控えるのは人の居場所と向き、歩きの時計、手刀の進み具合だけ。
      3Dの模型は毎コマこれらから組み直すので、戻せばそのまま同じ絵になる。 */
-  var REPLAY_LEAD=6, REPLAY_SLOW=3, REPLAY_HOLD=1.3;
-  var replayTape=[], replayTaped=false, replayAt=0, replayTimer=0, replayNext="";
+  var REPLAY_LEAD=6, REPLAY_SLOW=3, REPLAY_HOLD=1.3, REPLAY_WAIT=2;
+  var replayTape=[], replayTaped=false;
+  function replayRun(){return (replayTape.length-1)*FRAME_SECONDS*REPLAY_SLOW;}
+  function replayOver(){return REPLAY_WAIT+replayRun()+REPLAY_HOLD;}
 
   function record(){
     if(replayTaped)return;
@@ -232,46 +234,36 @@
     });
   }
   function finish(next){
-    state=next;
-    if(next===S.SUCCESS)successWait=0;
+    state=next;sinceResult=0;
   }
-  // 手刀が出る前に終わったときは流すものが無いので、そのまま結果へ。
-  function startReplay(next){
-    if(!replayTaped||replayTape.length<2){finish(next);return;}
-    replayAt=0;replayTimer=0;replayNext=next;
-    state=S.REPLAY;
+  // 札が出てから2秒は本物の姿。そこから控えたコマを順に見せ、手刀のコマで止まる。
+  // 流すものが無ければ -1 を返し、本物の姿のまま描く。
+  function replayAt(){
+    if(state!==S.SUCCESS&&state!==S.RESULT)return -1;
+    if(!replayTaped||replayTape.length<2)return -1;
+    var t=sinceResult-REPLAY_WAIT;
+    if(t< -1e-9)return -1;
+    return Math.min(replayTape.length-1,Math.floor((t+1e-9)/(FRAME_SECONDS*REPLAY_SLOW)));
   }
-  function replayTick(dt){
-    replayTimer+=dt;
-    if(replayAt>=replayTape.length-1){          /* 手刀のコマ。印をつけて少し止める */
-      if(replayTimer>=REPLAY_HOLD-1e-9)finish(replayNext);
-      return;
-    }
-    if(replayTimer>=FRAME_SECONDS*REPLAY_SLOW-1e-9){replayTimer=0;replayAt++;}
-  }
-  // 控えたコマの姿に一時だけ差し替えて描く。進行と覗き穴には触らない。
+  // 控えたコマの姿に一時だけ差し替えて描く。札と進行、覗き穴には触らない。
   function drawFrame(){
-    if(state!==S.REPLAY||!replayTape[replayAt]){draw();return;}
+    var at=replayAt();
+    if(at<0||!replayTape[at]){draw();return;}
     var liveT=T, liveElapsed=elapsed;
     var live=people.map(function(p){return {x:p.x,y:p.y,vx:p.vx,vy:p.vy};});
-    T=replayTape[replayAt].T;elapsed=replayTape[replayAt].elapsed;
-    moveCrowd(replayTape[replayAt].spots);
+    T=replayTape[at].T;elapsed=replayTape[at].elapsed;
+    moveCrowd(replayTape[at].spots);
     try{draw();}
     finally{T=liveT;elapsed=liveElapsed;moveCrowd(live);}
   }
-  // 手刀のコマで止まっている間と、結果が出てからは、出した人に印をつける。
-  function revealAttacker(){
-    if(state===S.RESULT||state===S.SUCCESS)return true;
-    return state===S.REPLAY&&replayAt>=replayTape.length-1;
-  }
   /* ============ 進行 ============ */
   function update(dt) {
-    if(state===S.REPLAY){replayTick(dt);return;}
     if(state===S.SUCCESS){
-      successWait+=dt;
-      if(successWait>=2-1e-9)newRound(true);
+      sinceResult+=dt;
+      if(sinceResult>=replayOver()-1e-9)newRound(true);
       return;
     }
+    if(state===S.RESULT){sinceResult+=dt;return;}
     if (state !== S.PLAY) return;
     T += dt;
 
@@ -294,7 +286,7 @@
       }
     }else if(elapsed>=0){
       elapsed+=dt;
-      if(elapsed>=GUESS_SECONDS-1e-9){elapsed=GUESS_SECONDS;outcome='miss';startReplay(S.RESULT);}
+      if(elapsed>=GUESS_SECONDS-1e-9){elapsed=GUESS_SECONDS;outcome='miss';finish(S.RESULT);}
     }
     record();
   }
@@ -360,7 +352,7 @@
      タップとスペースキーで同じことができるようにする。
      x が null のときはキー操作（場所を指さない）。 */
   function down(x, y) {
-    if(state===S.INTRO||state===S.SUCCESS||state===S.REPLAY)return;
+    if(state===S.INTRO||state===S.SUCCESS)return;
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
@@ -381,7 +373,7 @@
     var caught=id===attacker;
     outcome=caught?'caught':'wrong';
     if(caught)score++;
-    startReplay(caught?S.SUCCESS:S.RESULT);
+    finish(caught?S.SUCCESS:S.RESULT);
     tone(caught?880:160,.18,.09,'sine');
   }
   function move(x, y) {
@@ -592,7 +584,7 @@
     ctx.restore();
     ctx.restore();
     if(keyMode&&selected===p.id&&state===S.PLAY){ctx.strokeStyle='#fff6d3';ctx.lineWidth=2;roundRect(q.x-28*q.scale,q.y-94*q.scale,56*q.scale,100*q.scale,12);ctx.stroke();}
-    if(revealAttacker()&&p.id===attacker){ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(q.x,q.y-44*q.scale*p.stature,32*q.scale,50*q.scale*p.stature,0,0,Math.PI*2);ctx.stroke();}
+    if((state===S.RESULT||state===S.SUCCESS)&&p.id===attacker){ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(q.x,q.y-44*q.scale*p.stature,32*q.scale,50*q.scale*p.stature,0,0,Math.PI*2);ctx.stroke();}
   }
 
   var cameraPrepared=false,cameraLines=null;
@@ -621,7 +613,7 @@
     if(people3D){
       ctx.drawImage(people3D.render(people,T,attacker,victim,elapsed,fallProgress(),W,H,canvas.width,canvas.height),0,0,W,H);
       if(keyMode&&state===S.PLAY&&people[selected]){var focus=position(people[selected]);ctx.strokeStyle='#fff6d3';ctx.lineWidth=2;roundRect(focus.x-28*focus.scale,focus.y-94*focus.scale,56*focus.scale,100*focus.scale,12);ctx.stroke();}
-      if(revealAttacker()&&attacker>=0){
+      if((state===S.RESULT||state===S.SUCCESS)&&attacker>=0){
         var marked=position(people[attacker]);ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(marked.x,marked.y-44*marked.scale,32*marked.scale,55*marked.scale,0,0,Math.PI*2);ctx.stroke();
       }
     }else people.slice().sort(function(a,b){return a.y-b.y;}).forEach(drawPerson);
@@ -692,7 +684,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, level:level, W: W, H: H, T:T, elapsed:elapsed, attackAt:attackAt, attacker:attacker, victim:victim, outcome:outcome, selected:selected, resultText:resultText(), fallProgress:fallProgress(), strikeVisible:attacker>=0&&elapsed>=0&&elapsed<STRIKE_SECONDS-1e-9, replay:{taped:replayTape.length,at:replayAt,revealed:revealAttacker()}, people:people.map(function(p){var q=position(p);return {id:p.id,x:q.x,y:q.y-44*q.scale*p.stature,footY:q.y,worldX:p.x,worldY:p.y,scale:q.scale,vx:p.vx,vy:p.vy,generation:p.generation};}) }; },
+    now: function () { return { state: state, score: score, level:level, W: W, H: H, T:T, elapsed:elapsed, attackAt:attackAt, attacker:attacker, victim:victim, outcome:outcome, selected:selected, resultText:resultText(), fallProgress:fallProgress(), strikeVisible:attacker>=0&&elapsed>=0&&elapsed<STRIKE_SECONDS-1e-9, replay:{taped:replayTape.length,at:replayAt(),since:sinceResult,over:replayOver()}, people:people.map(function(p){var q=position(p);return {id:p.id,x:q.x,y:q.y-44*q.scale*p.stature,footY:q.y,worldX:p.x,worldY:p.y,scale:q.scale,vx:p.vx,vy:p.vy,generation:p.generation};}) }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(FRAME_SECONDS); drawFrame(); } },
     reset: function () { newRound(); }
   };
@@ -750,10 +742,10 @@
 <script>
 if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = "../games/_tools/recorder-ui.js?v=shuto-20260918074003";
+  recorderScript.src = "../games/_tools/recorder-ui.js?v=shuto-20260918075836";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=shuto-20260918074003"></script>
+<script src="./auto-reload.js?v=shuto-20260918075836"></script>
 </body>
 </html>
