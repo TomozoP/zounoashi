@@ -5,8 +5,8 @@ for(const shape of [[375,812],[700,700],[500,1600]]){
  for(let round=0;round<9;round++){
   g.probe.reset();g.tap(270,100);assert.equal(g.probe.now().state,'play');
   assert(g.until(()=>g.probe.now().elapsed>=0,1200),'手刀が出る');
-  let s=g.probe.now();assert.equal(s.people.length,20,'最初の群衆は20人');assert(Math.abs(s.people[s.attacker].x-s.people[s.victim].x)<88,'近くの相手に手刀');
-  for(let i=0;i<s.people.length;i++)for(let j=i+1;j<s.people.length;j++){if(i===s.victim||j===s.victim)continue;assert(Math.hypot(s.people[i].x-s.people[j].x,s.people[i].y-s.people[j].y)>=39,'人同士の間隔');}
+  let s=g.probe.now();assert.equal(s.people.length,20,'最初の群衆は20人');assert(Math.abs(s.people[s.attacker].worldX-s.people[s.victim].worldX)<88,'近くの相手に手刀');
+  for(let i=0;i<s.people.length;i++)for(let j=i+1;j<s.people.length;j++){if(i===s.victim||j===s.victim)continue;assert(Math.hypot(s.people[i].worldX-s.people[j].worldX,s.people[i].worldY-s.people[j].worldY)>=39,'人同士の間隔');}
   if(round%3===0){g.probe.step(49);assert.equal(g.probe.now().state,'play');g.probe.step(1);assert.equal(g.probe.now().outcome,'miss');assert.equal(g.probe.now().elapsed,5);assert.equal(g.probe.now().resultText,'見逃した');}
   else if(round%3===1){g.probe.step(20);s=g.probe.now();const p=s.people[s.attacker];g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'caught');assert.equal(g.probe.now().resultText,'見逃さなかった');}
   else{let p=s.people.find(p=>p.id!==s.attacker&&p.id!==s.victim&&p.x>32&&p.x<508&&p.y>45&&p.y<s.H-45);g.tap(p.x,p.y);assert.equal(g.probe.now().outcome,'wrong');assert.equal(g.probe.now().resultText,'見逃した');}
@@ -74,7 +74,7 @@ const dense=load('games/shuto/index.html',{w:700,h:700,inject:'window.__dbg={wal
 dense.press('0');let ds=dense.probe.now();
 assert(ds.people.filter(p=>p.x>=0&&p.x<=540&&p.footY>=0&&p.footY<=ds.H).length>=133,'140人の大半を最初から画面内に置く');
 for(let frame=0;frame<100;frame++)dense.dbg.walk();ds=dense.probe.now();let nearest=Infinity;
-for(let i=0;i<ds.people.length;i++)for(let j=i+1;j<ds.people.length;j++)nearest=Math.min(nearest,Math.hypot(ds.people[i].x-ds.people[j].x,ds.people[i].y-ds.people[j].y));
+for(let i=0;i<ds.people.length;i++)for(let j=i+1;j<ds.people.length;j++)nearest=Math.min(nearest,Math.hypot(ds.people[i].worldX-ds.people[j].worldX,ds.people[i].worldY-ds.people[j].worldY));
 assert(nearest>=39&&nearest<48,'40付近まですれ違える');
 console.log('OK 140人を画面内に配置、10秒歩行後も間隔は40付近');
 
