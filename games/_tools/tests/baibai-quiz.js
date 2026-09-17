@@ -2,8 +2,8 @@
 const assert = require('assert'); const load = require('../harness');
 const FILE = 'games/_baibai-quiz/index.html';
 const inject = 'window.__dbg={answer:function(){return Q.answer;},vel:function(){return vel;},build:build,' +
-  'data:{ANIMALS:ANIMALS,PREFS:PREFS,ELEMENTS:ELEMENTS,ELEMENT_Q:ELEMENT_Q,CODES:CODES,CODE_Q:CODE_Q,WORDS:WORDS,WORD_Q:WORD_Q,EVENTS:EVENTS}};';
-const STAGES = [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
+  'data:{TRUE_FALSE:TRUE_FALSE,ANIMALS:ANIMALS,PREFS:PREFS,ELEMENTS:ELEMENTS,ELEMENT_Q:ELEMENT_Q,CODES:CODES,CODE_Q:CODE_Q,WORDS:WORDS,WORD_Q:WORD_Q,EVENTS:EVENTS}};';
+const STAGES = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
 const center = c => [c.x + c.w / 2, c.y + c.h / 2];
 
 // 問題の中身
@@ -19,6 +19,8 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
   assert(d.WORDS.length >= 256 && uniq(d.WORDS), '英単語は256以上で重複なし（' + d.WORDS.length + '）');
   d.WORDS.concat(d.CODES).forEach(w => assert(/^[A-Z]{3}$/.test(w), w));
   d.WORD_Q.forEach(w => assert(d.WORDS.includes(w[1]), w[1]));
+  assert(d.TRUE_FALSE.length >= 20 && uniq(d.TRUE_FALSE.map(t => t[0])), '○×問題は20以上');
+  const tf = d.TRUE_FALSE.filter(t => t[1]).length; assert(tf >= 10 && d.TRUE_FALSE.length - tf >= 10, '○と×の両方が十分ある');
   d.EVENTS.forEach(e => assert(e[0] >= 1 && e[0] <= 2048));
   // 何度作っても、答えが中にあり、並びが揃っている
   for (let n = 0; n < 300; n++) for (const N of STAGES) {
@@ -33,10 +35,11 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
     if (N === 128) assert.equal(q.items[q.answer], d.CODE_Q.filter(w => q.text.startsWith(w[0] + 'の国コード'))[0][1]);
     if (N === 64) assert.equal(q.items[q.answer], d.ELEMENTS.filter(e => q.text === '元素記号が「' + e[0] + '」の元素は？')[0][1]);
     if (N === 32) assert.equal(q.items[q.answer], d.PREFS.filter(p => p[1] && q.text === '都道府県庁が' + p[1] + 'にあるのは？')[0][0]);
-    if (N <= 16) assert.equal(q.items[q.answer], d.ANIMALS.filter(a => a[1] === q.text)[0][0]);
-    assert(q.text.length >= 8, '文章題になっている: ' + q.text);
+    if (N === 2) { assert.deepEqual(q.items, ['○', '×']); assert.equal(q.answer, d.TRUE_FALSE.filter(t => t[0] === q.text)[0][1] ? 0 : 1); }
+    else if (N <= 16) assert.equal(q.items[q.answer], d.ANIMALS.filter(a => a[1] === q.text)[0][0]);
+    assert(q.text.length >= 6, '文章題になっている: ' + q.text);
   }
-  console.log('OK 問題の中身：動物' + d.ANIMALS.length + '・都道府県47・元素86・国コード' + d.CODES.length + '・英単語' + d.WORDS.length + '・出来事' + d.EVENTS.length + '、10段×300回');
+  console.log('OK 問題の中身：動物' + d.ANIMALS.length + '・都道府県47・元素86・国コード' + d.CODES.length + '・英単語' + d.WORDS.length + '・出来事' + d.EVENTS.length + '、11段×300回');
 }
 
 // 見えている押しどころ同士の間隔（中心どうし63以上）と、並びが全部そろっているか
@@ -85,7 +88,7 @@ function pick(g, offset) {
 for (const shape of [[375, 667], [390, 844], [768, 1024], [500, 1600], [1280, 720]]) {
   const g = load(FILE, { inject, w: shape[0], h: shape[1] });
   g.step(120); assert.equal(g.probe.now().state, 'intro'); g.press(' ');
-  assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().N, 4);
+  assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().N, 2);
   // 全問正解
   for (const N of STAGES) {
     assert.equal(g.probe.now().N, N); assert.equal(g.probe.now().scroll, 0, '新しい段は先頭から');
@@ -95,13 +98,13 @@ for (const shape of [[375, 667], [390, 844], [768, 1024], [500, 1600], [1280, 72
     waitPlay(g);
   }
   let s = g.probe.now(); assert.equal(s.state, 'result'); assert(s.cleared); assert.equal(s.score, 2048);
-  g.tap(175, s.H * 0.62 + 27); assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().N, 4);
+  g.tap(175, s.H * 0.62 + 27); assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().N, 2);
   // 各段で間違える。正解が遠くても、そこまで流れて見える
   for (let k = 0; k < STAGES.length; k++) {
     g.probe.reset();
     for (let i = 0; i < k; i++) { pick(g, 0); waitPlay(g); }
     const N = STAGES[k], ans = g.dbg.answer();
-    pick(g, Math.floor(N / 2) + 1); assert.equal(g.probe.now().judge, 'ng');
+    pick(g, N === 2 ? 1 : Math.floor(N / 2) + 1); assert.equal(g.probe.now().judge, 'ng');
     g.step(80); s = g.probe.now();
     assert.equal(s.state, 'judge');
     const c = s.cells.find(c => c.id === ans);
@@ -111,12 +114,12 @@ for (const shape of [[375, 667], [390, 844], [768, 1024], [500, 1600], [1280, 72
   }
   g.esc(); assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().score, 0);
 }
-console.log('OK 5画面：開始待ち・なぞって探して10段すべて正解で2048・判定中の入力無視・10段それぞれの間違いで正解まで流れる・押す間隔63以上');
+console.log('OK 5画面：開始待ち・なぞって探して11段すべて正解で2048・判定中の入力無視・11段それぞれの間違いで正解まで流れる・押す間隔63以上');
 
 // スクロールそのもの
 {
   const g = load(FILE, { inject, w: 390, h: 844 }); g.press(' ');
-  for (let i = 0; i < 9; i++) { pick(g, 0); waitPlay(g); }
+  for (let i = 0; i < 10; i++) { pick(g, 0); waitPlay(g); }
   let s = g.probe.now(); assert.equal(s.N, 2048);
   // なぞっている間は選ばない
   const mid = (s.listTop + s.listBottom) / 2;
@@ -165,6 +168,6 @@ console.log('OK スクロール：なぞりでは選ばない・慣性・止め�
   // 端でははみ出さない
   g.esc(); g.press('ArrowUp'); g.press('ArrowLeft'); assert.equal(g.probe.now().cur, 0);
   g.press('ArrowDown'); g.press('ArrowDown'); g.press('ArrowRight'); g.press('ArrowRight');
-  assert.equal(g.probe.now().cur, 3);
+  assert.equal(g.probe.now().cur, 1, '2択では右にしか動かない');
 }
 console.log('OK キー操作だけで2048・目印に合わせてスクロール');
