@@ -223,10 +223,10 @@
      手刀のコマまでを控えておき、勝敗が決まったら遅く流してから結果を出す。
      控えるのは人の居場所と向き、歩きの時計、手刀の進み具合だけ。
      3Dの模型は毎コマこれらから組み直すので、戻せばそのまま同じ絵になる。 */
-  var REPLAY_LEAD=6, REPLAY_SLOW=3, REPLAY_HOLD=1.3, REPLAY_WAIT=1.5;
+  var REPLAY_LEAD=6, REPLAY_SLOW=3, REPLAY_HOLD=1.2, REPLAY_WAIT=1.5;   /* 止めは流しのコマ間隔で割り切れる長さにする */
   var replayTape=[], replayTaped=false;
   function replayRun(){return (replayTape.length-1)*FRAME_SECONDS*REPLAY_SLOW;}
-  function replayOver(){return REPLAY_WAIT+replayRun()+REPLAY_HOLD;}
+  function replayCycle(){return replayRun()+REPLAY_HOLD;}   /* 流し＋止めの一巡 */
 
   function record(){
     if(replayTaped)return;
@@ -245,14 +245,16 @@
   function finish(next){
     state=next;sinceResult=0;
   }
-  // 札が出てから1.5秒は本物の姿。そこから控えたコマを順に見せ、手刀のコマで止まる。
+  // 札が出てから1.5秒は本物の姿。そこから控えたコマを順に見せ、手刀のコマで少し止め、
+  // また頭から流しなおす。次へを押すまで繰り返す。
   // 流すものが無ければ -1 を返し、本物の姿のまま描く。
   function replayAt(){
     if(state!==S.SUCCESS&&state!==S.RESULT)return -1;
     if(!replayTaped||replayTape.length<2)return -1;
     var t=sinceResult-REPLAY_WAIT;
     if(t< -1e-9)return -1;
-    return Math.min(replayTape.length-1,Math.floor((t+1e-9)/(FRAME_SECONDS*REPLAY_SLOW)));
+    var at=Math.floor(((t+1e-9)%replayCycle())/(FRAME_SECONDS*REPLAY_SLOW));
+    return Math.min(replayTape.length-1,at);
   }
   // 控えたコマの姿に一時だけ差し替えて描く。札と進行、覗き穴には触らない。
   function drawFrame(){
@@ -267,12 +269,7 @@
   }
   /* ============ 進行 ============ */
   function update(dt) {
-    if(state===S.SUCCESS){
-      sinceResult+=dt;
-      if(sinceResult>=replayOver()-1e-9)newRound(true);
-      return;
-    }
-    if(state===S.RESULT){sinceResult+=dt;return;}
+    if(state===S.SUCCESS||state===S.RESULT){sinceResult+=dt;return;}
     if (state !== S.PLAY) return;
     T += dt;
 
@@ -658,7 +655,7 @@
   // 成功のリプレイが流れている間だけ出す「次へ」。押すと待たずに次の面へ進む。
   function nextButton() {
     var w = 170, h = 54;
-    return { id: "next", x: W / 2 - w / 2, y: H * 0.62, w: w, h: h, label: "次へ" };
+    return { id: "next", x: W / 2 - w / 2, y: H * 0.80, w: w, h: h, label: "次へ" };
   }
   function inButton(b, x, y) { return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
   function hitButton(x, y) {
@@ -668,20 +665,23 @@
     }
     return null;
   }
+  // 下敷きを敷かないので、黒で太く縁取ってから白で塗る。
+  function signText(text, y, size) {
+    ctx.font = "800 " + size + "px sans-serif";
+    ctx.lineJoin = "round"; ctx.miterLimit = 2;
+    ctx.strokeStyle = "rgba(8,18,16,.9)"; ctx.lineWidth = size * 0.22;
+    ctx.strokeText(text, W / 2, y);
+    ctx.fillStyle = "#fff"; ctx.fillText(text, W / 2, y);
+  }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,24,28,.55)";
-    ctx.fillRect(0, 0, W, H);
     ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
     ctx.textAlign = "center";
+    ctx.shadowColor = "rgba(0,0,0,.55)";
+    ctx.shadowBlur = 8;
     /* 勝敗と回数は画面の上へ寄せ、真ん中はリプレイの絵に空けておく */
-    ctx.font=state===S.SUCCESS?'800 42px sans-serif':'800 48px sans-serif';
-    ctx.fillText(resultText(), W / 2, H * 0.13);
-    ctx.font=state===S.SUCCESS?'800 34px sans-serif':'800 48px sans-serif';
-    ctx.fillText(state===S.SUCCESS?'（'+score+'連続）':String(score),W/2,H*.21);
-    if(replayAt()>=0){ctx.font='800 26px sans-serif';ctx.fillText('リプレイ',W/2,H*.28);}
+    signText(resultText(), H * 0.13, state===S.SUCCESS?42:48);
+    signText(state===S.SUCCESS?'（'+score+'連続）':String(score), H * 0.21, state===S.SUCCESS?34:48);
+    if(replayAt()>=0)signText('リプレイ', H * 0.28, 26);
     ctx.restore();
     if(state===S.SUCCESS){if(replayAt()>=0)drawButton(nextButton());return;}
     resultButtons().forEach(drawButton);
@@ -705,7 +705,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, level:level, W: W, H: H, T:T, elapsed:elapsed, attackAt:attackAt, attacker:attacker, victim:victim, outcome:outcome, selected:selected, resultText:resultText(), fallProgress:fallProgress(), strikeVisible:attacker>=0&&elapsed>=0&&elapsed<STRIKE_SECONDS-1e-9, replay:{taped:replayTape.length,at:replayAt(),since:sinceResult,over:replayOver()}, people:people.map(function(p){var q=position(p);return {id:p.id,x:q.x,y:q.y-44*q.scale*p.stature,footY:q.y,worldX:p.x,worldY:p.y,scale:q.scale,vx:p.vx,vy:p.vy,generation:p.generation};}) }; },
+    now: function () { return { state: state, score: score, level:level, W: W, H: H, T:T, elapsed:elapsed, attackAt:attackAt, attacker:attacker, victim:victim, outcome:outcome, selected:selected, resultText:resultText(), fallProgress:fallProgress(), strikeVisible:attacker>=0&&elapsed>=0&&elapsed<STRIKE_SECONDS-1e-9, replay:{taped:replayTape.length,at:replayAt(),since:sinceResult,cycle:replayCycle()}, people:people.map(function(p){var q=position(p);return {id:p.id,x:q.x,y:q.y-44*q.scale*p.stature,footY:q.y,worldX:p.x,worldY:p.y,scale:q.scale,vx:p.vx,vy:p.vy,generation:p.generation};}) }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(FRAME_SECONDS); drawFrame(); } },
     reset: function () { newRound(); }
   };
