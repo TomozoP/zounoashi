@@ -227,9 +227,17 @@ console.log('OK キー操作だけで2048・目印に合わせてスクロール
     waitPlay(g);
   }
   assert(g.probe.now().cleared);
-  g.esc(); g.press('v'); g.drawn.length = 0; g.step(1); assert(!g.drawn.includes('arc'), '正解の印は出さない');
+  // 正解の札は canvas ではなく DOM に出す（録画に映らない）
+  const peek = () => g.wrap.children[g.wrap.children.length - 1];
+  g.esc(); g.step(1);
+  assert.equal(peek().style.display, 'none', '最初は出さない');
+  g.press('v'); g.drawn.length = 0; g.step(1);
+  assert.equal(peek().style.display, 'block');
+  assert.equal(peek().textContent, g.probe.now().cells.filter(c => g.dbg.answers().includes(c.id)).map(c => c.a).join(' '));
+  assert(!g.drawn.includes('arc'), 'canvas には描かない');
+  g.press('V'); g.step(1); assert.equal(peek().style.display, 'none');
 }
-console.log('OK 正解デバッグ：C で11段すべて正解・判定中と開始前は効かない・正解の印は出さない');
+console.log('OK 正解デバッグ：C で11段すべて正解・判定中と開始前は効かない・V の札は DOM（録画に映らない）');
 
 // 2048択の漢字は、同じ読みの別の漢字を選んでも正解
 {
