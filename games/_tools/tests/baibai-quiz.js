@@ -1,8 +1,8 @@
 // 2²択クイズ：問題の中身・全問正解・各段での間違い・スクロール・キー操作・押す間隔を確かめる。
 const assert = require('assert'); const load = require('../harness');
 const FILE = 'games/_baibai-quiz/index.html';
-const inject = 'window.__dbg={answer:function(){return Q.answer;},vel:function(){return vel;},build:build,' +
-  'data:{ANIMAL_NAMES:ANIMAL_NAMES,COLORS:COLORS,COLOR_Q:COLOR_Q,SEASONS:SEASONS,SEASON_Q:SEASON_Q,PLANETS:PLANETS,PLANET_Q:PLANET_Q,KANJI:KANJI,KANJI_Q:KANJI_Q,PEOPLE:PEOPLE,allFake:allFakeNames,TRUE_FALSE:TRUE_FALSE,ANIMALS:ANIMALS,PREFS:PREFS,ELEMENTS:ELEMENTS,ELEMENT_Q:ELEMENT_Q,CODES:CODES,CODE_Q:CODE_Q,EVENTS:EVENTS}};';
+const inject = 'window.__dbg={answer:function(){return Q.answer;},answers:function(){return Q.answers;},vel:function(){return vel;},build:build,' +
+  'data:{ANIMAL_GROUPS:ANIMAL_GROUPS,ANIMAL_NAMES:ANIMAL_NAMES,COLORS:COLORS,COLOR_Q:COLOR_Q,SEASONS:SEASONS,SEASON_Q:SEASON_Q,PLANETS:PLANETS,PLANET_Q:PLANET_Q,KANJI:KANJI,KANJI_Q:KANJI_Q,PEOPLE:PEOPLE,allFake:allFakeNames,TRUE_FALSE:TRUE_FALSE,ANIMALS:ANIMALS,PREFS:PREFS,ELEMENTS:ELEMENTS,ELEMENT_Q:ELEMENT_Q,CODES:CODES,CODE_Q:CODE_Q,EVENTS:EVENTS}};';
 const STAGES = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
 const center = c => [c.x + c.w / 2, c.y + c.h / 2];
 
@@ -20,6 +20,8 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
   assert(d.ANIMAL_NAMES.length >= 256 && uniq(d.ANIMAL_NAMES), '動物は256種類以上（' + d.ANIMAL_NAMES.length + '）');
   d.ANIMAL_NAMES.forEach(a => assert(/^[ァ-ヶー]{1,7}$/.test(a), '動物名はカタカナ7文字まで: ' + a));
   d.ANIMALS.forEach(a => assert(d.ANIMAL_NAMES.includes(a[0])));
+  assert.equal(d.ANIMAL_GROUPS.length, 6, '分類は6つ');
+  d.ANIMAL_GROUPS.forEach(g => assert.deepEqual(g, g.slice().sort(), '分類の中は五十音順'));
   // 答えの仲間（まぎらわしい動物）が候補に入っていない
   ['ヒグマ','ツキノワグマ','ホッキョクグマ','コウテイペンギン','ウミガメ','ヒキガエル','ニホンザル','ヤギ','シャチ','ラマ','ワラビー','レッサーパンダ','ヤマアラシ','ハリセンボン','トキ','イタチ','イノシシ','ガ','ミツバチ','ヤドカリ','コビトカバ']
     .forEach(a => assert(!d.ANIMAL_NAMES.includes(a), 'まぎらわしい動物: ' + a));
@@ -30,8 +32,9 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
   d.SEASON_Q.forEach(q => assert(d.SEASONS.includes(q[1]), q[0]));
   new Set(d.SEASONS).forEach(x => assert(d.SEASON_Q.some(q => q[1] === x), x + 'が答えの問題がある'));
   d.PLANET_Q.forEach(q => assert(d.PLANETS.includes(q[1]), q[0]));
-  assert(d.KANJI.length >= 512 && uniq(d.KANJI) && d.KANJI.every(k => k.length === 1), '漢字は512字以上');
-  d.KANJI_Q.forEach(q => assert(d.KANJI.includes(q[1]), q[1]));
+  assert(d.KANJI.length >= 2048 && uniq(d.KANJI) && d.KANJI.every(k => k.length === 1), '漢字は2048字以上');
+  assert.deepEqual(d.KANJI, d.KANJI.slice().sort(), '漢字は文字コード順');
+  d.KANJI_Q.forEach(q => [...q[1]].forEach(k => assert(d.KANJI.includes(k), q[0] + ': ' + k)));
   assert(uniq(d.KANJI_Q.map(q => q[0])), '漢字のよみは重ならない');
   assert(uniq(d.PEOPLE.map(p => p[0])) && uniq(d.PEOPLE.map(p => p[2])));
   d.PEOPLE.forEach(p => assert(/^[ぁ-ん]+$/.test(p[1]), p[0] + 'のよみ'));
@@ -49,15 +52,23 @@ const center = c => [c.x + c.w / 2, c.y + c.h / 2];
       const ev = d.EVENTS.filter(e => e[1] === q.text)[0];
       assert.equal(q.items[q.answer], String(ev[0])); assert(+q.items[0] >= 1 && +q.items[N - 1] <= 2048);
     }
-    if (N === 256) { assert.equal(q.items[q.answer], d.ANIMALS.filter(a => a[1] === q.text)[0][0]); assert.deepEqual(q.items, q.items.slice().sort()); }
+    if (N === 256) {
+      assert.equal(q.items[q.answer], d.ANIMALS.filter(a => a[1] === q.text)[0][0]);
+      const at = x => d.ANIMAL_NAMES.indexOf(x); assert(q.items.every((x, i) => i === 0 || at(q.items[i - 1]) < at(x)), '分類の順に並ぶ');
+    }
     if (N === 16) assert.equal(q.items[q.answer], d.COLOR_Q.filter(t => t[0] === q.text)[0][1]);
     if (N === 128) assert.equal(q.items[q.answer], d.CODE_Q.filter(w => q.text.startsWith(w[0] + 'の国コード'))[0][1]);
     if (N === 64) assert.equal(q.items[q.answer], d.ELEMENTS.filter(e => q.text === '元素記号が「' + e[0] + '」の元素は？')[0][1]);
     if (N === 32) assert.equal(q.items[q.answer], d.PREFS.filter(p => p[1] && q.text === '都道府県庁が' + p[1] + 'にあるのは？')[0][0]);
     if (N === 4) assert.equal(q.items[q.answer], d.SEASON_Q.filter(t => t[0] === q.text)[0][1]);
     if (N === 8) assert.equal(q.items[q.answer], d.PLANET_Q.filter(t => t[0] === q.text)[0][1]);
-    if (N === 512) { assert.equal(q.items[q.answer], d.KANJI_Q.filter(t => '「' + t[0] + '」を漢字1文字で書くと？' === q.text)[0][1]); assert.deepEqual(q.items, q.items.slice().sort()); }
-    if (N === 2048) { const p = d.PEOPLE.filter(t => t[2] === q.text)[0]; assert.equal(q.items[q.answer], p[0]); d.PEOPLE.forEach(t => assert(q.items.includes(t[0]))); }
+    if (N === 2048) {
+      const t = d.KANJI_Q.filter(t => '「' + t[0] + '」を漢字1文字で書くと？' === q.text)[0];
+      assert.equal(q.items[q.answer], t[1][0], '代表の答え'); assert.deepEqual(q.items, q.items.slice().sort());
+      assert.deepEqual(q.answers.map(i => q.items[i]).sort(), [...t[1]].filter(k => q.items.includes(k)).sort(), '同じ読みの漢字はどれも正解');
+    }
+    if (N === 512) { const p = d.PEOPLE.filter(t => t[2] === q.text)[0]; assert.equal(q.items[q.answer], p[0]); d.PEOPLE.forEach(t => assert(q.items.includes(t[0]))); }
+    if (N !== 2048) assert.equal(q.answers, undefined, '答えが1つの段');
     if (N === 2) { assert.deepEqual(q.items, ['○', '×']); assert.equal(q.answer, d.TRUE_FALSE.filter(t => t[0] === q.text)[0][1] ? 0 : 1); }
     assert(q.text.length >= 6, '文章題になっている: ' + q.text);
   }
@@ -126,7 +137,9 @@ for (const shape of [[375, 667], [390, 844], [768, 1024], [500, 1600], [1280, 72
     g.probe.reset();
     for (let i = 0; i < k; i++) { pick(g, 0); waitPlay(g); }
     const N = STAGES[k], ans = g.dbg.answer();
-    pick(g, N === 2 ? 1 : Math.floor(N / 2) + 1); assert.equal(g.probe.now().judge, 'ng');
+    let off = N === 2 ? 1 : Math.floor(N / 2) + 1;
+    while (g.dbg.answers().includes((ans + off) % N)) off++;
+    pick(g, off); assert.equal(g.probe.now().judge, 'ng');
     g.step(80); s = g.probe.now();
     assert.equal(s.state, 'judge');
     const c = s.cells.find(c => c.id === ans);
@@ -196,7 +209,7 @@ console.log('OK キー操作だけで2048・目印に合わせてスクロール
 
 // 手元用の正解デバッグ（localhost のときだけ）。C で正解、V で印
 {
-  const g = load(FILE, { inject: inject.replace('window.__dbg={', 'window.__dbg={mark:function(){return debugMark;},') });
+  const g = load(FILE, { inject });
   g.press('c'); assert.equal(g.probe.now().state, 'intro', '開始前は効かない');
   g.press(' ');
   for (const N of STAGES) {
@@ -208,7 +221,23 @@ console.log('OK キー操作だけで2048・目印に合わせてスクロール
     waitPlay(g);
   }
   assert(g.probe.now().cleared);
-  assert.equal(g.dbg.mark(), false); g.press('v'); assert.equal(g.dbg.mark(), true); g.press('V'); assert.equal(g.dbg.mark(), false);
-  g.esc(); g.press('v'); g.drawn.length = 0; g.step(1); assert(g.drawn.includes('arc'), '印を描く');
+  g.esc(); g.press('v'); g.drawn.length = 0; g.step(1); assert(!g.drawn.includes('arc'), '正解の印は出さない');
 }
-console.log('OK 正解デバッグ：C で11段すべて正解・判定中と開始前は効かない・V で印の切り替え');
+console.log('OK 正解デバッグ：C で11段すべて正解・判定中と開始前は効かない・正解の印は出さない');
+
+// 2048択の漢字は、同じ読みの別の漢字を選んでも正解
+{
+  let tried = 0;
+  for (let n = 0; n < 200 && tried < 5; n++) {
+    const g = load(FILE, { inject }); g.press(' ');
+    for (let i = 0; i < 10; i++) { g.press('c'); waitPlay(g); }
+    const ans = g.dbg.answer(), alts = g.dbg.answers().filter(i => i !== ans);
+    if (!alts.length) continue;
+    const c = scrollTo(g, alts[0]); g.tap(...center(c));
+    assert.equal(g.probe.now().judge, 'ok', '別の読みの漢字も正解: ' + c.a);
+    waitPlay(g); assert(g.probe.now().cleared);
+    tried++;
+  }
+  assert(tried >= 5, '別の正解がある問題を試せた');
+}
+console.log('OK 2048択の漢字：同じ読みの別の漢字でも正解');
