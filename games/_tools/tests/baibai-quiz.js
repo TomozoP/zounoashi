@@ -1,6 +1,6 @@
 // 2ⁿ択クイズ：問題の中身・全問正解・各段での間違い・スクロール・キー操作・押す間隔を確かめる。
 const assert = require('assert'); const load = require('../harness');
-const FILE = 'games/_baibai-quiz/index.html';
+const FILE = 'games/baibai-quiz/index.html';
 const inject = 'window.__dbg={answer:function(){return Q.answer;},answers:function(){return Q.answers;},vel:function(){return vel;},build:build,' +
   'data:{ANIMAL_GROUPS:ANIMAL_GROUPS,ANIMAL_NAMES:ANIMAL_NAMES,COLORS:COLORS,COLOR_Q:COLOR_Q,SEASONS:SEASONS,SEASON_Q:SEASON_Q,PLANETS:PLANETS,PLANET_Q:PLANET_Q,KANJI:KANJI,KANJI_Q:KANJI_Q,PEOPLE:PEOPLE,allFake:allFakeNames,TRUE_FALSE:TRUE_FALSE,ANIMALS:ANIMALS,PREFS:PREFS,ELEMENTS:ELEMENTS,ELEMENT_Q:ELEMENT_Q,CODES:CODES,CODE_Q:CODE_Q,EVENTS:EVENTS}};';
 const STAGES = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
