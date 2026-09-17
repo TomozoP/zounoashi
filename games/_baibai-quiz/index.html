@@ -310,48 +310,62 @@
       var names = shuffle(ANIMALS.filter(function (a) { return a !== p; })).slice(0, N - 1)
         .map(function (a) { return a[0]; }).concat([p[0]]);
       names = shuffle(names);
-      return { text: p[1], items: names, answer: names.indexOf(p[0]), per: N };
+      return { text: p[1], items: names, answer: names.indexOf(p[0]) };
     }
     if (N === 32) {
       p = pickQ(PREFS.filter(function (a) { return a[1]; }), function (a) { return a[1]; });
       r = fromPool(PREFS, PREFS.indexOf(p), N, function (a) { return a[0]; });
-      return { text: "都道府県庁が" + p[1] + "にあるのは？", items: r.items, answer: r.answer, per: 32 };
+      return { text: "都道府県庁が" + p[1] + "にあるのは？", items: r.items, answer: r.answer };
     }
     if (N === 64) {
       q = pickQ(ELEMENT_Q, function (s) { return "el" + s; });
       var at = ELEMENTS.map(function (e) { return e[0]; }).indexOf(q);
       r = fromPool(ELEMENTS, at, N, function (e) { return e[1]; });
-      return { text: "元素記号が「" + q + "」の元素は？", items: r.items, answer: r.answer, per: 32 };
+      return { text: "元素記号が「" + q + "」の元素は？", items: r.items, answer: r.answer };
     }
     if (N === 128) {
       p = pickQ(CODE_Q, function (a) { return a[0]; });
       r = fromPool(CODES, CODES.indexOf(p[1]), N, function (c) { return c; });
-      return { text: p[0] + "の国コード（アルファベット3文字）は？", items: r.items, answer: r.answer, per: 64 };
+      return { text: p[0] + "の国コード（アルファベット3文字）は？", items: r.items, answer: r.answer };
     }
     if (N === 256) {
       p = pickQ(WORD_Q, function (a) { return "w" + a[0]; });
       r = fromPool(WORDS, WORDS.indexOf(p[1]), N, function (w) { return w; });
-      return { text: "「" + p[0] + "」を英語で言うと？", items: r.items, answer: r.answer, per: 64 };
+      return { text: "「" + p[0] + "」を英語で言うと？", items: r.items, answer: r.answer };
     }
     /* 年: 答えを含む連続した N 年ぶん（1〜2048年の中で位置はばらばら） */
     p = pickQ(EVENTS, function (a) { return a[1]; });
     var lo = Math.max(1, p[0] - N + 1), hi = Math.min(p[0], LAST - N + 1);
     var start = lo + rnd(hi - lo + 1), years = [];
     for (var y = 0; y < N; y++) years.push(String(start + y));
-    return { text: p[1], items: years, answer: p[0] - start, per: 64 };
+    return { text: p[1], items: years, answer: p[0] - start };
   }
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", JUDGE: "judge", RESULT: "result" };
   var state, score, T, held, keyMode = false;
-  var N, Q, groups, level, grp, cur, popT, judge, judgeT, picked, revealed, cleared, used, introT = 0;
+  var N, Q, cols, rowH, cur, popT, judge, judgeT, picked, revealed, cleared, used, introT = 0;
+  var scrollY = 0, maxScroll = 0, scrollTo = null, vel = 0;
+  var drag = null;                             /* 押している指 */
 
-  var areaTop, unit;                           /* 高さから決まる置き場所 */
+  var areaTop, areaBottom, unit;               /* 高さから決まる置き場所 */
   function place() {
     /* 下に選択肢の場所。8段ぶんで1段64以上（押す間隔63以上）を必ず取る */
     areaTop = Math.round(Math.min(H * 0.4, H - 24 - 8 * 64));
-    unit = (H - 24 - areaTop) / 8;
+    areaBottom = H - 24;
+    unit = (areaBottom - areaTop) / 8;
+    if (Q) fitRows();
   }
+  function colsFor(n) { return n <= 16 ? 2 : n <= 64 ? 4 : 8; }
+  /* 1段の高さ。32択までは下に寄せて1画面に収める。それより多いと1段72でスクロール */
+  function fitRows() {
+    var rows = Math.ceil(N / cols);
+    rowH = N <= 32 ? unit * Math.min(2, 8 / rows) : 72;
+    maxScroll = Math.max(0, rows * rowH - (areaBottom - areaTop));
+    scrollY = clampScroll(scrollY);
+    Q.fs = null;
+  }
+  function clampScroll(y) { return Math.max(0, Math.min(maxScroll, y)); }
 
   function newRound() {
     shareButton.hidden = true;
@@ -368,43 +382,61 @@
     N = n;
     state = S.PLAY;
     Q = build(n);
-    groups = n / Q.per;
-    level = groups > 1 ? 0 : 1;
-    grp = 0;
+    cols = colsFor(n);
+    scrollY = 0; scrollTo = null; vel = 0; drag = null;
+    fitRows();
     judge = null; judgeT = 0; picked = -1; revealed = false;
-    showView();
+    cur = 0; popT = 0;
   }
-  function showView() { cur = 0; popT = 0; }
 
   /* ============ 並び ============ */
-  var DIMS = { 1: [1, 1], 2: [1, 2], 4: [2, 2], 8: [2, 4], 16: [2, 8], 32: [4, 8], 64: [8, 8] };
-  function cells() {
-    var list = [], i, count;
-    if (level === 0) {
-      count = groups;
-      for (i = 0; i < count; i++) list.push({ kind: "group", id: i, a: Q.items[i * Q.per], b: Q.items[(i + 1) * Q.per - 1] });
-    } else {
-      count = Q.per;
-      var base = grp * Q.per;
-      for (i = 0; i < count; i++) list.push({ kind: "item", id: base + i, a: Q.items[base + i] });
+  function gridTop() {
+    return maxScroll > 0 ? areaTop - scrollY : areaBottom - Math.ceil(N / cols) * rowH;
+  }
+  function cellAt(i, top) {
+    var cw = (W - 32) / cols;
+    return { id: i, a: Q.items[i], x: 16 + (i % cols) * cw, y: top + Math.floor(i / cols) * rowH, w: cw, h: rowH };
+  }
+  /* 見えている段のぶんだけ返す */
+  function visibleCells() {
+    var top = gridTop(), list = [];
+    var r0 = Math.max(0, Math.floor((areaTop - top) / rowH));
+    var r1 = Math.min(Math.ceil(N / cols) - 1, Math.floor((areaBottom - top) / rowH));
+    for (var r = r0; r <= r1; r++) for (var c = 0; c < cols; c++) {
+      var i = r * cols + c;
+      if (i < N) list.push(cellAt(i, top));
     }
-    var cols = DIMS[count][0], rows = DIMS[count][1];
-    var cw = (W - 32) / cols, ch = unit * Math.min(2, 8 / rows);
-    var top = H - 24 - rows * ch;
-    list.forEach(function (c, k) {
-      c.x = 16 + (k % cols) * cw; c.y = top + Math.floor(k / cols) * ch; c.w = cw; c.h = ch;
-    });
-    list.cols = cols;
     return list;
   }
-  function backRect() {
-    return groups > 1 && level === 1 ? { x: 22, y: areaTop - 66, w: 52, h: 52 } : null;
+  /* i 番が見える位置のスクロール量（まん中に寄せる / はみ出したぶんだけ寄せる） */
+  function scrollCenter(i) {
+    var room = areaBottom - areaTop;
+    return clampScroll(Math.floor(i / cols) * rowH - (room - rowH) / 2);
+  }
+  function ensureVisible(i) {
+    if (maxScroll <= 0) return;
+    var room = areaBottom - areaTop, y = Math.floor(i / cols) * rowH;
+    var now = scrollTo != null ? scrollTo : scrollY;
+    if (y < now) scrollTo = clampScroll(y);
+    else if (y + rowH > now + room) scrollTo = clampScroll(y + rowH - room);
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
     introT += dt;
     popT += dt;
+    if (!drag || !drag.moved) {
+      if (scrollTo != null) {
+        scrollY += (scrollTo - scrollY) * Math.min(1, dt * 12);
+        if (Math.abs(scrollTo - scrollY) < 0.5) { scrollY = scrollTo; scrollTo = null; }
+      } else if (vel) {
+        /* 離したあとの慣性 */
+        var before = scrollY;
+        scrollY = clampScroll(scrollY + vel * dt);
+        vel *= Math.pow(0.05, dt);
+        if (Math.abs(vel) < 8 || scrollY === before) vel = 0;
+      }
+    }
     if (state === S.JUDGE) {
       judgeT += dt;
       if (judge === "ok" && judgeT >= 0.8) {
@@ -413,8 +445,8 @@
       } else if (judge === "ng") {
         if (!revealed && judgeT >= 0.55) {
           revealed = true;
-          var g = Math.floor(Q.answer / Q.per);
-          if (groups > 1 && (level === 0 || grp !== g)) { level = 1; grp = g; showView(); }
+          vel = 0;
+          if (maxScroll > 0) scrollTo = scrollCenter(Q.answer);
         }
         if (judgeT >= 2.2) finish();
       }
@@ -430,18 +462,11 @@
     }
   }
 
-  function openGroup(g) {
-    level = 1; grp = g; showView();
-    tone(700, 0.08, 0.1, "triangle", 950);
-  }
-  function closeGroup() {
-    cur = grp; level = 0; popT = 0;
-    tone(700, 0.08, 0.1, "triangle", 480);
-  }
   function choose(id) {
     picked = id;
     state = S.JUDGE;
     judgeT = 0;
+    vel = 0; drag = null;
     if (id === Q.answer) {
       judge = "ok";
       tone(660, 0.12, 0.13, "square");
@@ -452,16 +477,9 @@
       noiseHit(0.2, 300, 0.2);
     }
   }
-  function activate(c) {
-    if (!c) return;
-    if (c === "back") { closeGroup(); return; }
-    if (c.kind === "group") openGroup(c.id);
-    else choose(c.id);
-  }
   function hitCell(x, y) {
-    var b = backRect();
-    if (b && x >= b.x - 6 && x <= b.x + b.w + 6 && y >= b.y - 6 && y <= b.y + b.h + 6) return "back";
-    var list = cells();
+    if (y < areaTop || y >= areaBottom) return null;
+    var list = visibleCells();
     for (var i = 0; i < list.length; i++) {
       var c = list[i];
       if (x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h) return c;
@@ -471,7 +489,8 @@
 
   /* ============ 入力 ============
      タップとスペースキーで同じことができるようにする。
-     x が null のときはキー操作（場所を指さない）。 */
+     x が null のときはキー操作（場所を指さない）。
+     選択肢は、なぞるとスクロール、なぞらずに離すと選ぶ。 */
   function down(x, y) {
     if(state===S.INTRO)return;
     audioOn();
@@ -481,19 +500,46 @@
       return;
     }
     if (state !== S.PLAY) return;
+    if (x == null) { choose(cur); return; }
     held = true;
-    if (x == null) activate(cur < 0 ? "back" : cells()[cur]);
-    else activate(hitCell(x, y));
+    /* 流れている最中に触ったら、止めるだけで選ばない */
+    drag = { x0: x, y0: y, sy: scrollY, moved: false, stopOnly: Math.abs(vel) > 60 || scrollTo != null,
+             lastY: y, lastT: performance.now() / 1000 };
+    vel = 0; scrollTo = null;
   }
-  function move(x, y) {}
-  function up() { held = false; }
-  /* 矢印キーで目印を動かす。上の段より上は「もどる」 */
+  function move(x, y) {
+    if (!drag) return;
+    if (!drag.moved && maxScroll > 0 && Math.abs(y - drag.y0) > 12) drag.moved = true;
+    if (!drag.moved) return;
+    var t = performance.now() / 1000, d = Math.max(1 / 120, t - drag.lastT);
+    vel = vel * 0.4 + 0.6 * (drag.lastY - y) / d;
+    drag.lastY = y; drag.lastT = t;
+    scrollY = clampScroll(drag.sy - (y - drag.y0));
+  }
+  function up() {
+    held = false;
+    if (!drag) return;
+    var d = drag;
+    drag = null;
+    if (state !== S.PLAY) return;
+    if (d.moved) {
+      /* 止まってから離したら流さない */
+      if (performance.now() / 1000 - d.lastT > 0.1) vel = 0;
+      vel = Math.max(-4000, Math.min(4000, vel));
+      return;
+    }
+    vel = 0;
+    if (d.stopOnly) return;
+    var c = hitCell(d.x0, d.y0);
+    if (c) choose(c.id);
+  }
+  function cancel() { held = false; drag = null; }
+  /* 矢印キーで目印を動かす */
   function arrow(dx, dy) {
-    var list = cells(), cols = list.cols, n = list.length, b = backRect();
-    if (cur < 0) { if (dy > 0 || dx > 0) cur = 0; return; }
-    if (dx) cur = Math.max(0, Math.min(n - 1, cur + dx));
-    if (dy > 0 && cur + cols < n) cur += cols;
-    if (dy < 0) { if (cur - cols >= 0) cur -= cols; else if (b) cur = -1; }
+    if (dx) cur = Math.max(0, Math.min(N - 1, cur + dx));
+    if (dy > 0 && cur + cols < N) cur += cols;
+    if (dy < 0 && cur - cols >= 0) cur -= cols;
+    ensureVisible(cur);
   }
 
   function atCanvas(e) {
@@ -504,12 +550,21 @@
     e.preventDefault(); keyMode = false;
     var p = atCanvas(e); down(p.x, p.y);
   });
-  wrap.addEventListener("pointermove", function (e) {
+  window.addEventListener("pointermove", function (e) {
+    if (!drag) return;
     var p = atCanvas(e); move(p.x, p.y);
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { up(); });
-  window.addEventListener("blur", function () { up(); });
+  window.addEventListener("pointerup", function (e) { if (drag) { e.preventDefault(); up(); } });
+  window.addEventListener("pointercancel", cancel);
+  window.addEventListener("blur", cancel);
+  wrap.addEventListener("wheel", function (e) {
+    if (state !== S.PLAY || maxScroll <= 0) return;
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var k = (e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? areaBottom - areaTop : 1) * (r.height ? H / r.height : 1);
+    vel = 0;
+    scrollTo = clampScroll((scrollTo != null ? scrollTo : scrollY) + e.deltaY * k);
+  }, { passive: false });
 
   window.addEventListener("keydown", function (e) {
     var esc = e.key === "Escape";
@@ -531,7 +586,7 @@
     down();
   });
   window.addEventListener("keyup", function (e) {
-    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else held = false; }
   });
 
   function doShare() {
@@ -587,9 +642,8 @@
   }
 
   function drawQuestion() {
-    /* 区画のある段は「もどる」の上まで。無い段は選択肢の上まで使う */
-    var list = cells();
-    var top = 64, bottom = groups > 1 ? areaTop - 76 : list[0].y - 24, mid = (top + bottom) / 2;
+    /* 選択肢の上の空いているところに置く */
+    var top = 64, bottom = Math.max(areaTop, gridTop()) - 20, mid = (top + bottom) / 2;
     var room = bottom - top;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -607,8 +661,8 @@
     });
     ctx.textBaseline = "alphabetic";
   }
-  /* 1文字ずつ詰めて折り返す。「、。？」」は行頭に置かない */
-  var NO_HEAD = "、。？！」）ー";
+  /* 1文字ずつ詰めて折り返す。「、。？」」や小さい仮名は行頭に置かない */
+  var NO_HEAD = "、。？！」）ーっゃゅょぁぃぅぇぉッャュョァィゥェォ";
   function wrapLines(s, maxW) {
     var lines = [], line = "";
     for (var i = 0; i < s.length; i++) {
@@ -624,30 +678,32 @@
 
   function cellColor(c) {
     if (state === S.JUDGE || state === S.RESULT) {
-      if (c.kind === "item") {
-        if (c.id === Q.answer && (judge === "ok" || revealed)) return "#5fd08a";
-        if (c.id === picked && judge === "ng") return "#ff6b5b";
-      } else if (judge === "ng" && Math.floor(picked / Q.per) === c.id && !revealed) return "#ff6b5b";
+      if (c.id === Q.answer && (judge === "ok" || revealed)) return "#5fd08a";
+      if (c.id === picked && judge === "ng") return "#ff6b5b";
     }
-    return c.kind === "group" ? "#3b3029" : "#f2ede4";
+    return "#f2ede4";
+  }
+
+  /* 字の大きさは段ごとに揃える（いちばん長いものに合わせる）。段が変わったときだけ測る */
+  function stageFontSize(boxW, boxH) {
+    if (Q.fs != null) return Q.fs;
+    var size = Math.min(34, boxH * 0.42);
+    ctx.font = "800 100px sans-serif";
+    for (var i = 0; i < N; i++) size = Math.min(size, 100 * boxW / ctx.measureText(Q.items[i]).width);
+    return (Q.fs = Math.max(8, Math.floor(size)));
   }
 
   function drawCells() {
-    var list = cells();
+    var list = visibleCells();
     var p = Math.min(1, popT / 0.22), ease = 1 - Math.pow(1 - p, 3);
-    /* 同じページの字の大きさは揃える（いちばん長いものに合わせる） */
-    var c0 = list[0], item = c0.kind === "item", pad0 = Math.min(5, c0.w * 0.07);
-    var boxW = c0.w - pad0 * 2 - (item ? 8 : 10), boxH = c0.h - pad0 * 2;
-    var pageSize = item ? Math.min(34, boxH * 0.42) : Math.min(26, boxH * 0.3);
-    ctx.font = "800 100px sans-serif";
+    var pad = Math.min(5, ((W - 32) / cols) * 0.07);
+    var fs = stageFontSize((W - 32) / cols - pad * 2 - 8, rowH - pad * 2);
+    var scrolls = maxScroll > 0;
+    if (scrolls) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, areaTop, W, areaBottom - areaTop); ctx.clip();
+    }
     list.forEach(function (c) {
-      (item ? [c.a] : [c.a, "〜" + c.b]).forEach(function (t) {
-        pageSize = Math.min(pageSize, 100 * boxW / ctx.measureText(t).width);
-      });
-    });
-    pageSize = Math.max(8, Math.floor(pageSize));
-    list.forEach(function (c, k) {
-      var pad = Math.min(5, c.w * 0.07);
       var s = 0.7 + 0.3 * ease;
       var w = (c.w - pad * 2) * s, h = (c.h - pad * 2) * s;
       var cx = c.x + c.w / 2, cy = c.y + c.h / 2;
@@ -655,39 +711,41 @@
       roundRect(cx - w / 2, cy - h / 2, w, h, Math.min(14, h / 4));
       ctx.fillStyle = cellColor(c);
       ctx.fill();
-      if (c.kind === "group") { ctx.lineWidth = 2; ctx.strokeStyle = "#7d6a5c"; ctx.stroke(); }
-      if (keyMode && state === S.PLAY && k === cur) {
+      if (keyMode && state === S.PLAY && c.id === cur) {
         ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71";
         roundRect(cx - w / 2 - 3, cy - h / 2 - 3, w + 6, h + 6, Math.min(16, h / 4 + 3)); ctx.stroke();
       }
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      var ls = pageSize * s;
-      if (c.kind === "item") {
-        ctx.fillStyle = "#16202e";
-        fitText(c.a, cx, cy + 1, w - 8, ls, "800");
-      } else {
-        ctx.fillStyle = "#f2ede4";
-        fitText(c.a, cx, cy - ls * 0.62, w - 10, ls, "800");
-        fitText("〜" + c.b, cx, cy + ls * 0.62, w - 10, ls, "800");
-      }
+      ctx.fillStyle = "#16202e";
+      fitText(c.a, cx, cy + 1, w - 8, fs * s, "800");
       ctx.globalAlpha = 1;
     });
     ctx.textBaseline = "alphabetic";
+    if (!scrolls) return;
 
-    var b = backRect();
-    if (b) {
-      var bx = b.x + b.w / 2, by = b.y + b.h / 2;
-      ctx.beginPath(); ctx.arc(bx, by, b.w / 2, 0, Math.PI * 2);
-      ctx.fillStyle = "#3b3029"; ctx.fill();
-      ctx.lineWidth = keyMode && cur < 0 && state === S.PLAY ? 4 : 2;
-      ctx.strokeStyle = keyMode && cur < 0 && state === S.PLAY ? "#f7cc71" : "#7d6a5c"; ctx.stroke();
-      /* 戻る矢印 */
-      ctx.strokeStyle = "#f2ede4"; ctx.lineWidth = 5; ctx.lineCap = "round"; ctx.lineJoin = "round";
-      ctx.beginPath(); ctx.moveTo(bx + 9, by); ctx.lineTo(bx - 9, by);
-      ctx.moveTo(bx - 1, by - 9); ctx.lineTo(bx - 10, by); ctx.lineTo(bx - 1, by + 9); ctx.stroke();
-      ctx.lineCap = "butt"; ctx.lineJoin = "miter";
+    /* 上下の端はぼかす（続きがあるときだけ） */
+    var fade = 22, g;
+    if (scrollY > 1) {
+      g = ctx.createLinearGradient(0, areaTop, 0, areaTop + fade);
+      g.addColorStop(0, "rgba(29,23,20,1)"); g.addColorStop(1, "rgba(29,23,20,0)");
+      ctx.fillStyle = g; ctx.fillRect(0, areaTop, W, fade);
     }
+    if (scrollY < maxScroll - 1) {
+      g = ctx.createLinearGradient(0, areaBottom - fade, 0, areaBottom);
+      g.addColorStop(0, "rgba(29,23,20,0)"); g.addColorStop(1, "rgba(29,23,20,1)");
+      ctx.fillStyle = g; ctx.fillRect(0, areaBottom - fade, W, fade);
+    }
+    ctx.restore();
+
+    /* 右端に、いまどのあたりかの細い線 */
+    var room = areaBottom - areaTop, total = room + maxScroll;
+    var barH = Math.max(28, room * room / total);
+    var barY = areaTop + (room - barH) * (scrollY / maxScroll);
+    ctx.fillStyle = "rgba(242,237,228,.14)";
+    roundRect(W - 9, areaTop, 5, room, 2.5); ctx.fill();
+    ctx.fillStyle = "rgba(247,204,113,.85)";
+    roundRect(W - 9, barY, 5, barH, 2.5); ctx.fill();
   }
 
   function draw() {
@@ -754,11 +812,13 @@
      画面に見えているものだけを返す（正解は返さない）。 */
   window.__probe = {
     now: function () {
-      var list = state === S.INTRO ? [] : cells();
+      var list = state === S.INTRO ? [] : visibleCells();
       return {
-        state: state, score: score, W: W, H: H, N: N, level: level, group: grp, cleared: cleared,
-        judge: judge, question: Q && Q.text, cur: cur, back: state === S.INTRO ? null : backRect(),
-        cells: list.map(function (c) { return { kind: c.kind, id: c.id, a: c.a, b: c.b, x: c.x, y: c.y, w: c.w, h: c.h }; })
+        state: state, score: score, W: W, H: H, N: N, cols: cols, rowH: rowH, cleared: cleared,
+        judge: judge, question: Q && Q.text, cur: cur,
+        scroll: scrollY, maxScroll: maxScroll, moving: !!(vel || scrollTo != null),
+        listTop: areaTop, listBottom: areaBottom,
+        cells: list.map(function (c) { return { id: c.id, a: c.a, x: c.x, y: c.y, w: c.w, h: c.h }; })
       };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
@@ -776,10 +836,9 @@
         await r.wait(1100);
         keyMode = true;
         var miss = k === 6;
-        var target = miss ? (Q.answer + 7) % N : Q.answer;
-        if (groups > 1) { cur = Math.floor(target / Q.per); await r.wait(500); r.key(); await r.wait(700); }
-        cur = target % Q.per;
-        await r.wait(600);
+        cur = miss ? (Q.answer + 37) % N : Q.answer;
+        ensureVisible(cur);
+        await r.wait(900);
         r.key();
         if (!miss && !await r.until(function () { return state === S.PLAY; }, 5)) throw Error("次へ進まない");
       }
