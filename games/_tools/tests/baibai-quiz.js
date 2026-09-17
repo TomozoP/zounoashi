@@ -1,4 +1,4 @@
-// 2²択クイズ：問題の中身・全問正解・各段での間違い・スクロール・キー操作・押す間隔を確かめる。
+// 2ⁿ択クイズ：問題の中身・全問正解・各段での間違い・スクロール・キー操作・押す間隔を確かめる。
 const assert = require('assert'); const load = require('../harness');
 const FILE = 'games/_baibai-quiz/index.html';
 const inject = 'window.__dbg={answer:function(){return Q.answer;},answers:function(){return Q.answers;},vel:function(){return vel;},build:build,' +

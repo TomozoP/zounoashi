@@ -6,7 +6,7 @@
 
    足すのは games/_tools/new.js、公開は games/_tools/publish.js が面倒を見ます。 */
 window.DRAFT_GAMES = [
-  { type: "lab", tags: [], id: "baibai-quiz", title: "2²択クイズ", year: 2026, date: "2026-09-17",
+  { type: "lab", tags: [], id: "baibai-quiz", title: "2ⁿ択クイズ", year: 2026, date: "2026-09-17",
     plays: null, url: "", img: "games/_baibai-quiz/img/thumb.webp",
     play: "games/_baibai-quiz/index.html", full: true,
     catch: "正解するたび選択肢が倍になる" },
