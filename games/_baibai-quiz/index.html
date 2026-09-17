@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>2²択クイズ</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #12100e; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 2²択クイズ
+
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
+  var W = 540, H = 960;
+  function layout() {
+    var host = wrap.parentNode;
+    var vw = host.clientWidth || window.innerWidth;
+    var vh = host.clientHeight || window.innerHeight;
+    H = Math.max(780, Math.min(1700, Math.round(W * vh / vw)));
+
+    place();                                   /* 高さが決まってから置き直す */
+
+    var scale = Math.min(vw / W, vh / H);
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    wrap.style.width = canvas.style.width = Math.round(W * scale) + "px";
+    wrap.style.height = canvas.style.height = Math.round(H * scale) + "px";
+    canvas.width = Math.round(W * scale * dpr);
+    canvas.height = Math.round(H * scale * dpr);
+    var k = canvas.width / W;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null;
+  var audioUnlocked = false;
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    if (!AC || AC.state === "closed") return;
+    if (AC.state !== "running") {
+      audioUnlocked = false;
+      try { var pending = AC.resume(); if (pending && pending.catch) pending.catch(function () {}); } catch (e) {}
+    }
+    if (!audioUnlocked) {
+      try {
+        var warmup = AC.createBufferSource();
+        warmup.buffer = AC.createBuffer(1, 1, AC.sampleRate);
+        warmup.connect(AC.destination);
+        warmup.onended = function () { audioUnlocked = AC.state === "running"; warmup.disconnect(); };
+        warmup.start(0);
+      } catch (e) {}
+    }
+  }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 問題 ============
+     4〜16択: 動物の絵 → 名前 / 32択: 県庁所在地 → 都道府県 / 64択: 元素記号 → 名前
+     128択: 国名 → 3文字の国コード / 256択: 絵 → 英単語3文字 / 512〜2048択: 出来事 → 年 */
+  var ANIMALS = [
+    ["🐘", "ゾウ"], ["🦒", "キリン"], ["🐼", "パンダ"], ["🐨", "コアラ"], ["🦁", "ライオン"],
+    ["🐯", "トラ"], ["🐻", "クマ"], ["🐰", "ウサギ"], ["🐸", "カエル"], ["🐧", "ペンギン"],
+    ["🐢", "カメ"], ["🐍", "ヘビ"], ["🦊", "キツネ"], ["🐒", "サル"], ["🐴", "ウマ"],
+    ["🐮", "ウシ"], ["🐷", "ブタ"], ["🐑", "ヒツジ"], ["🐔", "ニワトリ"], ["🦉", "フクロウ"],
+    ["🐬", "イルカ"], ["🐳", "クジラ"], ["🦈", "サメ"], ["🐙", "タコ"], ["🦀", "カニ"],
+    ["🦋", "チョウ"], ["🐝", "ハチ"], ["🐌", "カタツムリ"], ["🦓", "シマウマ"], ["🦏", "サイ"],
+    ["🦛", "カバ"], ["🐊", "ワニ"], ["🦘", "カンガルー"], ["🦔", "ハリネズミ"], ["🦩", "フラミンゴ"],
+    ["🦥", "ナマケモノ"], ["🐫", "ラクダ"], ["🦇", "コウモリ"], ["🦦", "カワウソ"], ["🦙", "アルパカ"],
+    ["🐆", "ヒョウ"], ["🐿", "リス"]
+  ];
+  /* 北から順。県庁所在地が県名と同じところは問題にしない（null） */
+  var PREFS = [
+    ["北海道", "札幌市"], ["青森県", null], ["岩手県", "盛岡市"], ["宮城県", "仙台市"], ["秋田県", null],
+    ["山形県", null], ["福島県", null], ["茨城県", "水戸市"], ["栃木県", "宇都宮市"], ["群馬県", "前橋市"],
+    ["埼玉県", "さいたま市"], ["千葉県", null], ["東京都", null], ["神奈川県", "横浜市"], ["新潟県", null],
+    ["富山県", null], ["石川県", "金沢市"], ["福井県", null], ["山梨県", "甲府市"], ["長野県", null],
+    ["岐阜県", null], ["静岡県", null], ["愛知県", "名古屋市"], ["三重県", "津市"], ["滋賀県", "大津市"],
+    ["京都府", null], ["大阪府", null], ["兵庫県", "神戸市"], ["奈良県", null], ["和歌山県", null],
+    ["鳥取県", null], ["島根県", "松江市"], ["岡山県", null], ["広島県", null], ["山口県", null],
+    ["徳島県", null], ["香川県", "高松市"], ["愛媛県", "松山市"], ["高知県", null], ["福岡県", null],
+    ["佐賀県", null], ["長崎県", null], ["熊本県", null], ["大分県", null], ["宮崎県", null],
+    ["鹿児島県", null], ["沖縄県", "那覇市"]
+  ];
+  /* 原子番号の順（1〜86） */
+  var ELEMENTS = ("H 水素,He ヘリウム,Li リチウム,Be ベリリウム,B ホウ素,C 炭素,N 窒素,O 酸素,F フッ素,Ne ネオン," +
+    "Na ナトリウム,Mg マグネシウム,Al アルミニウム,Si ケイ素,P リン,S 硫黄,Cl 塩素,Ar アルゴン,K カリウム,Ca カルシウム," +
+    "Sc スカンジウム,Ti チタン,V バナジウム,Cr クロム,Mn マンガン,Fe 鉄,Co コバルト,Ni ニッケル,Cu 銅,Zn 亜鉛," +
+    "Ga ガリウム,Ge ゲルマニウム,As ヒ素,Se セレン,Br 臭素,Kr クリプトン,Rb ルビジウム,Sr ストロンチウム,Y イットリウム,Zr ジルコニウム," +
+    "Nb ニオブ,Mo モリブデン,Tc テクネチウム,Ru ルテニウム,Rh ロジウム,Pd パラジウム,Ag 銀,Cd カドミウム,In インジウム,Sn スズ," +
+    "Sb アンチモン,Te テルル,I ヨウ素,Xe キセノン,Cs セシウム,Ba バリウム,La ランタン,Ce セリウム,Pr プラセオジム,Nd ネオジム," +
+    "Pm プロメチウム,Sm サマリウム,Eu ユウロピウム,Gd ガドリニウム,Tb テルビウム,Dy ジスプロシウム,Ho ホルミウム,Er エルビウム,Tm ツリウム,Yb イッテルビウム," +
+    "Lu ルテチウム,Hf ハフニウム,Ta タンタル,W タングステン,Re レニウム,Os オスミウム,Ir イリジウム,Pt 白金,Au 金,Hg 水銀," +
+    "Tl タリウム,Pb 鉛,Bi ビスマス,Po ポロニウム,At アスタチン,Rn ラドン").split(",").map(function (s) { return s.split(" "); });
+  var ELEMENT_Q = "H He C N O Na Mg Al Si S Cl K Ca Ti Fe Ni Cu Zn Ag Sn I W Pt Au Hg Pb".split(" ");
+  var CODES = ("AFG ALB DZA AND AGO ARG ARM AUS AUT AZE BHS BHR BGD BRB BLR BEL BLZ BEN BTN BOL BIH BWA BRA BRN BGR BFA BDI " +
+    "KHM CMR CAN CPV CAF TCD CHL CHN COL COM COG COD CRI CIV HRV CUB CYP CZE DNK DJI DMA DOM ECU EGY SLV GNQ ERI EST SWZ " +
+    "ETH FJI FIN FRA GAB GMB GEO DEU GHA GRC GRD GTM GIN GNB GUY HTI HND HUN ISL IND IDN IRN IRQ IRL ISR ITA JAM JPN JOR " +
+    "KAZ KEN KIR PRK KOR KWT KGZ LAO LVA LBN LSO LBR LBY LIE LTU LUX MDG MWI MYS MDV MLI MLT MHL MRT MUS MEX FSM MDA MCO " +
+    "MNG MNE MAR MOZ MMR NAM NRU NPL NLD NZL NIC NER NGA MKD NOR OMN PAK PLW PAN PNG PRY PER PHL POL PRT QAT ROU RUS RWA " +
+    "KNA LCA VCT WSM SMR STP SAU SEN SRB SYC SLE SGP SVK SVN SLB SOM ZAF SSD ESP LKA SDN SUR SWE CHE SYR TJK TZA THA TLS " +
+    "TGO TON TTO TUN TUR TKM TUV UGA UKR ARE GBR USA URY UZB VUT VAT VEN VNM YEM ZMB ZWE").split(" ").sort();
+  var CODE_Q = [
+    ["日本", "JPN"], ["アメリカ", "USA"], ["イギリス", "GBR"], ["ドイツ", "DEU"], ["フランス", "FRA"],
+    ["スイス", "CHE"], ["スペイン", "ESP"], ["オランダ", "NLD"], ["オーストリア", "AUT"], ["オーストラリア", "AUS"],
+    ["韓国", "KOR"], ["中国", "CHN"], ["インド", "IND"], ["ブラジル", "BRA"], ["メキシコ", "MEX"],
+    ["カナダ", "CAN"], ["イタリア", "ITA"], ["ポルトガル", "PRT"], ["クロアチア", "HRV"], ["アイルランド", "IRL"],
+    ["南アフリカ", "ZAF"], ["アラブ首長国連邦", "ARE"], ["ニュージーランド", "NZL"], ["シンガポール", "SGP"],
+    ["フィリピン", "PHL"], ["ギリシャ", "GRC"], ["デンマーク", "DNK"], ["スウェーデン", "SWE"],
+    ["アルゼンチン", "ARG"], ["サウジアラビア", "SAU"], ["カンボジア", "KHM"], ["ベトナム", "VNM"]
+  ];
+  var WORDS = ("ACE ACT ADD AGE AID AIM AIR ALL ANT APE ARC ARM ART ASH ASK ATE AXE BAD BAG BAN BAR BAT BAY BED BEE BET BIG " +
+    "BIN BIT BOA BOG BOW BOX BOY BUD BUG BUN BUS BUT BUY CAB CAN CAP CAR CAT COD COG COP COT COW CRY CUB CUE CUP CUT DAD " +
+    "DAM DAY DEN DEW DIG DIM DIP DOE DOG DOT DRY DUB DUE DUG DYE EAR EAT EBB EEL EGG ELF ELK ELM EMU END ERA EVE EWE EYE " +
+    "FAN FAR FAT FAX FED FEE FEW FIG FIN FIR FIT FIX FLU FLY FOE FOG FOR FOX FRY FUN FUR GAG GAP GAS GEL GEM GET GIG GNU " +
+    "GOD GUM GUN GUT GUY GYM HAM HAS HAT HAY HEM HEN HER HEX HID HIM HIP HIS HIT HOG HOP HOT HOW HUB HUE HUG HUM HUT ICE " +
+    "ICY ILL IMP INK INN ION IRE IVY JAB JAM JAR JAW JAY JET JIG JOB JOG JOT JOY JUG KEG KEN KEY KID KIN KIT LAB LAD LAG " +
+    "LAP LAW LAY LED LEG LET LID LIE LIP LIT LOG LOT LOW MAD MAN MAP MAT MAY MEN MET MID MIX MOB MOM MOP MUD MUG NAG NAP " +
+    "NET NEW NIB NOD NOR NOT NOW NUN NUT OAK OAR OAT ODD ODE OFF OIL OLD ONE OPT ORB ORE OUR OUT OWL OWN PAD PAL PAN PAW " +
+    "PAY PEA PEG PEN PET PEW PIE PIG PIN PIT POD POP POT PRY PUB PUN PUP PUT RAG RAM RAN RAP RAT RAW RAY RED RIB RID RIG " +
+    "RIM RIP ROB ROD ROE ROT ROW RUB RUG RUM RUN RYE SAD SAG SAP SAT SAW SAY SEA SET SEW SHE SHY SIN SIP SIR SIT SIX SKI " +
+    "SKY SLY SOB SOD SON SOW SOY SPA SPY STY SUB SUM SUN TAB TAG TAN TAP TAR TAX TEA TEN THE TIE TIN TIP TOE TON TOP TOW " +
+    "TOY TRY TUB TUG TWO URN USE VAN VAT VET VEX VIA VOW WAG WAR WAS WAX WAY WEB WED WET WHO WHY WIG WIN WIT WOE WOK WON " +
+    "WOO WOW YAK YAM YAP YAW YEN YES YET YEW YOU ZAP ZEN ZIP ZOO").split(" ").sort();
+  var WORD_Q = [
+    ["🐱", "CAT"], ["🐶", "DOG"], ["🐷", "PIG"], ["🐮", "COW"], ["🐝", "BEE"], ["🐜", "ANT"], ["🦉", "OWL"],
+    ["🦇", "BAT"], ["🦊", "FOX"], ["🐀", "RAT"], ["🥚", "EGG"], ["☀️", "SUN"], ["🔑", "KEY"], ["🚗", "CAR"],
+    ["🚌", "BUS"], ["📦", "BOX"], ["🎩", "HAT"], ["🖊️", "PEN"], ["🍵", "TEA"], ["🧊", "ICE"], ["🗺️", "MAP"],
+    ["🥧", "PIE"], ["👁️", "EYE"], ["👂", "EAR"], ["🦵", "LEG"], ["🌊", "SEA"], ["🧸", "TOY"], ["🛁", "TUB"],
+    ["🥫", "CAN"], ["🧢", "CAP"], ["🍳", "PAN"], ["🐛", "BUG"], ["🪰", "FLY"], ["🌫️", "FOG"], ["🏹", "BOW"],
+    ["👦", "BOY"], ["🎿", "SKI"], ["🐏", "RAM"], ["🚐", "VAN"], ["🛏️", "BED"], ["🦍", "APE"], ["🪓", "AXE"],
+    ["⛽", "GAS"], ["💎", "GEM"], ["🐔", "HEN"], ["🥜", "NUT"], ["🐾", "PAW"], ["🪵", "LOG"], ["🧝", "ELF"],
+    ["🚕", "CAB"], ["📌", "PIN"], ["🕸️", "WEB"], ["🛢️", "OIL"], ["🥅", "NET"]
+  ];
+  var EVENTS = [
+    [476, "西ローマ帝国の滅亡"], [603, "冠位十二階"], [604, "十七条の憲法"], [645, "大化の改新"],
+    [701, "大宝律令"], [710, "平城京遷都"], [743, "墾田永年私財法"], [794, "平安京遷都"],
+    [894, "遣唐使の停止"], [1185, "壇ノ浦の戦い"], [1206, "チンギス・ハンの即位"], [1215, "マグナ・カルタ"],
+    [1221, "承久の乱"], [1274, "文永の役"], [1281, "弘安の役"], [1467, "応仁の乱の始まり"],
+    [1492, "コロンブスのアメリカ到達"], [1517, "ルターの九十五か条の論題"], [1543, "鉄砲伝来"],
+    [1549, "ザビエルの来日"], [1575, "長篠の戦い"], [1600, "関ヶ原の戦い"], [1603, "江戸幕府の成立"],
+    [1637, "島原の乱の始まり"], [1776, "アメリカ独立宣言"], [1789, "フランス革命の始まり"],
+    [1804, "ナポレオンの皇帝即位"], [1853, "ペリー来航"], [1868, "明治元年"], [1872, "新橋・横浜間の鉄道開業"],
+    [1889, "大日本帝国憲法の発布"], [1894, "日清戦争の始まり"], [1896, "第1回近代オリンピック"],
+    [1903, "ライト兄弟の初飛行"], [1904, "日露戦争の始まり"], [1912, "大正元年"], [1912, "タイタニック号の沈没"],
+    [1914, "第一次世界大戦の始まり"], [1923, "関東大震災"], [1926, "昭和元年"], [1929, "世界恐慌の始まり"],
+    [1939, "第二次世界大戦の始まり"], [1941, "真珠湾攻撃"], [1947, "日本国憲法の施行"], [1958, "東京タワーの完成"],
+    [1964, "東海道新幹線の開業"], [1969, "アポロ11号の月面着陸"], [1970, "大阪万博"], [1989, "平成元年"],
+    [1989, "ベルリンの壁の崩壊"], [1995, "阪神・淡路大震災"], [2001, "アメリカ同時多発テロ"],
+    [2011, "東日本大震災"], [2012, "東京スカイツリーの開業"], [2019, "令和元年"]
+  ];
+  var LAST = 2048;
+
+  function rnd(n) { return Math.floor(Math.random() * n); }
+  function shuffle(a) {
+    a = a.slice();
+    for (var i = a.length - 1; i > 0; i--) { var j = rnd(i + 1), t = a[i]; a[i] = a[j]; a[j] = t; }
+    return a;
+  }
+  /* 同じ回のうちは同じ問題を出さない */
+  function pickQ(pool, key) {
+    var fresh = pool.filter(function (p) { return !used[key(p)]; });
+    var p = (fresh.length ? fresh : pool)[rnd((fresh.length ? fresh : pool).length)];
+    used[key(p)] = true;
+    return p;
+  }
+  /* 0..len-1 から keep を含む n 個を選び、元の順に並べる */
+  function sampleKeep(len, keep, n) {
+    var rest = [];
+    for (var i = 0; i < len; i++) if (i !== keep) rest.push(i);
+    return shuffle(rest).slice(0, n - 1).concat([keep]).sort(function (a, b) { return a - b; });
+  }
+  function fromPool(pool, keep, n, label) {
+    var idx = sampleKeep(pool.length, keep, n);
+    return { items: idx.map(function (i) { return label(pool[i]); }), answer: idx.indexOf(keep) };
+  }
+
+  function build(N) {
+    var p, r, q;
+    if (N <= 16) {
+      p = pickQ(ANIMALS, function (a) { return a[0]; });
+      var names = shuffle(ANIMALS.filter(function (a) { return a !== p; })).slice(0, N - 1)
+        .map(function (a) { return a[1]; }).concat([p[1]]);
+      names = shuffle(names);
+      return { look: "emoji", text: p[0], items: names, answer: names.indexOf(p[1]), per: N };
+    }
+    if (N === 32) {
+      p = pickQ(PREFS.filter(function (a) { return a[1]; }), function (a) { return a[1]; });
+      r = fromPool(PREFS, PREFS.indexOf(p), N, function (a) { return a[0]; });
+      return { look: "text", text: p[1], items: r.items, answer: r.answer, per: 32 };
+    }
+    if (N === 64) {
+      q = pickQ(ELEMENT_Q, function (s) { return "el" + s; });
+      var at = ELEMENTS.map(function (e) { return e[0]; }).indexOf(q);
+      r = fromPool(ELEMENTS, at, N, function (e) { return e[1]; });
+      return { look: "symbol", text: q, items: r.items, answer: r.answer, per: 32 };
+    }
+    if (N === 128) {
+      p = pickQ(CODE_Q, function (a) { return a[0]; });
+      r = fromPool(CODES, CODES.indexOf(p[1]), N, function (c) { return c; });
+      return { look: "text", text: p[0], items: r.items, answer: r.answer, per: 64 };
+    }
+    if (N === 256) {
+      p = pickQ(WORD_Q, function (a) { return a[0]; });
+      r = fromPool(WORDS, WORDS.indexOf(p[1]), N, function (w) { return w; });
+      return { look: "emoji", text: p[0], items: r.items, answer: r.answer, per: 64 };
+    }
+    /* 年: 答えを含む連続した N 年ぶん（1〜2048年の中で位置はばらばら） */
+    p = pickQ(EVENTS, function (a) { return a[1]; });
+    var lo = Math.max(1, p[0] - N + 1), hi = Math.min(p[0], LAST - N + 1);
+    var start = lo + rnd(hi - lo + 1), years = [];
+    for (var y = 0; y < N; y++) years.push(String(start + y));
+    return { look: "text", text: p[1], items: years, answer: p[0] - start, per: 64 };
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", JUDGE: "judge", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+  var N, Q, groups, level, grp, cur, popT, judge, judgeT, picked, revealed, cleared, used, introT = 0;
+
+  var areaTop, unit;                           /* 高さから決まる置き場所 */
+  function place() {
+    /* 下に選択肢の場所。8段ぶんで1段64以上（押す間隔63以上）を必ず取る */
+    areaTop = Math.round(Math.min(H * 0.4, H - 24 - 8 * 64));
+    unit = (H - 24 - areaTop) / 8;
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden=true;
+    state = S.PLAY;
+    score = 0;
+    T = 0;
+    held = false;
+    used = {};
+    cleared = false;
+    setStage(4);
+  }
+  function setStage(n) {
+    N = n;
+    state = S.PLAY;
+    Q = build(n);
+    groups = n / Q.per;
+    level = groups > 1 ? 0 : 1;
+    grp = 0;
+    judge = null; judgeT = 0; picked = -1; revealed = false;
+    showView();
+  }
+  function showView() { cur = 0; popT = 0; }
+
+  /* ============ 並び ============ */
+  var DIMS = { 1: [1, 1], 2: [1, 2], 4: [2, 2], 8: [2, 4], 16: [2, 8], 32: [4, 8], 64: [8, 8] };
+  function cells() {
+    var list = [], i, count;
+    if (level === 0) {
+      count = groups;
+      for (i = 0; i < count; i++) list.push({ kind: "group", id: i, a: Q.items[i * Q.per], b: Q.items[(i + 1) * Q.per - 1] });
+    } else {
+      count = Q.per;
+      var base = grp * Q.per;
+      for (i = 0; i < count; i++) list.push({ kind: "item", id: base + i, a: Q.items[base + i] });
+    }
+    var cols = DIMS[count][0], rows = DIMS[count][1];
+    var cw = (W - 32) / cols, ch = unit * Math.min(2, 8 / rows);
+    var top = H - 24 - rows * ch;
+    list.forEach(function (c, k) {
+      c.x = 16 + (k % cols) * cw; c.y = top + Math.floor(k / cols) * ch; c.w = cw; c.h = ch;
+    });
+    list.cols = cols;
+    return list;
+  }
+  function backRect() {
+    return groups > 1 && level === 1 ? { x: 22, y: areaTop - 66, w: 52, h: 52 } : null;
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    introT += dt;
+    popT += dt;
+    if (state === S.JUDGE) {
+      judgeT += dt;
+      if (judge === "ok" && judgeT >= 0.8) {
+        if (N >= LAST) { cleared = true; finish(); }
+        else { setStage(N * 2); tone(520, 0.12, 0.1, "triangle", 1040); }
+      } else if (judge === "ng") {
+        if (!revealed && judgeT >= 0.55) {
+          revealed = true;
+          var g = Math.floor(Q.answer / Q.per);
+          if (groups > 1 && (level === 0 || grp !== g)) { level = 1; grp = g; showView(); }
+        }
+        if (judgeT >= 2.2) finish();
+      }
+    }
+    if (state !== S.PLAY) return;
+    T += dt;
+  }
+  function finish() {
+    state = S.RESULT;
+    score = N;
+    if (cleared) {
+      [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.3, 0.12, "triangle", null, i * 0.1); });
+    }
+  }
+
+  function openGroup(g) {
+    level = 1; grp = g; showView();
+    tone(700, 0.08, 0.1, "triangle", 950);
+  }
+  function closeGroup() {
+    cur = grp; level = 0; popT = 0;
+    tone(700, 0.08, 0.1, "triangle", 480);
+  }
+  function choose(id) {
+    picked = id;
+    state = S.JUDGE;
+    judgeT = 0;
+    if (id === Q.answer) {
+      judge = "ok";
+      tone(660, 0.12, 0.13, "square");
+      tone(990, 0.2, 0.13, "square", null, 0.09);
+    } else {
+      judge = "ng";
+      tone(220, 0.45, 0.14, "sawtooth", 80);
+      noiseHit(0.2, 300, 0.2);
+    }
+  }
+  function activate(c) {
+    if (!c) return;
+    if (c === "back") { closeGroup(); return; }
+    if (c.kind === "group") openGroup(c.id);
+    else choose(c.id);
+  }
+  function hitCell(x, y) {
+    var b = backRect();
+    if (b && x >= b.x - 6 && x <= b.x + b.w + 6 && y >= b.y - 6 && y <= b.y + b.h + 6) return "back";
+    var list = cells();
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h) return c;
+    }
+    return null;
+  }
+
+  /* ============ 入力 ============
+     タップとスペースキーで同じことができるようにする。
+     x が null のときはキー操作（場所を指さない）。 */
+  function down(x, y) {
+    if(state===S.INTRO)return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (state !== S.PLAY) return;
+    held = true;
+    if (x == null) activate(cur < 0 ? "back" : cells()[cur]);
+    else activate(hitCell(x, y));
+  }
+  function move(x, y) {}
+  function up() { held = false; }
+  /* 矢印キーで目印を動かす。上の段より上は「もどる」 */
+  function arrow(dx, dy) {
+    var list = cells(), cols = list.cols, n = list.length, b = backRect();
+    if (cur < 0) { if (dy > 0 || dx > 0) cur = 0; return; }
+    if (dx) cur = Math.max(0, Math.min(n - 1, cur + dx));
+    if (dy > 0 && cur + cols < n) cur += cols;
+    if (dy < 0) { if (cur - cols >= 0) cur -= cols; else if (b) cur = -1; }
+  }
+
+  function atCanvas(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+  }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  window.addEventListener("keydown", function (e) {
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    var upk = e.key === "ArrowUp" || e.key === "w" || e.key === "W";
+    var dnk = e.key === "ArrowDown" || e.key === "s" || e.key === "S";
+    if (!esc && !go && !left && !right && !upk && !dnk) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (left || right || upk || dnk) {
+      if (state !== S.PLAY) return;
+      arrow(left ? -1 : right ? 1 : 0, upk ? -1 : dnk ? 1 : 0);
+      return;
+    }
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
+  });
+
+  function doShare() {
+    /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
+       URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
+    window.zResultActions.x({ text: cleared ? "2²択クイズで2048択を突破" : "2²択クイズで" + score + "択まで到達" });
+  }
+
+  /* ============ 描画 ============ */
+  var EMOJI_FONT = "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif";
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  /* 幅に収まるまで字を小さくして書く */
+  function fitText(s, x, y, maxW, size, weight, family) {
+    var px = size;
+    ctx.font = weight + " " + px + "px " + (family || "sans-serif");
+    var w = ctx.measureText(s).width;
+    if (w > maxW) { px = Math.max(8, Math.floor(px * maxW / w)); ctx.font = weight + " " + px + "px " + (family || "sans-serif"); }
+    ctx.fillText(s, x, y);
+    return px;
+  }
+
+  function drawPower(x, y, e, size, color) {
+    ctx.fillStyle = color;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.font = "800 " + size + "px sans-serif";
+    ctx.fillText("2", x, y);
+    var w = ctx.measureText("2").width;
+    ctx.font = "800 " + Math.round(size * 0.58) + "px sans-serif";
+    ctx.fillText(String(e), x + w + 2, y - size * 0.42);
+  }
+
+  function drawIntro() {
+    /* 2×2 → 4×4 → … と割れていく四角 */
+    var k = Math.floor(introT / 0.7) % 5 + 1, n = Math.pow(2, k);
+    var s = 360, x0 = (W - s) / 2, y0 = H * 0.42 - s / 2, gap = Math.max(1, 8 / k), c = s / n;
+    var t = (introT / 0.7) % 1;
+    for (var i = 0; i < n * n; i++) {
+      var cx = x0 + (i % n) * c, cy = y0 + Math.floor(i / n) * c;
+      var pop = Math.min(1, t * 4 + ((i % n) + Math.floor(i / n)) * -0.02 + 0.3);
+      var sz = (c - gap) * Math.max(0, pop);
+      ctx.fillStyle = (i * 7 + k) % 11 === 0 ? "#f7cc71" : "#f2ede4";
+      roundRect(cx + (c - sz) / 2, cy + (c - sz) / 2, sz, sz, Math.min(10, sz / 5));
+      ctx.fill();
+    }
+  }
+
+  function drawQuestion() {
+    /* 区画のある段は「もどる」の上まで。無い段は選択肢の上まで使う */
+    var list = cells();
+    var top = 64, bottom = groups > 1 ? areaTop - 76 : list[0].y - 24, mid = (top + bottom) / 2;
+    var room = bottom - top;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#f2ede4";
+    if (Q.look === "emoji") {
+      ctx.font = Math.round(Math.min(170, room)) + "px " + EMOJI_FONT;
+      ctx.fillText(Q.text, W / 2, mid + 4);
+    } else if (Q.look === "symbol") {
+      fitText(Q.text, W / 2, mid, 300, Math.round(Math.min(110, room)), "800");
+    } else {
+      fitText(Q.text, W / 2, mid, W - 60, Math.round(Math.min(52, room * 0.6)), "800");
+    }
+    ctx.textBaseline = "alphabetic";
+  }
+
+  function cellColor(c) {
+    if (state === S.JUDGE || state === S.RESULT) {
+      if (c.kind === "item") {
+        if (c.id === Q.answer && (judge === "ok" || revealed)) return "#5fd08a";
+        if (c.id === picked && judge === "ng") return "#ff6b5b";
+      } else if (judge === "ng" && Math.floor(picked / Q.per) === c.id && !revealed) return "#ff6b5b";
+    }
+    return c.kind === "group" ? "#3b3029" : "#f2ede4";
+  }
+
+  function drawCells() {
+    var list = cells();
+    var p = Math.min(1, popT / 0.22), ease = 1 - Math.pow(1 - p, 3);
+    /* 同じページの字の大きさは揃える（いちばん長いものに合わせる） */
+    var c0 = list[0], item = c0.kind === "item", pad0 = Math.min(5, c0.w * 0.07);
+    var boxW = c0.w - pad0 * 2 - (item ? 8 : 10), boxH = c0.h - pad0 * 2;
+    var pageSize = item ? Math.min(34, boxH * 0.42) : Math.min(26, boxH * 0.3);
+    ctx.font = "800 100px sans-serif";
+    list.forEach(function (c) {
+      (item ? [c.a] : [c.a, "〜" + c.b]).forEach(function (t) {
+        pageSize = Math.min(pageSize, 100 * boxW / ctx.measureText(t).width);
+      });
+    });
+    pageSize = Math.max(8, Math.floor(pageSize));
+    list.forEach(function (c, k) {
+      var pad = Math.min(5, c.w * 0.07);
+      var s = 0.7 + 0.3 * ease;
+      var w = (c.w - pad * 2) * s, h = (c.h - pad * 2) * s;
+      var cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+      ctx.globalAlpha = ease;
+      roundRect(cx - w / 2, cy - h / 2, w, h, Math.min(14, h / 4));
+      ctx.fillStyle = cellColor(c);
+      ctx.fill();
+      if (c.kind === "group") { ctx.lineWidth = 2; ctx.strokeStyle = "#7d6a5c"; ctx.stroke(); }
+      if (keyMode && state === S.PLAY && k === cur) {
+        ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71";
+        roundRect(cx - w / 2 - 3, cy - h / 2 - 3, w + 6, h + 6, Math.min(16, h / 4 + 3)); ctx.stroke();
+      }
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      var ls = pageSize * s;
+      if (c.kind === "item") {
+        ctx.fillStyle = "#16202e";
+        fitText(c.a, cx, cy + 1, w - 8, ls, "800");
+      } else {
+        ctx.fillStyle = "#f2ede4";
+        fitText(c.a, cx, cy - ls * 0.62, w - 10, ls, "800");
+        fitText("〜" + c.b, cx, cy + ls * 0.62, w - 10, ls, "800");
+      }
+      ctx.globalAlpha = 1;
+    });
+    ctx.textBaseline = "alphabetic";
+
+    var b = backRect();
+    if (b) {
+      var bx = b.x + b.w / 2, by = b.y + b.h / 2;
+      ctx.beginPath(); ctx.arc(bx, by, b.w / 2, 0, Math.PI * 2);
+      ctx.fillStyle = "#3b3029"; ctx.fill();
+      ctx.lineWidth = keyMode && cur < 0 && state === S.PLAY ? 4 : 2;
+      ctx.strokeStyle = keyMode && cur < 0 && state === S.PLAY ? "#f7cc71" : "#7d6a5c"; ctx.stroke();
+      /* 戻る矢印 */
+      ctx.strokeStyle = "#f2ede4"; ctx.lineWidth = 5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath(); ctx.moveTo(bx + 9, by); ctx.lineTo(bx - 9, by);
+      ctx.moveTo(bx - 1, by - 9); ctx.lineTo(bx - 10, by); ctx.lineTo(bx - 1, by + 9); ctx.stroke();
+      ctx.lineCap = "butt"; ctx.lineJoin = "miter";
+    }
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+
+    ctx.fillStyle = "#1d1714";
+    ctx.fillRect(0, 0, W, H);
+    if (state === S.INTRO) { drawIntro(); return; }
+
+    drawPower(24, 52, Math.round(Math.log(N) / Math.LN2), 34, "#f7cc71");
+    drawQuestion();
+    drawCells();
+
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.84)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = cleared ? "#f7cc71" : "#fff";
+    ctx.shadowColor = cleared ? "rgba(247,204,113,.8)" : "rgba(0,0,0,.6)";
+    ctx.shadowBlur = cleared ? 30 : 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx,b.label,0,1,30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
+     画面に見えているものだけを返す（正解は返さない）。 */
+  window.__probe = {
+    now: function () {
+      var list = state === S.INTRO ? [] : cells();
+      return {
+        state: state, score: score, W: W, H: H, N: N, level: level, group: grp, cleared: cleared,
+        judge: judge, question: Q && Q.text, cur: cur, back: state === S.INTRO ? null : backRect(),
+        cells: list.map(function (c) { return { kind: c.kind, id: c.id, a: c.a, b: c.b, x: c.x, y: c.y, w: c.w, h: c.h }; })
+      };
+    },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============
+     record.js が呼ぶ自動操作。目印を正解へ動かして選ぶ（撮影専用）。 */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      for (var k = 0; k < 7; k++) {
+        await r.wait(1100);
+        keyMode = true;
+        var miss = k === 6;
+        var target = miss ? (Q.answer + 7) % N : Q.answer;
+        if (groups > 1) { cur = Math.floor(target / Q.per); await r.wait(500); r.key(); await r.wait(700); }
+        cur = target % Q.per;
+        await r.wait(600);
+        r.key();
+        if (!miss && !await r.until(function () { return state === S.PLAY; }, 5)) throw Error("次へ進まない");
+      }
+      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("勝敗が出ない");
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
+  var startingPointer=null;
+  document.addEventListener('pointerdown',function(e){
+    if(!(state===S.INTRO))return;
+    if(e.isPrimary===false||e.button>0)return;
+    startingPointer=e.pointerId;
+    e.stopImmediatePropagation();
+  },true);
+  document.addEventListener('pointerup',function(e){
+    if(!(state===S.INTRO)||startingPointer!==e.pointerId)return;
+    startingPointer=null;e.preventDefault();e.stopImmediatePropagation();startButton.click();
+  },true);
+  document.addEventListener('pointercancel',function(){startingPointer=null;},true);
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  newRound();state=S.INTRO;startButton.hidden=false;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000);   /* 戻ってきたとき飛ばないように上限 */
+    last = now;
+    if (!window.__recordManual) { update(dt); draw(); }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
