@@ -335,7 +335,7 @@
       return g;
     });
     this.vessels = {
-      nabe: { g: pot, soup: soup, foods: this.foods, surf: [0.03, 0.085], soupColor: "#d8783a", pos: { x: POT.x, y: POT.y }, farHand: [0, 0.1, -0.28] }
+      nabe: { g: pot, soup: soup, foods: this.foods, surf: [0.03, 0.085], soupColor: "#d8783a", inner: [[0.014, 0.1], [0.04, 0.145], [0.085, 0.155], [0.105, 0.152]], soupR: 0.15, pos: { x: POT.x, y: POT.y }, farHand: [0, 0.1, -0.28] }
     };
     this.buildRamen();
     this.buildCoffee();
@@ -397,7 +397,7 @@
       g.add(q);
       return q;
     });
-    this.vessels.ramen = { g: g, soup: soup, foods: foods, surf: [0.05, 0.095], soupColor: "#d9a45a", pos: { x: POT.x, y: POT.y }, farHand: [0, 0.07, -0.19] };
+    this.vessels.ramen = { g: g, soup: soup, foods: foods, surf: [0.05, 0.095], soupColor: "#d9a45a", inner: [[0.024, 0.062], [0.1, 0.136], [0.112, 0.142]], soupR: 0.13, pos: { x: POT.x, y: POT.y }, farHand: [0, 0.07, -0.19] };
   };
 
   /* ============ コーヒーのマグカップ ============ */
@@ -423,7 +423,7 @@
     var soup = new T.Mesh(new T.CircleGeometry(0.052, 24), this.mat("#3b2416", { roughness: 0.15 }));
     soup.rotation.x = -Math.PI / 2;
     g.add(soup);
-    this.vessels.coffee = { g: g, soup: soup, foods: [], surf: [0.02, 0.095], soupColor: "#4a2c1a", pos: { x: 0.34, y: 0.78 }, farHand: [0, 0.02, -0.07], sip: true };
+    this.vessels.coffee = { g: g, soup: soup, foods: [], surf: [0.02, 0.095], soupColor: "#4a2c1a", inner: [[0.009, 0.053], [0.11, 0.053]], soupR: 0.052, pos: { x: 0.34, y: 0.78 }, farHand: [0, 0.02, -0.07], sip: true };
   };
 
   /* 選んだ段階の器に差し替える。飛んでいる最中は差し替えない */
@@ -770,6 +770,10 @@
     if (v.level) this.setVessel(v.level);
     var cur = this.cur;
     var surf = cur.surf[0] + (cur.surf[1] - cur.surf[0]) * (1 - v.eaten / v.N);
+    /* 水面の高さでの内径に汁を収める（すぼまった器で、減った汁が壁からはみ出さないように） */
+    var wallR = innerAt(cur.inner, surf) - 0.004;
+    this.soup.scale.setScalar(wallR / cur.soupR);
+    var foodK = Math.min(1, (wallR - 0.022) / 0.114);
     this.soup.position.y = surf;
     var hotK = Math.max(0, Math.min(1, v.hot));
     /* 食べきったら：持ち上げて傾ける(0〜0.5秒) → 頭を反らして飲み干す(〜1.3秒) → 元の位置へ戻す(〜1.7秒) */
@@ -805,16 +809,18 @@
     this.chop[0].visible = this.chop[1].visible = !cur.sip;
     if (posing) this.segment(this.chop[0], hand, tip);
     if (posing) this.segment(this.chop[1], [hand[0], hand[1] + 0.012, hand[2] - 0.01], [tip[0] + 0.005, tip[1] + 0.01, tip[2] - 0.012]);
-    var holding = !cur.sip && v.bite.idx < v.N && p >= 0.3 && p < 0.72 && v.phase === "ride";
+    /* ひと口の数と器の具の数は段階ごとに違うので、減った割合で具を消す。箸でつまむのは次に消える具 */
+    var shown = this.foods.length, gone = Math.floor(v.eaten * shown / v.N), next = Math.min(shown - 1, gone);
+    var holding = !cur.sip && shown > 0 && v.bite.idx < v.N && p >= 0.3 && p < 0.72 && v.phase === "ride";
     this.held.visible = holding;
     if (holding) {
       this.held.position.set(tip[0], tip[1], tip[2]);
-      this.held.material.color.set(this.foods[v.bite.idx].userData.color);
+      this.held.material.color.set(this.foods[next].userData.color);
     }
     if (!this.spill) this.foods.forEach(function (f, i) {
-      var gone = i < v.eaten || (i === v.bite.idx && holding);
-      f.visible = !gone;
-      f.position.set(f.userData.home[0], surf + 0.012, f.userData.home[1]);
+      var gone2 = i < gone;
+      f.visible = !gone2;
+      f.position.set(f.userData.home[0] * foodK, surf + 0.012, f.userData.home[1] * foodK);
     });
 
     /* 腕 */
@@ -939,6 +945,14 @@
     var A = Math.acos(Math.max(-1, Math.min(1, cosA)));
     var t = ang + bend * A;
     return [a[0] + Math.cos(t) * l1, a[1] + Math.sin(t) * l1, (a[2] + b[2]) / 2];
+  }
+  /* 器の内側の形（高さ, 内径 の並び）から、その高さの内径 */
+  function innerAt(pts, y) {
+    if (y <= pts[0][0]) return pts[0][1];
+    for (var i = 1; i < pts.length; i++) {
+      if (y <= pts[i][0]) { var k = (y - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]); return pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * k; }
+    }
+    return pts[pts.length - 1][1];
   }
   function lerp3(a, b, k) { return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]; }
   function ease(k) { return k * k * (3 - 2 * k); }
