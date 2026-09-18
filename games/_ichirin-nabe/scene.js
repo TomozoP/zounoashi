@@ -266,9 +266,9 @@
     this.face.material.emissiveIntensity = 0;
     /* 顔の部品（目・口・ほほ）は付けない。熱さは顔色と湯気と頭のふるえで見せる */
     /* 長い鼻。顔と同じ色なので、熱いと一緒に赤くなる */
-    var nose = new T.Mesh(new T.CylinderGeometry(0.012, 0.032, 0.3, 12), this.face.material);
+    var nose = new T.Mesh(new T.CylinderGeometry(0.013, 0.032, 0.2, 12), this.face.material);
     nose.rotation.z = -Math.PI / 2 + 0.12;
-    nose.position.set(0.27, -0.005, 0);
+    nose.position.set(0.225, -0.005, 0);
     nose.castShadow = true;
     head.add(nose);
     /* ニット帽 */
