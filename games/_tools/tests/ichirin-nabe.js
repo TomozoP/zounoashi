@@ -8,7 +8,7 @@
      - ラーメン：反応0.16〜0.2秒で熱さを待って食べれば、ときどき食べきれる。0.24秒ではほぼ無理
      - コーヒー：反応0.24秒でもほぼ飲みきれる
      - 鍋：ラーメンよりはっきり辛い。反応0.16秒でたまに食べきれる
-     - 開始画面で ← → を押すと段階が変わる
+     - 開始画面で ← → を押すと段階が変わる。START は無く、食べ物の絵を押すとその段階で始まる
      - 食べるボタンを連打すると熱くなって倒れやすい
      - タップの列で左右・食べるが分かれる */
 var load = require("../harness");
@@ -85,6 +85,9 @@ check(gs.probe.now().level === "coffee", "開始画面で ← を押すとコー
 gs.key("ArrowRight"); gs.key("ArrowRight", true); gs.key("ArrowRight"); gs.key("ArrowRight", true);
 gs.press(" "); gs.step(1);
 check(gs.probe.now().state === "play" && gs.probe.now().level === "nabe" && gs.probe.now().N === 20, "→ を2回押して始めると鍋");
+
+/* 開始画面のタップ（食べ物の絵で始まる）はページ全体で受けるので、この台では試せない。
+   実際のブラウザで確かめる（台は wrap と window にしか届けないため） */
 
 /* タップの列 */
 var g = load(FILE);
