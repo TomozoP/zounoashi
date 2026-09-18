@@ -330,9 +330,113 @@
       g.rotation.y = a * 1.7;
       g.userData.spin = g.rotation.y;
       g.userData.color = col;
+      g.userData.kind = kind;
       pot.add(g);
       return g;
     });
+    this.vessels = {
+      nabe: { g: pot, soup: soup, foods: this.foods, surf: [0.03, 0.085], soupColor: "#d8783a", pos: { x: POT.x, y: POT.y }, farHand: [0, 0.1, -0.28] }
+    };
+    this.buildRamen();
+    this.buildCoffee();
+    this.setVessel("ramen");
+  };
+
+  /* ============ ラーメンのどんぶり ============ */
+  var RAMEN = [
+    ["men", "#ecd070"], ["chashu", "#c98a6a"], ["men", "#ecd070"], ["naruto", "#f6f0f0"],
+    ["nori", "#1e2a22"], ["men", "#ecd070"], ["tamago", "#f4efe0"], ["menma", "#b98a4a"],
+    ["men", "#ecd070"], ["chashu", "#c98a6a"], ["negi", "#7fb34a"], ["men", "#ecd070"],
+    ["nori", "#1e2a22"], ["tamago", "#f4efe0"], ["menma", "#b98a4a"], ["men", "#ecd070"]
+  ];
+  NabeScene.prototype.buildRamen = function () {
+    var T = this.T, self = this;
+    var g = new T.Group();
+    g.scale.setScalar(1.3);
+    this.rig.add(g);
+    var prof = [[0, 0], [0.065, 0], [0.07, 0.018], [0.145, 0.1], [0.152, 0.112], [0.142, 0.112], [0.136, 0.1], [0.062, 0.024], [0, 0.024]]
+      .map(function (p) { return new T.Vector2(p[0], p[1]); });
+    var bowl = new T.Mesh(new T.LatheGeometry(prof, 32), this.mat("#f4efe6", { side: T.DoubleSide, roughness: 0.4 }));
+    bowl.castShadow = true;
+    g.add(bowl);
+    /* 縁の赤い帯と、胴の赤い線（雷文のかわり） */
+    [[0.148, 0.108, 0.006], [0.118, 0.07, 0.004]].forEach(function (b) {
+      var m = new T.Mesh(new T.TorusGeometry(b[0], b[2], 6, 32), self.mat("#c8322a"));
+      m.rotation.x = Math.PI / 2; m.position.y = b[1];
+      g.add(m);
+    });
+    var soup = new T.Mesh(new T.CircleGeometry(0.13, 28), this.mat("#d9a45a", { roughness: 0.3 }));
+    soup.rotation.x = -Math.PI / 2;
+    g.add(soup);
+    var foods = RAMEN.map(function (fd, i) {
+      var q = new T.Group(), kind = fd[0], col = fd[1];
+      if (kind === "men") {
+        /* 麺：黄色いうねり */
+        for (var k = 0; k < 3; k++) {
+          var m = new T.Mesh(new T.TorusGeometry(0.018, 0.004, 5, 10, Math.PI * 1.4), self.mat(col));
+          m.rotation.x = -Math.PI / 2; m.rotation.z = k * 2.1; m.position.set((k - 1) * 0.01, 0.002, 0);
+          q.add(m);
+        }
+      } else if (kind === "chashu") self.part(q, "tube", col, 0, 0, 0, 0.04, 0.008, 0.04);
+      else if (kind === "naruto") {
+        self.part(q, "tube", col, 0, 0, 0, 0.026, 0.008, 0.026);
+        var sw = new T.Mesh(new T.TorusGeometry(0.013, 0.003, 4, 12), self.mat("#e0507a"));
+        sw.rotation.x = -Math.PI / 2; sw.position.y = 0.005; q.add(sw);
+      } else if (kind === "nori") { var nr = self.part(q, "box", col, 0, 0.025, 0, 0.05, 0.06, 0.004); nr.rotation.x = -0.3; }
+      else if (kind === "tamago") {
+        self.part(q, "ball", col, 0, 0, 0, 0.026, 0.014, 0.02);
+        self.part(q, "ball", "#f0a830", 0, 0.008, 0, 0.013, 0.008, 0.011);
+      } else if (kind === "menma") self.part(q, "box", col, 0, 0, 0, 0.04, 0.008, 0.012);
+      else self.part(q, "tube", col, 0, 0, 0, 0.01, 0.006, 0.01);
+      var a = i * 2.4, rr = 0.02 + (i % 4) * 0.026;
+      q.userData.home = [Math.cos(a) * rr, Math.sin(a) * rr];
+      q.rotation.y = a * 1.7;
+      q.userData.spin = q.rotation.y;
+      q.userData.color = col;
+      q.userData.kind = kind;
+      g.add(q);
+      return q;
+    });
+    this.vessels.ramen = { g: g, soup: soup, foods: foods, surf: [0.05, 0.095], soupColor: "#d9a45a", pos: { x: POT.x, y: POT.y }, farHand: [0, 0.07, -0.19] };
+  };
+
+  /* ============ コーヒーのマグカップ ============ */
+  NabeScene.prototype.buildCoffee = function () {
+    var T = this.T;
+    var g = new T.Group();
+    g.scale.setScalar(1.3);
+    this.rig.add(g);
+    var prof = [[0, 0], [0.055, 0], [0.06, 0.006], [0.06, 0.11], [0.053, 0.11], [0.053, 0.009], [0, 0.009]]
+      .map(function (p) { return new T.Vector2(p[0], p[1]); });
+    var mug = new T.Mesh(new T.LatheGeometry(prof, 28), this.mat("#f2efe8", { side: T.DoubleSide, roughness: 0.35 }));
+    mug.castShadow = true;
+    g.add(mug);
+    /* 取っ手は手前。縦の輪で、根元は壁に埋める */
+    var hg = new T.Group();
+    hg.position.set(0, 0.058, 0.056);
+    hg.rotation.y = -Math.PI / 2;
+    var hd = new T.Mesh(new T.TorusGeometry(0.03, 0.009, 6, 14, Math.PI), this.mat("#f2efe8"));
+    hd.rotation.z = -Math.PI / 2;
+    hd.castShadow = true;
+    hg.add(hd);
+    g.add(hg);
+    var soup = new T.Mesh(new T.CircleGeometry(0.052, 24), this.mat("#3b2416", { roughness: 0.15 }));
+    soup.rotation.x = -Math.PI / 2;
+    g.add(soup);
+    this.vessels.coffee = { g: g, soup: soup, foods: [], surf: [0.02, 0.095], soupColor: "#4a2c1a", pos: { x: 0.34, y: 0.78 }, farHand: [0, 0.02, -0.07], sip: true };
+  };
+
+  /* 選んだ段階の器に差し替える。飛んでいる最中は差し替えない */
+  NabeScene.prototype.setVessel = function (id) {
+    if (this.vesselId === id || this.potFlying) return;
+    var self = this;
+    this.vesselId = id;
+    Object.keys(this.vessels).forEach(function (k) { self.vessels[k].g.visible = k === id; });
+    var c = this.cur = this.vessels[id];
+    this.pot = c.g;
+    this.soup = c.soup;
+    this.foods = c.foods;
+    c.g.add(this.warm);
   };
 
   /* ============ 倒れたら中身をぶちまける ============
@@ -372,7 +476,7 @@
       var vz = (Math.random() - 0.3) * 1.4;
       var b = null;
       if (world) {
-        var kind = FOODS[i][0];
+        var kind = f.userData.kind;
         var shape = kind === "tofu" ? new C.Box(new C.Vec3(0.033, 0.02, 0.033))
                   : kind === "hakusai" ? new C.Box(new C.Vec3(0.04, 0.007, 0.023))
                   : kind === "negi" ? new C.Box(new C.Vec3(0.05, 0.012, 0.012))
@@ -391,6 +495,8 @@
     var pw = new T.Vector3();
     this.pot.getWorldPosition(pw);
     var n = Math.round(this.drops.length * (0.25 + 0.75 * left));
+    this.drops[0].m.material.color.set(this.cur.soupColor);
+    this.puddle.material.color.set(this.cur.soupColor).multiplyScalar(0.85);
     this.drops.forEach(function (d, i) {
       d.m.visible = i < n;
       d.flying = i < n;
@@ -661,7 +767,9 @@
     });
 
     /* 箸と具 */
-    var surf = 0.03 + 0.055 * (1 - v.eaten / v.N);
+    if (v.level) this.setVessel(v.level);
+    var cur = this.cur;
+    var surf = cur.surf[0] + (cur.surf[1] - cur.surf[0]) * (1 - v.eaten / v.N);
     this.soup.position.y = surf;
     var hotK = Math.max(0, Math.min(1, v.hot));
     /* 食べきったら：持ち上げて傾ける(0〜0.5秒) → 頭を反らして飲み干す(〜1.3秒) → 元の位置へ戻す(〜1.7秒) */
@@ -670,7 +778,9 @@
     var drink = dT < 0.5 ? 0 : Math.min(1, (dT - 0.5) / 0.8);          /* 飲み干すほど深く傾ける */
     var gulp = dT >= 0.5 && dT < 1.3 ? potLift : 0;
     /* 食べきったら、鍋を口へ運んで汁を飲む */
-    var potX = POT.x - potLift * 0.1, potY = POT.y + potLift * 0.36;
+    /* コーヒーは箸を使わず、ひと口ごとにカップを口へ運んですする */
+    if (cur.sip && v.phase === "ride") potLift = Math.max(potLift, Math.sin(Math.PI * Math.min(1, v.bite.p)) * 0.8);
+    var potX = cur.pos.x - potLift * 0.1, potY = cur.pos.y + potLift * (cur.sip ? 0.3 : 0.36);
     if (!this.potFlying) this.pot.position.set(potX, potY, -0.02);
     if (!this.potFlying) this.pot.rotation.z = potLift * (0.85 + 0.55 * drink);
 
@@ -691,9 +801,11 @@
       hand = [potX - 0.04, potY + 0.02, 0.15];
       tip = [hand[0] + 0.05, hand[1] + 0.2, hand[2] + 0.02];
     }
+    if (cur.sip) hand = [potX - 0.01, potY + 0.07, 0.11];      /* 手前の手はカップの取っ手 */
+    this.chop[0].visible = this.chop[1].visible = !cur.sip;
     if (posing) this.segment(this.chop[0], hand, tip);
     if (posing) this.segment(this.chop[1], [hand[0], hand[1] + 0.012, hand[2] - 0.01], [tip[0] + 0.005, tip[1] + 0.01, tip[2] - 0.012]);
-    var holding = v.bite.idx < v.N && p >= 0.3 && p < 0.72 && v.phase === "ride";
+    var holding = !cur.sip && v.bite.idx < v.N && p >= 0.3 && p < 0.72 && v.phase === "ride";
     this.held.visible = holding;
     if (holding) {
       this.held.position.set(tip[0], tip[1], tip[2]);
@@ -706,7 +818,7 @@
     });
 
     /* 腕 */
-    var potHand = [potX, potY + 0.1, -0.28];          /* 奥の手は奥の取っ手をつかむ */
+    var potHand = [potX + cur.farHand[0], potY + cur.farHand[1], cur.farHand[2]];   /* 奥の手で器を支える */
     if (posing) this.arms.forEach(function (A) {
       var sh = [0.03, 0.98, A.s * 0.17];
       var h = A.s > 0 ? hand : potHand;
@@ -750,7 +862,7 @@
       this.fallWorld = null;
       this.potFlying = null;
       this.rig.attach(this.pot);
-      this.pot.position.set(POT.x, POT.y, -0.02);
+      this.pot.position.set(this.cur.pos.x, this.cur.pos.y, -0.02);
       this.pot.rotation.set(0, 0, 0);
       this.pot.scale.setScalar(1.3);
     }

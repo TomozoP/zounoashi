@@ -342,7 +342,7 @@
      熱いと体がはねる。路面のでこぼこでいつも揺さぶられる。
      数字はテストの自動運転で決めた：食べずに乗るだけなら反応0.2秒でなんとかなり、0.3秒では数秒で倒れる。
      食べきれるのは反応0.2秒前後で半分ほど。 */
-  var P = {
+  var BASE = {
     G: 3.5,        /* 重力で倒れようとする強さ（重さ÷高さ。大きいほど速く倒れる） */
     A: 3.2,        /* ボタンで車輪を加速する強さ（m/s²） */
     AL: 1.0,       /* 車輪の加速が体の傾きに効く割合（1÷高さ） */
@@ -359,7 +359,25 @@
     GUST: 0.4,     /* 路面のでこぼこで常に揺さぶられる強さ */
     GUSTT: 0.5     /* 揺さぶりの向きが変わるまでの目安（秒） */
   };
-  var N = 16;                                  /* 具の数 = ひと口の数 */
+  /* 段階。ラーメンが BASE そのまま。コーヒーはやさしく、鍋は辛く。N はひと口の数。
+     テストの自動運転で、反応0.16秒の人が食べきれるのは20回中 コーヒー20・ラーメン14・鍋6 回くらい */
+  var LEVELS = {
+    coffee: { N: 10, G: 2.2, D: 0.35, ARM: 0.25, JOLT: 0.5, GUST: 0.2, HOT: 0.2 },
+    ramen:  { N: 16 },
+    nabe:   { N: 20, G: 3.6, ARM: 0.55, JOLT: 0.9, GUST: 0.5, HOT: 0.3, BURN: 0.26 }
+  };
+  var LEVEL_ORDER = ["coffee", "ramen", "nabe"];
+  var LEVEL_NAME = { coffee: "コーヒー", ramen: "ラーメン", nabe: "鍋" };
+  var level = "ramen";                         /* 選んでいる段階（最初はラーメン） */
+  var P = {}, N = 16;
+  function applyLevel() {
+    var k, L = LEVELS[level];
+    P = {};
+    for (k in BASE) P[k] = BASE[k];
+    for (k in L) if (k !== "N") P[k] = L[k];
+    N = L.N;
+  }
+  applyLevel();
   var th, w, x, v, gust, gustTo, eaten, biteP, biting, burn, hot, phase, fallT, doneT, clearTime, puffNow, crank, creakHigh, lastBite;
   var dir;                                     /* 左右の押している向き（-1, 0, 1） */
   var fingers = {}, keys = { l: false, r: false };
@@ -374,10 +392,23 @@
       { id: "right", x: W * 0.83, y: y, r: r }
     ];
   }
+  /* 段階を選ぶ3つの絵。開始画面は START の上、結果画面はボタンの下に小さく */
+  function levelIcons() {
+    var intro = state === S.INTRO;
+    var y = intro ? H - 250 : H * 0.62 + 150, r = intro ? 56 : 44;
+    return LEVEL_ORDER.map(function (id, i) { return { id: id, x: W * (0.2 + 0.3 * i), y: y, r: r }; });
+  }
+  function levelAt(px, py) {
+    var hit = null;
+    levelIcons().forEach(function (b) { if (Math.hypot(px - b.x, py - b.y) <= b.r + 10) hit = b.id; });
+    return hit;
+  }
   /* 絵の中を縦3列に分け、どこを押してもその列のボタンになる（指が小さくずれても効く） */
   function padAt(px) { return px < W / 3 ? "left" : px > W * 2 / 3 ? "right" : "eat"; }
 
-  function newRound() {
+  function newRound(lv) {
+    if (lv) level = lv;
+    applyLevel();
     shareButton.hidden = true;
     document.getElementById("start").hidden=true;
     state = S.PLAY;
@@ -511,6 +542,8 @@
     if(state===S.INTRO)return;
     audioOn();
     if (state === S.RESULT) {
+      var lv = px == null ? null : levelAt(px, py);
+      if (lv) { newRound(lv); return; }
       var hit = px == null ? "retry" : hitButton(px, py);
       if (hit === "retry") newRound();
       return;
@@ -547,6 +580,15 @@
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
+    if ((left || right) && state === S.INTRO) {  /* 開始画面では段階を選ぶ */
+      if (!e.repeat) {
+        var i = LEVEL_ORDER.indexOf(level) + (left ? -1 : 1);
+        level = LEVEL_ORDER[Math.max(0, Math.min(LEVEL_ORDER.length - 1, i))];
+        applyLevel();
+        tone(520, 0.05, 0.05, "triangle");
+      }
+      return;
+    }
     if (left || right) {
       if (left) keys.l = true; else keys.r = true;
       readDir();
@@ -566,7 +608,9 @@
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    var text = phase === "done" ? "一輪車に乗ったまま鍋を" + scoreText() + "で食べきりました" : "一輪車に乗ったまま鍋を" + scoreText() + "食べました";
+    var nm = LEVEL_NAME[level], verb = level === "coffee" ? "飲" : "食べ";
+    var text = phase === "done" ? "一輪車に乗ったまま" + nm + "を" + scoreText() + "で" + verb + (level === "coffee" ? "みきりました" : "きりました")
+                                : "一輪車に乗ったまま" + nm + "を" + scoreText() + verb + (level === "coffee" ? "みました" : "ました");
     window.zResultActions.x({ text: text + " #一輪車で鍋" });
   }
 
@@ -591,7 +635,8 @@
       chew: animT - lastBite,                   /* ひと口食べてからの秒数（もぐもぐ） */
       red: Math.max(Math.sqrt(hot), Math.min(0.6, burn * 0.5)),
       phase: state === S.INTRO ? "intro" : phase, fallT: fallT, doneT: doneT,
-      bite: { p: state === S.INTRO ? 0 : biteP, idx: eaten }, puff: puffNow
+      bite: { p: state === S.INTRO ? 0 : biteP, idx: eaten }, puff: puffNow,
+      level: level
     };
     puffNow = false;
     if (view3d) {
@@ -600,6 +645,7 @@
     }
     if (!view3d) drawFlat(look);
     if (state === S.PLAY && phase === "ride") drawPads();
+    if (state === S.INTRO) drawLevels();
 
     if (state === S.RESULT) drawResult();
   }
@@ -624,15 +670,55 @@
           ctx.beginPath(); ctx.arc(0, 0, p.r - 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * biteP);
           ctx.strokeStyle = "#fff"; ctx.lineWidth = 6; ctx.stroke();
         }
-        /* 鍋と箸 */
-        ctx.beginPath(); ctx.moveTo(-30, -2); ctx.lineTo(30, -2); ctx.quadraticCurveTo(28, 24, 0, 26); ctx.quadraticCurveTo(-28, 24, -30, -2); ctx.fill();
-        ctx.fillRect(-36, -8, 72, 7);
-        ctx.lineWidth = 5; ctx.lineCap = "round"; ctx.strokeStyle = "#fff";
-        ctx.beginPath(); ctx.moveTo(4, -14); ctx.lineTo(24, -38); ctx.moveTo(13, -12); ctx.lineTo(34, -32); ctx.stroke();
+        drawVessel(level, 1);
       } else {
         var sg = p.id === "left" ? -1 : 1;
         ctx.beginPath(); ctx.moveTo(sg * 24, 0); ctx.lineTo(-sg * 14, -24); ctx.lineTo(-sg * 14, 24); ctx.closePath(); ctx.fill();
       }
+      ctx.restore();
+    });
+  }
+
+  /* 器の絵（白一色）。原点が中心、k は大きさ */
+  function drawVessel(id, k) {
+    ctx.save();
+    ctx.scale(k, k);
+    ctx.fillStyle = "#fff"; ctx.strokeStyle = "#fff"; ctx.lineCap = "round";
+    if (id === "coffee") {
+      /* マグカップと湯気 */
+      roundRect(-22, -12, 36, 38, 6); ctx.fill();
+      ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(16, 6, 10, -Math.PI / 2, Math.PI / 2); ctx.stroke();
+      ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.moveTo(-10, -18); ctx.quadraticCurveTo(-16, -26, -10, -34); ctx.moveTo(2, -18); ctx.quadraticCurveTo(-4, -26, 2, -34); ctx.stroke();
+    } else if (id === "ramen") {
+      /* どんぶりと、持ち上げた麺 */
+      ctx.beginPath(); ctx.moveTo(-34, 0); ctx.lineTo(34, 0); ctx.quadraticCurveTo(30, 26, 0, 28); ctx.quadraticCurveTo(-30, 26, -34, 0); ctx.fill();
+      ctx.fillRect(-12, 26, 24, 5);
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(10, -38); ctx.lineTo(24, -6); ctx.moveTo(18, -40); ctx.lineTo(30, -8); ctx.stroke();
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(8, -22); ctx.quadraticCurveTo(0, -12, 4, -4); ctx.moveTo(14, -24); ctx.quadraticCurveTo(8, -12, 12, -4); ctx.stroke();
+    } else {
+      /* 土鍋と箸 */
+      ctx.beginPath(); ctx.moveTo(-30, -2); ctx.lineTo(30, -2); ctx.quadraticCurveTo(28, 24, 0, 26); ctx.quadraticCurveTo(-28, 24, -30, -2); ctx.fill();
+      ctx.fillRect(-36, -8, 72, 7);
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(4, -14); ctx.lineTo(24, -38); ctx.moveTo(13, -12); ctx.lineTo(34, -32); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* 段階を選ぶ3つの絵。選んでいるものを明るく */
+  function drawLevels() {
+    levelIcons().forEach(function (b) {
+      var on = b.id === level;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2);
+      ctx.fillStyle = on ? "rgba(255,255,255,.45)" : "rgba(255,255,255,.14)";
+      ctx.fill();
+      ctx.lineWidth = on ? 6 : 3; ctx.strokeStyle = on ? "#fff" : "rgba(255,255,255,.6)"; ctx.stroke();
+      drawVessel(b.id, b.r / 58);
       ctx.restore();
     });
   }
@@ -700,6 +786,7 @@
       ctx.restore();
       ctx.textBaseline = "alphabetic";
     });
+    drawLevels();
   }
 
   /* ============ 覗き穴 ============
@@ -708,10 +795,11 @@
   window.__probe = {
     now: function () {
       return { state: state, score: score, W: W, H: H, phase: phase, th: th, w: w, x: x, v: v,
-               eaten: eaten, N: N, T: T, dir: dir, biting: biting, burn: burn, hot: hot };
+               eaten: eaten, N: N, T: T, dir: dir, biting: biting, burn: burn, hot: hot,
+               level: level, P: JSON.parse(JSON.stringify(P)) };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { animT += 1 / 60; update(1 / 60); draw(1 / 60); } },
-    reset: function () { newRound(); }
+    reset: function (lv) { newRound(lv); }       /* lv を渡すとその段階で */
   };
 
   /* ============ 手元用の動画撮影 ============
@@ -753,7 +841,9 @@
   },true);
   document.addEventListener('pointerup',function(e){
     if(!(state===S.INTRO)||startingPointer!==e.pointerId)return;
-    startingPointer=null;e.preventDefault();e.stopImmediatePropagation();startButton.click();
+    startingPointer=null;e.preventDefault();e.stopImmediatePropagation();
+    var pt=atCanvas(e),lv=levelAt(pt.x,pt.y);if(lv)level=lv;     /* 絵を押したらその段階で始める */
+    startButton.click();
   },true);
   document.addEventListener('pointercancel',function(){startingPointer=null;},true);
 
