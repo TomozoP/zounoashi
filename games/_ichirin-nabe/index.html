@@ -137,6 +137,78 @@
     s.connect(f); f.connect(g); g.connect(AC.destination);
     s.start(n); s.stop(n + dur + 0.05);
   }
+  /* ---- こぐ音と「アツっ」 ここから（音の試聴用に道具が切り出すので、目印を消さない） ---- */
+  var noiseBufs = [];
+  function noiseOf(ac) {
+    for (var i = 0; i < noiseBufs.length; i++) if (noiseBufs[i].ac === ac) return noiseBufs[i].buf;
+    var len = Math.floor(ac.sampleRate * 0.5), buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
+    for (var k = 0; k < len; k++) d[k] = Math.random() * 2 - 1;
+    noiseBufs.push({ ac: ac, buf: buf });
+    return buf;
+  }
+  /* こぐ音。クランク半回転ごとに「キ」「コ」と交互にきしむ */
+  function creak(ac, at, vol, high) {
+    var t = at, o = ac.createOscillator(), g = ac.createGain(), b = ac.createBiquadFilter();
+    o.type = "triangle";
+    var f = high ? 1650 : 1250;
+    o.frequency.setValueAtTime(f * (high ? 0.9 : 1.08), t);
+    o.frequency.exponentialRampToValueAtTime(f * (high ? 1.12 : 0.88), t + 0.06);
+    b.type = "bandpass"; b.frequency.value = f; b.Q.value = 3;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    o.connect(b); b.connect(g); g.connect(ac.destination);
+    o.start(t); o.stop(t + 0.1);
+    /* チェーンのカチッ */
+    var n = ac.createBufferSource(), nb = ac.createBiquadFilter(), ng = ac.createGain();
+    n.buffer = noiseOf(ac); nb.type = "highpass"; nb.frequency.value = 3000;
+    ng.gain.setValueAtTime(vol * 0.8, t); ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.015);
+    n.connect(nb); nb.connect(ng); ng.connect(ac.destination);
+    n.start(t); n.stop(t + 0.03);
+  }
+  /* 「アツっ」。声の元（のこぎり波）を口の形の響き（フォルマント）で絞って母音にする。
+     ア（口を開けて、驚いて高めから下がる）→ 一瞬止める → ツ（舌で止めてから息が擦れる）→ ウ（小さく） */
+  function atsu(ac, at, pitch) {
+    var t = at, f0 = pitch || 340;
+    var out = ac.createGain();
+    out.gain.value = 0.3;                       /* ほかの効果音と大きさを揃える */
+    out.connect(ac.destination);
+    function vowel(t0, dur, fm, p0, p1, vol) {
+      var o = ac.createOscillator(), env = ac.createGain();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(p0, t0);
+      o.frequency.exponentialRampToValueAtTime(p1, t0 + dur);
+      env.gain.setValueAtTime(0.0001, t0);
+      env.gain.exponentialRampToValueAtTime(vol, t0 + 0.015);
+      env.gain.setValueAtTime(vol, t0 + dur * 0.55);
+      env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(env);
+      fm.forEach(function (f) {
+        var b = ac.createBiquadFilter(), g = ac.createGain();
+        b.type = "bandpass"; b.frequency.value = f[0]; b.Q.value = f[1]; g.gain.value = f[2];
+        env.connect(b); b.connect(g); g.connect(out);
+      });
+      o.start(t0); o.stop(t0 + dur + 0.03);
+    }
+    function hiss(t0, dur, freq, q, vol) {
+      var n = ac.createBufferSource(), b = ac.createBiquadFilter(), g = ac.createGain();
+      n.buffer = noiseOf(ac); b.type = "bandpass"; b.frequency.value = freq; b.Q.value = q;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      n.connect(b); b.connect(g); g.connect(out);
+      n.start(t0); n.stop(t0 + dur + 0.02);
+    }
+    /* ア：F1 800 / F2 1200 / F3 2600 あたり */
+    vowel(t, 0.16, [[800, 5, 2.2], [1200, 6, 1.4], [2600, 8, 0.6]], f0 * 1.3, f0 * 0.95, 0.9);
+    /* ッ：息を止める（無音）→ ツ：舌がはじける「t」と、続く「s」の擦れ */
+    var t1 = t + 0.23;
+    hiss(t1, 0.02, 3500, 0.8, 0.5);
+    hiss(t1 + 0.012, 0.08, 6000, 1.5, 0.45);
+    /* ウ：F1 350 / F2 1300（口をすぼめて小さく） */
+    vowel(t1 + 0.07, 0.11, [[350, 5, 2.0], [1300, 7, 0.7], [2500, 8, 0.25]], f0 * 1.05, f0 * 0.85, 0.35);
+  }
+  /* ---- こぐ音と「アツっ」 ここまで ---- */
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -174,7 +246,7 @@
     GUSTT: 0.5     /* 揺さぶりの向きが変わるまでの目安（秒） */
   };
   var N = 16;                                  /* 具の数 = ひと口の数 */
-  var th, w, x, v, gust, gustTo, eaten, biteP, biting, burn, hot, phase, fallT, doneT, clearTime, puffNow;
+  var th, w, x, v, gust, gustTo, eaten, biteP, biting, burn, hot, phase, fallT, doneT, clearTime, puffNow, crank, creakHigh;
   var dir;                                     /* 左右の押している向き（-1, 0, 1） */
   var fingers = {}, keys = { l: false, r: false };
 
@@ -204,6 +276,7 @@
     gust = 0; gustTo = 0;
     eaten = 0; biteP = 0; biting = false; burn = 0; hot = 0;
     phase = "ride"; fallT = 0; doneT = 0; clearTime = 0; puffNow = false;
+    crank = 0; creakHigh = false;
   }
 
   function readDir() {
@@ -229,6 +302,13 @@
       a -= P.ROLL * v;
       v = Math.max(-P.VMAX, Math.min(P.VMAX, v + a * dt));
       x += v * dt;
+      /* クランクが半回転するごとにきしむ（車輪の半径0.3m） */
+      crank += Math.abs(v) * dt / 0.3;
+      if (crank >= Math.PI) {
+        crank -= Math.PI;
+        creakHigh = !creakHigh;
+        if (AC) creak(AC, AC.currentTime, Math.min(0.1, 0.04 + 0.04 * Math.abs(v)), creakHigh);
+      }
       /* 体：重力・鍋の重み・腕の動き・車輪の加速の反動 */
       var arm = biting ? Math.sin(Math.PI * Math.min(1, biteP / 0.72)) : 0;
       var acc = gust + P.G * Math.sin(th) - P.ARM * arm * Math.cos(th)
@@ -285,8 +365,7 @@
       hot = 1;
       puffNow = true;
       w += (Math.random() < 0.5 ? -1 : 1) * P.JOLT * (0.5 + burn * 0.6) * (0.8 + 0.4 * Math.random());
-      noiseHit(0.35, 900, 0.18, 0.6);
-      tone(980, 0.18, 0.08, "square", 520, 0.02);
+      if (AC) atsu(AC, AC.currentTime + 0.02, 310 + Math.random() * 80);
     }
     burn = Math.min(1.5, burn + P.BURN);
     if (eaten >= N) {
