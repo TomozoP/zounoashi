@@ -6,9 +6,9 @@
   var R = 0.3;                 /* 車輪の半径 */
   var HIP = 0.58;              /* 車軸から腰まで */
   var THIGH = 0.34, SHIN = 0.34;
-  var UPPER = 0.2, FORE = 0.2;
+  var UPPER = 0.23, FORE = 0.23;
   var CRANK = 0.12;
-  var POT = { x: 0.34, y: 0.7 };   /* 体から見た鍋の場所 */
+  var POT = { x: 0.42, y: 0.7 };   /* 体から見た鍋の場所（胴に食い込まない距離） */
   var MOUTH = { x: 0.2, y: 1.12, z: 0.05 };
 
   /* 具。形・色・大きさ */
@@ -303,8 +303,10 @@
     var band = new T.Mesh(new T.TorusGeometry(0.164, 0.007, 6, 28), this.mat("#f0e6d2"));
     band.rotation.x = Math.PI / 2; band.position.y = 0.1; pot.add(band);
     [-1, 1].forEach(function (s) {
-      var hd = new T.Mesh(new T.TorusGeometry(0.028, 0.01, 6, 12, Math.PI), self.mat("#6e3f27"));
-      hd.position.set(s * 0.18, 0.085, 0); hd.rotation.z = s > 0 ? -Math.PI / 2 : Math.PI / 2;
+      /* 取っ手は奥と手前。縁から水平に張り出す輪で、根元は壁に埋める */
+      var hd = new T.Mesh(new T.TorusGeometry(0.03, 0.011, 6, 12, Math.PI), self.mat("#6e3f27"));
+      hd.position.set(0, 0.085, s * 0.162); hd.rotation.x = s > 0 ? Math.PI / 2 : -Math.PI / 2;
+      hd.castShadow = true;
       pot.add(hd);
     });
     var soup = this.soup = new T.Mesh(new T.CircleGeometry(0.15, 28), this.mat("#d8783a", { roughness: 0.3 }));
@@ -668,7 +670,7 @@
     var drink = dT < 0.5 ? 0 : Math.min(1, (dT - 0.5) / 0.8);          /* 飲み干すほど深く傾ける */
     var gulp = dT >= 0.5 && dT < 1.3 ? potLift : 0;
     /* 食べきったら、鍋を口へ運んで汁を飲む */
-    var potX = POT.x - potLift * 0.02, potY = POT.y + potLift * 0.36;
+    var potX = POT.x - potLift * 0.1, potY = POT.y + potLift * 0.36;
     if (!this.potFlying) this.pot.position.set(potX, potY, -0.02);
     if (!this.potFlying) this.pot.rotation.z = potLift * (0.85 + 0.55 * drink);
 
@@ -704,7 +706,7 @@
     });
 
     /* 腕 */
-    var potHand = [potX - 0.02, potY - 0.01, -0.15];
+    var potHand = [potX, potY + 0.1, -0.28];          /* 奥の手は奥の取っ手をつかむ */
     if (posing) this.arms.forEach(function (A) {
       var sh = [0.03, 0.98, A.s * 0.17];
       var h = A.s > 0 ? hand : potHand;
