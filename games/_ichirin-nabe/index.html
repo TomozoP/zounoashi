@@ -147,26 +147,38 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
 
-  /* 釣り合いの決まりごと。th は体の傾き（ラジアン、前のめりが＋）、w はその速さ。
-     押している間は前へ漕いで体が後ろへ起き、離すと後ろへ漕いで前へ倒れる。
-     鍋が重いぶん前へ引っぱられ、食べるほど軽くなる。
-     数字は試算で決めた：放っておくと約1.2秒で倒れ、反応0.2〜0.3秒ならほぼ食べきれる。 */
+  /* 釣り合いの決まりごと。th は体の傾き（ラジアン、前＝右が＋）、w はその速さ。
+     左右のボタンで、押した向きへ体を傾ける。鍋が重いぶん前（右）へ引っぱられ、食べるほど軽くなる。
+     食べるボタンでひと口。続けて食べるほど熱くなって、体がはねやすく・強くなる。 */
   var P = {
     K: 1.0,        /* 倒れようとする強さ */
     C: 0.6,        /* 鍋の重みで前へ引かれる強さ（満杯のとき） */
-    B: 1.8,        /* 漕いで体を起こす強さ */
-    BACK: 0.8,     /* 離したときの後ろ漕ぎ（前漕ぎに対する割合） */
+    B: 1.8,        /* 左右ボタンで体を傾ける強さ */
     D: 1.0,        /* ぶれの収まり */
     FALL: 1.1,     /* これより傾いたら倒れる */
-    STEADY: 0.3,   /* これより傾きが小さいときだけ食べ進む */
-    BITE: 0.9,     /* ひと口の秒数 */
-    HOT: 0.5,      /* ひと口が熱い見込み */
-    JOLT: 0.9      /* 熱くて体がはねる強さ */
+    BITE: 0.8,     /* ひと口の秒数 */
+    HOT: 0.25,     /* 冷めているときに熱い見込み */
+    BURN: 0.4,     /* ひと口ごとにたまる熱さ */
+    COOL: 0.3,     /* 熱さが1秒で引くぶん */
+    JOLT: 0.8      /* 熱くて体がはねる強さ */
   };
   var N = 16;                                  /* 具の数 = ひと口の数 */
-  var th, w, x, v, eaten, biteP, hot, phase, fallT, doneT, clearTime, puffNow, rnd;
+  var th, w, x, v, eaten, biteP, biting, burn, hot, phase, fallT, doneT, clearTime, puffNow;
+  var dir;                                     /* 左右の押している向き（-1, 0, 1） */
+  var fingers = {}, keys = { l: false, r: false };
 
-  function place() {}
+  /* 下に並ぶ3つのボタン。← 食べる → */
+  var PADS;
+  function place() {
+    var y = H - 118, r = 58;
+    PADS = [
+      { id: "left", x: W * 0.17, y: y, r: r },
+      { id: "eat", x: W * 0.5, y: y, r: r + 8 },
+      { id: "right", x: W * 0.83, y: y, r: r }
+    ];
+  }
+  /* 絵の中を縦3列に分け、どこを押してもその列のボタンになる（指が小さくずれても効く） */
+  function padAt(px) { return px < W / 3 ? "left" : px > W * 2 / 3 ? "right" : "eat"; }
 
   function newRound() {
     shareButton.hidden = true;
@@ -175,36 +187,44 @@
     score = 0;
     T = 0;
     held = false;
+    fingers = {}; keys = { l: false, r: false }; dir = 0;
     th = 0; w = (Math.random() < 0.5 ? -1 : 1) * 0.05;
     x = 0; v = 0;
-    eaten = 0; biteP = 0; hot = 0;
+    eaten = 0; biteP = 0; biting = false; burn = 0; hot = 0;
     phase = "ride"; fallT = 0; doneT = 0; clearTime = 0; puffNow = false;
+  }
+
+  function readDir() {
+    var l = keys.l, r = keys.r;
+    for (var id in fingers) { if (fingers[id] === "left") l = true; if (fingers[id] === "right") r = true; }
+    dir = (r ? 1 : 0) - (l ? 1 : 0);
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
     if (state !== S.PLAY) return;
     hot = Math.max(0, hot - dt / 1.2);
+    burn = Math.max(0, burn - dt * P.COOL);
 
     if (phase === "ride") {
       T += dt;
-      var u = held ? 1 : -P.BACK;
       var load = 0.3 + 0.7 * (1 - eaten / N);
-      var acc = P.K * Math.sin(th) + P.C * load - P.B * u * Math.cos(th) - P.D * w;
+      var acc = P.K * Math.sin(th) + P.C * load + P.B * dir * Math.cos(th) - P.D * w;
       w += acc * dt;
       th += w * dt;
-      v = Math.max(-1.2, Math.min(2.2, v + (held ? 1.1 : -0.9) * dt));
+      /* 体を後ろへ起こすときは車輪が前へ出る */
+      v = Math.max(-1.2, Math.min(2.2, v + (-dir * 1.3 - v * 0.4) * dt));
       x += v * dt;
 
-      if (Math.abs(th) < P.STEADY) {
+      if (biting) {
         var before = biteP;
         biteP += dt / P.BITE;
         if (before < 0.72 && biteP >= 0.72) eat();
-        if (biteP >= 1) biteP -= 1;
+        if (biteP >= 1) { biteP = 0; biting = false; }
       }
       if (phase === "ride" && Math.abs(th) > P.FALL) {
         phase = "fall";
-        held = false;
+        biting = false;
         noiseHit(0.5, 380, 0.35, 0.8);
         tone(160, 0.35, 0.18, "triangle", 70);
       }
@@ -230,19 +250,28 @@
     }
   }
 
+  function startBite() {
+    if (phase !== "ride" || biting || eaten >= N) return;
+    biting = true;
+    biteP = 0;
+    tone(520, 0.04, 0.04, "triangle", 620);
+  }
+
   function eat() {
     eaten++;
     noiseHit(0.1, 1600, 0.12, 2);
     tone(420, 0.06, 0.05, "sine", 300, 0.08);
-    if (Math.random() < P.HOT) {
+    if (Math.random() < Math.min(0.9, P.HOT + burn * 0.6)) {
       hot = 1;
       puffNow = true;
-      w += (Math.random() < 0.5 ? -1 : 1) * P.JOLT * (0.6 + 0.4 * Math.random());
+      w += (Math.random() < 0.5 ? -1 : 1) * P.JOLT * (0.5 + burn * 0.6) * (0.8 + 0.4 * Math.random());
       noiseHit(0.35, 900, 0.18, 0.6);
       tone(980, 0.18, 0.08, "square", 520, 0.02);
     }
+    burn = Math.min(1.5, burn + P.BURN);
     if (eaten >= N) {
       phase = "done";
+      biting = false; biteP = 0;
       clearTime = T;
       tone(660, 0.14, 0.12, "triangle");
       tone(880, 0.14, 0.12, "triangle", null, 0.12);
@@ -252,6 +281,7 @@
 
   function endRound() {
     state = S.RESULT;
+    fingers = {}; keys = { l: false, r: false }; dir = 0;
     score = phase === "done" ? Math.round(clearTime * 10) / 10 : Math.round(eaten / N * 100);
   }
   function scoreText() {
@@ -259,28 +289,25 @@
   }
 
   /* ============ 入力 ============
-     タップとスペースキーで同じことができるようにする。
-     x が null のときはキー操作（場所を指さない）。 */
-  function down(x, y) {
+     左右は ← → キー、食べるのはスペース（ジョイパッドは十字キーとボタン）。
+     タップは列で決まる：左の列＝←、真ん中＝食べる、右の列＝→。左右は押している間だけ効く。 */
+  function down(px, py, id) {
     if(state===S.INTRO)return;
     audioOn();
     if (state === S.RESULT) {
-      var hit = x == null ? "retry" : hitButton(x, y);
+      var hit = px == null ? "retry" : hitButton(px, py);
       if (hit === "retry") newRound();
       return;
     }
     if (phase !== "ride") return;
-    held = true;
-    tone(240, 0.05, 0.04, "triangle", 300);
+    var pad = px == null ? "eat" : padAt(px);
+    if (pad === "eat") { startBite(); return; }
+    fingers[id] = pad;
+    readDir();
   }
-  function move(x, y) {
-    if (state !== S.PLAY || !held) return;
-    /* ▼UPDATE: なぞっているときの処理（要らなければ空のまま） */
-  }
-  function up() {
-    if (!held) return;
-    held = false;
-    /* ▼UPDATE: 離したときの処理（要らなければ空のまま） */
+  function up(id) {
+    if (id === undefined) fingers = {}; else delete fingers[id];
+    readDir();
   }
 
   function atCanvas(e) {
@@ -289,18 +316,15 @@
   }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y);
+    var p = atCanvas(e); down(p.x, p.y, e.pointerId);
   });
-  wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
-  });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { up(); });
-  window.addEventListener("blur", function () { up(); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(e.pointerId); });
+  wrap.addEventListener("pointercancel", function (e) { up(e.pointerId); });
+  window.addEventListener("blur", function () { keys = { l: false, r: false }; up(); });
 
   window.addEventListener("keydown", function (e) {
     var esc = e.key === "Escape";
-    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter" || e.key === "ArrowUp";
     var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
     var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
     if (!esc && !go && !left && !right) return;
@@ -308,15 +332,19 @@
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
     if (left || right) {
-      if (state !== S.PLAY) return;
-      /* ▼UPDATE: 左右キー（選ぶものがあるとき。目印は keyMode のときだけ出す） */
+      if (left) keys.l = true; else keys.r = true;
+      readDir();
       return;
     }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    if (e.key === "ArrowUp" && state !== S.PLAY) return;
     down();
   });
   window.addEventListener("keyup", function (e) {
-    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (left || right) { if (left) keys.l = false; else keys.r = false; readDir(); return; }
+    if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
   });
 
   function doShare() {
@@ -342,7 +370,7 @@
     ctx.clearRect(0, 0, W, H);
 
     var look = {
-      x: x, th: th, v: v, eaten: eaten, N: N, hot: hot, t: animT,
+      x: x, th: th, v: v, eaten: eaten, N: N, hot: Math.max(hot, burn * 0.35), t: animT,
       phase: state === S.INTRO ? "intro" : phase, fallT: fallT, doneT: doneT,
       bite: { p: state === S.INTRO ? 0 : biteP, idx: eaten }, puff: puffNow
     };
@@ -352,8 +380,42 @@
       catch (e) { view3d = null; }
     }
     if (!view3d) drawFlat(look);
+    if (state === S.PLAY && phase === "ride") drawPads();
 
     if (state === S.RESULT) drawResult();
+  }
+
+  /* 下の3つのボタン。文字は出さず、矢印と鍋の絵だけ */
+  function drawPads() {
+    PADS.forEach(function (p) {
+      var on = p.id === "eat" ? biting : (p.id === "left" ? dir < 0 : dir > 0);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2);
+      if (p.id === "eat") {
+        /* 続けて食べて熱いほど赤くなる */
+        var k = Math.min(1, burn / 1.2);
+        ctx.fillStyle = "rgba(" + Math.round(255) + "," + Math.round(255 - 150 * k) + "," + Math.round(255 - 190 * k) + "," + (on ? 0.5 : 0.28) + ")";
+      } else ctx.fillStyle = on ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.22)";
+      ctx.fill();
+      ctx.lineWidth = 4; ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.stroke();
+      ctx.fillStyle = "#fff";
+      if (p.id === "eat") {
+        if (biting) {
+          ctx.beginPath(); ctx.arc(0, 0, p.r - 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * biteP);
+          ctx.strokeStyle = "#fff"; ctx.lineWidth = 6; ctx.stroke();
+        }
+        /* 鍋と箸 */
+        ctx.beginPath(); ctx.moveTo(-30, -2); ctx.lineTo(30, -2); ctx.quadraticCurveTo(28, 24, 0, 26); ctx.quadraticCurveTo(-28, 24, -30, -2); ctx.fill();
+        ctx.fillRect(-36, -8, 72, 7);
+        ctx.lineWidth = 5; ctx.lineCap = "round"; ctx.strokeStyle = "#fff";
+        ctx.beginPath(); ctx.moveTo(4, -14); ctx.lineTo(24, -38); ctx.moveTo(13, -12); ctx.lineTo(34, -32); ctx.stroke();
+      } else {
+        var sg = p.id === "left" ? -1 : 1;
+        ctx.beginPath(); ctx.moveTo(sg * 24, 0); ctx.lineTo(-sg * 14, -24); ctx.lineTo(-sg * 14, 24); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    });
   }
 
   /* 3Dが使えないときの平らな絵（横から見た形だけ） */
@@ -427,7 +489,7 @@
   window.__probe = {
     now: function () {
       return { state: state, score: score, W: W, H: H, phase: phase, th: th, w: w, x: x,
-               eaten: eaten, N: N, T: T, held: held, hot: hot };
+               eaten: eaten, N: N, T: T, dir: dir, biting: biting, burn: burn, hot: hot };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { animT += 1 / 60; update(1 / 60); draw(1 / 60); } },
     reset: function () { newRound(); }
@@ -440,13 +502,20 @@
     run: async function (r) {
       await r.wait(1000);
       r.key();
-      /* 傾きを見て押したり離したりする。人の反応ぶん少し遅れて見る */
-      var seen = [];
+      /* 傾きを見て左右を押し、落ち着いていて熱くないときに食べる。人の反応ぶん少し遅れて見る */
+      var seen = [], now = 0;
+      function send(type, key) { window.dispatchEvent(new KeyboardEvent(type, { key: key, bubbles: true })); }
       var t0 = Date.now();
       while (state !== S.RESULT && Date.now() - t0 < 60000) {
         seen.push(th + 0.5 * w);
-        var want = state === S.PLAY && phase === "ride" && seen[Math.max(0, seen.length - 5)] > 0;
-        if (want !== held) window.dispatchEvent(new KeyboardEvent(want ? "keydown" : "keyup", { key: " ", code: "Space", bubbles: true }));
+        var sv = seen[Math.max(0, seen.length - 5)];
+        var want = state === S.PLAY && phase === "ride" ? (sv > 0.04 ? -1 : sv < -0.04 ? 1 : 0) : 0;
+        if (want !== now) {
+          if (now) send("keyup", now < 0 ? "ArrowLeft" : "ArrowRight");
+          if (want) send("keydown", want < 0 ? "ArrowLeft" : "ArrowRight");
+          now = want;
+        }
+        if (phase === "ride" && !biting && Math.abs(th) < 0.15 && burn < 0.5) { send("keydown", " "); send("keyup", " "); }
         await r.wait(40);
       }
       await r.wait(1500);
