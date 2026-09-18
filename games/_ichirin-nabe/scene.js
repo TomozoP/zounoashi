@@ -6,7 +6,7 @@
   var R = 0.3;                 /* 車輪の半径 */
   var HIP = 0.58;              /* 車軸から腰まで */
   var THIGH = 0.34, SHIN = 0.34;
-  var UPPER = 0.23, FORE = 0.23;
+  var UPPER = 0.25, FORE = 0.25;
   var CRANK = 0.12;
   var POT = { x: 0.42, y: 0.7 };   /* 体から見た鍋の場所（胴に食い込まない距離） */
   var MOUTH = { x: 0.2, y: 1.12, z: 0.05 };
@@ -293,7 +293,7 @@
 
     /* 土鍋 */
     var pot = this.pot = new T.Group();
-    pot.scale.setScalar(1.3);
+    pot.scale.setScalar(1.6);                    /* 土鍋は大きめ */
     rig.add(pot);
     var prof = [[0, 0], [0.11, 0], [0.16, 0.035], [0.172, 0.085], [0.166, 0.105], [0.152, 0.105], [0.155, 0.085], [0.145, 0.04], [0.1, 0.014], [0, 0.014]]
       .map(function (p) { return new T.Vector2(p[0], p[1]); });
@@ -335,7 +335,7 @@
       return g;
     });
     this.vessels = {
-      nabe: { g: pot, soup: soup, foods: this.foods, surf: [0.03, 0.085], soupColor: "#d8783a", inner: [[0.014, 0.1], [0.04, 0.145], [0.085, 0.155], [0.105, 0.152]], soupR: 0.15, pos: { x: POT.x, y: POT.y }, farHand: [0, 0.1, -0.28] }
+      nabe: { g: pot, soup: soup, foods: this.foods, surf: [0.03, 0.085], soupColor: "#d8783a", inner: [[0.014, 0.1], [0.04, 0.145], [0.085, 0.155], [0.105, 0.152]], soupR: 0.15, pos: { x: 0.48, y: 0.68 }, farHand: [0, 0.13, -0.33], scale: 1.6 }
     };
     this.buildRamen();
     this.buildCoffee();
@@ -397,7 +397,7 @@
       g.add(q);
       return q;
     });
-    this.vessels.ramen = { g: g, soup: soup, foods: foods, surf: [0.05, 0.095], soupColor: "#d9a45a", inner: [[0.024, 0.062], [0.1, 0.136], [0.112, 0.142]], soupR: 0.13, pos: { x: POT.x, y: POT.y }, farHand: [0, 0.07, -0.19] };
+    this.vessels.ramen = { g: g, soup: soup, foods: foods, surf: [0.05, 0.095], soupColor: "#d9a45a", inner: [[0.024, 0.062], [0.1, 0.136], [0.112, 0.142]], soupR: 0.13, pos: { x: POT.x, y: POT.y }, farHand: [0, 0.07, -0.19], scale: 1.3 };
   };
 
   /* ============ コーヒーのマグカップ ============ */
@@ -423,7 +423,7 @@
     var soup = new T.Mesh(new T.CircleGeometry(0.052, 24), this.mat("#3b2416", { roughness: 0.15 }));
     soup.rotation.x = -Math.PI / 2;
     g.add(soup);
-    this.vessels.coffee = { g: g, soup: soup, foods: [], surf: [0.02, 0.095], soupColor: "#4a2c1a", inner: [[0.009, 0.053], [0.11, 0.053]], soupR: 0.052, pos: { x: 0.34, y: 0.78 }, farHand: [0, 0.02, -0.07], sip: true };
+    this.vessels.coffee = { g: g, soup: soup, foods: [], surf: [0.02, 0.095], soupColor: "#4a2c1a", inner: [[0.009, 0.053], [0.11, 0.053]], soupR: 0.052, pos: { x: 0.34, y: 0.78 }, farHand: [0, 0.02, -0.07], sip: true, scale: 1.3 };
   };
 
   /* 選んだ段階の器に差し替える。飛んでいる最中は差し替えない */
@@ -789,7 +789,7 @@
     if (!this.potFlying) this.pot.rotation.z = potLift * (0.85 + 0.55 * drink);
 
     var p = v.bite.p, rest = [potX - 0.02, potY + 0.2, 0.03];
-    var inPot = [potX + 0.02, potY + surf + 0.01, 0.02];
+    var inPot = [potX + 0.02, potY + (surf + 0.01) * cur.scale, 0.02];   /* 器の大きさぶん汁の高さも伸びる */
     var mouth = [MOUTH.x, MOUTH.y, MOUTH.z];
     var tip;
     if (p < 0.3) tip = lerp3(rest, inPot, ease(p / 0.3));
@@ -870,7 +870,7 @@
       this.rig.attach(this.pot);
       this.pot.position.set(this.cur.pos.x, this.cur.pos.y, -0.02);
       this.pot.rotation.set(0, 0, 0);
-      this.pot.scale.setScalar(1.3);
+      this.pot.scale.setScalar(this.cur.scale);
     }
     if (this.potFlying) {
       var fl = this.potFlying;
