@@ -615,6 +615,12 @@
     this.face.material.color.copy(this.skinColor).lerp(this.hotColor, red);
     this.face.material.emissiveIntensity = red * 0.35;   /* 夜でも赤さが見えるよう少し光らせる */
     this.head.rotation.z = hotK * Math.sin(v.t * 30) * 0.12;
+    /* もぐもぐ：食べてから0.8秒ほど、頭を上下に縮めたり戻したりして小さくうなずく */
+    var ck = v.phase === "ride" && v.chew != null ? Math.max(0, 1 - v.chew / 0.8) : 0;
+    var cw = Math.abs(Math.sin(v.chew * 17)) * ck;
+    this.head.scale.set(1 + cw * 0.05, 1 - cw * 0.09, 1 + cw * 0.05);
+    this.head.position.y = 1.2 - cw * 0.012;
+    this.head.rotation.z += Math.sin(v.chew * 17) * ck * 0.06;
     this.head.rotation.x = 0;
 
     /* 鍋が飛ぶ */

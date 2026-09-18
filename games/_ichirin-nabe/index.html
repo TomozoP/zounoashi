@@ -217,6 +217,43 @@
     /* ウ：F1 350 / F2 1300（口をすぼめて小さく） */
     vowel(t1 + (big ? 0.11 : 0.07), big ? 0.14 : 0.11, [[350, 5, 2.0], [1300, 7, 0.7], [2500, 8, 0.25]], f0 * 1.05, f0 * 0.85, big ? 0.45 : 0.35);
   }
+  /* 倒れたときの「アアアアア～～～」。高いところから落ちていくように下がる長い叫び。
+     細かく音量を揺らして「アアアア」と途切れさせ、だんだん震えを強くして消える */
+  function scream(ac, at, pitch) {
+    var t = at, f0 = pitch || 520, dur = 1.7;
+    var out = ac.createGain(), trem = ac.createGain();
+    out.gain.value = 0.45;
+    trem.connect(out); out.connect(ac.destination);
+    var o = ac.createOscillator(), env = ac.createGain();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(f0 * 1.15, t);
+    o.frequency.exponentialRampToValueAtTime(f0, t + 0.12);
+    o.frequency.exponentialRampToValueAtTime(f0 * 0.5, t + dur);
+    /* 声の震え（あとほど深く） */
+    var vib = ac.createOscillator(), vg = ac.createGain();
+    vib.frequency.value = 6.5;
+    vg.gain.setValueAtTime(f0 * 0.01, t);
+    vg.gain.linearRampToValueAtTime(f0 * 0.05, t + dur);
+    vib.connect(vg); vg.connect(o.frequency);
+    /* 「アアアア」と途切れる揺れ */
+    var am = ac.createOscillator(), ag = ac.createGain();
+    am.frequency.setValueAtTime(8, t);
+    am.frequency.linearRampToValueAtTime(5, t + dur);
+    ag.gain.value = 0.35;
+    trem.gain.value = 0.65;
+    am.connect(ag); ag.connect(trem.gain);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(0.9, t + 0.03);
+    env.gain.setValueAtTime(0.9, t + dur * 0.55);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(env);
+    [[850, 5, 2.2], [1250, 6, 1.4], [2700, 8, 0.8]].forEach(function (fm) {
+      var b = ac.createBiquadFilter(), g = ac.createGain();
+      b.type = "bandpass"; b.frequency.value = fm[0]; b.Q.value = fm[1]; g.gain.value = fm[2];
+      env.connect(b); b.connect(g); g.connect(trem);
+    });
+    [o, vib, am].forEach(function (n) { n.start(t); n.stop(t + dur + 0.05); });
+  }
   /* ---- こぐ音と「アツっ」 ここまで ---- */
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
@@ -255,7 +292,7 @@
     GUSTT: 0.5     /* 揺さぶりの向きが変わるまでの目安（秒） */
   };
   var N = 16;                                  /* 具の数 = ひと口の数 */
-  var th, w, x, v, gust, gustTo, eaten, biteP, biting, burn, hot, phase, fallT, doneT, clearTime, puffNow, crank, creakHigh;
+  var th, w, x, v, gust, gustTo, eaten, biteP, biting, burn, hot, phase, fallT, doneT, clearTime, puffNow, crank, creakHigh, lastBite;
   var dir;                                     /* 左右の押している向き（-1, 0, 1） */
   var fingers = {}, keys = { l: false, r: false };
 
@@ -285,7 +322,7 @@
     gust = 0; gustTo = 0;
     eaten = 0; biteP = 0; biting = false; burn = 0; hot = 0;
     phase = "ride"; fallT = 0; doneT = 0; clearTime = 0; puffNow = false;
-    crank = 0; creakHigh = false;
+    crank = 0; creakHigh = false; lastBite = -9;
   }
 
   function readDir() {
@@ -335,7 +372,7 @@
         phase = "fall";
         biting = false;
         noiseHit(0.5, 380, 0.35, 0.8);
-        tone(160, 0.35, 0.18, "triangle", 70);
+        if (AC) scream(AC, AC.currentTime + 0.02, 480 + Math.random() * 80);
       }
     } else if (phase === "fall") {
       fallT += dt;
@@ -368,6 +405,7 @@
 
   function eat() {
     eaten++;
+    lastBite = animT;
     noiseHit(0.1, 1600, 0.12, 2);
     /* ひと口ごとに「アツ」。熱いのを引いたら「アッッツ！」 */
     var burned = Math.random() < Math.min(0.9, P.HOT + burn * 0.6);
@@ -481,6 +519,7 @@
     var look = {
       x: x, th: th, v: v, eaten: eaten, N: N, hot: hot, t: animT,
       /* 顔の赤さ：熱いひと口で真っ赤になってゆっくり引く。熱さがたまっている間はほんのり赤い */
+      chew: animT - lastBite,                   /* ひと口食べてからの秒数（もぐもぐ） */
       red: Math.max(Math.sqrt(hot), Math.min(0.6, burn * 0.5)),
       phase: state === S.INTRO ? "intro" : phase, fallT: fallT, doneT: doneT,
       bite: { p: state === S.INTRO ? 0 : biteP, idx: eaten }, puff: puffNow
