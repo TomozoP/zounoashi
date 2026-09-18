@@ -232,6 +232,7 @@
     this.part(rig, "box", frame, 0, 0.3, 0, 0.05, 0.03, 0.1);
     this.part(rig, "tube", "#b8bcc6", 0, 0.42, 0, 0.018, 0.24, 0.018, { metalness: 0.5, roughness: 0.4 });
     this.part(rig, "ball", "#222428", 0.01, 0.55, 0, 0.13, 0.035, 0.07);
+    this.frameParts = rig.children.slice();       /* 骨組み（倒れたら一輪車と一緒に転がる） */
 
     var coat = "#3a6fb8", pants = "#2e3442", skin = "#f1c7a1", mitten = "#e2493a";
     this.legs = [];
@@ -244,12 +245,13 @@
         foot: self.part(rig, "ball", "#3b2a22", 0, 0, 0, 0.075, 0.04, 0.05)
       });
     });
-    this.part(rig, "ball", pants, 0, HIP + 0.04, 0, 0.13, 0.09, 0.14);
+    var hips = this.part(rig, "ball", pants, 0, HIP + 0.04, 0, 0.13, 0.09, 0.14);
     this.torso = this.part(rig, "ball", coat, 0.02, 0.83, 0, 0.16, 0.24, 0.16);
-    this.part(rig, "tube", "#f2c94c", 0.02, 0.63, 0, 0.14, 0.04, 0.145);        /* 上着のすそ */
-    this.part(rig, "tube", "#e8702a", 0.02, 1.04, 0, 0.1, 0.06, 0.1);            /* マフラー */
+    var skirt = this.part(rig, "tube", "#f2c94c", 0.02, 0.63, 0, 0.14, 0.04, 0.145);        /* 上着のすそ */
+    var scarf = this.part(rig, "tube", "#e8702a", 0.02, 1.04, 0, 0.1, 0.06, 0.1);            /* マフラー */
     var tail = this.part(rig, "box", "#e8702a", -0.06, 0.95, 0.07, 0.04, 0.16, 0.05);
     tail.rotation.z = 0.2;
+    this.torsoParts = [hips, this.torso, skirt, scarf, tail];   /* 倒れたら胴としてひとかたまり */
 
     /* 頭。顔をすこしカメラへ向ける */
     var head = this.head = new T.Group();
@@ -263,6 +265,12 @@
     this.face.material.emissive = new T.Color("#ff2010");
     this.face.material.emissiveIntensity = 0;
     /* 顔の部品（目・口・ほほ）は付けない。熱さは顔色と湯気と頭のふるえで見せる */
+    /* 長い鼻。顔と同じ色なので、熱いと一緒に赤くなる */
+    var nose = new T.Mesh(new T.CylinderGeometry(0.012, 0.032, 0.3, 12), this.face.material);
+    nose.rotation.z = -Math.PI / 2 + 0.12;
+    nose.position.set(0.27, -0.005, 0);
+    nose.castShadow = true;
+    head.add(nose);
     /* ニット帽 */
     this.part(head, "ball", "#d8412f", -0.005, 0.045, 0, 0.145, 0.12, 0.145);
     this.part(head, "tube", "#f2ede4", 0, 0.05, 0, 0.148, 0.04, 0.148);
@@ -350,16 +358,7 @@
   NabeScene.prototype.spillStart = function (v, fl) {
     var T = this.T, C = global.CANNON, self = this;
     var left = 1 - v.eaten / v.N;                   /* 残っていた汁と具の割合 */
-    var world = null;
-    if (C) {
-      world = new C.World({ gravity: new C.Vec3(0, -9.8, 0) });
-      world.broadphase = new C.NaiveBroadphase();
-      world.defaultContactMaterial.friction = 0.5;
-      world.defaultContactMaterial.restitution = 0.35;
-      var ground = new C.Body({ mass: 0, shape: new C.Plane() });
-      ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-      world.addBody(ground);
-    }
+    var world = this.fallWorld;
     var bodies = [];
     var shown = this.foods.length, gone = Math.floor(v.eaten * shown / v.N);
     this.pot.updateMatrixWorld(true);
@@ -376,7 +375,8 @@
                   : kind === "hakusai" ? new C.Box(new C.Vec3(0.04, 0.007, 0.023))
                   : kind === "negi" ? new C.Box(new C.Vec3(0.05, 0.012, 0.012))
                   : new C.Sphere(0.022);
-        b = new C.Body({ mass: 0.02, shape: shape, linearDamping: 0.05, angularDamping: 0.3 });
+        b = new C.Body({ mass: 0.02, shape: shape, linearDamping: 0.05, angularDamping: 0.3,
+                           collisionFilterGroup: 4, collisionFilterMask: -1 });
         b.position.set(f.position.x, f.position.y, f.position.z);
         b.quaternion.set(f.quaternion.x, f.quaternion.y, f.quaternion.z, f.quaternion.w);
         b.velocity.set(vx, vy, vz);
@@ -459,6 +459,110 @@
     this.spill = null;
   };
 
+  /* ============ 倒れたらラグドール ============
+     倒れた瞬間に、体を頭・胴・上腕・前腕・太もも・すねに分けて、関節でつないだ物理の体にする。
+     一輪車も別の体にして転がす。飛び散った具とも同じ世界でぶつかる。
+     ぶつかり分け：地面1 / 体2（体どうしはぶつけない。関節がつっぱらないように）/ 具4 / 一輪車8 */
+  NabeScene.prototype.makeFallWorld = function () {
+    var C = global.CANNON;
+    if (!C) return null;
+    var world = new C.World({ gravity: new C.Vec3(0, -9.8, 0) });
+    world.broadphase = new C.NaiveBroadphase();
+    world.solver.iterations = 15;
+    world.defaultContactMaterial.friction = 0.5;
+    world.defaultContactMaterial.restitution = 0.3;
+    var ground = new C.Body({ mass: 0, shape: new C.Plane(), collisionFilterGroup: 1, collisionFilterMask: -1 });
+    ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+    world.addBody(ground);
+    return world;
+  };
+
+  NabeScene.prototype.ragStart = function (v) {
+    var T = this.T, C = global.CANNON, self = this, world = this.fallWorld;
+    if (!C || !world) return;
+    this.scene.updateMatrixWorld(true);
+    var axle = new T.Vector3();
+    this.base.getWorldPosition(axle);
+    var rq = new T.Quaternion();
+    this.rig.getWorldQuaternion(rq);
+    var moved = [], parts = [];
+    function W(p) { return self.rig.localToWorld(new T.Vector3(p[0], p[1], p[2])); }
+    function part(meshes, center, quat, shape, mass, group, mask, shapeQuat) {
+      var g = new T.Group();
+      g.position.copy(center); g.quaternion.copy(quat);
+      self.scene.add(g);
+      meshes.forEach(function (m) {
+        moved.push({ m: m, parent: m.parent, p: m.position.clone(), q: m.quaternion.clone(), s: m.scale.clone() });
+        g.attach(m);
+      });
+      var b = new C.Body({ mass: mass, linearDamping: 0.05, angularDamping: 0.4,
+                           collisionFilterGroup: group, collisionFilterMask: mask });
+      b.addShape(shape, new C.Vec3(0, 0, 0), shapeQuat);
+      b.position.set(center.x, center.y, center.z);
+      b.quaternion.set(quat.x, quat.y, quat.z, quat.w);
+      /* 倒れる回転の勢いを引き継ぐ（体は z 軸まわりに -w で回っている） */
+      var rx = center.x - axle.x, ry = center.y - axle.y;
+      b.velocity.set(v.v + v.w * ry, -v.w * rx, (Math.random() - 0.5) * 0.3);
+      b.angularVelocity.set(0, 0, -v.w);
+      world.addBody(b);
+      parts.push({ g: g, b: b });
+      return b;
+    }
+    function limb(meshes, a, bpt, r, mass) {
+      var A = W(a), B = W(bpt), mid = A.clone().add(B).multiplyScalar(0.5);
+      var q = new T.Quaternion().setFromUnitVectors(new T.Vector3(0, 1, 0), B.clone().sub(A).normalize());
+      return part(meshes, mid, q, new C.Box(new C.Vec3(r, Math.max(0.02, A.distanceTo(B) / 2), r)), mass, 2, 1 | 4 | 8);
+    }
+    function joint(b1, b2, p) {
+      var w = W(p), c = new C.Vec3(w.x, w.y, w.z);
+      world.addConstraint(new C.PointToPointConstraint(b1, b1.pointToLocalFrame(c), b2, b2.pointToLocalFrame(c)));
+    }
+    var torso = part(this.torsoParts, W([0.02, 0.83, 0]), rq, new C.Box(new C.Vec3(0.15, 0.27, 0.15)), 30, 2, 1 | 4 | 8);
+    var head = part([this.head], W([0.03, 1.2, 0]), rq, new C.Sphere(0.15), 5, 2, 1 | 4 | 8);
+    joint(torso, head, [0.03, 1.07, 0]);
+    this.legs.forEach(function (L) {
+      var P = L.pts;
+      var th = limb([L.thigh, L.knee], P[0], P[1], 0.055, 7);
+      var sh = limb([L.shin, L.foot], P[1], P[2], 0.045, 4);
+      joint(torso, th, P[0]);
+      joint(th, sh, P[1]);
+    });
+    this.arms.forEach(function (A) {
+      var P = A.pts;
+      var up = limb([A.upper, A.elbow], P[0], P[1], 0.045, 2.5);
+      var fo = limb([A.fore, A.hand].concat(A.s > 0 ? self.chop : []), P[1], P[2], 0.04, 2);
+      joint(torso, up, P[0]);
+      joint(up, fo, P[1]);
+    });
+    /* 一輪車：車輪（z 向きの円柱）と支柱 */
+    var cyc = part([this.wheel].concat(this.frameParts), axle.clone(), rq,
+                   new C.Cylinder(R, R, 0.08, 14), 6, 8, 1 | 2 | 4,
+                   new C.Quaternion().setFromEuler(Math.PI / 2, 0, 0));
+    cyc.addShape(new C.Box(new C.Vec3(0.03, 0.28, 0.05)), new C.Vec3(0, 0.3, 0));
+    cyc.angularVelocity.set(0, 0, -v.v / R);
+    this.held.visible = false;
+    this.rag = { parts: parts, moved: moved };
+  };
+
+  NabeScene.prototype.ragStep = function () {
+    if (!this.rag) return;
+    this.rag.parts.forEach(function (o) {
+      o.g.position.set(o.b.position.x, o.b.position.y, o.b.position.z);
+      o.g.quaternion.set(o.b.quaternion.x, o.b.quaternion.y, o.b.quaternion.z, o.b.quaternion.w);
+    });
+  };
+
+  NabeScene.prototype.ragReset = function () {
+    var self = this;
+    if (!this.rag) return;
+    this.rag.moved.forEach(function (o) {
+      o.parent.add(o.m);
+      o.m.position.copy(o.p); o.m.quaternion.copy(o.q); o.m.scale.copy(o.s);
+    });
+    this.rag.parts.forEach(function (o) { self.scene.remove(o.g); });
+    this.rag = null;
+  };
+
   /* ============ 湯気と雪 ============ */
   NabeScene.prototype.buildSteam = function () {
     var T = this.T;
@@ -515,7 +619,9 @@
     /* 速さのぶん先を見越して、進んでいても人物が真ん中に来るように */
     /* 倒れたら倒れた先へ寄せて、少し引く */
     var fk = v.phase === "fall" ? Math.min(1, v.fallT * 2) : 0;
-    this.camX += (v.x + v.v * 0.33 + fk * Math.sin(v.th) * 0.55 - this.camX) * Math.min(1, dt * 3);
+    /* ラグドールの間は、転がっていく胴を追う */
+    var aim = this.rag ? this.rag.parts[0].g.position.x : v.x + v.v * 0.33 + fk * Math.sin(v.th) * 0.55;
+    this.camX += (aim - this.camX) * Math.min(1, dt * 3);
     var cx = this.camX;
     var tall = 1 / this.aspect;               /* 縦長ほど少し引く */
     this.camera.position.set(cx + 0.75, 1.5 + (tall - 1.6) * 0.3 + fk * 0.2, 2.35 + (tall - 1.6) * 0.6 + fk * 0.9);
@@ -532,18 +638,13 @@
     /* 一輪車 */
     this.base.position.set(v.x, R, 0);
     var phi = -v.x / R;
-    this.wheel.rotation.z = phi;
-    var th = v.th;
+    var th = v.th, posing = !this.rag;       /* ラグドールの間は、姿勢を物理にまかせる */
+    if (posing) this.wheel.rotation.z = phi;
     this.rig.rotation.z = -th;
-    if (v.phase === "fall") {
-      /* 倒れきったら車輪ごと寝る */
-      var k = Math.min(1, v.fallT * 1.5);
-      this.base.rotation.x = k * 0.25;
-    } else this.base.rotation.x = 0;
 
     /* 脚：ペダルを体の向きに直して、ひざを前に曲げる */
     var ct = Math.cos(th), st = Math.sin(th);
-    this.legs.forEach(function (L, i) {
+    if (posing) this.legs.forEach(function (L, i) {
       var a = phi + (L.s > 0 ? 0 : Math.PI);
       var px = Math.sin(a) * CRANK, py = -Math.cos(a) * CRANK;
       /* 車輪の枠から体の枠へ（体は -th 回っている） */
@@ -554,6 +655,7 @@
       self.segment(L.shin, knee, foot);
       L.knee.position.set(knee[0], knee[1], knee[2]);
       L.foot.position.set(foot[0] + 0.02, foot[1] + 0.01, foot[2]);
+      L.pts = [hip, knee, foot];
     });
 
     /* 箸と具 */
@@ -583,8 +685,8 @@
       hand = [potX - 0.04, potY + 0.02, 0.15];
       tip = [hand[0] + 0.05, hand[1] + 0.2, hand[2] + 0.02];
     }
-    this.segment(this.chop[0], hand, tip);
-    this.segment(this.chop[1], [hand[0], hand[1] + 0.012, hand[2] - 0.01], [tip[0] + 0.005, tip[1] + 0.01, tip[2] - 0.012]);
+    if (posing) this.segment(this.chop[0], hand, tip);
+    if (posing) this.segment(this.chop[1], [hand[0], hand[1] + 0.012, hand[2] - 0.01], [tip[0] + 0.005, tip[1] + 0.01, tip[2] - 0.012]);
     var holding = v.bite.idx < v.N && p >= 0.3 && p < 0.72 && v.phase === "ride";
     this.held.visible = holding;
     if (holding) {
@@ -599,7 +701,7 @@
 
     /* 腕 */
     var potHand = [potX - 0.02, potY - 0.01, -0.15];
-    this.arms.forEach(function (A) {
+    if (posing) this.arms.forEach(function (A) {
       var sh = [0.03, 0.98, A.s * 0.17];
       var h = A.s > 0 ? hand : potHand;
       var el = ik2(sh, h, UPPER, FORE, -1);
@@ -608,12 +710,14 @@
       self.segment(A.fore, el, h);
       A.elbow.position.set(el[0], el[1], el[2]);
       A.hand.position.set(h[0], h[1], h[2]);
+      A.pts = [sh, el, h];
     });
 
     /* 顔：熱いと赤くなって、頭がふるえる */
     var red = Math.max(0, Math.min(1, v.red || 0));
     this.face.material.color.copy(this.skinColor).lerp(this.hotColor, red);
     this.face.material.emissiveIntensity = red * 0.35;   /* 夜でも赤さが見えるよう少し光らせる */
+    if (posing) {
     this.head.rotation.z = hotK * Math.sin(v.t * 30) * 0.12;
     /* もぐもぐ：食べてから0.8秒ほど、頭を上下に縮めたり戻したりして小さくうなずく */
     var ck = v.phase === "ride" && v.chew != null ? Math.max(0, 1 - v.chew / 0.8) : 0;
@@ -622,15 +726,20 @@
     this.head.position.y = 1.2 - cw * 0.012;
     this.head.rotation.z += Math.sin(v.chew * 17) * ck * 0.06;
     this.head.rotation.x = 0;
+    }
 
     /* 鍋が飛ぶ */
     if (v.phase === "fall" && !this.potFlying) {
       this.potFlying = { vx: (th > 0 ? 1.4 : -1.1) + v.v * 0.6, vy: 1.2, spin: th > 0 ? -5 : 5 };
       this.scene.attach(this.pot);
+      this.fallWorld = this.makeFallWorld();
+      this.ragStart(v);
       this.spillStart(v, this.potFlying);
     }
     if (v.phase !== "fall" && this.potFlying) {
       this.spillReset();
+      this.ragReset();
+      this.fallWorld = null;
       this.potFlying = null;
       this.rig.attach(this.pot);
       this.pot.position.set(POT.x, POT.y, -0.02);
@@ -649,6 +758,7 @@
     }
 
     this.spillStep(dt);
+    this.ragStep();
 
     /* 湯気 */
     var heat = v.phase === "fall" ? 0.2 : 0.35 + 0.65 * (1 - v.eaten / v.N);
