@@ -5,7 +5,7 @@
      - 何もしない・片側を押しっぱなしでは、すぐ倒れる
      - 食べずに釣り合いだけ取っていれば、ずっと倒れない
      - 反応が速めの人（0.2秒）は、熱さを待って食べればほぼ食べきれる
-     - 反応が遅い人（0.4秒）はときどき倒れる（簡単すぎない）
+     - 反応0.3秒で半分ほど、0.4秒ではたまにしか食べきれない（でこぼこで揺さぶられる）
      - 食べるボタンを連打すると熱くなって倒れやすい
      - タップの列で左右・食べるが分かれる */
 var load = require("../harness");
@@ -45,8 +45,8 @@ var idle = play({ lean: function () { return 0; } }, 1);
 check(idle.phase === "fall", "何もしないと倒れる", idle.T.toFixed(1) + "秒で");
 var hold = play({ lean: function () { return -1; } }, 1);
 check(hold.phase === "fall", "左を押しっぱなしでも倒れる", hold.T.toFixed(1) + "秒で");
-var keep = play({ lean: lean, delay: 18, frames: 60 * 40 }, 1);
-check(keep.state === "play" && keep.phase === "ride", "食べなければ釣り合いは保てる（反応0.3秒で40秒）");
+var keep = play({ lean: lean, delay: 12, frames: 60 * 40 }, 1);
+check(keep.state === "play" && keep.phase === "ride", "食べなければ釣り合いは保てる（反応0.2秒で40秒）");
 
 function rate(delay, eat, n) {
   var ok = 0, times = [];
@@ -62,7 +62,7 @@ var spam = rate(12, function (o, n) { return !n.biting; }, 20);
 console.log("    待って食べる  反応0.2秒 " + fast.txt + " / 0.3秒 " + mid.txt + " / 0.4秒 " + slow.txt);
 console.log("    連打で食べる  反応0.2秒 " + spam.txt);
 check(fast.ok >= 16, "反応0.2秒で待って食べればほぼ食べきれる");
-check(slow.ok <= 16, "反応0.4秒ではときどき倒れる（簡単すぎない）");
+check(slow.ok <= 8, "反応0.4秒ではたまにしか食べきれない");
 check(spam.ok < fast.ok, "連打すると待って食べるより倒れやすい");
 
 /* タップの列 */
