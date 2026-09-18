@@ -54,6 +54,7 @@
     this.buildRider();
     this.buildSteam();
     this.buildSnow();
+    this.buildSpill();
   }
 
   NabeScene.prototype.mat = function (color, opt) {
@@ -317,10 +318,145 @@
       var a = i * 2.4, rr = 0.03 + (i % 4) * 0.028;
       g.userData.home = [Math.cos(a) * rr, Math.sin(a) * rr];
       g.rotation.y = a * 1.7;
+      g.userData.spin = g.rotation.y;
       g.userData.color = col;
       pot.add(g);
       return g;
     });
+  };
+
+  /* ============ 倒れたら中身をぶちまける ============
+     具は物理（cannon）の体にして放り出す。地面で跳ねて転がり、具どうしもぶつかる。
+     汁はしぶきを飛ばし、落ちたところにしみを残す。鍋が落ちたところに汁だまりが広がる。
+     見た目だけの演出で、遊びの計算には関わらない。 */
+  NabeScene.prototype.buildSpill = function () {
+    var T = this.T;
+    this.drops = [];
+    var dropMat = this.mat("#c8652e", { roughness: 0.25 });
+    for (var i = 0; i < 48; i++) {
+      var d = new T.Mesh(this.geo.ball, dropMat);
+      d.visible = false;
+      this.scene.add(d);
+      this.drops.push({ m: d, vx: 0, vy: 0, vz: 0, flying: false });
+    }
+    this.puddle = new T.Mesh(new T.CircleGeometry(1, 28), this.mat("#b85a2a", { roughness: 0.2, transparent: true, opacity: 0.9 }));
+    this.puddle.rotation.x = -Math.PI / 2;
+    this.puddle.visible = false;
+    this.puddle.receiveShadow = true;
+    this.scene.add(this.puddle);
+    this.spill = null;
+  };
+
+  NabeScene.prototype.spillStart = function (v, fl) {
+    var T = this.T, C = global.CANNON, self = this;
+    var left = 1 - v.eaten / v.N;                   /* 残っていた汁と具の割合 */
+    var world = null;
+    if (C) {
+      world = new C.World({ gravity: new C.Vec3(0, -9.8, 0) });
+      world.broadphase = new C.NaiveBroadphase();
+      world.defaultContactMaterial.friction = 0.5;
+      world.defaultContactMaterial.restitution = 0.35;
+      var ground = new C.Body({ mass: 0, shape: new C.Plane() });
+      ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+      world.addBody(ground);
+    }
+    var bodies = [];
+    var shown = this.foods.length, gone = Math.floor(v.eaten * shown / v.N);
+    this.pot.updateMatrixWorld(true);
+    this.foods.forEach(function (f, i) {
+      if (i < gone || !f.visible) return;
+      self.scene.attach(f);
+      var vx = fl.vx * (0.6 + Math.random() * 0.7) + (Math.random() - 0.5) * 1.2;
+      var vy = fl.vy * (0.7 + Math.random() * 0.6) + 0.4 + Math.random() * 1.2;
+      var vz = (Math.random() - 0.3) * 1.4;
+      var b = null;
+      if (world) {
+        var kind = FOODS[i][0];
+        var shape = kind === "tofu" ? new C.Box(new C.Vec3(0.033, 0.02, 0.033))
+                  : kind === "hakusai" ? new C.Box(new C.Vec3(0.04, 0.007, 0.023))
+                  : kind === "negi" ? new C.Box(new C.Vec3(0.05, 0.012, 0.012))
+                  : new C.Sphere(0.022);
+        b = new C.Body({ mass: 0.02, shape: shape, linearDamping: 0.05, angularDamping: 0.3 });
+        b.position.set(f.position.x, f.position.y, f.position.z);
+        b.quaternion.set(f.quaternion.x, f.quaternion.y, f.quaternion.z, f.quaternion.w);
+        b.velocity.set(vx, vy, vz);
+        b.angularVelocity.set((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30);
+        world.addBody(b);
+      }
+      bodies.push({ f: f, b: b, v: [vx, vy, vz] });
+    });
+    /* 汁のしぶき */
+    var pw = new T.Vector3();
+    this.pot.getWorldPosition(pw);
+    var n = Math.round(this.drops.length * (0.25 + 0.75 * left));
+    this.drops.forEach(function (d, i) {
+      d.m.visible = i < n;
+      d.flying = i < n;
+      if (!d.flying) return;
+      d.m.position.set(pw.x + (Math.random() - 0.5) * 0.12, pw.y + 0.08, pw.z + (Math.random() - 0.5) * 0.12);
+      var s = 0.012 + Math.random() * 0.018;
+      d.m.scale.set(s, s, s);
+      d.vx = fl.vx * (0.5 + Math.random()) + (Math.random() - 0.5) * 1.6;
+      d.vy = fl.vy * (0.5 + Math.random()) + Math.random() * 1.8;
+      d.vz = (Math.random() - 0.3) * 1.6;
+    });
+    this.soup.visible = false;
+    this.spill = { world: world, bodies: bodies, left: left, puddleT: -1 };
+  };
+
+  NabeScene.prototype.spillStep = function (dt) {
+    var sp = this.spill;
+    if (!sp) return;
+    if (sp.world) sp.world.step(1 / 60, dt, 4);
+    sp.bodies.forEach(function (o) {
+      if (o.b) {
+        o.f.position.set(o.b.position.x, o.b.position.y, o.b.position.z);
+        o.f.quaternion.set(o.b.quaternion.x, o.b.quaternion.y, o.b.quaternion.z, o.b.quaternion.w);
+      } else {
+        /* 物理が読めないときは、放物線で落ちて止まるだけ */
+        o.v[1] -= 9.8 * dt;
+        o.f.position.x += o.v[0] * dt; o.f.position.y += o.v[1] * dt; o.f.position.z += o.v[2] * dt;
+        if (o.f.position.y < 0.02) { o.f.position.y = 0.02; o.v = [o.v[0] * 0.5, 0, o.v[2] * 0.5]; }
+      }
+    });
+    /* しぶき：落ちたら平たいしみになる */
+    this.drops.forEach(function (d) {
+      if (!d.flying) return;
+      d.vy -= 9.8 * dt;
+      d.m.position.x += d.vx * dt; d.m.position.y += d.vy * dt; d.m.position.z += d.vz * dt;
+      if (d.m.position.y <= 0.004) {
+        d.flying = false;
+        d.m.position.y = 0.004;
+        var s = d.m.scale.x;
+        d.m.scale.set(s * 2.6, s * 0.15, s * 2.6);
+      }
+    });
+    /* 鍋が地面に着いたら汁だまりが広がる */
+    if (this.potFlying && this.potFlying.vy === 0 && sp.puddleT < 0) {
+      sp.puddleT = 0;
+      this.puddle.position.set(this.pot.position.x, 0.003, this.pot.position.z);
+      this.puddle.visible = true;
+    }
+    if (sp.puddleT >= 0) {
+      sp.puddleT += dt;
+      var r = (0.12 + 0.4 * sp.left) * (1 - Math.exp(-sp.puddleT * 3));
+      this.puddle.scale.set(r, r * 0.8, 1);
+    }
+  };
+
+  NabeScene.prototype.spillReset = function () {
+    var self = this;
+    if (!this.spill) return;
+    this.spill.bodies.forEach(function (o) {
+      self.pot.attach(o.f);
+      o.f.quaternion.identity();
+      o.f.rotation.y = o.f.userData.spin || 0;
+      o.f.scale.set(1, 1, 1);
+    });
+    this.drops.forEach(function (d) { d.m.visible = false; d.flying = false; });
+    this.puddle.visible = false;
+    this.soup.visible = true;
+    this.spill = null;
   };
 
   /* ============ 湯気と雪 ============ */
@@ -455,7 +591,7 @@
       this.held.position.set(tip[0], tip[1], tip[2]);
       this.held.material.color.set(this.foods[v.bite.idx].userData.color);
     }
-    this.foods.forEach(function (f, i) {
+    if (!this.spill) this.foods.forEach(function (f, i) {
       var gone = i < v.eaten || (i === v.bite.idx && holding);
       f.visible = !gone;
       f.position.set(f.userData.home[0], surf + 0.012, f.userData.home[1]);
@@ -485,8 +621,10 @@
     if (v.phase === "fall" && !this.potFlying) {
       this.potFlying = { vx: (th > 0 ? 1.4 : -1.1) + v.v * 0.6, vy: 1.2, spin: th > 0 ? -5 : 5 };
       this.scene.attach(this.pot);
+      this.spillStart(v, this.potFlying);
     }
     if (v.phase !== "fall" && this.potFlying) {
+      this.spillReset();
       this.potFlying = null;
       this.rig.attach(this.pot);
       this.pot.position.set(POT.x, POT.y, -0.02);
@@ -503,6 +641,8 @@
         if (this.pot.position.y <= 0.01) { fl.vy = 0; fl.vx = 0; fl.spin = 0; this.pot.rotation.z = Math.PI * Math.round(this.pot.rotation.z / Math.PI); }
       }
     }
+
+    this.spillStep(dt);
 
     /* 湯気 */
     var heat = v.phase === "fall" ? 0.2 : 0.35 + 0.65 * (1 - v.eaten / v.N);
