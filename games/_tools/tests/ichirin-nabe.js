@@ -12,7 +12,7 @@
      - 食べるボタンを連打すると熱くなって倒れやすい
      - タップの列で左右・食べるが分かれる */
 var load = require("../harness");
-var FILE = "games/_ichirin-nabe/index.html";
+var FILE = "games/ichirin-nabe/index.html";
 
 function play(opt, seed) {
   var s = seed;

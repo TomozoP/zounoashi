@@ -5,9 +5,4 @@
    （公開サイトでは読みに行かないので、名前もソースに残りません）
 
    足すのは games/_tools/new.js、公開は games/_tools/publish.js が面倒を見ます。 */
-window.DRAFT_GAMES = [
-  { type: "lab", tags: [], id: "ichirin-nabe", title: "アツアツ一輪車", year: 2026, date: "2026-09-18",
-    plays: null, url: "", img: "games/_ichirin-nabe/img/thumb.webp",
-    play: "games/_ichirin-nabe/index.html", full: true,
-    catch: "一輪車に乗ったまま、アツアツの鍋を食べきる" },
-];
+window.DRAFT_GAMES = [];
