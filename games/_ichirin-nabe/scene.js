@@ -258,7 +258,9 @@
     this.face = this.part(head, "ball", skin, 0, 0, 0, 0.14, 0.14, 0.14);
     this.face.material = this.face.material.clone();
     this.skinColor = new T.Color(skin);
-    this.hotColor = new T.Color("#ff6a50");
+    this.hotColor = new T.Color("#e0281e");
+    this.face.material.emissive = new T.Color("#ff2010");
+    this.face.material.emissiveIntensity = 0;
     /* 顔の部品（目・口・ほほ）は付けない。熱さは顔色と湯気と頭のふるえで見せる */
     /* ニット帽 */
     this.part(head, "ball", "#d8412f", -0.005, 0.045, 0, 0.145, 0.12, 0.145);
@@ -473,7 +475,9 @@
     });
 
     /* 顔：熱いと赤くなって、頭がふるえる */
-    this.face.material.color.copy(this.skinColor).lerp(this.hotColor, hotK * 0.45);
+    var red = Math.max(0, Math.min(1, v.red || 0));
+    this.face.material.color.copy(this.skinColor).lerp(this.hotColor, red);
+    this.face.material.emissiveIntensity = red * 0.35;   /* 夜でも赤さが見えるよう少し光らせる */
     this.head.rotation.z = hotK * Math.sin(v.t * 30) * 0.12;
     this.head.rotation.x = 0;
 
