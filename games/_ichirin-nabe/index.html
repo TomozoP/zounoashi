@@ -147,23 +147,30 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
 
-  /* 釣り合いの決まりごと。th は体の傾き（ラジアン、前＝右が＋）、w はその速さ。
-     左右のボタンで、押した向きへ体を傾ける。鍋が重いぶん前（右）へ引っぱられ、食べるほど軽くなる。
-     食べるボタンでひと口。続けて食べるほど熱くなって、体がはねやすく・強くなる。
-     路面のでこぼこでいつも揺さぶられる。数字はテストの自動運転で決めた：
-     反応0.2秒でほぼ食べきれ、0.3秒で半分、0.4秒ではたまにしか食べきれない。 */
+  /* 釣り合いの決まりごと。一輪車に乗った人を、車輪の上に立てた棒（倒立振子）として計算する。
+     th は体の傾き（ラジアン、前＝右が＋）、w はその速さ。x, v は車輪の位置と速さ。
+     ボタンは車輪を前後に加速させるだけ。体はその反動で傾く（右を押すと車輪が左へ出て、体が右へ）。
+     車輪には最高速度があり、そこに張りついたらもう同じ向きには加速できない＝立て直せない。
+     乗り手は鍋を持ったぶん少しのけぞって重心を車輪の上に保っている（前へ一方的には引かれない）。
+     箸を口へ運ぶと、腕のぶん重心が一瞬後ろへ動く。
+     熱いと体がはねる。路面のでこぼこでいつも揺さぶられる。
+     数字はテストの自動運転で決めた：食べずに乗るだけなら反応0.2秒でなんとかなり、0.3秒では数秒で倒れる。
+     食べきれるのは反応0.2秒前後で半分ほど。 */
   var P = {
-    K: 1.8,        /* 倒れようとする強さ */
-    C: 0.6,        /* 鍋の重みで前へ引かれる強さ（満杯のとき） */
-    B: 2.4,        /* 左右ボタンで体を傾ける強さ */
-    D: 1.0,        /* ぶれの収まり */
+    G: 3.5,        /* 重力で倒れようとする強さ（重さ÷高さ。大きいほど速く倒れる） */
+    A: 3.2,        /* ボタンで車輪を加速する強さ（m/s²） */
+    AL: 1.0,       /* 車輪の加速が体の傾きに効く割合（1÷高さ） */
+    VMAX: 2.2,     /* 車輪の最高速度（m/s） */
+    ROLL: 0.05,    /* 転がりの抵抗 */
+    ARM: 0.5,      /* 箸を口へ運ぶときに重心が後ろへ動くぶん */
+    D: 0.2,        /* 体のぶれの収まり（小さいほど揺れが残る） */
     FALL: 1.1,     /* これより傾いたら倒れる */
-    BITE: 0.8,     /* ひと口の秒数 */
+    BITE: 0.3,     /* ひと口の秒数 */
     HOT: 0.25,     /* 冷めているときに熱い見込み */
-    BURN: 0.4,     /* ひと口ごとにたまる熱さ */
-    COOL: 0.3,     /* 熱さが1秒で引くぶん */
-    JOLT: 1.0,     /* 熱くて体がはねる強さ */
-    GUST: 0.6,     /* 路面のでこぼこで常に揺さぶられる強さ */
+    BURN: 0.22,    /* ひと口ごとにたまる熱さ */
+    COOL: 0.45,    /* 熱さが1秒で引くぶん */
+    JOLT: 0.8,     /* 熱くて体がはねる強さ */
+    GUST: 0.4,     /* 路面のでこぼこで常に揺さぶられる強さ */
     GUSTT: 0.5     /* 揺さぶりの向きが変わるまでの目安（秒） */
   };
   var N = 16;                                  /* 具の数 = ひと口の数 */
@@ -213,16 +220,21 @@
 
     if (phase === "ride") {
       T += dt;
-      var load = 0.3 + 0.7 * (1 - eaten / N);
       /* でこぼこ：ときどき向きの変わる揺さぶりを、なめらかにつなぐ */
       if (Math.random() < dt / P.GUSTT) gustTo = (Math.random() * 2 - 1) * P.GUST;
       gust += (gustTo - gust) * Math.min(1, dt * 4);
-      var acc = gust + P.K * Math.sin(th) + P.C * load + P.B * dir * Math.cos(th) - P.D * w;
+      /* 車輪：ボタンで加速。最高速度に張りついたら、その向きへはもう加速できない */
+      var a = -P.A * dir;
+      if ((v >= P.VMAX && a > 0) || (v <= -P.VMAX && a < 0)) a = 0;
+      a -= P.ROLL * v;
+      v = Math.max(-P.VMAX, Math.min(P.VMAX, v + a * dt));
+      x += v * dt;
+      /* 体：重力・鍋の重み・腕の動き・車輪の加速の反動 */
+      var arm = biting ? Math.sin(Math.PI * Math.min(1, biteP / 0.72)) : 0;
+      var acc = gust + P.G * Math.sin(th) - P.ARM * arm * Math.cos(th)
+              - a * P.AL * Math.cos(th) - P.D * w;
       w += acc * dt;
       th += w * dt;
-      /* 体を後ろへ起こすときは車輪が前へ出る */
-      v = Math.max(-1.2, Math.min(2.2, v + (-dir * 1.3 - v * 0.4) * dt));
-      x += v * dt;
 
       if (biting) {
         var before = biteP;
@@ -496,7 +508,7 @@
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
     now: function () {
-      return { state: state, score: score, W: W, H: H, phase: phase, th: th, w: w, x: x,
+      return { state: state, score: score, W: W, H: H, phase: phase, th: th, w: w, x: x, v: v,
                eaten: eaten, N: N, T: T, dir: dir, biting: biting, burn: burn, hot: hot };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { animT += 1 / 60; update(1 / 60); draw(1 / 60); } },
@@ -515,15 +527,15 @@
       function send(type, key) { window.dispatchEvent(new KeyboardEvent(type, { key: key, bubbles: true })); }
       var t0 = Date.now();
       while (state !== S.RESULT && Date.now() - t0 < 60000) {
-        seen.push(th + 0.5 * w);
-        var sv = seen[Math.max(0, seen.length - 5)];
-        var want = state === S.PLAY && phase === "ride" ? (sv > 0.04 ? -1 : sv < -0.04 ? 1 : 0) : 0;
+        seen.push(th + 0.35 * w);
+        var sv = seen[Math.max(0, seen.length - 3)];
+        var want = state === S.PLAY && phase === "ride" ? (sv > 0.03 ? -1 : sv < -0.03 ? 1 : 0) : 0;
         if (want !== now) {
           if (now) send("keyup", now < 0 ? "ArrowLeft" : "ArrowRight");
           if (want) send("keydown", want < 0 ? "ArrowLeft" : "ArrowRight");
           now = want;
         }
-        if (phase === "ride" && !biting && Math.abs(th) < 0.15 && burn < 0.5) { send("keydown", " "); send("keyup", " "); }
+        if (phase === "ride" && !biting && Math.abs(th) < 0.1 && burn < 0.4) { send("keydown", " "); send("keyup", " "); }
         await r.wait(40);
       }
       await r.wait(1500);

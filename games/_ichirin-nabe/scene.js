@@ -259,15 +259,7 @@
     this.face.material = this.face.material.clone();
     this.skinColor = new T.Color(skin);
     this.hotColor = new T.Color("#ff6a50");
-    [-1, 1].forEach(function (s) {
-      self.part(head, "ball", "#1f1c1c", 0.128, 0.03, s * 0.048, 0.016, 0.024, 0.016);
-    });
-    this.cheeks = [-1, 1].map(function (s) {
-      var m = self.part(head, "ball", "#ff8f86", 0.11, -0.03, s * 0.085, 0.012, 0.02, 0.03);
-      m.material = m.material.clone();
-      return m;
-    });
-    this.mouth = this.part(head, "ball", "#5a1e1e", 0.135, -0.055, 0, 0.012, 0.012, 0.03);
+    /* 顔の部品（目・口・ほほ）は付けない。熱さは顔色と湯気と頭のふるえで見せる */
     /* ニット帽 */
     this.part(head, "ball", "#d8412f", -0.005, 0.045, 0, 0.145, 0.12, 0.145);
     this.part(head, "tube", "#f2ede4", 0, 0.05, 0, 0.148, 0.04, 0.148);
@@ -480,17 +472,8 @@
       A.hand.position.set(h[0], h[1], h[2]);
     });
 
-    /* 顔：熱いと赤く、口がはふはふ */
+    /* 顔：熱いと赤くなって、頭がふるえる */
     this.face.material.color.copy(this.skinColor).lerp(this.hotColor, hotK * 0.45);
-    this.cheeks.forEach(function (c) {
-      c.scale.set(0.012, 0.02 + hotK * 0.01, 0.03 + hotK * 0.012);
-      c.material.color.set(hotK > 0.1 ? "#ff4a3a" : "#ff8f86");
-    });
-    var chew = p >= 0.62 && p < 0.85 && v.phase === "ride";
-    var mo = chew ? 0.02 + Math.abs(Math.sin(v.t * 18)) * 0.02 : 0.01;
-    if (hotK > 0) mo = Math.max(mo, 0.018 + Math.abs(Math.sin(v.t * 22)) * 0.02 * hotK);
-    if (v.phase === "done") mo = 0.03;
-    this.mouth.scale.set(0.012, mo, 0.03);
     this.head.rotation.z = hotK * Math.sin(v.t * 30) * 0.12;
     this.head.rotation.x = 0;
 

@@ -1,11 +1,12 @@
 /* 一輪車で鍋：遊びとして成り立つかを、人の反応の遅れをまねた自動運転で測る。
      node games/_tools/tests/ichirin-nabe.js
    操作は ← → で体を傾け、スペース（真ん中）で食べる。
+   体は車輪の上に立てた棒として動く（ボタンは車輪を加速させるだけ）ので、かなり尖った辛さ。
    見るもの
      - 何もしない・片側を押しっぱなしでは、すぐ倒れる
-     - 食べずに釣り合いだけ取っていれば、ずっと倒れない
-     - 反応が速めの人（0.2秒）は、熱さを待って食べればほぼ食べきれる
-     - 反応0.3秒で半分ほど、0.4秒ではたまにしか食べきれない（でこぼこで揺さぶられる）
+     - 食べずに乗るだけなら、反応0.2秒で20秒もつ。0.3秒では数秒で倒れる
+     - 反応0.16〜0.2秒で熱さを待って食べれば、ときどき食べきれる
+     - 反応0.24秒ではほぼ食べきれない
      - 食べるボタンを連打すると熱くなって倒れやすい
      - タップの列で左右・食べるが分かれる */
 var load = require("../harness");
@@ -38,15 +39,17 @@ function check(ok, label, detail) {
   console.log((ok ? "OK  " : "NG  ") + label + (detail ? "  " + detail : ""));
   if (!ok) fails++;
 }
-function lean(o) { var sv = o.th + 0.5 * o.w; return sv > 0.04 ? -1 : sv < -0.04 ? 1 : 0; }
-function calm(o, n) { return !n.biting && Math.abs(o.th) < 0.15 && n.burn < 0.5; }
+function lean(o) { var sv = o.th + 0.35 * o.w; return sv > 0.03 ? -1 : sv < -0.03 ? 1 : 0; }
+function calm(o, n) { return !n.biting && Math.abs(o.th) < 0.1 && n.burn < 0.4; }
 
 var idle = play({ lean: function () { return 0; } }, 1);
 check(idle.phase === "fall", "何もしないと倒れる", idle.T.toFixed(1) + "秒で");
 var hold = play({ lean: function () { return -1; } }, 1);
 check(hold.phase === "fall", "左を押しっぱなしでも倒れる", hold.T.toFixed(1) + "秒で");
-var keep = play({ lean: lean, delay: 12, frames: 60 * 40 }, 1);
-check(keep.state === "play" && keep.phase === "ride", "食べなければ釣り合いは保てる（反応0.2秒で40秒）");
+var keep = play({ lean: lean, delay: 12, frames: 60 * 20 }, 1);
+check(keep.state === "play" && keep.phase === "ride", "食べずに乗るだけなら反応0.2秒で20秒もつ");
+var late = play({ lean: lean, delay: 18, frames: 60 * 20 }, 1);
+check(late.phase === "fall" && late.T < 10, "反応0.3秒では乗るだけでも倒れる", late.T.toFixed(1) + "秒で");
 
 function rate(delay, eat, n) {
   var ok = 0, times = [];
@@ -57,12 +60,12 @@ function rate(delay, eat, n) {
   var avg = times.length ? (times.reduce(function (a, b) { return a + b; }, 0) / times.length).toFixed(1) : "-";
   return { ok: ok, avg: avg, txt: ok + "/" + n + " 平均" + avg + "秒" };
 }
-var fast = rate(12, calm, 20), mid = rate(18, calm, 20), slow = rate(24, calm, 20);
+var fast = rate(10, calm, 20), mid = rate(12, calm, 20), slow = rate(15, calm, 20);
 var spam = rate(12, function (o, n) { return !n.biting; }, 20);
-console.log("    待って食べる  反応0.2秒 " + fast.txt + " / 0.3秒 " + mid.txt + " / 0.4秒 " + slow.txt);
-console.log("    連打で食べる  反応0.2秒 " + spam.txt);
-check(fast.ok >= 16, "反応0.2秒で待って食べればほぼ食べきれる");
-check(slow.ok <= 8, "反応0.4秒ではたまにしか食べきれない");
+console.log("    待って食べる  反応0.16秒 " + fast.txt + " / 0.2秒 " + mid.txt + " / 0.24秒 " + slow.txt);
+console.log("    連打で食べる  反応0.16秒 " + spam.txt);
+check(fast.ok >= 5 && mid.ok >= 5, "反応0.2秒前後で待って食べれば、ときどき食べきれる");
+check(slow.ok <= 4, "反応0.24秒ではほぼ食べきれない");
 check(spam.ok < fast.ok, "連打すると待って食べるより倒れやすい");
 
 /* タップの列 */
