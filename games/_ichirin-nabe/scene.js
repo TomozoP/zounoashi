@@ -662,11 +662,15 @@
     var surf = 0.03 + 0.055 * (1 - v.eaten / v.N);
     this.soup.position.y = surf;
     var hotK = Math.max(0, Math.min(1, v.hot));
-    var potLift = v.phase === "done" ? Math.min(1, v.doneT * 2) : 0;
+    /* 食べきったら：持ち上げて傾ける(0〜0.5秒) → 頭を反らして飲み干す(〜1.3秒) → 元の位置へ戻す(〜1.7秒) */
+    var dT = v.phase === "done" ? v.doneT : -1;
+    var potLift = dT < 0 ? 0 : dT < 0.5 ? ease(dT / 0.5) : dT < 1.3 ? 1 : dT < 1.7 ? 1 - ease((dT - 1.3) / 0.4) : 0;
+    var drink = dT < 0.5 ? 0 : Math.min(1, (dT - 0.5) / 0.8);          /* 飲み干すほど深く傾ける */
+    var gulp = dT >= 0.5 && dT < 1.3 ? potLift : 0;
     /* 食べきったら、鍋を口へ運んで汁を飲む */
     var potX = POT.x - potLift * 0.02, potY = POT.y + potLift * 0.36;
     if (!this.potFlying) this.pot.position.set(potX, potY, -0.02);
-    if (!this.potFlying) this.pot.rotation.z = potLift * 0.85;
+    if (!this.potFlying) this.pot.rotation.z = potLift * (0.85 + 0.55 * drink);
 
     var p = v.bite.p, rest = [potX - 0.02, potY + 0.2, 0.03];
     var inPot = [potX + 0.02, potY + surf + 0.01, 0.02];
@@ -726,6 +730,8 @@
     this.head.position.y = 1.2 - cw * 0.012;
     this.head.rotation.z += Math.sin(v.chew * 17) * ck * 0.06;
     this.head.rotation.x = 0;
+    /* 飲み干すあいだは頭を反らして、ごくごくと小さくうなずく */
+    this.head.rotation.z += gulp * (0.22 + Math.max(0, Math.sin(v.t * 14)) * 0.07);
     }
 
     /* 鍋が飛ぶ */
