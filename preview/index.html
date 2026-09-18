@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="shuto-20260918082402">
+<meta name="preview-version" content="ichirin-nabe-20260918225752">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>手刀を見逃さないゲーム</title>
+<title>一輪車で鍋</title>
 <style>
   html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -19,7 +19,6 @@
   #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #share-button[hidden] { display:none; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
-  #wrap.photo-cursor, #wrap.photo-cursor * { cursor:none; }
 </style>
 </head>
 <body>
@@ -28,14 +27,15 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/share.js?v=shuto-20260918082402"></script>
-<script src="../games/random-bowling/vendor/three.min.js?v=shuto-20260918082402"></script>
-<script src="./people3d.js?v=shuto-20260918082402"></script>
-<script src="../games/result-actions.js?v=shuto-20260918082402"></script>
-<script src="../games/action-icons.js?v=shuto-20260918082402"></script>
-<script src="../games/pad.js?v=shuto-20260918082402"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/share.js?v=ichirin-nabe-20260918225752"></script>
+<script src="../games/random-bowling/vendor/three.min.js?v=ichirin-nabe-20260918225752"></script>
+<script src="../games/random-bowling/vendor/cannon.js?v=ichirin-nabe-20260918225752"></script>
+<script src="./scene.js?v=ichirin-nabe-20260918225752"></script>
+<script src="../games/result-actions.js?v=ichirin-nabe-20260918225752"></script>
+<script src="../games/action-icons.js?v=ichirin-nabe-20260918225752"></script>
+<script src="../games/pad.js?v=ichirin-nabe-20260918225752"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* 手刀を見逃さないゲーム
+/* 一輪車で鍋
 
    書き換えるところの目印は3つ。
      ▼UPDATE … 進行と入力
@@ -49,37 +49,7 @@
   var ctx = canvas.getContext("2d");
   var wrap = document.getElementById("wrap");
   var shareButton = document.getElementById("share-button");
-  var people3D=null;
-  if(window.WebGLRenderingContext&&window.ShutoPeople3D){try{people3D=new window.ShutoPeople3D();}catch(e){}}
-  // 指先を操作位置に合わせ、録画にも写るようゲームの絵へ重ねる。
-  var handImage = new Image(), handReady = false;
-  var pointer = { x:0, y:0, visible:false, clickedAt:-Infinity };
-  function handPress() { return Math.max(0, 1-(performance.now()-pointer.clickedAt)/240); }
-  handImage.onload = function () { handReady = true; };
-  handImage.src = 'img/pointing-hand.webp?v=shuto-20260918082402';
-  function hideHand() {
-    pointer.visible = false; pointer.clickedAt = -Infinity; wrap.classList.remove('photo-cursor');
-    if (people) drawFrame();
-  }
-  function pointHand(e) {
-    if (e.pointerType !== 'mouse' || !handReady || state === S.INTRO) { hideHand(); return; }
-    var p = atCanvas(e);
-    pointer.x = p.x; pointer.y = p.y; pointer.visible = true;
-    wrap.classList.add('photo-cursor');
-    drawFrame();
-  }
-  wrap.addEventListener('pointermove', pointHand, true);
-  wrap.addEventListener('pointerdown', function (e) {
-    pointHand(e);
-    if (pointer.visible && e.button === 0) {
-      pointer.clickedAt = performance.now();
-      drawFrame();
-    }
-  }, true);
-  wrap.addEventListener('pointerleave', hideHand);
-  wrap.addEventListener('pointercancel', hideHand);
-  window.addEventListener('blur', hideHand);
-  document.addEventListener('visibilitychange', function () { if (document.hidden) hideHand(); });
+  window.zResultActions.bind(shareButton, doShare);
 
   /* ============ 画面 ============
      タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
@@ -101,6 +71,13 @@
     canvas.height = Math.round(H * scale * dpr);
     var k = canvas.width / W;
     ctx.setTransform(k, 0, 0, k, 0, 0);
+    if (view3d) view3d.resize(canvas.width, canvas.height, W, H);
+  }
+
+  /* 3Dの絵。使えない環境（テストの台など）では平らな絵で代わりに描く */
+  var view3d = null;
+  if (window.WebGLRenderingContext && window.THREE && window.NabeScene) {
+    try { view3d = new window.NabeScene(); } catch (e) { view3d = null; }
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
@@ -163,6 +140,191 @@
     s.connect(f); f.connect(g); g.connect(AC.destination);
     s.start(n); s.stop(n + dur + 0.05);
   }
+  /* ---- こぐ音と「アツっ」 ここから（音の試聴用に道具が切り出すので、目印を消さない） ---- */
+  var noiseBufs = [];
+  function noiseOf(ac) {
+    for (var i = 0; i < noiseBufs.length; i++) if (noiseBufs[i].ac === ac) return noiseBufs[i].buf;
+    var len = Math.floor(ac.sampleRate * 0.5), buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
+    for (var k = 0; k < len; k++) d[k] = Math.random() * 2 - 1;
+    noiseBufs.push({ ac: ac, buf: buf });
+    return buf;
+  }
+  /* こぐ音。クランク半回転ごとに「キ」「コ」と交互にきしむ */
+  function creak(ac, at, vol, high) {
+    var t = at, o = ac.createOscillator(), g = ac.createGain(), b = ac.createBiquadFilter();
+    o.type = "triangle";
+    var f = high ? 1650 : 1250;
+    o.frequency.setValueAtTime(f * (high ? 0.9 : 1.08), t);
+    o.frequency.exponentialRampToValueAtTime(f * (high ? 1.12 : 0.88), t + 0.06);
+    b.type = "bandpass"; b.frequency.value = f; b.Q.value = 3;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    o.connect(b); b.connect(g); g.connect(ac.destination);
+    o.start(t); o.stop(t + 0.1);
+    /* チェーンのカチッ */
+    var n = ac.createBufferSource(), nb = ac.createBiquadFilter(), ng = ac.createGain();
+    n.buffer = noiseOf(ac); nb.type = "highpass"; nb.frequency.value = 3000;
+    ng.gain.setValueAtTime(vol * 0.8, t); ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.015);
+    n.connect(nb); nb.connect(ng); ng.connect(ac.destination);
+    n.start(t); n.stop(t + 0.03);
+  }
+  /* 「アツっ」。声の元（のこぎり波）を口の形の響き（フォルマント）で絞って母音にする。
+     ア（口を開けて、驚いて高めから下がる）→ 一瞬止める → ツ（舌で止めてから息が擦れる）→ ウ（小さく）
+     big のときは「アッッツ！」：アを長く高く叫んで震わせ、ためを長く、ツを強く */
+  function atsu(ac, at, pitch, big) {
+    var t = at, f0 = (pitch || 340) * (big ? 1.3 : 1);
+    var out = ac.createGain();
+    out.gain.value = big ? 0.55 : 0.3;          /* ほかの効果音と大きさを揃える */
+    out.connect(ac.destination);
+    function vowel(t0, dur, fm, p0, p1, vol, shake) {
+      var o = ac.createOscillator(), env = ac.createGain();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(p0, t0);
+      o.frequency.exponentialRampToValueAtTime(p1, t0 + dur);
+      if (shake) {                              /* 叫び声の震え */
+        var lfo = ac.createOscillator(), lg = ac.createGain();
+        lfo.frequency.value = 11; lg.gain.value = p0 * shake;
+        lfo.connect(lg); lg.connect(o.frequency);
+        lfo.start(t0); lfo.stop(t0 + dur + 0.03);
+      }
+      env.gain.setValueAtTime(0.0001, t0);
+      env.gain.exponentialRampToValueAtTime(vol, t0 + 0.015);
+      env.gain.setValueAtTime(vol, t0 + dur * 0.55);
+      env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(env);
+      fm.forEach(function (f) {
+        var b = ac.createBiquadFilter(), g = ac.createGain();
+        b.type = "bandpass"; b.frequency.value = f[0]; b.Q.value = f[1]; g.gain.value = f[2];
+        env.connect(b); b.connect(g); g.connect(out);
+      });
+      o.start(t0); o.stop(t0 + dur + 0.03);
+    }
+    function hiss(t0, dur, freq, q, vol) {
+      var n = ac.createBufferSource(), b = ac.createBiquadFilter(), g = ac.createGain();
+      n.buffer = noiseOf(ac); b.type = "bandpass"; b.frequency.value = freq; b.Q.value = q;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      n.connect(b); b.connect(g); g.connect(out);
+      n.start(t0); n.stop(t0 + dur + 0.02);
+    }
+    /* ア：F1 800 / F2 1200 / F3 2600 あたり */
+    var aLen = big ? 0.3 : 0.16;
+    vowel(t, aLen, [[850, 5, 2.2], [1250, 6, 1.4], [2700, 8, big ? 0.9 : 0.6]], f0 * (big ? 1.45 : 1.3), f0 * 0.95, 0.9, big ? 0.04 : 0);
+    /* ッ：息を止める（無音）→ ツ：舌がはじける「t」と、続く「s」の擦れ */
+    var t1 = t + aLen + (big ? 0.14 : 0.07);
+    hiss(t1, big ? 0.03 : 0.02, 3500, 0.8, big ? 0.8 : 0.5);
+    hiss(t1 + 0.012, big ? 0.13 : 0.08, 6000, 1.5, big ? 0.7 : 0.45);
+    /* ウ：F1 350 / F2 1300（口をすぼめて小さく） */
+    vowel(t1 + (big ? 0.11 : 0.07), big ? 0.14 : 0.11, [[350, 5, 2.0], [1300, 7, 0.7], [2500, 8, 0.25]], f0 * 1.05, f0 * 0.85, big ? 0.45 : 0.35);
+  }
+  /* 倒れたときの「アアアアア～～～」。高いところから落ちていくように下がる長い叫び。
+     細かく音量を揺らして「アアアア」と途切れさせ、だんだん震えを強くして消える */
+  function scream(ac, at, pitch) {
+    var t = at, f0 = pitch || 520, dur = 1.7;
+    var out = ac.createGain(), trem = ac.createGain();
+    out.gain.value = 0.45;
+    trem.connect(out); out.connect(ac.destination);
+    var o = ac.createOscillator(), env = ac.createGain();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(f0 * 1.15, t);
+    o.frequency.exponentialRampToValueAtTime(f0, t + 0.12);
+    o.frequency.exponentialRampToValueAtTime(f0 * 0.5, t + dur);
+    /* 声の震え（あとほど深く） */
+    var vib = ac.createOscillator(), vg = ac.createGain();
+    vib.frequency.value = 6.5;
+    vg.gain.setValueAtTime(f0 * 0.01, t);
+    vg.gain.linearRampToValueAtTime(f0 * 0.05, t + dur);
+    vib.connect(vg); vg.connect(o.frequency);
+    /* 「アアアア」と途切れる揺れ */
+    var am = ac.createOscillator(), ag = ac.createGain();
+    am.frequency.setValueAtTime(8, t);
+    am.frequency.linearRampToValueAtTime(5, t + dur);
+    ag.gain.value = 0.35;
+    trem.gain.value = 0.65;
+    am.connect(ag); ag.connect(trem.gain);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(0.9, t + 0.03);
+    env.gain.setValueAtTime(0.9, t + dur * 0.55);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(env);
+    [[850, 5, 2.2], [1250, 6, 1.4], [2700, 8, 0.8]].forEach(function (fm) {
+      var b = ac.createBiquadFilter(), g = ac.createGain();
+      b.type = "bandpass"; b.frequency.value = fm[0]; b.Q.value = fm[1]; g.gain.value = fm[2];
+      env.connect(b); b.connect(g); g.connect(trem);
+    });
+    [o, vib, am].forEach(function (n) { n.start(t); n.stop(t + dur + 0.05); });
+  }
+  /* 「ごちそうさまでした」。声の元（のこぎり波）1本を、母音ごとの響き（フォルマント）に切り替えながら話させる。
+     子音は、ご・で＝短いはじき、ち・し＝息の擦れ、そ・さ＝細い擦れ、ま＝鼻に抜ける低い響き。
+     高さは丁寧にお礼を言うように、少しずつ下げていく */
+  var VOWELS = { a: [800, 1200, 2600], i: [300, 2300, 3000], u: [350, 1300, 2400], e: [500, 1900, 2600], o: [500, 850, 2500] };
+  function speak(ac, at, pitch, words) {
+    var t = at, f0 = pitch || 300;
+    words = words || [
+      ["g", "o", 0.13], ["ch", "i", 0.12], ["s", "o", 0.12], ["", "o", 0.14], ["s", "a", 0.12],
+      ["m", "a", 0.13], ["d", "e", 0.12], ["sh", "i", 0.09], ["t", "a", 0.2]
+    ];
+    var out = ac.createGain();
+    out.gain.value = 0.34;
+    out.connect(ac.destination);
+    var o = ac.createOscillator(), env = ac.createGain();
+    o.type = "sawtooth";
+    env.gain.value = 0.0001;
+    o.connect(env);
+    var bands = [0, 1, 2].map(function (k) {
+      var b = ac.createBiquadFilter(), g = ac.createGain();
+      b.type = "bandpass"; b.Q.value = [5, 6, 8][k]; g.gain.value = [2.2, 1.4, 0.6][k];
+      env.connect(b); b.connect(g); g.connect(out);
+      return b;
+    });
+    function hiss(t0, dur, freq, q, vol) {
+      var n = ac.createBufferSource(), b = ac.createBiquadFilter(), g = ac.createGain();
+      n.buffer = noiseOf(ac); b.type = "bandpass"; b.frequency.value = freq; b.Q.value = q;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      n.connect(b); b.connect(g); g.connect(out);
+      n.start(t0); n.stop(t0 + dur + 0.02);
+    }
+    var total = 0;
+    words.forEach(function (w) { total += w[2]; });
+    var start = t;
+    words.forEach(function (w, i) {
+      var c = w[0], vw = VOWELS[w[1]], dur = w[2];
+      var k = (t - start) / total;
+      var p = f0 * (1.12 - 0.3 * k);                 /* 少しずつ下がる */
+      o.frequency.setTargetAtTime(p, t, 0.02);
+      /* 子音 */
+      var cl = 0;
+      if (c === "s" || c === "sh" || c === "ch") {
+        cl = c === "ch" ? 0.05 : 0.07;
+        env.gain.setTargetAtTime(0.0001, t, 0.008);
+        if (c === "ch") hiss(t, 0.012, 3000, 0.8, 0.5);
+        hiss(t, cl, c === "s" ? 6500 : 3400, c === "s" ? 2 : 1.5, 0.55);
+      } else if (c === "g" || c === "d" || c === "t") {
+        cl = 0.03;
+        env.gain.setTargetAtTime(0.0001, t, 0.005);
+        hiss(t + 0.015, 0.02, c === "g" ? 1500 : 3500, 0.8, c === "t" ? 0.5 : 0.3);
+      } else if (c === "m") {
+        cl = 0.05;
+        /* 口を閉じて鼻に抜ける：低い響きだけにする */
+        env.gain.setTargetAtTime(0.35, t, 0.01);
+        bands[0].frequency.setTargetAtTime(250, t, 0.01);
+        bands[1].frequency.setTargetAtTime(1000, t, 0.01);
+        bands[2].frequency.setTargetAtTime(2200, t, 0.01);
+      }
+      /* 母音。「し」の i は声を小さく（ささやくように抜ける） */
+      var tv = t + cl, loud = c === "sh" ? 0.25 : 0.9;
+      bands.forEach(function (b, j) { b.frequency.setTargetAtTime(vw[j], tv, 0.015); });
+      env.gain.setTargetAtTime(loud, tv, 0.012);
+      t += dur;
+      if (i === words.length - 1) env.gain.setTargetAtTime(0.0001, t - 0.06, 0.03);
+    });
+    o.start(start); o.stop(t + 0.2);
+  }
+  /* ---- こぐ音と「アツっ」 ここまで ---- */
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -170,222 +332,233 @@
   });
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", SUCCESS: "success", RESULT: "result" };
-  var state, score, T, held, sinceResult=0, keyMode = false;
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
 
-  var PERSONAL_SPACE=40, MAX_LEVEL=7;
-  var level=1, CROWD_SIZE=20, FRAME_SECONDS=1/10, STRIKE_SECONDS=1/30, GUESS_SECONDS=5;
-  var people=[], attacker=-1, victim=-1, attackAt=0, elapsed=-1, outcome='', selected=0;
-  var clothes=['#b95038','#356f83','#d5a52f','#45614a','#57558a','#ac5872','#f0e2be'];
-  var crowdHeight=960;
-  var CY;                                      /* 高さから決まる置き場所 */
+  /* 釣り合いの決まりごと。一輪車に乗った人を、車輪の上に立てた棒（倒立振子）として計算する。
+     th は体の傾き（ラジアン、前＝右が＋）、w はその速さ。x, v は車輪の位置と速さ。
+     ボタンは車輪を前後に加速させるだけ。体はその反動で傾く（右を押すと車輪が左へ出て、体が右へ）。
+     車輪には最高速度があり、そこに張りついたらもう同じ向きには加速できない＝立て直せない。
+     乗り手は鍋を持ったぶん少しのけぞって重心を車輪の上に保っている（前へ一方的には引かれない）。
+     箸を口へ運ぶと、腕のぶん重心が一瞬後ろへ動く。
+     熱いと体がはねる。路面のでこぼこでいつも揺さぶられる。
+     数字はテストの自動運転で決めた：食べずに乗るだけなら反応0.2秒でなんとかなり、0.3秒では数秒で倒れる。
+     食べきれるのは反応0.2秒前後で半分ほど。 */
+  var BASE = {
+    G: 3.5,        /* 重力で倒れようとする強さ（重さ÷高さ。大きいほど速く倒れる） */
+    A: 3.2,        /* ボタンで車輪を加速する強さ（m/s²） */
+    AL: 1.0,       /* 車輪の加速が体の傾きに効く割合（1÷高さ） */
+    VMAX: 2.2,     /* 車輪の最高速度（m/s） */
+    ROLL: 0.05,    /* 転がりの抵抗 */
+    ARM: 0.5,      /* 箸を口へ運ぶときに重心が後ろへ動くぶん */
+    D: 0.2,        /* 体のぶれの収まり（小さいほど揺れが残る） */
+    FALL: 1.1,     /* これより傾いたら倒れる */
+    BITE: 0.3,     /* ひと口の秒数 */
+    HOT: 0.25,     /* 冷めているときに熱い見込み */
+    BURN: 0.22,    /* ひと口ごとにたまる熱さ */
+    COOL: 0.45,    /* 熱さが1秒で引くぶん */
+    JOLT: 0.8,     /* 熱くて体がはねる強さ */
+    GUST: 0.4,     /* 路面のでこぼこで常に揺さぶられる強さ */
+    GUSTT: 0.5     /* 揺さぶりの向きが変わるまでの目安（秒） */
+  };
+  /* 段階。ラーメンが BASE そのまま。コーヒーはやさしく、鍋は辛く。N はひと口の数。
+     テストの自動運転で、反応0.16秒の人が食べきれるのは20回中 コーヒー20・ラーメン14・鍋6 回くらい */
+  var LEVELS = {
+    coffee: { N: 10, G: 2.2, D: 0.35, ARM: 0.25, JOLT: 0.5, GUST: 0.2, HOT: 0.2 },
+    ramen:  { N: 16 },
+    nabe:   { N: 20, G: 3.6, ARM: 0.55, JOLT: 0.9, GUST: 0.5, HOT: 0.3, BURN: 0.26 }
+  };
+  var LEVEL_ORDER = ["coffee", "ramen", "nabe"];
+  var LEVEL_NAME = { coffee: "コーヒー", ramen: "ラーメン", nabe: "鍋" };
+  var level = "ramen";                         /* 選んでいる段階（最初はラーメン） */
+  var P = {}, N = 16;
+  function applyLevel() {
+    var k, L = LEVELS[level];
+    P = {};
+    for (k in BASE) P[k] = BASE[k];
+    for (k in L) if (k !== "N") P[k] = L[k];
+    N = L.N;
+  }
+  applyLevel();
+  var th, w, x, v, gust, gustTo, eaten, biteP, biting, burn, hot, phase, fallT, doneT, clearTime, puffNow, crank, creakHigh, lastBite;
+  var dir;                                     /* 左右の押している向き（-1, 0, 1） */
+  var fingers = {}, keys = { l: false, r: false };
+
+  /* 下に並ぶ3つのボタン。← 食べる → */
+  var PADS;
   function place() {
-    if(people)people.forEach(function(p){p.y=p.y/crowdHeight*H;});crowdHeight=H;
-    CY = Math.round(H * 0.5);                  /* ▼UPDATE: 置き場所の計算 */
+    var y = H - 118, r = 58;
+    PADS = [
+      { id: "left", x: W * 0.17, y: y, r: r },
+      { id: "eat", x: W * 0.5, y: y, r: r + 8 },
+      { id: "right", x: W * 0.83, y: y, r: r }
+    ];
   }
+  /* 段階を選ぶ3つの絵。開始画面は START の上、結果画面はボタンの下に小さく */
+  function levelIcons() {
+    var intro = state === S.INTRO;
+    var y = intro ? H - 250 : H * 0.62 + 150, r = intro ? 56 : 44;
+    return LEVEL_ORDER.map(function (id, i) { return { id: id, x: W * (0.2 + 0.3 * i), y: y, r: r }; });
+  }
+  function levelAt(px, py) {
+    var hit = null;
+    levelIcons().forEach(function (b) { if (Math.hypot(px - b.x, py - b.y) <= b.r + 10) hit = b.id; });
+    return hit;
+  }
+  /* 絵の中を縦3列に分け、どこを押してもその列のボタンになる（指が小さくずれても効く） */
+  function padAt(px) { return px < W / 3 ? "left" : px > W * 2 / 3 ? "right" : "eat"; }
 
-  function newRound(continueStreak, jumpLevel) {
+  function newRound(lv) {
+    if (lv) level = lv;
+    applyLevel();
+    shareButton.hidden = true;
     document.getElementById("start").hidden=true;
-    shareButton.hidden=true;
     state = S.PLAY;
-    if(!continueStreak){score=0;level=Math.min(MAX_LEVEL,jumpLevel||1);}
-    else level=Math.min(MAX_LEVEL,level+1);
-    CROWD_SIZE=level*20;
-    sinceResult=0;
+    score = 0;
     T = 0;
-    frameDebt=0;
     held = false;
-    attackAt=6+Math.random()*4; elapsed=-1; outcome=''; attacker=-1; victim=-1; selected=0;
-    replayTape=[];replayTaped=false;
-    people=[];
-    // 少人数でも自然に隣り合う人を用意し、手刀の相手がいない待ち時間を減らす。
-    var pairY=H*(.4+Math.random()*.2),pairVX=(Math.random()-.5)*5,pairVY=(Math.random()-.5)*12;
-    for(var i=0;i<CROWD_SIZE;i++){
-      var p=makePerson(i),tries=0;
-      do{var initial=groundAt(15+Math.random()*510,65+Math.random()*(H-80));p.x=initial.x;p.y=initial.y;tries++;}
-      while(tries<1000&&people.some(function(q){return Math.hypot(p.x-q.x,p.y-q.y)<PERSONAL_SPACE+2;}));
-      if(i<2){p.x=W/2+(i===0?-33:33);p.y=pairY;p.vx=pairVX;p.vy=pairVY;}
-      else if(tries>=1000)enter(p);
-      people.push(p);
-    }
+    fingers = {}; keys = { l: false, r: false }; dir = 0;
+    th = 0; w = (Math.random() < 0.5 ? -1 : 1) * 0.05;
+    x = 0; v = 0;
+    gust = 0; gustTo = 0;
+    eaten = 0; biteP = 0; biting = false; burn = 0; hot = 0;
+    phase = "ride"; fallT = 0; doneT = 0; clearTime = 0; puffNow = false;
+    crank = 0; creakHigh = false; lastBite = -9;
   }
 
-  /* ============ 手刀のリプレイ ============
-     手刀のコマまでを控えておき、勝敗が決まったら遅く流してから結果を出す。
-     控えるのは人の居場所と向き、歩きの時計、手刀の進み具合だけ。
-     3Dの模型は毎コマこれらから組み直すので、戻せばそのまま同じ絵になる。 */
-  var REPLAY_LEAD=6, REPLAY_SLOW=3, REPLAY_HOLD=1.2, REPLAY_WAIT=1.5;   /* 止めは流しのコマ間隔で割り切れる長さにする */
-  var replayTape=[], replayTaped=false;
-  function replayRun(){return (replayTape.length-1)*FRAME_SECONDS*REPLAY_SLOW;}
-  function replayCycle(){return replayRun()+REPLAY_HOLD;}   /* 流し＋止めの一巡 */
+  function readDir() {
+    var l = keys.l, r = keys.r;
+    for (var id in fingers) { if (fingers[id] === "left") l = true; if (fingers[id] === "right") r = true; }
+    dir = (r ? 1 : 0) - (l ? 1 : 0);
+  }
 
-  function record(){
-    if(replayTaped)return;
-    replayTape.push({T:T,elapsed:elapsed,
-      spots:people.map(function(p){return {x:p.x,y:p.y,vx:p.vx,vy:p.vy};})});
-    if(elapsed>=0){replayTaped=true;return;}   /* 手刀のコマを控えたら、そこで止める */
-    if(replayTape.length>REPLAY_LEAD)replayTape.shift();
-  }
-  function moveCrowd(spots){
-    spots.forEach(function(s,id){
-      var p=people[id];
-      if(!p)return;
-      p.x=s.x;p.y=s.y;p.vx=s.vx;p.vy=s.vy;
-    });
-  }
-  function finish(next){
-    state=next;sinceResult=0;
-  }
-  // 札が出てから1.5秒は本物の姿。そこから控えたコマを順に見せ、手刀のコマで少し止め、
-  // また頭から流しなおす。次へを押すまで繰り返す。
-  // 流すものが無ければ -1 を返し、本物の姿のまま描く。
-  function replayAt(){
-    if(state!==S.SUCCESS&&state!==S.RESULT)return -1;
-    if(!replayTaped||replayTape.length<2)return -1;
-    var t=sinceResult-REPLAY_WAIT;
-    if(t< -1e-9)return -1;
-    var at=Math.floor(((t+1e-9)%replayCycle())/(FRAME_SECONDS*REPLAY_SLOW));
-    return Math.min(replayTape.length-1,at);
-  }
-  // 控えたコマの姿に一時だけ差し替えて描く。札と進行、覗き穴には触らない。
-  function drawFrame(){
-    var at=replayAt();
-    if(at<0||!replayTape[at]){draw();return;}
-    var liveT=T, liveElapsed=elapsed;
-    var live=people.map(function(p){return {x:p.x,y:p.y,vx:p.vx,vy:p.vy};});
-    T=replayTape[at].T;elapsed=replayTape[at].elapsed;
-    moveCrowd(replayTape[at].spots);
-    try{draw();}
-    finally{T=liveT;elapsed=liveElapsed;moveCrowd(live);}
-  }
   /* ============ 進行 ============ */
   function update(dt) {
-    if(state===S.SUCCESS||state===S.RESULT){sinceResult+=dt;return;}
     if (state !== S.PLAY) return;
-    T += dt;
+    hot = Math.max(0, hot - dt / 1.2);
+    burn = Math.max(0, burn - dt * P.COOL);
 
-    walkCrowd(dt);
-    if(elapsed<0 && T>=attackAt){
-      var pairs=[];
-      people.forEach(function(p){
-        var screen=position(p);
-        if(screen.x<120||screen.x>W-120||screen.y<170||screen.y>H-130)return;
-        var end=position({x:p.x+p.vx*GUESS_SECONDS,y:p.y+p.vy*GUESS_SECONDS});
-        if(end.x<64||end.x>W-64||end.y<130||end.y>H-60)return;
-        people.forEach(function(q){
-          var distance=Math.hypot(p.x-q.x,p.y-q.y);
-          if(p.id!==q.id&&distance>=PERSONAL_SPACE-1&&distance<88&&Math.abs(p.y-q.y)<28)pairs.push([p.id,q.id]);
-        });
-      });
-      if(pairs.length){
-        var pair=pairs[Math.floor(Math.random()*pairs.length)];attacker=pair[0];victim=pair[1];
-        elapsed=0;
+    if (phase === "ride") {
+      T += dt;
+      /* でこぼこ：ときどき向きの変わる揺さぶりを、なめらかにつなぐ */
+      if (Math.random() < dt / P.GUSTT) gustTo = (Math.random() * 2 - 1) * P.GUST;
+      gust += (gustTo - gust) * Math.min(1, dt * 4);
+      /* 車輪：ボタンで加速。最高速度に張りついたら、その向きへはもう加速できない */
+      var a = -P.A * dir;
+      if ((v >= P.VMAX && a > 0) || (v <= -P.VMAX && a < 0)) a = 0;
+      a -= P.ROLL * v;
+      v = Math.max(-P.VMAX, Math.min(P.VMAX, v + a * dt));
+      x += v * dt;
+      /* クランクが半回転するごとにきしむ（車輪の半径0.3m） */
+      crank += Math.abs(v) * dt / 0.3;
+      if (crank >= Math.PI) {
+        crank -= Math.PI;
+        creakHigh = !creakHigh;
+        if (AC) creak(AC, AC.currentTime, Math.min(0.1, 0.04 + 0.04 * Math.abs(v)), creakHigh);
       }
-    }else if(elapsed>=0){
-      elapsed+=dt;
-      if(elapsed>=GUESS_SECONDS-1e-9){elapsed=GUESS_SECONDS;outcome='miss';finish(S.RESULT);}
+      /* 体：重力・鍋の重み・腕の動き・車輪の加速の反動 */
+      var arm = biting ? Math.sin(Math.PI * Math.min(1, biteP / 0.72)) : 0;
+      var acc = gust + P.G * Math.sin(th) - P.ARM * arm * Math.cos(th)
+              - a * P.AL * Math.cos(th) - P.D * w;
+      w += acc * dt;
+      th += w * dt;
+
+      if (biting) {
+        var before = biteP;
+        biteP += dt / P.BITE;
+        if (before < 0.72 && biteP >= 0.72) eat();
+        if (biteP >= 1) { biteP = 0; biting = false; }
+      }
+      if (phase === "ride" && Math.abs(th) > P.FALL) {
+        phase = "fall";
+        biting = false;
+        noiseHit(0.5, 380, 0.35, 0.8);
+        if (AC) scream(AC, AC.currentTime + 0.02, 480 + Math.random() * 80);
+      }
+    } else if (phase === "fall") {
+      fallT += dt;
+      w += 5 * Math.sin(th) * dt;
+      th += w * dt;
+      if (Math.abs(th) > 1.5) {
+        if (Math.abs(w) > 0.8) noiseHit(0.25, 250, 0.3, 0.8);
+        th = (th > 0 ? 1 : -1) * 1.5;
+        w = -w * 0.2;
+      }
+      v *= 1 - Math.min(1, dt * 3);
+      x += v * dt;
+      if (fallT > 1.4) endRound();
+    } else if (phase === "done") {
+      doneT += dt;
+      th += (0 - th) * Math.min(1, dt * 4);
+      w = 0;
+      v *= 1 - Math.min(1, dt * 2);
+      x += v * dt;
+      if (doneT > 3.4) endRound();              /* 「ごちそうさまでした」を言い終えてから */
     }
-    record();
   }
 
-  // 行き先は画面外。退場してから、別の入口の外側へ戻す。
-  function makePerson(id){
-    // ゆったり、大股、小刻み、弾む歩き、肩を揺らす歩き。
-    var styles=[
-      {speed:20,pace:4.2,stride:.6,arm:.45,bounce:.4,sway:.012,lean:.025},
-      {speed:32,pace:5.1,stride:1.35,arm:1.2,bounce:1.1,sway:.02,lean:.065},
-      {speed:29,pace:8.4,stride:.55,arm:.55,bounce:.7,sway:.012,lean:.04},
-      {speed:27,pace:6.3,stride:.95,arm:1.05,bounce:2.8,sway:.025,lean:.015},
-      {speed:22,pace:4.7,stride:.85,arm:.75,bounce:.5,sway:.065,lean:-.02}
-    ];
-    var gait=styles[id%styles.length],variation=.9+Math.random()*.2;
-    var builds=[{width:.78,waist:7,belly:8},{width:1,waist:8,belly:9},{width:1.3,waist:7,belly:9},{width:1.2,waist:11,belly:14}];
-    var build=builds[Math.floor(Math.random()*builds.length)];
-    var angle=Math.random()*Math.PI*2,speed=gait.speed*variation;
-    return {id:id,x:0,y:0,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,speed:speed,
-      build:build.width,waist:build.waist,belly:build.belly,stature:.87+Math.random()*.26,
-      gait:id%styles.length,pace:gait.pace*variation,stride:gait.stride*(.9+Math.random()*.2),
-      arm:gait.arm,bounce:gait.bounce,sway:gait.sway,lean:gait.lean,asymmetry:Math.random()*.18,
-      phase:Math.random()*6.28,color:clothes[Math.floor(Math.random()*clothes.length)],
-      hair:Math.floor(Math.random()*5),hairStyle:Math.floor(Math.random()*5),
-      hat:Math.random()<.32?1+Math.floor(Math.random()*3):0,
-      hatColor:['#394b61','#dcc592','#824b42','#dedbd1','#4c6451'][Math.floor(Math.random()*5)],
-      pattern:Math.floor(Math.random()*6),patternColor:Math.random()<.55?'#eee5d2':'#384951',
-      skin:['#dbb395','#bf9276','#e5c6a8'][Math.floor(Math.random()*3)],
-      trousers:['#384248','#575650','#4b505c'][Math.floor(Math.random()*3)],generation:0};
+  function startBite() {
+    if (phase !== "ride" || biting || eaten >= N) return;
+    biting = true;
+    biteP = 0;
+    tone(520, 0.04, 0.04, "triangle", 620);
   }
-  function enter(p){
-    p.generation++;
-    var target=groundAt(80+Math.random()*380,140+Math.random()*(H-260)),attempt=0;
-    do{
-      var edge=Math.floor(Math.random()*4);
-      var entry=groundAt(edge===0?-200:edge===1?W+200:Math.random()*W,
-        edge===2?-220:edge===3?H+360:Math.random()*H);
-      p.x=entry.x;p.y=entry.y;
-      attempt++;
-    }while(attempt<200&&people.some(function(q){return p!==q&&Math.hypot(p.x-q.x,p.y-q.y)<PERSONAL_SPACE+2;}));
-    var dx=target.x-p.x,dy=target.y-p.y,d=Math.hypot(dx,dy);
-    p.vx=dx/d*p.speed;p.vy=dy/d*p.speed;
-  }
-  function walkCrowd(dt){
-    people.forEach(function(p){
-      if(p.id===victim)return;
-      p.x+=p.vx*dt;p.y+=p.vy*dt;
-      var screen=position(p);
-      if(screen.depth<100||screen.x< -240||screen.x>W+240||screen.y< -260||screen.y>H+420)enter(p);
-    });
-    // 近づいた人同士が少しずつ道を譲り、肩が触れるくらいの間隔ですれ違う。
-    for(var pass=0;pass<5;pass++)for(var i=0;i<people.length;i++)for(var j=i+1;j<people.length;j++){
-      var p=people[i],q=people[j],dx=p.x-q.x,dy=p.y-q.y,d=Math.hypot(dx,dy);
-      if(d>=PERSONAL_SPACE)continue;
-      if(d<.001){dx=1;dy=0;d=1;}
-      var shift=(PERSONAL_SPACE-d)/2,px=dx/d*shift,py=dy/d*shift;
-      if(p.id!==victim){p.x+=px*(q.id===victim?2:1);p.y+=py*(q.id===victim?2:1);}
-      if(q.id!==victim){q.x-=px*(p.id===victim?2:1);q.y-=py*(p.id===victim?2:1);}
+
+  function eat() {
+    eaten++;
+    lastBite = animT;
+    noiseHit(0.1, 1600, 0.12, 2);
+    /* ひと口ごとに「アツ」。熱いのを引いたら「アッッツ！」 */
+    var burned = Math.random() < Math.min(0.9, P.HOT + burn * 0.6);
+    if (burned) {
+      hot = 1;
+      puffNow = true;
+      w += (Math.random() < 0.5 ? -1 : 1) * P.JOLT * (0.5 + burn * 0.6) * (0.8 + 0.4 * Math.random());
     }
+    if (AC) atsu(AC, AC.currentTime + 0.02, 310 + Math.random() * 80, burned);
+    burn = Math.min(1.5, burn + P.BURN);
+    if (eaten >= N) {
+      phase = "done";
+      biting = false; biteP = 0;
+      clearTime = T;
+      tone(660, 0.14, 0.12, "triangle");
+      tone(880, 0.14, 0.12, "triangle", null, 0.12);
+      tone(1320, 0.3, 0.12, "triangle", null, 0.24);
+      if (AC) speak(AC, AC.currentTime + 1.8, 290 + Math.random() * 30);    /* 汁を飲み干して、鍋を元に戻してから「ごちそうさまでした」 */
+    }
+  }
+
+  function endRound() {
+    state = S.RESULT;
+    fingers = {}; keys = { l: false, r: false }; dir = 0;
+    score = phase === "done" ? Math.round(clearTime * 10) / 10 : Math.round(eaten / N * 100);
+  }
+  function scoreText() {
+    return phase === "done" ? score.toFixed(1) + "秒" : score + "%";
   }
 
   /* ============ 入力 ============
-     タップとスペースキーで同じことができるようにする。
-     x が null のときはキー操作（場所を指さない）。 */
-  function down(x, y) {
+     左右は ← → キー、食べるのはスペース（ジョイパッドは十字キーとボタン）。
+     タップは列で決まる：左の列＝←、真ん中＝食べる、右の列＝→。左右は押している間だけ効く。 */
+  function down(px, py, id) {
     if(state===S.INTRO)return;
     audioOn();
-    if (state === S.SUCCESS) {
-      /* 札が出た直後の誤って触ったぶんでは飛ばさない。流れはじめてからだけ受ける */
-      if (replayAt() >= 0 && (x == null || inButton(nextButton(), x, y))) newRound(true);
-      return;
-    }
     if (state === S.RESULT) {
-      var hit = x == null ? "retry" : hitButton(x, y);
+      var lv = px == null ? null : levelAt(px, py);
+      if (lv) { newRound(lv); return; }
+      var hit = px == null ? "retry" : hitButton(px, py);
       if (hit === "retry") newRound();
       return;
     }
-    held = true;
-    if(elapsed<0)return;
-    var id=-1;
-    if(x==null)id=selected;
-    else if(people3D)id=people3D.pick(x,y,W,H);
-    else{
-      var nearest=Infinity;
-      people.forEach(function(p){if(p.id===victim)return;var q=position(p),distance=Math.hypot((x-q.x)/q.scale,(y-(q.y-44*q.scale*p.stature))/q.scale);
-        if(Math.abs(x-q.x)<=31*q.scale&&Math.abs(y-(q.y-44*q.scale*p.stature))<=43*q.scale*p.stature&&distance<nearest){nearest=distance;id=p.id;}});
-    }
-    if(id<0||id===victim)return;
-    var caught=id===attacker;
-    outcome=caught?'caught':'wrong';
-    if(caught)score++;
-    finish(caught?S.SUCCESS:S.RESULT);
-    tone(caught?880:160,.18,.09,'sine');
+    if (phase !== "ride") return;
+    var pad = px == null ? "eat" : padAt(px);
+    if (pad === "eat") { startBite(); return; }
+    fingers[id] = pad;
+    readDir();
   }
-  function move(x, y) {
-    if (state !== S.PLAY || !held) return;
-    /* ▼UPDATE: なぞっているときの処理（要らなければ空のまま） */
-  }
-  function up() {
-    if (!held) return;
-    held = false;
-    /* ▼UPDATE: 離したときの処理（要らなければ空のまま） */
+  function up(id) {
+    if (id === undefined) fingers = {}; else delete fingers[id];
+    readDir();
   }
 
   function atCanvas(e) {
@@ -393,59 +566,54 @@
     return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
   }
   wrap.addEventListener("pointerdown", function (e) {
-    if(e.isPrimary===false||e.button>0)return;
     e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y);
+    var p = atCanvas(e); down(p.x, p.y, e.pointerId);
   });
-  wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
-  });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { up(); });
-  window.addEventListener("blur", function () { up(); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(e.pointerId); });
+  wrap.addEventListener("pointercancel", function (e) { up(e.pointerId); });
+  window.addEventListener("blur", function () { keys = { l: false, r: false }; up(); });
 
   window.addEventListener("keydown", function (e) {
-    if(/^[0-9]$/.test(e.key)&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
-      e.preventDefault();
-      if(!e.repeat){audioOn();newRound(false,e.key==='0'?10:Number(e.key));}
-      return;
-    }
     var esc = e.key === "Escape";
-    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter" || e.key === "ArrowUp";
     var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
     var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
-    var vertical=e.key==='ArrowUp'?-6:e.key==='ArrowDown'?6:0;
-    if(vertical){e.preventDefault();keyMode=true;if(state===S.PLAY)selected=(selected+vertical+people.length)%people.length;return;}
     if (!esc && !go && !left && !right) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
+    if ((left || right) && state === S.INTRO) {  /* 開始画面では段階を選ぶ */
+      if (!e.repeat) {
+        var i = LEVEL_ORDER.indexOf(level) + (left ? -1 : 1);
+        level = LEVEL_ORDER[Math.max(0, Math.min(LEVEL_ORDER.length - 1, i))];
+        applyLevel();
+        tone(520, 0.05, 0.05, "triangle");
+      }
+      return;
+    }
     if (left || right) {
-      if (state !== S.PLAY) return;
-      selected=(selected+(left?-1:1)+people.length)%people.length;
+      if (left) keys.l = true; else keys.r = true;
+      readDir();
       return;
     }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    if (e.key === "ArrowUp" && state !== S.PLAY) return;
     down();
   });
   window.addEventListener("keyup", function (e) {
-    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (left || right) { if (left) keys.l = false; else keys.r = false; readDir(); return; }
+    if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
   });
 
-  function resultText(){
-    return outcome==='caught'?'見逃さなかった':'見逃した';
-  }
-  // スマホでもユーザー操作として扱われる、通常のクリックから直接開く。
-  window.zResultActions.bind(shareButton,function(){
-    if(state===S.RESULT)doShare();
-  });
-  function syncShareButton(){
-    window.zResultActions.place(shareButton,resultButtons()[1],W,H,state===S.RESULT);
-  }
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    window.zResultActions.x({ text: score + "回連続で見逃さなかった #手刀を見逃さないゲーム" });
+    var nm = LEVEL_NAME[level], verb = level === "coffee" ? "飲" : "食べ";
+    var text = phase === "done" ? "一輪車に乗ったまま" + nm + "を" + scoreText() + "で" + verb + (level === "coffee" ? "みきりました" : "きりました")
+                                : "一輪車に乗ったまま" + nm + "を" + scoreText() + verb + (level === "coffee" ? "みました" : "ました");
+    window.zResultActions.x({ text: text + " #一輪車で鍋" });
   }
 
   /* ============ 描画 ============ */
@@ -459,179 +627,123 @@
     ctx.closePath();
   }
 
-  // 地面を高さ0の平面として、上方48度の透視カメラから投影する。
-  // 人物は従来の絵をカメラへ向けて立て、同じ深度で拡縮する。
-  function position(p){
-    var focal=Math.max(1000,H),z=H/2-p.y;
-    var depth=focal+z*Math.cos(48*Math.PI/180),scale=focal/Math.max(1,depth);
-    return {x:W/2+(p.x-W/2)*scale,y:H/2-z*Math.sin(48*Math.PI/180)*scale,scale:scale,depth:depth};
-  }
-  function groundAt(x,y){
-    var focal=Math.max(1000,H),dy=y-H/2;
-    var worldY=dy/(Math.sin(48*Math.PI/180)+dy*Math.cos(48*Math.PI/180)/focal);
-    var scale=focal/(focal-worldY*Math.cos(48*Math.PI/180));
-    return {x:W/2+(x-W/2)/scale,y:H/2+worldY};
-  }
-  function line(x,y,x2,y2,color,width){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x2,y2);ctx.stroke();}
-  function drawTown(){
-    var floor=ctx.createLinearGradient(0,0,0,H);
-    floor.addColorStop(0,'#cbd0cc');floor.addColorStop(1,'#b8bdb8');
-    ctx.fillStyle=floor;ctx.fillRect(0,0,W,H);
-    var far=groundAt(0,-20),near=groundAt(0,H+20);
-    var left=Math.min(far.x,near.x)-180,right=W-left;
-    for(var y=Math.floor(far.y/30)*30;y<near.y+30;y+=30){
-      var a=position({x:left,y:y}),b=position({x:right,y:y});
-      line(a.x,a.y,b.x,b.y,'#959b91',Math.max(.5,a.scale));
-      for(var x=Math.floor(left/60)*60+(Math.floor(y/30)%2)*30;x<right;x+=60){
-        var corners=[position({x:x+2,y:y+2}),position({x:x+58,y:y+2}),position({x:x+58,y:y+28}),position({x:x+2,y:y+28})];
-        ctx.beginPath();corners.forEach(function(p,i){if(i)ctx.lineTo(p.x,p.y);else ctx.moveTo(p.x,p.y);});ctx.closePath();
-        var shade=Math.sin(x*.13+y*.17)>0;
-        ctx.fillStyle=shade?'rgba(239,237,216,.12)':'rgba(60,65,53,.045)';ctx.fill();
-        line(corners[0].x,corners[0].y,corners[1].x,corners[1].y,'rgba(244,241,220,.40)',Math.max(.5,corners[0].scale*1.5));
-        line(corners[2].x,corners[2].y,corners[3].x,corners[3].y,'rgba(58,64,52,.16)',Math.max(.5,corners[2].scale*1.5));
-        a=position({x:x,y:y});b=position({x:x,y:y+30});
-        line(a.x,a.y,b.x,b.y,'#959b91',Math.max(.5,a.scale));
-      }
-    }
-  }
-  // 模様は服の輪郭で切り取り、歩いても本人の組み合わせを保つ。
-  function drawClothes(p){
-    if(!p.pattern)return;
-    ctx.save();ctx.clip();ctx.fillStyle=p.patternColor;
-    if(p.pattern===1||p.pattern===3){
-      for(var y=-65;y<-40;y+=7)ctx.fillRect(-20,y,40,p.pattern===3?1.6:2.7);
-    }
-    if(p.pattern===2||p.pattern===3){
-      for(var x=-12;x<=12;x+=6)ctx.fillRect(x,-70,p.pattern===3?1.6:2.2,32);
-    }
-    if(p.pattern===4){
-      for(var row=0;row<4;row++)for(var col=0;col<4;col++){
-        ctx.beginPath();ctx.arc(-10+col*7+(row%2)*3,-64+row*7,1.5,0,Math.PI*2);ctx.fill();
-      }
-    }
-    if(p.pattern===5){ctx.fillRect(-20,-61,40,9);ctx.fillRect(-20,-44,40,4);}
-    ctx.restore();
-  }
-  function drawHead(p,side){
-    var hairColor=['#303632','#654a39','#a9936a','#b9b7aa','#8b533d'][p.hair];
-    var back=p.vy< -8;
-    ctx.fillStyle=hairColor;
-    if(p.hairStyle===2){roundRect(-7,-87,14,20,4);ctx.fill();}
-    if(p.hairStyle===3){
-      ctx.beginPath();ctx.ellipse(-side*8,-78,3,8,-side*.3,0,Math.PI*2);ctx.fill();
-      line(-side*7,-82,-side*9,-81,p.hatColor,2);
-    }
-    ctx.fillStyle=p.skin;ctx.beginPath();ctx.ellipse(0,-81,5.8,7.3,side*.08,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle=hairColor;
-    if(p.hairStyle===4){
-      for(var i=0;i<5;i++){ctx.beginPath();ctx.arc(-5+i*2.5,-86-(i%2)*1.5,3,0,Math.PI*2);ctx.fill();}
-    }else{
-      ctx.beginPath();ctx.ellipse(-side,-84,6,p.hairStyle===1?7:4.8,0,Math.PI,Math.PI*2);ctx.fill();
-      if(p.hairStyle===1){ctx.beginPath();ctx.moveTo(-6,-85);ctx.lineTo(5,-86);ctx.lineTo(-side*4,-79);ctx.closePath();ctx.fill();}
-    }
-    if(back){roundRect(-5.5,-86,11,p.hairStyle===2?18:11,3);ctx.fill();}
-    else{ctx.fillStyle='#49473f';ctx.fillRect(side*3,-81,1.2,1.2);}
-    ctx.fillStyle=p.hatColor;
-    if(p.hat===1){
-      ctx.beginPath();ctx.ellipse(0,-86,7,5,0,Math.PI,Math.PI*2);ctx.fill();
-      line(-6,-86,side*12,-86,p.hatColor,3);
-    }else if(p.hat===2){
-      roundRect(-6,-95,12,9,2);ctx.fill();
-      line(-11,-86,11,-86,p.hatColor,3);
-      line(-5,-89,5,-89,'#504a40',2);
-    }else if(p.hat===3){
-      ctx.beginPath();ctx.ellipse(0,-85,7,8,0,Math.PI,Math.PI*2);ctx.fill();
-      line(-6,-85,6,-85,p.hatColor,4);
-      ctx.beginPath();ctx.arc(0,-94,2.6,0,Math.PI*2);ctx.fill();
-    }
-  }
-  function fallProgress(){return Math.max(0,Math.min(1,(elapsed-.4)/1.1));}
-  // 影も地面上の座標から投影し、人物より先に描く。
-  function drawShadow(p){
-    var q=position(p);
-    if(q.depth<100||q.x< -120||q.x>W+120||q.y< -80||q.y>H+200)return;
-    ctx.save();ctx.fillStyle='rgba(35,40,33,.22)';
-    ctx.beginPath();ctx.ellipse(q.x,q.y,15*q.scale*p.build,6*q.scale,0,0,Math.PI*2);
-    ctx.fill();ctx.restore();
-  }
-  function drawPerson(p){
-    var q=position(p),fallen=p.id===victim&&elapsed>=0;
-    if(q.depth<100||q.x< -95*q.scale||q.x>W+95*q.scale||q.y< -10*q.scale||q.y>H+120*q.scale)return;
-    var cycle=T*p.pace+p.phase,walk=Math.sin(cycle),side=p.vx<0?-1:1;
-    var stride=walk*p.stride,arm=Math.sin(cycle+.18)*p.arm;
-    ctx.save();ctx.translate(q.x,q.y);ctx.scale(q.scale,q.scale);
-    if(fallen){var fall=fallProgress();ctx.translate(0,-5*fall);ctx.rotate(fall*fall*(3-2*fall)*Math.PI/2);walk=0;stride=0;arm=0;}
-    // 頭は全身の約七分の一。膝・肘を曲げながら歩く。
-    var bob=fallen?0:Math.abs(walk)*p.bounce;
-    ctx.translate(0,-bob);
-    ctx.scale(p.build,p.stature);
-    if(!fallen)ctx.rotate(side*p.lean+Math.sin(cycle)*p.sway);
-    line(-5,-39,-6+stride*4,-21,p.trousers,7);
-    line(-6+stride*4,-21,-6+stride*8,-3,p.trousers,6);
-    line(5,-39,6-stride*4*(1-p.asymmetry),-21,p.trousers,7);
-    line(6-stride*4*(1-p.asymmetry),-21,6-stride*8*(1-p.asymmetry),-3,p.trousers,6);
-    line(-6+stride*8,-2,-6+stride*8+side*5,-1,'#303533',4);
-    line(6-stride*8*(1-p.asymmetry),-2,6-stride*8*(1-p.asymmetry)+side*5,-1,'#303533',4);
-    ctx.fillStyle=p.color;ctx.beginPath();ctx.moveTo(-10,-69);ctx.lineTo(10,-69);ctx.quadraticCurveTo(p.belly+3,-52,p.waist,-40);ctx.lineTo(-p.waist,-40);ctx.quadraticCurveTo(-p.belly-3,-52,-10,-69);ctx.closePath();ctx.fill();
-    drawClothes(p);
-    line(-10,-65,-13-arm*4,-51,p.color,6);line(-13-arm*4,-51,-12-arm*7,-38,p.skin,4);
-    if(p.id===attacker&&elapsed>=0&&elapsed<STRIKE_SECONDS-1e-9){
-      var other=position(people[victim]),dx=(other.x-q.x)/(p.build*q.scale),dy=(other.y-q.y)/(p.stature*q.scale);
-      line(dx<0?-9:9,-64,dx*.48,dy*.5-65,p.color,6);
-      line(dx*.48,dy*.5-65,dx,dy-72*people[victim].stature*other.scale/(p.stature*q.scale),p.skin,4);
-    }else{line(10,-65,13+arm*4,-51,p.color,6);line(13+arm*4,-51,12+arm*7,-38,p.skin,4);}
-    line(0,-71,0,-75,p.skin,5);
-    ctx.save();ctx.scale(1/Math.sqrt(p.build),1);
-    drawHead(p,side);
-    ctx.restore();
-    ctx.restore();
-    if(keyMode&&selected===p.id&&state===S.PLAY){ctx.strokeStyle='#fff6d3';ctx.lineWidth=2;roundRect(q.x-28*q.scale,q.y-94*q.scale,56*q.scale,100*q.scale,12);ctx.stroke();}
-    if((state===S.RESULT||state===S.SUCCESS)&&p.id===attacker){ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(q.x,q.y-44*q.scale*p.stature,32*q.scale,50*q.scale*p.stature,0,0,Math.PI*2);ctx.stroke();}
-  }
-
-  var cameraPrepared=false,cameraLines=null;
-  function drawCamera(){
-    if(!cameraPrepared){
-      cameraPrepared=true;
-      var scan=document.createElement('canvas');scan.width=4;scan.height=4;
-      var sc=scan.getContext('2d');sc.fillStyle='rgba(12,27,25,.08)';sc.fillRect(0,0,4,1);
-      cameraLines=ctx.createPattern(scan,'repeat');
-    }
-    ctx.save();
-    // 走査線と冷たい色味だけを薄く重ねる。
-    ctx.globalCompositeOperation='saturation';ctx.globalAlpha=.10;
-    ctx.fillStyle='#888';ctx.fillRect(0,0,W,H);
-    ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
-    ctx.fillStyle='rgba(38,69,63,.045)';ctx.fillRect(0,0,W,H);
-    if(cameraLines){ctx.fillStyle=cameraLines;ctx.fillRect(0,0,W,H);}
-    ctx.restore();
-  }
-  function draw() {
-    syncShareButton();
+  function draw(dt) {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
 
-    drawTown();
-    people.forEach(drawShadow);
-    if(people3D){
-      ctx.drawImage(people3D.render(people,T,attacker,victim,elapsed,fallProgress(),W,H,canvas.width,canvas.height),0,0,W,H);
-      if(keyMode&&state===S.PLAY&&people[selected]){var focus=position(people[selected]);ctx.strokeStyle='#fff6d3';ctx.lineWidth=2;roundRect(focus.x-28*focus.scale,focus.y-94*focus.scale,56*focus.scale,100*focus.scale,12);ctx.stroke();}
-      if((state===S.RESULT||state===S.SUCCESS)&&attacker>=0){
-        var marked=position(people[attacker]);ctx.strokeStyle='#f7cc71';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(marked.x,marked.y-44*marked.scale,32*marked.scale,55*marked.scale,0,0,Math.PI*2);ctx.stroke();
-      }
-    }else people.slice().sort(function(a,b){return a.y-b.y;}).forEach(drawPerson);
-    drawCamera();
-
-    if (pointer.visible && handReady) {
-      var size = 120;
-      ctx.save();
-      ctx.translate(pointer.x, pointer.y);
-      var press = handPress();
-      ctx.rotate((-25-4*press)*Math.PI/180);
-      ctx.scale(1-.10*press, 1-.10*press);
-      ctx.drawImage(handImage, -size*.49, -size*.014, size, size);
-      ctx.restore();
+    var look = {
+      x: x, th: th, w: w, v: v, eaten: eaten, N: N, hot: hot, t: animT,
+      /* 顔の赤さ：熱いひと口で真っ赤になってゆっくり引く。熱さがたまっている間はほんのり赤い */
+      chew: animT - lastBite,                   /* ひと口食べてからの秒数（もぐもぐ） */
+      red: Math.max(Math.sqrt(hot), Math.min(0.6, burn * 0.5)),
+      phase: state === S.INTRO ? "intro" : phase, fallT: fallT, doneT: doneT,
+      bite: { p: state === S.INTRO ? 0 : biteP, idx: eaten }, puff: puffNow,
+      level: level
+    };
+    puffNow = false;
+    if (view3d) {
+      try { ctx.drawImage(view3d.render(look, dt || 1 / 60), 0, 0, W, H); }
+      catch (e) { if (window.console) console.error("3Dの絵が描けない", e); view3d = null; }
     }
-    if (state === S.RESULT||state===S.SUCCESS) drawResult();
+    if (!view3d) drawFlat(look);
+    if (state === S.PLAY && phase === "ride") drawPads();
+    if (state === S.INTRO) drawLevels();
+
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 下の3つのボタン。文字は出さず、矢印と鍋の絵だけ */
+  function drawPads() {
+    PADS.forEach(function (p) {
+      var on = p.id === "eat" ? biting : (p.id === "left" ? dir < 0 : dir > 0);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2);
+      if (p.id === "eat") {
+        /* 続けて食べて熱いほど赤くなる */
+        var k = Math.min(1, burn / 1.2);
+        ctx.fillStyle = "rgba(" + Math.round(255) + "," + Math.round(255 - 150 * k) + "," + Math.round(255 - 190 * k) + "," + (on ? 0.5 : 0.28) + ")";
+      } else ctx.fillStyle = on ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.22)";
+      ctx.fill();
+      ctx.lineWidth = 4; ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.stroke();
+      ctx.fillStyle = "#fff";
+      if (p.id === "eat") {
+        if (biting) {
+          ctx.beginPath(); ctx.arc(0, 0, p.r - 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * biteP);
+          ctx.strokeStyle = "#fff"; ctx.lineWidth = 6; ctx.stroke();
+        }
+        drawVessel(level, 1);
+      } else {
+        var sg = p.id === "left" ? -1 : 1;
+        ctx.beginPath(); ctx.moveTo(sg * 24, 0); ctx.lineTo(-sg * 14, -24); ctx.lineTo(-sg * 14, 24); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    });
+  }
+
+  /* 器の絵（白一色）。原点が中心、k は大きさ */
+  function drawVessel(id, k) {
+    ctx.save();
+    ctx.scale(k, k);
+    ctx.fillStyle = "#fff"; ctx.strokeStyle = "#fff"; ctx.lineCap = "round";
+    if (id === "coffee") {
+      /* マグカップと湯気 */
+      roundRect(-22, -12, 36, 38, 6); ctx.fill();
+      ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(16, 6, 10, -Math.PI / 2, Math.PI / 2); ctx.stroke();
+      ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.moveTo(-10, -18); ctx.quadraticCurveTo(-16, -26, -10, -34); ctx.moveTo(2, -18); ctx.quadraticCurveTo(-4, -26, 2, -34); ctx.stroke();
+    } else if (id === "ramen") {
+      /* どんぶりと、持ち上げた麺 */
+      ctx.beginPath(); ctx.moveTo(-34, 0); ctx.lineTo(34, 0); ctx.quadraticCurveTo(30, 26, 0, 28); ctx.quadraticCurveTo(-30, 26, -34, 0); ctx.fill();
+      ctx.fillRect(-12, 26, 24, 5);
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(10, -38); ctx.lineTo(24, -6); ctx.moveTo(18, -40); ctx.lineTo(30, -8); ctx.stroke();
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(8, -22); ctx.quadraticCurveTo(0, -12, 4, -4); ctx.moveTo(14, -24); ctx.quadraticCurveTo(8, -12, 12, -4); ctx.stroke();
+    } else {
+      /* 土鍋と箸 */
+      ctx.beginPath(); ctx.moveTo(-30, -2); ctx.lineTo(30, -2); ctx.quadraticCurveTo(28, 24, 0, 26); ctx.quadraticCurveTo(-28, 24, -30, -2); ctx.fill();
+      ctx.fillRect(-36, -8, 72, 7);
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(4, -14); ctx.lineTo(24, -38); ctx.moveTo(13, -12); ctx.lineTo(34, -32); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* 段階を選ぶ3つの絵。選んでいるものを明るく */
+  function drawLevels() {
+    levelIcons().forEach(function (b) {
+      var on = b.id === level;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2);
+      ctx.fillStyle = on ? "rgba(255,255,255,.45)" : "rgba(255,255,255,.14)";
+      ctx.fill();
+      ctx.lineWidth = on ? 6 : 3; ctx.strokeStyle = on ? "#fff" : "rgba(255,255,255,.6)"; ctx.stroke();
+      drawVessel(b.id, b.r / 58);
+      ctx.restore();
+    });
+  }
+
+  /* 3Dが使えないときの平らな絵（横から見た形だけ） */
+  function drawFlat(o) {
+    var s = 220, gx = W / 2 - 40, gy = H * 0.7;
+    ctx.fillStyle = "#1c2544"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#3a3e4b"; ctx.fillRect(0, gy, W, H - gy);
+    var ax = gx, ay = gy - 0.3 * s;
+    ctx.strokeStyle = "#1d1f24"; ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.arc(ax, ay, 0.3 * s - 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.save();
+    ctx.translate(ax, ay); ctx.rotate(o.th);
+    ctx.fillStyle = "#3a6fb8"; ctx.fillRect(-0.15 * s, -1.05 * s, 0.3 * s, 0.45 * s);
+    ctx.fillStyle = "#f1c7a1"; ctx.beginPath(); ctx.arc(0.03 * s, -1.2 * s, 0.14 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#d8412f"; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -0.58 * s); ctx.stroke();
+    if (o.phase !== "fall") {
+      ctx.fillStyle = "#6e3f27"; ctx.fillRect(0.2 * s, -0.75 * s, 0.3 * s, 0.1 * s);
+      ctx.fillStyle = "#d8783a"; ctx.fillRect(0.22 * s, -0.75 * s, 0.26 * s * (1 - o.eaten / o.N), 0.03 * s);
+    }
+    ctx.restore();
   }
 
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
@@ -643,62 +755,53 @@
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
     ];
   }
-  // 成功のリプレイが流れている間だけ出す「次へ」。押すと待たずに次の面へ進む。
-  function nextButton() {
-    var w = 170, h = 54;
-    return { id: "next", x: W / 2 - w / 2, y: H * 0.80, w: w, h: h, label: "次へ" };
-  }
-  function inButton(b, x, y) { return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
   function hitButton(x, y) {
     var bs = resultButtons();
     for (var i = 0; i < bs.length; i++) {
-      if (inButton(bs[i], x, y)) return bs[i].id;
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
     }
     return null;
   }
-  // 下敷きを敷かないので、黒で太く縁取ってから白で塗る。
-  function signText(text, y, size) {
-    ctx.font = "800 " + size + "px sans-serif";
-    ctx.lineJoin = "round"; ctx.miterLimit = 2;
-    ctx.strokeStyle = "rgba(8,18,16,.9)"; ctx.lineWidth = size * 0.22;
-    ctx.strokeText(text, W / 2, y);
-    ctx.fillStyle = "#fff"; ctx.fillText(text, W / 2, y);
-  }
   function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
     ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
     ctx.textAlign = "center";
-    ctx.shadowColor = "rgba(0,0,0,.55)";
-    ctx.shadowBlur = 8;
-    /* 勝敗と回数は画面の上へ寄せ、真ん中はリプレイの絵に空けておく */
-    signText(resultText(), H * 0.13, state===S.SUCCESS?42:48);
-    signText(state===S.SUCCESS?'（'+score+'連続）':String(score), H * 0.21, state===S.SUCCESS?34:48);
-    if(replayAt()>=0)signText('リプレイ', H * 0.28, 26);
+    ctx.fillText(scoreText(), W / 2, H * 0.45);
     ctx.restore();
-    if(state===S.SUCCESS){if(replayAt()>=0)drawButton(nextButton());return;}
-    resultButtons().forEach(drawButton);
-  }
-  function drawButton(b) {
-    ctx.save();
-    ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
-    roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
-    ctx.fillStyle = "#fff"; ctx.fill();
-    ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
-    ctx.fillStyle = "#16202e";
-    ctx.font = "800 24px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    if (!window.zActionIcon || !window.zActionIcon(ctx,b.label,0,1,30)) ctx.fillText(b.label, 0, 1);
-    ctx.restore();
-    ctx.textBaseline = "alphabetic";
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx,b.label,0,1,30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+    drawLevels();
   }
 
   /* ============ 覗き穴 ============
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, level:level, W: W, H: H, T:T, elapsed:elapsed, attackAt:attackAt, attacker:attacker, victim:victim, outcome:outcome, selected:selected, resultText:resultText(), fallProgress:fallProgress(), strikeVisible:attacker>=0&&elapsed>=0&&elapsed<STRIKE_SECONDS-1e-9, replay:{taped:replayTape.length,at:replayAt(),since:sinceResult,cycle:replayCycle()}, people:people.map(function(p){var q=position(p);return {id:p.id,x:q.x,y:q.y-44*q.scale*p.stature,footY:q.y,worldX:p.x,worldY:p.y,scale:q.scale,vx:p.vx,vy:p.vy,generation:p.generation};}) }; },
-    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(FRAME_SECONDS); drawFrame(); } },
-    reset: function () { newRound(); }
+    now: function () {
+      return { state: state, score: score, W: W, H: H, phase: phase, th: th, w: w, x: x, v: v,
+               eaten: eaten, N: N, T: T, dir: dir, biting: biting, burn: burn, hot: hot,
+               level: level, P: JSON.parse(JSON.stringify(P)) };
+    },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { animT += 1 / 60; update(1 / 60); draw(1 / 60); } },
+    reset: function (lv) { newRound(lv); }       /* lv を渡すとその段階で */
   };
 
   /* ============ 手元用の動画撮影 ============
@@ -708,7 +811,22 @@
     run: async function (r) {
       await r.wait(1000);
       r.key();
-      if (!await r.until(function () { return state === S.RESULT; }, 20)) throw Error("勝敗が出ない");
+      /* 傾きを見て左右を押し、落ち着いていて熱くないときに食べる。人の反応ぶん少し遅れて見る */
+      var seen = [], now = 0;
+      function send(type, key) { window.dispatchEvent(new KeyboardEvent(type, { key: key, bubbles: true })); }
+      var t0 = Date.now();
+      while (state !== S.RESULT && Date.now() - t0 < 60000) {
+        seen.push(th + 0.35 * w);
+        var sv = seen[Math.max(0, seen.length - 3)];
+        var want = state === S.PLAY && phase === "ride" ? (sv > 0.03 ? -1 : sv < -0.03 ? 1 : 0) : 0;
+        if (want !== now) {
+          if (now) send("keyup", now < 0 ? "ArrowLeft" : "ArrowRight");
+          if (want) send("keydown", want < 0 ? "ArrowLeft" : "ArrowRight");
+          now = want;
+        }
+        if (phase === "ride" && !biting && Math.abs(th) < 0.1 && burn < 0.4) { send("keydown", " "); send("keyup", " "); }
+        await r.wait(40);
+      }
       await r.wait(1500);
     }
   };
@@ -725,27 +843,22 @@
   },true);
   document.addEventListener('pointerup',function(e){
     if(!(state===S.INTRO)||startingPointer!==e.pointerId)return;
-    startingPointer=null;e.preventDefault();e.stopImmediatePropagation();startButton.click();
+    startingPointer=null;e.preventDefault();e.stopImmediatePropagation();
+    var pt=atCanvas(e),lv=levelAt(pt.x,pt.y);if(lv)level=lv;     /* 絵を押したらその段階で始める */
+    startButton.click();
   },true);
   document.addEventListener('pointercancel',function(){startingPointer=null;},true);
 
   ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
-  startButton.addEventListener('click',function(e){if(e.stopPropagation)e.stopPropagation();audioOn();resumeAudio();newRound();});
-  layout();
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
   newRound();state=S.INTRO;startButton.hidden=false;
-  var last = performance.now(),frameDebt=0;
+  layout();
+  var last = performance.now(), animT = 0;
   function loop(now) {
-    var dt = Math.min(.1, Math.max(0,(now-last)/1000));
-    last=now;
-    if(!window.__recordManual&&!document.hidden){
-      frameDebt+=dt;
-      if(frameDebt>=FRAME_SECONDS-1e-9){
-        var ticks=Math.floor((frameDebt+1e-9)/FRAME_SECONDS);
-        frameDebt=Math.max(0,frameDebt-ticks*FRAME_SECONDS);
-        // 表示と進行を10fpsに揃え、手刀の発生コマは必ず描く。
-        update(ticks*FRAME_SECONDS);drawFrame();
-      }
-    }else frameDebt=0;
+    var dt = Math.min(0.033, (now - last) / 1000);   /* 戻ってきたとき飛ばないように上限 */
+    last = now;
+    animT += dt;
+    if (!window.__recordManual) { update(dt); draw(dt); }
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
@@ -754,10 +867,10 @@
 <script>
 if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = "../games/_tools/recorder-ui.js?v=shuto-20260918082402";
+  recorderScript.src = "../games/_tools/recorder-ui.js?v=ichirin-nabe-20260918225752";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=shuto-20260918082402"></script>
+<script src="./auto-reload.js?v=ichirin-nabe-20260918225752"></script>
 </body>
 </html>
