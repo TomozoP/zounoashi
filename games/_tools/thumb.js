@@ -24,6 +24,7 @@ var fs = require("fs");
 var path = require("path");
 var os = require("os");
 var cp = require("child_process");
+var stopBrowser = require("./browser-stop");   /* 借りたブラウザを残さず止める */
 
 /* ---------------- 言われたことを読む ---------------- */
 var args = process.argv.slice(2);
@@ -152,7 +153,7 @@ function browser() {
   return null;
 }
 
-var child = null, timer = null;
+var child = null, timer = null, usedProfile = null;
 
 server.listen(0, "127.0.0.1", function () {
   var url = "http://127.0.0.1:" + server.address().port + pageUrl;
@@ -162,7 +163,7 @@ server.listen(0, "127.0.0.1", function () {
     console.log("自分でここを開けば、" + secs + "秒後に撮れます: " + url);
     return;
   }
-  var profile = fs.mkdtempSync(path.join(os.tmpdir(), "zthumb-"));
+  var profile = usedProfile = fs.mkdtempSync(path.join(os.tmpdir(), "zthumb-"));
   child = cp.spawn(exe, [
     "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
     "--autoplay-policy=no-user-gesture-required",
@@ -182,7 +183,7 @@ function finish() {
   if (ended) return;
   ended = true;
   if (timer) clearTimeout(timer);
-  if (child) { try { child.kill(); } catch (e) {} }
+  stopBrowser(child, usedProfile);
   server.close();
 
   if (why || !fs.existsSync(out)) {

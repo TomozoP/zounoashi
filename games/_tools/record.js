@@ -10,6 +10,7 @@ var fs = require('fs');
 var path = require('path');
 var os = require('os');
 var cp = require('child_process');
+var stopBrowser = require('./browser-stop');   /* 借りたブラウザを残さず止める */
 
 var args = process.argv.slice(2);
 var manual = args.indexOf('--manual') >= 0;
@@ -30,7 +31,7 @@ if (!fs.existsSync(gamePath)) {
 var outDir = path.join(root, 'games', '_recordings');
 fs.mkdirSync(outDir, { recursive: true });
 var gameUrl = '/games/' + dir + '/index.html';
-var output = null, recordingInfo = null, ended = false, why = null, child = null, timer = null;
+var output = null, recordingInfo = null, ended = false, why = null, child = null, timer = null, usedProfile = null;
 
 /* 音の出口へつないだ節を、録画用の出口にもつなぐ。 */
 var recorder = String.raw`<script>
@@ -205,7 +206,7 @@ function browser() {
 server.listen(0, '127.0.0.1', function () {
   var exe = browser();
   if (!exe) { why = 'EdgeもChromeも見つかりません'; finish(); return; }
-  var profile = fs.mkdtempSync(path.join(os.tmpdir(), 'zrecord-'));
+  var profile = usedProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'zrecord-'));
   var url = 'http://127.0.0.1:' + server.address().port + gameUrl + '?recorder-cli=1';
   var browserArgs = [
     '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -225,7 +226,7 @@ function finish() {
   if (ended) return;
   ended = true;
   if (timer) clearTimeout(timer);
-  if (child) { try { child.kill(); } catch (e) {} }
+  stopBrowser(child, usedProfile);
   server.close();
   if (why || !output || !fs.existsSync(output)) {
     console.log('NG  ' + (why || '動画を保存できませんでした'));

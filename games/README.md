@@ -307,6 +307,7 @@ node games/_tools/img.js 拾った絵/ -o games/_hoge/img -w 1080   # 横1080ま
 | `thumb.js` | 動いている画面からサムネ（600x600 webp）を作る |
 | `record.js` | ゲームを自動運転し、手元用の縦動画を撮る |
 | `img.js` | 素材の png/jpg を webp にする（縮小もできる） |
+| `browser-stop.js` | 裏で借りたブラウザを残さず止め、一時フォルダも消す（`thumb.js` `img.js` `record.js` が使う） |
 | `publish.js` | `_` を外して `GAMES` に入れる（commit と push はしない） |
 | `tests/` | ゲームごとのテスト。`wanko-*.js` が書き方の見本、`pad.js` は全ゲーム共通の確認 |
 

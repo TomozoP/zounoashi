@@ -1,4 +1,6 @@
-/* ローカル配信とMP4保存係をまとめて起動する。既存の配信はそのまま使う。 */
+/* ローカル配信とMP4保存係をまとめて起動する。既存の配信はそのまま使う。
+   配信（8735番）と、MP4保存係の見回り（8737番を札として押さえた1つだけ）は、それぞれ1つずつにする。
+   どちらもすでにほかで動いていれば、何もせずに終わる（起動のたびに見回りだけが増え続けないように）。 */
 const http=require('http'),fs=require('fs'),path=require('path'),cp=require('child_process');
 const root=path.resolve(__dirname,'../..');
 let checking=false,child=null;
@@ -18,8 +20,23 @@ function ensureRecorder(){
     child.on('exit',()=>{child=null;});
   });
 }
-ensureRecorder();
-setInterval(ensureRecorder,5000);
+let serving=false,watching=false,waiting=2;
+function settle(){
+  if(--waiting>0)return;
+  if(!serving&&!watching){console.log('配信もMP4保存係の見回りも、すでに動いています：http://127.0.0.1:8735/');process.exit(0);}
+}
+/* 見回りの札。押さえられたら見回りを引き受け、ほかが持っていれば任せる */
+const watchLock=http.createServer((req,res)=>{res.end('preview-server の見回り');});
+watchLock.on('error',e=>{
+  if(e.code==='EADDRINUSE')settle();
+  else{console.error(e);settle();}
+});
+watchLock.listen(8737,'127.0.0.1',()=>{
+  watching=true;
+  ensureRecorder();
+  setInterval(ensureRecorder,5000);
+  settle();
+});
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.svg':'image/svg+xml','.webp':'image/webp','.png':'image/png','.jpg':'image/jpeg','.mp3':'audio/mpeg','.wav':'audio/wav','.mp4':'video/mp4','.wasm':'application/wasm'};
 const server=http.createServer(async(req,res)=>{
   try{
@@ -37,7 +54,8 @@ const server=http.createServer(async(req,res)=>{
   }catch(e){res.writeHead(e.code==='ENOENT'?404:400);res.end();}
 });
 server.on('error',e=>{
-  if(e.code==='EADDRINUSE')console.log('8735番の既存配信を使います。MP4保存係も確認中です。');
+  if(e.code==='EADDRINUSE')console.log('8735番の既存配信を使います。');
   else{console.error(e);process.exitCode=1;}
+  settle();
 });
-server.listen(8735,'127.0.0.1',()=>console.log('ローカルプレビューとMP4保存係を起動しました：http://127.0.0.1:8735/'));
+server.listen(8735,'127.0.0.1',()=>{serving=true;console.log('ローカルプレビューを起動しました：http://127.0.0.1:8735/');settle();});
