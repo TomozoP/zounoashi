@@ -210,7 +210,7 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
       <button id="tRazor" class="tool" title="レーザーツール (C)"><svg viewBox="0 0 24 24"><g transform="rotate(-45 12 12)"><path d="M2 8.5A1.5 1.5 0 013.5 7h17A1.5 1.5 0 0122 8.5v7a1.5 1.5 0 01-1.5 1.5h-17A1.5 1.5 0 012 15.5zM8.5 10.8v2.4h7v-2.4z" fill-rule="evenodd"/></g></svg></button>
       <div class="gap"></div>
       <button id="bSplit" title="再生ヘッドで分割 (Ctrl+K / 全トラック Ctrl+Shift+K)">✂ 分割</button>
-      <button id="bDel" title="削除 (Delete)">削除</button>
+      <button id="bDel" title="削除 (Delete) / 詰めて削除 (Shift+Delete)">削除</button>
       <button id="bSub" title="字幕を追加 (T)">＋字幕</button>
       <button id="bUndo" title="元に戻す (Ctrl+Z)">↶</button>
       <button id="bRedo" title="やり直し (Ctrl+Shift+Z)">↷</button>
@@ -254,7 +254,7 @@ let uid = 1; const nid = () => uid++;
 /* ---------- state ---------- */
 const sources = new Map();   // id -> {id,name,url,duration,w,h,audio,strip}
 const buffers = new Map();   // id -> {raw, peaks, proc, procKey}
-let vclips = [];             // {id,src,in,out,gain}
+let vclips = [];             // {id,src,in,out,at,gain}  at の順に並べておく
 let aclips = [];             // {id,buf,in,out,at,gain}
 let subs = [];               // {id,text,start,end}
 const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur' };
@@ -277,21 +277,21 @@ function restore(s) { const o = JSON.parse(s); vclips = o.vclips; aclips = o.acl
 function undo() { if (!undoStack.length) return; redoStack.push(snap()); restore(undoStack.pop()); changed(true); }
 function redo() { if (!redoStack.length) return; undoStack.push(snap()); restore(redoStack.pop()); changed(true); }
 // call commit() BEFORE mutating; changed() after mutation to refresh
-function changed(after) { mixDirty = true; if (playing && !recording) pause(); if (after !== undefined) refresh(); }
+function changed(after) { vclips.sort((a, b) => a.at - b.at); mixDirty = true; if (playing && !recording) pause(); if (after !== undefined) refresh(); }
 function refresh() { renderTimeline(); renderInspector(); renderSubList(); loadFonts(); drawStill(); }
 
 /* ---------- helpers ---------- */
 function fmt(t) { t = Math.max(0, t); const m = Math.floor(t / 60), s = t - m * 60; return m + ':' + s.toFixed(2).padStart(5, '0'); }
 function toast(msg, ms = 2600) { const e = $('toast'); e.textContent = msg; e.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => e.style.display = 'none', ms); }
-function vStarts() { const r = []; let t = 0; for (const c of vclips) { r.push(t); t += c.out - c.in; } return r; }
-function videoDur() { return vclips.reduce((s, c) => s + c.out - c.in, 0); }
+const vEnd = c => c.at + c.out - c.in;
+function videoDur() { return vclips.reduce((s, c) => Math.max(s, vEnd(c)), 0); }
 function totalDur() {
   let d = videoDur();
   for (const a of aclips) d = Math.max(d, a.at + a.out - a.in);
   for (const s of subs) d = Math.max(d, s.end);
   return d;
 }
-function clipAt(t) { let s = 0; for (let i = 0; i < vclips.length; i++) { const c = vclips[i], l = c.out - c.in; if (t < s + l - 1e-6) return { i, c, local: t - s, start: s }; s += l; } return null; }
+function clipAt(t) { for (let i = vclips.length - 1; i >= 0; i--) { const c = vclips[i]; if (t >= c.at - 1e-6 && t < vEnd(c) - 1e-6) return { i, c, local: Math.max(0, t - c.at), start: c.at }; } return null; }
 function find(type, id) { return (type === 'v' ? vclips : type === 'a' ? aclips : subs).find(x => x.id === id); }
 
 /* ---------- audio ---------- */
@@ -368,8 +368,7 @@ async function buildMix() {
     g.gain.setValueAtTime(gain, when + len - f); g.gain.linearRampToValueAtTime(0, when + len);
     s.connect(g); g.connect(lim); s.start(when, offset, len);
   };
-  const st = vStarts();
-  vclips.forEach((c, i) => { const s = sources.get(c.src); place(s.audio, st[i], c.in, c.out - c.in, opt.vvol * (c.gain ?? 1)); });
+  for (const c of vclips) place(sources.get(c.src).audio, c.at, c.in, c.out - c.in, opt.vvol * (c.gain ?? 1));
   for (const a of aclips) place(await procBuffer(a.buf), a.at, a.in, a.out - a.in, opt.avol * (a.gain ?? 1));
   return off.startRendering();
 }
@@ -525,12 +524,14 @@ function tick() {
     if (el2.paused && !el2.seeking) el2.play().catch(() => {});
     ready = !el2.seeking && el2.readyState >= 3;
     if (!el2.seeking && el2.readyState >= 2) drawVideoFrame(el2);
-    // 次のクリップを裏で準備
-    const nx = vclips[h.i + 1], o = 1 - curV;
-    if (nx && vState[o].clip !== nx.id && (h.c.out - h.c.in - h.local) < 1.5) { prepVideo(o, nx, nx.in); vids[o].pause(); }
   } else {
+    // 隙間は黒
+    if (!vids[curV].paused) vids[curV].pause();
     bg.fillStyle = '#000'; bg.fillRect(0, 0, W, H);
   }
+  // 次のクリップを裏で準備
+  const nx = vclips.find(c => c.at > t + 1e-3), oV = 1 - curV;
+  if (nx && nx.at - t < 1.5 && vState[oV].clip !== nx.id) { prepVideo(oV, nx, nx.in); vids[oV].pause(); }
   // 書き出し中は映像が追いつくまで全体を止めて同期を保つ
   if (exporting) {
     if (!ready && !stalled) { stalled = true; clockT = t; stopAudio(); if (recorder.state === 'recording') recorder.pause(); }
@@ -568,7 +569,7 @@ async function addVideo(file) {
   sources.set(id, src);
   try { src.audio = await actx.decodeAudioData(await file.arrayBuffer()); } catch (e) { /* 音声なし or 非対応 */ }
   commit();
-  vclips.push({ id: nid(), src: id, in: 0, out: el.duration, gain: 1 });
+  vclips.push({ id: nid(), src: id, in: 0, out: el.duration, at: videoDur(), gain: 1 });
   changed(true);
   $('drop').style.display = 'none';
   toast(file.name + (src.audio ? '' : '（音声は読み込めませんでした）'));
@@ -796,8 +797,8 @@ async function startExport() {
   };
   resetOv(); $('ov').classList.add('on');
   exporting = true; playhead = 0; curV = 0;
-  const h = clipAt(0); prepVideo(0, h.c, h.c.in);
-  await new Promise(r => { const el = vids[0]; if (!el.seeking && el.readyState >= 3) r(); else { el.addEventListener('canplay', r, { once: true }); setTimeout(r, 3000); } });
+  const h0 = vclips[0]; if (h0) prepVideo(0, h0, h0.in);
+  await new Promise(r => { const el = vids[0]; if (!h0 || !el.seeking && el.readyState >= 3) r(); else { el.addEventListener('canplay', r, { once: true }); setTimeout(r, 3000); } });
   recorder.start(1000);
   play();
 }
@@ -816,15 +817,15 @@ $('exportBtn').onclick = startExport;
 /* ---------- editing ops ---------- */
 function insideT(ty, o, t) {
   if (!o) return false;
-  if (ty === 'v') { const i = vclips.indexOf(o), st = vStarts()[i]; return t > st + 0.05 && t < st + o.out - o.in - 0.05; }
+  if (ty === 'v') return t > o.at + 0.05 && t < vEnd(o) - 0.05;
   if (ty === 'a') return t > o.at + 0.05 && t < o.at + o.out - o.in - 0.05;
   return t > o.start + 0.05 && t < o.end - 0.05;
 }
 // t の位置で1つ切る。できた後ろ側の id を返す
 function splitItem(ty, o, t) {
   if (ty === 'v') {
-    const i = vclips.indexOf(o), l = t - vStarts()[i];
-    const b = { ...o, id: nid(), in: o.in + l }; o.out = o.in + l; vclips.splice(i + 1, 0, b); return b.id;
+    const l = t - o.at;
+    const b = { ...o, id: nid(), in: o.in + l, at: t }; o.out = o.in + l; vclips.splice(vclips.indexOf(o) + 1, 0, b); return b.id;
   }
   if (ty === 'a') { const l = t - o.at; const b = { ...o, id: nid(), in: o.in + l, at: t }; o.out = o.in + l; aclips.push(b); return b.id; }
   const b = { ...o, id: nid(), start: t }; o.end = t; subs.splice(subs.indexOf(o) + 1, 0, b); return b.id;
@@ -848,12 +849,22 @@ function cutAll(t, only) {
   selected = null;
   changed(true);
 }
-function delSel() {
+function delSel(ripple) {
   if (!selected) return;
+  const o = find(selected.type, selected.id); if (!o) return;
+  const s0 = selected.type === 's' ? o.start : o.at, e0 = selected.type === 's' ? o.end : o.at + o.out - o.in;
   commit();
   if (selected.type === 'v') vclips = vclips.filter(c => c.id !== selected.id);
   if (selected.type === 'a') aclips = aclips.filter(c => c.id !== selected.id);
   if (selected.type === 's') subs = subs.filter(c => c.id !== selected.id);
+  if (ripple) {
+    // 消した後ろにあるものを全部前へ詰める
+    const d = e0 - s0, after = t => t >= e0 - 1e-3;
+    for (const c of vclips) if (after(c.at)) c.at -= d;
+    for (const a of aclips) if (after(a.at)) a.at -= d;
+    for (const x of subs) if (after(x.start)) { x.start -= d; x.end -= d; }
+    playhead = s0;
+  }
   selected = null;
   playhead = Math.min(playhead, totalDur());
   changed(true);
@@ -873,7 +884,7 @@ function setTool(tl) {
   $('tl').classList.toggle('razor', tl === 'razor'); if (tl !== 'razor') $('razorLine').style.display = 'none';
 }
 $('tSel').onclick = () => setTool('select'); $('tRazor').onclick = () => setTool('razor');
-$('bSplit').onclick = splitAt; $('bDel').onclick = delSel; $('bSub').onclick = addSub; $('bUndo').onclick = undo; $('bRedo').onclick = redo;
+$('bSplit').onclick = splitAt; $('bDel').onclick = e => delSel(e.shiftKey); $('bSub').onclick = addSub; $('bUndo').onclick = undo; $('bRedo').onclick = redo;
 $('playBtn').onclick = () => playing ? (recording ? stopRec() : pause()) : play();
 $('recBtn').onclick = toggleRec;
 
@@ -891,16 +902,16 @@ function renderTimeline() {
     const i = document.createElement('i'); i.style.left = t * pps + 'px'; r.appendChild(i);
   }
   // video
-  trV.innerHTML = ''; let t = 0;
+  trV.innerHTML = '';
   for (const c of vclips) {
     const l = c.out - c.in, src = sources.get(c.src);
-    const d = mkClip('v', c.id, t, l);
+    const d = mkClip('v', c.id, c.at, l);
     if (src.strip) {
       const full = src.duration * pps;
       d.style.backgroundImage = `url(${src.strip})`; d.style.backgroundSize = `${full}px 100%`; d.style.backgroundPosition = `${-c.in * pps}px 0`;
     }
     d.insertAdjacentHTML('afterbegin', `<div class="lb">${esc(src.name)}${(c.gain ?? 1) === 0 ? ' 🔇' : ''}</div>`);
-    trV.appendChild(d); t += l;
+    trV.appendChild(d);
   }
   // audio
   trA.innerHTML = '';
@@ -940,11 +951,23 @@ function updatePlayhead(follow) {
 
 // ドラッグ操作（移動・端のトリム）
 function snapPoints(exType, exId) {
-  const pts = [0, playhead]; let t = 0;
-  for (const c of vclips) { t += c.out - c.in; pts.push(t); }
+  const pts = [0, playhead];
+  for (const c of vclips) if (!(exType === 'v' && c.id === exId)) pts.push(c.at, vEnd(c));
   for (const a of aclips) if (!(exType === 'a' && a.id === exId)) pts.push(a.at, a.at + a.out - a.in);
   for (const s of subs) if (!(exType === 's' && s.id === exId)) pts.push(s.start, s.end);
   return pts;
+}
+// 置いた映像に重なる他の映像は、重なった部分だけ消す（Premiere の上書きと同じ）
+function overwriteV(o) {
+  const s0 = o.at, e0 = vEnd(o), res = [];
+  for (const c of vclips) {
+    if (c === o) { res.push(c); continue; }
+    const cs = c.at, ce = vEnd(c);
+    if (ce <= s0 + 1e-3 || cs >= e0 - 1e-3) { res.push(c); continue; }
+    if (cs < s0) res.push({ ...c, out: c.in + (s0 - cs) });
+    if (ce > e0) res.push({ ...c, id: cs < s0 ? nid() : c.id, in: c.in + (e0 - cs), at: e0 });
+  }
+  vclips = res.filter(c => c.out - c.in > 0.02).sort((a, b) => a.at - b.at);
 }
 function snapT(t, pts) { const th = 8 / pps; let best = t, bd = th; for (const p of pts) { const d = Math.abs(p - t); if (d < bd) { bd = d; best = p; } } return best; }
 function clipDown(e, type, id, el) {
@@ -959,16 +982,19 @@ function clipDown(e, type, id, el) {
   select(type, id);
   const orig = { ...o }, x0 = e.clientX, pts = snapPoints(type, id);
   let moved = false, before = snap();
-  const vStart = type === 'v' ? vStarts()[vclips.indexOf(o)] : 0;
+  // 映像の端を伸ばすときは隣のクリップまで
+  const others = type === 'v' ? vclips.filter(c => c !== o) : [];
+  const prevEnd = others.filter(c => vEnd(c) <= orig.at + 1e-3).reduce((m, c) => Math.max(m, vEnd(c)), 0);
+  const nextStart = others.filter(c => c.at >= orig.at + orig.out - orig.in - 1e-3).reduce((m, c) => Math.min(m, c.at), Infinity);
   const mv = ev => {
     const dt = (ev.clientX - x0) / pps;
     if (!moved && Math.abs(ev.clientX - x0) < 3) return;
     moved = true;
     if (type === 'v') {
-      const src = sources.get(o.src);
-      if (mode === 'l') o.in = clamp(orig.in + dt, 0, o.out - 0.1);
-      else if (mode === 'r') { const endT = snapT(vStart + orig.out - orig.in + dt, pts.filter(p => p !== vStart + orig.out - orig.in)); o.out = clamp(orig.out + (endT - (vStart + orig.out - orig.in)), o.in + 0.1, src.duration); }
-      else { const cur = document.querySelector('.clip.v.sel'); if (cur) cur.style.transform = `translateX(${ev.clientX - x0}px)`; return; }
+      const len = orig.out - orig.in, src = sources.get(o.src);
+      if (mode === 'm') { let at = orig.at + dt; const s1 = snapT(at, pts); if (s1 !== at) at = s1; else { const s2 = snapT(at + len, pts); at += s2 - (at + len); } o.at = Math.max(0, at); }
+      else if (mode === 'l') { const at = clamp(snapT(orig.at + dt, pts), Math.max(prevEnd, orig.at - orig.in), orig.at + len - 0.1); o.in = orig.in + at - orig.at; o.at = at; }
+      else { const end = clamp(snapT(orig.at + len + dt, pts), orig.at + 0.1, Math.min(nextStart, orig.at + src.duration - orig.in)); o.out = orig.in + end - orig.at; }
     } else if (type === 'a') {
       const len = orig.out - orig.in, buf = buffers.get(o.buf).raw;
       if (mode === 'm') { let at = orig.at + dt; const s1 = snapT(at, pts); if (s1 !== at) at = s1; else { const s2 = snapT(at + len, pts); at += s2 - (at + len); } o.at = Math.max(0, at); }
@@ -985,13 +1011,7 @@ function clipDown(e, type, id, el) {
   const up = ev => {
     removeEventListener('pointermove', mv); removeEventListener('pointerup', up);
     if (!moved) { if (type === 's') seek(Math.max(playhead, 0)); return; }
-    if (type === 'v' && mode === 'm') {
-      // 並べ替え：ドロップ位置の時刻に最も近い境界へ
-      const tPos = vStart + (ev.clientX - x0) / pps + (o.out - o.in) / 2;
-      const rest = vclips.filter(c => c !== o); let acc = 0, idx = rest.length;
-      for (let i = 0; i < rest.length; i++) { const l = rest[i].out - rest[i].in; if (tPos < acc + l / 2) { idx = i; break; } acc += l; }
-      rest.splice(idx, 0, o); vclips = rest;
-    }
+    if (type === 'v') overwriteV(o);
     if (type === 's') subs.sort((a, b) => a.start - b.start);
     undoStack.push(before); redoStack.length = 0; changed(true);
   };
@@ -1040,16 +1060,11 @@ function renderInspector() {
   const name = isV ? sources.get(o.src).name : 'ナレーション';
   el.innerHTML = `<h3>${isV ? '映像クリップ' : '音声クリップ'}</h3>
     <div class="status" style="margin:0 0 6px">${esc(name)} ・ ${(o.out - o.in).toFixed(2)}秒</div>
-    <div class="row"><label>音量</label><input type="range" id="iG" min="0" max="2" step="0.05"><span class="val" id="iGV"></span></div>
-    ${isV ? '<div class="row"><button id="iL" style="flex:1">◀ 前へ</button><button id="iR" style="flex:1">後ろへ ▶</button></div>' : ''}`;
+    <div class="row"><label>音量</label><input type="range" id="iG" min="0" max="2" step="0.05"><span class="val" id="iGV"></span></div>`;
   const iG = $('iG'); iG.value = o.gain ?? 1; $('iGV').textContent = Math.round(iG.value * 100) + '%';
   let first = true;
   iG.oninput = () => { if (first) { undoStack.push(snap()); redoStack.length = 0; first = false; } o.gain = +iG.value; $('iGV').textContent = Math.round(o.gain * 100) + '%'; mixDirty = true; };
   iG.onchange = () => { first = true; renderTimeline(); };
-  if (isV) {
-    const mvC = d => { const i = vclips.indexOf(o), j = i + d; if (j < 0 || j >= vclips.length) return; commit(); [vclips[i], vclips[j]] = [vclips[j], vclips[i]]; changed(true); };
-    $('iL').onclick = () => mvC(-1); $('iR').onclick = () => mvC(1);
-  }
 }
 function renderSubList(onlyCur) {
   const box = $('subList');
@@ -1109,7 +1124,7 @@ addEventListener('keydown', e => {
   else if (k === 'c' && !e.ctrlKey && !e.metaKey) setTool('razor');
   else if (k === 't') addSub();
   else if (k === 'r') toggleRec();
-  else if (k === 'delete' || k === 'backspace') { e.preventDefault(); delSel(); }
+  else if (k === 'delete' || k === 'backspace') { e.preventDefault(); delSel(e.shiftKey); }
   else if (k === 'arrowleft') { e.preventDefault(); seek(playhead - (e.shiftKey ? 1 : 1 / FPS)); }
   else if (k === 'arrowright') { e.preventDefault(); seek(playhead + (e.shiftKey ? 1 : 1 / FPS)); }
   else if (k === 'home') seek(0);
