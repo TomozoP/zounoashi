@@ -83,10 +83,12 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
 #tl.razor .clip,#tl.razor .clip .hd{cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cg transform='rotate(-45 12 12)'%3E%3Crect x='3' y='8' width='18' height='8' rx='1.5' fill='%23fff' stroke='%23000' stroke-width='1.2'/%3E%3Crect x='9' y='10.5' width='6' height='3' fill='%23000'/%3E%3C/g%3E%3C/svg%3E") 12 12,crosshair}
 #razorLine{position:absolute;top:22px;bottom:0;width:1px;background:#6fb4ff;pointer-events:none;z-index:6;display:none}
 #tlbar input[type=range]{width:120px}
-#tlbody{display:grid;grid-template-columns:56px 1fr}
+#tlbody{display:grid;grid-template-columns:76px 1fr}
+#labels .ln{gap:4px}
+#labels .ln button{padding:0 5px;line-height:16px;font-size:12px;border-radius:4px}
 #labels div{height:var(--h);display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:11px;border-bottom:1px solid var(--line)}
 #labels .rl{height:22px}
-#tlscroll{overflow-x:auto;overflow-y:hidden;position:relative}
+#tlscroll{overflow-x:scroll;overflow-y:hidden;position:relative}
 #tlinner{position:relative;min-width:100%}
 #ruler{height:22px;position:relative;border-bottom:1px solid var(--line);cursor:pointer;background:#191a1e}
 #ruler span{position:absolute;top:3px;font-size:10px;color:var(--dim);transform:translateX(3px)}
@@ -100,6 +102,8 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
 .clip .hd.l{left:0}.clip .hd.r{right:0}
 .clip.v{background-color:var(--v);background-repeat:no-repeat}
 .clip.a{background:#1f5e49}
+.clip.a.se{background:#6b4a17}
+.clip.a.bgm{background:#3f3170}
 .clip.a canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .clip.s{background:#6f5412;padding:0 8px;display:flex;align-items:center;font-weight:700;font-size:12px;white-space:nowrap}
 #phead{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);pointer-events:none;z-index:5}
@@ -166,6 +170,8 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
         <div class="row"><label>ノイズ抑制</label><input type="range" id="optGate" min="0" max="1" step="0.05" value="0.5"><span class="val" id="optGateV"></span></div>
         <div class="row"><label>動画の音量</label><input type="range" id="optVVol" min="0" max="2" step="0.05" value="1"><span class="val" id="optVVolV"></span></div>
         <div class="row"><label>ナレーション</label><input type="range" id="optAVol" min="0" max="2" step="0.05" value="1"><span class="val" id="optAVolV"></span></div>
+        <div class="row"><label>効果音</label><input type="range" id="optSEVol" min="0" max="2" step="0.05" value="1"><span class="val" id="optSEVolV"></span></div>
+        <div class="row"><label>BGM</label><input type="range" id="optBGMVol" min="0" max="2" step="0.05" value="0.5"><span class="val" id="optBGMVolV"></span></div>
       </div>
 
       <div class="sec">
@@ -218,13 +224,18 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
       <span style="color:var(--dim)">ズーム</span><input type="range" id="zoom" min="8" max="400" value="60">
     </div>
     <div id="tlbody">
-      <div id="labels"><div class="rl"></div><div>字幕</div><div>映像</div><div>音声</div></div>
+      <div id="labels"><div class="rl"></div><div>字幕</div><div>映像</div><div>ナレーション</div>
+        <div class="ln">効果音<button data-lane="se" title="効果音を追加">＋</button></div>
+        <div class="ln">BGM<button data-lane="bgm" title="BGMを追加">＋</button></div></div>
+      <input id="laneIn" type="file" accept="audio/*,video/*" multiple hidden>
       <div id="tlscroll">
         <div id="tlinner">
           <div id="ruler"></div>
           <div class="track" id="trS"></div>
           <div class="track" id="trV"></div>
           <div class="track" id="trA"></div>
+          <div class="track" id="trSE"></div>
+          <div class="track" id="trBGM"></div>
           <div id="phead"></div>
           <div id="razorLine"></div>
         </div>
@@ -258,7 +269,11 @@ let vclips = [];             // {id,src,in,out,at,gain}  at の順に並べて�
 let aclips = [];             // {id,buf,in,out,at,gain}
 let subs = [];               // {id,text,start,end}
 const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur' };
-const opt = { enhance: true, gate: 0.5, vvol: 1, avol: 1 };
+const opt = { enhance: true, gate: 0.5, vvol: 1, avol: 1, sevol: 1, bgmvol: 0.5 };
+// 音声のレーン：vo=ナレーション（補正あり） se=効果音 bgm=BGM
+const LANES = { vo: 'ナレーション', se: '効果音', bgm: 'BGM' };
+const laneOf = a => a.lane || 'vo';
+const laneVol = a => ({ vo: opt.avol, se: opt.sevol, bgm: opt.bgmvol })[laneOf(a)];
 const PRESETS = [
   { name: 'あ', fill: '#ffffff', stroke: '#111111', shadow: 'rgba(0,0,0,.55)' },
   { name: 'あ', fill: '#ffe23d', stroke: '#111111', shadow: 'rgba(0,0,0,.55)' },
@@ -344,9 +359,9 @@ function noiseGate(d, sr, strength) {
   let g = reduce;
   for (let i = 0; i < d.length; i++) { const t = tgt[Math.floor(i / win)]; g = t > g ? aC * g + (1 - aC) * t : rC * g + (1 - rC) * t; d[i] *= g; }
 }
-async function procBuffer(bid) {
+async function procBuffer(bid, lane) {
   const b = buffers.get(bid);
-  if (!opt.enhance) return b.raw;
+  if (!opt.enhance || (lane && lane !== 'vo')) return b.raw;
   const key = 'e' + opt.gate;
   if (b.procKey !== key) { b.proc = await enhanceBuffer(b.raw, opt.gate); b.procKey = key; }
   return b.proc;
@@ -369,7 +384,7 @@ async function buildMix() {
     s.connect(g); g.connect(lim); s.start(when, offset, len);
   };
   for (const c of vclips) place(sources.get(c.src).audio, c.at, c.in, c.out - c.in, opt.vvol * (c.gain ?? 1));
-  for (const a of aclips) place(await procBuffer(a.buf), a.at, a.in, a.out - a.in, opt.avol * (a.gain ?? 1));
+  for (const a of aclips) place(await procBuffer(a.buf, laneOf(a)), a.at, a.in, a.out - a.in, laneVol(a) * (a.gain ?? 1));
   return off.startRendering();
 }
 async function ensureMix() {
@@ -551,10 +566,14 @@ function seek(t) {
 function updateTime() { $('time').textContent = fmt(playhead) + ' / ' + fmt(totalDur()); }
 
 /* ---------- import ---------- */
-async function addFiles(files) {
+const isAudioFile = f => f.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|opus|flac)$/i.test(f.name);
+// lane を指定すると音声として（動画ファイルでも音だけ）そのレーンの at に置く
+async function addFiles(files, lane, at) {
+  let t = at ?? playhead;
   for (const f of files) {
-    if (f.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|mkv)$/i.test(f.name)) await addVideo(f);
-    else if (f.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|opus|flac)$/i.test(f.name)) await addAudioFile(f);
+    if (lane) { const d = await addAudioFile(f, lane, t); if (d) t += d; }
+    else if (isAudioFile(f)) await addAudioFile(f);
+    else if (f.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|mkv)$/i.test(f.name)) await addVideo(f);
   }
 }
 async function addVideo(file) {
@@ -586,19 +605,31 @@ async function makeStrip(src, el) {
   }
   el.removeAttribute('src'); el.load();
 }
-async function addAudioFile(file) {
+async function addAudioFile(file, lane, at) {
   try {
     const raw = await actx.decodeAudioData(await file.arrayBuffer());
     const bid = nid(); buffers.set(bid, { raw, peaks: computePeaks(raw) });
-    commit(); aclips.push({ id: nid(), buf: bid, in: 0, out: raw.duration, at: playhead, gain: 1 }); changed(true);
-  } catch (e) { toast('音声を読み込めませんでした'); }
+    // レーン指定がなければ、長いものは BGM、短いものは効果音へ
+    lane = lane || (raw.duration > 20 ? 'bgm' : 'se');
+    commit(); aclips.push({ id: nid(), buf: bid, in: 0, out: raw.duration, at: at ?? playhead, gain: 1, lane, name: file.name }); changed(true);
+    return raw.duration;
+  } catch (e) { toast('音声を読み込めませんでした'); return 0; }
 }
+let laneTarget = 'se';
+document.querySelectorAll('#labels button[data-lane]').forEach(b => b.onclick = () => { laneTarget = b.dataset.lane; $('laneIn').click(); });
+$('laneIn').onchange = e => { addFiles([...e.target.files], laneTarget); e.target.value = ''; };
 $('fileIn').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
 $('addBtn').onclick = () => $('fileIn').click();
 const stage = $('stage');
 addEventListener('dragover', e => { e.preventDefault(); stage.classList.add('dragover'); });
 addEventListener('dragleave', e => { if (!e.relatedTarget) stage.classList.remove('dragover'); });
-addEventListener('drop', e => { e.preventDefault(); stage.classList.remove('dragover'); addFiles([...e.dataTransfer.files]); });
+addEventListener('drop', e => {
+  e.preventDefault(); stage.classList.remove('dragover');
+  // 音声レーンの上に落としたら、そのレーンのその位置へ
+  const tr = e.target.closest && e.target.closest('#trA,#trSE,#trBGM');
+  if (tr) addFiles([...e.dataTransfer.files], { trA: 'vo', trSE: 'se', trBGM: 'bgm' }[tr.id], Math.max(0, (e.clientX - inner.getBoundingClientRect().left) / pps));
+  else addFiles([...e.dataTransfer.files]);
+});
 
 /* ---------- recording ---------- */
 let recorder = null, recStream = null, recChunks = [], recAt = 0, recT0 = 0, recTimer = 0;
@@ -744,7 +775,7 @@ async function runWhisper() {
       asrModel = model;
     }
     let buf, from, len, offset;
-    if (target) { buf = await procBuffer(target.buf); from = target.in; len = target.out - target.in; offset = target.at; }
+    if (target) { buf = await procBuffer(target.buf, laneOf(target)); from = target.in; len = target.out - target.in; offset = target.at; }
     else { buf = await ensureMix(); from = 0; len = totalDur(); offset = 0; }
     st.textContent = '文字起こし中…'; bar.style.width = '100%';
     const pcm = await to16k(buf, from, len);
@@ -889,7 +920,7 @@ $('playBtn').onclick = () => playing ? (recording ? stopRec() : pause()) : play(
 $('recBtn').onclick = toggleRec;
 
 /* ---------- timeline ---------- */
-const trS = $('trS'), trV = $('trV'), trA = $('trA'), inner = $('tlinner'), scroller = $('tlscroll');
+const trS = $('trS'), trV = $('trV'), trA = $('trA'), trSE = $('trSE'), trBGM = $('trBGM'), inner = $('tlinner'), scroller = $('tlscroll');
 function renderTimeline() {
   const dur = totalDur();
   const w = Math.max(scroller.clientWidth, (dur + 5) * pps);
@@ -914,12 +945,15 @@ function renderTimeline() {
     trV.appendChild(d);
   }
   // audio
-  trA.innerHTML = '';
+  trA.innerHTML = ''; trSE.innerHTML = ''; trBGM.innerHTML = '';
+  const laneEl = { vo: trA, se: trSE, bgm: trBGM };
   for (const a of aclips) {
     const l = a.out - a.in, d = mkClip('a', a.id, a.at, l);
     const cv = document.createElement('canvas'); const cw = Math.min(4000, Math.max(1, Math.round(l * pps)));
     cv.width = cw; cv.height = 40; drawWave(cv, buffers.get(a.buf).peaks, a.in, a.out);
-    d.prepend(cv); trA.appendChild(d);
+    if (laneOf(a) !== 'vo') d.classList.add(laneOf(a));
+    d.insertAdjacentHTML('afterbegin', `<div class="lb">${a.name ? esc(a.name) : ''}</div>`);
+    d.prepend(cv); laneEl[laneOf(a)].appendChild(d);
   }
   // subs
   trS.innerHTML = '';
@@ -997,7 +1031,10 @@ function clipDown(e, type, id, el) {
       else { const end = clamp(snapT(orig.at + len + dt, pts), orig.at + 0.1, Math.min(nextStart, orig.at + src.duration - orig.in)); o.out = orig.in + end - orig.at; }
     } else if (type === 'a') {
       const len = orig.out - orig.in, buf = buffers.get(o.buf).raw;
-      if (mode === 'm') { let at = orig.at + dt; const s1 = snapT(at, pts); if (s1 !== at) at = s1; else { const s2 = snapT(at + len, pts); at += s2 - (at + len); } o.at = Math.max(0, at); }
+      if (mode === 'm') {
+        let at = orig.at + dt; const s1 = snapT(at, pts); if (s1 !== at) at = s1; else { const s2 = snapT(at + len, pts); at += s2 - (at + len); } o.at = Math.max(0, at);
+        for (const [ln, tr] of [['vo', trA], ['se', trSE], ['bgm', trBGM]]) { const r = tr.getBoundingClientRect(); if (ev.clientY >= r.top && ev.clientY < r.bottom) o.lane = ln; }
+      }
       else if (mode === 'l') { let at = snapT(orig.at + dt, pts); let d = clamp(at - orig.at, -orig.in, len - 0.1); if (orig.at + d < 0) d = -orig.at; o.at = orig.at + d; o.in = orig.in + d; }
       else { const end = snapT(orig.at + len + dt, pts); o.out = clamp(orig.in + end - orig.at, orig.in + 0.1, buf.duration); }
     } else {
@@ -1034,7 +1071,7 @@ function scrubDown(e) {
   const up = () => { removeEventListener('pointermove', f); removeEventListener('pointerup', up); };
   addEventListener('pointermove', f); addEventListener('pointerup', up);
 }
-$('ruler').onpointerdown = scrubDown; trS.onpointerdown = scrubDown; trV.onpointerdown = scrubDown; trA.onpointerdown = scrubDown;
+$('ruler').onpointerdown = scrubDown; trS.onpointerdown = scrubDown; trV.onpointerdown = scrubDown; trA.onpointerdown = scrubDown; trSE.onpointerdown = scrubDown; trBGM.onpointerdown = scrubDown;
 $('zoom').oninput = e => { const c = playhead * pps - scroller.scrollLeft; pps = +e.target.value; renderTimeline(); scroller.scrollLeft = playhead * pps - c; };
 scroller.addEventListener('wheel', e => { if (e.ctrlKey) { e.preventDefault(); const z = $('zoom'); z.value = clamp(pps * (e.deltaY < 0 ? 1.15 : 0.87), 8, 400); z.oninput({ target: z }); } else if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { scroller.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
 addEventListener('resize', applyLayout);
@@ -1057,8 +1094,8 @@ function renderInspector() {
     return;
   }
   const isV = selected.type === 'v';
-  const name = isV ? sources.get(o.src).name : 'ナレーション';
-  el.innerHTML = `<h3>${isV ? '映像クリップ' : '音声クリップ'}</h3>
+  const name = isV ? sources.get(o.src).name : (o.name || LANES[laneOf(o)]);
+  el.innerHTML = `<h3>${isV ? '映像クリップ' : LANES[laneOf(o)]}</h3>
     <div class="status" style="margin:0 0 6px">${esc(name)} ・ ${(o.out - o.in).toFixed(2)}秒</div>
     <div class="row"><label>音量</label><input type="range" id="iG" min="0" max="2" step="0.05"><span class="val" id="iGV"></span></div>`;
   const iG = $('iG'); iG.value = o.gain ?? 1; $('iGV').textContent = Math.round(iG.value * 100) + '%';
@@ -1094,13 +1131,15 @@ function bindRange(id, fmtv, set) {
 bindRange('optGate', v => Math.round(v * 100) + '%', v => { opt.gate = v; mixDirty = true; });
 bindRange('optVVol', v => Math.round(v * 100) + '%', v => { opt.vvol = v; mixDirty = true; });
 bindRange('optAVol', v => Math.round(v * 100) + '%', v => { opt.avol = v; mixDirty = true; });
+bindRange('optSEVol', v => Math.round(v * 100) + '%', v => { opt.sevol = v; mixDirty = true; });
+bindRange('optBGMVol', v => Math.round(v * 100) + '%', v => { opt.bgmvol = v; mixDirty = true; });
 bindRange('stSize', v => v, v => { style.size = v; compose(playhead); });
 bindRange('stY', v => Math.round(v * 100) + '%', v => { style.y = v; compose(playhead); });
 bindRange('stMax', v => v, v => { style.max = v; });
 $('optEnhance').onchange = e => { opt.enhance = e.target.checked; mixDirty = true; };
 $('stFont').onchange = e => { style.font = e.target.value; loadFonts(); compose(playhead); };
 $('stFit').onchange = e => { style.fit = e.target.value; drawStill(); };
-['optGate', 'optVVol', 'optAVol'].forEach(id => $(id).addEventListener('change', () => { if (playing && !recording) { pause(); play(); } }));
+['optGate', 'optVVol', 'optAVol', 'optSEVol', 'optBGMVol'].forEach(id => $(id).addEventListener('change', () => { if (playing && !recording) { pause(); play(); } }));
 $('optEnhance').addEventListener('change', () => { if (playing && !recording) { pause(); play(); } });
 PRESETS.forEach((p, i) => {
   const b = document.createElement('button'); b.textContent = p.name;
@@ -1131,7 +1170,7 @@ addEventListener('keydown', e => {
 });
 
 /* ---------- 窓の大きさ（境目をドラッグ。ダブルクリックで元に戻す） ---------- */
-const LAY_KEY = 'shortEditor.layout', LAY_DEF = { scriptW: 260, sideW: 320, tlH: 230 };
+const LAY_KEY = 'shortEditor.layout', LAY_DEF = { scriptW: 260, sideW: 320, tlH: 290 };
 const lay = { ...LAY_DEF };
 try { Object.assign(lay, JSON.parse(localStorage.getItem(LAY_KEY) || '{}')); } catch (e) {}
 function fitView() {
@@ -1150,8 +1189,8 @@ function applyLayout() {
   app.style.setProperty('--scriptW', lay.scriptW + 'px');
   $('spScript').style.display = innerWidth > 820 ? '' : 'none';
   // トラックの高さはタイムラインの高さに合わせる
-  const rest = lay.tlH - $('tlbar').offsetHeight - 24;
-  app.style.setProperty('--h', clamp(Math.floor(rest / 3), 30, 140) + 'px');
+  const rest = lay.tlH - $('tlbar').offsetHeight - 24 - (scroller.offsetHeight - scroller.clientHeight);
+  app.style.setProperty('--h', clamp(Math.floor(rest / 5), 26, 120) + 'px');
   fitView(); renderTimeline();
 }
 function splitter(el, key, move) {
