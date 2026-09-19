@@ -133,6 +133,7 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
   <header>
     <div class="title">ショート編集</div>
     <label><button id="addBtn" type="button">動画を追加</button><input id="fileIn" type="file" accept="video/*,audio/*" multiple hidden></label>
+    <button id="newBtn" title="今の編集を消して新しく始める">新規</button>
     <button id="exportBtn" class="primary">書き出し</button>
   </header>
 
@@ -309,6 +310,28 @@ function totalDur() {
   return d;
 }
 function clipAt(t) { for (let i = vclips.length - 1; i >= 0; i--) { const c = vclips[i]; if (t >= c.at - 1e-6 && t < vEnd(c) - 1e-6) return { i, c, local: Math.max(0, t - c.at), start: c.at }; } return null; }
+const DB = new Promise(res => {
+  try {
+    const r = indexedDB.open('shortEditor', 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('media'); r.result.createObjectStore('state'); };
+    r.onsuccess = () => res(r.result); r.onerror = () => res(null);
+  } catch (e) { res(null); }
+});
+async function dbDo(store, mode, fn) {
+  const db = await DB; if (!db) return null;
+  return new Promise(res => {
+    try {
+      const tx = db.transaction(store, mode), rq = fn(tx.objectStore(store));
+      tx.oncomplete = () => res(rq.result === undefined && mode === 'readwrite' ? true : rq.result);
+      tx.onerror = tx.onabort = () => res(null);
+    } catch (e) { res(null); }
+  });
+}
+const dbPut = (st, k, v) => dbDo(st, 'readwrite', o => o.put(v, k));
+const dbGet = (st, k) => dbDo(st, 'readonly', o => o.get(k));
+const dbKeys = st => dbDo(st, 'readonly', o => o.getAllKeys());
+const dbDel = (st, k) => dbDo(st, 'readwrite', o => o.delete(k));
+const dbClear = st => dbDo(st, 'readwrite', o => o.clear());
 function find(type, id) { return (type === 'v' ? vclips : type === 'a' ? aclips : subs).find(x => x.id === id); }
 
 /* ---------- audio ---------- */
@@ -591,23 +614,27 @@ async function addFiles(files, lane, at) {
     else if (f.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|mkv)$/i.test(f.name)) await addVideo(f);
   }
 }
-async function addVideo(file) {
-  toast('読み込み中… ' + file.name, 60000);
+// 動画ファイルを素材として読み込む（追加と、保存からの復元で共用）
+async function loadSource(file, id, name) {
   const url = URL.createObjectURL(file);
   const el = document.createElement('video'); el.muted = true; el.preload = 'auto'; el.src = url;
-  try {
-    await new Promise((ok, ng) => { el.onloadedmetadata = ok; el.onerror = () => ng(new Error('この形式の動画は再生できません')); });
-  } catch (e) { toast(e.message); return; }
-  const id = nid();
-  const src = { id, name: file.name, url, duration: el.duration, w: el.videoWidth, h: el.videoHeight, audio: null, strip: null };
+  await new Promise((ok, ng) => { el.onloadedmetadata = ok; el.onerror = () => ng(new Error('この形式の動画は再生できません')); });
+  const src = { id, name, url, duration: el.duration, w: el.videoWidth, h: el.videoHeight, audio: null, strip: null };
   sources.set(id, src);
   try { src.audio = await actx.decodeAudioData(await file.arrayBuffer()); } catch (e) { /* 音声なし or 非対応 */ }
+  makeStrip(src, el);
+  return src;
+}
+async function addVideo(file) {
+  toast('読み込み中… ' + file.name, 60000);
+  const id = nid(); let src;
+  try { src = await loadSource(file, id, file.name); } catch (e) { toast(e.message); return; }
+  if (!await dbPut('media', 'v' + id, { name: file.name, blob: file })) toast('容量が足りず、この動画は自動保存されません');
   commit();
-  vclips.push({ id: nid(), src: id, in: 0, out: el.duration, at: videoDur(), gain: 1 });
+  vclips.push({ id: nid(), src: id, in: 0, out: src.duration, at: videoDur(), gain: 1 });
   changed(true);
   $('drop').style.display = 'none';
   toast(file.name + (src.audio ? '' : '（音声は読み込めませんでした）'));
-  makeStrip(src, el);
 }
 async function makeStrip(src, el) {
   const n = Math.min(Math.ceil(src.duration), 240), th = 44, tw = Math.round(th * src.w / src.h) || 25;
@@ -624,6 +651,7 @@ async function addAudioFile(file, lane, at) {
   try {
     const raw = await actx.decodeAudioData(await file.arrayBuffer());
     const bid = nid(); buffers.set(bid, { raw, peaks: computePeaks(raw) });
+    dbPut('media', 'a' + bid, { name: file.name, blob: file });
     // レーン指定がなければ、長いものは BGM、短いものは効果音へ
     lane = lane || (raw.duration > 20 ? 'bgm' : 'se');
     commit(); aclips.push({ id: nid(), buf: bid, in: 0, out: raw.duration, at: at ?? playhead, gain: 1, lane, name: file.name }); changed(true);
@@ -699,6 +727,7 @@ async function onRecStop() {
   let raw;
   try { raw = await actx.decodeAudioData(await blob.arrayBuffer()); } catch (e) { toast('録音の読み込みに失敗しました'); return; }
   const bid = nid(); buffers.set(bid, { raw, peaks: computePeaks(raw) });
+  dbPut('media', 'a' + bid, { name: '録音', blob });
   commit();
   const clip = { id: nid(), buf: bid, in: 0, out: raw.duration, at: recAt, gain: 1 };
   aclips.push(clip);
@@ -1235,7 +1264,62 @@ applyLayout();
   try { ta.value = localStorage.getItem('shortEditor.script') || ''; } catch (e) {}
   ta.addEventListener('input', () => { try { localStorage.setItem('shortEditor.script', ta.value); } catch (e) {} });
 })();
+/* ---------- 自動保存（このブラウザの IndexedDB に、素材ごと残す） ---------- */
+function projectState() {
+  return JSON.stringify({ uid, vclips, aclips, subs, style, opt, playhead: +playhead.toFixed(2), names: [...sources.values()].map(x => [x.id, x.name]) });
+}
+let lastSaved = '', restoring = true;
+async function saveState() {
+  if (restoring || playing || recording || exporting) return;
+  const st = projectState(); if (st === lastSaved) return;
+  lastSaved = st; await dbPut('state', 'project', st);
+}
+setInterval(saveState, 1500);
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveState(); });
+addEventListener('pagehide', saveState);
+function syncControls() {
+  const set = (id, v) => { const e = $(id); if (e.type === 'checkbox') e.checked = v; else e.value = v; e.dispatchEvent(new Event('input')); };
+  set('optEnhance', opt.enhance); set('optGate', opt.gate); set('optVVol', opt.vvol); set('optAVol', opt.avol); set('optSEVol', opt.sevol); set('optBGMVol', opt.bgmvol);
+  set('stSize', style.size); set('stY', style.y); set('stMax', style.max); set('stFont', style.font); set('stFit', style.fit); set('stOut', style.out);
+  [...$('presets').children].forEach((x, j) => x.classList.toggle('on', j === style.preset));
+}
+async function restoreProject() {
+  const st = await dbGet('state', 'project');
+  if (st) {
+    try {
+      const o = JSON.parse(st), names = new Map(o.names || []);
+      const needV = new Set(o.vclips.map(c => c.src)), needA = new Set(o.aclips.map(a => a.buf));
+      if (needV.size || needA.size) toast('前回の編集を読み込み中…', 60000);
+      uid = Math.max(uid, o.uid || 1);
+      for (const id of needV) {
+        const m = await dbGet('media', 'v' + id);
+        if (m) try { await loadSource(m.blob, id, m.name || names.get(id)); } catch (e) {}
+      }
+      for (const bid of needA) {
+        const m = await dbGet('media', 'a' + bid);
+        if (m) try { const raw = await actx.decodeAudioData(await m.blob.arrayBuffer()); buffers.set(bid, { raw, peaks: computePeaks(raw) }); } catch (e) {}
+      }
+      vclips = o.vclips.filter(c => sources.has(c.src));
+      aclips = o.aclips.filter(a => buffers.has(a.buf));
+      subs = o.subs || [];
+      Object.assign(opt, o.opt); Object.assign(style, o.style); syncControls();
+      playhead = o.playhead || 0;
+      if (vclips.length) $('drop').style.display = 'none';
+      // もう使っていない素材は消す
+      for (const k of (await dbKeys('media')) || []) if (!(k[0] === 'v' ? needV : needA).has(+k.slice(1))) dbDel('media', k);
+      if (needV.size || needA.size) toast(vclips.length + aclips.length < needV.size + needA.size ? '前回の編集を読み込みました（一部の素材は戻せませんでした）' : '前回の編集を読み込みました');
+      lastSaved = projectState();
+    } catch (e) { console.error(e); }
+  }
+  restoring = false; mixDirty = true; refresh();
+}
+$('newBtn').onclick = async () => {
+  if (!confirm('今の編集を消して、新しく始めますか？（台本は残ります）')) return;
+  restoring = true; await dbClear('state'); await dbClear('media'); location.reload();
+};
+try { navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {}); } catch (e) {}
 refresh();
+restoreProject();
 </script>
 </body>
 </html>
