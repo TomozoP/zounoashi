@@ -186,6 +186,8 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
         <div class="row"><label>大きさ</label><input type="range" id="stSize" min="40" max="180" step="2" value="96"><span class="val" id="stSizeV"></span></div>
         <div class="row"><label>縦位置</label><input type="range" id="stY" min="0.1" max="0.92" step="0.01" value="0.74"><span class="val" id="stYV"></span></div>
         <div class="row"><label>1枚の文字数</label><input type="range" id="stMax" min="6" max="30" step="1" value="16"><span class="val" id="stMaxV"></span></div>
+        <div class="row"><label>画面サイズ</label>
+          <select id="stOut" style="flex:1"><option value="source">元の動画のまま</option><option value="vertical">縦 1080×1920</option></select></div>
         <div class="row"><label>映像の配置</label>
           <select id="stFit" style="flex:1"><option value="blur">収める（背景ぼかし）</option><option value="cover">画面いっぱい</option></select></div>
       </div>
@@ -257,7 +259,7 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
 
 <script>
 'use strict';
-const W = 1080, H = 1920, FPS = 30;
+let W = 1080, H = 1920; const FPS = 30;
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 let uid = 1; const nid = () => uid++;
@@ -268,7 +270,7 @@ const buffers = new Map();   // id -> {raw, peaks, proc, procKey}
 let vclips = [];             // {id,src,in,out,at,gain}  at の順に並べておく
 let aclips = [];             // {id,buf,in,out,at,gain}
 let subs = [];               // {id,text,start,end}
-const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur' };
+const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur', out: 'source' };
 const opt = { enhance: true, gate: 0.5, vvol: 1, avol: 1, sevol: 1, bgmvol: 0.5 };
 // 音声のレーン：vo=ナレーション（補正あり） se=効果音 bgm=BGM
 const LANES = { vo: 'ナレーション', se: '効果音', bgm: 'BGM' };
@@ -293,7 +295,7 @@ function undo() { if (!undoStack.length) return; redoStack.push(snap()); restore
 function redo() { if (!redoStack.length) return; undoStack.push(snap()); restore(redoStack.pop()); changed(true); }
 // call commit() BEFORE mutating; changed() after mutation to refresh
 function changed(after) { vclips.sort((a, b) => a.at - b.at); mixDirty = true; if (playing && !recording) pause(); if (after !== undefined) refresh(); }
-function refresh() { renderTimeline(); renderInspector(); renderSubList(); loadFonts(); drawStill(); }
+function refresh() { applyOutSize(); renderTimeline(); renderInspector(); renderSubList(); loadFonts(); drawStill(); }
 
 /* ---------- helpers ---------- */
 function fmt(t) { t = Math.max(0, t); const m = Math.floor(t / 60), s = t - m * 60; return m + ':' + s.toFixed(2).padStart(5, '0'); }
@@ -397,6 +399,19 @@ async function ensureMix() {
 /* ---------- video / drawing ---------- */
 const view = $('view'), g = view.getContext('2d');
 const base = document.createElement('canvas'); base.width = W; base.height = H; const bg = base.getContext('2d');
+// 画面サイズ：既定は先頭の動画の大きさそのまま。動画がなければ縦 1080×1920
+function outSize() {
+  const c = vclips[0], src = c && sources.get(c.src);
+  if (style.out === 'vertical' || !src || !src.w) return [1080, 1920];
+  return [src.w - src.w % 2, src.h - src.h % 2];
+}
+function applyOutSize() {
+  const [w, h] = outSize(); if (w === W && h === H) return;
+  W = w; H = h; view.width = base.width = W; view.height = base.height = H;
+  if (typeof fitView === 'function') fitView();
+}
+// 字幕などの大きさは、1080 を基準に画面の短い辺に合わせる
+const sz = () => style.size * Math.min(W, H) / 1080;
 const blurC = document.createElement('canvas'); blurC.width = 54; blurC.height = 96; const blg = blurC.getContext('2d');
 const vids = [$('vA'), $('vB')];
 let curV = 0; const vState = [{ clip: null }, { clip: null }];
@@ -419,7 +434,7 @@ function compose(t) {
   g.drawImage(base, 0, 0);
   drawSubs(g, t);
 }
-function subFont() { const [fam, w] = style.font.split('|'); return `${w} ${style.size}px ${fam}, "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif`; }
+function subFont() { const [fam, w] = style.font.split('|'); return `${w} ${sz()}px ${fam}, "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif`; }
 function wrapLines(ctx, text, maxW) {
   const out = [];
   for (const para of text.split('\n')) {
@@ -441,12 +456,12 @@ function drawSubs(ctx, t) {
     ctx.save();
     ctx.font = subFont(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.miterLimit = 2;
     const lines = wrapLines(ctx, s.text, W * 0.88);
-    const lh = style.size * 1.22, y0 = style.y * H - (lines.length - 1) * lh / 2;
-    const sw = style.size * 0.2;
+    const fs = sz(), lh = fs * 1.22, y0 = style.y * H - (lines.length - 1) * lh / 2;
+    const sw = fs * 0.2;
     lines.forEach((ln, i) => {
       const y = y0 + i * lh, x = W / 2;
       ctx.strokeStyle = p.shadow; ctx.fillStyle = p.shadow; ctx.lineWidth = sw;
-      ctx.strokeText(ln, x + style.size * 0.05, y + style.size * 0.08); ctx.fillText(ln, x + style.size * 0.05, y + style.size * 0.08);
+      ctx.strokeText(ln, x + fs * 0.05, y + fs * 0.08); ctx.fillText(ln, x + fs * 0.05, y + fs * 0.08);
       ctx.strokeStyle = p.stroke; ctx.strokeText(ln, x, y);
       ctx.fillStyle = p.fill; ctx.fillText(ln, x, y);
     });
@@ -1139,6 +1154,7 @@ bindRange('stMax', v => v, v => { style.max = v; });
 $('optEnhance').onchange = e => { opt.enhance = e.target.checked; mixDirty = true; };
 $('stFont').onchange = e => { style.font = e.target.value; loadFonts(); compose(playhead); };
 $('stFit').onchange = e => { style.fit = e.target.value; drawStill(); };
+$('stOut').onchange = e => { style.out = e.target.value; applyOutSize(); drawStill(); };
 ['optGate', 'optVVol', 'optAVol', 'optSEVol', 'optBGMVol'].forEach(id => $(id).addEventListener('change', () => { if (playing && !recording) { pause(); play(); } }));
 $('optEnhance').addEventListener('change', () => { if (playing && !recording) { pause(); play(); } });
 PRESETS.forEach((p, i) => {
@@ -1175,8 +1191,8 @@ const lay = { ...LAY_DEF };
 try { Object.assign(lay, JSON.parse(localStorage.getItem(LAY_KEY) || '{}')); } catch (e) {}
 function fitView() {
   const m = $('stageMain'), vw = $('viewWrap');
-  let h = Math.max(80, m.clientHeight - 44), w = h * 9 / 16;
-  if (w > m.clientWidth) { w = m.clientWidth; h = w * 16 / 9; }
+  let h = Math.max(80, m.clientHeight - 44), w = h * W / H;
+  if (w > m.clientWidth) { w = m.clientWidth; h = w * H / W; }
   vw.style.width = w + 'px'; vw.style.height = h + 'px';
 }
 function applyLayout() {
