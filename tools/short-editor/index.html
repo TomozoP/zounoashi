@@ -167,6 +167,7 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
 
       <div class="sec">
         <h3>音声</h3>
+        <label class="chk"><input type="checkbox" id="optNorm" checked>全体の音量を自動でそろえる</label>
         <label class="chk"><input type="checkbox" id="optEnhance" checked>ナレーションを聞き取りやすく補正</label>
         <div class="row"><label>ノイズ抑制</label><input type="range" id="optGate" min="0" max="1" step="0.05" value="0.5"><span class="val" id="optGateV"></span></div>
         <div class="row"><label>動画の音量</label><input type="range" id="optVVol" min="0" max="2" step="0.05" value="1"><span class="val" id="optVVolV"></span></div>
@@ -272,7 +273,7 @@ let vclips = [];             // {id,src,in,out,at,gain}  at の順に並べて�
 let aclips = [];             // {id,buf,in,out,at,gain}
 let subs = [];               // {id,text,start,end}
 const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur', out: 'source' };
-const opt = { enhance: true, gate: 0.5, vvol: 1, avol: 1, sevol: 1, bgmvol: 0.5 };
+const opt = { norm: true, enhance: true, gate: 0.5, vvol: 1, avol: 1, sevol: 1, bgmvol: 0.5 };
 // 音声のレーン：vo=ナレーション（補正あり） se=効果音 bgm=BGM
 const LANES = { vo: 'ナレーション', se: '効果音', bgm: 'BGM' };
 const laneOf = a => a.lane || 'vo';
@@ -410,7 +411,50 @@ async function buildMix() {
   };
   for (const c of vclips) place(sources.get(c.src).audio, c.at, c.in, c.out - c.in, opt.vvol * (c.gain ?? 1));
   for (const a of aclips) place(await procBuffer(a.buf, laneOf(a)), a.at, a.in, a.out - a.in, laneVol(a) * (a.gain ?? 1));
-  return off.startRendering();
+  const out = await off.startRendering();
+  if (opt.norm) await normalizeLoudness(out);
+  return out;
+}
+// 全体の音量をそろえる：ショート動画の配信先で一般的な -14 LUFS に合わせ、ピークは -1dB で頭打ち
+const TARGET_LUFS = -14, CEIL = Math.pow(10, -1 / 20);
+async function measureLufs(buf) {
+  // BS.1770 の K 特性（近似）をかけてから、400ms ブロックでゲート付き平均
+  const sr = buf.sampleRate, off = new OfflineAudioContext(buf.numberOfChannels, buf.length, sr);
+  const src = off.createBufferSource(); src.buffer = buf;
+  const shelf = off.createBiquadFilter(); shelf.type = 'highshelf'; shelf.frequency.value = 1500; shelf.gain.value = 4;
+  const hp = off.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 38; hp.Q.value = 0.5;
+  src.connect(shelf); shelf.connect(hp); hp.connect(off.destination); src.start();
+  const k = await off.startRendering();
+  const chs = [...Array(k.numberOfChannels)].map((_, i) => k.getChannelData(i));
+  const blk = Math.round(sr * 0.4), hop = Math.round(sr * 0.1), pw = [];
+  for (let st = 0; st + blk <= k.length; st += hop) {
+    let sum = 0; for (const d of chs) for (let i = st; i < st + blk; i++) sum += d[i] * d[i];
+    pw.push(sum / blk);
+  }
+  const lk = x => -0.691 + 10 * Math.log10(x + 1e-12);
+  let g1 = pw.filter(x => lk(x) > -70); if (!g1.length) return null;
+  const rel = lk(g1.reduce((a, b) => a + b, 0) / g1.length) - 10;
+  const g2 = g1.filter(x => lk(x) > rel); if (!g2.length) return null;
+  return lk(g2.reduce((a, b) => a + b, 0) / g2.length);
+}
+async function normalizeLoudness(buf) {
+  const lufs = await measureLufs(buf); if (lufs == null) return;
+  const gain = Math.min(Math.pow(10, (TARGET_LUFS - lufs) / 20), 8); // 小さすぎる音は最大 +18dB まで
+  const chs = [...Array(buf.numberOfChannels)].map((_, i) => buf.getChannelData(i)), n = buf.length, sr = buf.sampleRate;
+  // 先読みリミッター：大きいところだけ一瞬下げる（5ms で下げ、80ms かけて戻す）
+  const look = Math.round(sr * 0.005), need = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let m = 0; for (const d of chs) m = Math.max(m, Math.abs(d[i])); const v = m * gain; need[i] = v > CEIL ? CEIL / v : 1; }
+  const env = new Float32Array(n); let g = 1; const rel = Math.exp(-1 / (sr * 0.08));
+  // 後ろから「この先 look サンプル以内の最小値」を求めて前倒しで下げる
+  const minAhead = new Float32Array(n), dq = new Int32Array(n); let h = 0, t = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    while (t > h && need[dq[t - 1]] >= need[i]) t--;
+    dq[t++] = i; while (dq[h] > i + look) h++;
+    minAhead[i] = need[dq[h]];
+  }
+  const att = Math.exp(-1 / (sr * 0.002));
+  for (let i = 0; i < n; i++) { const t = minAhead[i]; g = t < g ? att * g + (1 - att) * t : rel * g + (1 - rel) * t; if (g > need[i]) g = need[i]; env[i] = g; }
+  for (const d of chs) for (let i = 0; i < n; i++) d[i] *= gain * env[i];
 }
 async function ensureMix() {
   if (!mixDirty && mix) return mix;
@@ -1181,6 +1225,7 @@ bindRange('stSize', v => v, v => { style.size = v; compose(playhead); });
 bindRange('stY', v => Math.round(v * 100) + '%', v => { style.y = v; compose(playhead); });
 bindRange('stMax', v => v, v => { style.max = v; });
 $('optEnhance').onchange = e => { opt.enhance = e.target.checked; mixDirty = true; };
+$('optNorm').onchange = e => { opt.norm = e.target.checked; mixDirty = true; if (playing && !recording) { pause(); play(); } };
 $('stFont').onchange = e => { style.font = e.target.value; loadFonts(); compose(playhead); };
 $('stFit').onchange = e => { style.fit = e.target.value; drawStill(); };
 $('stOut').onchange = e => { style.out = e.target.value; applyOutSize(); drawStill(); };
@@ -1279,7 +1324,7 @@ addEventListener('visibilitychange', () => { if (document.visibilityState === 'h
 addEventListener('pagehide', saveState);
 function syncControls() {
   const set = (id, v) => { const e = $(id); if (e.type === 'checkbox') e.checked = v; else e.value = v; e.dispatchEvent(new Event('input')); };
-  set('optEnhance', opt.enhance); set('optGate', opt.gate); set('optVVol', opt.vvol); set('optAVol', opt.avol); set('optSEVol', opt.sevol); set('optBGMVol', opt.bgmvol);
+  set('optNorm', opt.norm !== false); set('optEnhance', opt.enhance); set('optGate', opt.gate); set('optVVol', opt.vvol); set('optAVol', opt.avol); set('optSEVol', opt.sevol); set('optBGMVol', opt.bgmvol);
   set('stSize', style.size); set('stY', style.y); set('stMax', style.max); set('stFont', style.font); set('stFit', style.fit); set('stOut', style.out);
   [...$('presets').children].forEach((x, j) => x.classList.toggle('on', j === style.preset));
 }
