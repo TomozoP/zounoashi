@@ -20,7 +20,7 @@ var ZDoji5Scene = (function () {
   /* ============ 地面の絵 ============
      世界の x -35〜35、z -25〜80（70m×105m）を 2048x3072 の絵にする。
      縦横とも 1m = 29.26px で揃うので、円は円のまま描ける。
-     線は実物と同じ8cmほどの細さ。5競技の線を同じ紙の上に全部引く。 */
+     線は5cmほどの細さ。5競技の線を同じ紙の上に全部引く。 */
   var FIELD = { x0: -35, z0: -25, w: 70, d: 105, px: 2048 / 70 };
   var fieldCv = null, grassCv = null;
   /* 芝と刈り跡だけの下地。線を引き直すたびに作り直さない */
@@ -44,7 +44,7 @@ var ZDoji5Scene = (function () {
     function PX(x) { return (x + 35) * K; }
     function PZ(z) { return (z + 25) * K; }
     function S(v) { return v * K; }
-    function line() { c.lineWidth = S(.08); c.strokeStyle = 'rgba(246,250,247,.95)'; }
+    function line() { c.lineWidth = S(.05); c.strokeStyle = 'rgba(246,250,247,.95)'; }
     function rect(x0, z0, x1, z1) { c.strokeRect(PX(x0), PZ(z0), S(x1 - x0), S(z1 - z0)); }
     function seg(x0, z0, x1, z1) { c.beginPath(); c.moveTo(PX(x0), PZ(z0)); c.lineTo(PX(x1), PZ(z1)); c.stroke(); }
     function circle(x, z, r, from, to) {
