@@ -279,6 +279,33 @@ var ZDoji5Scene = (function () {
       wristband.castShadow = true; parts.handL.add(wristband);
       worn.tennis.push(wristband);
     }
+    /* 手前のプレイヤーだけ、服の縁・手・靴底などの立体を足す。 */
+    if (opt.gear && !opt.simple) {
+      var trim = mat('#f1e6d2', .8), sole = mat('#dce5e9', .9), seam = mat('#b52e2b', .85);
+      function detail(parent, x, y, z, sx, sy, sz, material) {
+        var m = blob(parent, sx, sy, sz, material, y, z); m.position.x = x; return m;
+      }
+      /* 首元と裾は体に沿った細い縁。背中に縦の縫い目を置く。 */
+      var collar = new T.Mesh(new T.TorusGeometry(.085, .012, 6, 20), trim);
+      collar.rotation.x = Math.PI / 2; collar.position.set(0, .48, 0); torso.add(collar);
+      detail(torso, 0, .24, -.159, .007, .19, .005, seam);
+      detail(torso, 0, .015, 0, .164, .019, .137, seam);
+      detail(torso, 0, .675, 0, .025, .018, .025, seam);
+      [-1, 1].forEach(function (side) {
+        detail(torso, side * .112, .58, 0, .025, .039, .026, skin);
+        detail(torso, side * .043, .598, .116, .012, .016, .007, shoe);
+      });
+      ['L', 'R'].forEach(function (tag) {
+        var side = tag === 'L' ? 1 : -1, sh = parts['shoulder' + tag], hand = parts['hand' + tag], kn = parts['knee' + tag];
+        detail(sh, 0, -.05, 0, .075, .083, .075, shirt);
+        detail(sh, 0, -.108, 0, .068, .012, .068, trim);
+        detail(hand, 0, -.015, .007, .057, .065, .047, skin);
+        detail(hand, side * .039, .004, .032, .024, .04, .025, skin);
+        detail(kn, 0, -.465, .064, .096, .018, .167, sole);
+        detail(kn, 0, -.426, -.073, .066, .045, .025, trim);
+        for (var i = 0; i < 3; i++) detail(kn, 0, -.38 - i * .008, .095 + i * .025, .049, .006, .008, trim);
+      });
+    }
     var batParts = [], racketParts = [];
     if (opt.bat) {                                            /* 右手はバット。手首から上へ伸ばす */
       var bat = new T.Mesh(new T.CylinderGeometry(.05, .023, .92, 12), mat(COLORS.yakyu, .55));
