@@ -155,5 +155,26 @@ function start(g) { g.press(" "); g.step(2); return g; }
   ok("詰まりすぎない", later > .38, later.toFixed(2) + "秒");
 })();
 
+/* 途中の競技を切っても、数字キーは同じ競技を操作する。 */
+[false, true].forEach(function (reduced) {
+  var g = load("games/_doji5/index.html", { quiet: true });
+  var keys = ["yakyu", "soccer", "tennis", "basket", "volley"];
+  if (reduced) { g.press("1"); g.press("3"); }
+  start(g);
+  var seen = {};
+  for (var i = 0; i < 60 && Object.keys(seen).length < (reduced ? 3 : 5); i++) {
+    var kind = g.probe.toBall(), before = g.probe.now().score;
+    if (!kind) break;
+    if (reduced) {
+      g.press("1");
+      ok("切った競技のキーでは点が入らない", g.probe.now().score === before);
+    }
+    g.press(String(keys.indexOf(kind) + 1));
+    ok("数字キーで当たる：" + kind, g.probe.now().score > before);
+    seen[kind] = true;
+  }
+  ok(reduced ? "競技を切っても割り当てがずれない" : "5競技とも数字キーで操作できる", Object.keys(seen).length === (reduced ? 3 : 5));
+});
+
 console.log(bad.length ? "\n直すところ: " + bad.join(" / ") : "\n問題なし");
 process.exit(bad.length ? 1 : 0);
