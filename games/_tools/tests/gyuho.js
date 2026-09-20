@@ -3,6 +3,7 @@
    見るもの
      - 指を上へなぞったぶんだけ速くなる。なぞらなければ落ちも進みもしない
      - 下へなぞっても、指を離したあとの動きも効かない
+     - 大きくはらうと、そのぶん牛がぐっと前へ出る（boost）
      - 景色の切れ目は 時速10 / 50 / 200 / 1000。宇宙に出ると1押しで一気に上がる
      - 景色ごとに要る押しの数（100 / 200 / 200 / 250 / 300）と、光の速さまでの合計
      - 壊すものが景色ごとに変わる（わら・人・車・ビル・星）
@@ -61,11 +62,15 @@ ok(!/ c$/.test(t50.probe.now().read), "表記は時速で統一", t50.probe.now(
 
 /* 2b. なぞった長さで進む */
 var sw = start();
-swipe(sw, 40);
-ok(Math.abs(sw.probe.now().kmh - 0.2) < 1e-6, "40px なぞるとひとこぎぶん", sw.probe.now().read);
-swipe(sw, 400);
-ok(Math.abs(sw.probe.now().kmh - 1.2) < 1e-6, "400px なぞると10こぎぶん", sw.probe.now().read);
+swipe(sw, 80);
+ok(Math.abs(sw.probe.now().kmh - 0.2) < 1e-6, "80px なぞるとひとこぎぶん", sw.probe.now().read);
+swipe(sw, 800);
+ok(Math.abs(sw.probe.now().kmh - 1.2) < 1e-6, "800px なぞると10こぎぶん", sw.probe.now().read);
 ok(sw.probe.now().score === 11, "数えかたもこいだ回数", sw.probe.now().score);
+ok(sw.probe.now().boost > 0, "大きくはらうと前へ突き出す", sw.probe.now().boost);
+var wasBoost = sw.probe.now().boost;
+sw.step(60);
+ok(sw.probe.now().boost < wasBoost, "突き出したぶんはすぐ使いきる", sw.probe.now().boost);
 var back = sw.probe.now().kmh;
 var H2 = sw.probe.now().H;
 sw.down(270, H2 * 0.3); sw.moveTo(270, H2 * 0.3 + 300); sw.up();

@@ -58,7 +58,8 @@
   var TAU = Math.PI * 2;
   var C_KMH = 1079252848.8;                  /* 光の速さ km/h */
   var SONIC = 1234.8;                        /* 音の速さ km/h */
-  var STROKE = 40;                           /* このぶん指を上へはらうと、ひとこぎ */
+  var STROKE = 80;                           /* このぶん指を上へはらうと、ひとこぎ */
+  var LUNGE = 1.4;                           /* 大きくはらったとき、何秒ぶん前へ出るか */
   var MIN_KMH = 0.1;                         /* 牛歩 */
   var WARN_BETA = 0.9;                       /* ここから警告 */
 
@@ -74,6 +75,11 @@
   ];
   var PHASE_NAME = ["牧場", "道路", "町", "都市", "宇宙"];
   var WORLD = [1, 1.25, 1.5, 1.8, 2.2];      /* 景色ごとの世界の広さ */
+  /* 見た目の速さ。景色のはじめと終わりで、ここからここまで登る。
+     景色が変わると登りなおすが、はじまりの速さ自体が段ごとに上がっていく。
+     宇宙はいきなり速い。 */
+  var WSP_LO = [46, 82, 131, 210, 760];
+  var WSP_HI = [476, 676, 928, 1284, 2400];
   function gearIndex(km) {
     for (var i = 0; i < GEARS.length - 1; i++) if (km < GEARS[i].top) return i;
     return GEARS.length - 1;
@@ -206,7 +212,7 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", BOOM: "boom", RESULT: "result" };
   var state, score, scoreF, broken, T, bt;
-  var dragY = null, tickAcc = 0;
+  var dragY = null, tickAcc = 0, boost, lead;
   var speed = MIN_KMH, beta = 0, wsp = 0, gear = 0, warning = false;
   var W8 = [1, 0, 0, 0, 0];                    /* 景色の重み（牧場・道路・町・都市・宇宙） */
   var props, rings, shards;
@@ -224,9 +230,9 @@
     var lo = g === 0 ? MIN_KMH : GEARS[g - 1].top;
     return clamp01((km - lo) / (GEARS[g].top - lo));
   }
-  /* 見た目の速さ。景色のなかで登りなおし、世界が広くなったぶんだけ速くなる */
   function wspOf(km) {
-    return (46 + 430 * Math.pow(phaseT(km), 0.8)) * WORLD[gearIndex(km)];
+    var g = gearIndex(km);
+    return WSP_LO[g] + (WSP_HI[g] - WSP_LO[g]) * Math.pow(phaseT(km), 0.8);
   }
   /* 壊すものの間隔。はじめは3秒に1つ、終わりで1.6秒に1つくらい */
   function propGap() {
@@ -255,7 +261,7 @@
     speed = MIN_KMH;
     props = []; rings = []; shards = [];
     dist = 0; nextAt = 300; legPhase = 0; prevHalf = 0; prevKmh = MIN_KMH; prevGear = 0;
-    sirenT = 0; clickPulse = 0; gearFlash = 0;
+    sirenT = 0; clickPulse = 0; gearFlash = 0; boost = 0; lead = 0;
     if (scene3d) scene3d.reset();
     recalc();
   }
@@ -275,6 +281,7 @@
     scoreF += u;
     score = Math.floor(scoreF);
     speed += GEARS[gearIndex(speed)].step * u;
+    boost += (px / 900) * wsp * LUNGE;         /* はらった量ぶん、前へ突き出す */
     clickPulse = Math.min(1, clickPulse + u * 0.6);
     if (speed >= C_KMH) { speed = C_KMH; recalc(); reachLight(); return; }
     recalc();
@@ -332,6 +339,12 @@
     T += dt;
     recalc();
     dist += wsp * dt;
+    if (boost > 0) {                           /* 突き出したぶんを、みるみる使う */
+      var give = Math.min(boost, boost * 6 * dt + 40 * dt);
+      dist += give;
+      boost -= give;
+    }
+    lead += (Math.min(150, boost * 0.5) - lead) * Math.min(1, dt * 10);
     clickPulse = Math.max(0, clickPulse - dt * 4);
     gearFlash = Math.max(0, gearFlash - dt * 1.6);
 
@@ -637,7 +650,7 @@
     if (scene3d) {
       scene3d.sync({
         dist: dist, w: W8, gear: gear, legPhase: legPhase, wsp: wsp, beta: beta,
-        props: props, dt: lastDt, clickPulse: clickPulse, t: phaseT(speed), world: WORLD[gear],
+        props: props, dt: lastDt, clickPulse: clickPulse, lead: lead, t: phaseT(speed), world: WORLD[gear],
         groundColor: mixW(GROUND), roadColor: mixW(PAVE), fogColor: mixW(SKY_LO)
       });
       place();                                   /* カメラが動くので測りなおす */
@@ -713,7 +726,7 @@
                kmh: speed, beta: beta, wsp: wsp, gear: gear, step: GEARS[gear].step,
                phase: PHASE_NAME[gear], props: props.length,
                bits: scene3d ? scene3d.bits.length : 0, solid: !!scene3d,
-               warn: warning, read: fmtSpeed(speed) };
+               boost: Math.round(boost), warn: warning, read: fmtSpeed(speed) };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }

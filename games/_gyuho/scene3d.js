@@ -477,8 +477,8 @@
     /* 牛 */
     var cow = this.cow;
     var bob = Math.abs(Math.sin(s.legPhase * Math.PI * 2)) * 5;
-    cow.root.position.set(0, bob, s.clickPulse * -26);
-    cow.root.rotation.x = -0.06 * Math.min(1, s.wsp / 2400) - s.clickPulse * 0.06;
+    cow.root.position.set(0, bob, -(s.lead || 0));       /* はらうと前へ出る */
+    cow.root.rotation.x = -0.06 * Math.min(1, s.wsp / 2400) - Math.min(0.12, (s.lead || 0) * 0.0012);
     for (var i = 0; i < cow.legs.length; i++) {
       var off = (i === 0 || i === 3) ? 0 : 0.5;
       cow.legs[i].rotation.x = Math.sin((s.legPhase + off) * Math.PI * 2) * 0.62;
