@@ -2,10 +2,10 @@
      node games/_tools/tests/gyuho.js
    見るもの
      - 押すたびに速くなる。押さなければ落ちも進みもしない
-     - 時速100kmに届くのは100押しを過ぎたあたり（最初はじっくり）
-     - 景色は 牧場→道路→町→都市→宇宙。変わるたびに1押しの効きが上がる
-     - 景色ごとに要る押しの数（100 / 198 / 198 / 248 / 297）と、光の速さまでの合計
-     - 壊すものが景色ごとに変わる（わら・電柱・車・ビル・星）
+     - 景色の切れ目は 時速10 / 50 / 200 / 1000。宇宙に出ると1押しで一気に上がる
+     - 景色ごとに要る押しの数（100 / 200 / 200 / 250 / 300）と、光の速さまでの合計
+     - 壊すものが景色ごとに変わる（わら・人・車・ビル・星）
+     - 速さの表記は時速で統一（光の速さは 1,079,252,849 km/h）
      - 光の速さの手前で警告。押すのをやめれば壊れない
      - 光の速さに届くと宇宙が壊れ、結果は押した回数
      - 画面の形が変わっても遊べる */
@@ -37,7 +37,7 @@ var g = start();
 ok(g.probe.now().state === "play", "スペースで始まる", g.probe.now().state);
 ok(Math.abs(g.probe.now().kmh - 0.1) < 1e-9, "はじめは牛歩", g.probe.now().read);
 push(g, 1);
-ok(Math.abs(g.probe.now().kmh - 0.5) < 1e-9, "牧場は1押し0.4km/h", g.probe.now().read);
+ok(Math.abs(g.probe.now().kmh - 0.2) < 1e-9, "牧場は1押し0.1km/h", g.probe.now().read);
 var keep = g.probe.now().kmh;
 g.step(60 * 20);
 ok(g.probe.now().kmh === keep, "押さずに20秒おいても落ちない", g.probe.now().read);
@@ -45,10 +45,11 @@ ok(g.probe.now().kmh === keep, "押さずに20秒おいても落ちない", g.pr
 /* 2. 最初はじっくり */
 var t100 = start(), n100 = 0;
 while (t100.probe.now().kmh < 100 && n100 < 3000) { t100.tap(270, 400); n100++; }
-ok(n100 > 80 && n100 < 140, "時速100kmまで100押しくらいかかる", n100 + "押し");
+ok(n100 > 300 && n100 < 420, "時速100kmまでは道のり長い", n100 + "押し");
 var t50 = start();
 push(t50, 10);
-ok(t50.probe.now().kmh < 5, "10押しではまだ歩くほど", t50.probe.now().read);
+ok(t50.probe.now().kmh < 2, "10押しではまだ牛歩", t50.probe.now().read);
+ok(!/ c$/.test(t50.probe.now().read), "表記は時速で統一", t50.probe.now().read);
 
 /* 3. 景色ごとに要る押しの数 */
 g.probe.reset();
@@ -68,11 +69,11 @@ ok(marks.length === 5, "景色は5つ", marks.length + "つ");
 ok(marks[0].clicks === 100, "牧場は100押し", marks[0].clicks);
 var inc = marks.every(function (m, i) { return i === 0 || m.clicks >= marks[i - 1].clicks; });
 ok(inc, "先へ行くほど押す数が増える", marks.map(function (m) { return m.clicks; }).join(" → "));
-ok(total > 950 && total < 1150, "光の速さまで合計1000押しくらい", total + "押し");
+ok(total > 980 && total < 1120, "光の速さまで合計1050押しくらい", total + "押し");
 ok(g.probe.now().score === total, "結果の数字は押した回数", g.probe.now().score);
 
 /* 4. ギアの中身 */
-[[0, "牧場", 0.4], [120, "道路", 20], [320, "町", 2000], [510, "都市", 160000], [760, "宇宙", 3500000]].forEach(function (c) {
+[[0, "牧場", 0.1], [120, "道路", 0.2], [320, "町", 0.75], [510, "都市", 3.2], [760, "宇宙", 3600000]].forEach(function (c) {
   var t = start();
   push(t, c[0]);
   var n = t.probe.now();
@@ -81,7 +82,7 @@ ok(g.probe.now().score === total, "結果の数字は押した回数", g.probe.n
 });
 
 /* 5. 壊すものが景色ごとに変わる */
-[[40, "牧場"], [200, "道路"], [400, "町"], [600, "都市"], [800, "宇宙"]].forEach(function (c) {
+[[40, "牧場"], [180, "道路"], [380, "町"], [580, "都市"], [800, "宇宙"]].forEach(function (c) {
   var t = start();
   push(t, c[0], 1);
   var before = t.probe.now().broken;
@@ -108,7 +109,7 @@ ok(t4.probe.now().state === "play" && t4.probe.now().warn, "警告のまま押�
 var t6 = start();
 while (t6.probe.now().state === "play") t6.tap(270, 400);
 ok(t6.probe.now().state === "boom", "光の速さに届くと宇宙が壊れる", t6.probe.now().read);
-ok(t6.probe.now().read === "1.000000 c", "壊れる瞬間はちょうど光の速さ", t6.probe.now().read);
+ok(t6.probe.now().read === "1,079,252,849 km/h", "壊れる瞬間はちょうど光の速さ", t6.probe.now().read);
 ok(t6.until(function () { return t6.probe.now().state === "result"; }, 300), "壊れたあと結果画面へ",
    t6.probe.now().state);
 
@@ -132,7 +133,7 @@ ok(t7.probe.now().score === 0, "Escで最初から");
   var t = load(FILE, { w: v[0], h: v[1] });
   t.press(" "); t.step(2);
   push(t, 5, 1);
-  ok(t.probe.now().score === 5 && Math.abs(t.probe.now().kmh - 2.1) < 1e-9,
+  ok(t.probe.now().score === 5 && Math.abs(t.probe.now().kmh - 0.6) < 1e-9,
      "画面 " + v[0] + "x" + v[1] + " で押せる", "高さ" + t.probe.now().H + " / " + t.probe.now().read);
 });
 

@@ -131,14 +131,14 @@
     /* 壊すもの */
     this.propPool = [
       pool(10, function () { return self.makeStraw(); }),
-      pool(10, function () { return self.makePole(175, mat("#7b6a56")); }),
+      pool(10, function () { return self.makePerson(); }),
       pool(10, function () { return self.makeCar(); }),
       pool(8,  function () { return self.makeBuilding(); }),
       pool(10, function () { return self.makeStar(); })
     ];
 
     /* 破片 */
-    this.bitMats = ["#e8c25a", "#d9b24a", "#7b6a56", "#e0543c", "#3f7fd6", "#5a6472", "#f6e9bb", "#ffffff"]
+    this.bitMats = ["#e8c25a", "#d9b24a", "#7b6a56", "#e0543c", "#3f7fd6", "#5a6472", "#f6e9bb", "#ffffff", "#f0c9a6", "#4c7fd6"]
       .map(function (c) { return mat(c, { rough: 0.9 }); });
     for (var i = 0; i < 120; i++) {
       var b = this.mesh(this.geo.box, this.bitMats[0]);
@@ -248,9 +248,9 @@
   /* ============ 道ばたのもの ============ */
   Scene3D.prototype.makeFence = function () {
     var g = new T.Group();
-    this.put(this.mesh(this.geo.box, this.M.fenceWood, g), 0, 27, 0, 9, 54, 7);
-    this.put(this.mesh(this.geo.box, this.M.fenceBar, g), 0, 44, 0, 112, 7, 5);
-    this.put(this.mesh(this.geo.box, this.M.fenceBar, g), 0, 24, 0, 112, 7, 5);
+    this.put(this.mesh(this.geo.box, this.M.fenceWood, g), 0, 27, 0, 9, 54, 9);
+    this.put(this.mesh(this.geo.box, this.M.fenceBar, g), 0, 44, 0, 5, 7, 112);
+    this.put(this.mesh(this.geo.box, this.M.fenceBar, g), 0, 24, 0, 5, 7, 112);
     return g;
   };
   Scene3D.prototype.makeBarn = function () {
@@ -270,8 +270,8 @@
   };
   Scene3D.prototype.makeRail = function () {
     var g = new T.Group();
-    this.put(this.mesh(this.geo.box, this.M.railTop, g), 0, 30, 0, 100, 10, 5);
-    this.put(this.mesh(this.geo.box, this.M.railLeg, g), 0, 15, 0, 7, 30, 6);
+    this.put(this.mesh(this.geo.box, this.M.railTop, g), 0, 30, 0, 5, 10, 104);
+    this.put(this.mesh(this.geo.box, this.M.railLeg, g), 0, 15, 0, 7, 30, 7);
     return g;
   };
   Scene3D.prototype.makeHouse = function () {
@@ -299,6 +299,21 @@
     face.rotation.z = Math.PI / 2;
     return g;
   };
+  /* 人。牛とおなじ向きで道に立っている */
+  Scene3D.prototype.makePerson = function () {
+    var g = new T.Group();
+    var skin = mat("#f0c9a6"), shirt = mat("#4c7fd6"), pants = mat("#3b4a6b"), hair = mat("#3a2e26");
+    g.userData.shirt = shirt;
+    this.put(this.mesh(this.geo.tube, pants, g), -13, 38, 0, 11, 76, 11);   /* 脚 */
+    this.put(this.mesh(this.geo.tube, pants, g), 13, 38, 0, 11, 76, 11);
+    this.put(this.mesh(this.geo.box, shirt, g), 0, 108, 0, 46, 66, 26);     /* 胴 */
+    this.put(this.mesh(this.geo.tube, shirt, g), -30, 106, 0, 10, 62, 10);  /* 腕 */
+    this.put(this.mesh(this.geo.tube, shirt, g), 30, 106, 0, 10, 62, 10);
+    this.put(this.mesh(this.geo.ball, skin, g), 0, 156, 0, 19, 21, 19);     /* 頭 */
+    this.put(this.mesh(this.geo.ball, hair, g), 0, 163, 3, 20, 15, 20);     /* 髪 */
+    return g;
+  };
+
   Scene3D.prototype.makeCar = function () {
     var g = new T.Group();
     this.put(this.mesh(this.geo.box, mat("#e0543c", { rough: 0.5 }), g), 0, 26, 0, 92, 40, 160);
@@ -331,8 +346,8 @@
 
   /* ============ 破片 ============ */
   Scene3D.prototype.burst = function (x, z, type) {
-    var cols = [[0, 1], [2, 6], [3, 4], [5, 6], [6, 7]][type] || [0, 1];
-    var high = [40, 150, 46, 260, 120][type] || 40;
+    var cols = [[0, 1], [8, 9], [3, 4], [5, 6], [6, 7]][type] || [0, 1];
+    var high = [40, 160, 46, 260, 120][type] || 40;
     for (var i = 0; i < 9; i++) {
       var m = this.bitPool.pop();
       if (!m) break;
@@ -388,8 +403,8 @@
     this.road.visible = this.roadMat.opacity > 0.02;
     this.grassMat.opacity = 0.14 * (1 - w[4]);
     this.grass.visible = this.grassMat.opacity > 0.01;
-    this.grassTex.offset.y = -s.dist / 260;
-    this.lineTex.offset.y = -s.dist / 340;
+    this.grassTex.offset.y = s.dist / 260;
+    this.lineTex.offset.y = s.dist / 340;
     this.lineMat.opacity = Math.min(1, w[1] + w[2] + w[3]) * (1 - w[4]);
     this.lines.visible = this.lineMat.opacity > 0.02;
     setColor(this.fog.color, s.fogColor);
@@ -425,7 +440,8 @@
       var m = lane[used[o.t]++];
       m.visible = true;
       m.position.set(o.x, 0, -o.z);
-      m.rotation.y = o.r * 3.14;
+      m.rotation.y = o.t === 2 ? (o.r - 0.5) * 0.24 : o.r * 3.14;
+      if (o.t === 1 && m.userData.shirt) m.userData.shirt.color.copy(this.shirtColor(o.r));
       if (o.t === 2 && m.userData.body) m.userData.body.material = this.carMat(o.r);
       if (o.t === 3 && m.userData.body) m.userData.body.scale.y = 300 * (0.7 + o.r * 0.7);
     }
@@ -459,6 +475,14 @@
     }
   };
 
+  Scene3D.prototype.shirtColor = function (r) {
+    if (!this._shirts) {
+      this._shirts = ["#4c7fd6", "#d95f4c", "#4aa86b", "#e8b63a", "#8a5ad0", "#e9e4da"]
+        .map(function (c) { return new T.Color(c); });
+    }
+    return this._shirts[Math.floor(r * this._shirts.length) % this._shirts.length];
+  };
+
   Scene3D.prototype.carMat = function (r) {
     if (!this._carMats) {
       this._carMats = ["#e0543c", "#3f7fd6", "#e8b63a", "#4aa86b", "#e9e4da", "#8a5ad0"]
@@ -490,7 +514,8 @@
       g.visible = true;
       g.position.set(px, 0, -z);
       var r = fract(Math.sin(id * 12.9898) * 43758.5453);
-      g.rotation.y = px < 0 ? 0 : Math.PI;
+      g.rotation.y = (kind === "house" || kind === "barn" || kind === "tower")
+                     ? (px < 0 ? -Math.PI / 2 : Math.PI / 2) : 0;
       var sc = 0.8 + r * 0.5;
       if (kind === "house" || kind === "tower" || kind === "barn") g.scale.set(1, sc, 1);
     }
