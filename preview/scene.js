@@ -183,7 +183,7 @@ var ZDoji5Scene = (function () {
         c.closePath(); c.fill();
       }
     } else if (kind === 'tennis') {
-      c.fillStyle = '#d3e64a'; c.fillRect(0, 0, 256, 128);
+      c.fillStyle = '#dfff38'; c.fillRect(0, 0, 256, 128);
       c.strokeStyle = '#f7f9ee'; c.lineWidth = 7;
       [24, 152].forEach(function (off) {
         c.beginPath();
@@ -523,7 +523,7 @@ var ZDoji5Scene = (function () {
     ['yakyu', 'soccer', 'tennis', 'basket', 'volley'].forEach(function (kind) {
       var pool = [];
       for (var n = 0; n < 6; n++) {
-        var m = new T.Mesh(SPHERE, new T.MeshStandardMaterial({ map: texture(ballTexture(kind)), roughness: kind === 'basket' ? .85 : .45 }));
+        var m = new T.Mesh(SPHERE, new T.MeshStandardMaterial({ map: texture(ballTexture(kind)), roughness: kind === 'basket' ? .85 : .45, emissive: kind === 'tennis' ? '#829b16' : '#000000', emissiveIntensity: kind === 'tennis' ? .3 : 0 }));
         m.castShadow = true; m.visible = false;
         /* 縁取り。ひと回り大きい球の裏側だけを描いて、輪郭として残す */
         var edge = new T.Mesh(SPHERE, new T.MeshBasicMaterial({ color: '#121a24', side: T.BackSide }));
@@ -561,7 +561,7 @@ var ZDoji5Scene = (function () {
       var a = makeAthlete(self.scene, { shirt: u[0], pants: u[1], simple: true });
       a.root.position.set(e[1], 0, e[2]);
       a.sport = e[0]; a.home = [e[1], e[2]];
-      a.face = Math.PI + (e[1] > 0 ? -.3 : .3);            /* ふだんは打つ人のほう */
+      a.face = Math.atan2(-e[1], -.9 - e[2]);            /* ふだんは打つ人のほう */
       a.root.rotation.y = a.face;
       a.phase = n * 1.3;
       self.extras.push(a);
@@ -706,7 +706,8 @@ var ZDoji5Scene = (function () {
     var sp = Math.sqrt(vx * vx + vz * vz);
     a.root.position.x = a.home[0] + Math.sin(u) * m.rx;
     a.root.position.z = a.home[1] + Math.sin(u * .7 + 1.3) * m.rz;
-    if (sp > .9) a.face = Math.atan2(vx, vz);              /* 走っているあいだだけ向きを変える */
+    a.face = Math.atan2(this.player.root.position.x - a.root.position.x,
+      this.player.root.position.z - a.root.position.z); /* 移動中も手前のプレイヤーを向く */
     a.root.rotation.y = a.face;
 
     /* 足取り。速いほど大きく振る */
