@@ -81,6 +81,7 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
 #tlbar .tool svg{width:18px;height:18px;fill:currentColor}
 #tlbar .tool.on{background:#3a3f4a;border-color:#8a90a0;color:#6fb4ff}
 #tl.razor .clip,#tl.razor .clip .hd{cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cg transform='rotate(-45 12 12)'%3E%3Crect x='3' y='8' width='18' height='8' rx='1.5' fill='%23fff' stroke='%23000' stroke-width='1.2'/%3E%3Crect x='9' y='10.5' width='6' height='3' fill='%23000'/%3E%3C/g%3E%3C/svg%3E") 12 12,crosshair}
+#marq{position:absolute;border:1px solid #9cc4ff;background:rgba(156,196,255,.14);pointer-events:none;z-index:7;display:none}
 #razorLine{position:absolute;top:22px;bottom:0;width:1px;background:#6fb4ff;pointer-events:none;z-index:6;display:none}
 #tlbar input[type=range]{width:120px}
 #tlbody{display:grid;grid-template-columns:76px 1fr}
@@ -242,6 +243,7 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
           <div class="track" id="trBGM"></div>
           <div id="phead"></div>
           <div id="razorLine"></div>
+          <div id="marq"></div>
         </div>
       </div>
     </div>
@@ -284,7 +286,16 @@ const PRESETS = [
   { name: 'あ', fill: '#ffffff', stroke: '#e5362c', shadow: 'rgba(0,0,0,.45)' },
   { name: 'あ', fill: '#111111', stroke: '#ffffff', shadow: 'rgba(0,0,0,.35)' },
 ];
-let selected = null;         // {type:'v'|'a'|'s', id}
+let selected = null;         // {type:'v'|'a'|'s', id} まとめて選んでいるときの代表
+let sel = new Set();         // "type:id" の集まり
+const keyOf = (t, i) => t + ':' + i;
+const isSel = (t, i) => sel.has(keyOf(t, i));
+const itemStart = (t, o) => t === 's' ? o.start : o.at;
+const itemEnd = (t, o) => t === 's' ? o.end : o.at + o.out - o.in;
+function selItems() {
+  return [...sel].map(k => { const i = k.indexOf(':'), t = k.slice(0, i), o = find(t, +k.slice(i + 1)); return o ? [t, o] : null; }).filter(Boolean);
+}
+function setSel(type, id) { sel = new Set([keyOf(type, id)]); selected = { type, id }; }
 let playhead = 0;
 let pps = 60;                // pixels per second
 
@@ -776,7 +787,7 @@ async function onRecStop() {
   const clip = { id: nid(), buf: bid, in: 0, out: raw.duration, at: recAt, gain: 1 };
   aclips.push(clip);
   if (srSegs.length) addSubsFromSegs(srSegs.map(s => ({ text: s.text, start: recAt + s.start, end: recAt + s.end })));
-  selected = { type: 'a', id: clip.id };
+  setSel('a', clip.id);
   playhead = recAt;
   changed(true);
 }
@@ -955,7 +966,7 @@ function splitAt() {
   let tgt = selected && find(selected.type, selected.id), type = selected && selected.type;
   if (!insideT(type, tgt, t)) { const h = clipAt(t); tgt = h && h.c; type = 'v'; if (!insideT('v', tgt, t)) return; }
   commit();
-  selected = { type, id: splitItem(type, tgt, t) };
+  setSel(type, splitItem(type, tgt, t));
   changed(true);
 }
 // t の位置で切る。only を渡せばそのクリップだけ、なければ全トラック
@@ -965,17 +976,17 @@ function cutAll(t, only) {
   if (!hits.length) return;
   commit();
   hits.forEach(([ty, o]) => splitItem(ty, o, t));
-  selected = null;
+  sel.clear(); selected = null;
   changed(true);
 }
 function delSel(ripple) {
-  if (!selected) return;
-  const o = find(selected.type, selected.id); if (!o) return;
-  const s0 = selected.type === 's' ? o.start : o.at, e0 = selected.type === 's' ? o.end : o.at + o.out - o.in;
+  const items = selItems(); if (!items.length) return;
+  const s0 = Math.min(...items.map(([t, o]) => itemStart(t, o))), e0 = Math.max(...items.map(([t, o]) => itemEnd(t, o)));
   commit();
-  if (selected.type === 'v') vclips = vclips.filter(c => c.id !== selected.id);
-  if (selected.type === 'a') aclips = aclips.filter(c => c.id !== selected.id);
-  if (selected.type === 's') subs = subs.filter(c => c.id !== selected.id);
+  const dead = new Set(items.map(([t, o]) => keyOf(t, o.id)));
+  vclips = vclips.filter(c => !dead.has(keyOf('v', c.id)));
+  aclips = aclips.filter(c => !dead.has(keyOf('a', c.id)));
+  subs = subs.filter(c => !dead.has(keyOf('s', c.id)));
   if (ripple) {
     // 消した後ろにあるものを全部前へ詰める
     const d = e0 - s0, after = t => t >= e0 - 1e-3;
@@ -984,7 +995,7 @@ function delSel(ripple) {
     for (const x of subs) if (after(x.start)) { x.start -= d; x.end -= d; }
     playhead = s0;
   }
-  selected = null;
+  sel.clear(); selected = null;
   playhead = Math.min(playhead, totalDur());
   changed(true);
 }
@@ -992,11 +1003,24 @@ function addSub() {
   commit();
   const s = { id: nid(), text: 'テキスト', start: playhead, end: playhead + 2 };
   subs.push(s); subs.sort((a, b) => a.start - b.start);
-  selected = { type: 's', id: s.id };
+  setSel('s', s.id);
   changed(true);
   const ta = document.querySelector('#insp textarea'); if (ta) { ta.focus(); ta.select(); }
 }
-function select(type, id) { selected = type ? { type, id } : null; renderTimeline(); renderInspector(); }
+function select(type, id, add) {
+  if (!type) { sel.clear(); selected = null; }
+  else if (add) {
+    const k = keyOf(type, id);
+    if (sel.has(k) && sel.size > 1) { sel.delete(k); if (selected && selected.id === id) selected = null; }
+    else { sel.add(k); selected = { type, id }; }
+  } else setSel(type, id);
+  renderTimeline(); renderInspector();
+}
+function selectAll() {
+  sel = new Set([...vclips.map(c => keyOf('v', c.id)), ...aclips.map(c => keyOf('a', c.id)), ...subs.map(c => keyOf('s', c.id))]);
+  selected = sel.size ? (vclips[0] ? { type: 'v', id: vclips[0].id } : null) : null;
+  renderTimeline(); renderInspector();
+}
 let tool = 'select';
 function setTool(tl) {
   tool = tl; $('tSel').classList.toggle('on', tl === 'select'); $('tRazor').classList.toggle('on', tl === 'razor');
@@ -1050,7 +1074,7 @@ function renderTimeline() {
 }
 function esc(s) { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }
 function mkClip(type, id, start, len) {
-  const d = document.createElement('div'); d.className = 'clip ' + type + (selected && selected.type === type && selected.id === id ? ' sel' : '');
+  const d = document.createElement('div'); d.className = 'clip ' + type + (isSel(type, id) ? ' sel' : '');
   d.style.left = start * pps + 'px'; d.style.width = Math.max(2, len * pps) + 'px';
   d.innerHTML = '<div class="hd l"></div><div class="hd r"></div>';
   d.onpointerdown = e => clipDown(e, type, id, d);
@@ -1080,14 +1104,24 @@ function snapPoints(exType, exId) {
   return pts;
 }
 // 置いた映像に重なる他の映像は、重なった部分だけ消す（Premiere の上書きと同じ）
-function overwriteV(o) {
-  const s0 = o.at, e0 = vEnd(o), res = [];
+function overwriteV(moved) {
+  moved = [].concat(moved).filter(c => vclips.includes(c));
+  if (!moved.length) return;
+  const ranges = moved.map(c => [c.at, vEnd(c)]), res = [];
   for (const c of vclips) {
-    if (c === o) { res.push(c); continue; }
-    const cs = c.at, ce = vEnd(c);
-    if (ce <= s0 + 1e-3 || cs >= e0 - 1e-3) { res.push(c); continue; }
-    if (cs < s0) res.push({ ...c, out: c.in + (s0 - cs) });
-    if (ce > e0) res.push({ ...c, id: cs < s0 ? nid() : c.id, in: c.in + (e0 - cs), at: e0 });
+    if (moved.includes(c)) { res.push(c); continue; }
+    let parts = [{ ...c }];
+    for (const [s0, e0] of ranges) {
+      const next = [];
+      for (const q of parts) {
+        const qs = q.at, qe = vEnd(q);
+        if (qe <= s0 + 1e-3 || qs >= e0 - 1e-3) { next.push(q); continue; }
+        if (qs < s0) next.push({ ...q, out: q.in + (s0 - qs) });
+        if (qe > e0) next.push({ ...q, in: q.in + (e0 - qs), at: e0 });
+      }
+      parts = next;
+    }
+    parts.forEach((q, i) => res.push(i === 0 ? Object.assign(c, q) : { ...q, id: nid() }));
   }
   vclips = res.filter(c => c.out - c.in > 0.02).sort((a, b) => a.at - b.at);
 }
@@ -1101,8 +1135,12 @@ function clipDown(e, type, id, el) {
   // つかんだ位置は描き直す前に測る（select で要素が作り直されるため）
   const o = find(type, id), rect = el.getBoundingClientRect(), x = e.clientX - rect.left;
   const mode = x < 8 ? 'l' : x > rect.width - 8 ? 'r' : 'm';
-  select(type, id);
+  const add = e.shiftKey || e.ctrlKey || e.metaKey;
+  if (add) { select(type, id, true); return; }
+  if (!isSel(type, id)) select(type, id); else { selected = { type, id }; renderInspector(); }
   const orig = { ...o }, x0 = e.clientX, pts = snapPoints(type, id);
+  // まとめて選んでいるときは、つかんだもの以外も同じだけ動かす
+  const group = mode === 'm' ? selItems().filter(([t, x]) => x !== o).map(([t, x]) => ({ t, x, at: x.at, start: x.start, end: x.end })) : [];
   let moved = false, before = snap();
   // 映像の端を伸ばすときは隣のクリップまで
   const others = type === 'v' ? vclips.filter(c => c !== o) : [];
@@ -1121,7 +1159,7 @@ function clipDown(e, type, id, el) {
       const len = orig.out - orig.in, buf = buffers.get(o.buf).raw;
       if (mode === 'm') {
         let at = orig.at + dt; const s1 = snapT(at, pts); if (s1 !== at) at = s1; else { const s2 = snapT(at + len, pts); at += s2 - (at + len); } o.at = Math.max(0, at);
-        for (const [ln, tr] of [['vo', trA], ['se', trSE], ['bgm', trBGM]]) { const r = tr.getBoundingClientRect(); if (ev.clientY >= r.top && ev.clientY < r.bottom) o.lane = ln; }
+        if (!group.length) for (const [ln, tr] of [['vo', trA], ['se', trSE], ['bgm', trBGM]]) { const r = tr.getBoundingClientRect(); if (ev.clientY >= r.top && ev.clientY < r.bottom) o.lane = ln; }
       }
       else if (mode === 'l') { let at = snapT(orig.at + dt, pts); let d = clamp(at - orig.at, -orig.in, len - 0.1); if (orig.at + d < 0) d = -orig.at; o.at = orig.at + d; o.in = orig.in + d; }
       else { const end = snapT(orig.at + len + dt, pts); o.out = clamp(orig.in + end - orig.at, orig.in + 0.1, buf.duration); }
@@ -1131,13 +1169,19 @@ function clipDown(e, type, id, el) {
       else if (mode === 'l') o.start = clamp(snapT(orig.start + dt, pts), 0, o.end - 0.1);
       else o.end = Math.max(o.start + 0.1, snapT(orig.end + dt, pts));
     }
+    if (group.length) {
+      let d = type === 's' ? o.start - orig.start : o.at - orig.at;
+      for (const m of group) { const st = m.t === 's' ? m.start : m.at; if (st + d < 0) d = -st; }
+      if (type === 's') { o.start = orig.start + d; o.end = orig.end + d; } else o.at = orig.at + d;
+      for (const m of group) { if (m.t === 's') { m.x.start = m.start + d; m.x.end = m.end + d; } else m.x.at = m.at + d; }
+    }
     renderTimeline();
   };
   const up = ev => {
     removeEventListener('pointermove', mv); removeEventListener('pointerup', up);
     if (!moved) { if (type === 's') seek(Math.max(playhead, 0)); return; }
-    if (type === 'v') overwriteV(o);
-    if (type === 's') subs.sort((a, b) => a.start - b.start);
+    overwriteV([o, ...group.map(m => m.x)]);
+    subs.sort((a, b) => a.start - b.start);
     undoStack.push(before); redoStack.length = 0; changed(true);
   };
   addEventListener('pointermove', mv); addEventListener('pointerup', up);
@@ -1149,6 +1193,39 @@ scroller.addEventListener('pointermove', e => {
   ln.style.display = 'block'; ln.style.left = razorT(e) * pps + 'px';
 });
 scroller.addEventListener('pointerleave', () => $('razorLine').style.display = 'none');
+// トラックの空きをドラッグ：囲んだ範囲のクリップをまとめて選ぶ
+function marqueeDown(e) {
+  if (e.button !== 0 || tool === 'razor') return;
+  if (playing && !recording) pause();
+  const r0 = inner.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY, box = $('marq');
+  let on = false;
+  const mv = ev => {
+    if (!on && Math.abs(ev.clientX - x0) < 4 && Math.abs(ev.clientY - y0) < 4) return;
+    on = true; box.style.display = 'block';
+    const x1 = Math.min(x0, ev.clientX), x2 = Math.max(x0, ev.clientX), y1 = Math.min(y0, ev.clientY), y2 = Math.max(y0, ev.clientY);
+    box.style.left = (x1 - r0.left) + 'px'; box.style.width = (x2 - x1) + 'px';
+    box.style.top = (y1 - r0.top) + 'px'; box.style.height = (y2 - y1) + 'px';
+    const t1 = (x1 - r0.left) / pps, t2 = (x2 - r0.left) / pps;
+    sel = new Set();
+    for (const [ty, tr, list, lane] of [['s', trS, subs, null], ['v', trV, vclips, null], ['a', trA, aclips, 'vo'], ['a', trSE, aclips, 'se'], ['a', trBGM, aclips, 'bgm']]) {
+      const tb = tr.getBoundingClientRect();
+      if (tb.bottom < y1 || tb.top > y2) continue;
+      for (const it of list) {
+        if (lane && laneOf(it) !== lane) continue;
+        if (itemEnd(ty, it) > t1 && itemStart(ty, it) < t2) sel.add(keyOf(ty, it.id));
+      }
+    }
+    const last = [...sel].pop();
+    selected = last ? { type: last.slice(0, last.indexOf(':')), id: +last.slice(last.indexOf(':') + 1) } : null;
+    renderTimeline(); renderInspector();
+  };
+  const up = () => {
+    removeEventListener('pointermove', mv); removeEventListener('pointerup', up);
+    box.style.display = 'none';
+    if (!on) select(null);
+  };
+  addEventListener('pointermove', mv); addEventListener('pointerup', up);
+}
 function scrubDown(e) {
   if (e.button !== 0) return;
   if (tool === 'razor' && e.target.classList.contains('track')) return;
@@ -1159,7 +1236,8 @@ function scrubDown(e) {
   const up = () => { removeEventListener('pointermove', f); removeEventListener('pointerup', up); };
   addEventListener('pointermove', f); addEventListener('pointerup', up);
 }
-$('ruler').onpointerdown = scrubDown; trS.onpointerdown = scrubDown; trV.onpointerdown = scrubDown; trA.onpointerdown = scrubDown; trSE.onpointerdown = scrubDown; trBGM.onpointerdown = scrubDown;
+$('ruler').onpointerdown = scrubDown;
+[trS, trV, trA, trSE, trBGM].forEach(tr => tr.onpointerdown = marqueeDown);
 $('zoom').oninput = e => { const c = playhead * pps - scroller.scrollLeft; pps = +e.target.value; renderTimeline(); scroller.scrollLeft = playhead * pps - c; };
 scroller.addEventListener('wheel', e => { if (e.ctrlKey) { e.preventDefault(); const z = $('zoom'); z.value = clamp(pps * (e.deltaY < 0 ? 1.15 : 0.87), 8, 400); z.oninput({ target: z }); } else if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { scroller.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
 addEventListener('resize', applyLayout);
@@ -1167,6 +1245,19 @@ addEventListener('resize', applyLayout);
 /* ---------- inspector / side ---------- */
 function renderInspector() {
   const el = $('insp');
+  const many = selItems();
+  if (many.length > 1) {
+    const clips = many.filter(([t]) => t !== 's').map(([t, o]) => o);
+    el.innerHTML = `<h3>${many.length}個を選択中</h3>` +
+      (clips.length ? '<div class="row"><label>音量</label><input type="range" id="iG" min="0" max="2" step="0.05"><span class="val" id="iGV"></span></div>' : '');
+    if (clips.length) {
+      const iG = $('iG'); iG.value = clips[0].gain ?? 1; $('iGV').textContent = Math.round(iG.value * 100) + '%';
+      let first = true;
+      iG.oninput = () => { if (first) { undoStack.push(snap()); redoStack.length = 0; first = false; } clips.forEach(c => c.gain = +iG.value); $('iGV').textContent = Math.round(iG.value * 100) + '%'; mixDirty = true; };
+      iG.onchange = () => { first = true; renderTimeline(); };
+    }
+    return;
+  }
   const o = selected && find(selected.type, selected.id);
   if (!o) { el.innerHTML = '<h3>選択中</h3><div class="status">タイムラインのクリップを選ぶと、ここで調整できます</div>'; return; }
   if (selected.type === 's') {
@@ -1248,6 +1339,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); $('playBtn').click(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'a') { e.preventDefault(); selectAll(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'k') { e.preventDefault(); e.shiftKey ? cutAll(playhead) : splitAt(); }
   else if (k === 'v' && !e.ctrlKey && !e.metaKey) setTool('select');
   else if (k === 'c' && !e.ctrlKey && !e.metaKey) setTool('razor');
