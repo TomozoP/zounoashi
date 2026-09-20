@@ -516,7 +516,11 @@ var ZDoji5Scene = (function () {
       var pool = [];
       for (var n = 0; n < 6; n++) {
         var m = new T.Mesh(SPHERE, new T.MeshStandardMaterial({ map: texture(ballTexture(kind)), roughness: kind === 'basket' ? .85 : .45 }));
-        m.castShadow = true; m.visible = false; self.scene.add(m); pool.push(m);
+        m.castShadow = true; m.visible = false;
+        /* 縁取り。ひと回り大きい球の裏側だけを描いて、輪郭として残す */
+        var edge = new T.Mesh(SPHERE, new T.MeshBasicMaterial({ color: '#121a24', side: T.BackSide }));
+        edge.scale.setScalar(1.13); m.add(edge);
+        self.scene.add(m); pool.push(m);
       }
       self.ballMeshes[kind] = pool;
     });
@@ -582,6 +586,7 @@ var ZDoji5Scene = (function () {
      0 で真上、＋で前へ倒す、−で後ろへ倒す。こうすると腕をどう動かしても、
      バットが胴を突き抜けたり、ラケットが体の中へ入ったりしない。 */
   var BAT = -.45, RKT = .35;                                   /* 構えたときの角度 */
+  var PLAYER_NDC = 1 - 2 * .655;                                /* 選手を画面の68%の高さに置く */
   var QA = null, QB = null, EU = null;
   /* 持ちものを、腕の形に関わらず体（腰）から見た向きへ合わせる。
      angleX は 0 で真上・＋で前へ倒す、leanZ は体の外へ開く角度。 */
@@ -712,6 +717,13 @@ var ZDoji5Scene = (function () {
     var sh = this.shake * .25;
     this.camera.position.set((Math.random() - .5) * sh, 5.2 + (Math.random() - .5) * sh, -7.8);
     this.camera.lookAt(0, .9, 11.5);
+    this.camera.updateMatrixWorld();
+    /* 画面の形で上下の写る範囲が変わるので、選手がいつも同じ高さに来るまで傾ける。
+       下に並べたボタンへ選手がかぶらないようにするため。 */
+    if (!this.aimPoint) this.aimPoint = new T.Vector3();
+    var ndc = this.aimPoint.set(0, 1.0, -.9).project(this.camera).y;
+    var half = Math.tan(this.camera.fov * Math.PI / 360);
+    this.camera.rotateX(-(Math.atan(PLAYER_NDC * half) - Math.atan(ndc * half)));
     this.camera.updateMatrixWorld();
 
     this.renderer.render(this.scene, this.camera);
