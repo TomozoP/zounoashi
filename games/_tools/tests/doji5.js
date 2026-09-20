@@ -176,5 +176,25 @@ function start(g) { g.press(" "); g.step(2); return g; }
   ok("到着の確認ができた：" + wanted, found);
 });
 
+/* 同時押しと連打は、最初のひとつだけを判定する。 */
+(function () {
+  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var keys = ["yakyu", "soccer", "tennis", "basket", "volley"];
+  var kind = g.probe.toBall(), other = keys.filter(function (k) { return k !== kind; })[0];
+  hitPad(g, other);
+  for (var i = 0; i < 21; i++) {
+    keys.forEach(function (k, n) { hitPad(g, k); g.press(String(n + 1)); });
+    g.step(1);
+  }
+  ok("同時押し連打でも後から正解を拾えない", g.probe.now().score === 0);
+  ok("待ち時間中は最初の動作を保つ", g.probe.now().act === other);
+  var next = g.probe.toBall();
+  hitPad(g, next);
+  ok("待ち時間後は次の球を打てる", g.probe.now().score > 0);
+  g.probe.reset();
+  hitPad(g, "tennis");
+  ok("やり直すと待ち時間も戻る", g.probe.now().act === "tennis");
+})();
+
 console.log(bad.length ? "\n直すところ: " + bad.join(" / ") : "\n問題なし");
 process.exit(bad.length ? 1 : 0);
