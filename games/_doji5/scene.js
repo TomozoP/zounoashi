@@ -534,8 +534,9 @@ var ZDoji5Scene = (function () {
     var bat = BAT, racket = RKT, batLean = -.3, racketLean = .35;
     if (act) {
       var e = Math.max(0, Math.min(1, p));
-      var s = 1 - Math.pow(1 - Math.min(1, e / .42), 3);      /* 振り抜き */
-      var w = e < .7 ? 1 : 1 - (e - .7) / .3;                  /* 終わりは立ち姿へ戻す */
+      var s = 1 - Math.pow(1 - Math.min(1, e / .45), 3);      /* 振り抜き */
+      /* 振り終わったら、はじめに大きく戻して構えへ収める（余韻を残さない） */
+      var w = e < .55 ? 1 : 1 - Math.pow((e - .55) / .45, .65);
       var k = s * w;
       if (act === 'yakyu') {                                   /* 腰を回してバットを水平に振る */
         P.hips.rotation.y = -2.6 * k + .65 * w;
