@@ -13,6 +13,7 @@
   var CAM = { x: -232, y: 262, z: 596 };
   var LOOK = { x: 26, y: 76, z: -216 };
   var FOCAL = 900;                       /* 画面の高さに対する画角のもと */
+  var BEHIND = 760;                      /* 牛を通りすぎたものを、どこまで残すか */
 
   function Scene3D() {
     T = global.THREE;
@@ -121,12 +122,12 @@
 
     /* 道ばたのもの */
     this.side = {
-      fence: pool(26, function () { return self.makeFence(); }),
-      barn:  pool(6,  function () { return self.makeBarn(); }),
-      pole:  pool(12, function () { return self.makePole(160, self.M.poleWood); }),
-      rail:  pool(26, function () { return self.makeRail(); }),
-      house: pool(12, function () { return self.makeHouse(); }),
-      tower: pool(16, function () { return self.makeTower(); })
+      fence: pool(40, function () { return self.makeFence(); }),
+      barn:  pool(10, function () { return self.makeBarn(); }),
+      pole:  pool(16, function () { return self.makePole(160, self.M.poleWood); }),
+      rail:  pool(34, function () { return self.makeRail(); }),
+      house: pool(18, function () { return self.makeHouse(); }),
+      tower: pool(20, function () { return self.makeTower(); })
     };
     /* 壊すもの */
     this.propPool = [
@@ -501,7 +502,7 @@
       return;
     }
     var half = Math.floor(list.length / 2);
-    var start = Math.ceil(dist / gap) * gap;
+    var start = Math.ceil((dist - BEHIND) / gap) * gap;   /* 通りすぎたぶんも残す */
     for (var k = 0; k < half; k++) {
       var z = start + k * gap - dist;
       var left = list[k * 2], right = list[k * 2 + 1];
