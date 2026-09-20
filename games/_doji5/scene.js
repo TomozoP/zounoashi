@@ -302,7 +302,7 @@ var ZDoji5Scene = (function () {
     worn.yakyu = worn.yakyu.concat(batParts);
     worn.tennis = worn.tennis.concat(racketParts);
     scene.add(root);
-    return { root: root, parts: parts, worn: worn };
+    return { root: root, parts: parts, worn: worn, holdsItem: !!(opt.bat || opt.racket) };
   }
 
   /* ============ 舞台 ============ */
@@ -556,7 +556,9 @@ var ZDoji5Scene = (function () {
       var u = UNIFORM[e[0]];
       var a = makeAthlete(self.scene, { shirt: u[0], pants: u[1] });
       a.root.position.set(e[1], 0, e[2]);
-      a.root.rotation.y = Math.PI + (e[1] > 0 ? -.3 : .3);
+      a.sport = e[0]; a.home = [e[1], e[2]];
+      a.face = Math.PI + (e[1] > 0 ? -.3 : .3);            /* ふだんは打つ人のほう */
+      a.root.rotation.y = a.face;
       a.phase = n * 1.3;
       self.extras.push(a);
       gear[e[0]].push(a.root);
@@ -674,11 +676,74 @@ var ZDoji5Scene = (function () {
         racket = RKT + .5 * up - .3 * hit;
       }
     }
-    /* 腕の形が決まってから、持ちものの向きだけ入れ直す */
-    if (P.wristR || P.wristL) {
+    /* 腕の形が決まってから、持ちものの向きだけ入れ直す（持っている人だけ） */
+    if (a.holdsItem) {
       a.root.updateMatrixWorld(true);
       if (P.wristR) aimItem(P.hips, P.handR, P.wristR, bat, batLean);
       if (P.wristL) aimItem(P.hips, P.handL, P.wristL, racket, racketLean);
+    }
+  };
+
+  /* ============ 奥の人たちの動き ============
+     持ち場のまわりを行き来させ、競技ごとの構えを足す。 */
+  var MOVE = {
+    yakyu:  { speed: .50, rx: 1.0, rz: .6 },
+    soccer: { speed: .75, rx: 5.5, rz: 3.4 },
+    tennis: { speed: 1.00, rx: 2.4, rz: 1.0 },
+    basket: { speed: .90, rx: 3.6, rz: 2.2 },
+    volley: { speed: 1.10, rx: 1.8, rz: .9 }
+  };
+  Scene.prototype.idle = function (a, t) {
+    var P = a.parts, ph = a.phase, m = MOVE[a.sport] || MOVE.yakyu;
+    this.pose(a, null, 0, t + ph);
+    var u = t * m.speed + ph;
+    var vx = Math.cos(u) * m.rx * m.speed;
+    var vz = Math.cos(u * .7 + 1.3) * m.rz * m.speed * .7;
+    var sp = Math.sqrt(vx * vx + vz * vz);
+    a.root.position.x = a.home[0] + Math.sin(u) * m.rx;
+    a.root.position.z = a.home[1] + Math.sin(u * .7 + 1.3) * m.rz;
+    if (sp > .9) a.face = Math.atan2(vx, vz);              /* 走っているあいだだけ向きを変える */
+    a.root.rotation.y = a.face;
+
+    /* 足取り。速いほど大きく振る */
+    var swing = Math.min(1, sp / 2.2), step = t * (4.5 + sp) + ph * 2;
+    var lift = Math.sin(step);
+    a.root.position.y = Math.abs(lift) * .07 * swing;
+    P.hipL.rotation.x += lift * .75 * swing;
+    P.hipR.rotation.x += -lift * .75 * swing;
+    P.kneeL.rotation.x += Math.max(0, -lift) * .85 * swing;
+    P.kneeR.rotation.x += Math.max(0, lift) * .85 * swing;
+    P.shoulderL.rotation.x += -lift * .8 * swing;
+    P.shoulderR.rotation.x += lift * .8 * swing;
+
+    /* 競技ごとの構え */
+    if (a.sport === 'yakyu') {                             /* 腰を落としてグラブを前へ */
+      P.torso.rotation.x += .22;
+      P.hipL.rotation.x += -.3; P.hipR.rotation.x += -.3;
+      P.kneeL.rotation.x += .45; P.kneeR.rotation.x += .45;
+      P.shoulderL.rotation.x += -.7; P.elbowL.rotation.x += -.5;
+      P.shoulderR.rotation.x += -.4;
+    } else if (a.sport === 'basket') {                     /* 片手でつく */
+      var d = Math.sin(t * 6 + ph * 3);
+      P.shoulderR.rotation.x += -.9 + d * .45;
+      P.elbowR.rotation.x += .55;
+      P.shoulderL.rotation.z += -.5;
+      P.torso.rotation.x += .12;
+    } else if (a.sport === 'tennis') {                     /* 小刻みに跳ねて構える */
+      a.root.position.y += Math.abs(Math.sin(t * 3.4 + ph)) * .09;
+      P.shoulderL.rotation.x += -.9; P.shoulderR.rotation.x += -.7;
+      P.elbowL.rotation.x += .5; P.elbowR.rotation.x += .5;
+      P.torso.rotation.x += .16;
+    } else if (a.sport === 'volley') {                     /* 低く構えて、ときどき跳ぶ */
+      var jump = Math.max(0, Math.sin(t * 1.3 + ph * 2) - .82) / .18;
+      a.root.position.y += jump * .55;
+      P.torso.rotation.x += .3 - jump * .5;
+      P.hipL.rotation.x += -.45; P.hipR.rotation.x += -.45;
+      P.kneeL.rotation.x += .7; P.kneeR.rotation.x += .7;
+      P.shoulderL.rotation.x += -1.1 - jump * 1.8; P.shoulderR.rotation.x += -1.1 - jump * 1.8;
+      P.elbowL.rotation.x += .9; P.elbowR.rotation.x += .9;
+    } else {                                               /* サッカーは走るだけ */
+      P.torso.rotation.x += .1 * swing;
     }
   };
 
@@ -707,8 +772,7 @@ var ZDoji5Scene = (function () {
     this.posePitcher(snap.pitch, t);
     this.extras.forEach(function (a) {
       if (!a.root.visible) return;                       /* 出ていない競技の人は動かさない */
-      self.pose(a, null, 0, t + a.phase);
-      a.root.position.y = Math.abs(Math.sin(t * 2.4 + a.phase)) * .05;
+      self.idle(a, t);
     });
 
     /* 球を並べる。余ったものは隠す */
