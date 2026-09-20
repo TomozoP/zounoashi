@@ -32,7 +32,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* ---- 合うボタンを間合いで押せば、5競技とも当たる ---- */
 (function () {
-  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var g = start(load("games/doji5/index.html", { quiet: true }));
   var seen = {}, tries = 0, points = 0;
   while (Object.keys(seen).length < 5 && tries++ < 60) {
     var kind = g.probe.toBall();
@@ -50,7 +50,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* ---- 違うボタンを押しても当たらない。ただし残りは減らない ---- */
 (function () {
-  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var g = start(load("games/doji5/index.html", { quiet: true }));
   var kind = g.probe.toBall();
   var other = ["yakyu", "soccer", "tennis", "basket", "volley"].filter(function (k) { return k !== kind; })[0];
   var before = g.probe.now();
@@ -62,7 +62,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* ---- 何も来ていないのに押しても減らない ---- */
 (function () {
-  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var g = start(load("games/doji5/index.html", { quiet: true }));
   var before = g.probe.now().lives;
   for (var i = 0; i < 20; i++) { hitPad(g, "yakyu"); g.step(2); }   /* 最初の球が出るより前 */
   ok("空振りを続けても残りが減らない", g.probe.now().lives === before, before + " → " + g.probe.now().lives);
@@ -72,7 +72,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* ---- ボタンの外を触っても何も起きない ---- */
 (function () {
-  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var g = start(load("games/doji5/index.html", { quiet: true }));
   var before = g.probe.now().lives;
   g.tap(270, g.H * .3); g.step(2);
   ok("ボタンの外は相手にしない", g.probe.now().lives === before);
@@ -80,7 +80,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* ---- 見逃すと残りが減り、尽きたら結果画面 ---- */
 (function () {
-  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var g = start(load("games/doji5/index.html", { quiet: true }));
   var frames = 0;
   while (g.probe.now().state === "play" && frames++ < 1800) g.step(1);
   var now = g.probe.now();
@@ -97,7 +97,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* ---- 開始前は競技を切り替えられず、操作ボタンを出さない ---- */
 (function () {
-  var g = load("games/_doji5/index.html", { quiet: true });
+  var g = load("games/doji5/index.html", { quiet: true });
   ["1", "2", "3", "4", "5", "ArrowUp"].forEach(function (k) { g.press(k); });
   ok("開始前はSTART待ちで操作ボタンを出さない", g.probe.now().state === "intro" && g.probe.now().pads.length === 0);
   ok("常に5競技", g.probe.now().on.length === 5);
@@ -107,7 +107,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* ---- 押しどころの間隔 ---- */
 (function () {
-  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var g = start(load("games/doji5/index.html", { quiet: true }));
   var list = g.probe.now().pads, near = 999;
   for (var i = 1; i < list.length; i++) near = Math.min(near, list[i].x - (list[i - 1].x + list[i - 1].w));
   var step = list.length > 1 ? list[1].x - list[0].x : 999;
@@ -118,7 +118,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* ---- 難しさ。球と球の間隔 ---- */
 (function () {
-  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var g = start(load("games/doji5/index.html", { quiet: true }));
   var gaps = [], last = null, guard = 0;
   while (gaps.length < 40 && guard++ < 200) {
     var kind = g.probe.toBall();
@@ -138,7 +138,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* 5競技のキー操作と得点時の表示。 */
 (function () {
-  var g = load("games/_doji5/index.html", { quiet: true });
+  var g = load("games/doji5/index.html", { quiet: true });
   var keys = ["yakyu", "soccer", "tennis", "basket", "volley"];
   var words = ["HOME RUN!", "GOAL!", "WINNER!", "BASKET!", "POINT!"];
   start(g);
@@ -158,7 +158,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* 結果は打った瞬間には出ず、球が奥へ届いてから出る。 */
 ["yakyu", "soccer", "tennis", "basket", "volley"].forEach(function (wanted, index) {
-  var g = start(load("games/_doji5/index.html", { quiet: true, inject: "var calls = []; cheerSound = function () { calls.push(T); }; window.__probe.cheerCalls = function () { return calls; };" }));
+  var g = start(load("games/doji5/index.html", { quiet: true, inject: "var calls = []; cheerSound = function () { calls.push(T); }; window.__probe.cheerCalls = function () { return calls; };" }));
   var found = false;
   for (var i = 0; i < 100; i++) {
     var kind = g.probe.toBall();
@@ -178,7 +178,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* 同時押しと連打は、最初のひとつだけを判定する。 */
 (function () {
-  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var g = start(load("games/doji5/index.html", { quiet: true }));
   var keys = ["yakyu", "soccer", "tennis", "basket", "volley"];
   var kind = g.probe.toBall(), other = keys.filter(function (k) { return k !== kind; })[0];
   hitPad(g, other);
@@ -198,7 +198,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* 変化球でも到着の位置と時刻は変わらず、途中の軌道だけ変わる。 */
 (function () {
-  var g = load("games/_doji5/index.html", { quiet: true });
+  var g = load("games/doji5/index.html", { quiet: true });
   [["yakyu","curve"],["yakyu","drop"],["soccer","swerve"],["tennis","spin"],["basket","bounce"],["volley","float"]].forEach(function (pair) {
     var end = g.probe.trajectory(pair[0], pair[1], 1), normal = g.probe.trajectory(pair[0], null, 1);
     ok("到着位置は同じ：" + pair[1], Math.hypot(end.x-normal.x,end.y-normal.y,end.z-normal.z)<.000001);
@@ -214,7 +214,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* テニスは15、30、40、ゲームで一周する。 */
 (function () {
-  var g=start(load("games/_doji5/index.html",{quiet:true})), count=0;
+  var g=start(load("games/doji5/index.html",{quiet:true})), count=0;
   for(var i=0;i<180&&count<5;i++) {
     var kind=g.probe.toBall(), before=g.probe.now().score;
     hitPad(g,kind);
@@ -232,7 +232,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* 速球も到着位置は同じ。通常より遅く出て、短い時間で届く。 */
 (function () {
-  var g = load("games/_doji5/index.html", { quiet: true });
+  var g = load("games/doji5/index.html", { quiet: true });
   var normal = g.probe.trajectory("yakyu", null, .5), fast = g.probe.trajectory("yakyu", "fast", .5);
   ok("速球は同じ時刻でもまだ奥にある", fast.z > normal.z);
   var end = g.probe.trajectory("yakyu", "fast", 1), usual = g.probe.trajectory("yakyu", null, 1);
