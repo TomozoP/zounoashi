@@ -6,7 +6,7 @@ var ZDoji5Scene = (function () {
 
   var COLORS = ZDoji5Colors;
   var T;                                   /* THREE。Scene を作るときに入れる */
-  var SPHERE, CYL, BOX;                    /* 使い回す形 */
+  var SPHERE, SIMPLE_SPHERE, CYL, BOX;                    /* 使い回す形 */
 
   function mat(color, rough, metal) {
     return new T.MeshStandardMaterial({ color: color, roughness: rough == null ? .7 : rough, metalness: metal || 0 });
@@ -223,17 +223,17 @@ var ZDoji5Scene = (function () {
       var g = new T.Group(); g.position.set(x, y, z); parent.add(g); parts[name] = g; return g;
     }
     function blob(parent, sx, sy, sz, m, y, z) {
-      var mesh = new T.Mesh(SPHERE, m);
+      var mesh = new T.Mesh(opt.simple ? SIMPLE_SPHERE : SPHERE, m);
       mesh.scale.set(sx, sy, sz); mesh.position.set(0, y || 0, z || 0);
-      mesh.castShadow = true; parent.add(mesh); return mesh;
+      mesh.castShadow = !opt.simple; parent.add(mesh); return mesh;
     }
     var hips = part(root, 'hips', 0, .92, 0);
     blob(hips, .18, .16, .15, pants);
     var torso = part(hips, 'torso', 0, .05, 0);
     blob(torso, .21, .27, .16, shirt, .24);
     blob(torso, .115, .13, .125, skin, .58);                 /* 頭 */
-    var cap = new T.Mesh(SPHERE, mat(opt.shirt, .7));
-    cap.scale.set(.125, .085, .135); cap.position.set(0, .655, 0); cap.castShadow = true; torso.add(cap);
+    var cap = new T.Mesh(opt.simple ? SIMPLE_SPHERE : SPHERE, mat(opt.shirt, .7));
+    cap.scale.set(.125, .085, .135); cap.position.set(0, .655, 0); cap.castShadow = !opt.simple; torso.add(cap);
     var visor = new T.Mesh(BOX, mat(opt.shirt, .7));
     visor.scale.set(.2, .02, .16); visor.position.set(0, .625, .155); torso.add(visor);
     ['L', 'R'].forEach(function (tag) {
@@ -285,11 +285,11 @@ var ZDoji5Scene = (function () {
       parts.wristR.add(bat, batGrip);
       batParts = [bat, batGrip];
     }
-    if (opt.racket) {                                         /* 左手はラケット。面は体の横を向く */
+    if (opt.racket) {                                         /* 左手はラケット。面を斜めに開き、構えでも見えるようにする */
       var frame = new T.Mesh(new T.TorusGeometry(.165, .023, 8, 22), mat(COLORS.tennis, .4, .25));
-      frame.position.y = .45; frame.rotation.y = Math.PI / 2; frame.castShadow = true;
+      frame.position.y = .45; frame.rotation.y = .35; frame.castShadow = true;
       var gut = new T.Mesh(new T.CircleGeometry(.152, 20), new T.MeshBasicMaterial({ color: '#f4f7fa', transparent: true, opacity: .42, side: T.DoubleSide }));
-      gut.position.y = .45; gut.rotation.y = Math.PI / 2;
+      gut.position.y = .45; gut.rotation.y = .35;
       var throat = new T.Mesh(CYL, mat(COLORS.tennis, .4, .25));
       throat.scale.set(.02, .12, .02); throat.position.y = .26;
       var grip = new T.Mesh(CYL, mat('#23272f', .85));
@@ -312,6 +312,8 @@ var ZDoji5Scene = (function () {
     T = THREE;
     var self = this;
     SPHERE = new T.SphereGeometry(1, 14, 10);
+    /* 奥の選手は少ない面数を共有し、個々の影も省いて軽くする。 */
+    SIMPLE_SPHERE = new T.SphereGeometry(1, 8, 6);
     CYL = new T.CylinderGeometry(1, 1, 1, 12);
     BOX = new T.BoxGeometry(1, 1, 1);
 
@@ -556,7 +558,7 @@ var ZDoji5Scene = (function () {
      ['soccer', 2.8, 52], ['soccer', -5.4, 58], ['soccer', 9.8, 62]
     ].forEach(function (e, n) {
       var u = UNIFORM[e[0]];
-      var a = makeAthlete(self.scene, { shirt: u[0], pants: u[1] });
+      var a = makeAthlete(self.scene, { shirt: u[0], pants: u[1], simple: true });
       a.root.position.set(e[1], 0, e[2]);
       a.sport = e[0]; a.home = [e[1], e[2]];
       a.face = Math.PI + (e[1] > 0 ? -.3 : .3);            /* ふだんは打つ人のほう */
@@ -621,13 +623,13 @@ var ZDoji5Scene = (function () {
     P.torso.rotation.set(.12 + Math.sin(t * 3) * .03, 0, 0);
     /* 右腕はバットを右肩の上へ、左腕はラケットを前へ。腕は体の外側へ開く */
     P.shoulderR.rotation.set(-.30, 0, -.30); P.elbowR.rotation.set(-1.70, 0, 0);
-    P.shoulderL.rotation.set(-.45, 0, .34); P.elbowL.rotation.set(-1.30, 0, 0);
+    P.shoulderL.rotation.set(-.45, 0, .55); P.elbowL.rotation.set(-1.30, 0, 0);
     P.hipL.rotation.set(-.16, 0, .1); P.kneeL.rotation.set(.26, 0, 0);
     P.hipR.rotation.set(-.16, 0, -.1); P.kneeR.rotation.set(.26, 0, 0);
     /* 持っていない側の腕は、構えずに下ろす */
     if (a.hasBat === false) { P.shoulderR.rotation.set(-.12, 0, -.16); P.elbowR.rotation.set(-.5, 0, 0); }
     if (a.hasRacket === false) { P.shoulderL.rotation.set(-.12, 0, .16); P.elbowL.rotation.set(-.45, 0, 0); }
-    var bat = BAT, racket = RKT, batLean = -.3, racketLean = .35;
+    var bat = BAT, racket = RKT, batLean = -.3, racketLean = .55;
     if (act) {
       var e = Math.max(0, Math.min(1, p));
       var s = 1 - Math.pow(1 - Math.min(1, e / .45), 3);      /* 振り抜き */
