@@ -839,7 +839,7 @@ var ZDoji5Scene = (function () {
           var next = points[Math.min(j + 1, points.length - 1)], prev = points[Math.max(0, j - 1)];
           var tangent = new T.Vector3(next.x - prev.x, next.y - prev.y, next.z - prev.z);
           var facing = new T.Vector3().subVectors(self.camera.position, new T.Vector3(p.x, p.y, p.z));
-          var across = tangent.cross(facing).normalize().multiplyScalar(.045 * (1 - j / 14));
+          var across = tangent.cross(facing).normalize().multiplyScalar(.060 * (1 - j / 14));
           edges.push([{ x: p.x + across.x, y: p.y + across.y, z: p.z + across.z }, { x: p.x - across.x, y: p.y - across.y, z: p.z - across.z }]);
         });
         for (var j = 0; j < points.length - 1; j++) {
