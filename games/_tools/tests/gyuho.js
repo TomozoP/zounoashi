@@ -5,6 +5,7 @@
      - 下へなぞっても、指を離したあとの動きも効かない
      - 大きくはらうと、そのぶん牛がぐっと前へ出る（boost）
      - 指を離したあとは、サイトのスクロールのように余韻で進んで止まる（glide）
+     - 景色が変わると、上に速報が流れる
      - 景色の切れ目は 時速10 / 50 / 200 / 1000。宇宙に出ると1押しで一気に上がる
      - 景色ごとに要る押しの数（100 / 200 / 200 / 250 / 300）と、光の速さまでの合計
      - 壊すものが景色ごとに変わる（わら・人・車・ビル・星）
@@ -63,11 +64,11 @@ ok(!/ c$/.test(t50.probe.now().read), "表記は時速で統一", t50.probe.now(
 
 /* 2b. なぞった長さで進む */
 var sw = start();
-swipe(sw, 80);
-ok(Math.abs(sw.probe.now().kmh - 0.2) < 1e-6, "80px なぞるとひとこぎぶん", sw.probe.now().read);
+swipe(sw, 160);
+ok(Math.abs(sw.probe.now().kmh - 0.2) < 1e-6, "160px なぞるとひとこぎぶん", sw.probe.now().read);
 swipe(sw, 800);
-ok(Math.abs(sw.probe.now().kmh - 1.2) < 1e-6, "800px なぞると10こぎぶん", sw.probe.now().read);
-ok(sw.probe.now().score === 11, "数えかたもこいだ回数", sw.probe.now().score);
+ok(Math.abs(sw.probe.now().kmh - 0.7) < 1e-6, "800px なぞると5こぎぶん", sw.probe.now().read);
+ok(sw.probe.now().score === 6, "数えかたもこいだ回数", sw.probe.now().score);
 ok(sw.probe.now().boost > 0, "大きくはらうと前へ突き出す", sw.probe.now().boost);
 var wasBoost = sw.probe.now().boost;
 sw.step(60);
@@ -118,6 +119,15 @@ var inc = marks.every(function (m, i) { return i === 0 || m.clicks >= marks[i - 
 ok(inc, "先へ行くほど押す数が増える", marks.map(function (m) { return m.clicks; }).join(" → "));
 ok(total > 980 && total < 1120, "光の速さまで合計1050押しくらい", total + "押し");
 ok(g.probe.now().score === total, "結果の数字は押した回数", g.probe.now().score);
+
+/* 3b. 景色が変わると速報が出る */
+var nw = start();
+ok(nw.probe.now().news === "", "はじめは速報なし");
+while (nw.probe.now().gear === 0 && nw.probe.now().state === "play") nw.press(" ");
+nw.step(1);
+ok(nw.probe.now().news.indexOf("逃走") >= 0, "道路に出ると速報が流れる", nw.probe.now().news);
+nw.step(60 * 9);
+ok(nw.probe.now().news === "", "速報は流れきると消える");
 
 /* 4. ギアの中身 */
 [[0, "牧場", 0.1], [120, "道路", 0.2], [320, "町", 0.75], [510, "都市", 3.2], [760, "宇宙", 3600000]].forEach(function (c) {

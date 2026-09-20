@@ -58,7 +58,7 @@
   var TAU = Math.PI * 2;
   var C_KMH = 1079252848.8;                  /* 光の速さ km/h */
   var SONIC = 1234.8;                        /* 音の速さ km/h */
-  var STROKE = 80;                           /* このぶん指を上へはらうと、ひとこぎ */
+  var STROKE = 160;                          /* このぶん指を上へはらうと、ひとこぎ */
   var LUNGE = 1.4;                           /* 大きくはらったとき、何秒ぶん前へ出るか */
   var GLIDE = 0.1;                           /* 指を離したあとの余韻。1秒でこの割合まで落ちる */
   var GLIDE_MAX = 2600;                      /* 余韻の速さの上限（px／秒） */
@@ -76,6 +76,13 @@
     { top: C_KMH, step: 3.6e6 }              /* 宇宙：星 */
   ];
   var PHASE_NAME = ["牧場", "道路", "町", "都市", "宇宙"];
+  var NEWS = [
+    "",
+    "牧場から牛が逃走 県道を南へ",
+    "逃走中の牛 市街地に入る 住民は屋内へ",
+    "牛 都心を直進 高層ビルに被害",
+    "牛が大気圏を抜ける 宇宙空間へ"
+  ];
   var WORLD = [1, 1.25, 1.5, 1.8, 2.2];      /* 景色ごとの世界の広さ */
   /* 見た目の速さ。景色のはじめと終わりで、ここからここまで登る。
      景色が変わると登りなおすが、はじまりの速さ自体が段ごとに上がっていく。
@@ -246,6 +253,7 @@
   var dragY = null, tickAcc = 0, mooAcc = 0, lastSmash = -9, boost, lead;
   var moveAcc = 0, flickVel = 0, glide = 0;   /* 指の勢いと、離したあとの余韻 */
   var zips = [];                              /* 速いときに流れる線 */
+  var news = null;                            /* 上に流れる速報 */
   var speed = MIN_KMH, beta = 0, wsp = 0, gear = 0, warning = false;
   var W8 = [1, 0, 0, 0, 0];                    /* 景色の重み（牧場・道路・町・都市・宇宙） */
   var props, shards;
@@ -296,6 +304,7 @@
     dist = 0; nextAt = 300; legPhase = 0; prevHalf = 0; prevKmh = MIN_KMH; prevGear = 0;
     sirenT = 0; clickPulse = 0; gearFlash = 0; boost = 0; lead = 0;
     moveAcc = 0; flickVel = 0; glide = 0;
+    news = null;
     zips = [];
     for (var z = 0; z < 34; z++) {
       zips.push({ a: Math.random() * TAU, r: Math.random() * 1.2,
@@ -426,6 +435,7 @@
       for (var g2 = 0; g2 < props.length; g2++) props[g2].t = gear;   /* 道の先のものも入れ替える */
       if (gear > prevGear) {
         gearFlash = 1;
+        if (NEWS[gear]) showNews(NEWS[gear]);
         tone(330, 0.16, 0.16, "square", 660);
         tone(660, 0.22, 0.12, "square", 990, 0.08);
         noiseHit(0.3, 300, 0.22, 0.8);
@@ -461,6 +471,8 @@
       if (o.z <= 96) { props.splice(j, 1); smash(o); }
     }
     if (props.length > 60) props.splice(0, props.length - 60);
+
+    if (news) { news.t += dt; if (news.t > news.dur) news = null; }
 
     /* 速いときの流れ線 */
     var zk = zipAmount();
@@ -516,6 +528,7 @@
   }
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); release(); });
   wrap.addEventListener("pointercancel", release);
+  window.addEventListener("pointerup", release);   /* 絵の外で離したときのため */
   window.addEventListener("blur", release);
   wrap.addEventListener("wheel", function (e) {   /* ころがしても進む */
     if (state !== S.PLAY) return;
@@ -625,6 +638,44 @@
       ell(COWP.x + side, COWP.y - 16 * s + l * 0.3, 9 * s + l * 0.13, l * 0.36);
     }
     ctx.restore();
+  }
+
+  /* 上に出る速報。文が右から左へ流れきったら消える */
+  function showNews(text) {
+    ctx.save();
+    ctx.font = "700 27px sans-serif";
+    var tw = ctx.measureText(text).width;
+    ctx.restore();
+    news = { text: text, t: 0, w: tw, dur: 0.3 + (W - 104 + tw) / 168 + 0.3 };
+  }
+  function drawNews() {
+    if (!news) return;
+    var t = news.t;
+    var sl = Math.min(1, t / 0.28, (news.dur - t) / 0.28);
+    if (sl <= 0) return;
+    var h = 56, top = Math.round(H * 0.045) - (1 - sl) * (h + 22);
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, sl);
+    ctx.fillStyle = "rgba(252,250,246,.95)";
+    ctx.fillRect(0, top, W, h);
+    ctx.fillStyle = "#d8262b";
+    ctx.fillRect(0, top, 104, h);
+    ctx.fillStyle = "rgba(0,0,0,.18)";
+    ctx.fillRect(0, top + h, W, 3);
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 27px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("速報", 52, top + h / 2 + 1);
+    ctx.beginPath();
+    ctx.rect(104, top, W - 104, h);
+    ctx.clip();
+    ctx.fillStyle = "#16202e";
+    ctx.font = "700 27px sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(news.text, W - (t - 0.3) * 168, top + h / 2 + 1);
+    ctx.restore();
+    ctx.textBaseline = "alphabetic";
   }
 
   /* 速いときに、奥から手前へ流れる線 */
@@ -764,7 +815,7 @@
     ctx.restore();
 
     drawWarn();
-    if (state !== S.RESULT) drawMeter();
+    if (state !== S.RESULT) { drawMeter(); drawNews(); }
 
     if (state === S.BOOM) drawBoom();
     if (state === S.RESULT) drawResult();
@@ -822,7 +873,7 @@
                kmh: speed, beta: beta, wsp: wsp, gear: gear, step: GEARS[gear].step,
                phase: PHASE_NAME[gear], props: props.length,
                bits: scene3d ? scene3d.bits.length : 0, solid: !!scene3d,
-               boost: Math.round(boost), glide: Math.round(glide),
+               boost: Math.round(boost), glide: Math.round(glide), news: news ? news.text : "",
                warn: warning, read: fmtSpeed(speed) };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
