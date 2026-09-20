@@ -114,25 +114,47 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     startAmbience();
   }
-  /* 遠くの観客席。鋭い高音を避け、ゆっくりうねる小さなざわめきにする。 */
-  var ambience = null;
+  /* 遠くの観客席。「オー」から「ワー」へ開く声を、ばらばらに重ねる。 */
+  var ambience = null, nextAmbient = 0;
   function startAmbience() {
-    if (!AC || !NOISE || ambience) return;
+    if (!AC || ambience) return;
     ambience = AC.createGain();
-    ambience.gain.setValueAtTime(.0001, AC.currentTime);
-    ambience.gain.linearRampToValueAtTime(.55, AC.currentTime + 1.5);
-    ambience.connect(MASTER);
-    [[420, .025], [1150, .012]].forEach(function (band, i) {
-      var crowd = AC.createBufferSource(), filter = AC.createBiquadFilter(), gain = AC.createGain();
-      crowd.buffer = NOISE; crowd.loop = true; crowd.playbackRate.value = .78 + i * .15;
-      filter.type = "bandpass"; filter.frequency.value = band[0]; filter.Q.value = .7;
-      gain.gain.value = band[1];
-      crowd.connect(filter); filter.connect(gain); gain.connect(ambience);
-      crowd.start(AC.currentTime, i * .6);
-      var swell = AC.createOscillator(), depth = AC.createGain();
-      swell.frequency.value = .13 + i * .06; depth.gain.value = band[1] * .28;
-      swell.connect(depth); depth.connect(gain.gain); swell.start();
-    });
+    ambience.gain.value = .75;
+    var soft = AC.createBiquadFilter();
+    soft.type = "lowpass"; soft.frequency.value = 2400; soft.Q.value = .5;
+    ambience.connect(soft); soft.connect(MASTER);
+    updateAmbience();
+  }
+  function updateAmbience() {
+    if (!AC || !ambience || AC.state !== "running" || AC.currentTime < nextAmbient) return;
+    nextAmbient = AC.currentTime + 1.5;
+    for (var i = 0; i < 9; i++) {
+      var at = AC.currentTime + Math.random() * 1.45, dur = .8 + Math.random() * .7;
+      var voice = AC.createOscillator(), envelope = AC.createGain();
+      var pitch = 110 + Math.random() * 170, volume = .012 + Math.random() * .009;
+      voice.type = i % 3 === 0 ? "triangle" : "sawtooth";
+      voice.frequency.setValueAtTime(pitch, at);
+      voice.frequency.linearRampToValueAtTime(pitch * 1.12, at + dur * .35);
+      voice.frequency.linearRampToValueAtTime(pitch * .94, at + dur);
+      envelope.gain.setValueAtTime(.0001, at);
+      envelope.gain.exponentialRampToValueAtTime(volume, at + .18);
+      envelope.gain.exponentialRampToValueAtTime(.0001, at + dur);
+      var nodes = [voice, envelope], timbre = .85 + Math.random() * .3;
+      [[450, 800, 4, 1], [850, 1250, 5, .65], [2400, 2600, 7, .15]].forEach(function (v) {
+        var filter = AC.createBiquadFilter(), level = AC.createGain();
+        filter.type = "bandpass"; filter.Q.value = v[2]; level.gain.value = v[3];
+        filter.frequency.setValueAtTime(v[0] * timbre, at);
+        filter.frequency.linearRampToValueAtTime(v[1] * timbre, at + dur * .4);
+        voice.connect(filter); filter.connect(level); level.connect(envelope);
+        nodes.push(filter, level);
+      });
+      if (AC.createStereoPanner) {
+        var pan = AC.createStereoPanner(); pan.pan.value = Math.random() * 1.8 - .9;
+        envelope.connect(pan); pan.connect(ambience); nodes.push(pan);
+      } else envelope.connect(ambience);
+      voice.onended = (function (list) { return function () { list.forEach(function (n) { n.disconnect(); }); }; })(nodes);
+      voice.start(at); voice.stop(at + dur + .05);
+    }
   }
   function tone(freq, dur, vol, type, to, delay) {
     if (!AC) return;
@@ -423,6 +445,7 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
 
   /* ============ 進行 ============ */
   function update(dt) {
+    updateAmbience();
     shake = Math.max(0, shake - dt * 4);
     if (act) { actT += dt; if (actT > ACT) act = null; }
     KEYS.forEach(function (k) { if (flash[k] > 0) flash[k] = Math.max(0, flash[k] - dt); });
