@@ -189,16 +189,17 @@ var ZDoji5Scene = (function () {
       for (var i = 0; i < 12; i++) for (var j = i + 1; j < 12; j++) for (var k = j + 1; k < 12; k++) {
         if (neighbors[i].indexOf(j) >= 0 && neighbors[i].indexOf(k) >= 0 && neighbors[j].indexOf(k) >= 0) face([cut(i,j),cut(j,i),cut(j,k),cut(k,j),cut(k,i),cut(i,k)], false);
       }
-      var pixels = c.createImageData(256, 128), dir = new T.Vector3();
-      for (var y = 0; y < 128; y++) for (var x = 0; x < 256; x++) {
-        var lat = (y + .5) / 128 * Math.PI, lon = (x + .5) / 256 * Math.PI * 2;
+      /* 画素の直接書き込みには拡大設定が効かないため、実寸で描く。 */
+      var pixels = c.createImageData(cv.width, cv.height), dir = new T.Vector3();
+      for (var y = 0; y < cv.height; y++) for (var x = 0; x < cv.width; x++) {
+        var lat = (y + .5) / cv.height * Math.PI, lon = (x + .5) / cv.width * Math.PI * 2;
         dir.set(Math.sin(lat) * Math.cos(lon), Math.cos(lat), Math.sin(lat) * Math.sin(lon));
         var color = [244,244,240];
         for (var f = 0; f < faces.length; f++) {
           var distance = Math.min.apply(null, faces[f].normals.map(function (n) { return n.dot(dir); }));
           if (distance >= 0) { color = faces[f].black ? [32,36,42] : distance < .009 ? [167,174,169] : [244,244,240]; break; }
         }
-        var offset = (y * 256 + x) * 4; pixels.data[offset] = color[0]; pixels.data[offset+1] = color[1]; pixels.data[offset+2] = color[2]; pixels.data[offset+3] = 255;
+        var offset = (y * cv.width + x) * 4; pixels.data[offset] = color[0]; pixels.data[offset+1] = color[1]; pixels.data[offset+2] = color[2]; pixels.data[offset+3] = 255;
       }
       c.putImageData(pixels, 0, 0);
     } else if (kind === 'tennis') {
