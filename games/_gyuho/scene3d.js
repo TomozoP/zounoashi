@@ -41,6 +41,8 @@
     };
     this.bits = [];
     this.bitPool = [];
+    this.flying = [];
+    this.flyPool = [];
     this.build();
     this._v = new T.Vector3();
   }
@@ -74,8 +76,8 @@
     this.ground.position.set(0, 0, -3600);
 
     this.grassTex = stripeTexture();
-    this.grassTex.repeat.set(1, 11000 / 260);
-    this.grassMat = new T.MeshBasicMaterial({ map: this.grassTex, transparent: true, opacity: 0.16 });
+    this.grassTex.repeat.set(1, 11000 / 140);
+    this.grassMat = new T.MeshBasicMaterial({ map: this.grassTex, transparent: true, opacity: 0.2 });
     this.grass = this.mesh(new T.PlaneGeometry(14000, 11000), this.grassMat);
     this.grass.rotation.x = -Math.PI / 2;
     this.grass.position.set(0, 0.4, -3600);
@@ -86,7 +88,7 @@
     this.road.position.set(0, 0.9, -3600);
 
     this.lineTex = lineTexture();
-    this.lineTex.repeat.set(1, 11000 / 340);
+    this.lineTex.repeat.set(1, 11000 / 240);
     this.lineMat = new T.MeshBasicMaterial({ map: this.lineTex, transparent: true, opacity: 0 });
     this.lines = this.mesh(new T.PlaneGeometry(260, 11000), this.lineMat);
     this.lines.rotation.x = -Math.PI / 2;
@@ -97,29 +99,20 @@
     this.scene.add(this.cow.root);
 
     this.M = {
-      fenceWood: mat("#8f7048", { transparent: true }),
-      fenceBar:  mat("#a8875c", { transparent: true }),
-      barnWall:  mat("#b5503f", { transparent: true }),
-      barnRoof:  mat("#8c3a2d", { transparent: true }),
-      barnDoor:  mat("#6d5a44", { transparent: true }),
-      poleWood:  mat("#6b5c4c", { transparent: true }),
-      railTop:   mat("#c9cdd2", { rough: 0.6, transparent: true }),
-      railLeg:   mat("#9aa0a7", { rough: 0.6, transparent: true }),
-      houseWall: mat("#efe7d8", { transparent: true }),
-      houseRoof: mat("#c25a4a", { transparent: true }),
-      houseWin:  mat("#8fb6cf", { rough: 0.4, transparent: true }),
-      towerWall: mat("#454f5f", { transparent: true }),
-      towerWin:  new T.MeshBasicMaterial({ color: "#f6e9bb", transparent: true })
+      fenceWood: mat("#8f7048"),
+      fenceBar:  mat("#a8875c"),
+      barnWall:  mat("#b5503f"),
+      barnRoof:  mat("#8c3a2d"),
+      barnDoor:  mat("#6d5a44"),
+      poleWood:  mat("#6b5c4c"),
+      railTop:   mat("#c9cdd2", { rough: 0.6 }),
+      railLeg:   mat("#9aa0a7", { rough: 0.6 }),
+      houseWall: mat("#efe7d8"),
+      houseRoof: mat("#c25a4a"),
+      houseWin:  mat("#8fb6cf", { rough: 0.4 }),
+      towerWall: mat("#454f5f"),
+      towerWin:  new T.MeshBasicMaterial({ color: "#f6e9bb" })
     };
-    this.sideMats = {
-      fence: [this.M.fenceWood, this.M.fenceBar],
-      barn:  [this.M.barnWall, this.M.barnRoof, this.M.barnDoor],
-      pole:  [this.M.poleWood],
-      rail:  [this.M.railTop, this.M.railLeg],
-      house: [this.M.houseWall, this.M.houseRoof, this.M.houseWin],
-      tower: [this.M.towerWall, this.M.towerWin]
-    };
-
     /* 道ばたのもの */
     this.side = {
       fence: pool(40, function () { return self.makeFence(); }),
@@ -137,6 +130,14 @@
       pool(8,  function () { return self.makeBuilding(); }),
       pool(10, function () { return self.makeStar(); })
     ];
+
+    /* 吹っ飛ぶ人 */
+    for (var f = 0; f < 8; f++) {
+      var fp = this.makePerson();
+      fp.visible = false;
+      this.scene.add(fp);
+      this.flyPool.push(fp);
+    }
 
     /* 破片 */
     this.bitMats = ["#e8c25a", "#d9b24a", "#7b6a56", "#e0543c", "#3f7fd6", "#5a6472", "#f6e9bb", "#ffffff", "#f0c9a6", "#4c7fd6"]
@@ -367,6 +368,45 @@
       });
     }
   };
+  /* 人をひとり、宙へ跳ね上げる（こわさない） */
+  Scene3D.prototype.launchPerson = function (x, r) {
+    var m = this.flyPool.pop();
+    if (!m) {
+      var old = this.flying.shift();
+      if (!old) return;
+      m = old.m;
+    }
+    m.visible = true;
+    m.position.set(x, 8, 0);
+    m.rotation.set(0, r * 3.14, 0);
+    if (m.userData.shirt) m.userData.shirt.color.copy(this.shirtColor(r));
+    this.flying.push({
+      m: m, life: 0,
+      vx: (Math.random() - 0.5) * 240,
+      vy: 470 + Math.random() * 260,
+      vz: (this._wsp || 100) + 170 + Math.random() * 150,
+      rx: (Math.random() - 0.5) * 10, ry: (Math.random() - 0.5) * 7, rz: (Math.random() - 0.5) * 10
+    });
+  };
+  Scene3D.prototype.stepFlying = function (dt) {
+    for (var i = this.flying.length - 1; i >= 0; i--) {
+      var f = this.flying[i];
+      f.life += dt;
+      f.vy -= 1250 * dt;
+      f.m.position.x += f.vx * dt;
+      f.m.position.y += f.vy * dt;
+      f.m.position.z += f.vz * dt;
+      f.m.rotation.x += f.rx * dt;
+      f.m.rotation.y += f.ry * dt;
+      f.m.rotation.z += f.rz * dt;
+      if (f.m.position.z > 900 || f.m.position.y < -240 || f.life > 3) {
+        f.m.visible = false;
+        this.flyPool.push(f.m);
+        this.flying.splice(i, 1);
+      }
+    }
+  };
+
   Scene3D.prototype.stepBits = function (dt) {
     for (var i = this.bits.length - 1; i >= 0; i--) {
       var b = this.bits[i];
@@ -390,6 +430,11 @@
       this.bitPool.push(this.bits[i].m);
     }
     this.bits.length = 0;
+    for (var j = 0; j < this.flying.length; j++) {
+      this.flying[j].m.visible = false;
+      this.flyPool.push(this.flying[j].m);
+    }
+    this.flying.length = 0;
   };
 
   /* ============ 毎コマの更新 ============
@@ -402,10 +447,10 @@
     setColor(this.roadMat.color, s.roadColor);
     this.roadMat.opacity = 1 - w[4];
     this.road.visible = this.roadMat.opacity > 0.02;
-    this.grassMat.opacity = 0.14 * (1 - w[4]);
+    this.grassMat.opacity = 0.2 * (1 - w[4]);
     this.grass.visible = this.grassMat.opacity > 0.01;
-    this.grassTex.offset.y = s.dist / 260;
-    this.lineTex.offset.y = s.dist / 340;
+    this.grassTex.offset.y = s.dist / 140;
+    this.lineTex.offset.y = s.dist / 240;
     this.lineMat.opacity = Math.min(1, w[1] + w[2] + w[3]) * (1 - w[4]);
     this.lines.visible = this.lineMat.opacity > 0.02;
     setColor(this.fog.color, s.fogColor);
@@ -425,11 +470,11 @@
 
     /* 道ばたのもの */
     this.row("fence", w[0], 112, 176, s.dist);
-    this.row("barn", w[0], 520, 360, s.dist);
-    this.row("pole", Math.min(1, w[1] + w[2] * 0.5), 440, 214, s.dist);
-    this.row("rail", Math.min(1, w[1] + w[2] * 0.6 + w[3] * 0.4), 210, 156, s.dist);
-    this.row("house", w[2], 340, 330, s.dist);
-    this.row("tower", w[3], 420, 390, s.dist);
+    this.row("barn", w[0], 520, 430, s.dist);
+    this.row("pole", w[1] + w[2], 440, 300, s.dist);
+    this.row("rail", w[1] + w[2] + w[3], 210, 156, s.dist);
+    this.row("house", w[2], 340, 380, s.dist);
+    this.row("tower", w[3], 420, 450, s.dist);
 
     /* 壊すもの */
     var used = [0, 0, 0, 0, 0];
@@ -467,7 +512,9 @@
       pos.needsUpdate = true;
     }
 
+    this._wsp = s.wsp;
     this.stepBits(s.dt);
+    this.stepFlying(s.dt);
 
     function setColor(c, arr) { c.setRGB(srgb(arr[0]), srgb(arr[1]), srgb(arr[2])); }
     function srgb(v) {
@@ -495,9 +542,7 @@
   /* 道の両わきに、等間隔でならべる */
   Scene3D.prototype.row = function (kind, alpha, gap, x, dist) {
     var list = this.side[kind];
-    var mats = this.sideMats[kind];
-    for (var mi = 0; mi < mats.length; mi++) { mats[mi].opacity = Math.min(1, alpha); }
-    if (alpha <= 0.03) {
+    if (alpha < 0.5) {
       for (var i = 0; i < list.length; i++) list[i].visible = false;
       return;
     }
