@@ -818,6 +818,8 @@ var ZDoji5Scene = (function () {
       m.visible = true;
       m.position.set(b.x, b.y, b.z);
       m.scale.setScalar(b.r);
+      /* 球の半径にかかわらず、輪郭の厚みを揃える。 */
+      m.children[0].scale.setScalar(1 + .018 / b.r);
       m.rotation.set(b.z * 1.4, b.x * 2 + t * 3, b.spin || 0);
     });
     Object.keys(used).forEach(function (kind) {
