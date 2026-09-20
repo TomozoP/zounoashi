@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="ichirin-nabe-20260919082019">
+<meta name="preview-version" content="doji5-20260920113900">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>アツアツ一輪車</title>
+<title>同時球技5種</title>
 <style>
   html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -27,21 +27,16 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/share.js?v=ichirin-nabe-20260919082019"></script>
-<script src="../games/random-bowling/vendor/three.min.js?v=ichirin-nabe-20260919082019"></script>
-<script src="../games/random-bowling/vendor/cannon.js?v=ichirin-nabe-20260919082019"></script>
-<script src="./scene.js?v=ichirin-nabe-20260919082019"></script>
-<script src="../games/result-actions.js?v=ichirin-nabe-20260919082019"></script>
-<script src="../games/action-icons.js?v=ichirin-nabe-20260919082019"></script>
-<script src="../games/pad.js?v=ichirin-nabe-20260919082019"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/random-bowling/vendor/three.min.js?v=doji5-20260920113900"></script>
+<script src="./scene.js?v=doji5-20260920113900"></script>
+<script src="../games/share.js?v=doji5-20260920113900"></script>
+<script src="../games/result-actions.js?v=doji5-20260920113900"></script>
+<script src="../games/action-icons.js?v=doji5-20260920113900"></script>
+<script src="../games/pad.js?v=doji5-20260920113900"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* アツアツ一輪車
-
-   書き換えるところの目印は3つ。
-     ▼UPDATE … 進行と入力
-     ▼DRAW   … 絵
-     ▼SHARE  … シェアの文
-   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
+/* 同時球技5種。
+   野球・サッカー・テニス・バスケ・バレーの球が、ぜんぶ同じ場所へ次々に飛んでくる。
+   押すのは1つだけ。いちばん近い球に合わせて、打つ・蹴る・打ち返す・撃つ・叩く。 */
 (function () {
   "use strict";
 
@@ -51,9 +46,11 @@
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
 
+  var view3d = (window.WebGLRenderingContext && typeof ZDoji5Scene !== "undefined" && typeof THREE !== "undefined")
+    ? new ZDoji5Scene() : null;
+
   /* ============ 画面 ============
-     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
-     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。 */
   var W = 540, H = 960;
   function layout() {
     var host = wrap.parentNode;
@@ -71,19 +68,13 @@
     canvas.height = Math.round(H * scale * dpr);
     var k = canvas.width / W;
     ctx.setTransform(k, 0, 0, k, 0, 0);
-    if (view3d) view3d.resize(canvas.width, canvas.height, W, H);
-  }
-
-  /* 3Dの絵。使えない環境（テストの台など）では平らな絵で代わりに描く */
-  var view3d = null;
-  if (window.WebGLRenderingContext && window.THREE && window.NabeScene) {
-    try { view3d = new window.NabeScene(); } catch (e) { view3d = null; }
+    if (view3d) view3d.resize(canvas.width, canvas.height);
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
 
   /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
-  var AC = null, NOISE = null;
+  var AC = null, NOISE = null, MASTER = null;
   var audioUnlocked = false;
   // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
   function resumeAudio() {
@@ -111,6 +102,10 @@
     if (!C) return;
     try { AC = new C(); } catch (e) { return; }
     resumeAudio();
+    MASTER = AC.createGain(); MASTER.gain.value = 1.6;
+    var limiter = AC.createDynamicsCompressor();
+    limiter.threshold.value = -8; limiter.ratio.value = 10; limiter.attack.value = .004; limiter.release.value = .12;
+    MASTER.connect(limiter); limiter.connect(AC.destination);
     var len = Math.floor(AC.sampleRate * 2);
     NOISE = AC.createBuffer(1, len, AC.sampleRate);
     var d = NOISE.getChannelData(0);
@@ -126,440 +121,213 @@
     g.gain.setValueAtTime(0.0001, n);
     g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    o.connect(g); g.connect(AC.destination);
+    o.connect(g); g.connect(MASTER || AC.destination);
     o.start(n); o.stop(n + dur + 0.05);
   }
-  function noiseHit(dur, freq, vol, q) {
+  function noiseHit(dur, freq, vol, q, to, delay) {
     if (!AC || !NOISE) return;
     var s = AC.createBufferSource(); s.buffer = NOISE;
     var f = AC.createBiquadFilter();
     f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
-    var g = AC.createGain(), n = AC.currentTime;
+    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
+    if (to) f.frequency.exponentialRampToValueAtTime(to, n + dur);
     g.gain.setValueAtTime(vol, n);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    s.connect(f); f.connect(g); g.connect(AC.destination);
-    s.start(n); s.stop(n + dur + 0.05);
+    s.connect(f); f.connect(g); g.connect(MASTER || AC.destination);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
   }
-  /* ---- こぐ音と「アツっ」 ここから（音の試聴用に道具が切り出すので、目印を消さない） ---- */
-  var noiseBufs = [];
-  function noiseOf(ac) {
-    for (var i = 0; i < noiseBufs.length; i++) if (noiseBufs[i].ac === ac) return noiseBufs[i].buf;
-    var len = Math.floor(ac.sampleRate * 0.5), buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
-    for (var k = 0; k < len; k++) d[k] = Math.random() * 2 - 1;
-    noiseBufs.push({ ac: ac, buf: buf });
-    return buf;
+  /* 競技ごとの当たった音 */
+  function hitSound(kind, perfect) {
+    if (kind === "yakyu") { noiseHit(.09, 2600, .5, .8, 900); tone(320, .16, .22, "triangle", 120); }
+    else if (kind === "soccer") { noiseHit(.13, 260, .5, .9, 90); tone(120, .2, .22, "sine", 55); }
+    else if (kind === "tennis") { noiseHit(.06, 3400, .42, 1.4, 1500); tone(760, .1, .14, "triangle", 420); }
+    else if (kind === "basket") { noiseHit(.11, 700, .34, .7, 260); tone(190, .18, .16, "sine", 90); }
+    else { noiseHit(.07, 1800, .45, .9, 700); tone(420, .12, .16, "square", 210); }
+    if (perfect) { tone(1320, .1, .1, "triangle", null, .03); tone(1760, .14, .09, "triangle", null, .09); }
   }
-  /* こぐ音。クランク半回転ごとに「キ」「コ」と交互にきしむ */
-  function creak(ac, at, vol, high) {
-    var t = at, o = ac.createOscillator(), g = ac.createGain(), b = ac.createBiquadFilter();
-    o.type = "triangle";
-    var f = high ? 1650 : 1250;
-    o.frequency.setValueAtTime(f * (high ? 0.9 : 1.08), t);
-    o.frequency.exponentialRampToValueAtTime(f * (high ? 1.12 : 0.88), t + 0.06);
-    b.type = "bandpass"; b.frequency.value = f; b.Q.value = 3;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
-    o.connect(b); b.connect(g); g.connect(ac.destination);
-    o.start(t); o.stop(t + 0.1);
-    /* チェーンのカチッ */
-    var n = ac.createBufferSource(), nb = ac.createBiquadFilter(), ng = ac.createGain();
-    n.buffer = noiseOf(ac); nb.type = "highpass"; nb.frequency.value = 3000;
-    ng.gain.setValueAtTime(vol * 0.8, t); ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.015);
-    n.connect(nb); nb.connect(ng); ng.connect(ac.destination);
-    n.start(t); n.stop(t + 0.03);
-  }
-  /* 「アツっ」。声の元（のこぎり波）を口の形の響き（フォルマント）で絞って母音にする。
-     ア（口を開けて、驚いて高めから下がる）→ 一瞬止める → ツ（舌で止めてから息が擦れる）→ ウ（小さく）
-     big のときは「アッッツ！」：アを長く高く叫んで震わせ、ためを長く、ツを強く */
-  function atsu(ac, at, pitch, big) {
-    var t = at, f0 = (pitch || 340) * (big ? 1.3 : 1);
-    var out = ac.createGain();
-    out.gain.value = big ? 0.55 : 0.3;          /* ほかの効果音と大きさを揃える */
-    out.connect(ac.destination);
-    function vowel(t0, dur, fm, p0, p1, vol, shake) {
-      var o = ac.createOscillator(), env = ac.createGain();
-      o.type = "sawtooth";
-      o.frequency.setValueAtTime(p0, t0);
-      o.frequency.exponentialRampToValueAtTime(p1, t0 + dur);
-      if (shake) {                              /* 叫び声の震え */
-        var lfo = ac.createOscillator(), lg = ac.createGain();
-        lfo.frequency.value = 11; lg.gain.value = p0 * shake;
-        lfo.connect(lg); lg.connect(o.frequency);
-        lfo.start(t0); lfo.stop(t0 + dur + 0.03);
-      }
-      env.gain.setValueAtTime(0.0001, t0);
-      env.gain.exponentialRampToValueAtTime(vol, t0 + 0.015);
-      env.gain.setValueAtTime(vol, t0 + dur * 0.55);
-      env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      o.connect(env);
-      fm.forEach(function (f) {
-        var b = ac.createBiquadFilter(), g = ac.createGain();
-        b.type = "bandpass"; b.frequency.value = f[0]; b.Q.value = f[1]; g.gain.value = f[2];
-        env.connect(b); b.connect(g); g.connect(out);
-      });
-      o.start(t0); o.stop(t0 + dur + 0.03);
-    }
-    function hiss(t0, dur, freq, q, vol) {
-      var n = ac.createBufferSource(), b = ac.createBiquadFilter(), g = ac.createGain();
-      n.buffer = noiseOf(ac); b.type = "bandpass"; b.frequency.value = freq; b.Q.value = q;
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.004);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      n.connect(b); b.connect(g); g.connect(out);
-      n.start(t0); n.stop(t0 + dur + 0.02);
-    }
-    /* ア：F1 800 / F2 1200 / F3 2600 あたり */
-    var aLen = big ? 0.3 : 0.16;
-    vowel(t, aLen, [[850, 5, 2.2], [1250, 6, 1.4], [2700, 8, big ? 0.9 : 0.6]], f0 * (big ? 1.45 : 1.3), f0 * 0.95, 0.9, big ? 0.04 : 0);
-    /* ッ：息を止める（無音）→ ツ：舌がはじける「t」と、続く「s」の擦れ */
-    var t1 = t + aLen + (big ? 0.14 : 0.07);
-    hiss(t1, big ? 0.03 : 0.02, 3500, 0.8, big ? 0.8 : 0.5);
-    hiss(t1 + 0.012, big ? 0.13 : 0.08, 6000, 1.5, big ? 0.7 : 0.45);
-    /* ウ：F1 350 / F2 1300（口をすぼめて小さく） */
-    vowel(t1 + (big ? 0.11 : 0.07), big ? 0.14 : 0.11, [[350, 5, 2.0], [1300, 7, 0.7], [2500, 8, 0.25]], f0 * 1.05, f0 * 0.85, big ? 0.45 : 0.35);
-  }
-  /* 倒れたときの「アアアアア～～～」。高いところから落ちていくように下がる長い叫び。
-     細かく音量を揺らして「アアアア」と途切れさせ、だんだん震えを強くして消える */
-  function scream(ac, at, pitch) {
-    var t = at, f0 = pitch || 520, dur = 1.7;
-    var out = ac.createGain(), trem = ac.createGain();
-    out.gain.value = 0.45;
-    trem.connect(out); out.connect(ac.destination);
-    var o = ac.createOscillator(), env = ac.createGain();
-    o.type = "sawtooth";
-    o.frequency.setValueAtTime(f0 * 1.15, t);
-    o.frequency.exponentialRampToValueAtTime(f0, t + 0.12);
-    o.frequency.exponentialRampToValueAtTime(f0 * 0.5, t + dur);
-    /* 声の震え（あとほど深く） */
-    var vib = ac.createOscillator(), vg = ac.createGain();
-    vib.frequency.value = 6.5;
-    vg.gain.setValueAtTime(f0 * 0.01, t);
-    vg.gain.linearRampToValueAtTime(f0 * 0.05, t + dur);
-    vib.connect(vg); vg.connect(o.frequency);
-    /* 「アアアア」と途切れる揺れ */
-    var am = ac.createOscillator(), ag = ac.createGain();
-    am.frequency.setValueAtTime(8, t);
-    am.frequency.linearRampToValueAtTime(5, t + dur);
-    ag.gain.value = 0.35;
-    trem.gain.value = 0.65;
-    am.connect(ag); ag.connect(trem.gain);
-    env.gain.setValueAtTime(0.0001, t);
-    env.gain.exponentialRampToValueAtTime(0.9, t + 0.03);
-    env.gain.setValueAtTime(0.9, t + dur * 0.55);
-    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(env);
-    [[850, 5, 2.2], [1250, 6, 1.4], [2700, 8, 0.8]].forEach(function (fm) {
-      var b = ac.createBiquadFilter(), g = ac.createGain();
-      b.type = "bandpass"; b.frequency.value = fm[0]; b.Q.value = fm[1]; g.gain.value = fm[2];
-      env.connect(b); b.connect(g); g.connect(trem);
-    });
-    [o, vib, am].forEach(function (n) { n.start(t); n.stop(t + dur + 0.05); });
-  }
-  /* 「ごちそうさまでした」。声の元（のこぎり波）1本を、母音ごとの響き（フォルマント）に切り替えながら話させる。
-     子音は、ご・で＝短いはじき、ち・し＝息の擦れ、そ・さ＝細い擦れ、ま＝鼻に抜ける低い響き。
-     高さは丁寧にお礼を言うように、少しずつ下げていく */
-  var VOWELS = { a: [800, 1200, 2600], i: [300, 2300, 3000], u: [350, 1300, 2400], e: [500, 1900, 2600], o: [500, 850, 2500] };
-  function speak(ac, at, pitch, words) {
-    var t = at, f0 = pitch || 300;
-    words = words || [
-      ["g", "o", 0.13], ["ch", "i", 0.12], ["s", "o", 0.12], ["", "o", 0.14], ["s", "a", 0.12],
-      ["m", "a", 0.13], ["d", "e", 0.12], ["sh", "i", 0.09], ["t", "a", 0.2]
-    ];
-    var out = ac.createGain();
-    out.gain.value = 0.34;
-    out.connect(ac.destination);
-    var o = ac.createOscillator(), env = ac.createGain();
-    o.type = "sawtooth";
-    env.gain.value = 0.0001;
-    o.connect(env);
-    var bands = [0, 1, 2].map(function (k) {
-      var b = ac.createBiquadFilter(), g = ac.createGain();
-      b.type = "bandpass"; b.Q.value = [5, 6, 8][k]; g.gain.value = [2.2, 1.4, 0.6][k];
-      env.connect(b); b.connect(g); g.connect(out);
-      return b;
-    });
-    function hiss(t0, dur, freq, q, vol) {
-      var n = ac.createBufferSource(), b = ac.createBiquadFilter(), g = ac.createGain();
-      n.buffer = noiseOf(ac); b.type = "bandpass"; b.frequency.value = freq; b.Q.value = q;
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      n.connect(b); b.connect(g); g.connect(out);
-      n.start(t0); n.stop(t0 + dur + 0.02);
-    }
-    var total = 0;
-    words.forEach(function (w) { total += w[2]; });
-    var start = t;
-    words.forEach(function (w, i) {
-      var c = w[0], vw = VOWELS[w[1]], dur = w[2];
-      var k = (t - start) / total;
-      var p = f0 * (1.12 - 0.3 * k);                 /* 少しずつ下がる */
-      o.frequency.setTargetAtTime(p, t, 0.02);
-      /* 子音 */
-      var cl = 0;
-      if (c === "s" || c === "sh" || c === "ch") {
-        cl = c === "ch" ? 0.05 : 0.07;
-        env.gain.setTargetAtTime(0.0001, t, 0.008);
-        if (c === "ch") hiss(t, 0.012, 3000, 0.8, 0.5);
-        hiss(t, cl, c === "s" ? 6500 : 3400, c === "s" ? 2 : 1.5, 0.55);
-      } else if (c === "g" || c === "d" || c === "t") {
-        cl = 0.03;
-        env.gain.setTargetAtTime(0.0001, t, 0.005);
-        hiss(t + 0.015, 0.02, c === "g" ? 1500 : 3500, 0.8, c === "t" ? 0.5 : 0.3);
-      } else if (c === "m") {
-        cl = 0.05;
-        /* 口を閉じて鼻に抜ける：低い響きだけにする */
-        env.gain.setTargetAtTime(0.35, t, 0.01);
-        bands[0].frequency.setTargetAtTime(250, t, 0.01);
-        bands[1].frequency.setTargetAtTime(1000, t, 0.01);
-        bands[2].frequency.setTargetAtTime(2200, t, 0.01);
-      }
-      /* 母音。「し」の i は声を小さく（ささやくように抜ける） */
-      var tv = t + cl, loud = c === "sh" ? 0.25 : 0.9;
-      bands.forEach(function (b, j) { b.frequency.setTargetAtTime(vw[j], tv, 0.015); });
-      env.gain.setTargetAtTime(loud, tv, 0.012);
-      t += dur;
-      if (i === words.length - 1) env.gain.setTargetAtTime(0.0001, t - 0.06, 0.03);
-    });
-    o.start(start); o.stop(t + 0.2);
-  }
-  /* ---- こぐ音と「アツっ」 ここまで ---- */
+  function missSound() { tone(200, .3, .2, "sawtooth", 70); noiseHit(.2, 420, .18, .6, 150); }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
     else { try { AC.resume(); } catch (e) {} }
   });
 
+  /* ============ 球 ============
+     flight は投げてから打つ位置に届くまでの秒数。到着の時刻から逆算して出す。 */
+  var KINDS = {
+    yakyu:  { flight: 1.2, z0: 11, y0: 1.95, y1: 1.2,  r: .12, pts: 3 },
+    soccer: { flight: 2.1, z0: 26, y0: .30,  y1: .45,  r: .23, pts: 2 },
+    tennis: { flight: 1.8, z0: 24, y0: 1.5,  y1: 1.05, r: .11, pts: 2 },
+    basket: { flight: 2.4, z0: 28, y0: 2.0,  y1: 1.6,  r: .25, pts: 3 },
+    volley: { flight: 1.7, z0: 19, y0: 5.4,  y1: 2.1,  r: .23, pts: 2 }
+  };
+  var KEYS = ["yakyu", "soccer", "tennis", "basket", "volley"];
+  var WINDOW = .17, PERFECT = .07, LIVES = 5, GRAVITY = 17;
+  var PLATE = 1.4;                                 /* 打つ場所。選手の少し前 */
+
+  function ballY(kind, u) {
+    var k = KINDS[kind];
+    if (kind === "yakyu") return k.y0 + (k.y1 - k.y0) * u - .12 * u * u;
+    if (kind === "soccer") { var b = u * 2.6; return k.r + Math.abs(Math.sin(b * Math.PI)) * Math.max(0, .85 - .26 * b); }
+    if (kind === "tennis") {
+      if (u < .6) { var a = u / .6; return k.y0 + (.12 - k.y0) * a * a + Math.sin(a * Math.PI) * .5; }
+      var c = (u - .6) / .4; return .12 + (k.y1 + .35) * Math.sin(c * Math.PI * .85);
+    }
+    if (kind === "basket") return k.y0 + (k.y1 - k.y0) * u + Math.sin(u * Math.PI) * 3.2;
+    return k.y0 + (k.y1 - k.y0) * u + Math.sin(u * Math.PI) * .8;
+  }
+  function ballAt(b, t) {
+    var k = KINDS[b.kind], u = (t - b.tArrive + k.flight) / k.flight;
+    return { x: b.xs + (b.xe - b.xs) * u, y: ballY(b.kind, u), z: PLATE + (k.z0 - PLATE) * (1 - u), u: u };
+  }
+  /* tf 秒で目標へ届く速さ */
+  function aimAt(from, to, tf) {
+    return {
+      x: (to.x - from.x) / tf,
+      y: (to.y - from.y) / tf + .5 * GRAVITY * tf,
+      z: (to.z - from.z) / tf
+    };
+  }
+
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
-  var state, score, T, held, keyMode = false;
+  var state, score, hits, lives, T, held, keyMode = false;
+  var balls, nextArrive, lastKinds, act, actT, actKind, shake, flashes, pitchAt, leanX;
 
-  /* 釣り合いの決まりごと。一輪車に乗った人を、車輪の上に立てた棒（倒立振子）として計算する。
-     th は体の傾き（ラジアン、前＝右が＋）、w はその速さ。x, v は車輪の位置と速さ。
-     ボタンは車輪を前後に加速させるだけ。体はその反動で傾く（右を押すと車輪が左へ出て、体が右へ）。
-     車輪には最高速度があり、そこに張りついたらもう同じ向きには加速できない＝立て直せない。
-     乗り手は鍋を持ったぶん少しのけぞって重心を車輪の上に保っている（前へ一方的には引かれない）。
-     箸を口へ運ぶと、腕のぶん重心が一瞬後ろへ動く。
-     熱いと体がはねる。路面のでこぼこでいつも揺さぶられる。
-     数字はテストの自動運転で決めた：食べずに乗るだけなら反応0.2秒でなんとかなり、0.3秒では数秒で倒れる。
-     食べきれるのは反応0.2秒前後で半分ほど。 */
-  var BASE = {
-    G: 3.5,        /* 重力で倒れようとする強さ（重さ÷高さ。大きいほど速く倒れる） */
-    A: 3.2,        /* ボタンで車輪を加速する強さ（m/s²） */
-    AL: 1.0,       /* 車輪の加速が体の傾きに効く割合（1÷高さ） */
-    VMAX: 2.2,     /* 車輪の最高速度（m/s） */
-    ROLL: 0.05,    /* 転がりの抵抗 */
-    ARM: 0.5,      /* 箸を口へ運ぶときに重心が後ろへ動くぶん */
-    D: 0.2,        /* 体のぶれの収まり（小さいほど揺れが残る） */
-    FALL: 1.1,     /* これより傾いたら倒れる */
-    BITE: 0.3,     /* ひと口の秒数 */
-    HOT: 0.25,     /* 冷めているときに熱い見込み */
-    BURN: 0.22,    /* ひと口ごとにたまる熱さ */
-    COOL: 0.45,    /* 熱さが1秒で引くぶん */
-    JOLT: 0.8,     /* 熱くて体がはねる強さ */
-    GUST: 0.4,     /* 路面のでこぼこで常に揺さぶられる強さ */
-    GUSTT: 0.5     /* 揺さぶりの向きが変わるまでの目安（秒） */
-  };
-  /* 段階。ラーメンが BASE そのまま。コーヒーはやさしく、鍋は辛く。N はひと口の数。
-     テストの自動運転で、反応0.16秒の人が食べきれるのは20回中 コーヒー20・ラーメン14・鍋6 回くらい */
-  var LEVELS = {
-    coffee: { N: 10, G: 2.2, D: 0.35, ARM: 0.25, JOLT: 0.5, GUST: 0.2, HOT: 0.2 },
-    ramen:  { N: 16 },
-    nabe:   { N: 20, G: 3.6, ARM: 0.55, JOLT: 0.9, GUST: 0.5, HOT: 0.3, BURN: 0.26 }
-  };
-  var LEVEL_ORDER = ["coffee", "ramen", "nabe"];
-  var LEVEL_NAME = { coffee: "コーヒー", ramen: "ラーメン", nabe: "鍋" };
-  var level = "ramen";                         /* 選んでいる段階（最初はラーメン） */
-  var P = {}, N = 16;
-  function applyLevel() {
-    var k, L = LEVELS[level];
-    P = {};
-    for (k in BASE) P[k] = BASE[k];
-    for (k in L) if (k !== "N") P[k] = L[k];
-    N = L.N;
-  }
-  applyLevel();
-  var th, w, x, v, gust, gustTo, eaten, biteP, biting, burn, hot, phase, fallT, doneT, clearTime, puffNow, crank, creakHigh, lastBite;
-  var dir;                                     /* 左右の押している向き（-1, 0, 1） */
-  var fingers = {}, keys = { l: false, r: false };
-
-  /* 下に並ぶ3つのボタン。← 食べる → */
-  var PADS;
+  var HUDY, SCOREY;
   function place() {
-    var y = H - 118, r = 58;
-    PADS = [
-      { id: "left", x: W * 0.17, y: y, r: r },
-      { id: "eat", x: W * 0.5, y: y - 6, r: r + 22 },     /* 食べるボタンは大きめ */
-      { id: "right", x: W * 0.83, y: y, r: r }
-    ];
+    HUDY = Math.round(H * 0.045);
+    SCOREY = Math.round(H * 0.105);
   }
-  /* 段階を選ぶ3つの絵。開始画面は START の上、結果画面はボタンの下に小さく */
-  function levelIcons() {
-    var intro = state === S.INTRO;
-    var y = intro ? H - 150 : H * 0.62 + 150, r = intro ? 64 : 44;   /* 開始画面では START のかわり */
-    return LEVEL_ORDER.map(function (id, i) { return { id: id, x: W * (0.2 + 0.3 * i), y: y, r: r }; });
-  }
-  function levelAt(px, py) {
-    var hit = null;
-    levelIcons().forEach(function (b) { if (Math.hypot(px - b.x, py - b.y) <= b.r + 10) hit = b.id; });
-    return hit;
-  }
-  /* 絵の中を縦3列に分け、どこを押してもその列のボタンになる（指が小さくずれても効く） */
-  function padAt(px) { return px < W / 3 ? "left" : px > W * 2 / 3 ? "right" : "eat"; }
 
-  function newRound(lv) {
-    if (lv) level = lv;
-    applyLevel();
+  function newRound() {
     shareButton.hidden = true;
-    document.getElementById("start").hidden=true;
+    document.getElementById("start").hidden = true;
     state = S.PLAY;
-    score = 0;
-    T = 0;
-    held = false;
-    fingers = {}; keys = { l: false, r: false }; dir = 0;
-    th = 0; w = (Math.random() < 0.5 ? -1 : 1) * 0.05;
-    x = 0; v = 0;
-    gust = 0; gustTo = 0;
-    eaten = 0; biteP = 0; biting = false; burn = 0; hot = 0;
-    phase = "ride"; fallT = 0; doneT = 0; clearTime = 0; puffNow = false;
-    crank = 0; creakHigh = false; lastBite = -9;
+    score = 0; hits = 0; lives = LIVES; T = 0; held = false;
+    balls = []; lastKinds = []; flashes = [];
+    act = null; actT = 0; actKind = null; shake = 0; pitchAt = -9; leanX = 0;
+    nextArrive = 1.9;
   }
 
-  function readDir() {
-    var l = keys.l, r = keys.r;
-    for (var id in fingers) { if (fingers[id] === "left") l = true; if (fingers[id] === "right") r = true; }
-    dir = (r ? 1 : 0) - (l ? 1 : 0);
+  function pickKind() {
+    var k;
+    do { k = KEYS[(Math.random() * KEYS.length) | 0]; }
+    while (lastKinds.length >= 2 && lastKinds[0] === k && lastKinds[1] === k);
+    lastKinds.unshift(k); lastKinds.length = 2;
+    return k;
+  }
+  /* 来る球を先に決めておく。飛んでいる時間ぶん早く出す */
+  function schedule() {
+    while (nextArrive < T + 3.6) {
+      var kind = pickKind(), k = KINDS[kind];
+      var xs = (Math.random() - .5) * (kind === "yakyu" ? 1.2 : 9);
+      var b = {
+        kind: kind, tArrive: nextArrive, xs: xs, xe: (Math.random() - .5) * 1.6,
+        spin: Math.random() * 6, hit: false, dead: false, judged: false
+      };
+      balls.push(b);
+      if (kind === "yakyu") pitchAt = nextArrive - k.flight;
+      var gap = Math.max(.40, .95 - T * .011) + (Math.random() - .5) * .14;
+      nextArrive += gap;
+    }
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
+    shake = Math.max(0, shake - dt * 4);
+    if (act) { actT += dt; if (actT > .62) act = null; }
+    flashes.forEach(function (f) { f.age += dt; });
+    flashes = flashes.filter(function (f) { return f.age < .45; });
     if (state !== S.PLAY) return;
-    hot = Math.max(0, hot - dt / 1.2);
-    burn = Math.max(0, burn - dt * P.COOL);
+    T += dt;
+    schedule();
 
-    if (phase === "ride") {
-      T += dt;
-      /* でこぼこ：ときどき向きの変わる揺さぶりを、なめらかにつなぐ */
-      if (Math.random() < dt / P.GUSTT) gustTo = (Math.random() * 2 - 1) * P.GUST;
-      gust += (gustTo - gust) * Math.min(1, dt * 4);
-      /* 車輪：ボタンで加速。最高速度に張りついたら、その向きへはもう加速できない */
-      var a = -P.A * dir;
-      if ((v >= P.VMAX && a > 0) || (v <= -P.VMAX && a < 0)) a = 0;
-      a -= P.ROLL * v;
-      v = Math.max(-P.VMAX, Math.min(P.VMAX, v + a * dt));
-      x += v * dt;
-      /* クランクが半回転するごとにきしむ（車輪の半径0.3m） */
-      crank += Math.abs(v) * dt / 0.3;
-      if (crank >= Math.PI) {
-        crank -= Math.PI;
-        creakHigh = !creakHigh;
-        if (AC) creak(AC, AC.currentTime, Math.min(0.1, 0.04 + 0.04 * Math.abs(v)), creakHigh);
+    var near = null, nearAbs = 9;
+    balls.forEach(function (b) {
+      var k = KINDS[b.kind];
+      if (b.hit) {
+        var e = T - b.hitT;
+        b.fx = b.hx + b.v.x * e;
+        b.fy = b.hy + b.v.y * e - .5 * GRAVITY * e * e;
+        b.fz = b.hz + b.v.z * e;
+        if (b.fy < k.r) { b.fy = k.r; }
+        if (e > 2.4 || Math.abs(b.fz) > 95) b.dead = true;
+        return;
       }
-      /* 体：重力・鍋の重み・腕の動き・車輪の加速の反動 */
-      var arm = biting ? Math.sin(Math.PI * Math.min(1, biteP / 0.72)) : 0;
-      var acc = gust + P.G * Math.sin(th) - P.ARM * arm * Math.cos(th)
-              - a * P.AL * Math.cos(th) - P.D * w;
-      w += acc * dt;
-      th += w * dt;
+      var p = ballAt(b, T);
+      if (p.u < 0) return;
+      if (!b.judged && T > b.tArrive + WINDOW) {          /* 見逃した */
+        b.judged = true;
+        lives--; missSound(); shake = Math.max(shake, .5);
+        if (lives <= 0) { state = S.RESULT; shareButton.hidden = false; }
+      }
+      if (p.z < -9) b.dead = true;
+      var d = Math.abs(T - b.tArrive);
+      if (!b.judged && d < nearAbs) { nearAbs = d; near = b; }
+    });
+    balls = balls.filter(function (b) { return !b.dead; });
 
-      if (biting) {
-        var before = biteP;
-        biteP += dt / P.BITE;
-        if (before < 0.72 && biteP >= 0.72) eat();
-        if (biteP >= 1) { biteP = 0; biting = false; }
-      }
-      if (phase === "ride" && Math.abs(th) > P.FALL) {
-        phase = "fall";
-        biting = false;
-        noiseHit(0.5, 380, 0.35, 0.8);
-        if (AC) scream(AC, AC.currentTime + 0.02, 480 + Math.random() * 80);
-      }
-    } else if (phase === "fall") {
-      fallT += dt;
-      w += 5 * Math.sin(th) * dt;
-      th += w * dt;
-      if (Math.abs(th) > 1.5) {
-        if (Math.abs(w) > 0.8) noiseHit(0.25, 250, 0.3, 0.8);
-        th = (th > 0 ? 1 : -1) * 1.5;
-        w = -w * 0.2;
-      }
-      v *= 1 - Math.min(1, dt * 3);
-      x += v * dt;
-      if (fallT > 1.4) endRound();
-    } else if (phase === "done") {
-      doneT += dt;
-      th += (0 - th) * Math.min(1, dt * 4);
-      w = 0;
-      v *= 1 - Math.min(1, dt * 2);
-      x += v * dt;
-      if (doneT > 3.4) endRound();              /* 「ごちそうさまでした」を言い終えてから */
-    }
+    /* 来ている球のほうへ体を寄せる */
+    var want = 0;
+    if (near) want = Math.max(-1.1, Math.min(1.1, near.xe * .6));
+    leanX += (want - leanX) * Math.min(1, dt * 6);
   }
 
-  function startBite() {
-    if (phase !== "ride" || biting || eaten >= N) return;
-    biting = true;
-    biteP = 0;
-    tone(520, 0.04, 0.04, "triangle", 620);
+  /* 押したときに狙う球 */
+  function bestTarget() {
+    var best = null, bestD = 9;
+    balls.forEach(function (b) {
+      if (b.hit || b.judged) return;
+      var d = Math.abs(T - b.tArrive);
+      if (d < bestD) { bestD = d; best = b; }
+    });
+    return bestD < .7 ? best : null;
   }
 
-  function eat() {
-    eaten++;
-    lastBite = animT;
-    noiseHit(0.1, 1600, 0.12, 2);
-    /* ひと口ごとに「アツ」。熱いのを引いたら「アッッツ！」 */
-    var burned = Math.random() < Math.min(0.9, P.HOT + burn * 0.6);
-    if (burned) {
-      hot = 1;
-      puffNow = true;
-      w += (Math.random() < 0.5 ? -1 : 1) * P.JOLT * (0.5 + burn * 0.6) * (0.8 + 0.4 * Math.random());
-    }
-    if (AC) atsu(AC, AC.currentTime + 0.02, 310 + Math.random() * 80, burned);
-    burn = Math.min(1.5, burn + P.BURN);
-    if (eaten >= N) {
-      phase = "done";
-      biting = false; biteP = 0;
-      clearTime = T;
-      tone(660, 0.14, 0.12, "triangle");
-      tone(880, 0.14, 0.12, "triangle", null, 0.12);
-      tone(1320, 0.3, 0.12, "triangle", null, 0.24);
-      if (AC) speak(AC, AC.currentTime + 1.8, 290 + Math.random() * 30);    /* 汁を飲み干して、鍋を元に戻してから「ごちそうさまでした」 */
-    }
+  function swingAt(b) {
+    var d = Math.abs(T - b.tArrive), k = KINDS[b.kind];
+    act = b.kind; actT = 0; actKind = b.kind;
+    if (d > WINDOW) { whiff(); return; }
+    var perfect = d < PERFECT;
+    b.hit = true; b.judged = true; b.hitT = T;
+    var p = ballAt(b, T);
+    b.hx = p.x; b.hy = Math.max(k.r, p.y); b.hz = p.z;
+    var from = { x: b.hx, y: b.hy, z: b.hz }, to, tf;
+    if (b.kind === "yakyu") { to = { x: (Math.random() - .5) * 34, y: 11, z: 88 }; tf = 2.1; }
+    else if (b.kind === "soccer") { to = { x: (Math.random() - .5) * 5, y: 1.1, z: 78 }; tf = 1.6; }
+    else if (b.kind === "tennis") { to = { x: (Math.random() - .5) * 8, y: .2, z: 22 }; tf = 1.0; }
+    else if (b.kind === "basket") { to = { x: 0, y: 3.2, z: 24.2 }; tf = 1.15; }
+    else { to = { x: (Math.random() - .5) * 6, y: .2, z: 19 }; tf = .9; }
+    b.v = aimAt(from, to, tf);
+    score += k.pts * (perfect ? 2 : 1);
+    hits++;
+    shake = Math.max(shake, perfect ? .9 : .6);
+    flashes.push({ x: b.hx, y: b.hy, z: b.hz, age: 0, big: perfect });
+    hitSound(b.kind, perfect);
   }
-
-  function endRound() {
-    state = S.RESULT;
-    fingers = {}; keys = { l: false, r: false }; dir = 0;
-    score = phase === "done" ? Math.round(clearTime * 10) / 10 : Math.round(eaten / N * 100);
-  }
-  function scoreText() {
-    return phase === "done" ? score.toFixed(1) + "秒" : score + "%";
+  function whiff() {                                     /* 空振りも見逃しと同じ扱い */
+    lives--; missSound(); shake = Math.max(shake, .4);
+    if (lives <= 0) { state = S.RESULT; shareButton.hidden = false; }
   }
 
   /* ============ 入力 ============
-     左右は ← → キー、食べるのはスペース（ジョイパッドは十字キーとボタン）。
-     タップは列で決まる：左の列＝←、真ん中＝食べる、右の列＝→。左右は押している間だけ効く。 */
-  function down(px, py, id) {
-    if(state===S.INTRO)return;
+     タップとスペースキーで同じことができる。x が null のときはキー操作。 */
+  function down(x, y) {
+    if (state === S.INTRO) return;
     audioOn();
     if (state === S.RESULT) {
-      var lv = px == null ? null : levelAt(px, py);
-      if (lv) { newRound(lv); return; }
-      var hit = px == null ? "retry" : hitButton(px, py);
+      var hit = x == null ? "retry" : hitButton(x, y);
       if (hit === "retry") newRound();
       return;
     }
-    if (phase !== "ride") return;
-    var pad = px == null ? "eat" : padAt(px);
-    if (pad === "eat") { startBite(); return; }
-    fingers[id] = pad;
-    readDir();
+    held = true;
+    var b = bestTarget();
+    if (b) swingAt(b);
+    else { act = KEYS[(Math.random() * 5) | 0]; actT = 0; whiff(); }
   }
-  function up(id) {
-    if (id === undefined) fingers = {}; else delete fingers[id];
-    readDir();
-  }
+  function move() {}
+  function up() { held = false; }
 
   function atCanvas(e) {
     var r = canvas.getBoundingClientRect();
@@ -567,53 +335,32 @@
   }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y, e.pointerId);
+    var p = atCanvas(e); down(p.x, p.y);
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(e.pointerId); });
-  wrap.addEventListener("pointercancel", function (e) { up(e.pointerId); });
-  window.addEventListener("blur", function () { keys = { l: false, r: false }; up(); });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
 
   window.addEventListener("keydown", function (e) {
     var esc = e.key === "Escape";
-    var go = e.code === "Space" || e.key === " " || e.key === "Enter" || e.key === "ArrowUp";
-    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
-    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
-    if (!esc && !go && !left && !right) return;
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
-    if ((left || right) && state === S.INTRO) {  /* 開始画面では段階を選ぶ */
-      if (!e.repeat) {
-        var i = LEVEL_ORDER.indexOf(level) + (left ? -1 : 1);
-        level = LEVEL_ORDER[Math.max(0, Math.min(LEVEL_ORDER.length - 1, i))];
-        applyLevel();
-        tone(520, 0.05, 0.05, "triangle");
-      }
-      return;
-    }
-    if (left || right) {
-      if (left) keys.l = true; else keys.r = true;
-      readDir();
-      return;
-    }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
-    if (e.key === "ArrowUp" && state !== S.PLAY) return;
     down();
   });
   window.addEventListener("keyup", function (e) {
-    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
-    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
-    if (left || right) { if (left) keys.l = false; else keys.r = false; readDir(); return; }
-    if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
   });
 
   function doShare() {
-    /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
-       URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    var nm = LEVEL_NAME[level], verb = level === "coffee" ? "飲" : "食べ";
-    var text = phase === "done" ? "一輪車に乗ったまま" + nm + "を" + scoreText() + "で" + verb + (level === "coffee" ? "みきりました" : "きりました")
-                                : "一輪車に乗ったまま" + nm + "は" + (level === "coffee" ? "飲み切れませんでした" : "食べ切れませんでした");   /* 倒れたときは割合を出さない */
-    window.zResultActions.x({ text: text + " #アツアツ一輪車" });
+    /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。 */
+    window.zResultActions.x({ text: score + "点でした #同時球技5種" });
   }
 
   /* ============ 描画 ============ */
@@ -627,133 +374,70 @@
     ctx.closePath();
   }
 
-  function draw(dt) {
+  function snapshot() {
+    var list = [];
+    balls.forEach(function (b) {
+      var k = KINDS[b.kind];
+      if (b.hit) { list.push({ kind: b.kind, x: b.fx, y: b.fy, z: b.fz, r: k.r, spin: b.spin }); return; }
+      var p = ballAt(b, T);
+      if (p.u < 0 || p.z < -9) return;
+      list.push({ kind: b.kind, x: p.x, y: p.y, z: p.z, r: k.r, spin: b.spin });
+    });
+    var pitch = -1;
+    if (T - pitchAt > -.55 && T - pitchAt < .55) pitch = (T - pitchAt + .55) / 1.1;
+    return { t: T, balls: list, act: act, actP: act ? actT / .62 : 0, shake: shake, leanX: leanX, pitch: pitch };
+  }
+
+  /* 3Dが使えないとき（自動確認の台など）の簡単な絵 */
+  function drawFlat(snap) {
+    ctx.fillStyle = "#16283a"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#2e7a3b"; ctx.fillRect(0, H * .42, W, H * .58);
+    var colors = { yakyu: "#f6f3ea", soccer: "#f4f4f0", tennis: "#d3e64a", basket: "#d4702a", volley: "#f7f6f1" };
+    snap.balls.forEach(function (b) {
+      var f = 620 / Math.max(.3, b.z + 7.4);
+      var x = W / 2 + b.x * f * .55, y = H * .62 - (b.y - 1.2) * f * .55;
+      ctx.fillStyle = colors[b.kind];
+      ctx.beginPath(); ctx.arc(x, y, Math.max(1, b.r * f * .55), 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
-    ctx.clearRect(0, 0, W, H);
+    var snap = snapshot();
+    if (view3d) { ctx.clearRect(0, 0, W, H); view3d.draw(ctx, W, H, snap); }
+    else drawFlat(snap);
 
-    var look = {
-      x: x, th: th, w: w, v: v, eaten: eaten, N: N, hot: hot, t: animT,
-      /* 顔の赤さ：熱いひと口で真っ赤になってゆっくり引く。熱さがたまっている間はほんのり赤い */
-      chew: animT - lastBite,                   /* ひと口食べてからの秒数（もぐもぐ） */
-      red: Math.max(Math.sqrt(hot), Math.min(0.6, burn * 0.5)),
-      phase: state === S.INTRO ? "intro" : phase, fallT: fallT, doneT: doneT,
-      bite: { p: state === S.INTRO ? 0 : biteP, idx: eaten }, puff: puffNow,
-      level: level
-    };
-    puffNow = false;
-    if (view3d) {
-      try { ctx.drawImage(view3d.render(look, dt || 1 / 60), 0, 0, W, H); }
-      catch (e) { if (window.console) console.error("3Dの絵が描けない", e); view3d = null; }
-    }
-    if (!view3d) drawFlat(look);
-    if (state === S.PLAY && phase === "ride") drawPads();
-    if (state === S.INTRO) drawLevels();
-
-    if (state === S.RESULT) drawResult();
-  }
-
-  /* 下の3つのボタン。左右は矢印だけ、真ん中は器の絵と「食べる」（コーヒーは「飲む」） */
-  function drawPads() {
-    PADS.forEach(function (p) {
-      var on = p.id === "eat" ? biting : (p.id === "left" ? dir < 0 : dir > 0);
+    /* 当たった場所の光 */
+    flashes.forEach(function (f) {
+      var p = view3d ? view3d.project(f.x, f.y, f.z) : { x: W / 2, y: H * .6, z: 0 };
+      if (p.z > 1) return;
+      var a = 1 - f.age / .45, rad = (f.big ? 90 : 60) * (.3 + f.age / .45);
       ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2);
-      if (p.id === "eat") {
-        /* 続けて食べて熱いほど赤くなる */
-        var k = Math.min(1, burn / 1.2);
-        ctx.fillStyle = "rgba(" + Math.round(255) + "," + Math.round(255 - 150 * k) + "," + Math.round(255 - 190 * k) + "," + (on ? 0.5 : 0.28) + ")";
-      } else ctx.fillStyle = on ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.22)";
-      ctx.fill();
-      ctx.lineWidth = 4; ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.stroke();
-      ctx.fillStyle = "#fff";
-      if (p.id === "eat") {
-        if (biting) {
-          ctx.beginPath(); ctx.arc(0, 0, p.r - 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * biteP);
-          ctx.strokeStyle = "#fff"; ctx.lineWidth = 6; ctx.stroke();
-        }
-        /* 器の絵を少し上に小さく、その下に「食べる」（コーヒーは「飲む」） */
-        ctx.save(); ctx.translate(0, -15); drawVessel(level, 0.88); ctx.restore();
-        ctx.fillStyle = "#fff";
-        ctx.font = "800 24px sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(level === "coffee" ? "飲む" : "食べる", 0, 44);
-        ctx.textBaseline = "alphabetic";
-      } else {
-        var sg = p.id === "left" ? -1 : 1;
-        ctx.beginPath(); ctx.moveTo(sg * 24, 0); ctx.lineTo(-sg * 14, -24); ctx.lineTo(-sg * 14, 24); ctx.closePath(); ctx.fill();
-      }
+      ctx.globalAlpha = a * .8;
+      ctx.strokeStyle = f.big ? "#ffe27a" : "#ffffff";
+      ctx.lineWidth = f.big ? 9 : 6;
+      ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI * 2); ctx.stroke();
       ctx.restore();
     });
-  }
 
-  /* 器の絵（白一色）。原点が中心、k は大きさ */
-  function drawVessel(id, k) {
+    /* 残りと点。結果画面では出さない */
+    if (state === S.RESULT) { drawResult(); return; }
     ctx.save();
-    ctx.scale(k, k);
-    ctx.fillStyle = "#fff"; ctx.strokeStyle = "#fff"; ctx.lineCap = "round";
-    if (id === "coffee") {
-      /* マグカップと湯気 */
-      roundRect(-22, -12, 36, 38, 6); ctx.fill();
-      ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(16, 6, 10, -Math.PI / 2, Math.PI / 2); ctx.stroke();
-      ctx.lineWidth = 3.5;
-      ctx.beginPath(); ctx.moveTo(-10, -18); ctx.quadraticCurveTo(-16, -26, -10, -34); ctx.moveTo(2, -18); ctx.quadraticCurveTo(-4, -26, 2, -34); ctx.stroke();
-    } else if (id === "ramen") {
-      /* どんぶりと、持ち上げた麺 */
-      ctx.beginPath(); ctx.moveTo(-34, 0); ctx.lineTo(34, 0); ctx.quadraticCurveTo(30, 26, 0, 28); ctx.quadraticCurveTo(-30, 26, -34, 0); ctx.fill();
-      ctx.fillRect(-12, 26, 24, 5);
-      ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.moveTo(10, -38); ctx.lineTo(24, -6); ctx.moveTo(18, -40); ctx.lineTo(30, -8); ctx.stroke();
-      ctx.lineWidth = 2.5;
-      ctx.beginPath(); ctx.moveTo(8, -22); ctx.quadraticCurveTo(0, -12, 4, -4); ctx.moveTo(14, -24); ctx.quadraticCurveTo(8, -12, 12, -4); ctx.stroke();
-    } else {
-      /* 土鍋と箸 */
-      ctx.beginPath(); ctx.moveTo(-30, -2); ctx.lineTo(30, -2); ctx.quadraticCurveTo(28, 24, 0, 26); ctx.quadraticCurveTo(-28, 24, -30, -2); ctx.fill();
-      ctx.fillRect(-36, -8, 72, 7);
-      ctx.lineWidth = 5;
-      ctx.beginPath(); ctx.moveTo(4, -14); ctx.lineTo(24, -38); ctx.moveTo(13, -12); ctx.lineTo(34, -32); ctx.stroke();
+    for (var i = 0; i < LIVES; i++) {
+      ctx.beginPath();
+      ctx.arc(30 + i * 26, HUDY, 8, 0, Math.PI * 2);
+      ctx.fillStyle = i < lives ? "#ffffff" : "rgba(255,255,255,.22)";
+      ctx.fill();
     }
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "rgba(0,0,0,.65)"; ctx.shadowBlur = 12;
+    ctx.font = "800 72px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, SCOREY);
     ctx.restore();
   }
 
-  /* 段階を選ぶ3つの絵。選んでいるものを明るく */
-  function drawLevels() {
-    levelIcons().forEach(function (b) {
-      var on = b.id === level;
-      ctx.save();
-      ctx.translate(b.x, b.y);
-      ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2);
-      ctx.fillStyle = on ? "rgba(255,255,255,.45)" : "rgba(255,255,255,.14)";
-      ctx.fill();
-      ctx.lineWidth = on ? 6 : 3; ctx.strokeStyle = on ? "#fff" : "rgba(255,255,255,.6)"; ctx.stroke();
-      drawVessel(b.id, b.r / 58);
-      ctx.restore();
-    });
-  }
-
-  /* 3Dが使えないときの平らな絵（横から見た形だけ） */
-  function drawFlat(o) {
-    var s = 220, gx = W / 2 - 40, gy = H * 0.7;
-    ctx.fillStyle = "#1c2544"; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = "#3a3e4b"; ctx.fillRect(0, gy, W, H - gy);
-    var ax = gx, ay = gy - 0.3 * s;
-    ctx.strokeStyle = "#1d1f24"; ctx.lineWidth = 10;
-    ctx.beginPath(); ctx.arc(ax, ay, 0.3 * s - 5, 0, Math.PI * 2); ctx.stroke();
-    ctx.save();
-    ctx.translate(ax, ay); ctx.rotate(o.th);
-    ctx.fillStyle = "#3a6fb8"; ctx.fillRect(-0.15 * s, -1.05 * s, 0.3 * s, 0.45 * s);
-    ctx.fillStyle = "#f1c7a1"; ctx.beginPath(); ctx.arc(0.03 * s, -1.2 * s, 0.14 * s, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#d8412f"; ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -0.58 * s); ctx.stroke();
-    if (o.phase !== "fall") {
-      ctx.fillStyle = "#6e3f27"; ctx.fillRect(0.2 * s, -0.75 * s, 0.3 * s, 0.1 * s);
-      ctx.fillStyle = "#d8783a"; ctx.fillRect(0.22 * s, -0.75 * s, 0.26 * s * (1 - o.eaten / o.N), 0.03 * s);
-    }
-    ctx.restore();
-  }
-
-  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
     var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
@@ -779,7 +463,7 @@
     ctx.shadowBlur = 10;
     ctx.font = "800 108px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(scoreText(), W / 2, H * 0.45);
+    ctx.fillText(String(score), W / 2, H * 0.45);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
@@ -791,82 +475,85 @@
       ctx.font = "800 24px sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      if (!window.zActionIcon || !window.zActionIcon(ctx,b.label,0,1,30)) ctx.fillText(b.label, 0, 1);
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
       ctx.restore();
       ctx.textBaseline = "alphabetic";
     });
-    drawLevels();
   }
 
   /* ============ 覗き穴 ============
-     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
-     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
   window.__probe = {
     now: function () {
-      return { state: state, score: score, W: W, H: H, phase: phase, th: th, w: w, x: x, v: v,
-               eaten: eaten, N: N, T: T, dir: dir, biting: biting, burn: burn, hot: hot,
-               level: level, P: JSON.parse(JSON.stringify(P)) };
+      return {
+        state: state, score: score, hits: hits, lives: lives, T: T, act: act,
+        balls: balls.map(function (b) {
+          return { kind: b.kind, dt: T - b.tArrive, hit: b.hit, judged: b.judged };
+        }),
+        nextArrive: nextArrive, W: W, H: H, has3d: !!view3d
+      };
     },
-    step: function (n) { for (var i = 0; i < (n || 1); i++) { animT += 1 / 60; update(1 / 60); draw(1 / 60); } },
-    reset: function (lv) { newRound(lv); }       /* lv を渡すとその段階で */
+    /* 次の球を、ちょうどの間合いまで進める */
+    toBall: function () {
+      var guard = 0;
+      while (guard++ < 1200) {
+        var b = null, d = 9;
+        for (var i = 0; i < balls.length; i++) {
+          if (balls[i].hit || balls[i].judged) continue;
+          var e = balls[i].tArrive - T;
+          if (e > -WINDOW && e < d) { d = e; b = balls[i]; }
+        }
+        if (b && Math.abs(T - b.tArrive) < .02) return b.kind;
+        update(1 / 60); draw();
+      }
+      return null;
+    },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    tap: function () { down(); up(); },
+    reset: function () { newRound(); }
   };
 
-  /* ============ 手元用の動画撮影 ============
-     record.js が呼ぶ自動操作。ゲームに合わせて run の中だけ書き換える。 */
+  /* ============ 手元用の動画撮影 ============ */
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
-      await r.wait(1000);
+      await r.wait(800);
       r.key();
-      /* 傾きを見て左右を押し、落ち着いていて熱くないときに食べる。人の反応ぶん少し遅れて見る */
-      var seen = [], now = 0;
-      function send(type, key) { window.dispatchEvent(new KeyboardEvent(type, { key: key, bubbles: true })); }
-      var t0 = Date.now();
-      while (state !== S.RESULT && Date.now() - t0 < 60000) {
-        seen.push(th + 0.35 * w);
-        var sv = seen[Math.max(0, seen.length - 3)];
-        var want = state === S.PLAY && phase === "ride" ? (sv > 0.03 ? -1 : sv < -0.03 ? 1 : 0) : 0;
-        if (want !== now) {
-          if (now) send("keyup", now < 0 ? "ArrowLeft" : "ArrowRight");
-          if (want) send("keydown", want < 0 ? "ArrowLeft" : "ArrowRight");
-          now = want;
-        }
-        if (phase === "ride" && !biting && Math.abs(th) < 0.1 && burn < 0.4) { send("keydown", " "); send("keyup", " "); }
-        await r.wait(40);
+      var guard = Date.now() + 45000;
+      while (state !== S.RESULT && Date.now() < guard) {
+        var b = bestTarget();
+        if (b && Math.abs(T - b.tArrive) < .04) { down(); up(); }
+        await r.wait(16);
       }
-      await r.wait(1500);
+      await r.wait(1600);
     }
   };
 
   /* ============ ループ ============ */
-  var startButton=document.getElementById('start');
+  var startButton = document.getElementById("start");
   // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
-  var startingPointer=null;
-  document.addEventListener('pointerdown',function(e){
-    if(!(state===S.INTRO))return;
-    if(e.isPrimary===false||e.button>0)return;
-    startingPointer=e.pointerId;
+  var startingPointer = null;
+  document.addEventListener("pointerdown", function (e) {
+    if (!(state === S.INTRO)) return;
+    if (e.isPrimary === false || e.button > 0) return;
+    startingPointer = e.pointerId;
     e.stopImmediatePropagation();
-  },true);
-  document.addEventListener('pointerup',function(e){
-    if(!(state===S.INTRO)||startingPointer!==e.pointerId)return;
-    startingPointer=null;e.preventDefault();e.stopImmediatePropagation();
-    /* START は出さず、食べ物の絵が START のかわり。絵を押したらその段階で始め、ほかの場所では始めない */
-    var pt=atCanvas(e),lv=levelAt(pt.x,pt.y);if(!lv)return;level=lv;
-    startButton.click();
-  },true);
-  document.addEventListener('pointercancel',function(){startingPointer=null;},true);
+  }, true);
+  document.addEventListener("pointerup", function (e) {
+    if (!(state === S.INTRO) || startingPointer !== e.pointerId) return;
+    startingPointer = null; e.preventDefault(); e.stopImmediatePropagation(); startButton.click();
+  }, true);
+  document.addEventListener("pointercancel", function () { startingPointer = null; }, true);
 
-  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
-  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
-  newRound();state=S.INTRO;startButton.hidden=true;   /* キーとジョイパッドで始める入口としてだけ残す */
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  newRound(); state = S.INTRO; startButton.hidden = false;
   layout();
-  var last = performance.now(), animT = 0;
+  var last = performance.now();
   function loop(now) {
-    var dt = Math.min(0.033, (now - last) / 1000);   /* 戻ってきたとき飛ばないように上限 */
+    var dt = Math.max(0, Math.min(0.033, (now - last) / 1000));   /* 戻ってきたとき飛ばないように上限 */
     last = now;
-    animT += dt;
-    if (!window.__recordManual) { update(dt); draw(dt); }
+    if (!window.__recordManual) { update(dt); draw(); }
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
@@ -875,10 +562,10 @@
 <script>
 if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = "../games/_tools/recorder-ui.js?v=ichirin-nabe-20260919082019";
+  recorderScript.src = "../games/_tools/recorder-ui.js?v=doji5-20260920113900";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=ichirin-nabe-20260919082019"></script>
+<script src="./auto-reload.js?v=doji5-20260920113900"></script>
 </body>
 </html>
