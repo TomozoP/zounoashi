@@ -192,11 +192,13 @@ var ZDoji5Scene = (function () {
     } else if (kind === 'basket') {
       c.fillStyle = '#d4702a'; c.fillRect(0, 0, 256, 128);
       c.strokeStyle = '#231a14'; c.lineWidth = 4;
+      /* 赤道が1本、極を通る継ぎ目が1本（左右に分かれて2本に見える）、
+         そのあいだにふくらんだ継ぎ目が2本。重ならないように置く。 */
       c.beginPath(); c.moveTo(0, 64); c.lineTo(256, 64); c.stroke();
-      [0, 64, 128, 192].forEach(function (p) { c.beginPath(); c.moveTo(p, 0); c.lineTo(p, 128); c.stroke(); });
-      [64, 192].forEach(function (p) {
+      [0, 128, 256].forEach(function (p) { c.beginPath(); c.moveTo(p, 0); c.lineTo(p, 128); c.stroke(); });
+      [[64, 1], [192, -1]].forEach(function (v) {
         c.beginPath();
-        for (var y = 0; y <= 128; y++) c.lineTo(p + Math.sin(y / 128 * Math.PI) * 26, y);
+        for (var y = 0; y <= 128; y++) c.lineTo(v[0] + v[1] * Math.sin(y / 128 * Math.PI) * 26, y);
         c.stroke();
       });
     } else {
@@ -248,6 +250,30 @@ var ZDoji5Scene = (function () {
       blob(kn, .072, .21, .075, skin, -.2);
       blob(kn, .085, .05, .15, shoe, -.42, .06);
     });
+    /* 競技ごとの持ちもの・身につけるもの。入切で見え隠れさせる */
+    var worn = { yakyu: [], soccer: [], tennis: [], basket: [], volley: [] };
+    if (opt.gear) {
+      worn.yakyu.push(cap, visor);                            /* 帽子は野球のもの */
+      ['L', 'R'].forEach(function (tag) {
+        var kn = parts['knee' + tag];
+        /* サッカー: 長いソックスとスパイク */
+        worn.soccer.push(blob(kn, .083, .17, .086, mat('#2a6fd6', .75), -.27));
+        worn.soccer.push(blob(kn, .094, .056, .165, mat('#e8e24a', .6), -.425, .065));
+        /* バレー: ひざあて */
+        worn.volley.push(blob(kn, .09, .078, .092, mat('#2b3340', .8), -.02));
+      });
+      /* バスケ: ヘッドバンドと、右腕のスリーブ */
+      var band = new T.Mesh(new T.TorusGeometry(.119, .027, 6, 16), mat('#f0f3f7', .7));
+      band.rotation.x = Math.PI / 2; band.position.set(0, .565, 0); band.castShadow = true;
+      torso.add(band); worn.basket.push(band);
+      worn.basket.push(blob(parts.shoulderR, .068, .155, .068, mat('#1b2330', .8), -.15));
+      worn.basket.push(blob(parts.elbowR, .061, .145, .061, mat('#1b2330', .8), -.13));
+      /* テニス: ラケットを持つ手のリストバンド */
+      var wristband = new T.Mesh(CYL, mat('#f2f5f8', .7));
+      wristband.scale.set(.062, .055, .062); wristband.position.y = .04;
+      wristband.castShadow = true; parts.handL.add(wristband);
+      worn.tennis.push(wristband);
+    }
     var batParts = [], racketParts = [];
     if (opt.bat) {                                            /* 右手はバット。手首から上へ伸ばす */
       var bat = new T.Mesh(new T.CylinderGeometry(.05, .023, .92, 12), mat('#c49055', .55));
@@ -273,8 +299,10 @@ var ZDoji5Scene = (function () {
       var glove = new T.Mesh(SPHERE, mat('#8a5a2f', .8));
       glove.scale.set(.13, .15, .07); glove.castShadow = true; parts.handL.add(glove);
     }
+    worn.yakyu = worn.yakyu.concat(batParts);
+    worn.tennis = worn.tennis.concat(racketParts);
     scene.add(root);
-    return { root: root, parts: parts, bat: batParts, racket: racketParts };
+    return { root: root, parts: parts, worn: worn };
   }
 
   /* ============ 舞台 ============ */
@@ -494,7 +522,7 @@ var ZDoji5Scene = (function () {
     });
 
     /* 選手と投手 */
-    this.player = makeAthlete(this.scene, { shirt: '#d8402f', pants: '#1f2a3a', bat: true, racket: true });
+    this.player = makeAthlete(this.scene, { shirt: '#d8402f', pants: '#1f2a3a', bat: true, racket: true, gear: true });
     this.pitcher = makeAthlete(this.scene, { shirt: '#f0f2f0', pants: '#39506e', glove: true });
     this.pitcher.root.position.set(0, .28, 11);
     this.pitcher.root.rotation.y = Math.PI;
@@ -536,9 +564,8 @@ var ZDoji5Scene = (function () {
     key.split(',').forEach(function (k) { if (k) set[k] = 1; });
     Object.keys(this.gear).forEach(function (kind) {
       self.gear[kind].forEach(function (o) { o.visible = !!set[kind]; });
+      self.player.worn[kind].forEach(function (m) { m.visible = !!set[kind]; });
     });
-    this.player.bat.forEach(function (m) { m.visible = !!set.yakyu; });
-    this.player.racket.forEach(function (m) { m.visible = !!set.tennis; });
     this.player.hasBat = !!set.yakyu;
     this.player.hasRacket = !!set.tennis;
     fieldTexture(set);
