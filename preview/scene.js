@@ -171,17 +171,36 @@ var ZDoji5Scene = (function () {
         }
       });
     } else if (kind === 'soccer') {
-      c.fillStyle = '#f4f4f0'; c.fillRect(0, 0, 256, 128);
-      c.fillStyle = '#20242a';
-      for (i = 0; i < 14; i++) {
-        var cx = (i % 5) * 52 + ((i / 5 | 0) % 2 ? 26 : 0), cy = ((i / 5) | 0) * 44 + 18;
-        c.beginPath();
-        for (var k = 0; k < 5; k++) {
-          var a = k / 5 * Math.PI * 2 - Math.PI / 2;
-          c.lineTo(cx + Math.cos(a) * 15, cy + Math.sin(a) * 15);
-        }
-        c.closePath(); c.fill();
+      /* 切頂二十面体の五角形と六角形を球面へ写し、極でも模様を潰さない。 */
+      var golden = (1 + Math.sqrt(5)) / 2, vertices = [], faces = [];
+      [-1, 1].forEach(function (a) { [-1, 1].forEach(function (b) {
+        vertices.push(new T.Vector3(0, a, b * golden), new T.Vector3(a, b * golden, 0), new T.Vector3(b * golden, 0, a));
+      }); });
+      function cut(a, b) { return vertices[a].clone().multiplyScalar(2).add(vertices[b]).normalize(); }
+      function face(points, black) {
+        var center = new T.Vector3(); points.forEach(function (p) { center.add(p); }); center.normalize();
+        var axis = points[0].clone().sub(center.clone().multiplyScalar(points[0].dot(center))).normalize(), up = new T.Vector3().crossVectors(center, axis);
+        points.sort(function (a, b) { return Math.atan2(a.dot(up), a.dot(axis)) - Math.atan2(b.dot(up), b.dot(axis)); });
+        var normals = points.map(function (p, i) { var n = new T.Vector3().crossVectors(p, points[(i + 1) % points.length]).normalize(); if (n.dot(center) < 0) n.negate(); return n; });
+        faces.push({ normals: normals, black: black });
       }
+      var neighbors = vertices.map(function (v, i) { return vertices.map(function (w, j) { return j; }).filter(function (j) { return j !== i && v.distanceTo(vertices[j]) < 2.01; }); });
+      neighbors.forEach(function (ns, i) { face(ns.map(function (j) { return cut(i, j); }), true); });
+      for (var i = 0; i < 12; i++) for (var j = i + 1; j < 12; j++) for (var k = j + 1; k < 12; k++) {
+        if (neighbors[i].indexOf(j) >= 0 && neighbors[i].indexOf(k) >= 0 && neighbors[j].indexOf(k) >= 0) face([cut(i,j),cut(j,i),cut(j,k),cut(k,j),cut(k,i),cut(i,k)], false);
+      }
+      var pixels = c.createImageData(256, 128), dir = new T.Vector3();
+      for (var y = 0; y < 128; y++) for (var x = 0; x < 256; x++) {
+        var lat = (y + .5) / 128 * Math.PI, lon = (x + .5) / 256 * Math.PI * 2;
+        dir.set(Math.sin(lat) * Math.cos(lon), Math.cos(lat), Math.sin(lat) * Math.sin(lon));
+        var color = [244,244,240];
+        for (var f = 0; f < faces.length; f++) {
+          var distance = Math.min.apply(null, faces[f].normals.map(function (n) { return n.dot(dir); }));
+          if (distance >= 0) { color = faces[f].black ? [32,36,42] : distance < .009 ? [167,174,169] : [244,244,240]; break; }
+        }
+        var offset = (y * 256 + x) * 4; pixels.data[offset] = color[0]; pixels.data[offset+1] = color[1]; pixels.data[offset+2] = color[2]; pixels.data[offset+3] = 255;
+      }
+      c.putImageData(pixels, 0, 0);
     } else if (kind === 'tennis') {
       c.fillStyle = '#dfff38'; c.fillRect(0, 0, 256, 128);
       c.strokeStyle = '#f7f9ee'; c.lineWidth = 7;
@@ -550,13 +569,14 @@ var ZDoji5Scene = (function () {
 
     /* 球。競技ごとに1個ずつ用意して使い回す */
     this.ballMeshes = {};
+    var ballSphere = new T.SphereGeometry(1, 28, 20);
     ['yakyu', 'soccer', 'tennis', 'basket', 'volley'].forEach(function (kind) {
-      var pool = [];
+      var pool = [], ballMap = texture(ballTexture(kind));
       for (var n = 0; n < 6; n++) {
-        var m = new T.Mesh(SPHERE, new T.MeshStandardMaterial({ map: texture(ballTexture(kind)), roughness: kind === 'basket' ? .85 : .45, emissive: kind === 'tennis' ? '#829b16' : '#000000', emissiveIntensity: kind === 'tennis' ? .3 : 0 }));
+        var m = new T.Mesh(ballSphere, new T.MeshStandardMaterial({ map: ballMap, roughness: kind === 'basket' ? .85 : .45, emissive: kind === 'tennis' ? '#829b16' : '#000000', emissiveIntensity: kind === 'tennis' ? .3 : 0 }));
         m.castShadow = true; m.visible = false;
         /* 縁取り。ひと回り大きい球の裏側だけを描いて、輪郭として残す */
-        var edge = new T.Mesh(SPHERE, new T.MeshBasicMaterial({ color: '#121a24', side: T.BackSide }));
+        var edge = new T.Mesh(ballSphere, new T.MeshBasicMaterial({ color: '#121a24', side: T.BackSide }));
         edge.scale.setScalar(1.13); m.add(edge);
         /* 白い帯を使い回し、先端から後方へ細く薄くする。 */
         var trailGeo = new T.BufferGeometry();

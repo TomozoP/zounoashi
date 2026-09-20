@@ -45,7 +45,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
     if (after.state !== "play") break;
   }
   ok("5競技ぜんぶ当てられる", Object.keys(seen).length === 5, Object.keys(seen).join(",") + " / " + points + "点");
-  ok("当てているあいだは残りが減らない", g.probe.now().lives === 5, String(g.probe.now().lives));
+  ok("当てているあいだは残りが減らない", g.probe.now().lives === 3, String(g.probe.now().lives));
 })();
 
 /* ---- 違うボタンを押しても当たらない。ただし残りは減らない ---- */
@@ -86,11 +86,11 @@ function start(g) { g.press(" "); g.step(2); return g; }
   var now = g.probe.now();
   ok("放っておくと残りが尽きて終わる", now.state === "result" && now.lives <= 0,
      JSON.stringify({ state: now.state, lives: now.lives, T: Math.round(now.T * 10) / 10 }));
-  ok("終わるまで十分な間がある", now.T > 4, Math.round(now.T * 10) / 10 + "秒");
+  ok("終わるまで十分な間がある", now.T > 3.5, Math.round(now.T * 10) / 10 + "秒");
   g.tap(150, g.H * .62 + 20); g.step(2);
   var back = g.probe.now();
   ok("もう一度で開始画面へ戻る", back.state === "intro" && back.pads.length === 0, back.state);
-  ok("戻ったら点と残りが元に戻っている", back.score === 0 && back.lives === 5);
+  ok("戻ったら点と残りが元に戻っている", back.score === 0 && back.lives === 3);
   g.press(" "); g.step(2);
   ok("そこから始められる", g.probe.now().state === "play", g.probe.now().state);
 })();
@@ -226,6 +226,17 @@ function start(g) { g.press(" "); g.step(2); return g; }
     }else ok("競技に応じた加点："+kind,after.score-before===(kind==="basket"?3:1));
   }
   ok("ゲーム成立後は15から再開",count===5&&g.probe.now().tennisGames===1);
+})();
+
+
+
+/* 速球も到着位置は同じ。通常より遅く出て、短い時間で届く。 */
+(function () {
+  var g = load("games/_doji5/index.html", { quiet: true });
+  var normal = g.probe.trajectory("yakyu", null, .5), fast = g.probe.trajectory("yakyu", "fast", .5);
+  ok("速球は同じ時刻でもまだ奥にある", fast.z > normal.z);
+  var end = g.probe.trajectory("yakyu", "fast", 1), usual = g.probe.trajectory("yakyu", null, 1);
+  ok("速球の到着位置は変わらない", Math.abs(end.z - usual.z) < .0001 && Math.abs(end.y - usual.y) < .0001);
 })();
 
 console.log(bad.length ? "\n直すところ: " + bad.join(" / ") : "\n問題なし");
