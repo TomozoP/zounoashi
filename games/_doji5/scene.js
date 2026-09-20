@@ -840,6 +840,18 @@ var ZDoji5Scene = (function () {
     this.pose(this.player, snap.act, snap.actP, t);
     this.player.root.position.x = snap.leanX || 0;
     this.player.root.position.z = -.9;
+    this.player.root.rotation.z = 0;
+    if (snap.fall >= 0) {
+      /* 一瞬膝を落としてから横に倒れ、結果画面ではその姿勢を保つ。 */
+      var fall = snap.fall, eased = fall * fall * (3 - 2 * fall), body = this.player.parts;
+      this.player.root.rotation.z = -Math.PI * .49 * eased;
+      this.player.root.position.y = .18 * eased;
+      body.torso.rotation.x += .18 * Math.sin(fall * Math.PI);
+      body.shoulderL.rotation.z += .55 * eased;
+      body.shoulderR.rotation.z -= .35 * eased;
+      body.kneeL.rotation.x += .4 * eased;
+      body.kneeR.rotation.x += .22 * eased;
+    }
     this.posePitcher(snap.pitch, t);
     this.extras.forEach(function (a) {
       if (!a.root.visible) return;                       /* 出ていない競技の人は動かさない */
