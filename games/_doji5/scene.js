@@ -17,26 +17,28 @@ var ZDoji5Scene = (function () {
   }
 
   /* ============ 地面の絵 ============
-     世界の x -35〜35、z -25〜85 を 1024x1536 の絵にする。
-     5競技の線を同じ紙の上に全部引く。 */
+     世界の x -35〜35、z -25〜80（70m×105m）を 2048x3072 の絵にする。
+     縦横とも 1m = 29.26px で揃うので、円は円のまま描ける。
+     線は実物と同じ8cmほどの細さ。5競技の線を同じ紙の上に全部引く。 */
+  var FIELD = { x0: -35, z0: -25, w: 70, d: 105, px: 2048 / 70 };
   function fieldTexture() {
     var cv = document.createElement('canvas');
-    cv.width = 1024; cv.height = 1536;
+    cv.width = 2048; cv.height = 3072;
     var c = cv.getContext('2d');
-    function PX(x) { return (x + 35) / 70 * 1024; }
-    function PZ(z) { return (z + 25) / 110 * 1536; }
-    function SX(w) { return w / 70 * 1024; }
-    function SZ(d) { return d / 110 * 1536; }
-    function line() { c.lineWidth = 3.2; c.strokeStyle = 'rgba(244,248,245,.92)'; }
-    function rect(x0, z0, x1, z1) { c.strokeRect(PX(x0), PZ(z0), SX(x1 - x0), SZ(z1 - z0)); }
+    var K = FIELD.px;
+    function PX(x) { return (x + 35) * K; }
+    function PZ(z) { return (z + 25) * K; }
+    function S(v) { return v * K; }
+    function line() { c.lineWidth = S(.08); c.strokeStyle = 'rgba(246,250,247,.95)'; }
+    function rect(x0, z0, x1, z1) { c.strokeRect(PX(x0), PZ(z0), S(x1 - x0), S(z1 - z0)); }
     function seg(x0, z0, x1, z1) { c.beginPath(); c.moveTo(PX(x0), PZ(z0)); c.lineTo(PX(x1), PZ(z1)); c.stroke(); }
     function circle(x, z, r, from, to) {
-      c.beginPath(); c.ellipse(PX(x), PZ(z), SX(r), SZ(r), 0, from == null ? 0 : from, to == null ? Math.PI * 2 : to); c.stroke();
+      c.beginPath(); c.arc(PX(x), PZ(z), S(r), from == null ? 0 : from, to == null ? Math.PI * 2 : to); c.stroke();
     }
 
     /* 芝と刈り跡 */
-    c.fillStyle = '#2e7a3b'; c.fillRect(0, 0, 1024, 1536);
-    for (var i = 0; i < 24; i++) { c.fillStyle = i % 2 ? '#358140' : '#2a7135'; c.fillRect(0, i * 64, 1024, 64); }
+    c.fillStyle = '#2e7a3b'; c.fillRect(0, 0, 2048, 3072);
+    for (var i = 0; i < 24; i++) { c.fillStyle = i % 2 ? '#358140' : '#2a7135'; c.fillRect(0, i * 128, 2048, 128); }
 
     /* 野球の内野。土の菱形の中に芝を残す */
     function diamond(back, right, front, fill) {
@@ -49,12 +51,12 @@ var ZDoji5Scene = (function () {
     diamond(1.5, 10.5, 20.5, 'rgba(46,122,59,.85)');
     c.fillStyle = '#a9713f';
     [[0, -1], [12, 11], [0, 23], [-12, 11]].forEach(function (b) {
-      c.beginPath(); c.ellipse(PX(b[0]), PZ(b[1]), SX(2.2), SZ(2.2), 0, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(PX(b[0]), PZ(b[1]), S(2.2), S(2.2), 0, 0, Math.PI * 2); c.fill();
     });
-    c.beginPath(); c.ellipse(PX(0), PZ(11), SX(2.9), SZ(2.9), 0, 0, Math.PI * 2); c.fillStyle = '#b77c47'; c.fill();
+    c.beginPath(); c.ellipse(PX(0), PZ(11), S(2.9), S(2.9), 0, 0, Math.PI * 2); c.fillStyle = '#b77c47'; c.fill();
     c.fillStyle = '#f4f7f4';
-    [[12, 11], [0, 23], [-12, 11]].forEach(function (b) { c.fillRect(PX(b[0]) - SX(.5), PZ(b[1]) - SZ(.5), SX(1), SZ(1)); });
-    c.fillRect(PX(0) - SX(.45), PZ(11) - SZ(.18), SX(.9), SZ(.36));
+    [[12, 11], [0, 23], [-12, 11]].forEach(function (b) { c.fillRect(PX(b[0]) - S(.5), PZ(b[1]) - S(.5), S(1), S(1)); });
+    c.fillRect(PX(0) - S(.45), PZ(11) - S(.18), S(.9), S(.36));
     c.beginPath();                                           /* 本塁 */
     c.moveTo(PX(-.6), PZ(-1.6)); c.lineTo(PX(.6), PZ(-1.6)); c.lineTo(PX(.6), PZ(-.6));
     c.lineTo(PX(0), PZ(-.1)); c.lineTo(PX(-.6), PZ(-.6)); c.closePath(); c.fill();
@@ -68,12 +70,12 @@ var ZDoji5Scene = (function () {
     rect(-20, -18, 20, -2); rect(-9, -18, 9, -12);
     c.fillStyle = 'rgba(244,248,245,.92)';
     [[0, 67], [0, -7], [0, 30]].forEach(function (p) {
-      c.beginPath(); c.ellipse(PX(p[0]), PZ(p[1]), SX(.35), SZ(.35), 0, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(PX(p[0]), PZ(p[1]), S(.35), S(.35), 0, 0, Math.PI * 2); c.fill();
     });
     circle(-28, 78, 1, 0, Math.PI * 2); circle(28, 78, 1, 0, Math.PI * 2);
 
     /* テニス（本塁の先に重ねる） */
-    c.fillStyle = 'rgba(40,86,132,.30)'; c.fillRect(PX(-5.5), PZ(0), SX(11), SZ(24));
+    c.fillStyle = 'rgba(40,86,132,.30)'; c.fillRect(PX(-5.5), PZ(0), S(11), S(24));
     line(); rect(-5.5, 0, 5.5, 24); rect(-4.12, 0, 4.12, 24);
     seg(-4.12, 6, 4.12, 6); seg(-4.12, 18, 4.12, 18); seg(0, 6, 0, 18);
 
@@ -81,14 +83,14 @@ var ZDoji5Scene = (function () {
     line(); rect(-7.5, -4, 7.5, 24);
     seg(-7.5, 10, 7.5, 10); circle(0, 10, 1.8);
     c.fillStyle = 'rgba(190,84,42,.42)';
-    c.fillRect(PX(-2.45), PZ(17.2), SX(4.9), SZ(6.8)); c.fillRect(PX(-2.45), PZ(-4), SX(4.9), SZ(6.8));
+    c.fillRect(PX(-2.45), PZ(17.2), S(4.9), S(6.8)); c.fillRect(PX(-2.45), PZ(-4), S(4.9), S(6.8));
     line(); rect(-2.45, 17.2, 2.45, 24); rect(-2.45, -4, 2.45, 2.8);
     circle(0, 17.2, 1.8); circle(0, 2.8, 1.8);
     circle(0, 22.4, 6.75, Math.PI * 1.08, Math.PI * 1.92);
     circle(0, -2.4, 6.75, Math.PI * .08, Math.PI * .92);
 
     /* バレー */
-    c.fillStyle = 'rgba(214,116,48,.34)'; c.fillRect(PX(-4.5), PZ(4), SX(9), SZ(18));
+    c.fillStyle = 'rgba(214,116,48,.34)'; c.fillRect(PX(-4.5), PZ(4), S(9), S(18));
     line(); rect(-4.5, 4, 4.5, 22); seg(-4.5, 13, 4.5, 13); seg(-4.5, 10, 4.5, 10); seg(-4.5, 16, 4.5, 16);
 
     return cv;
@@ -97,16 +99,16 @@ var ZDoji5Scene = (function () {
   /* 観客席。点をばらまくだけ */
   function crowdTexture() {
     var cv = document.createElement('canvas');
-    cv.width = 512; cv.height = 256;
+    cv.width = 1024; cv.height = 512;
     var c = cv.getContext('2d');
-    c.fillStyle = '#1b222c'; c.fillRect(0, 0, 512, 256);
+    c.fillStyle = '#1b222c'; c.fillRect(0, 0, 1024, 512);
     var colors = ['#e4d7bd', '#c9576a', '#6f9bd6', '#e6b455', '#8fc79a', '#b78fd0', '#d8dde4'];
     for (var row = 0; row < 16; row++) {
-      c.fillStyle = 'rgba(12,16,22,.5)'; c.fillRect(0, row * 16, 512, 3);
-      for (var i = 0; i < 90; i++) {
+      c.fillStyle = 'rgba(12,16,22,.5)'; c.fillRect(0, row * 32, 1024, 6);
+      for (var i = 0; i < 180; i++) {
         c.fillStyle = colors[(Math.random() * colors.length) | 0];
         c.globalAlpha = .55 + Math.random() * .45;
-        c.beginPath(); c.arc(Math.random() * 512, row * 16 + 9 + Math.random() * 3, 3 + Math.random() * 1.6, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.arc(Math.random() * 1024, row * 32 + 18 + Math.random() * 6, 6 + Math.random() * 3.2, 0, Math.PI * 2); c.fill();
       }
     }
     c.globalAlpha = 1;
@@ -131,8 +133,9 @@ var ZDoji5Scene = (function () {
   /* 球の柄。競技ごとに描き分ける */
   function ballTexture(kind) {
     var cv = document.createElement('canvas');
-    cv.width = 256; cv.height = 128;
+    cv.width = 512; cv.height = 256;
     var c = cv.getContext('2d');
+    c.scale(2, 2);                                 /* 描くのは 256x128 のつもりのまま */
     var x, i;
     if (kind === 'yakyu') {
       c.fillStyle = '#f6f3ea'; c.fillRect(0, 0, 256, 128);
@@ -287,9 +290,9 @@ var ZDoji5Scene = (function () {
 
     /* 地面 */
     var ft = texture(fieldTexture());
-    ft.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-    var ground = new T.Mesh(new T.PlaneGeometry(70, 110), new T.MeshStandardMaterial({ map: ft, roughness: .92 }));
-    ground.rotation.x = -Math.PI / 2; ground.position.set(0, 0, 30);
+    ft.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    var ground = new T.Mesh(new T.PlaneGeometry(FIELD.w, FIELD.d), new T.MeshStandardMaterial({ map: ft, roughness: .92 }));
+    ground.rotation.x = -Math.PI / 2; ground.position.set(0, 0, FIELD.z0 + FIELD.d / 2);
     ground.receiveShadow = true; this.scene.add(ground);
     var outer = new T.Mesh(new T.PlaneGeometry(220, 320), mat('#25532f', .95));
     outer.rotation.x = -Math.PI / 2; outer.position.set(0, -.02, 30); this.scene.add(outer);
