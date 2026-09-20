@@ -58,6 +58,7 @@
   var TAU = Math.PI * 2;
   var C_KMH = 1079252848.8;                  /* 光の速さ km/h */
   var SONIC = 1234.8;                        /* 音の速さ km/h */
+  var STROKE = 40;                           /* このぶん指を上へはらうと、ひとこぎ */
   var MIN_KMH = 0.1;                         /* 牛歩 */
   var WARN_BETA = 0.9;                       /* ここから警告 */
 
@@ -104,7 +105,7 @@
   /* ============ 画面 ============
      タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。 */
   var W = 540, H = 960;
-  var HY, VAN, COWP, READ_Y, GAUGE_Y, GX0, GX1;
+  var HY, VAN, COWP, READ_Y;
   function layout() {
     var host = wrap.parentNode;
     var vw = host.clientWidth || window.innerWidth;
@@ -133,9 +134,7 @@
       VAN = { x: W * 0.66, y: HY };
       COWP = { x: W * 0.5, y: H * 0.62, s: 2 };
     }
-    READ_Y  = Math.round(H * 0.80);
-    GAUGE_Y = Math.round(H * 0.86);
-    GX0 = 76; GX1 = W - 76;
+    READ_Y = Math.round(H * 0.84);
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
@@ -206,7 +205,8 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", BOOM: "boom", RESULT: "result" };
-  var state, score, broken, T, bt;
+  var state, score, scoreF, broken, T, bt;
+  var dragY = null, tickAcc = 0;
   var speed = MIN_KMH, beta = 0, wsp = 0, gear = 0, warning = false;
   var W8 = [1, 0, 0, 0, 0];                    /* 景色の重み（牧場・道路・町・都市・宇宙） */
   var props, rings, shards;
@@ -250,7 +250,7 @@
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    score = 0; broken = 0;
+    score = 0; scoreF = 0; tickAcc = 0; dragY = null; broken = 0;
     T = 0; bt = 0; lastDt = 1 / 60;
     speed = MIN_KMH;
     props = []; rings = []; shards = [];
@@ -268,16 +268,22 @@
     warning = beta >= WARN_BETA;
   }
 
-  /* ============ 押す ============ 1押しで、いまのギアのぶんだけ速くなる */
-  function push() {
-    if (state !== S.PLAY) return;
-    score++;
-    clickPulse = 1;
-    speed += GEARS[gearIndex(speed)].step;
+  /* ============ こぐ ============ なぞった長さのぶんだけ速くなる */
+  function feed(px) {
+    if (state !== S.PLAY || !(px > 0)) return;
+    var u = px / STROKE;
+    scoreF += u;
+    score = Math.floor(scoreF);
+    speed += GEARS[gearIndex(speed)].step * u;
+    clickPulse = Math.min(1, clickPulse + u * 0.6);
     if (speed >= C_KMH) { speed = C_KMH; recalc(); reachLight(); return; }
     recalc();
-    tone(180 + gear * 90 + Math.min(300, wsp * 0.1), 0.06, 0.09, "square");
-    noiseHit(0.05, 200 + gear * 120, 0.09, 1.4);
+    tickAcc += u;
+    if (tickAcc >= 1) {                        /* ひとこぎごとに鳴らす */
+      tickAcc -= Math.floor(tickAcc);
+      tone(180 + gear * 90 + Math.min(300, wsp * 0.1), 0.06, 0.09, "square");
+      noiseHit(0.05, 200 + gear * 120, 0.09, 1.4);
+    }
   }
 
   function reachLight() {
@@ -394,7 +400,8 @@
       if (hit === "retry") newRound();
       return;
     }
-    push();
+    if (x == null) feed(STROKE);               /* キーとジョイパッドは、ひとこぎぶん */
+    else dragY = y;
   }
 
   function atCanvas(e) {
@@ -405,7 +412,22 @@
     e.preventDefault();
     var p = atCanvas(e); down(p.x, p.y);
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); });
+  wrap.addEventListener("pointermove", function (e) {
+    if (dragY == null || state !== S.PLAY) return;
+    var p = atCanvas(e);
+    var dy = dragY - p.y;                      /* 上へはらったぶんだけ進む */
+    dragY = p.y;
+    if (dy > 0) feed(dy);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); dragY = null; });
+  wrap.addEventListener("pointercancel", function () { dragY = null; });
+  window.addEventListener("blur", function () { dragY = null; });
+  wrap.addEventListener("wheel", function (e) {   /* ころがしても進む */
+    if (state !== S.PLAY) return;
+    e.preventDefault();
+    audioOn();
+    feed(Math.max(0, e.deltaY) * 0.7);
+  }, { passive: false });
   window.addEventListener("keydown", function (e) {
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
@@ -549,11 +571,7 @@
     ctx.restore();
   }
 
-  function gearColor(i) {
-    return ["#5ec27a", "#8fc258", "#e8c65a", "#e8843a", "#ff3b30"][i];
-  }
-
-  /* 速さの数字と、光の速さまでの目盛り（押すところではない） */
+  /* 速さの数字 */
   function drawMeter() {
     ctx.save();
     ctx.textAlign = "center";
@@ -568,26 +586,6 @@
       ctx.font = "800 " + size + "px sans-serif";
     }
     ctx.fillText(text, W / 2, READ_Y);
-    ctx.restore();
-
-    var y = GAUGE_Y, x0 = GX0, x1 = GX1;
-    var lo = gear === 0 ? 0 : GEARS[gear - 1].top;
-    var p = clamp01((gear + (speed - lo) / (GEARS[gear].top - lo)) / GEARS.length);
-    ctx.save();
-    roundRect(x0, y - 7, x1 - x0, 14, 7);
-    ctx.fillStyle = "rgba(10,9,14,.5)"; ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,.3)"; ctx.stroke();
-    if (p > 0.004) {
-      roundRect(x0, y - 7, (x1 - x0) * p, 14, 7);
-      ctx.fillStyle = gearColor(gear); ctx.fill();
-    }
-    for (var i = 0; i < GEARS.length - 1; i++) {      /* 景色の変わり目 */
-      var tx = x0 + (x1 - x0) * ((i + 1) / GEARS.length);
-      ctx.fillStyle = i < gear ? "rgba(255,255,255,.85)" : "rgba(255,255,255,.4)";
-      ctx.fillRect(tx - 1.5, y - 18, 3, 9);
-    }
-    ctx.fillStyle = "#ff3b30";
-    ctx.fillRect(x1 - 2, y - 18, 4, 9);
     ctx.restore();
   }
 
