@@ -147,7 +147,7 @@
   }
   async function begin() {
     if (started || saving || preparing) return;
-    preparing=true;mark('録画準備中');
+    preparing=true;window.__recordingActive=true;mark('録画準備中');
     try {
       var health=await fetch('http://127.0.0.1:8736/health');
       if(!health.ok)throw Error();
@@ -198,6 +198,8 @@
       });
       separateRecorder.onerror=function(e){fail(e.error||'音声の録音に失敗しました');};
     }
+    /* 録画専用の表示へ切り替えた画面を最初のコマから使う。 */
+    await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
     output=document.createElement('canvas');output.width=width;output.height=height;drawOutput();
     var stream=output.captureStream(60),tracks=stream.getVideoTracks();
     tracks=tracks.concat(audioTracks);
@@ -218,7 +220,7 @@
     releaseMicrophone();
     saving=true;
     mark('MP4保存中');
-    cancelAnimationFrame(paintId);
+    cancelAnimationFrame(paintId);window.__recordingActive=false;
     recorder.stream.getTracks().filter(function(t){return t.kind==='video';}).forEach(function(t){t.stop();});
     if(silence){silence.stop();silence.disconnect();silence=null;}
     status.textContent='MP4に変換中';panel.style.display='grid';

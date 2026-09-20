@@ -6,7 +6,7 @@ const code=source.slice(source.indexOf('    var audioTracks='),source.indexOf(" 
 for(const mode of ['combined','microphone','audio'])for(const mic of [false,true]){
   if(mode==='microphone'&&!mic)continue;
   function Recorder(stream){this.stream=stream;}Recorder.isTypeSupported=()=>true;
-  const c={window:{__zRecorderSound:{stream:{getAudioTracks:()=>['ゲーム音']}}},microphone:{getAudioTracks:()=>['声']},microphoneTracks:async()=>['合成音'],separateMode:mode,useMicrophone:mic,MediaStream:function(tracks){this.tracks=tracks;},MediaRecorder:Recorder,Blob,fail(){},separateRecorder:null,separateDone:null};
+  const c={requestAnimationFrame:callback=>callback(0),window:{__zRecorderSound:{stream:{getAudioTracks:()=>['ゲーム音']}}},microphone:{getAudioTracks:()=>['声']},microphoneTracks:async()=>['合成音'],separateMode:mode,useMicrophone:mic,MediaStream:function(tracks){this.tracks=tracks;},MediaRecorder:Recorder,Blob,fail(){},separateRecorder:null,separateDone:null};
   vm.createContext(c);await vm.runInContext('(async()=>{'+code+'return {video:audioTracks,audio:separateTracks};})()',c).then(r=>{
     assert.deepEqual(Array.from(r.video),mode==='audio'?[]:mode==='microphone'||!mic?['ゲーム音']:['合成音']);
     assert.deepEqual(Array.from(r.audio),mode==='combined'?[]:mode==='microphone'?['声']:mic?['合成音']:['ゲーム音']);
