@@ -136,7 +136,15 @@
   }
   /* 競技ごとの当たった音 */
   function hitSound(kind, perfect) {
-    if (kind === "yakyu") { noiseHit(.09, 2600, .5, .8, 900); tone(320, .16, .22, "triangle", 120); }
+    if (kind === "yakyu") {
+      /* 打った芯の衝撃に、金属バットの高い響きと短い反響を重ねる。 */
+      noiseHit(.045, 3100, .42, .7, 1600);
+      tone(210, .10, .18, "sine", 95);
+      tone(1480, .62, .23, "sine", 1430);
+      tone(2390, .36, .10, "sine", 2330);
+      tone(3670, .20, .045, "sine", 3600);
+      tone(1480, .38, .045, "sine", 1430, .075);
+    }
     else if (kind === "soccer") { noiseHit(.13, 260, .5, .9, 90); tone(120, .2, .22, "sine", 55); }
     else if (kind === "tennis") { noiseHit(.06, 3400, .42, 1.4, 1500); tone(760, .1, .14, "triangle", 420); }
     else if (kind === "basket") { noiseHit(.11, 700, .34, .7, 260); tone(190, .18, .16, "sine", 90); }
@@ -144,6 +152,47 @@
     if (perfect) { tone(1320, .1, .1, "triangle", null, .03); tone(1760, .14, .09, "triangle", null, .09); }
   }
   function missSound() { tone(200, .3, .2, "sawtooth", 70); noiseHit(.2, 420, .18, .6, 150); }
+  var lastCheer = -10;
+  function cheerSound() {
+    if (!AC || !NOISE) return;
+    var now = AC.currentTime;
+    /* 同じ瞬間に結果が重なったときは、ひとつの歓声にまとめる。 */
+    if (now - lastCheer < .18) return;
+    lastCheer = now;
+    var crowd = AC.createGain();
+    crowd.gain.setValueAtTime(.0001, now);
+    crowd.gain.linearRampToValueAtTime(.24, now + .14);
+    crowd.gain.linearRampToValueAtTime(.18, now + .50);
+    crowd.gain.exponentialRampToValueAtTime(.0001, now + 1.25);
+    crowd.connect(MASTER || AC.destination);
+    /* 高さと入りをずらした「ワー」という声。母音の響きを二つの帯域で作る。 */
+    for (var i = 0; i < 8; i++) {
+      var voice = AC.createOscillator(), level = AC.createGain();
+      var start = now + Math.random() * .09, pitch = 150 + i * 23 + Math.random() * 18;
+      voice.type = "sawtooth";
+      voice.frequency.setValueAtTime(pitch, start);
+      voice.frequency.linearRampToValueAtTime(pitch * 1.2, start + .18);
+      voice.frequency.exponentialRampToValueAtTime(pitch * .88, start + 1.15);
+      level.gain.value = .13;
+      voice.connect(level);
+      [760 + i * 19, 1180 + i * 31].forEach(function (freq) {
+        var vowel = AC.createBiquadFilter();
+        vowel.type = "bandpass"; vowel.frequency.value = freq; vowel.Q.value = 2.8;
+        level.connect(vowel); vowel.connect(crowd);
+        voice.addEventListener("ended", function () { vowel.disconnect(); });
+      });
+      voice.start(start); voice.stop(now + 1.3);
+      voice.addEventListener("ended", (function (o, g) { return function () { o.disconnect(); g.disconnect(); }; })(voice, level));
+    }
+    var air = AC.createBufferSource(), filter = AC.createBiquadFilter();
+    air.buffer = NOISE;
+    filter.type = "bandpass"; filter.frequency.value = 1500; filter.Q.value = .6;
+    air.connect(filter); filter.connect(crowd);
+    air.start(now, .1); air.stop(now + 1.3);
+    air.onended = function () { air.disconnect(); filter.disconnect(); crowd.disconnect(); };
+    /* 拍手を少し混ぜ、声だけの機械的な響きを崩す。 */
+    for (var j = 0; j < 5; j++) noiseHit(.055, 1900 + Math.random() * 900, .055, .7, 900, .12 + j * .14);
+  }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -286,6 +335,7 @@
         if (!b.resultShown && e >= b.resultAfter) {
           b.resultShown = true;
           results.push({ kind: b.kind, x: b.resultAt.x, y: b.resultAt.y, z: b.resultAt.z, age: 0 });
+          cheerSound();
         }
         if (e > 2.4 || Math.abs(b.fz) > 95) b.dead = true;
         return;

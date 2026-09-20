@@ -158,7 +158,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
 
 /* 結果は打った瞬間には出ず、球が奥へ届いてから出る。 */
 ["yakyu", "soccer", "tennis", "basket", "volley"].forEach(function (wanted, index) {
-  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var g = start(load("games/_doji5/index.html", { quiet: true, inject: "var calls = []; cheerSound = function () { calls.push(T); }; window.__probe.cheerCalls = function () { return calls; };" }));
   var found = false;
   for (var i = 0; i < 100; i++) {
     var kind = g.probe.toBall();
@@ -168,6 +168,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
     found = true;
     ok("打った瞬間にその球の結果はまだ出ない：" + kind, !g.probe.now().results.some(function (r) { return r.kind === wanted; }));
     g.step(Math.ceil([2.1, 1.6, 1, 1.15, .9][index] * 60) + 1);
+    ok("到着時に歓声が呼ばれる：" + wanted, g.probe.cheerCalls().some(function (t) { return Math.abs(t - g.probe.now().T) < .04; }));
     var result = g.probe.now().results.filter(function (r) { return r.kind === wanted; })[0];
     ok("到着後、奥の位置に結果が出る：" + kind, !!result && result.z >= 19);
     break;
