@@ -72,7 +72,7 @@
     { top: C_KMH, step: 3.6e6 }              /* 宇宙：星 */
   ];
   var PHASE_NAME = ["牧場", "道路", "町", "都市", "宇宙"];
-  var PROP_GAP = [110, 230, 300, 620, 800];  /* 壊すものが置かれる間隔 */
+  var WORLD = [1, 1.25, 1.5, 1.8, 2.2];      /* 景色ごとの世界の広さ */
   function gearIndex(km) {
     for (var i = 0; i < GEARS.length - 1; i++) if (km < GEARS[i].top) return i;
     return GEARS.length - 1;
@@ -218,8 +218,19 @@
   var GROUND = ["#7fb04a", "#74a648", "#8a9a6e", "#6e7278", "#0a0b1a"];
   var PAVE   = ["#b79a6b", "#4a4b50", "#4a4b50", "#3f4046", "#0a0b1a"];
 
-  function wspOf(km) {                          /* 世界の単位／秒。速すぎると見えないので頭打ち */
-    return Math.min(2400, 14 + 46 * Math.pow(Math.max(km, 1e-4) / 10, 0.45));
+  /* その景色のなかで、どこまで来たか（0〜1） */
+  function phaseT(km) {
+    var g = gearIndex(km);
+    var lo = g === 0 ? MIN_KMH : GEARS[g - 1].top;
+    return clamp01((km - lo) / (GEARS[g].top - lo));
+  }
+  /* 見た目の速さ。景色のなかで登りなおし、世界が広くなったぶんだけ速くなる */
+  function wspOf(km) {
+    return (46 + 430 * Math.pow(phaseT(km), 0.8)) * WORLD[gearIndex(km)];
+  }
+  /* 壊すものの間隔。はじめは3秒に1つ、終わりで1.6秒に1つくらい */
+  function propGap() {
+    return wsp * (3.0 - 1.4 * phaseT(speed));
   }
   function heatOf(km) { return clamp01((log10(km) - 2.8) / 1.6); }
 
@@ -348,9 +359,9 @@
     prevKmh = speed;
 
     /* 道の先に置くもの */
-    while (nextAt - dist < 2500) {
+    while (nextAt - dist < 2500 * WORLD[gear]) {
       props.push({ at: nextAt, x: (Math.random() - 0.5) * 92, t: gear, r: Math.random(), z: nextAt - dist });
-      nextAt += PROP_GAP[gear] * (0.75 + Math.random() * 0.5);
+      nextAt += propGap() * (0.82 + Math.random() * 0.36);
     }
     for (var j = props.length - 1; j >= 0; j--) {
       var o = props[j];
@@ -628,9 +639,10 @@
     if (scene3d) {
       scene3d.sync({
         dist: dist, w: W8, gear: gear, legPhase: legPhase, wsp: wsp, beta: beta,
-        props: props, dt: lastDt, clickPulse: clickPulse,
+        props: props, dt: lastDt, clickPulse: clickPulse, t: phaseT(speed), world: WORLD[gear],
         groundColor: mixW(GROUND), roadColor: mixW(PAVE), fogColor: mixW(SKY_LO)
       });
+      place();                                   /* カメラが動くので測りなおす */
       scene3d.render();
       ctx.drawImage(scene3d.dom, 0, 0, W, H);
     }

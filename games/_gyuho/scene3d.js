@@ -14,6 +14,7 @@
   var LOOK = { x: 26, y: 76, z: -216 };
   var FOCAL = 900;                       /* 画面の高さに対する画角のもと */
   var BEHIND = 760;                      /* 牛を通りすぎたものを、どこまで残すか */
+  var CAMS = [1, 1.09, 1.19, 1.31, 1.46];  /* 景色が変わるたび、カメラを引いて広く見せる */
 
   function Scene3D() {
     T = global.THREE;
@@ -441,6 +442,22 @@
      s: { dist, w, gear, legPhase, wsp, beta, props, dt, sky } */
   Scene3D.prototype.sync = function (s) {
     var w = s.w;
+    var ws = s.world || 1, cs = CAMS[s.gear] || 1;
+    if (this._ws !== ws) {
+      this.road.scale.x = ws;
+      this.lines.scale.x = ws;
+      this._ws = ws;
+    }
+    if (this._cs !== cs) {
+      this.camera.position.set(CAM.x * cs, CAM.y * cs, CAM.z * cs);
+      this.camera.lookAt(LOOK.x * cs, LOOK.y * cs, LOOK.z * cs);
+      this._cs = cs;
+    }
+    var fov = this._baseFov * (1 + 0.1 * (s.t || 0));
+    if (Math.abs(fov - this.camera.fov) > 0.01) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
 
     /* 地面と道の色 */
     setColor(this.groundMat.color, s.groundColor);
@@ -454,8 +471,8 @@
     this.lineMat.opacity = Math.min(1, w[1] + w[2] + w[3]) * (1 - w[4]);
     this.lines.visible = this.lineMat.opacity > 0.02;
     setColor(this.fog.color, s.fogColor);
-    this.fog.near = 800 + 1200 * w[4];
-    this.fog.far = 2800 + 2600 * w[4];
+    this.fog.near = (800 + 1200 * w[4]) * ws;    /* 世界が広くなったぶん、霞む距離ものばす */
+    this.fog.far = (2800 + 2600 * w[4]) * ws;
 
     /* 牛 */
     var cow = this.cow;
@@ -469,12 +486,12 @@
     cow.tail.rotation.x = Math.sin(s.legPhase * Math.PI) * 0.26 - 0.1;
 
     /* 道ばたのもの */
-    this.row("fence", w[0], 112, 176, s.dist);
-    this.row("barn", w[0], 520, 430, s.dist);
-    this.row("pole", w[1] + w[2], 440, 300, s.dist);
-    this.row("rail", w[1] + w[2] + w[3], 210, 156, s.dist);
-    this.row("house", w[2], 340, 380, s.dist);
-    this.row("tower", w[3], 420, 450, s.dist);
+    this.row("fence", w[0], 112 * ws, 176 * ws, s.dist);
+    this.row("barn", w[0], 520 * ws, 430 * ws, s.dist);
+    this.row("pole", w[1] + w[2], 440 * ws, 300 * ws, s.dist);
+    this.row("rail", w[1] + w[2] + w[3], 210 * ws, 156 * ws, s.dist);
+    this.row("house", w[2], 340 * ws, 380 * ws, s.dist);
+    this.row("tower", w[3], 420 * ws, 450 * ws, s.dist);
 
     /* 壊すもの */
     var used = [0, 0, 0, 0, 0];
@@ -573,13 +590,15 @@
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(pxW, pxH, false);
     this.camera.aspect = pxW / pxH;
-    this.camera.fov = 2 * Math.atan((gameH / 2) / FOCAL) * 180 / Math.PI;
+    this._baseFov = 2 * Math.atan((gameH / 2) / FOCAL) * 180 / Math.PI;
+    this.camera.fov = this._baseFov;
     this.camera.updateProjectionMatrix();
   };
   /* 地平線が画面のどこに来るか（ゲーム座標の y） */
   Scene3D.prototype.horizonY = function (gameH) {
+    var c = this.camera.position;
     var d = this._v.set(LOOK.x - CAM.x, 0, LOOK.z - CAM.z).normalize();
-    var far = this._v.set(CAM.x + d.x * 60000, CAM.y, CAM.z + d.z * 60000);
+    var far = this._v.set(c.x + d.x * 60000, c.y, c.z + d.z * 60000);
     far.project(this.camera);
     return (1 - far.y) / 2 * gameH;
   };
