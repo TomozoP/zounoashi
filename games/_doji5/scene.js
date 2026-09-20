@@ -44,7 +44,7 @@ var ZDoji5Scene = (function () {
     function PX(x) { return (x + 35) * K; }
     function PZ(z) { return (z + 25) * K; }
     function S(v) { return v * K; }
-    function line() { c.lineWidth = S(.05); c.strokeStyle = 'rgba(246,250,247,.95)'; }
+    function line() { c.lineWidth = S(.03); c.strokeStyle = 'rgba(246,250,247,.95)'; }
     function rect(x0, z0, x1, z1) { c.strokeRect(PX(x0), PZ(z0), S(x1 - x0), S(z1 - z0)); }
     function seg(x0, z0, x1, z1) { c.beginPath(); c.moveTo(PX(x0), PZ(z0)); c.lineTo(PX(x1), PZ(z1)); c.stroke(); }
     function circle(x, z, r, from, to) {
