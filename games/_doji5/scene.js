@@ -219,25 +219,32 @@ var ZDoji5Scene = (function () {
       blob(sh, .062, .16, .062, skin, -.14);
       var el = part(sh, 'elbow' + tag, 0, -.3, 0);
       blob(el, .055, .15, .055, skin, -.13);
-      part(el, 'hand' + tag, 0, -.28, 0);
+      var hand = part(el, 'hand' + tag, 0, -.28, 0);
+      /* 手首。持ちものの向きは腕の角度と切り離して決める */
+      part(hand, 'wrist' + tag, 0, 0, 0);
       var hip = part(hips, 'hip' + tag, side * .11, -.06, 0);
       blob(hip, .088, .22, .09, pants, -.2);
       var kn = part(hip, 'knee' + tag, 0, -.42, 0);
       blob(kn, .072, .21, .075, skin, -.2);
       blob(kn, .085, .05, .15, shoe, -.42, .06);
     });
-    if (opt.bat) {                                            /* 右手のバット */
-      var bat = new T.Mesh(new T.CylinderGeometry(.048, .022, .92, 10), mat('#b9834a', .6));
-      bat.position.y = .42; bat.castShadow = true; parts.handR.add(bat);
+    if (opt.bat) {                                            /* 右手はバット。手首から上へ伸ばす */
+      var bat = new T.Mesh(new T.CylinderGeometry(.05, .023, .92, 12), mat('#c49055', .55));
+      bat.position.y = .46; bat.castShadow = true;
+      var batGrip = new T.Mesh(CYL, mat('#23272f', .85));
+      batGrip.scale.set(.026, .17, .026); batGrip.position.y = .08;
+      parts.wristR.add(bat, batGrip);
     }
-    if (opt.racket) {                                         /* 左手のラケット */
-      var frame = new T.Mesh(new T.TorusGeometry(.17, .016, 6, 20), mat('#2b3340', .5, .3));
-      frame.position.y = .43; frame.rotation.y = Math.PI / 2; frame.castShadow = true;
-      var gut = new T.Mesh(new T.CircleGeometry(.158, 18), new T.MeshBasicMaterial({ color: '#e9ecef', transparent: true, opacity: .32, side: T.DoubleSide }));
-      gut.position.y = .43; gut.rotation.y = Math.PI / 2;
-      var grip = new T.Mesh(CYL, mat('#20242c', .8));
-      grip.scale.set(.022, .26, .022); grip.position.y = .14;
-      parts.handL.add(frame, gut, grip);
+    if (opt.racket) {                                         /* 左手はラケット。面は体の横を向く */
+      var frame = new T.Mesh(new T.TorusGeometry(.165, .023, 8, 22), mat('#e8edf3', .4, .25));
+      frame.position.y = .45; frame.rotation.y = Math.PI / 2; frame.castShadow = true;
+      var gut = new T.Mesh(new T.CircleGeometry(.152, 20), new T.MeshBasicMaterial({ color: '#f4f7fa', transparent: true, opacity: .42, side: T.DoubleSide }));
+      gut.position.y = .45; gut.rotation.y = Math.PI / 2;
+      var throat = new T.Mesh(CYL, mat('#e8edf3', .4, .25));
+      throat.scale.set(.02, .12, .02); throat.position.y = .26;
+      var grip = new T.Mesh(CYL, mat('#23272f', .85));
+      grip.scale.set(.025, .2, .025); grip.position.y = .1;
+      parts.wristL.add(frame, gut, throat, grip);
     }
     if (opt.glove) {
       var glove = new T.Mesh(SPHERE, mat('#8a5a2f', .8));
@@ -498,48 +505,87 @@ var ZDoji5Scene = (function () {
     return { x: (v.x * .5 + .5) * 540, y: (.5 - v.y * .5) * this.logicalH, z: v.z };
   };
 
-  /* 立ち姿にしてから、動作ぶんだけ足す */
+  /* 立ち姿にしてから、動作ぶんだけ足す。
+     持ちものの角度（BAT/RKT）は腕の曲げ具合とは別に決め、最後に手首で辻褄を合わせる。
+     0 で真上、＋で前へ倒す、−で後ろへ倒す。こうすると腕をどう動かしても、
+     バットが胴を突き抜けたり、ラケットが体の中へ入ったりしない。 */
+  var BAT = -.45, RKT = .35;                                   /* 構えたときの角度 */
+  var QA = null, QB = null, EU = null;
+  /* 持ちものを、腕の形に関わらず体（腰）から見た向きへ合わせる。
+     angleX は 0 で真上・＋で前へ倒す、leanZ は体の外へ開く角度。 */
+  function aimItem(hips, hand, wrist, angleX, leanZ) {
+    if (!QA) { QA = new T.Quaternion(); QB = new T.Quaternion(); EU = new T.Euler(); }
+    EU.set(angleX, 0, leanZ, 'YXZ');
+    QA.setFromEuler(EU);
+    QA.premultiply(hips.getWorldQuaternion(QB));
+    wrist.quaternion.copy(hand.getWorldQuaternion(QB).invert()).multiply(QA);
+  }
   Scene.prototype.pose = function (a, act, p, t) {
     var P = a.parts;
     a.root.position.y = 0;
     a.root.rotation.y = 0;
     P.hips.rotation.set(0, 0, 0);
-    P.torso.rotation.set(.14 + Math.sin(t * 3) * .03, 0, 0);
-    P.shoulderR.rotation.set(-.55, 0, .5); P.elbowR.rotation.set(-1.15, 0, 0);
-    P.shoulderL.rotation.set(-.4, 0, -.45); P.elbowL.rotation.set(-1.05, 0, 0);
-    P.hipL.rotation.set(-.16, 0, 0); P.kneeL.rotation.set(.26, 0, 0);
-    P.hipR.rotation.set(-.16, 0, 0); P.kneeR.rotation.set(.26, 0, 0);
-    if (!act) return;
-    var e = Math.max(0, Math.min(1, p));
-    var s = 1 - Math.pow(1 - Math.min(1, e / .42), 3);        /* 振り抜き */
-    var w = e < .7 ? 1 : 1 - (e - .7) / .3;                    /* 終わりは立ち姿へ戻す */
-    var k = s * w;
-    if (act === 'yakyu') {
-      P.hips.rotation.y = -2.7 * k + .7 * w;
-      P.torso.rotation.y = -.8 * k + .3 * w;
-      P.shoulderR.rotation.x += 1.0 * k; P.shoulderR.rotation.z += -1.0 * k;
-      P.elbowR.rotation.x += 1.0 * k;
-      P.hipR.rotation.x += -.3 * k;
-    } else if (act === 'tennis') {
-      P.hips.rotation.y = 2.4 * k - .6 * w;
-      P.shoulderL.rotation.z += 1.5 * k; P.shoulderL.rotation.x += -.9 * k;
-      P.elbowL.rotation.x += .9 * k;
-    } else if (act === 'soccer') {
-      P.hipR.rotation.x += -2.2 * k; P.kneeR.rotation.x += -1.1 * k;
-      P.torso.rotation.x += .35 * k;
-      P.shoulderL.rotation.x += -.9 * k; P.shoulderR.rotation.x += .5 * k;
-      a.root.position.y = Math.sin(Math.PI * e) * .06 * w;
-    } else if (act === 'basket') {
-      a.root.position.y = Math.sin(Math.PI * Math.min(1, e / .8)) * .42 * w;
-      P.shoulderR.rotation.x += -2.3 * k; P.shoulderL.rotation.x += -2.3 * k;
-      P.elbowR.rotation.x += 1.0 * k; P.elbowL.rotation.x += 1.0 * k;
-      P.hipR.rotation.x += .3 * k; P.hipL.rotation.x += .3 * k;
-    } else if (act === 'volley') {
-      a.root.position.y = Math.sin(Math.PI * Math.min(1, e / .85)) * .8 * w;
-      P.shoulderR.rotation.x += -3.3 + 3.9 * s * w + (1 - w) * 3.3;
-      P.elbowR.rotation.x += .7 * k;
-      P.torso.rotation.x += -.3 * w + .55 * k;
-      P.hipL.rotation.x += -.5 * k;
+    P.torso.rotation.set(.12 + Math.sin(t * 3) * .03, 0, 0);
+    /* 右腕はバットを右肩の上へ、左腕はラケットを前へ。腕は体の外側へ開く */
+    P.shoulderR.rotation.set(-.30, 0, -.30); P.elbowR.rotation.set(-1.70, 0, 0);
+    P.shoulderL.rotation.set(-.45, 0, .34); P.elbowL.rotation.set(-1.30, 0, 0);
+    P.hipL.rotation.set(-.16, 0, .1); P.kneeL.rotation.set(.26, 0, 0);
+    P.hipR.rotation.set(-.16, 0, -.1); P.kneeR.rotation.set(.26, 0, 0);
+    var bat = BAT, racket = RKT, batLean = -.3, racketLean = .35;
+    if (act) {
+      var e = Math.max(0, Math.min(1, p));
+      var s = 1 - Math.pow(1 - Math.min(1, e / .42), 3);      /* 振り抜き */
+      var w = e < .7 ? 1 : 1 - (e - .7) / .3;                  /* 終わりは立ち姿へ戻す */
+      var k = s * w;
+      if (act === 'yakyu') {                                   /* 腰を回してバットを水平に振る */
+        P.hips.rotation.y = -2.6 * k + .65 * w;
+        P.torso.rotation.y = -.7 * k + .25 * w;
+        P.shoulderR.rotation.x += -.5 * k; P.shoulderR.rotation.z += -.7 * k;
+        P.elbowR.rotation.x += 1.3 * k;
+        P.hipR.rotation.x += -.3 * k;
+        P.shoulderL.rotation.x += .55 * k; P.shoulderL.rotation.z += -.2 * k;
+        P.elbowL.rotation.x += -.35 * k;                       /* ラケットは邪魔にならぬよう引く */
+        bat = BAT - .35 * w + 2.15 * k; batLean = -.3 + .25 * k;
+        racket = RKT - .8 * k;
+      } else if (act === 'tennis') {                           /* 逆回りでラケットを払う */
+        P.hips.rotation.y = 2.3 * k - .55 * w;
+        P.torso.rotation.y = .6 * k - .2 * w;
+        P.shoulderL.rotation.x += -.4 * k; P.shoulderL.rotation.z += .7 * k;
+        P.elbowL.rotation.x += 1.0 * k;
+        P.shoulderR.rotation.x += .5 * k; P.shoulderR.rotation.z += .2 * k;
+        P.elbowR.rotation.x += -.3 * k;                        /* バットは肩へ担いだまま */
+        racket = RKT - .9 * w + 2.1 * k; racketLean = .35 - .25 * k;
+        bat = BAT - .45 * k;
+      } else if (act === 'soccer') {                           /* 右足を振り出す。持ちものは構えたまま */
+        P.hipR.rotation.x += -1.9 * k; P.kneeR.rotation.x += -.85 * k;
+        P.hipL.rotation.x += .25 * k; P.kneeL.rotation.x += .2 * k;
+        P.torso.rotation.x += -.22 * k;                        /* 蹴り足の反対へ少し反る */
+        P.shoulderL.rotation.x += -.9 * k; P.shoulderR.rotation.x += .5 * k;
+        a.root.position.y = Math.sin(Math.PI * e) * .05 * w;
+      } else if (act === 'basket') {                           /* 跳んで両手で押し出す */
+        a.root.position.y = Math.sin(Math.PI * Math.min(1, e / .8)) * .42 * w;
+        P.shoulderR.rotation.x += -2.3 * k; P.shoulderL.rotation.x += -2.3 * k;
+        P.elbowR.rotation.x += 1.2 * k; P.elbowL.rotation.x += 1.2 * k;
+        P.hipR.rotation.x += .3 * k; P.hipL.rotation.x += .3 * k;
+        bat = BAT + .35 * k; racket = RKT - .3 * k;            /* 手が上がるぶん立てる */
+        batLean = -.3 + .12 * k; racketLean = .35 - .15 * k;
+      } else if (act === 'volley') {                           /* 跳んで、振りかぶってから打ち下ろす */
+        var up = Math.min(1, e / .35) * w, hit = Math.max(0, Math.min(1, (e - .35) / .3)) * w;
+        a.root.position.y = Math.sin(Math.PI * Math.min(1, e / .9)) * .8 * w;
+        P.shoulderR.rotation.x += -3.3 * up + 4.0 * hit;
+        P.elbowR.rotation.x += 1.0 * up - .6 * hit;
+        P.shoulderL.rotation.x += -1.1 * up + .4 * hit;
+        P.torso.rotation.x += -.35 * up + .7 * hit;
+        P.hipL.rotation.x += -.5 * hit;
+        bat = BAT - 1.0 * up + 2.9 * hit; batLean = -.3 + .2 * hit;
+        racket = RKT + .5 * up - .3 * hit;
+      }
+    }
+    /* 腕の形が決まってから、持ちものの向きだけ入れ直す */
+    if (P.wristR || P.wristL) {
+      a.root.updateMatrixWorld(true);
+      if (P.wristR) aimItem(P.hips, P.handR, P.wristR, bat, batLean);
+      if (P.wristL) aimItem(P.hips, P.handL, P.wristL, racket, racketLean);
     }
   };
 
