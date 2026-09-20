@@ -4,6 +4,7 @@
      - 指を上へなぞったぶんだけ速くなる。なぞらなければ落ちも進みもしない
      - 下へなぞっても、指を離したあとの動きも効かない
      - 大きくはらうと、そのぶん牛がぐっと前へ出る（boost）
+     - 指を離したあとは、サイトのスクロールのように余韻で進んで止まる（glide）
      - 景色の切れ目は 時速10 / 50 / 200 / 1000。宇宙に出ると1押しで一気に上がる
      - 景色ごとに要る押しの数（100 / 200 / 200 / 250 / 300）と、光の速さまでの合計
      - 壊すものが景色ごとに変わる（わら・人・車・ビル・星）
@@ -77,6 +78,25 @@ sw.down(270, H2 * 0.3); sw.moveTo(270, H2 * 0.3 + 300); sw.up();
 ok(sw.probe.now().kmh === back, "下へなぞっても進まない（戻すぶんは効かない）", sw.probe.now().read);
 sw.moveTo(270, H2 * 0.1);
 ok(sw.probe.now().kmh === back, "指を離したあとの動きは拾わない");
+
+/* 2c. 指を離したあとの余韻 */
+var fl = start();
+var H3 = fl.probe.now().H;
+fl.down(270, H3 * 0.9);
+fl.moveTo(270, H3 * 0.9 - 150); fl.step(1);
+fl.moveTo(270, H3 * 0.9 - 300); fl.step(1);
+ok(fl.probe.now().glide === 0, "なぞっているあいだは余韻なし");
+fl.up();
+ok(fl.probe.now().glide > 0, "離すと勢いが余韻に移る", fl.probe.now().glide + "px/秒");
+var s0 = fl.probe.now().score;
+fl.step(30);
+var s1 = fl.probe.now().score;
+ok(s1 > s0, "離したあとも余韻で進む", s0 + "こぎ → " + s1 + "こぎ");
+fl.step(150);
+ok(fl.probe.now().glide === 0, "余韻は2〜3秒でおさまる", fl.probe.now().glide);
+var s2 = fl.probe.now().score;
+fl.step(120);
+ok(fl.probe.now().score === s2, "おさまったら、もう進まない");
 
 /* 3. 景色ごとに要る押しの数 */
 g.probe.reset();

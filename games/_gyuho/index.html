@@ -60,6 +60,8 @@
   var SONIC = 1234.8;                        /* 音の速さ km/h */
   var STROKE = 80;                           /* このぶん指を上へはらうと、ひとこぎ */
   var LUNGE = 1.4;                           /* 大きくはらったとき、何秒ぶん前へ出るか */
+  var GLIDE = 0.1;                           /* 指を離したあとの余韻。1秒でこの割合まで落ちる */
+  var GLIDE_MAX = 2600;                      /* 余韻の速さの上限（px／秒） */
   var MIN_KMH = 0.1;                         /* 牛歩 */
   var WARN_BETA = 0.9;                       /* ここから警告 */
 
@@ -203,6 +205,35 @@
     s.connect(f); f.connect(g); g.connect(AC.destination);
     s.start(n); s.stop(n + dur + 0.05);
   }
+  function moo(pitch, dur, vol) {
+    if (!AC) return;
+    var n = AC.currentTime;
+    var o = AC.createOscillator(), o2 = AC.createOscillator();
+    var lfo = AC.createOscillator(), lg = AC.createGain();
+    var f = AC.createBiquadFilter(), g = AC.createGain();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(pitch * 1.16, n);
+    o.frequency.exponentialRampToValueAtTime(pitch, n + dur * 0.22);
+    o.frequency.exponentialRampToValueAtTime(pitch * 0.74, n + dur);
+    o2.type = "triangle";
+    o2.frequency.setValueAtTime(pitch * 0.5, n);
+    o2.frequency.exponentialRampToValueAtTime(pitch * 0.37, n + dur);
+    lfo.frequency.setValueAtTime(6.5, n);        /* のどのふるえ */
+    lg.gain.setValueAtTime(pitch * 0.035, n);
+    lfo.connect(lg); lg.connect(o.frequency);
+    f.type = "bandpass";                         /* 口の開き */
+    f.frequency.setValueAtTime(pitch * 2.1, n);
+    f.frequency.exponentialRampToValueAtTime(pitch * 3.8, n + dur * 0.3);
+    f.frequency.exponentialRampToValueAtTime(pitch * 1.9, n + dur);
+    f.Q.value = 2.4;
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.1);
+    g.gain.setValueAtTime(vol, n + dur * 0.55);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(f); o2.connect(f); f.connect(g); g.connect(AC.destination);
+    o.start(n); o2.start(n); lfo.start(n);
+    o.stop(n + dur + 0.05); o2.stop(n + dur + 0.05); lfo.stop(n + dur + 0.05);
+  }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -212,7 +243,8 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", BOOM: "boom", RESULT: "result" };
   var state, score, scoreF, broken, T, bt;
-  var dragY = null, tickAcc = 0, boost, lead;
+  var dragY = null, tickAcc = 0, mooAcc = 0, lastSmash = -9, boost, lead;
+  var moveAcc = 0, flickVel = 0, glide = 0;   /* 指の勢いと、離したあとの余韻 */
   var speed = MIN_KMH, beta = 0, wsp = 0, gear = 0, warning = false;
   var W8 = [1, 0, 0, 0, 0];                    /* 景色の重み（牧場・道路・町・都市・宇宙） */
   var props, rings, shards;
@@ -256,12 +288,13 @@
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    score = 0; scoreF = 0; tickAcc = 0; dragY = null; broken = 0;
+    score = 0; scoreF = 0; tickAcc = 0; mooAcc = 0; lastSmash = -9; dragY = null; broken = 0;
     T = 0; bt = 0; lastDt = 1 / 60;
     speed = MIN_KMH;
     props = []; rings = []; shards = [];
     dist = 0; nextAt = 300; legPhase = 0; prevHalf = 0; prevKmh = MIN_KMH; prevGear = 0;
     sirenT = 0; clickPulse = 0; gearFlash = 0; boost = 0; lead = 0;
+    moveAcc = 0; flickVel = 0; glide = 0;
     if (scene3d) scene3d.reset();
     recalc();
   }
@@ -286,10 +319,16 @@
     if (speed >= C_KMH) { speed = C_KMH; recalc(); reachLight(); return; }
     recalc();
     tickAcc += u;
-    if (tickAcc >= 1) {                        /* ひとこぎごとに鳴らす */
+    if (tickAcc >= 1) {                        /* ひとこぎごとの足音 */
       tickAcc -= Math.floor(tickAcc);
-      tone(180 + gear * 90 + Math.min(300, wsp * 0.1), 0.06, 0.09, "square");
-      noiseHit(0.05, 200 + gear * 120, 0.09, 1.4);
+      tone(180 + gear * 90 + Math.min(300, wsp * 0.1), 0.06, 0.07, "square");
+      noiseHit(0.05, 200 + gear * 120, 0.07, 1.4);
+    }
+    mooAcc += u;
+    if (mooAcc >= 5.5) {                       /* まとまってこぐと、モーと鳴く */
+      mooAcc = 0;
+      var big = u > 2.5;
+      moo(150 + gear * 20 + phaseT(speed) * 46, big ? 0.62 : 0.42, big ? 0.15 : 0.1);
     }
   }
 
@@ -315,11 +354,28 @@
       if (o.t === 1) scene3d.launchPerson(o.x, o.r);   /* 人はこわさず跳ね上げる */
       else scene3d.burst(o.x, 0, o.t);
     }
-    if (o.t === 0)      { noiseHit(0.24, 900, 0.22, 0.6); tone(520, 0.1, 0.06, "triangle", 300); }
-    else if (o.t === 1) { noiseHit(0.18, 320, 0.26, 1.0); tone(300, 0.12, 0.08, "triangle", 140); }
-    else if (o.t === 2) { noiseHit(0.24, 240, 0.32, 0.8); tone(340, 0.18, 0.1, "sawtooth", 90); }
-    else if (o.t === 3) { noiseHit(0.5, 120, 0.4, 0.5); tone(120, 0.3, 0.14, "sawtooth", 50); }
-    else                { noiseHit(0.3, 1400, 0.2, 2.0); tone(1200, 0.2, 0.08, "sine", 2400); }
+    if (T - lastSmash < 0.07) return;          /* つづけざまのときは重ねない */
+    lastSmash = T;
+    if (o.t === 0) {                           /* わら：ザッ */
+      noiseHit(0.3, 1100, 0.3, 0.7);
+      tone(560, 0.12, 0.07, "triangle", 320);
+    } else if (o.t === 1) {                    /* 人：ボフッとひと声 */
+      noiseHit(0.16, 340, 0.32, 1.0);
+      tone(430, 0.09, 0.1, "triangle", 190);
+      tone(250, 0.16, 0.07, "sawtooth", 110, 0.05);
+    } else if (o.t === 2) {                    /* 車：ガシャン */
+      noiseHit(0.3, 200, 0.4, 0.7);
+      noiseHit(0.22, 2600, 0.17, 1.6);
+      tone(300, 0.2, 0.12, "sawtooth", 70);
+    } else if (o.t === 3) {                    /* ビル：ゴゴゴ */
+      noiseHit(0.7, 90, 0.46, 0.4);
+      noiseHit(0.4, 520, 0.18, 0.8);
+      tone(90, 0.5, 0.16, "sawtooth", 40);
+    } else {                                   /* 星：キラン */
+      noiseHit(0.34, 1800, 0.22, 2.4);
+      tone(1600, 0.24, 0.1, "sine", 3200);
+      tone(2400, 0.18, 0.06, "sine", 4800, 0.06);
+    }
   }
 
   /* ============ 進行 ============ */
@@ -337,6 +393,17 @@
     }
     if (state !== S.PLAY) return;
     T += dt;
+
+    if (dragY != null) {                       /* なぞっているあいだ、勢いを測る */
+      flickVel = flickVel * 0.45 + (moveAcc / Math.max(dt, 1 / 120)) * 0.55;
+      moveAcc = 0;
+      glide = 0;
+    } else if (glide > 40) {                   /* 離したあとは、余韻でしばらく進む */
+      feed(glide * dt);
+      glide *= Math.pow(GLIDE, dt);
+      if (state !== S.PLAY) return;
+    } else { glide = 0; }
+
     recalc();
     dist += wsp * dt;
     if (boost > 0) {                           /* 突き出したぶんを、みるみる使う */
@@ -430,11 +497,17 @@
     var p = atCanvas(e);
     var dy = dragY - p.y;                      /* 上へはらったぶんだけ進む */
     dragY = p.y;
-    if (dy > 0) feed(dy);
+    if (dy > 0) { feed(dy); moveAcc += dy; }
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); dragY = null; });
-  wrap.addEventListener("pointercancel", function () { dragY = null; });
-  window.addEventListener("blur", function () { dragY = null; });
+  function release() {
+    if (dragY == null) return;
+    dragY = null;
+    glide = Math.min(GLIDE_MAX, flickVel);     /* 勢いをそのまま余韻へ */
+    flickVel = 0; moveAcc = 0;
+  }
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); release(); });
+  wrap.addEventListener("pointercancel", release);
+  window.addEventListener("blur", release);
   wrap.addEventListener("wheel", function (e) {   /* ころがしても進む */
     if (state !== S.PLAY) return;
     e.preventDefault();
@@ -726,7 +799,8 @@
                kmh: speed, beta: beta, wsp: wsp, gear: gear, step: GEARS[gear].step,
                phase: PHASE_NAME[gear], props: props.length,
                bits: scene3d ? scene3d.bits.length : 0, solid: !!scene3d,
-               boost: Math.round(boost), warn: warning, read: fmtSpeed(speed) };
+               boost: Math.round(boost), glide: Math.round(glide),
+               warn: warning, read: fmtSpeed(speed) };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
