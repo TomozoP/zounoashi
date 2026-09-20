@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>同時球技5種</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #12100e; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="scene.js"></script>
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 同時球技5種。
+   野球・サッカー・テニス・バスケ・バレーの球が、ぜんぶ同じ場所へ次々に飛んでくる。
+   押すのは1つだけ。いちばん近い球に合わせて、打つ・蹴る・打ち返す・撃つ・叩く。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  var view3d = (window.WebGLRenderingContext && typeof ZDoji5Scene !== "undefined" && typeof THREE !== "undefined")
+    ? new ZDoji5Scene() : null;
+
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。 */
+  var W = 540, H = 960;
+  function layout() {
+    var host = wrap.parentNode;
+    var vw = host.clientWidth || window.innerWidth;
+    var vh = host.clientHeight || window.innerHeight;
+    H = Math.max(780, Math.min(1700, Math.round(W * vh / vw)));
+
+    place();                                   /* 高さが決まってから置き直す */
+
+    var scale = Math.min(vw / W, vh / H);
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    wrap.style.width = canvas.style.width = Math.round(W * scale) + "px";
+    wrap.style.height = canvas.style.height = Math.round(H * scale) + "px";
+    canvas.width = Math.round(W * scale * dpr);
+    canvas.height = Math.round(H * scale * dpr);
+    var k = canvas.width / W;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+    if (view3d) view3d.resize(canvas.width, canvas.height);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null, MASTER = null;
+  var audioUnlocked = false;
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    if (!AC || AC.state === "closed") return;
+    if (AC.state !== "running") {
+      audioUnlocked = false;
+      try { var pending = AC.resume(); if (pending && pending.catch) pending.catch(function () {}); } catch (e) {}
+    }
+    if (!audioUnlocked) {
+      try {
+        var warmup = AC.createBufferSource();
+        warmup.buffer = AC.createBuffer(1, 1, AC.sampleRate);
+        warmup.connect(AC.destination);
+        warmup.onended = function () { audioUnlocked = AC.state === "running"; warmup.disconnect(); };
+        warmup.start(0);
+      } catch (e) {}
+    }
+  }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    MASTER = AC.createGain(); MASTER.gain.value = 1.6;
+    var limiter = AC.createDynamicsCompressor();
+    limiter.threshold.value = -8; limiter.ratio.value = 10; limiter.attack.value = .004; limiter.release.value = .12;
+    MASTER.connect(limiter); limiter.connect(AC.destination);
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(MASTER || AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q, to, delay) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
+    if (to) f.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(MASTER || AC.destination);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+  }
+  /* 競技ごとの当たった音 */
+  function hitSound(kind, perfect) {
+    if (kind === "yakyu") { noiseHit(.09, 2600, .5, .8, 900); tone(320, .16, .22, "triangle", 120); }
+    else if (kind === "soccer") { noiseHit(.13, 260, .5, .9, 90); tone(120, .2, .22, "sine", 55); }
+    else if (kind === "tennis") { noiseHit(.06, 3400, .42, 1.4, 1500); tone(760, .1, .14, "triangle", 420); }
+    else if (kind === "basket") { noiseHit(.11, 700, .34, .7, 260); tone(190, .18, .16, "sine", 90); }
+    else { noiseHit(.07, 1800, .45, .9, 700); tone(420, .12, .16, "square", 210); }
+    if (perfect) { tone(1320, .1, .1, "triangle", null, .03); tone(1760, .14, .09, "triangle", null, .09); }
+  }
+  function missSound() { tone(200, .3, .2, "sawtooth", 70); noiseHit(.2, 420, .18, .6, 150); }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 球 ============
+     flight は投げてから打つ位置に届くまでの秒数。到着の時刻から逆算して出す。 */
+  var KINDS = {
+    yakyu:  { flight: 1.2, z0: 11, y0: 1.95, y1: 1.2,  r: .12, pts: 3 },
+    soccer: { flight: 2.1, z0: 26, y0: .30,  y1: .45,  r: .23, pts: 2 },
+    tennis: { flight: 1.8, z0: 24, y0: 1.5,  y1: 1.05, r: .11, pts: 2 },
+    basket: { flight: 2.4, z0: 28, y0: 2.0,  y1: 1.6,  r: .25, pts: 3 },
+    volley: { flight: 1.7, z0: 19, y0: 5.4,  y1: 2.1,  r: .23, pts: 2 }
+  };
+  var KEYS = ["yakyu", "soccer", "tennis", "basket", "volley"];
+  var WINDOW = .17, PERFECT = .07, LIVES = 5, GRAVITY = 17;
+  var PLATE = 1.4;                                 /* 打つ場所。選手の少し前 */
+
+  function ballY(kind, u) {
+    var k = KINDS[kind];
+    if (kind === "yakyu") return k.y0 + (k.y1 - k.y0) * u - .12 * u * u;
+    if (kind === "soccer") { var b = u * 2.6; return k.r + Math.abs(Math.sin(b * Math.PI)) * Math.max(0, .85 - .26 * b); }
+    if (kind === "tennis") {
+      if (u < .6) { var a = u / .6; return k.y0 + (.12 - k.y0) * a * a + Math.sin(a * Math.PI) * .5; }
+      var c = (u - .6) / .4; return .12 + (k.y1 + .35) * Math.sin(c * Math.PI * .85);
+    }
+    if (kind === "basket") return k.y0 + (k.y1 - k.y0) * u + Math.sin(u * Math.PI) * 3.2;
+    return k.y0 + (k.y1 - k.y0) * u + Math.sin(u * Math.PI) * .8;
+  }
+  function ballAt(b, t) {
+    var k = KINDS[b.kind], u = (t - b.tArrive + k.flight) / k.flight;
+    return { x: b.xs + (b.xe - b.xs) * u, y: ballY(b.kind, u), z: PLATE + (k.z0 - PLATE) * (1 - u), u: u };
+  }
+  /* tf 秒で目標へ届く速さ */
+  function aimAt(from, to, tf) {
+    return {
+      x: (to.x - from.x) / tf,
+      y: (to.y - from.y) / tf + .5 * GRAVITY * tf,
+      z: (to.z - from.z) / tf
+    };
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, hits, lives, T, held, keyMode = false;
+  var balls, nextArrive, lastKinds, act, actT, actKind, shake, flashes, pitchAt, leanX;
+
+  var HUDY, SCOREY;
+  function place() {
+    HUDY = Math.round(H * 0.045);
+    SCOREY = Math.round(H * 0.105);
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    score = 0; hits = 0; lives = LIVES; T = 0; held = false;
+    balls = []; lastKinds = []; flashes = [];
+    act = null; actT = 0; actKind = null; shake = 0; pitchAt = -9; leanX = 0;
+    nextArrive = 1.9;
+  }
+
+  function pickKind() {
+    var k;
+    do { k = KEYS[(Math.random() * KEYS.length) | 0]; }
+    while (lastKinds.length >= 2 && lastKinds[0] === k && lastKinds[1] === k);
+    lastKinds.unshift(k); lastKinds.length = 2;
+    return k;
+  }
+  /* 来る球を先に決めておく。飛んでいる時間ぶん早く出す */
+  function schedule() {
+    while (nextArrive < T + 3.6) {
+      var kind = pickKind(), k = KINDS[kind];
+      var xs = (Math.random() - .5) * (kind === "yakyu" ? 1.2 : 9);
+      var b = {
+        kind: kind, tArrive: nextArrive, xs: xs, xe: (Math.random() - .5) * 1.6,
+        spin: Math.random() * 6, hit: false, dead: false, judged: false
+      };
+      balls.push(b);
+      if (kind === "yakyu") pitchAt = nextArrive - k.flight;
+      var gap = Math.max(.40, .95 - T * .011) + (Math.random() - .5) * .14;
+      nextArrive += gap;
+    }
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    shake = Math.max(0, shake - dt * 4);
+    if (act) { actT += dt; if (actT > .62) act = null; }
+    flashes.forEach(function (f) { f.age += dt; });
+    flashes = flashes.filter(function (f) { return f.age < .45; });
+    if (state !== S.PLAY) return;
+    T += dt;
+    schedule();
+
+    var near = null, nearAbs = 9;
+    balls.forEach(function (b) {
+      var k = KINDS[b.kind];
+      if (b.hit) {
+        var e = T - b.hitT;
+        b.fx = b.hx + b.v.x * e;
+        b.fy = b.hy + b.v.y * e - .5 * GRAVITY * e * e;
+        b.fz = b.hz + b.v.z * e;
+        if (b.fy < k.r) { b.fy = k.r; }
+        if (e > 2.4 || Math.abs(b.fz) > 95) b.dead = true;
+        return;
+      }
+      var p = ballAt(b, T);
+      if (p.u < 0) return;
+      if (!b.judged && T > b.tArrive + WINDOW) {          /* 見逃した */
+        b.judged = true;
+        lives--; missSound(); shake = Math.max(shake, .5);
+        if (lives <= 0) { state = S.RESULT; shareButton.hidden = false; }
+      }
+      if (p.z < -9) b.dead = true;
+      var d = Math.abs(T - b.tArrive);
+      if (!b.judged && d < nearAbs) { nearAbs = d; near = b; }
+    });
+    balls = balls.filter(function (b) { return !b.dead; });
+
+    /* 来ている球のほうへ体を寄せる */
+    var want = 0;
+    if (near) want = Math.max(-1.1, Math.min(1.1, near.xe * .6));
+    leanX += (want - leanX) * Math.min(1, dt * 6);
+  }
+
+  /* 押したときに狙う球 */
+  function bestTarget() {
+    var best = null, bestD = 9;
+    balls.forEach(function (b) {
+      if (b.hit || b.judged) return;
+      var d = Math.abs(T - b.tArrive);
+      if (d < bestD) { bestD = d; best = b; }
+    });
+    return bestD < .7 ? best : null;
+  }
+
+  function swingAt(b) {
+    var d = Math.abs(T - b.tArrive), k = KINDS[b.kind];
+    act = b.kind; actT = 0; actKind = b.kind;
+    if (d > WINDOW) { whiff(); return; }
+    var perfect = d < PERFECT;
+    b.hit = true; b.judged = true; b.hitT = T;
+    var p = ballAt(b, T);
+    b.hx = p.x; b.hy = Math.max(k.r, p.y); b.hz = p.z;
+    var from = { x: b.hx, y: b.hy, z: b.hz }, to, tf;
+    if (b.kind === "yakyu") { to = { x: (Math.random() - .5) * 34, y: 11, z: 88 }; tf = 2.1; }
+    else if (b.kind === "soccer") { to = { x: (Math.random() - .5) * 5, y: 1.1, z: 78 }; tf = 1.6; }
+    else if (b.kind === "tennis") { to = { x: (Math.random() - .5) * 8, y: .2, z: 22 }; tf = 1.0; }
+    else if (b.kind === "basket") { to = { x: 0, y: 3.2, z: 24.2 }; tf = 1.15; }
+    else { to = { x: (Math.random() - .5) * 6, y: .2, z: 19 }; tf = .9; }
+    b.v = aimAt(from, to, tf);
+    score += k.pts * (perfect ? 2 : 1);
+    hits++;
+    shake = Math.max(shake, perfect ? .9 : .6);
+    flashes.push({ x: b.hx, y: b.hy, z: b.hz, age: 0, big: perfect });
+    hitSound(b.kind, perfect);
+  }
+  function whiff() {                                     /* 空振りも見逃しと同じ扱い */
+    lives--; missSound(); shake = Math.max(shake, .4);
+    if (lives <= 0) { state = S.RESULT; shareButton.hidden = false; }
+  }
+
+  /* ============ 入力 ============
+     タップとスペースキーで同じことができる。x が null のときはキー操作。 */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    held = true;
+    var b = bestTarget();
+    if (b) swingAt(b);
+    else { act = KEYS[(Math.random() * 5) | 0]; actT = 0; whiff(); }
+  }
+  function move() {}
+  function up() { held = false; }
+
+  function atCanvas(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+  }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  window.addEventListener("keydown", function (e) {
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function doShare() {
+    /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。 */
+    window.zResultActions.x({ text: score + "点でした #同時球技5種" });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function snapshot() {
+    var list = [];
+    balls.forEach(function (b) {
+      var k = KINDS[b.kind];
+      if (b.hit) { list.push({ kind: b.kind, x: b.fx, y: b.fy, z: b.fz, r: k.r, spin: b.spin }); return; }
+      var p = ballAt(b, T);
+      if (p.u < 0 || p.z < -9) return;
+      list.push({ kind: b.kind, x: p.x, y: p.y, z: p.z, r: k.r, spin: b.spin });
+    });
+    var pitch = -1;
+    if (T - pitchAt > -.55 && T - pitchAt < .55) pitch = (T - pitchAt + .55) / 1.1;
+    return { t: T, balls: list, act: act, actP: act ? actT / .62 : 0, shake: shake, leanX: leanX, pitch: pitch };
+  }
+
+  /* 3Dが使えないとき（自動確認の台など）の簡単な絵 */
+  function drawFlat(snap) {
+    ctx.fillStyle = "#16283a"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#2e7a3b"; ctx.fillRect(0, H * .42, W, H * .58);
+    var colors = { yakyu: "#f6f3ea", soccer: "#f4f4f0", tennis: "#d3e64a", basket: "#d4702a", volley: "#f7f6f1" };
+    snap.balls.forEach(function (b) {
+      var f = 620 / Math.max(.3, b.z + 7.4);
+      var x = W / 2 + b.x * f * .55, y = H * .62 - (b.y - 1.2) * f * .55;
+      ctx.fillStyle = colors[b.kind];
+      ctx.beginPath(); ctx.arc(x, y, Math.max(1, b.r * f * .55), 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    var snap = snapshot();
+    if (view3d) { ctx.clearRect(0, 0, W, H); view3d.draw(ctx, W, H, snap); }
+    else drawFlat(snap);
+
+    /* 当たった場所の光 */
+    flashes.forEach(function (f) {
+      var p = view3d ? view3d.project(f.x, f.y, f.z) : { x: W / 2, y: H * .6, z: 0 };
+      if (p.z > 1) return;
+      var a = 1 - f.age / .45, rad = (f.big ? 90 : 60) * (.3 + f.age / .45);
+      ctx.save();
+      ctx.globalAlpha = a * .8;
+      ctx.strokeStyle = f.big ? "#ffe27a" : "#ffffff";
+      ctx.lineWidth = f.big ? 9 : 6;
+      ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    });
+
+    /* 残りと点。結果画面では出さない */
+    if (state === S.RESULT) { drawResult(); return; }
+    ctx.save();
+    for (var i = 0; i < LIVES; i++) {
+      ctx.beginPath();
+      ctx.arc(30 + i * 26, HUDY, 8, 0, Math.PI * 2);
+      ctx.fillStyle = i < lives ? "#ffffff" : "rgba(255,255,255,.22)";
+      ctx.fill();
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "rgba(0,0,0,.65)"; ctx.shadowBlur = 12;
+    ctx.font = "800 72px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, SCOREY);
+    ctx.restore();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
+  window.__probe = {
+    now: function () {
+      return {
+        state: state, score: score, hits: hits, lives: lives, T: T, act: act,
+        balls: balls.map(function (b) {
+          return { kind: b.kind, dt: T - b.tArrive, hit: b.hit, judged: b.judged };
+        }),
+        nextArrive: nextArrive, W: W, H: H, has3d: !!view3d
+      };
+    },
+    /* 次の球を、ちょうどの間合いまで進める */
+    toBall: function () {
+      var guard = 0;
+      while (guard++ < 1200) {
+        var b = null, d = 9;
+        for (var i = 0; i < balls.length; i++) {
+          if (balls[i].hit || balls[i].judged) continue;
+          var e = balls[i].tArrive - T;
+          if (e > -WINDOW && e < d) { d = e; b = balls[i]; }
+        }
+        if (b && Math.abs(T - b.tArrive) < .02) return b.kind;
+        update(1 / 60); draw();
+      }
+      return null;
+    },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    tap: function () { down(); up(); },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(800);
+      r.key();
+      var guard = Date.now() + 45000;
+      while (state !== S.RESULT && Date.now() < guard) {
+        var b = bestTarget();
+        if (b && Math.abs(T - b.tArrive) < .04) { down(); up(); }
+        await r.wait(16);
+      }
+      await r.wait(1600);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
+  var startingPointer = null;
+  document.addEventListener("pointerdown", function (e) {
+    if (!(state === S.INTRO)) return;
+    if (e.isPrimary === false || e.button > 0) return;
+    startingPointer = e.pointerId;
+    e.stopImmediatePropagation();
+  }, true);
+  document.addEventListener("pointerup", function (e) {
+    if (!(state === S.INTRO) || startingPointer !== e.pointerId) return;
+    startingPointer = null; e.preventDefault(); e.stopImmediatePropagation(); startButton.click();
+  }, true);
+  document.addEventListener("pointercancel", function () { startingPointer = null; }, true);
+
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.033, (now - last) / 1000));   /* 戻ってきたとき飛ばないように上限 */
+    last = now;
+    if (!window.__recordManual) { update(dt); draw(); }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>

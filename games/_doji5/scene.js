@@ -1,0 +1,596 @@
+/* 同時球技5種の舞台。
+   野球・サッカー・テニス・バスケ・バレーのコートと道具を、
+   ぜんぶ同じ場所に重ねて置く。本体から渡された球と選手の姿勢を描くだけ。 */
+var ZDoji5Scene = (function () {
+  'use strict';
+
+  var T;                                   /* THREE。Scene を作るときに入れる */
+  var SPHERE, CYL, BOX;                    /* 使い回す形 */
+
+  function mat(color, rough, metal) {
+    return new T.MeshStandardMaterial({ color: color, roughness: rough == null ? .7 : rough, metalness: metal || 0 });
+  }
+  function texture(cv) {
+    var t = new T.CanvasTexture(cv);
+    t.colorSpace = T.SRGBColorSpace;
+    return t;
+  }
+
+  /* ============ 地面の絵 ============
+     世界の x -35〜35、z -25〜85 を 1024x1536 の絵にする。
+     5競技の線を同じ紙の上に全部引く。 */
+  function fieldTexture() {
+    var cv = document.createElement('canvas');
+    cv.width = 1024; cv.height = 1536;
+    var c = cv.getContext('2d');
+    function PX(x) { return (x + 35) / 70 * 1024; }
+    function PZ(z) { return (z + 25) / 110 * 1536; }
+    function SX(w) { return w / 70 * 1024; }
+    function SZ(d) { return d / 110 * 1536; }
+    function line() { c.lineWidth = 3.2; c.strokeStyle = 'rgba(244,248,245,.92)'; }
+    function rect(x0, z0, x1, z1) { c.strokeRect(PX(x0), PZ(z0), SX(x1 - x0), SZ(z1 - z0)); }
+    function seg(x0, z0, x1, z1) { c.beginPath(); c.moveTo(PX(x0), PZ(z0)); c.lineTo(PX(x1), PZ(z1)); c.stroke(); }
+    function circle(x, z, r, from, to) {
+      c.beginPath(); c.ellipse(PX(x), PZ(z), SX(r), SZ(r), 0, from == null ? 0 : from, to == null ? Math.PI * 2 : to); c.stroke();
+    }
+
+    /* 芝と刈り跡 */
+    c.fillStyle = '#2e7a3b'; c.fillRect(0, 0, 1024, 1536);
+    for (var i = 0; i < 24; i++) { c.fillStyle = i % 2 ? '#358140' : '#2a7135'; c.fillRect(0, i * 64, 1024, 64); }
+
+    /* 野球の内野。土の菱形の中に芝を残す */
+    function diamond(back, right, front, fill) {
+      c.beginPath();
+      c.moveTo(PX(0), PZ(back)); c.lineTo(PX(right), PZ((back + front) / 2));
+      c.lineTo(PX(0), PZ(front)); c.lineTo(PX(-right), PZ((back + front) / 2));
+      c.closePath(); c.fillStyle = fill; c.fill();
+    }
+    diamond(-5, 17, 27, '#a9713f');
+    diamond(1.5, 10.5, 20.5, 'rgba(46,122,59,.85)');
+    c.fillStyle = '#a9713f';
+    [[0, -1], [12, 11], [0, 23], [-12, 11]].forEach(function (b) {
+      c.beginPath(); c.ellipse(PX(b[0]), PZ(b[1]), SX(2.2), SZ(2.2), 0, 0, Math.PI * 2); c.fill();
+    });
+    c.beginPath(); c.ellipse(PX(0), PZ(11), SX(2.9), SZ(2.9), 0, 0, Math.PI * 2); c.fillStyle = '#b77c47'; c.fill();
+    c.fillStyle = '#f4f7f4';
+    [[12, 11], [0, 23], [-12, 11]].forEach(function (b) { c.fillRect(PX(b[0]) - SX(.5), PZ(b[1]) - SZ(.5), SX(1), SZ(1)); });
+    c.fillRect(PX(0) - SX(.45), PZ(11) - SZ(.18), SX(.9), SZ(.36));
+    c.beginPath();                                           /* 本塁 */
+    c.moveTo(PX(-.6), PZ(-1.6)); c.lineTo(PX(.6), PZ(-1.6)); c.lineTo(PX(.6), PZ(-.6));
+    c.lineTo(PX(0), PZ(-.1)); c.lineTo(PX(-.6), PZ(-.6)); c.closePath(); c.fill();
+    line(); rect(-2.6, -2.4, -.9, .8); rect(.9, -2.4, 2.6, .8);   /* 打席 */
+    seg(0, -1, 27, 26); seg(0, -1, -27, 26);                      /* ファウルライン */
+
+    /* サッカー */
+    line(); rect(-28, -18, 28, 78);
+    seg(-28, 30, 28, 30); circle(0, 30, 9.15);
+    rect(-20, 62, 20, 78); rect(-9, 72, 9, 78);
+    rect(-20, -18, 20, -2); rect(-9, -18, 9, -12);
+    c.fillStyle = 'rgba(244,248,245,.92)';
+    [[0, 67], [0, -7], [0, 30]].forEach(function (p) {
+      c.beginPath(); c.ellipse(PX(p[0]), PZ(p[1]), SX(.35), SZ(.35), 0, 0, Math.PI * 2); c.fill();
+    });
+    circle(-28, 78, 1, 0, Math.PI * 2); circle(28, 78, 1, 0, Math.PI * 2);
+
+    /* テニス（本塁の先に重ねる） */
+    c.fillStyle = 'rgba(40,86,132,.30)'; c.fillRect(PX(-5.5), PZ(0), SX(11), SZ(24));
+    line(); rect(-5.5, 0, 5.5, 24); rect(-4.12, 0, 4.12, 24);
+    seg(-4.12, 6, 4.12, 6); seg(-4.12, 18, 4.12, 18); seg(0, 6, 0, 18);
+
+    /* バスケ */
+    line(); rect(-7.5, -4, 7.5, 24);
+    seg(-7.5, 10, 7.5, 10); circle(0, 10, 1.8);
+    c.fillStyle = 'rgba(190,84,42,.42)';
+    c.fillRect(PX(-2.45), PZ(17.2), SX(4.9), SZ(6.8)); c.fillRect(PX(-2.45), PZ(-4), SX(4.9), SZ(6.8));
+    line(); rect(-2.45, 17.2, 2.45, 24); rect(-2.45, -4, 2.45, 2.8);
+    circle(0, 17.2, 1.8); circle(0, 2.8, 1.8);
+    circle(0, 22.4, 6.75, Math.PI * 1.08, Math.PI * 1.92);
+    circle(0, -2.4, 6.75, Math.PI * .08, Math.PI * .92);
+
+    /* バレー */
+    c.fillStyle = 'rgba(214,116,48,.34)'; c.fillRect(PX(-4.5), PZ(4), SX(9), SZ(18));
+    line(); rect(-4.5, 4, 4.5, 22); seg(-4.5, 13, 4.5, 13); seg(-4.5, 10, 4.5, 10); seg(-4.5, 16, 4.5, 16);
+
+    return cv;
+  }
+
+  /* 観客席。点をばらまくだけ */
+  function crowdTexture() {
+    var cv = document.createElement('canvas');
+    cv.width = 512; cv.height = 256;
+    var c = cv.getContext('2d');
+    c.fillStyle = '#1b222c'; c.fillRect(0, 0, 512, 256);
+    var colors = ['#e4d7bd', '#c9576a', '#6f9bd6', '#e6b455', '#8fc79a', '#b78fd0', '#d8dde4'];
+    for (var row = 0; row < 16; row++) {
+      c.fillStyle = 'rgba(12,16,22,.5)'; c.fillRect(0, row * 16, 512, 3);
+      for (var i = 0; i < 90; i++) {
+        c.fillStyle = colors[(Math.random() * colors.length) | 0];
+        c.globalAlpha = .55 + Math.random() * .45;
+        c.beginPath(); c.arc(Math.random() * 512, row * 16 + 9 + Math.random() * 3, 3 + Math.random() * 1.6, 0, Math.PI * 2); c.fill();
+      }
+    }
+    c.globalAlpha = 1;
+    return cv;
+  }
+
+  /* 網。透ける格子。1枚に4目、糸は細く */
+  function netTexture(color) {
+    var cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    var c = cv.getContext('2d');
+    c.clearRect(0, 0, 64, 64);
+    c.strokeStyle = color; c.lineWidth = 1.6;
+    for (var i = 0; i < 4; i++) {
+      var p = i * 16 + .8;
+      c.beginPath(); c.moveTo(p, 0); c.lineTo(p, 64); c.stroke();
+      c.beginPath(); c.moveTo(0, p); c.lineTo(64, p); c.stroke();
+    }
+    return cv;
+  }
+
+  /* 球の柄。競技ごとに描き分ける */
+  function ballTexture(kind) {
+    var cv = document.createElement('canvas');
+    cv.width = 256; cv.height = 128;
+    var c = cv.getContext('2d');
+    var x, i;
+    if (kind === 'yakyu') {
+      c.fillStyle = '#f6f3ea'; c.fillRect(0, 0, 256, 128);
+      c.strokeStyle = '#c4384a'; c.lineWidth = 3;
+      [40, 168].forEach(function (off) {
+        c.beginPath();
+        for (x = 0; x <= 64; x++) c.lineTo(off + x, 64 + Math.sin(x / 64 * Math.PI) * 46 - 23);
+        c.stroke();
+        for (i = 0; i < 12; i++) {
+          var t = i / 11, px = off + t * 64, py = 64 + Math.sin(t * Math.PI) * 46 - 23;
+          c.beginPath(); c.moveTo(px - 5, py - 5); c.lineTo(px + 5, py + 5); c.stroke();
+        }
+      });
+    } else if (kind === 'soccer') {
+      c.fillStyle = '#f4f4f0'; c.fillRect(0, 0, 256, 128);
+      c.fillStyle = '#20242a';
+      for (i = 0; i < 14; i++) {
+        var cx = (i % 5) * 52 + ((i / 5 | 0) % 2 ? 26 : 0), cy = ((i / 5) | 0) * 44 + 18;
+        c.beginPath();
+        for (var k = 0; k < 5; k++) {
+          var a = k / 5 * Math.PI * 2 - Math.PI / 2;
+          c.lineTo(cx + Math.cos(a) * 15, cy + Math.sin(a) * 15);
+        }
+        c.closePath(); c.fill();
+      }
+    } else if (kind === 'tennis') {
+      c.fillStyle = '#d3e64a'; c.fillRect(0, 0, 256, 128);
+      c.strokeStyle = '#f7f9ee'; c.lineWidth = 7;
+      [24, 152].forEach(function (off) {
+        c.beginPath();
+        for (x = 0; x <= 80; x++) c.lineTo(off + x, 64 + Math.sin(x / 80 * Math.PI) * 50 - 25);
+        c.stroke();
+      });
+    } else if (kind === 'basket') {
+      c.fillStyle = '#d4702a'; c.fillRect(0, 0, 256, 128);
+      c.strokeStyle = '#231a14'; c.lineWidth = 4;
+      c.beginPath(); c.moveTo(0, 64); c.lineTo(256, 64); c.stroke();
+      [0, 64, 128, 192].forEach(function (p) { c.beginPath(); c.moveTo(p, 0); c.lineTo(p, 128); c.stroke(); });
+      [64, 192].forEach(function (p) {
+        c.beginPath();
+        for (var y = 0; y <= 128; y++) c.lineTo(p + Math.sin(y / 128 * Math.PI) * 26, y);
+        c.stroke();
+      });
+    } else {
+      c.fillStyle = '#f7f6f1'; c.fillRect(0, 0, 256, 128);
+      ['#2f5fb0', '#e5c33f', '#2f5fb0'].forEach(function (col, n) {
+        c.fillStyle = col;
+        c.fillRect(n * 85 + 10, 0, 22, 128);
+      });
+      c.strokeStyle = '#c9c7bf'; c.lineWidth = 2;
+      for (i = 0; i < 6; i++) { c.beginPath(); c.moveTo(i * 43, 0); c.lineTo(i * 43, 128); c.stroke(); }
+    }
+    return cv;
+  }
+
+  /* ============ 人 ============ */
+  function makeAthlete(scene, opt) {
+    var root = new T.Group(), parts = {};
+    var skin = new T.MeshStandardMaterial({ color: '#d9a06a', roughness: .55 });
+    var shirt = mat(opt.shirt, .75), pants = mat(opt.pants, .75), shoe = mat('#1d2129', .6);
+    function part(parent, name, x, y, z) {
+      var g = new T.Group(); g.position.set(x, y, z); parent.add(g); parts[name] = g; return g;
+    }
+    function blob(parent, sx, sy, sz, m, y, z) {
+      var mesh = new T.Mesh(SPHERE, m);
+      mesh.scale.set(sx, sy, sz); mesh.position.set(0, y || 0, z || 0);
+      mesh.castShadow = true; parent.add(mesh); return mesh;
+    }
+    var hips = part(root, 'hips', 0, .92, 0);
+    blob(hips, .18, .16, .15, pants);
+    var torso = part(hips, 'torso', 0, .05, 0);
+    blob(torso, .21, .27, .16, shirt, .24);
+    blob(torso, .115, .13, .125, skin, .58);                 /* 頭 */
+    var cap = new T.Mesh(SPHERE, mat(opt.shirt, .7));
+    cap.scale.set(.125, .085, .135); cap.position.set(0, .655, 0); cap.castShadow = true; torso.add(cap);
+    var visor = new T.Mesh(BOX, mat(opt.shirt, .7));
+    visor.scale.set(.2, .02, .16); visor.position.set(0, .625, .155); torso.add(visor);
+    ['L', 'R'].forEach(function (tag) {
+      var side = tag === 'L' ? 1 : -1;
+      var sh = part(torso, 'shoulder' + tag, side * .24, .46, 0);
+      blob(sh, .062, .16, .062, skin, -.14);
+      var el = part(sh, 'elbow' + tag, 0, -.3, 0);
+      blob(el, .055, .15, .055, skin, -.13);
+      part(el, 'hand' + tag, 0, -.28, 0);
+      var hip = part(hips, 'hip' + tag, side * .11, -.06, 0);
+      blob(hip, .088, .22, .09, pants, -.2);
+      var kn = part(hip, 'knee' + tag, 0, -.42, 0);
+      blob(kn, .072, .21, .075, skin, -.2);
+      blob(kn, .085, .05, .15, shoe, -.42, .06);
+    });
+    if (opt.bat) {                                            /* 右手のバット */
+      var bat = new T.Mesh(new T.CylinderGeometry(.048, .022, .92, 10), mat('#b9834a', .6));
+      bat.position.y = .42; bat.castShadow = true; parts.handR.add(bat);
+    }
+    if (opt.racket) {                                         /* 左手のラケット */
+      var frame = new T.Mesh(new T.TorusGeometry(.17, .016, 6, 20), mat('#2b3340', .5, .3));
+      frame.position.y = .43; frame.rotation.y = Math.PI / 2; frame.castShadow = true;
+      var gut = new T.Mesh(new T.CircleGeometry(.158, 18), new T.MeshBasicMaterial({ color: '#e9ecef', transparent: true, opacity: .32, side: T.DoubleSide }));
+      gut.position.y = .43; gut.rotation.y = Math.PI / 2;
+      var grip = new T.Mesh(CYL, mat('#20242c', .8));
+      grip.scale.set(.022, .26, .022); grip.position.y = .14;
+      parts.handL.add(frame, gut, grip);
+    }
+    if (opt.glove) {
+      var glove = new T.Mesh(SPHERE, mat('#8a5a2f', .8));
+      glove.scale.set(.13, .15, .07); glove.castShadow = true; parts.handL.add(glove);
+    }
+    scene.add(root);
+    return { root: root, parts: parts };
+  }
+
+  /* ============ 舞台 ============ */
+  function Scene() {
+    T = THREE;
+    var self = this;
+    SPHERE = new T.SphereGeometry(1, 14, 10);
+    CYL = new T.CylinderGeometry(1, 1, 1, 12);
+    BOX = new T.BoxGeometry(1, 1, 1);
+
+    this.renderer = new T.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+    this.renderer.setPixelRatio(1);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = T.PCFSoftShadowMap;
+    this.renderer.outputColorSpace = T.SRGBColorSpace;
+    this.renderer.toneMapping = T.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
+
+    this.scene = new T.Scene();
+    this.scene.fog = new T.Fog('#16334c', 80, 190);
+    /* 空。上から水平線へ向けて明るくする */
+    var skyCv = document.createElement('canvas');
+    skyCv.width = 8; skyCv.height = 128;
+    var sc = skyCv.getContext('2d');
+    var grd = sc.createLinearGradient(0, 0, 0, 128);
+    grd.addColorStop(0, '#060d17'); grd.addColorStop(.6, '#15304a'); grd.addColorStop(1, '#31607e');
+    sc.fillStyle = grd; sc.fillRect(0, 0, 8, 128);
+    var sky = new T.Mesh(new T.SphereGeometry(200, 16, 12),
+      new T.MeshBasicMaterial({ map: texture(skyCv), side: T.BackSide, fog: false }));
+    this.scene.add(sky);
+    this.camera = new T.PerspectiveCamera(50, 540 / 960, .1, 400);
+    this.w = 540; this.h = 960; this.logicalH = 960;
+
+    this.scene.add(new T.HemisphereLight('#d6e9ff', '#4d5b3c', 1.9));
+    var key = new T.DirectionalLight('#fff3da', 2.6);
+    key.position.set(-16, 40, -6); key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    Object.assign(key.shadow.camera, { left: -24, right: 24, top: 30, bottom: -18, near: 1, far: 120 });
+    key.target.position.set(0, 0, 10); key.shadow.bias = -.0004;
+    this.scene.add(key, key.target);
+    var fill = new T.DirectionalLight('#9fc6e8', 1.1);
+    fill.position.set(12, 14, 26); this.scene.add(fill);
+
+    /* 地面 */
+    var ft = texture(fieldTexture());
+    ft.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    var ground = new T.Mesh(new T.PlaneGeometry(70, 110), new T.MeshStandardMaterial({ map: ft, roughness: .92 }));
+    ground.rotation.x = -Math.PI / 2; ground.position.set(0, 0, 30);
+    ground.receiveShadow = true; this.scene.add(ground);
+    var outer = new T.Mesh(new T.PlaneGeometry(220, 320), mat('#25532f', .95));
+    outer.rotation.x = -Math.PI / 2; outer.position.set(0, -.02, 30); this.scene.add(outer);
+
+    function box(x, y, z, w, h, d, m, cast) {
+      var mesh = new T.Mesh(BOX, m);
+      mesh.scale.set(w, h, d); mesh.position.set(x, y, z);
+      mesh.receiveShadow = true; if (cast !== false) mesh.castShadow = true;
+      self.scene.add(mesh); return mesh;
+    }
+    function post(x, y, z, r, h, m, rotZ) {
+      var mesh = new T.Mesh(CYL, m);
+      mesh.scale.set(r, h, r); mesh.position.set(x, y, z);
+      if (rotZ) mesh.rotation.z = rotZ;
+      mesh.castShadow = true; self.scene.add(mesh); return mesh;
+    }
+    /* cell は目の大きさ（メートル） */
+    function netPanel(x, y, z, w, h, cell, color, rotY) {
+      var tx = texture(netTexture(color));
+      tx.wrapS = tx.wrapT = T.RepeatWrapping; tx.repeat.set(w / (cell * 4), h / (cell * 4));
+      var mesh = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshBasicMaterial({ map: tx, transparent: true, side: T.DoubleSide, depthWrite: false }));
+      mesh.position.set(x, y, z); if (rotY) mesh.rotation.y = rotY;
+      self.scene.add(mesh); return mesh;
+    }
+    var white = mat('#eef1ee', .5), metal = mat('#8e9aa4', .4, .5), dark = mat('#20262e', .7);
+
+    /* まとめて作ってから、置き場所と向きを決める */
+    function group(x, z, rotY, build) {
+      var start = self.scene.children.length;
+      build();
+      var g = new T.Group();
+      self.scene.children.slice(start).forEach(function (m) { g.add(m); });
+      g.position.set(x, 0, z); g.rotation.y = rotY || 0;
+      self.scene.add(g); return g;
+    }
+
+    /* サッカーゴール。z=0 に置き、開いている側が手前 */
+    function soccerGoal() {
+      post(-3.66, 1.22, 0, .1, 2.44, white); post(3.66, 1.22, 0, .1, 2.44, white);
+      post(0, 2.44, 0, .1, 7.32, white, Math.PI / 2);
+      netPanel(0, 1.22, 1.6, 7.3, 2.44, .13, 'rgba(238,242,238,.85)');
+      netPanel(0, 2.0, .8, 7.3, 1.7, .13, 'rgba(238,242,238,.5)');
+    }
+    group(0, 78, 0, soccerGoal);
+    group(-26, 44, Math.PI / 2, soccerGoal);
+
+    /* バスケットゴール。リングは手前側（-z）へ張り出す */
+    function hoop() {
+      post(0, 1.9, 1.6, .11, 3.8, metal);
+      box(0, 3.5, .8, .16, .16, 1.6, metal);
+      var bb = box(0, 3.5, 0, 1.8, 1.05, .06, new T.MeshStandardMaterial({ color: '#f2f4f6', roughness: .35, transparent: true, opacity: .82 }));
+      bb.renderOrder = 1;
+      box(0, 3.35, -.05, .59, .45, .08, mat('#c9552f', .6));
+      var ring = new T.Mesh(new T.TorusGeometry(.33, .028, 6, 18), mat('#e2622c', .5, .3));
+      ring.rotation.x = Math.PI / 2; ring.position.set(0, 3.05, -.43); ring.castShadow = true;
+      self.scene.add(ring);
+      netPanel(0, 2.82, -.43, .66, .45, .05, 'rgba(245,247,245,.9)');
+      netPanel(0, 2.82, -.43, .66, .45, .05, 'rgba(245,247,245,.9)', Math.PI / 2);
+    }
+    group(0, 24.5, 0, hoop);
+    group(-7.9, 15, -Math.PI / 2, hoop);
+    group(8.6, 30, Math.PI / 2, hoop);
+
+    /* バレーのネット */
+    post(-5.6, 1.3, 13, .07, 2.6, metal); post(5.6, 1.3, 13, .07, 2.6, metal);
+    netPanel(0, 2.05, 13, 11.2, 1, .1, 'rgba(232,236,232,.85)');
+    box(0, 2.53, 13, 11.2, .1, .03, white, false);
+
+    /* テニスのネット */
+    post(-6.4, .6, 8, .06, 1.2, metal); post(6.4, .6, 8, .06, 1.2, metal);
+    netPanel(0, .52, 8, 12.8, 1.04, .045, 'rgba(70,80,92,.75)');
+    box(0, 1.06, 8, 12.8, .08, .03, white, false);
+
+    /* 野球のバックネット。打つ人の後ろなので、カメラの外に置く */
+    var backstop = new T.Mesh(new T.CylinderGeometry(9, 9, 5, 20, 1, true, Math.PI * .74, Math.PI * .52), (function () {
+      var tx = texture(netTexture('rgba(190,200,206,.7)'));
+      tx.wrapS = tx.wrapT = T.RepeatWrapping; tx.repeat.set(60, 12);
+      return new T.MeshBasicMaterial({ map: tx, transparent: true, side: T.DoubleSide, depthWrite: false });
+    })());
+    backstop.position.set(0, 2.5, -2); this.scene.add(backstop);
+
+    /* 観客席と照明 */
+    var crowd = texture(crowdTexture());
+    crowd.wrapS = crowd.wrapT = T.RepeatWrapping;
+    function stand(x, z, w, d, rotY) {
+      var c = crowd.clone(); c.needsUpdate = true; c.repeat.set(w / 7, 1.6);
+      var base = box(x, 5, z, d, 10, w, dark, false);
+      base.rotation.y = rotY || 0;
+      var face = new T.Mesh(new T.PlaneGeometry(w, 11), new T.MeshBasicMaterial({ map: c }));
+      face.position.set(x + (x < 0 ? d / 2 : -d / 2), 6.5, z);
+      face.rotation.y = x < 0 ? Math.PI / 2 : -Math.PI / 2;
+      face.rotation.x = -.16;
+      if (rotY) { face.position.set(x, 6.5, z - d / 2); face.rotation.set(-.16, Math.PI, 0); }
+      self.scene.add(face);
+    }
+    stand(-34, 30, 104, 8);
+    stand(34, 30, 104, 8);
+    stand(0, 90, 74, 8, Math.PI);
+    for (var i = 0; i < 4; i++) {
+      var lx = i % 2 ? 22 : -22, lz = i < 2 ? 70 : 20;
+      post(lx, 10, lz, .32, 20, metal);
+      var head = box(lx, 20.6, lz, 4.6, 1.5, .5, mat('#2a323c', .5));
+      head.lookAt(0, 0, 20);
+      for (var j = 0; j < 8; j++) {
+        var lamp = box(lx + (j % 4 - 1.5) * 1.1 * (lx < 0 ? 1 : -1), 20.2 + (j < 4 ? .5 : -.5), lz + (lx < 0 ? .3 : -.3), .8, .5, .12,
+          new T.MeshBasicMaterial({ color: '#fff6d8' }), false);
+        lamp.lookAt(0, 0, 20);
+      }
+    }
+    box(0, 11, 88, 22, 7, .6, mat('#161d26', .8));
+    for (var r = 0; r < 3; r++) for (var q = 0; q < 9; q++) {
+      box(-8 + q * 2, 13 - r * 2, 87.6, 1.5, 1.3, .1, new T.MeshBasicMaterial({ color: (q + r) % 3 ? '#243040' : '#f0b64a' }), false);
+    }
+
+    /* 小物。どの競技のものも散らかしておく */
+    function flag(x, z, color) {
+      post(x, .8, z, .045, 1.6, white);
+      var f = new T.Mesh(new T.PlaneGeometry(.62, .42), new T.MeshBasicMaterial({ color: color, side: T.DoubleSide }));
+      f.position.set(x + (x < 0 ? -.31 : .31), 1.38, z); self.scene.add(f);
+    }
+    [[-28, 78, '#f0c33c'], [28, 78, '#f0c33c'], [-28, -18, '#e0604a'], [28, -18, '#e0604a']].forEach(function (p) { flag(p[0], p[1], p[2]); });
+
+    function umpChair(x, z, rotY) {
+      group(x, z, rotY, function () {
+        [-.42, .42].forEach(function (s) { post(s, 1.15, -.33, .045, 2.3, metal); post(s, 1.15, .33, .045, 2.3, metal); });
+        box(0, 2.32, 0, 1.05, .1, .86, mat('#39485a', .7));
+        box(0, 2.7, -.42, 1.05, .76, .1, mat('#39485a', .7));
+        box(0, 1.2, 0, .9, .06, .7, mat('#39485a', .7));
+      });
+    }
+    umpChair(7.4, 8, -Math.PI / 2);
+    umpChair(-6.6, 13, Math.PI / 2);
+
+    function bench(x, z, rotY) {
+      group(x, z, rotY, function () {
+        box(0, .44, 0, 3.4, .1, .46, mat('#c8873f', .8));
+        box(0, .74, -.24, 3.4, .5, .08, mat('#c8873f', .8));
+        [-1.5, 1.5].forEach(function (s) { post(s, .22, 0, .05, .44, metal); });
+      });
+    }
+    bench(-9.5, 3, Math.PI / 2); bench(10.2, 11, -Math.PI / 2); bench(-11, 22, Math.PI / 2);
+
+    /* 球かご。5競技の球を放り込んである */
+    function basket5(x, z) {
+      box(x, .3, z, 1.1, .6, 1.1, new T.MeshStandardMaterial({ color: '#2b3340', roughness: .6, transparent: true, opacity: .55 }));
+      ['#f6f3ea', '#d4702a', '#d3e64a', '#f4f4f0', '#e5c33f'].forEach(function (col, n) {
+        var b = new T.Mesh(SPHERE, mat(col, .5));
+        b.scale.setScalar(.18 + (n % 2) * .05);
+        b.position.set(x + (n % 3 - 1) * .32, .68, z + ((n / 3 | 0) - .5) * .32);
+        b.castShadow = true; self.scene.add(b);
+      });
+    }
+    basket5(-8.6, 6.5); basket5(9.4, 17);
+
+    /* 球。競技ごとに1個ずつ用意して使い回す */
+    this.ballMeshes = {};
+    ['yakyu', 'soccer', 'tennis', 'basket', 'volley'].forEach(function (kind) {
+      var pool = [];
+      for (var n = 0; n < 6; n++) {
+        var m = new T.Mesh(SPHERE, new T.MeshStandardMaterial({ map: texture(ballTexture(kind)), roughness: kind === 'basket' ? .85 : .45 }));
+        m.castShadow = true; m.visible = false; self.scene.add(m); pool.push(m);
+      }
+      self.ballMeshes[kind] = pool;
+    });
+
+    /* 選手と投手 */
+    this.player = makeAthlete(this.scene, { shirt: '#d8402f', pants: '#1f2a3a', bat: true, racket: true });
+    this.pitcher = makeAthlete(this.scene, { shirt: '#f0f2f0', pants: '#39506e', glove: true });
+    this.pitcher.root.position.set(0, .28, 11);
+    this.pitcher.root.rotation.y = Math.PI;
+    var mound = new T.Mesh(new T.CylinderGeometry(2.9, 3.2, .3, 20), mat('#b77c47', .95));
+    mound.position.set(0, .14, 11); mound.receiveShadow = true; this.scene.add(mound);
+
+    /* 味方と相手。立たせておくだけ */
+    this.extras = [];
+    [['#3e63c8', '#f0f2f0', -6.5, 17], ['#3e63c8', '#f0f2f0', 6.2, 19.5], ['#e8c53c', '#1f2a3a', -9.5, 6],
+     ['#e8c53c', '#1f2a3a', 9.2, 9], ['#3e63c8', '#f0f2f0', -3.4, 26], ['#e8c53c', '#1f2a3a', 4.1, 31],
+     ['#f0f2f0', '#c3352c', -13, 24], ['#f0f2f0', '#c3352c', 12.6, 14], ['#3e63c8', '#f0f2f0', -2.2, 38],
+     ['#e8c53c', '#1f2a3a', 7.6, 42], ['#f0f2f0', '#c3352c', -10.5, 35], ['#3e63c8', '#f0f2f0', 13.4, 33],
+     ['#e8c53c', '#1f2a3a', -16, 12], ['#f0f2f0', '#c3352c', 15.5, 5], ['#3e63c8', '#f0f2f0', 2.8, 52],
+     ['#e8c53c', '#1f2a3a', -5.4, 58]].forEach(function (e, n) {
+      var a = makeAthlete(self.scene, { shirt: e[0], pants: e[1] });
+      a.root.position.set(e[2], 0, e[3]);
+      a.root.rotation.y = Math.PI + (e[2] > 0 ? -.3 : .3);
+      a.phase = n * 1.3;
+      self.extras.push(a);
+    });
+
+    this.shake = 0;
+  }
+
+  Scene.prototype.resize = function (w, h) {
+    this.w = w; this.h = h;
+    this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h;
+    /* タテ長でも横の写る範囲を保つ */
+    this.camera.fov = 2 * Math.atan(Math.tan(30 * Math.PI / 180) * (h / w) / (960 / 540)) * 180 / Math.PI;
+    this.camera.updateProjectionMatrix();
+  };
+
+  Scene.prototype.project = function (x, y, z) {
+    var v = new T.Vector3(x, y, z).project(this.camera);
+    return { x: (v.x * .5 + .5) * 540, y: (.5 - v.y * .5) * this.logicalH, z: v.z };
+  };
+
+  /* 立ち姿にしてから、動作ぶんだけ足す */
+  Scene.prototype.pose = function (a, act, p, t) {
+    var P = a.parts;
+    a.root.position.y = 0;
+    a.root.rotation.y = 0;
+    P.hips.rotation.set(0, 0, 0);
+    P.torso.rotation.set(.14 + Math.sin(t * 3) * .03, 0, 0);
+    P.shoulderR.rotation.set(-.55, 0, .5); P.elbowR.rotation.set(-1.15, 0, 0);
+    P.shoulderL.rotation.set(-.4, 0, -.45); P.elbowL.rotation.set(-1.05, 0, 0);
+    P.hipL.rotation.set(-.16, 0, 0); P.kneeL.rotation.set(.26, 0, 0);
+    P.hipR.rotation.set(-.16, 0, 0); P.kneeR.rotation.set(.26, 0, 0);
+    if (!act) return;
+    var e = Math.max(0, Math.min(1, p));
+    var s = 1 - Math.pow(1 - Math.min(1, e / .42), 3);        /* 振り抜き */
+    var w = e < .7 ? 1 : 1 - (e - .7) / .3;                    /* 終わりは立ち姿へ戻す */
+    var k = s * w;
+    if (act === 'yakyu') {
+      P.hips.rotation.y = -2.7 * k + .7 * w;
+      P.torso.rotation.y = -.8 * k + .3 * w;
+      P.shoulderR.rotation.x += 1.0 * k; P.shoulderR.rotation.z += -1.0 * k;
+      P.elbowR.rotation.x += 1.0 * k;
+      P.hipR.rotation.x += -.3 * k;
+    } else if (act === 'tennis') {
+      P.hips.rotation.y = 2.4 * k - .6 * w;
+      P.shoulderL.rotation.z += 1.5 * k; P.shoulderL.rotation.x += -.9 * k;
+      P.elbowL.rotation.x += .9 * k;
+    } else if (act === 'soccer') {
+      P.hipR.rotation.x += -2.2 * k; P.kneeR.rotation.x += -1.1 * k;
+      P.torso.rotation.x += .35 * k;
+      P.shoulderL.rotation.x += -.9 * k; P.shoulderR.rotation.x += .5 * k;
+      a.root.position.y = Math.sin(Math.PI * e) * .06 * w;
+    } else if (act === 'basket') {
+      a.root.position.y = Math.sin(Math.PI * Math.min(1, e / .8)) * .42 * w;
+      P.shoulderR.rotation.x += -2.3 * k; P.shoulderL.rotation.x += -2.3 * k;
+      P.elbowR.rotation.x += 1.0 * k; P.elbowL.rotation.x += 1.0 * k;
+      P.hipR.rotation.x += .3 * k; P.hipL.rotation.x += .3 * k;
+    } else if (act === 'volley') {
+      a.root.position.y = Math.sin(Math.PI * Math.min(1, e / .85)) * .8 * w;
+      P.shoulderR.rotation.x += -3.3 + 3.9 * s * w + (1 - w) * 3.3;
+      P.elbowR.rotation.x += .7 * k;
+      P.torso.rotation.x += -.3 * w + .55 * k;
+      P.hipL.rotation.x += -.5 * k;
+    }
+  };
+
+  /* 投手。渡された進みぐあいで振りかぶって投げる */
+  Scene.prototype.posePitcher = function (p, t) {
+    var a = this.pitcher, P = a.parts;
+    this.pose(a, null, 0, t + 1.7);
+    if (p < 0) return;
+    var e = Math.max(0, Math.min(1, p));
+    var wind = Math.min(1, e / .55), throwing = Math.max(0, (e - .55) / .45);
+    P.shoulderR.rotation.x += -2.4 * wind + 3.4 * throwing;
+    P.elbowR.rotation.x += -.6 * wind + .8 * throwing;
+    P.torso.rotation.x += -.25 * wind + .5 * throwing;
+    P.hipL.rotation.x += -.9 * wind + 1.1 * throwing;
+    P.kneeL.rotation.x += 1.2 * wind - 1.4 * throwing;
+  };
+
+  Scene.prototype.draw = function (ctx, W, H, snap) {
+    this.logicalH = H;
+    var t = snap.t, self = this;
+
+    this.pose(this.player, snap.act, snap.actP, t);
+    this.player.root.position.x = snap.leanX || 0;
+    this.player.root.position.z = -.9;
+    this.posePitcher(snap.pitch, t);
+    this.extras.forEach(function (a, i) {
+      self.pose(a, null, 0, t + a.phase);
+      a.root.position.y = Math.abs(Math.sin(t * 2.4 + a.phase)) * .05;
+    });
+
+    /* 球を並べる。余ったものは隠す */
+    var used = { yakyu: 0, soccer: 0, tennis: 0, basket: 0, volley: 0 };
+    snap.balls.forEach(function (b) {
+      var pool = self.ballMeshes[b.kind], m = pool[used[b.kind]++];
+      if (!m) return;
+      m.visible = true;
+      m.position.set(b.x, b.y, b.z);
+      m.scale.setScalar(b.r);
+      m.rotation.set(b.z * 1.4, b.x * 2 + t * 3, b.spin || 0);
+    });
+    Object.keys(used).forEach(function (kind) {
+      for (var i = used[kind]; i < self.ballMeshes[kind].length; i++) self.ballMeshes[kind][i].visible = false;
+    });
+
+    /* 打った瞬間だけ少し揺らす */
+    this.shake = Math.max(0, (snap.shake || 0));
+    var sh = this.shake * .25;
+    this.camera.position.set((Math.random() - .5) * sh, 5.2 + (Math.random() - .5) * sh, -7.8);
+    this.camera.lookAt(0, .9, 11.5);
+    this.camera.updateMatrixWorld();
+
+    this.renderer.render(this.scene, this.camera);
+    ctx.drawImage(this.renderer.domElement, 0, 0, W, H);
+  };
+
+  return Scene;
+})();
