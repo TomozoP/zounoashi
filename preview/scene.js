@@ -558,6 +558,21 @@ var ZDoji5Scene = (function () {
         /* 縁取り。ひと回り大きい球の裏側だけを描いて、輪郭として残す */
         var edge = new T.Mesh(SPHERE, new T.MeshBasicMaterial({ color: '#121a24', side: T.BackSide }));
         edge.scale.setScalar(1.13); m.add(edge);
+        /* 軌跡は球ごとに確保して使い回す。遠い点ほど透明になる色付きの線。 */
+        var trailGeo = new T.BufferGeometry();
+        trailGeo.setAttribute('position', new T.BufferAttribute(new Float32Array(36), 3));
+        var trailColors = new Float32Array(36), trailColor = new T.Color(COLORS[kind]);
+        for (var j = 0; j < 12; j++) {
+          var fade = Math.pow(1 - j / 11, 1.5);
+          trailColors[j * 3] = trailColor.r * fade;
+          trailColors[j * 3 + 1] = trailColor.g * fade;
+          trailColors[j * 3 + 2] = trailColor.b * fade;
+        }
+        trailGeo.setAttribute('color', new T.BufferAttribute(trailColors, 3));
+        m.userData.trail = new T.Line(trailGeo, new T.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: .65, blending: T.AdditiveBlending, depthWrite: false }));
+        m.userData.trail.frustumCulled = false;
+        m.userData.trail.visible = false;
+        self.scene.add(m.userData.trail);
         self.scene.add(m); pool.push(m);
       }
       self.ballMeshes[kind] = pool;
@@ -816,6 +831,13 @@ var ZDoji5Scene = (function () {
       var pool = self.ballMeshes[b.kind], m = pool[used[b.kind]++];
       if (!m) return;
       m.visible = true;
+      var tail = m.userData.trail, points = b.trail || [];
+      tail.visible = points.length > 1;
+      if (tail.visible) {
+        var positions = tail.geometry.attributes.position;
+        points.forEach(function (p, j) { positions.setXYZ(j, p.x, p.y, p.z); });
+        positions.needsUpdate = true; tail.geometry.setDrawRange(0, points.length);
+      }
       m.position.set(b.x, b.y, b.z);
       m.scale.setScalar(b.r);
       /* 球の半径にかかわらず、輪郭の厚みを揃える。 */
@@ -823,7 +845,10 @@ var ZDoji5Scene = (function () {
       m.rotation.set(b.z * 1.4, b.x * 2 + t * 3, b.spin || 0);
     });
     Object.keys(used).forEach(function (kind) {
-      for (var i = used[kind]; i < self.ballMeshes[kind].length; i++) self.ballMeshes[kind][i].visible = false;
+      for (var i = used[kind]; i < self.ballMeshes[kind].length; i++) {
+        self.ballMeshes[kind][i].visible = false;
+        self.ballMeshes[kind][i].userData.trail.visible = false;
+      }
     });
 
     /* 打った瞬間だけ少し揺らす */
