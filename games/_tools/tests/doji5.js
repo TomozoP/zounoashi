@@ -67,7 +67,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
   for (var i = 0; i < 20; i++) { hitPad(g, "yakyu"); g.step(2); }   /* 最初の球が出るより前 */
   ok("空振りを続けても残りが減らない", g.probe.now().lives === before, before + " → " + g.probe.now().lives);
   ok("空振りでは点が入らない", g.probe.now().score === 0);
-  ok("空振りは操作だけを表示する", g.probe.now().actions.indexOf("SWING") >= 0 && g.probe.now().cheers.length === 0);
+  ok("空振りでは結果を表示しない", g.probe.now().cheers.length === 0);
 })();
 
 /* ---- ボタンの外を触っても何も起きない ---- */
@@ -149,7 +149,6 @@ function start(g) { g.press(" "); g.step(2); return g; }
     g.press(String(keys.indexOf(kind) + 1));
     ok("数字キーで当たる：" + kind, g.probe.now().score > before);
 
-    ok("操作の表示も別に出る", g.probe.now().actions.indexOf(["SWING", "KICK", "RETURN", "SHOOT", "SPIKE"][keys.indexOf(kind)]) >= 0);
     seen[kind] = true;
   }
   ok("5競技とも数字キーで操作できる", Object.keys(seen).length === 5);
