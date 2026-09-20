@@ -1,12 +1,13 @@
-/* 牛歩シミュレーター：ツマミの効き・車の跳ね飛ばし・警告・宇宙の壊れかたを測る。
+/* 牛歩シミュレーター：押した数と景色の移り変わりを測る。
      node games/_tools/tests/gyuho.js
    見るもの
-     - ツマミ0は牛歩（0.1km/h）、目盛りの位置が音の速さ、右端が光の速さ
-     - 遅いうちは車が出ない。速くすると追いついて跳ね飛ばす
-     - 光の速さの手前で警告が出る。そこで戻せば壊れない
-     - 右端に置いた時点で警告が出て、そのままにすると 2秒で宇宙が壊れ、結果画面へ
-     - キー（→ ← スペース）とジョイパッドでもツマミが動く
-     - 画面の形が変わってもツマミの位置がずれない */
+     - 押すたびに速くなる。押さなければ落ちも進みもしない
+     - 景色は 牧場→道路→町→都市→宇宙。変わるたびに1押しの効きが上がる
+     - 景色ごとに要る押しの数（50 / 100 / 150 / 198 / 297）と、光の速さまでの合計
+     - 牧場では車が出ない。道路から先は追いついて跳ね飛ばす
+     - 光の速さの手前で警告。押すのをやめれば壊れない
+     - 光の速さに届くと宇宙が壊れ、結果は押した回数
+     - 画面の形が変わっても遊べる */
 var load = require("../harness");
 var FILE = "games/_gyuho/index.html";
 
@@ -21,121 +22,113 @@ function start(w, h) {
   g.step(2);
   return g;
 }
-function knobY(g) { return Math.round(g.probe.now().H * 0.83); }
-function knobX(g, t) { var W = g.probe.now().W; return 76 + (W - 152) * t; }
-function setKnob(g, t) {
-  var y = knobY(g), x = knobX(g, t);
-  g.down(x, y); g.moveTo(x, y); g.up();
-  return g;
+function push(g, n, per) {
+  for (var i = 0; i < (n || 1); i++) {
+    if (g.probe.now().state !== "play") return i;
+    g.tap(270, Math.round(g.probe.now().H * 0.3));
+    if (per) g.step(per);
+  }
+  return n;
 }
-function settle(g, t, frames) { setKnob(g, t); g.step(frames || 240); return g.probe.now(); }
 
-/* 1. ツマミと速さの対応 */
+/* 1. 押すと速くなる。押さなければ変わらない */
 var g = start();
 ok(g.probe.now().state === "play", "スペースで始まる", g.probe.now().state);
-var n0 = settle(g, 0, 60);
-ok(Math.abs(n0.kmh - 0.1) < 0.001, "ツマミ0は牛歩", n0.read);
-ok(n0.vis > 5 && n0.vis < 16, "牛歩でも画面は少しずつ流れる", n0.vis.toFixed(1) + "px/s");
-
-var nSonic = settle(g, 0.3408);
-ok(nSonic.kmh > 1100 && nSonic.kmh < 1400, "目盛りの位置が音の速さ", nSonic.read);
-
-var nHalf = settle(g, 0.5);
-ok(nHalf.kmh > 8e4 && nHalf.kmh < 1.2e5, "まん中は10万km/hくらい", nHalf.read);
-
-var nC = settle(g, 0.99, 300);
-ok(nC.beta > 0.999 && nC.beta < 1, "右端の手前は光の速さのすぐ下", nC.read);
-ok(/ c$/.test(nC.read), "光の速さに近いと c で出る", nC.read);
-
-/* 2. 遅いうちは車が出ない */
-g.probe.reset();
-var slow = settle(g, 0.12, 60 * 12);
-ok(slow.kmh < 55, "ツマミ0.12はまだ55km/h未満", slow.read);
-ok(slow.cars === 0 && slow.score === 0, "遅いうちは車が出ない", "車" + slow.cars + " 台" + slow.score);
-
-/* 3. 速くすると車を跳ね飛ばす */
-g.probe.reset();
-setKnob(g, 0.5);
-g.step(60 * 10);
-var fast = g.probe.now();
-ok(fast.score >= 10, "速くすると次々跳ね飛ばす（10秒）", fast.score + "台");
-ok(fast.flying > 0, "跳ね飛ばした車が飛んでいる", fast.flying + "台");
-
-g.probe.reset();
-setKnob(g, 0.26);
+ok(Math.abs(g.probe.now().kmh - 0.1) < 1e-9, "はじめは牛歩", g.probe.now().read);
+push(g, 1);
+ok(Math.abs(g.probe.now().kmh - 1.1) < 1e-9, "牧場は1押し1km/h", g.probe.now().read);
+var keep = g.probe.now().kmh;
 g.step(60 * 20);
-var mid = g.probe.now();
-ok(mid.score >= 1 && mid.score <= 12, "100km/hあたりはたまに跳ねる（20秒）", mid.score + "台 / " + mid.read);
+ok(g.probe.now().kmh === keep, "押さずに20秒おいても落ちない", g.probe.now().read);
 
-/* 4. 警告 */
+/* 2. 景色ごとに要る押しの数 */
 g.probe.reset();
-var warn = settle(g, 0.94, 300);
-ok(warn.warn === true, "光の速さの手前で警告が出る", warn.read);
-var nowarn = settle(g, 0.8, 300);
-ok(nowarn.warn === false, "戻せば警告が消える", nowarn.read);
+var marks = [], seen = 0, total = 0, guard = 0;
+while (g.probe.now().state === "play" && guard++ < 4000) {
+  var before = g.probe.now().gear;
+  g.tap(270, 400); total++;
+  var n = g.probe.now();
+  if (n.gear !== before || n.state !== "play") {
+    marks.push({ phase: ["牧場", "道路", "町", "都市", "宇宙"][before], clicks: total - seen });
+    seen = total;
+  }
+}
+ok(g.probe.now().state !== "play", "押し続ければ必ず光の速さに届く", g.probe.now().state);
+marks.forEach(function (m) { console.log("    " + m.phase + " … " + m.clicks + "押し"); });
+ok(marks.length === 5, "景色は5つ", marks.length + "つ");
+ok(marks[0].clicks === 50, "牧場は50押し", marks[0].clicks);
+var inc = marks.every(function (m, i) { return i === 0 || m.clicks >= marks[i - 1].clicks; });
+ok(inc, "先へ行くほど押す数が増える", marks.map(function (m) { return m.clicks; }).join(" → "));
+ok(total > 700 && total < 900, "光の速さまで合計800押しくらい", total + "押し");
+ok(g.probe.now().score === total, "結果の数字は押した回数", g.probe.now().score);
 
-/* 5. 警告のまま止めても壊れない */
+/* 3. ギアの中身 */
 g.probe.reset();
-setKnob(g, 0.95);
-g.step(60 * 15);
-var held = g.probe.now();
-ok(held.state === "play" && held.warn, "右端まで行かなければ壊れない（15秒）", held.read);
+[[0, "牧場", 1], [60, "道路", 100], [160, "町", 6600], [310, "都市", 5e5], [510, "宇宙", 3.3e6]].forEach(function (c) {
+  var t = start();
+  push(t, c[0]);
+  var n = t.probe.now();
+  ok(n.phase === c[1] && n.step === c[2], c[0] + "押しめは" + c[1] + "（1押し " + c[2] + "km/h）",
+     n.phase + " / " + n.step + " / " + n.read);
+});
 
-/* 6. 右端に置くと宇宙が壊れる */
-g.probe.reset();
-setKnob(g, 1);
-g.step(30);
-var before = g.probe.now();
-ok(before.state === "play" && before.hold > 0, "右端に置くと溜めが始まる", before.hold.toFixed(2) + "秒");
-ok(before.warn === true, "右端に置いた時点で警告が出る", before.read);
-var boomed = g.until(function () { return g.probe.now().state === "boom"; }, 200);
-ok(boomed, "2秒ほどで宇宙が壊れる", g.probe.now().read);
-ok(g.probe.now().read === "1.000000 c", "壊れる瞬間はちょうど光の速さ", g.probe.now().read);
-var done = g.until(function () { return g.probe.now().state === "result"; }, 300);
-ok(done, "壊れたあと結果画面へ", g.probe.now().state);
+/* 4. 車 */
+var t1 = start();
+push(t1, 40, 2);
+g.step(1);
+ok(t1.probe.now().kmh < 50 && t1.probe.now().cars === 0, "牧場では車が出ない", t1.probe.now().read);
+var t2 = start();
+push(t2, 120, 4);
+t2.step(60 * 8);
+ok(t2.probe.now().flying + t2.probe.now().cars > 0, "道路より先では車が出る", t2.probe.now().read);
+var t3 = start();
+push(t3, 200, 3);
+t3.step(60 * 6);
+ok(t3.probe.now().flying > 0, "追いついて跳ね飛ばす", "飛んでいる車 " + t3.probe.now().flying + "台");
 
-/* 7. 溜めの途中で戻せば助かる */
-g.probe.reset();
-setKnob(g, 1);
-g.step(60);                                   /* 1秒だけ右端に置く */
-setKnob(g, 0.5);
-g.step(60 * 4);
-ok(g.probe.now().state === "play", "溜めの途中で戻せば助かる", g.probe.now().read);
+/* 5. 警告と、やめれば壊れない */
+var t4 = start();
+var toWarn = 0;
+while (!t4.probe.now().warn && t4.probe.now().state === "play" && toWarn < 2000) { t4.tap(270, 400); toWarn++; }
+ok(t4.probe.now().warn, "光の速さの手前で警告が出る", t4.probe.now().read + " / " + toWarn + "押しめ");
+var left = 0;
+var t5 = load(FILE); t5.press(" "); t5.step(2);
+for (var i = 0; i < toWarn; i++) t5.tap(270, 400);
+while (t5.probe.now().state === "play" && left < 2000) { t5.tap(270, 400); left++; }
+ok(left > 10 && left < 60, "警告が出てから光の速さまで少し間がある", left + "押し");
+t4.step(60 * 30);
+ok(t4.probe.now().state === "play" && t4.probe.now().warn, "警告のまま押すのをやめれば壊れない（30秒）", t4.probe.now().read);
 
-/* 8. 結果画面から、もう一度 */
-g.probe.reset();
-setKnob(g, 1);
-g.until(function () { return g.probe.now().state === "result"; }, 400);
-var H = g.probe.now().H, W = g.probe.now().W;
-g.tap(W / 2 - 115, H * 0.62 + 27);
-ok(g.probe.now().state === "play", "「もう一度」で遊び直せる", g.probe.now().state);
-ok(g.probe.now().knob === 0 && g.probe.now().score === 0, "やり直すとツマミも数も戻る");
+/* 6. 宇宙が壊れる */
+var t6 = start();
+while (t6.probe.now().state === "play") t6.tap(270, 400);
+ok(t6.probe.now().state === "boom", "光の速さに届くと宇宙が壊れる", t6.probe.now().read);
+ok(t6.probe.now().read === "1.000000 c", "壊れる瞬間はちょうど光の速さ", t6.probe.now().read);
+ok(t6.until(function () { return t6.probe.now().state === "result"; }, 300), "壊れたあと結果画面へ",
+   t6.probe.now().state);
 
-/* 9. キーとジョイパッド */
-g.probe.reset();
-g.key("ArrowRight"); g.step(60); g.key("ArrowRight", true);
-var byKey = g.probe.now().knob;
-ok(byKey > 0.2 && byKey < 0.35, "→ 1秒でツマミが0.28ほど動く", byKey.toFixed(3));
-g.key("ArrowLeft"); g.step(30); g.key("ArrowLeft", true);
-ok(g.probe.now().knob < byKey, "← で戻る", g.probe.now().knob.toFixed(3));
-g.probe.reset();
-for (var i = 0; i < 60; i++) { g.pad({ press: true }); g.step(1); }
-g.pad({});
-ok(g.probe.now().knob > 0.2, "ジョイパッドでも上がる", g.probe.now().knob.toFixed(3));
+/* 7. 結果画面から、もう一度 */
+var H = t6.probe.now().H, Wd = t6.probe.now().W;
+t6.tap(Wd / 2 - 115, H * 0.62 + 27);
+ok(t6.probe.now().state === "play", "「もう一度」で遊び直せる", t6.probe.now().state);
+ok(t6.probe.now().score === 0 && Math.abs(t6.probe.now().kmh - 0.1) < 1e-9, "やり直すと牛歩から");
 
-/* 10. ツマミ以外を触っても動かない */
-g.probe.reset();
-g.tap(270, Math.round(g.probe.now().H * 0.3));
-ok(g.probe.now().knob === 0, "道路のあたりを触ってもツマミは動かない");
+/* 8. キーとジョイパッド */
+var t7 = start();
+t7.press(" "); t7.press(" "); t7.press(" ");
+ok(t7.probe.now().score === 3, "スペースの連打で進む", t7.probe.now().score + "押し");
+t7.pad({ press: true }); t7.step(1); t7.pad({}); t7.step(1);
+ok(t7.probe.now().score === 4, "ジョイパッドでも押せる", t7.probe.now().score + "押し");
+t7.esc();
+ok(t7.probe.now().score === 0, "Escで最初から");
 
-/* 11. 画面の形が変わってもツマミは同じ場所で効く */
+/* 9. 画面の形 */
 [[375, 667], [390, 844], [430, 932], [768, 1024], [412, 915], [360, 780]].forEach(function (v) {
   var t = load(FILE, { w: v[0], h: v[1] });
   t.press(" "); t.step(2);
-  var y = Math.round(t.probe.now().H * 0.83), x = 76 + (t.probe.now().W - 152) * 0.6;
-  t.down(x, y); t.up();
-  ok(Math.abs(t.probe.now().knob - 0.6) < 0.01, "画面 " + v[0] + "x" + v[1] + " でツマミが効く",
-     "高さ" + t.probe.now().H);
+  push(t, 5, 1);
+  ok(t.probe.now().score === 5 && Math.abs(t.probe.now().kmh - 5.1) < 1e-9,
+     "画面 " + v[0] + "x" + v[1] + " で押せる", "高さ" + t.probe.now().H + " / " + t.probe.now().read);
 });
 
 console.log(ng ? "\n問題 " + ng + " 件" : "\nぜんぶ通った");
