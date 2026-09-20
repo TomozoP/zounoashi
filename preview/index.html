@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="doji5-20260920142859">
+<meta name="preview-version" content="doji5-1789882574145">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>同時球技5種</title>
 <style>
@@ -27,12 +27,12 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/random-bowling/vendor/three.min.js?v=doji5-20260920142859"></script>
-<script src="./scene.js?v=doji5-20260920142859"></script>
-<script src="../games/share.js?v=doji5-20260920142859"></script>
-<script src="../games/result-actions.js?v=doji5-20260920142859"></script>
-<script src="../games/action-icons.js?v=doji5-20260920142859"></script>
-<script src="../games/pad.js?v=doji5-20260920142859"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/random-bowling/vendor/three.min.js?v=doji5-1789882574145"></script>
+<script src="./scene.js?v=doji5-1789882574145"></script>
+<script src="../games/share.js?v=doji5-1789882574145"></script>
+<script src="../games/result-actions.js?v=doji5-1789882574145"></script>
+<script src="../games/action-icons.js?v=doji5-1789882574145"></script>
+<script src="../games/pad.js?v=doji5-1789882574145"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* 同時球技5種。
    野球・サッカー・テニス・バスケ・バレーの球が、ぜんぶ同じ場所へ次々に飛んでくる。
@@ -194,12 +194,14 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, hits, lives, T, held, keyMode = false;
   var balls, nextArrive, lastKinds, act, actT, actKind, shake, flashes, pitchAt, leanX;
-  var flash = {}, cursor = 0, animT = 0;           /* 押した目印、キー操作の選び位置、絵の時計 */
+  var actions = {}, results = [], flash = {}, cursor = 0, animT = 0;           /* 押した目印、キー操作の選び位置、絵の時計 */
   var on = { yakyu: true, soccer: true, tennis: true, basket: true, volley: true };
-  function kinds() { return KEYS.filter(function (k) { return on[k]; }); }
+  function kinds() { return KEYS.slice(); }
+  var ACTIONS = { yakyu: "SWING", soccer: "KICK", tennis: "RETURN", basket: "SHOOT", volley: "SPIKE" };
+  var CHEERS = { yakyu: "HOME RUN!", soccer: "GOAL!", tennis: "WINNER!", basket: "BASKET!", volley: "POINT!" };
 
   /* ============ 下の5ボタン ============
-     はじめの画面では5つとも出して入切を選び、遊びのあいだは入れたものだけ出す。 */
+     遊びのあいだは常に5つとも出す。 */
   var HUDY, SCOREY, PADY, PADW = 92, PADGAP = 14;
   function place() {
     HUDY = Math.round(H * 0.045);
@@ -221,13 +223,6 @@
     }
     return null;
   }
-  /* 入切。最後のひとつは切らせない */
-  function toggle(kind) {
-    if (on[kind] && kinds().length <= 1) return;
-    on[kind] = !on[kind];
-    flash[kind] = .16;
-  }
-
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
@@ -235,9 +230,9 @@
     score = 0; hits = 0; lives = LIVES; T = 0; held = false;
     balls = []; lastKinds = []; flashes = [];
     act = null; actT = 0; actKind = null; shake = 0; pitchAt = -9; leanX = 0;
-    nextArrive = 1.9; cursor = 0; flash = {};
+    nextArrive = 1.9; cursor = 0; flash = {}; results = []; actions = {};
   }
-  /* 結果から「もう一度」は、競技を選び直すところへ戻す */
+  /* 結果から「もう一度」は、開始画面へ戻す */
   function toIntro() {
     newRound();
     state = S.INTRO;
@@ -274,6 +269,9 @@
     if (act) { actT += dt; if (actT > ACT) act = null; }
     KEYS.forEach(function (k) { if (flash[k] > 0) flash[k] = Math.max(0, flash[k] - dt); });
     animT += dt;                                   /* 絵だけの時計。選ぶ画面でも奥の人は動く */
+    KEYS.forEach(function (k) { actions[k] = Math.max(0, (actions[k] || 0) - dt); });
+    results.forEach(function (r) { r.age += dt; });
+    results = results.filter(function (r) { return r.age < 1.1; });
     flashes.forEach(function (f) { f.age += dt; });
     flashes = flashes.filter(function (f) { return f.age < .45; });
     if (state !== S.PLAY) return;
@@ -289,6 +287,10 @@
         b.fy = b.hy + b.v.y * e - .5 * GRAVITY * e * e;
         b.fz = b.hz + b.v.z * e;
         if (b.fy < k.r) { b.fy = k.r; }
+        if (!b.resultShown && e >= b.resultAfter) {
+          b.resultShown = true;
+          results.push({ kind: b.kind, x: b.resultAt.x, y: b.resultAt.y, z: b.resultAt.z, age: 0 });
+        }
         if (e > 2.4 || Math.abs(b.fz) > 95) b.dead = true;
         return;
       }
@@ -326,6 +328,7 @@
   function press(kind) {
     if (state !== S.PLAY || !on[kind]) return;
     flash[kind] = .16;
+    actions[kind] = .45;
     act = kind; actT = 0; actKind = kind;
     var b = targetOf(kind);
     if (b) swingAt(b); else whiff();
@@ -347,6 +350,7 @@
     b.v = aimAt(from, to, tf);
     score += k.pts * (perfect ? 2 : 1);
     hits++;
+    b.resultAfter = tf; b.resultAt = to; b.resultShown = false;
     shake = Math.max(shake, perfect ? .9 : .6);
     flashes.push({ x: b.hx, y: b.hy, z: b.hz, age: 0, big: perfect });
     hitSound(b.kind, perfect);
@@ -363,12 +367,7 @@
      x が null のときはキー操作。 */
   var padPending = null;
   function down(x, y) {
-    if (state === S.INTRO) {
-      /* 入切の並びを押したとき。本物のブラウザでは下の捕捉側が先に受け取る */
-      var t = padAt(x, y, true);
-      padPending = t ? t.kind : null;
-      return;
-    }
+    if (state === S.INTRO) return;
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
@@ -382,7 +381,7 @@
   function move() {}
   function up() {
     held = false;
-    if (state === S.INTRO && padPending) { toggle(padPending); padPending = null; }
+
   }
 
   function atCanvas(e) {
@@ -419,8 +418,7 @@
     }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
     if (state === S.INTRO) {
-      if (num >= 0) { toggle(KEYS[num]); cursor = num; return; }
-      if (flip) { toggle(list[Math.min(cursor, list.length - 1)].kind); return; }
+      if (!go) return;
       introArmed = true;                       /* 開始は、この指を離したとき */
       return;
     }
@@ -433,8 +431,8 @@
     if (state === S.PLAY) { if (list[cursor]) press(list[cursor].kind); return; }
     down();                                    /* 結果画面はスペースでもう一度 */
   });
-  /* 結果画面でスペースを押すと競技選びへ戻る。その指を離したぶんで
-     そのまま始まってしまわないよう、押した時点で選び画面だったときだけ開始する。 */
+  /* 結果画面でスペースを押すと開始画面へ戻る。その指を離したぶんで
+     そのまま始まってしまわないよう、押した時点で開始画面だったときだけ開始する。 */
   var introArmed = false;
   window.addEventListener("keyup", function (e) {
     if (e.code !== "Space" && e.key !== " " && e.key !== "Enter") return;
@@ -600,6 +598,19 @@
     });
   }
 
+  function drawWord(word, x, y, color, size, alpha) {
+    ctx.save();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = "bold " + size + "px sans-serif";
+    var margin = ctx.measureText(word).width / 2 + 8;
+    x = Math.max(margin, Math.min(W - margin, x));
+    y = Math.max(size, Math.min(H - size, y));
+    ctx.globalAlpha = Math.min(1, alpha);
+    ctx.lineWidth = 5; ctx.strokeStyle = "#101820"; ctx.fillStyle = color;
+    ctx.strokeText(word, x, y); ctx.fillText(word, x, y);
+    ctx.restore();
+  }
+
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     var snap = snapshot();
@@ -621,7 +632,17 @@
 
     /* 残りと点。結果画面では出さない */
     if (state === S.RESULT) { drawResult(); return; }
-    drawPads(state === S.INTRO);
+    if (state === S.INTRO) return;
+    drawPads(false);
+    /* 操作は手前の選手、結果は球が届いた奥の場所に出す。 */
+    KEYS.filter(function (k) { return actions[k] > 0; }).forEach(function (k, i) {
+      var p = view3d ? view3d.project(leanX, 2.7, -.9) : { x: W / 2, y: H * .56 };
+      drawWord(ACTIONS[k], p.x, p.y - i * 27, "#ffffff", 22, actions[k] / .15);
+    });
+    results.forEach(function (r) {
+      var p = view3d ? view3d.project(r.x, r.y, r.z) : { x: W / 2, y: H * .28 };
+      drawWord(CHEERS[r.kind], p.x, p.y - 20 - r.age * 16, "#ffe27a", 26, (1.1 - r.age) / .2);
+    });
     ctx.save();
     for (var i = 0; i < LIVES; i++) {
       ctx.beginPath();
@@ -691,7 +712,7 @@
           return { kind: b.kind, dt: T - b.tArrive, hit: b.hit, judged: b.judged };
         }),
         nextArrive: nextArrive, W: W, H: H, has3d: !!view3d,
-        on: kinds(), pads: pads(state === S.INTRO)
+        on: kinds(), actions: KEYS.filter(function (k) { return actions[k] > 0; }).map(function (k) { return ACTIONS[k]; }), cheers: results.map(function (r) { return CHEERS[r.kind]; }), results: results.map(function (r) { return { kind: r.kind, x: r.x, y: r.y, z: r.z }; }), pads: state === S.PLAY ? pads(false) : []
       };
     },
     /* 次の球を、ちょうどの間合いまで進める */
@@ -734,34 +755,20 @@
   /* ============ ループ ============ */
   var startButton = document.getElementById("start");
   // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
-  var startingPointer = null, togglingPointer = null;
-  /* 入切の並びを触ったときだけは開始せず、その競技を入切する */
-  function introPad(e) {
-    var r = canvas.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
-    return padAt((e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H, true);
-  }
+  var startingPointer = null;
   document.addEventListener("pointerdown", function (e) {
     if (!(state === S.INTRO)) return;
     if (e.isPrimary === false || e.button > 0) return;
     keyMode = false;
-    if (introPad(e)) { togglingPointer = e.pointerId; e.stopImmediatePropagation(); return; }
     startingPointer = e.pointerId;
     e.stopImmediatePropagation();
   }, true);
   document.addEventListener("pointerup", function (e) {
     if (!(state === S.INTRO)) return;
-    if (togglingPointer === e.pointerId) {
-      togglingPointer = null;
-      var pad = introPad(e);
-      e.preventDefault(); e.stopImmediatePropagation();
-      if (pad) toggle(pad.kind);
-      return;
-    }
     if (startingPointer !== e.pointerId) return;
     startingPointer = null; e.preventDefault(); e.stopImmediatePropagation(); startButton.click();
   }, true);
-  document.addEventListener("pointercancel", function () { startingPointer = null; togglingPointer = null; }, true);
+  document.addEventListener("pointercancel", function () { startingPointer = null; }, true);
 
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
   startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
@@ -780,10 +787,10 @@
 <script>
 if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = "../games/_tools/recorder-ui.js?v=doji5-20260920142859";
+  recorderScript.src = "../games/_tools/recorder-ui.js?v=doji5-1789882574145";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=doji5-20260920142859"></script>
+<script src="./auto-reload.js?v=doji5-1789882574145"></script>
 </body>
 </html>

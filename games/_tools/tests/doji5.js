@@ -6,8 +6,8 @@
    ・球に合うボタンを間合いで押せば当たる（5競技ぜんぶ）
    ・違うボタンを押しても当たらないが、振っただけでは残りは減らない
    ・減るのは球を見逃したときだけ。尽きたら結果画面
-   ・もう一度を押すと、競技を選ぶところへ戻る
-   ・はじめの画面で競技を切ると、その球は来ず、ボタンも出ない
+   ・もう一度を押すと、開始画面へ戻る
+   ・開始画面はSTART待ちで、つねに5競技
    ・ボタン同士が63以上離れている（スマホで44px） */
 
 var load = require("../harness");
@@ -67,6 +67,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
   for (var i = 0; i < 20; i++) { hitPad(g, "yakyu"); g.step(2); }   /* 最初の球が出るより前 */
   ok("空振りを続けても残りが減らない", g.probe.now().lives === before, before + " → " + g.probe.now().lives);
   ok("空振りでは点が入らない", g.probe.now().score === 0);
+  ok("空振りは操作だけを表示する", g.probe.now().actions.indexOf("SWING") >= 0 && g.probe.now().cheers.length === 0);
 })();
 
 /* ---- ボタンの外を触っても何も起きない ---- */
@@ -88,40 +89,20 @@ function start(g) { g.press(" "); g.step(2); return g; }
   ok("終わるまで十分な間がある", now.T > 4, Math.round(now.T * 10) / 10 + "秒");
   g.tap(150, g.H * .62 + 20); g.step(2);
   var back = g.probe.now();
-  ok("もう一度で競技を選ぶところへ戻る", back.state === "intro" && back.pads.length === 5, back.state);
+  ok("もう一度で開始画面へ戻る", back.state === "intro" && back.pads.length === 0, back.state);
   ok("戻ったら点と残りが元に戻っている", back.score === 0 && back.lives === 5);
   g.press(" "); g.step(2);
   ok("そこから始められる", g.probe.now().state === "play", g.probe.now().state);
 })();
 
-/* ---- はじめの画面で競技を切る ---- */
+/* ---- 開始前は競技を切り替えられず、操作ボタンを出さない ---- */
 (function () {
   var g = load("games/_doji5/index.html", { quiet: true });
-  g.step(2);
-  var intro = g.probe.now();
-  ok("はじめは5つとも出ている", intro.pads.length === 5 && intro.on.length === 5, intro.on.join(","));
-  hitPad(g, "yakyu"); g.step(2);                  /* 野球を切る */
-  hitPad(g, "tennis"); g.step(2);                 /* テニスを切る */
-  var picked = g.probe.now();
-  ok("切った競技は入っていない", picked.on.length === 3 && picked.on.indexOf("yakyu") < 0, picked.on.join(","));
-  ok("切っても開始前のまま", picked.state === "intro");
+  ["1", "2", "3", "4", "5", "ArrowUp"].forEach(function (k) { g.press(k); });
+  ok("開始前はSTART待ちで操作ボタンを出さない", g.probe.now().state === "intro" && g.probe.now().pads.length === 0);
+  ok("常に5競技", g.probe.now().on.length === 5);
   start(g);
-  var playing = g.probe.now();
-  ok("遊びに入ると、入れた競技だけボタンが出る", playing.pads.length === 3, playing.pads.map(function (b) { return b.kind; }).join(","));
-  var frames = 0, badKind = null;
-  while (g.probe.now().state === "play" && frames++ < 900) {
-    g.step(1);
-    g.probe.now().balls.forEach(function (b) { if (b.kind === "yakyu" || b.kind === "tennis") badKind = b.kind; });
-  }
-  ok("切った競技の球は来ない", !badKind, badKind || "来なかった");
-})();
-
-/* ---- 最後のひとつは切れない ---- */
-(function () {
-  var g = load("games/_doji5/index.html", { quiet: true });
-  g.step(2);
-  ["yakyu", "soccer", "tennis", "basket", "volley"].forEach(function (k) { hitPad(g, k); g.step(2); });
-  ok("ぜんぶ切ろうとしても1つ残る", g.probe.now().on.length === 1, g.probe.now().on.join(","));
+  ok("開始後は5ボタン", g.probe.now().pads.length === 5);
 })();
 
 /* ---- 押しどころの間隔 ---- */
@@ -155,25 +136,44 @@ function start(g) { g.press(" "); g.step(2); return g; }
   ok("詰まりすぎない", later > .38, later.toFixed(2) + "秒");
 })();
 
-/* 途中の競技を切っても、数字キーは同じ競技を操作する。 */
-[false, true].forEach(function (reduced) {
+/* 5競技のキー操作と得点時の表示。 */
+(function () {
   var g = load("games/_doji5/index.html", { quiet: true });
   var keys = ["yakyu", "soccer", "tennis", "basket", "volley"];
-  if (reduced) { g.press("1"); g.press("3"); }
+  var words = ["HOME RUN!", "GOAL!", "WINNER!", "BASKET!", "POINT!"];
   start(g);
   var seen = {};
-  for (var i = 0; i < 60 && Object.keys(seen).length < (reduced ? 3 : 5); i++) {
+  for (var i = 0; i < 60 && Object.keys(seen).length < 5; i++) {
     var kind = g.probe.toBall(), before = g.probe.now().score;
     if (!kind) break;
-    if (reduced) {
-      g.press("1");
-      ok("切った競技のキーでは点が入らない", g.probe.now().score === before);
-    }
     g.press(String(keys.indexOf(kind) + 1));
     ok("数字キーで当たる：" + kind, g.probe.now().score > before);
+
+    ok("操作の表示も別に出る", g.probe.now().actions.indexOf(["SWING", "KICK", "RETURN", "SHOOT", "SPIKE"][keys.indexOf(kind)]) >= 0);
     seen[kind] = true;
   }
-  ok(reduced ? "競技を切っても割り当てがずれない" : "5競技とも数字キーで操作できる", Object.keys(seen).length === (reduced ? 3 : 5));
+  ok("5競技とも数字キーで操作できる", Object.keys(seen).length === 5);
+  g.step(210);
+  ok("得点表示は消える", g.probe.now().cheers.length === 0);
+})();
+
+/* 結果は打った瞬間には出ず、球が奥へ届いてから出る。 */
+["yakyu", "soccer", "tennis", "basket", "volley"].forEach(function (wanted, index) {
+  var g = start(load("games/_doji5/index.html", { quiet: true }));
+  var found = false;
+  for (var i = 0; i < 100; i++) {
+    var kind = g.probe.toBall();
+    if (!kind) break;
+    hitPad(g, kind);
+    if (kind !== wanted) continue;
+    found = true;
+    ok("打った瞬間にその球の結果はまだ出ない：" + kind, !g.probe.now().results.some(function (r) { return r.kind === wanted; }));
+    g.step(Math.ceil([2.1, 1.6, 1, 1.15, .9][index] * 60) + 1);
+    var result = g.probe.now().results.filter(function (r) { return r.kind === wanted; })[0];
+    ok("到着後、奥の位置に結果が出る：" + kind, !!result && result.z >= 19);
+    break;
+  }
+  ok("到着の確認ができた：" + wanted, found);
 });
 
 console.log(bad.length ? "\n直すところ: " + bad.join(" / ") : "\n問題なし");
