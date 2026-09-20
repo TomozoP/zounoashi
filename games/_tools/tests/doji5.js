@@ -4,9 +4,9 @@
 
    見るところ
    ・球に合うボタンを間合いで押せば当たる（5競技ぜんぶ）
-   ・違うボタンを押すと当たらず、残りが減る
-   ・何も来ていないのに押すと残りが減る
-   ・見逃すと残りが減る／残りが尽きたら結果画面
+   ・違うボタンを押しても当たらないが、振っただけでは残りは減らない
+   ・減るのは球を見逃したときだけ。尽きたら結果画面
+   ・もう一度を押すと、競技を選ぶところへ戻る
    ・はじめの画面で競技を切ると、その球は来ず、ボタンも出ない
    ・ボタン同士が63以上離れている（スマホで44px） */
 
@@ -48,7 +48,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
   ok("当てているあいだは残りが減らない", g.probe.now().lives === 5, String(g.probe.now().lives));
 })();
 
-/* ---- 違うボタンを押すと当たらない ---- */
+/* ---- 違うボタンを押しても当たらない。ただし残りは減らない ---- */
 (function () {
   var g = start(load("games/_doji5/index.html", { quiet: true }));
   var kind = g.probe.toBall();
@@ -57,15 +57,15 @@ function start(g) { g.press(" "); g.step(2); return g; }
   hitPad(g, other);
   var after = g.probe.now();
   ok("違うボタンでは点が入らない", after.score === before.score, kind + " の球に " + other + " のボタン");
-  ok("違うボタンは残りが減る", after.lives === before.lives - 1, before.lives + " → " + after.lives);
+  ok("違うボタンでも残りは減らない", after.lives === before.lives, before.lives + " → " + after.lives);
 })();
 
-/* ---- 何も来ていないのに押すと残りが減る ---- */
+/* ---- 何も来ていないのに押しても減らない ---- */
 (function () {
   var g = start(load("games/_doji5/index.html", { quiet: true }));
   var before = g.probe.now().lives;
-  hitPad(g, "yakyu");                             /* 最初の球が出るより前 */
-  ok("空振りで残りが減る", g.probe.now().lives === before - 1, before + " → " + g.probe.now().lives);
+  for (var i = 0; i < 20; i++) { hitPad(g, "yakyu"); g.step(2); }   /* 最初の球が出るより前 */
+  ok("空振りを続けても残りが減らない", g.probe.now().lives === before, before + " → " + g.probe.now().lives);
   ok("空振りでは点が入らない", g.probe.now().score === 0);
 })();
 
@@ -87,7 +87,11 @@ function start(g) { g.press(" "); g.step(2); return g; }
      JSON.stringify({ state: now.state, lives: now.lives, T: Math.round(now.T * 10) / 10 }));
   ok("終わるまで十分な間がある", now.T > 4, Math.round(now.T * 10) / 10 + "秒");
   g.tap(150, g.H * .62 + 20); g.step(2);
-  ok("結果画面から、もう一度で遊びに戻る", g.probe.now().state === "play");
+  var back = g.probe.now();
+  ok("もう一度で競技を選ぶところへ戻る", back.state === "intro" && back.pads.length === 5, back.state);
+  ok("戻ったら点と残りが元に戻っている", back.score === 0 && back.lives === 5);
+  g.press(" "); g.step(2);
+  ok("そこから始められる", g.probe.now().state === "play", g.probe.now().state);
 })();
 
 /* ---- はじめの画面で競技を切る ---- */

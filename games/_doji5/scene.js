@@ -535,19 +535,27 @@ var ZDoji5Scene = (function () {
     gear.yakyu.push(mound, this.pitcher.root);
     this.ground = ground; this.fieldTex = ft; this.sportsKey = null;
 
-    /* 味方と相手。立たせておくだけ */
+    /* 奥に立っている人たち。競技ごとに揃いの色で、入切で出入りする */
+    var UNIFORM = {
+      yakyu: ['#f0f2f0', '#39506e'], soccer: ['#3e63c8', '#f0f2f0'],
+      tennis: ['#f4f6f8', '#e6e9ee'], basket: ['#7a4fd0', '#2a2f3a'],
+      volley: ['#e8c53c', '#1f2a3a']
+    };
     this.extras = [];
-    [['#3e63c8', '#f0f2f0', -6.5, 17], ['#3e63c8', '#f0f2f0', 6.2, 19.5], ['#e8c53c', '#1f2a3a', -9.5, 6],
-     ['#e8c53c', '#1f2a3a', 9.2, 9], ['#3e63c8', '#f0f2f0', -3.4, 26], ['#e8c53c', '#1f2a3a', 4.1, 31],
-     ['#f0f2f0', '#c3352c', -13, 24], ['#f0f2f0', '#c3352c', 12.6, 14], ['#3e63c8', '#f0f2f0', -2.2, 38],
-     ['#e8c53c', '#1f2a3a', 7.6, 42], ['#f0f2f0', '#c3352c', -10.5, 35], ['#3e63c8', '#f0f2f0', 13.4, 33],
-     ['#e8c53c', '#1f2a3a', -16, 12], ['#f0f2f0', '#c3352c', 15.5, 5], ['#3e63c8', '#f0f2f0', 2.8, 52],
-     ['#e8c53c', '#1f2a3a', -5.4, 58]].forEach(function (e, n) {
-      var a = makeAthlete(self.scene, { shirt: e[0], pants: e[1] });
-      a.root.position.set(e[2], 0, e[3]);
-      a.root.rotation.y = Math.PI + (e[2] > 0 ? -.3 : .3);
+    [['tennis', -4.6, 18], ['tennis', 4.3, 21.5], ['tennis', -8.6, 13],
+     ['volley', -3.4, 17.5], ['volley', 3.2, 20], ['volley', 6.4, 16],
+     ['basket', -7.6, 11], ['basket', 7.2, 21], ['basket', 2.2, 27], ['basket', -2.6, 30],
+     ['yakyu', -12, 11], ['yakyu', 12, 11], ['yakyu', 0, 23], ['yakyu', -17, 27], ['yakyu', 17, 29],
+     ['soccer', -2.2, 38], ['soccer', 7.6, 42], ['soccer', -10.5, 35], ['soccer', 13.4, 33],
+     ['soccer', 2.8, 52], ['soccer', -5.4, 58], ['soccer', 9.8, 62]
+    ].forEach(function (e, n) {
+      var u = UNIFORM[e[0]];
+      var a = makeAthlete(self.scene, { shirt: u[0], pants: u[1] });
+      a.root.position.set(e[1], 0, e[2]);
+      a.root.rotation.y = Math.PI + (e[1] > 0 ? -.3 : .3);
       a.phase = n * 1.3;
       self.extras.push(a);
+      gear[e[0]].push(a.root);
     });
 
     this.shake = 0;
@@ -693,7 +701,8 @@ var ZDoji5Scene = (function () {
     this.player.root.position.x = snap.leanX || 0;
     this.player.root.position.z = -.9;
     this.posePitcher(snap.pitch, t);
-    this.extras.forEach(function (a, i) {
+    this.extras.forEach(function (a) {
+      if (!a.root.visible) return;                       /* 出ていない競技の人は動かさない */
       self.pose(a, null, 0, t + a.phase);
       a.root.position.y = Math.abs(Math.sin(t * 2.4 + a.phase)) * .05;
     });
