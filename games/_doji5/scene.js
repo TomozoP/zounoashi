@@ -414,7 +414,7 @@ var ZDoji5Scene = (function () {
       netPanel(0, 2.82, -.43, .66, .45, .05, 'rgba(245,247,245,.9)');
       netPanel(0, 2.82, -.43, .66, .45, .05, 'rgba(245,247,245,.9)', Math.PI / 2);
     }
-    gear.basket.push(group(0, 24.5, 0, hoop), group(-7.9, 15, -Math.PI / 2, hoop), group(8.6, 30, Math.PI / 2, hoop));
+    gear.basket.push(group(0, 24.5, 0, hoop));
 
     /* バレーのネット */
     gear.volley.push(group(0, 13, 0, function () {
@@ -576,7 +576,7 @@ var ZDoji5Scene = (function () {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     /* タテ長でも横の写る範囲を保つ */
-    this.camera.fov = 2 * Math.atan(Math.tan(30 * Math.PI / 180) * (h / w) / (960 / 540)) * 180 / Math.PI;
+    this.camera.fov = 2 * Math.atan(Math.tan(34 * Math.PI / 180) * (h / w) / (960 / 540)) * 180 / Math.PI;
     this.camera.updateProjectionMatrix();
   };
 
@@ -797,7 +797,13 @@ var ZDoji5Scene = (function () {
     /* 打った瞬間だけ少し揺らす */
     this.shake = Math.max(0, (snap.shake || 0));
     var sh = this.shake * .25;
-    this.camera.position.set((Math.random() - .5) * sh, 5.2 + (Math.random() - .5) * sh, -7.8);
+    /* 開始前は全景、開始すると元の近い位置へゆっくり加速して寄る。 */
+    var mix = snap.cameraMix == null ? 1 : snap.cameraMix;
+    mix = mix * mix * (3 - 2 * mix);
+    var angle = 34 + (30 - 34) * mix;
+    this.camera.fov = 2 * Math.atan(Math.tan(angle * Math.PI / 180) * (this.h / this.w) / (960 / 540)) * 180 / Math.PI;
+    this.camera.updateProjectionMatrix();
+    this.camera.position.set((Math.random() - .5) * sh, 16 + (5.2 - 16) * mix + (Math.random() - .5) * sh, -24 + (-7.8 + 24) * mix);
     this.camera.lookAt(0, .9, 11.5);
     this.camera.updateMatrixWorld();
     /* 画面の形で上下の写る範囲が変わるので、選手がいつも同じ高さに来るまで傾ける。
