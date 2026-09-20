@@ -81,7 +81,7 @@
      景色が変わると登りなおすが、はじまりの速さ自体が段ごとに上がっていく。
      宇宙はいきなり速い。 */
   var WSP_LO = [46, 82, 131, 210, 760];
-  var WSP_HI = [476, 676, 928, 1284, 2400];
+  var WSP_HI = [700, 1000, 1400, 1950, 3200];
   function gearIndex(km) {
     for (var i = 0; i < GEARS.length - 1; i++) if (km < GEARS[i].top) return i;
     return GEARS.length - 1;
@@ -245,9 +245,10 @@
   var state, score, scoreF, broken, T, bt;
   var dragY = null, tickAcc = 0, mooAcc = 0, lastSmash = -9, boost, lead;
   var moveAcc = 0, flickVel = 0, glide = 0;   /* 指の勢いと、離したあとの余韻 */
+  var zips = [];                              /* 速いときに流れる線 */
   var speed = MIN_KMH, beta = 0, wsp = 0, gear = 0, warning = false;
   var W8 = [1, 0, 0, 0, 0];                    /* 景色の重み（牧場・道路・町・都市・宇宙） */
-  var props, rings, shards;
+  var props, shards;
   var dist, nextAt, legPhase, prevHalf, prevKmh, prevGear, sirenT, clickPulse, gearFlash, lastDt;
 
   var PIECE = ["#f4f1ea", "#2b2723", "#e0543c", "#45464b", "#7fb04a", "#3f7fd6"];
@@ -266,9 +267,9 @@
     var g = gearIndex(km);
     return WSP_LO[g] + (WSP_HI[g] - WSP_LO[g]) * Math.pow(phaseT(km), 0.8);
   }
-  /* 壊すものの間隔。はじめは3秒に1つ、終わりで1.6秒に1つくらい */
+  /* 壊すものの間隔 */
   function propGap() {
-    return wsp * (3.0 - 1.4 * phaseT(speed));
+    return wsp * (2.0 + 1.3 * phaseT(speed));   /* はじめ2秒に1つ、終わりで3.3秒に1つ */
   }
   function heatOf(km) { return clamp01((log10(km) - 2.8) / 1.6); }
 
@@ -291,10 +292,15 @@
     score = 0; scoreF = 0; tickAcc = 0; mooAcc = 0; lastSmash = -9; dragY = null; broken = 0;
     T = 0; bt = 0; lastDt = 1 / 60;
     speed = MIN_KMH;
-    props = []; rings = []; shards = [];
+    props = []; shards = [];
     dist = 0; nextAt = 300; legPhase = 0; prevHalf = 0; prevKmh = MIN_KMH; prevGear = 0;
     sirenT = 0; clickPulse = 0; gearFlash = 0; boost = 0; lead = 0;
     moveAcc = 0; flickVel = 0; glide = 0;
+    zips = [];
+    for (var z = 0; z < 34; z++) {
+      zips.push({ a: Math.random() * TAU, r: Math.random() * 1.2,
+                  len: 0.09 + Math.random() * 0.22, v: 0.55 + Math.random() * 0.8 });
+    }
     if (scene3d) scene3d.reset();
     recalc();
   }
@@ -438,7 +444,7 @@
 
     /* 音の壁 */
     if (prevKmh < SONIC && speed >= SONIC) {
-      rings.push({ r: 0.2, life: 0 });
+      if (scene3d) scene3d.sonicBoom();
       noiseHit(0.55, 110, 0.45, 0.5);
       tone(160, 0.5, 0.2, "sawtooth", 50);
     }
@@ -456,11 +462,14 @@
     }
     if (props.length > 60) props.splice(0, props.length - 60);
 
-    /* 音の壁の輪 */
-    for (var m = rings.length - 1; m >= 0; m--) {
-      rings[m].r += 2.2 * dt;
-      rings[m].life += dt;
-      if (rings[m].life > 0.9) rings.splice(m, 1);
+    /* 速いときの流れ線 */
+    var zk = zipAmount();
+    if (zk > 0.01) {
+      for (var zi = 0; zi < zips.length; zi++) {
+        var zp = zips[zi];
+        zp.r += zp.v * dt * (0.5 + zk * 3.2);
+        if (zp.r > 1.35) { zp.r = 0.04 + Math.random() * 0.12; zp.a = Math.random() * TAU; }
+      }
     }
 
     /* 警告の音 */
@@ -618,16 +627,29 @@
     ctx.restore();
   }
 
-  /* 音の壁を抜けた瞬間の輪 */
-  function drawRings() {
-    for (var i = 0; i < rings.length; i++) {
-      var r = rings[i], a = 1 - r.life / 0.9;
-      ctx.strokeStyle = "rgba(255,255,255," + (a * 0.5) + ")";
-      ctx.lineWidth = 3 + a * 7;
+  /* 速いときに、奥から手前へ流れる線 */
+  function zipAmount() {
+    return clamp01((wsp - 300) / 1500) * (W8[4] ? 0.55 : 1);
+  }
+  function drawZips() {
+    var k = zipAmount();
+    if (k <= 0.01) return;
+    var R = Math.max(W, H) * 0.9;
+    ctx.save();
+    ctx.lineCap = "round";
+    for (var i = 0; i < zips.length; i++) {
+      var z = zips[i];
+      var c = Math.cos(z.a), si = Math.sin(z.a);
+      var r0 = z.r, r1 = z.r + z.len * (0.4 + k);
+      var fade = clamp01(r0 * 3) * clamp01((1.35 - r0) * 2.5);
+      ctx.strokeStyle = "rgba(255,255,255," + (k * 0.42 * fade) + ")";
+      ctx.lineWidth = 1.5 + k * 3.5;
       ctx.beginPath();
-      ctx.ellipse(COWP.x, COWP.y - 60 * COWP.s, 300 * r.r * COWP.s, 320 * r.r * COWP.s, 0, 0, TAU);
+      ctx.moveTo(VAN.x + c * r0 * R, VAN.y + si * r0 * R * 0.88);
+      ctx.lineTo(VAN.x + c * r1 * R, VAN.y + si * r1 * R * 0.88);
       ctx.stroke();
     }
+    ctx.restore();
   }
 
   function drawBlue() {
@@ -732,7 +754,7 @@
     }
 
     drawFlame();
-    drawRings();
+    drawZips();
     drawBlue();
     if (gearFlash > 0.01) {
       ctx.fillStyle = "rgba(255,255,255," + (gearFlash * 0.35) + ")";

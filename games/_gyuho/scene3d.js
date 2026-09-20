@@ -38,12 +38,18 @@
       ball: new T.SphereGeometry(1, 16, 12),
       box: new T.BoxGeometry(1, 1, 1),
       tube: new T.CylinderGeometry(1, 1, 1, 12),
-      cone: new T.ConeGeometry(1, 1, 4)
+      cone: new T.ConeGeometry(1, 1, 4),
+      puff: new T.SphereGeometry(1, 6, 4),
+      ring: new T.RingGeometry(0.86, 1, 36)
     };
     this.bits = [];
     this.bitPool = [];
     this.flying = [];
     this.flyPool = [];
+    this.dust = [];
+    this.dustPool = [];
+    this.dustTimer = 0;
+    this.ringLife = [];
     this.build();
     this._v = new T.Vector3();
   }
@@ -147,6 +153,24 @@
       var b = this.mesh(this.geo.box, this.bitMats[0]);
       b.visible = false;
       this.bitPool.push(b);
+    }
+
+    /* 土ぼこり。ひと粒ずつ濃さを変えるので、材質も粒ごとに持つ */
+    for (var d = 0; d < 46; d++) {
+      var dm = new T.MeshBasicMaterial({ color: "#c9b48c", transparent: true, opacity: 0.5, depthWrite: false });
+      var puff = this.mesh(this.geo.puff, dm);
+      puff.visible = false;
+      this.dustPool.push(puff);
+    }
+
+    /* 音の壁を抜けたときの輪 */
+    this.ringMesh = [];
+    for (var r = 0; r < 3; r++) {
+      var rm = new T.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0, side: T.DoubleSide, depthWrite: false });
+      var ring = this.mesh(this.geo.ring, rm);
+      ring.visible = false;
+      this.ringMesh.push(ring);
+      this.ringLife.push(0);
     }
 
     /* 宇宙の星 */
@@ -360,15 +384,68 @@
       m.scale.set(sx, sx * (0.4 + Math.random() * 0.5), 6 + Math.random() * 14);
       m.position.set(x + (Math.random() - 0.5) * 70, 20 + Math.random() * high, z + (Math.random() - 0.5) * 60);
       m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+      var pw = Math.min(2.4, 0.85 + (this._wsp || 100) / 850);   /* 速いほど豪快に飛ぶ */
       this.bits.push({
         m: m, life: 0,
-        vx: (Math.random() - 0.5) * 460,
-        vy: 180 + Math.random() * 480,
-        vz: 220 + Math.random() * 420,
+        vx: (Math.random() - 0.5) * 460 * pw,
+        vy: (180 + Math.random() * 480) * pw,
+        vz: (220 + Math.random() * 420) * pw,
         rx: (Math.random() - 0.5) * 12, ry: (Math.random() - 0.5) * 12
       });
     }
   };
+  /* 土ぼこりをひと粒あげる */
+  Scene3D.prototype.puffUp = function (col) {
+    var m = this.dustPool.pop();
+    if (!m) return;
+    m.visible = true;
+    m.material.color.setRGB(srgb(col[0] * 0.55 + 140), srgb(col[1] * 0.55 + 132), srgb(col[2] * 0.55 + 112));
+    m.material.opacity = 0.5;
+    var sz = 13 + Math.random() * 15;
+    m.scale.set(sz, sz, sz);
+    m.position.set((Math.random() - 0.5) * 74, 6 + Math.random() * 12, 30 + Math.random() * 30);
+    this.dust.push({ m: m, life: 0, vx: (Math.random() - 0.5) * 95, vy: 34 + Math.random() * 72, gr: 1 + Math.random() * 1.6 });
+  };
+  Scene3D.prototype.stepDust = function (dt, wsp) {
+    for (var i = this.dust.length - 1; i >= 0; i--) {
+      var d = this.dust[i];
+      d.life += dt;
+      d.m.position.x += d.vx * dt;
+      d.m.position.y += d.vy * dt;
+      d.m.position.z += wsp * 0.85 * dt;
+      var gs = 1 + d.gr * dt;
+      d.m.scale.multiplyScalar(gs);
+      d.m.material.opacity = Math.max(0, 0.5 * (1 - d.life / 0.85));
+      if (d.life > 0.85 || d.m.position.z > 820) {
+        d.m.visible = false;
+        this.dustPool.push(d.m);
+        this.dust.splice(i, 1);
+      }
+    }
+  };
+
+  /* 音の壁を抜けた。輪を3枚、すこしずらして広げる */
+  Scene3D.prototype.sonicBoom = function () {
+    for (var i = 0; i < this.ringMesh.length; i++) {
+      this.ringMesh[i].visible = true;
+      this.ringLife[i] = -i * 0.13;
+    }
+  };
+  Scene3D.prototype.stepRings = function (dt) {
+    for (var i = 0; i < this.ringMesh.length; i++) {
+      var m = this.ringMesh[i];
+      if (!m.visible) continue;
+      this.ringLife[i] += dt;
+      var k = this.ringLife[i] / 0.72;
+      if (k < 0) { m.material.opacity = 0; continue; }
+      if (k >= 1) { m.visible = false; continue; }
+      var sc = 26 + k * 520;
+      m.scale.set(sc, sc, sc);
+      m.position.set(0, 74, -40 + k * 150);
+      m.material.opacity = 0.7 * (1 - k) * (1 - k);
+    }
+  };
+
   /* 人をひとり、宙へ跳ね上げる（こわさない） */
   Scene3D.prototype.launchPerson = function (x, r) {
     var m = this.flyPool.pop();
@@ -431,6 +508,12 @@
       this.bitPool.push(this.bits[i].m);
     }
     this.bits.length = 0;
+    for (var d2 = 0; d2 < this.dust.length; d2++) {
+      this.dust[d2].m.visible = false;
+      this.dustPool.push(this.dust[d2].m);
+    }
+    this.dust.length = 0;
+    for (var r2 = 0; r2 < this.ringMesh.length; r2++) this.ringMesh[r2].visible = false;
     for (var j = 0; j < this.flying.length; j++) {
       this.flying[j].m.visible = false;
       this.flyPool.push(this.flying[j].m);
@@ -530,15 +613,26 @@
     }
 
     this._wsp = s.wsp;
+    if (w[4] < 0.5 && s.wsp > 26) {            /* 地面があるあいだは土ぼこり */
+      var rate = Math.min(28, 3 + s.wsp / 24);
+      this.dustTimer -= s.dt;
+      var guard = 0;
+      while (this.dustTimer <= 0 && guard++ < 8) {
+        this.puffUp(s.roadColor);
+        this.dustTimer += 1 / rate;
+      }
+    }
+    this.stepDust(s.dt, s.wsp);
+    this.stepRings(s.dt);
     this.stepBits(s.dt);
     this.stepFlying(s.dt);
 
     function setColor(c, arr) { c.setRGB(srgb(arr[0]), srgb(arr[1]), srgb(arr[2])); }
-    function srgb(v) {
-      v = v / 255;
-      return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-    }
   };
+  function srgb(v) {
+    v = Math.min(255, v) / 255;
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  }
 
   Scene3D.prototype.shirtColor = function (r) {
     if (!this._shirts) {
