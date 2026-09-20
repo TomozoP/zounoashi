@@ -26,16 +26,21 @@
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
 <script src="../share.js"></script>
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="scene3d.js"></script>
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* 牛歩シミュレーター
 
-   奥へ走る牛を後ろから見ている。押すたびに速くなり、道の先にあるものを壊す。
-   景色は 牧場→道路→町→都市→宇宙。変わるたびに1押しの効き（ギア）と
-   壊すもの（わら・電柱・車・ビル・星）が変わる。速さは落ちない。
-   光の速さの手前で警告が出て、それでも押して光の速さになると宇宙が壊れる。 */
+   奥へ走る牛を、左後ろのすこし上から見ている（立体。組み立ては scene3d.js）。
+   押すたびに速くなり、道の先にあるものを壊す。景色は 牧場→道路→町→都市→宇宙。
+   変わるたびに1押しの効き（ギア）と壊すもの（わら・電柱・車・ビル・星）が変わる。
+   速さは落ちない。光の速さの手前で警告が出て、それでも押すと宇宙が壊れる。
+
+   空・雲・遠くの山なみと、数字まわりは2Dで描き、そのあいだに立体を重ねている。
+   WebGL が無いところでは立体を飛ばして、進行だけが動く。 */
 (function () {
   "use strict";
 
@@ -45,6 +50,11 @@
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
 
+  var scene3d = null;
+  if (window.WebGLRenderingContext && window.GyuhoScene3D && window.THREE) {
+    try { scene3d = new window.GyuhoScene3D(); } catch (e) { scene3d = null; }
+  }
+
   var TAU = Math.PI * 2;
   var C_KMH = 1079252848.8;                  /* 光の速さ km/h */
   var SONIC = 1234.8;                        /* 音の速さ km/h */
@@ -52,7 +62,7 @@
   var WARN_BETA = 0.9;                       /* ここから警告 */
 
   /* 景色と、そこでの1押しの効き。上の速さに届くと次の景色へ移り、ギアが上がる。
-     牧場をゆっくりにしてあるので、時速100kmに届くのは100押しを過ぎたあたり。
+     牧場をゆっくりにしてあるので、時速100kmに届くのは103押しめ。
      1景色に要る押しの数は 100→198→198→248→297（合計1041）。 */
   var GEARS = [
     { top: 40,    step: 0.4 },               /* 牧場：わら */
@@ -62,14 +72,7 @@
     { top: C_KMH, step: 3.5e6 }              /* 宇宙：星 */
   ];
   var PHASE_NAME = ["牧場", "道路", "町", "都市", "宇宙"];
-  /* 壊すものの、置かれる間隔（世界の単位）と破片の色 */
-  var PROPS = [
-    { gap: 175, col: ["#e8c25a", "#d9b24a", "#c2913a"] },
-    { gap: 400, col: ["#7b6a56", "#5b4d3f", "#9a8a72"] },
-    { gap: 430, col: ["#e0543c", "#3f7fd6", "#e8b63a"] },
-    { gap: 720, col: ["#5a6472", "#39414f", "#f6e9bb"] },
-    { gap: 540, col: ["#ffffff", "#cfe3ff", "#ffe9a8"] }
-  ];
+  var PROP_GAP = [175, 400, 430, 720, 540];  /* 壊すものが置かれる間隔 */
   function gearIndex(km) {
     for (var i = 0; i < GEARS.length - 1; i++) if (km < GEARS[i].top) return i;
     return GEARS.length - 1;
@@ -80,10 +83,6 @@
   function log10(v) { return Math.log(Math.max(v, 1e-9)) / Math.LN10; }
   function hex(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
   function rgb(c) { return "rgb(" + Math.round(c[0]) + "," + Math.round(c[1]) + "," + Math.round(c[2]) + ")"; }
-  function mix3(a, b, t) {
-    t = clamp01(t);
-    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-  }
   /* 景色の重みで色を混ぜる */
   function mixW(list) {
     var r = 0, g = 0, b = 0, s = 0;
@@ -95,7 +94,6 @@
     if (s <= 0) return [0, 0, 0];
     return [r / s, g / s, b / s];
   }
-  /* 番号から決まるでたらめ（流れても建物の高さが変わらないように） */
   function rnd(i) { var x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x); }
   function ell(x, y, rx, ry, rot) {
     ctx.beginPath();
@@ -106,13 +104,12 @@
   /* ============ 画面 ============
      タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。 */
   var W = 540, H = 960;
+  var HY, VAN, COWP, READ_Y, GAUGE_Y, GX0, GX1;
   function layout() {
     var host = wrap.parentNode;
     var vw = host.clientWidth || window.innerWidth;
     var vh = host.clientHeight || window.innerHeight;
     H = Math.max(780, Math.min(1700, Math.round(W * vh / vw)));
-
-    place();                                   /* 高さが決まってから置き直す */
 
     var scale = Math.min(vw / W, vh / H);
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -122,33 +119,26 @@
     canvas.height = Math.round(H * scale * dpr);
     var k = canvas.width / W;
     ctx.setTransform(k, 0, 0, k, 0, 0);
-  }
-  window.addEventListener("resize", layout);
-  window.addEventListener("orientationchange", layout);
 
-  /* ============ 見えかた（うすい3D）============
-     奥へ走る牛を、すこし上の後ろから見ている。遠近はきつくしない。
-     道は消える一点まで描かず、手前の地面に溶けるところで切る。 */
-  var FOV = 900, CAM_BACK = 420, CAM_H = 190;
-  var Z_NEAR = -280, Z_FAR = 1600;
-  var ROAD_HW = 130;                           /* 道の半分の幅（世界の単位） */
-  var HY, BX, VPX, READ_Y, GAUGE_Y, GX0, GX1;
+    if (scene3d) scene3d.resize(canvas.width, canvas.height, H);
+    place();
+  }
   function place() {
-    HY  = Math.round(H * 0.30);                /* 地平線 */
-    BX  = Math.round(W * 0.50);                /* 手前の道の中心＝牛のいるところ */
-    VPX = Math.round(W * 0.74);                /* 奥（やや右） */
+    if (scene3d) {
+      HY = scene3d.horizonY(H);
+      VAN = scene3d.vanish(W, H);
+      COWP = scene3d.cowScreen(W, H);
+    } else {
+      HY = Math.round(H * 0.30);
+      VAN = { x: W * 0.66, y: HY };
+      COWP = { x: W * 0.5, y: H * 0.62, s: 2 };
+    }
     READ_Y  = Math.round(H * 0.80);
     GAUGE_Y = Math.round(H * 0.86);
     GX0 = 76; GX1 = W - 76;
   }
-  function proj(x, y, z) {
-    var d = z + CAM_BACK;
-    if (d < 40) d = 40;
-    var s = FOV / d;
-    var t = 1 - CAM_BACK / d;                  /* 手前は BX、奥ほど VPX へ寄る */
-    return { x: BX + (VPX - BX) * t + x * s, y: HY + (CAM_H - y) * s, s: s };
-  }
-  function fog(z) { return clamp01((z - Z_FAR * 0.45) / (Z_FAR * 0.55)); }   /* 奥は景色に溶ける */
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
 
   /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
   var AC = null, NOISE = null;
@@ -219,10 +209,9 @@
   var state, score, broken, T, bt;
   var speed = MIN_KMH, beta = 0, wsp = 0, gear = 0, warning = false;
   var W8 = [1, 0, 0, 0, 0];                    /* 景色の重み（牧場・道路・町・都市・宇宙） */
-  var props, bits, rings, shards, stars;
-  var dist, nextAt, legPhase, prevHalf, prevKmh, prevGear, sirenT, clickPulse, gearFlash;
+  var props, rings, shards;
+  var dist, nextAt, legPhase, prevHalf, prevKmh, prevGear, sirenT, clickPulse, gearFlash, lastDt;
 
-  var CARCOL = ["#e0543c", "#3f7fd6", "#e8b63a", "#4aa86b", "#e9e4da", "#8a5ad0"];
   var PIECE = ["#f4f1ea", "#2b2723", "#e0543c", "#45464b", "#7fb04a", "#3f7fd6"];
   var SKY_HI = ["#3f8fd0", "#3f8fd0", "#4d92c8", "#6d8ba4", "#04050d"];
   var SKY_LO = ["#d5e9f6", "#d5e9f6", "#dbe7ef", "#c6ccd2", "#0a0b1a"];
@@ -260,18 +249,13 @@
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     score = 0; broken = 0;
-    T = 0; bt = 0;
+    T = 0; bt = 0; lastDt = 1 / 60;
     speed = MIN_KMH;
-    props = []; bits = []; rings = []; shards = [];
-    dist = 0; nextAt = 260; legPhase = 0; prevHalf = 0; prevKmh = MIN_KMH; prevGear = 0;
+    props = []; rings = []; shards = [];
+    dist = 0; nextAt = 300; legPhase = 0; prevHalf = 0; prevKmh = MIN_KMH; prevGear = 0;
     sirenT = 0; clickPulse = 0; gearFlash = 0;
-    stars = [];
-    for (var i = 0; i < 120; i++) stars.push(newStar(true));
+    if (scene3d) scene3d.reset();
     recalc();
-  }
-  function newStar(spread) {
-    var a = Math.random() * TAU, r = (spread ? Math.random() : 0.04 + Math.random() * 0.1) * W * 1.1;
-    return { x: VPX + Math.cos(a) * r, y: HY + Math.sin(a) * r * 0.9, z: 0.3 + Math.random() * 0.7 };
   }
 
   function recalc() {
@@ -312,19 +296,7 @@
   /* ============ 壊す ============ */
   function smash(o) {
     broken++;
-    var p = proj(o.x, 0, 6), cols = PROPS[o.t].col;
-    var high = [40, 170, 46, 300, 40][o.t];
-    for (var i = 0; i < 9; i++) {
-      bits.push({ x: p.x + (Math.random() - 0.5) * 90 * p.s,
-                  y: p.y - Math.random() * high * p.s,
-                  vx: (Math.random() - 0.5) * 1100,
-                  vy: -(160 + Math.random() * 760),
-                  rot: Math.random() * TAU, vr: (Math.random() - 0.5) * 16,
-                  w: (7 + Math.random() * 26) * clamp(p.s, 0.5, 2),
-                  h: (4 + Math.random() * 12) * clamp(p.s, 0.5, 2),
-                  c: cols[i % cols.length], life: 0 });
-    }
-    if (bits.length > 110) bits.splice(0, bits.length - 110);
+    if (scene3d) scene3d.burst(o.x, 0, o.t);
     if (o.t === 0)      { noiseHit(0.24, 900, 0.22, 0.6); tone(520, 0.1, 0.06, "triangle", 300); }
     else if (o.t === 1) { noiseHit(0.3, 260, 0.3, 1.2); tone(200, 0.16, 0.1, "square", 80); }
     else if (o.t === 2) { noiseHit(0.24, 240, 0.32, 0.8); tone(340, 0.18, 0.1, "sawtooth", 90); }
@@ -334,6 +306,7 @@
 
   /* ============ 進行 ============ */
   function update(dt) {
+    lastDt = dt;
     if (state === S.BOOM) {
       bt += dt;
       for (var i = 0; i < shards.length; i++) {
@@ -380,42 +353,22 @@
     prevKmh = speed;
 
     /* 道の先に置くもの */
-    while (nextAt - dist < Z_FAR) {
-      props.push({ at: nextAt, x: (Math.random() - 0.5) * 92, t: gear, r: Math.random() });
-      nextAt += PROPS[gear].gap * (0.75 + Math.random() * 0.5);
+    while (nextAt - dist < 2500) {
+      props.push({ at: nextAt, x: (Math.random() - 0.5) * 92, t: gear, r: Math.random(), z: nextAt - dist });
+      nextAt += PROP_GAP[gear] * (0.75 + Math.random() * 0.5);
     }
     for (var j = props.length - 1; j >= 0; j--) {
       var o = props[j];
       o.z = o.at - dist;
-      if (o.z <= 0) { props.splice(j, 1); smash(o); }
+      if (o.z <= 96) { props.splice(j, 1); smash(o); }
     }
     if (props.length > 60) props.splice(0, props.length - 60);
-
-    /* 破片 */
-    for (var k = bits.length - 1; k >= 0; k--) {
-      var b = bits[k];
-      b.life += dt;
-      b.vy += 2000 * dt;
-      b.x += b.vx * dt; b.y += b.vy * dt; b.rot += b.vr * dt;
-      if (b.life > 1.0 || b.y > H + 120) bits.splice(k, 1);
-    }
 
     /* 音の壁の輪 */
     for (var m = rings.length - 1; m >= 0; m--) {
       rings[m].r += 2.2 * dt;
       rings[m].life += dt;
       if (rings[m].life > 0.9) rings.splice(m, 1);
-    }
-
-    /* 星。奥から手前へ広がってくる */
-    if (W8[4] > 0.01) {
-      var k2 = 0.35 + wsp / 900;
-      for (var n = 0; n < stars.length; n++) {
-        var st = stars[n];
-        st.x += (st.x - VPX) * k2 * dt * st.z;
-        st.y += (st.y - HY) * k2 * dt * st.z;
-        if (st.x < -80 || st.x > W + 80 || st.y < -80 || st.y > H + 80) stars[n] = newStar(false);
-      }
     }
 
     /* 警告の音 */
@@ -467,7 +420,7 @@
     window.zResultActions.x({ text: score + "回押して宇宙を壊しました #牛歩シミュレーター" });
   }
 
-  /* ============ 描画 ============ */
+  /* ============ 描画 ============ 空と雲は2D、そのうえに立体、いちばん上に数字 */
   function roundRect(x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -484,25 +437,8 @@
     g.addColorStop(1, rgb(mixW(SKY_LO)));
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, HY + 10);
-    ctx.fillStyle = rgb(mixW(GROUND));
+    ctx.fillStyle = rgb(mixW(GROUND));           /* 立体が無いときの下地 */
     ctx.fillRect(0, HY, W, H - HY);
-  }
-
-  function drawStars() {
-    var a = W8[4];
-    if (a < 0.02) return;
-    for (var i = 0; i < stars.length; i++) {
-      var s = stars[i];
-      var dx = s.x - VPX, dy = s.y - HY;
-      var len = Math.min(0.55, wsp / 4200) * s.z;
-      ctx.strokeStyle = "rgba(" + Math.round(205 + 50 * (1 - beta)) + "," +
-                                  Math.round(218 + 37 * (1 - beta)) + ",255," + (a * (0.3 + s.z * 0.7)) + ")";
-      ctx.lineWidth = 1 + s.z * 1.8;
-      ctx.beginPath();
-      ctx.moveTo(s.x - dx * len, s.y - dy * len);
-      ctx.lineTo(s.x, s.y);
-      ctx.stroke();
-    }
   }
 
   function drawClouds() {
@@ -511,345 +447,83 @@
     ctx.save();
     ctx.globalAlpha = a * 0.92;
     ctx.fillStyle = "#ffffff";
-    var gap = 360, off = (dist * 0.05) % gap;
+    var gap = 250, off = (dist * 0.05) % gap;
     for (var i = -1; i < Math.ceil(W / gap) + 3; i++) {
       var x = W + 140 - off - i * gap;
       if (x < -160 || x > W + 160) continue;
-      var y = HY - 210 + (Math.abs(i % 2) ? 96 : 0);
+      var y = HY - 120 - (Math.abs(i % 3)) * 84;
       ell(x, y, 56, 23); ell(x - 42, y + 11, 36, 17); ell(x + 40, y + 9, 41, 19);
     }
     ctx.restore();
   }
 
-  /* 地平線のむこう（丘・家並み・ビルの影） */
+  /* 地平線のむこう（山なみ・遠いビルの影） */
   function drawFar() {
     var a = Math.min(1, W8[0] + W8[1] + W8[2] * 0.6);
     if (a > 0.02) {
       ctx.save();
       ctx.globalAlpha = a;
-      var off = (dist * 0.04) % 420;
+      var off = (dist * 0.03) % 420;
       ctx.fillStyle = "#6f9f7d";
       ctx.beginPath();
       ctx.moveTo(-off - 420, HY + 4);
       for (var i = -1; i < 4; i++) {
         var bx = -off + i * 420;
-        ctx.quadraticCurveTo(bx + 105, HY - 76, bx + 210, HY + 4);
-        ctx.quadraticCurveTo(bx + 315, HY - 40, bx + 420, HY + 4);
+        ctx.quadraticCurveTo(bx + 105, HY - 74, bx + 210, HY + 4);
+        ctx.quadraticCurveTo(bx + 315, HY - 38, bx + 420, HY + 4);
       }
       ctx.lineTo(W + 500, HY + 40); ctx.lineTo(-500, HY + 40);
       ctx.closePath(); ctx.fill();
       ctx.restore();
     }
     var b = W8[3];
-    if (b > 0.02) {                                   /* 遠くのビル影 */
+    if (b > 0.02) {
       ctx.save();
-      ctx.globalAlpha = b * 0.8;
+      ctx.globalAlpha = b * 0.75;
       ctx.fillStyle = "#6b7585";
-      var gap = 58, off2 = (dist * 0.05) % gap;
+      var gap = 58, off2 = (dist * 0.04) % gap;
       for (var j = -1; j < Math.ceil(W / gap) + 2; j++) {
         var x = W - off2 - j * gap;
-        var hgt = 40 + rnd(j + Math.floor((dist * 0.05) / gap)) * 120;
+        var hgt = 34 + rnd(j + Math.floor((dist * 0.04) / gap)) * 110;
         ctx.fillRect(x - gap * 0.42, HY - hgt, gap * 0.84, hgt + 10);
       }
       ctx.restore();
     }
   }
 
-  /* 地面と道。奥から手前へ、帯を重ねていく */
-  function drawGround() {
-    var segs = 26;
-    var gcol = mixW(GROUND), pcol = mixW(PAVE);
-    var gdark = mix3(gcol, [0, 0, 0], 0.12), pdark = mix3(pcol, [0, 0, 0], 0.12);
-    var paved = Math.min(1, W8[1] + W8[2] + W8[3]);
-    var roadA = 1 - W8[4];
-    for (var i = segs - 1; i >= 0; i--) {
-      var z0 = zSeg(i / segs), z1 = zSeg((i + 1) / segs);
-      var f = fog(z0);
-      var band = Math.floor((dist + z0) / 90) % 2;
-      var gc = band ? gdark : gcol, pc = band ? pdark : pcol;
-      quad(-6000, z0, 6000, z1, rgb(mix3(gc, gcol, f * 0.85)));
-      if (roadA > 0.02) {
-        ctx.save();
-        ctx.globalAlpha = roadA;
-        quad(-ROAD_HW, z0, ROAD_HW, z1, rgb(mix3(pc, gcol, f * 0.85)));
-        ctx.restore();
-      }
-    }
-    if (paved > 0.02 && roadA > 0.02) {               /* 白線 */
-      ctx.save();
-      ctx.globalAlpha = paved * roadA;
-      var gap = 170;
-      var start = Math.ceil(dist / gap) * gap;
-      for (var k = 0; k < 14; k++) {
-        var za = start + k * gap - dist, zb = za + gap * 0.42;
-        if (za > Z_FAR) break;
-        if (zb < Z_NEAR) continue;
-        ctx.globalAlpha = paved * roadA * (1 - fog(za));
-        quad(-9, za, 9, zb, "#f1ead6");
-      }
-      ctx.globalAlpha = paved * roadA * 0.8;
-      for (var m = segs - 1; m >= 0; m--) {           /* 路肩 */
-        var s0 = zSeg(m / segs), s1 = zSeg((m + 1) / segs);
-        ctx.globalAlpha = paved * roadA * (1 - fog(s0)) * 0.9;
-        quad(-ROAD_HW + 2, s0, -ROAD_HW + 12, s1, "#e9e4d6");
-        quad(ROAD_HW - 12, s0, ROAD_HW - 2, s1, "#e9e4d6");
-      }
-      ctx.restore();
-    }
-  }
-  function zSeg(u) { return Z_NEAR + (Z_FAR - Z_NEAR) * Math.pow(u, 2.0); }
-  function quad(x0, z0, x1, z1, col) {
-    var a = proj(x0, 0, z0), b = proj(x1, 0, z0), c = proj(x1, 0, z1), d = proj(x0, 0, z1);
-    ctx.fillStyle = col;
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y);
-    ctx.closePath(); ctx.fill();
-  }
-
-  /* 道ばたのもの（壊さない飾り）。奥から手前へ */
-  function drawSide() {
-    var list = [];
-    addRow(W8[0], 112, ROAD_HW + 46, "fence");
-    addRow(W8[0], 520, ROAD_HW + 210, "barn");
-    addRow(W8[1] + W8[2] * 0.5, 440, ROAD_HW + 80, "pole");
-    addRow(W8[1] + W8[2] * 0.6 + W8[3] * 0.4, 210, ROAD_HW + 26, "rail");
-    addRow(W8[2], 340, ROAD_HW + 190, "house");
-    addRow(W8[3], 420, ROAD_HW + 240, "tower");
-    list.sort(function (a, b) { return b.z - a.z; });
-    for (var i = 0; i < list.length; i++) drawSideOne(list[i]);
-
-    function addRow(a, gap, x, kind) {
-      if (a <= 0.03) return;
-      var start = Math.ceil(dist / gap) * gap;
-      for (var k = 0; k < 24; k++) {
-        var z = start + k * gap - dist;
-        if (z > Z_FAR) break;
-        if (z < Z_NEAR + 40) continue;
-        var id = Math.round((start + k * gap) / gap);
-        list.push({ z: z, x: -x, a: a, kind: kind, id: id });
-        list.push({ z: z, x: x, a: a, kind: kind, id: id + 7777 });
-      }
-    }
-  }
-  function drawSideOne(o) {
-    var p = proj(o.x, 0, o.z);
-    if (p.s <= 0.02 || p.x < -260 || p.x > W + 260) return;
-    var s = p.s, a = o.a * (1 - fog(o.z));
-    if (a <= 0.02) return;
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, a);
-    var r = rnd(o.id);
-    if (o.kind === "fence") {
-      ctx.fillStyle = "#8f7048";
-      ctx.fillRect(p.x - 4 * s, p.y - 54 * s, 8 * s, 54 * s);
-      ctx.fillStyle = "rgba(168,135,92,.95)";
-      ctx.fillRect(p.x - 66 * s, p.y - 46 * s, 132 * s, 6 * s);
-      ctx.fillRect(p.x - 66 * s, p.y - 26 * s, 132 * s, 6 * s);
-    } else if (o.kind === "barn") {
-      ctx.fillStyle = "#b5503f";
-      ctx.fillRect(p.x - 70 * s, p.y - 92 * s, 140 * s, 92 * s);
-      ctx.beginPath();
-      ctx.moveTo(p.x - 82 * s, p.y - 92 * s); ctx.lineTo(p.x, p.y - 146 * s); ctx.lineTo(p.x + 82 * s, p.y - 92 * s);
-      ctx.closePath(); ctx.fillStyle = "#8c3a2d"; ctx.fill();
-      ctx.fillStyle = "#6d5a44";
-      ctx.fillRect(p.x - 18 * s, p.y - 46 * s, 36 * s, 46 * s);
-    } else if (o.kind === "pole") {
-      ctx.fillStyle = "#6b5c4c";
-      ctx.fillRect(p.x - 5 * s, p.y - 180 * s, 10 * s, 180 * s);
-      ctx.fillRect(p.x - 30 * s, p.y - 168 * s, 60 * s, 7 * s);
-    } else if (o.kind === "rail") {
-      ctx.fillStyle = "#c9cdd2";
-      ctx.fillRect(p.x - 46 * s, p.y - 34 * s, 92 * s, 9 * s);
-      ctx.fillStyle = "#9aa0a7";
-      ctx.fillRect(p.x - 3 * s, p.y - 32 * s, 6 * s, 32 * s);
-    } else if (o.kind === "house") {
-      var hh = (86 + r * 46) * s, hw = (104 + r * 26) * s;
-      ctx.fillStyle = "#efe7d8";
-      ctx.fillRect(p.x - hw / 2, p.y - hh, hw, hh);
-      ctx.fillStyle = ["#c25a4a", "#4c6f9c", "#7a6aa8", "#c99a3f"][Math.floor(r * 4) % 4];
-      ctx.beginPath();
-      ctx.moveTo(p.x - hw / 2 - 10 * s, p.y - hh);
-      ctx.lineTo(p.x, p.y - hh - (38 + r * 16) * s);
-      ctx.lineTo(p.x + hw / 2 + 10 * s, p.y - hh);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "#8fb6cf";
-      ctx.fillRect(p.x - hw * 0.28, p.y - hh + 20 * s, 26 * s, 22 * s);
-      ctx.fillRect(p.x + hw * 0.06, p.y - hh + 20 * s, 26 * s, 22 * s);
-    } else if (o.kind === "tower") {
-      var th = (240 + r * 300) * s, tw = (110 + r * 50) * s;
-      ctx.fillStyle = r > 0.5 ? "#4a5361" : "#39414f";
-      ctx.fillRect(p.x - tw / 2, p.y - th, tw, th);
-      ctx.fillStyle = "rgba(246,233,187,.55)";
-      for (var wy = p.y - th + 22 * s; wy < p.y - 26 * s; wy += 34 * s) {
-        for (var wx = p.x - tw / 2 + 14 * s; wx < p.x + tw / 2 - 16 * s; wx += 30 * s) {
-          if (rnd(wx * 0.7 + wy * 1.3 + o.id) > 0.42) ctx.fillRect(wx, wy, 14 * s, 18 * s);
-        }
-      }
-    }
-    ctx.restore();
-  }
-
-  /* 道の先にある、壊すもの */
-  function drawProps() {
-    var sorted = props.slice().sort(function (a, b) { return b.z - a.z; });
-    for (var i = 0; i < sorted.length; i++) {
-      var o = sorted[i];
-      if (o.z == null || o.z > Z_FAR || o.z < 0) continue;
-      var p = proj(o.x, 0, o.z), s = p.s, a = 1 - fog(o.z);
-      if (a <= 0.02) continue;
-      ctx.save();
-      ctx.globalAlpha = Math.min(1, a);
-      if (o.t === 0) {                                  /* わら */
-        ctx.fillStyle = "#d9b24a";
-        ell(p.x, p.y - 24 * s, 27 * s, 24 * s);
-        ctx.fillStyle = "#c2913a";
-        ell(p.x, p.y - 24 * s, 16 * s, 14 * s);
-        ctx.fillStyle = "#e8c25a";
-        ell(p.x, p.y - 24 * s, 7 * s, 6 * s);
-      } else if (o.t === 1) {                           /* 電柱 */
-        ctx.fillStyle = "#6b5c4c";
-        ctx.fillRect(p.x - 7 * s, p.y - 175 * s, 14 * s, 175 * s);
-        ctx.fillStyle = "#54483b";
-        ctx.fillRect(p.x - 34 * s, p.y - 162 * s, 68 * s, 8 * s);
-        ctx.fillRect(p.x - 26 * s, p.y - 136 * s, 52 * s, 7 * s);
-      } else if (o.t === 2) {                           /* 車（後ろ姿） */
-        var col = CARCOL[Math.floor(o.r * CARCOL.length) % CARCOL.length];
-        ctx.fillStyle = col;
-        roundRect(p.x - 46 * s, p.y - 46 * s, 92 * s, 40 * s, 8 * s); ctx.fill();
-        ctx.fillStyle = "rgba(255,255,255,.5)";
-        roundRect(p.x - 32 * s, p.y - 72 * s, 64 * s, 28 * s, 7 * s); ctx.fill();
-        ctx.fillStyle = "#23242a";
-        ell(p.x - 40 * s, p.y - 6 * s, 12 * s, 9 * s);
-        ell(p.x + 40 * s, p.y - 6 * s, 12 * s, 9 * s);
-        ctx.fillStyle = "#e8483a";
-        ctx.fillRect(p.x - 42 * s, p.y - 36 * s, 14 * s, 9 * s);
-        ctx.fillRect(p.x + 28 * s, p.y - 36 * s, 14 * s, 9 * s);
-      } else if (o.t === 3) {                           /* ビル */
-        var bh = (250 + o.r * 210) * s, bw = (120 + o.r * 40) * s;
-        ctx.fillStyle = o.r > 0.5 ? "#596373" : "#454f5f";
-        ctx.fillRect(p.x - bw / 2, p.y - bh, bw, bh);
-        ctx.fillStyle = "rgba(246,233,187,.6)";
-        for (var wy = p.y - bh + 24 * s; wy < p.y - 30 * s; wy += 36 * s) {
-          for (var wx = p.x - bw / 2 + 16 * s; wx < p.x + bw / 2 - 18 * s; wx += 32 * s) {
-            if (rnd(wx * 0.9 + wy * 1.7) > 0.4) ctx.fillRect(wx, wy, 15 * s, 19 * s);
-          }
-        }
-      } else {                                          /* 星 */
-        var rr = (26 + o.r * 16) * s;
-        var g = ctx.createRadialGradient(p.x, p.y - 90 * s, 0, p.x, p.y - 90 * s, rr * 3);
-        g.addColorStop(0, "rgba(255,255,255,.95)");
-        g.addColorStop(0.3, "rgba(200,225,255,.5)");
-        g.addColorStop(1, "rgba(120,160,255,0)");
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(p.x, p.y - 90 * s, rr * 3, 0, TAU); ctx.fill();
-        ctx.fillStyle = "#ffffff";
-        ell(p.x, p.y - 90 * s, rr, rr);
-      }
-      ctx.restore();
-    }
-  }
-
-  /* 牛。後ろ姿で、奥へ走っている */
-  function drawCow() {
-    var p = proj(0, 0, 0);
-    var k = p.s * 0.82;
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,.22)";
-    ell(p.x, p.y + 4 * k, 52 * k, 13 * k);
-    ctx.restore();
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.scale(k, k);
-    var bob = Math.abs(Math.sin(legPhase * TAU)) * 5;
-    ctx.translate(0, -bob);
-    var blurA = clamp01((wsp - 260) / 900);
-    if (blurA > 0.02) {
-      ctx.save();
-      ctx.globalAlpha = blurA * 0.16;
-      for (var b = 1; b <= 3; b++) { ctx.save(); ctx.translate(0, b * 7); body(legPhase - b * 0.09); ctx.restore(); }
-      ctx.restore();
-    }
-    body(legPhase);
-    ctx.restore();
-
-    function body(ph) {
-      var sw = Math.sin(ph * TAU);
-      leg(-25, sw); leg(25, -sw);
-      ctx.fillStyle = "#f5f2ea";
-      ell(0, -74, 44, 40);                       /* しり */
-      ell(0, -98, 35, 21);                       /* 背中 */
-      ctx.fillStyle = "#2b2723";                 /* 斑 */
-      ell(-23, -78, 26, 29, -0.2);
-      ell(25, -54, 11, 8, 0.3);
-      ctx.fillStyle = "#f5f2ea";                 /* 頭（奥に少しのぞく） */
-      ell(0, -110, 16, 10);
-      ell(-19, -109, 8, 4); ell(19, -109, 8, 4);     /* 耳 */
-      ctx.fillStyle = "#e7dfcb";
-      ell(-10, -119, 4, 6); ell(10, -119, 4, 6);     /* 角 */
-      ctx.strokeStyle = "#f5f2ea"; ctx.lineWidth = 7; ctx.lineCap = "round";
-      var sway = Math.sin(ph * TAU * 0.5) * 11;      /* 尻尾 */
-      ctx.beginPath(); ctx.moveTo(0, -102);
-      ctx.quadraticCurveTo(sway, -78, sway * 1.5, -46); ctx.stroke();
-      ctx.fillStyle = "#2b2723";
-      ell(sway * 1.5, -42, 5, 7);
-      function leg(x, s) {
-        ctx.strokeStyle = "#e6e2d7"; ctx.lineWidth = 17; ctx.lineCap = "round";
-        var fx = x + s * 7, lift = Math.max(0, s) * 15;
-        ctx.beginPath();
-        ctx.moveTo(x, -54);
-        ctx.quadraticCurveTo(x + s * 5, -30, fx, -8 - lift);
-        ctx.stroke();
-        ctx.fillStyle = "#2b2723";
-        ell(fx, -6 - lift, 9, 5);
-      }
-    }
-  }
-
+  /* 大気との摩擦。牛が見えている場所に重ねる */
   function drawFlame() {
     var heat = heatOf(speed);
     if (heat < 0.03) return;
-    var p = proj(0, 0, 0), s = p.s;
+    var s = COWP.s;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     for (var i = 0; i < 14; i++) {
       var f = Math.random(), l = (26 + f * 84 * heat) * s;
-      var side = (Math.random() - 0.5) * 52 * s;
+      var side = (Math.random() - 0.5) * 60 * s;
       ctx.fillStyle = f > 0.66 ? "rgba(255,246,205,.4)"
                     : (f > 0.33 ? "rgba(255,168,45,.32)" : "rgba(255,74,18,.26)");
-      ell(p.x + side, p.y - 14 * s + l * 0.3, 9 * s + l * 0.13, l * 0.36);
+      ell(COWP.x + side, COWP.y - 16 * s + l * 0.3, 9 * s + l * 0.13, l * 0.36);
     }
     ctx.restore();
   }
 
-  function drawShock() {
-    var p = proj(0, 0, 0);
+  /* 音の壁を抜けた瞬間の輪 */
+  function drawRings() {
     for (var i = 0; i < rings.length; i++) {
       var r = rings[i], a = 1 - r.life / 0.9;
-      ctx.strokeStyle = "rgba(255,255,255," + (a * 0.55) + ")";
+      ctx.strokeStyle = "rgba(255,255,255," + (a * 0.5) + ")";
       ctx.lineWidth = 3 + a * 7;
       ctx.beginPath();
-      ctx.ellipse(p.x, p.y - 80 * p.s, 300 * r.r * p.s, 340 * r.r * p.s, 0, 0, TAU);
+      ctx.ellipse(COWP.x, COWP.y - 60 * COWP.s, 300 * r.r * COWP.s, 320 * r.r * COWP.s, 0, 0, TAU);
       ctx.stroke();
-    }
-  }
-
-  function drawBits() {
-    for (var i = 0; i < bits.length; i++) {
-      var b = bits[i];
-      ctx.save();
-      ctx.globalAlpha = clamp01((1.0 - b.life) * 2.2);
-      ctx.translate(b.x, b.y);
-      ctx.rotate(b.rot);
-      ctx.fillStyle = b.c;
-      ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
-      ctx.restore();
     }
   }
 
   function drawBlue() {
     if (beta < 0.2) return;
     var a = Math.pow(clamp01((beta - 0.2) / 0.8), 1.6);
-    var g = ctx.createRadialGradient(VPX, HY, 10, VPX, HY, W * 1.2);
+    var g = ctx.createRadialGradient(VAN.x, VAN.y, 10, VAN.x, VAN.y, W * 1.2);
     g.addColorStop(0, "rgba(225,240,255," + (0.85 * a) + ")");
     g.addColorStop(0.3, "rgba(120,170,255," + (0.36 * a) + ")");
     g.addColorStop(1, "rgba(30,20,90,0)");
@@ -951,16 +625,21 @@
     if (shake > 0.2) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
 
     drawSky();
-    drawStars();
     drawClouds();
     drawFar();
-    drawGround();
-    drawSide();
-    drawProps();
+
+    if (scene3d) {
+      scene3d.sync({
+        dist: dist, w: W8, gear: gear, legPhase: legPhase, wsp: wsp, beta: beta,
+        props: props, dt: lastDt, clickPulse: clickPulse,
+        groundColor: mixW(GROUND), roadColor: mixW(PAVE), fogColor: mixW(SKY_LO)
+      });
+      scene3d.render();
+      ctx.drawImage(scene3d.dom, 0, 0, W, H);
+    }
+
     drawFlame();
-    drawCow();
-    drawShock();
-    drawBits();
+    drawRings();
     drawBlue();
     if (gearFlash > 0.01) {
       ctx.fillStyle = "rgba(255,255,255," + (gearFlash * 0.35) + ")";
@@ -1025,7 +704,8 @@
     now: function () {
       return { state: state, score: score, broken: broken, W: W, H: H,
                kmh: speed, beta: beta, wsp: wsp, gear: gear, step: GEARS[gear].step,
-               phase: PHASE_NAME[gear], props: props.length, bits: bits.length,
+               phase: PHASE_NAME[gear], props: props.length,
+               bits: scene3d ? scene3d.bits.length : 0, solid: !!scene3d,
                warn: warning, read: fmtSpeed(speed) };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },

@@ -90,10 +90,7 @@ ok(g.probe.now().score === total, "結果の数字は押した回数", g.probe.n
   ok(n.broken > before, c[1] + "で道の先のものを壊す",
      "壊した数 " + (n.broken - before) + " / " + n.read);
 });
-var tb = start();
-push(tb, 300, 1);
-tb.step(60 * 6);
-ok(tb.probe.now().bits > 0, "壊すと破片が飛ぶ", tb.probe.now().bits + "個");
+/* 破片は立体のほうで持つので、偽DOMでは数えない（壊した数で見る） */
 
 /* 6. 警告と、やめれば壊れない */
 var t4 = start();
