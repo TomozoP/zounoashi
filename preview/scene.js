@@ -21,10 +21,24 @@ var ZDoji5Scene = (function () {
      縦横とも 1m = 29.26px で揃うので、円は円のまま描ける。
      線は実物と同じ8cmほどの細さ。5競技の線を同じ紙の上に全部引く。 */
   var FIELD = { x0: -35, z0: -25, w: 70, d: 105, px: 2048 / 70 };
-  function fieldTexture() {
-    var cv = document.createElement('canvas');
-    cv.width = 2048; cv.height = 3072;
+  var fieldCv = null, grassCv = null;
+  /* 芝と刈り跡だけの下地。線を引き直すたびに作り直さない */
+  function grassBase() {
+    if (grassCv) return grassCv;
+    grassCv = document.createElement('canvas');
+    grassCv.width = 2048; grassCv.height = 3072;
+    var c = grassCv.getContext('2d');
+    c.fillStyle = '#2e7a3b'; c.fillRect(0, 0, 2048, 3072);
+    for (var i = 0; i < 24; i++) { c.fillStyle = i % 2 ? '#358140' : '#2a7135'; c.fillRect(0, i * 128, 2048, 128); }
+    return grassCv;
+  }
+  /* on に入っている競技の線だけを引く */
+  function fieldTexture(on) {
+    if (!fieldCv) { fieldCv = document.createElement('canvas'); fieldCv.width = 2048; fieldCv.height = 3072; }
+    var cv = fieldCv;
     var c = cv.getContext('2d');
+    c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1;
+    c.drawImage(grassBase(), 0, 0);
     var K = FIELD.px;
     function PX(x) { return (x + 35) * K; }
     function PZ(z) { return (z + 25) * K; }
@@ -36,10 +50,6 @@ var ZDoji5Scene = (function () {
       c.beginPath(); c.arc(PX(x), PZ(z), S(r), from == null ? 0 : from, to == null ? Math.PI * 2 : to); c.stroke();
     }
 
-    /* 芝と刈り跡 */
-    c.fillStyle = '#2e7a3b'; c.fillRect(0, 0, 2048, 3072);
-    for (var i = 0; i < 24; i++) { c.fillStyle = i % 2 ? '#358140' : '#2a7135'; c.fillRect(0, i * 128, 2048, 128); }
-
     /* 野球の内野。土の菱形の中に芝を残す */
     function diamond(back, right, front, fill) {
       c.beginPath();
@@ -47,6 +57,7 @@ var ZDoji5Scene = (function () {
       c.lineTo(PX(0), PZ(front)); c.lineTo(PX(-right), PZ((back + front) / 2));
       c.closePath(); c.fillStyle = fill; c.fill();
     }
+    if (on.yakyu) {
     diamond(-5, 17, 27, '#a9713f');
     diamond(1.5, 10.5, 20.5, 'rgba(46,122,59,.85)');
     c.fillStyle = '#a9713f';
@@ -62,8 +73,10 @@ var ZDoji5Scene = (function () {
     c.lineTo(PX(0), PZ(-.1)); c.lineTo(PX(-.6), PZ(-.6)); c.closePath(); c.fill();
     line(); rect(-2.6, -2.4, -.9, .8); rect(.9, -2.4, 2.6, .8);   /* 打席 */
     seg(0, -1, 27, 26); seg(0, -1, -27, 26);                      /* ファウルライン */
+    }
 
     /* サッカー */
+    if (on.soccer) {
     line(); rect(-28, -18, 28, 78);
     seg(-28, 30, 28, 30); circle(0, 30, 9.15);
     rect(-20, 62, 20, 78); rect(-9, 72, 9, 78);
@@ -73,13 +86,17 @@ var ZDoji5Scene = (function () {
       c.beginPath(); c.ellipse(PX(p[0]), PZ(p[1]), S(.35), S(.35), 0, 0, Math.PI * 2); c.fill();
     });
     circle(-28, 78, 1, 0, Math.PI * 2); circle(28, 78, 1, 0, Math.PI * 2);
+    }
 
     /* テニス（本塁の先に重ねる） */
+    if (on.tennis) {
     c.fillStyle = 'rgba(40,86,132,.30)'; c.fillRect(PX(-5.5), PZ(0), S(11), S(24));
     line(); rect(-5.5, 0, 5.5, 24); rect(-4.12, 0, 4.12, 24);
     seg(-4.12, 6, 4.12, 6); seg(-4.12, 18, 4.12, 18); seg(0, 6, 0, 18);
+    }
 
     /* バスケ */
+    if (on.basket) {
     line(); rect(-7.5, -4, 7.5, 24);
     seg(-7.5, 10, 7.5, 10); circle(0, 10, 1.8);
     c.fillStyle = 'rgba(190,84,42,.42)';
@@ -88,10 +105,13 @@ var ZDoji5Scene = (function () {
     circle(0, 17.2, 1.8); circle(0, 2.8, 1.8);
     circle(0, 22.4, 6.75, Math.PI * 1.08, Math.PI * 1.92);
     circle(0, -2.4, 6.75, Math.PI * .08, Math.PI * .92);
+    }
 
     /* バレー */
+    if (on.volley) {
     c.fillStyle = 'rgba(214,116,48,.34)'; c.fillRect(PX(-4.5), PZ(4), S(9), S(18));
     line(); rect(-4.5, 4, 4.5, 22); seg(-4.5, 13, 4.5, 13); seg(-4.5, 10, 4.5, 10); seg(-4.5, 16, 4.5, 16);
+    }
 
     return cv;
   }
@@ -228,12 +248,14 @@ var ZDoji5Scene = (function () {
       blob(kn, .072, .21, .075, skin, -.2);
       blob(kn, .085, .05, .15, shoe, -.42, .06);
     });
+    var batParts = [], racketParts = [];
     if (opt.bat) {                                            /* 右手はバット。手首から上へ伸ばす */
       var bat = new T.Mesh(new T.CylinderGeometry(.05, .023, .92, 12), mat('#c49055', .55));
       bat.position.y = .46; bat.castShadow = true;
       var batGrip = new T.Mesh(CYL, mat('#23272f', .85));
       batGrip.scale.set(.026, .17, .026); batGrip.position.y = .08;
       parts.wristR.add(bat, batGrip);
+      batParts = [bat, batGrip];
     }
     if (opt.racket) {                                         /* 左手はラケット。面は体の横を向く */
       var frame = new T.Mesh(new T.TorusGeometry(.165, .023, 8, 22), mat('#e8edf3', .4, .25));
@@ -245,13 +267,14 @@ var ZDoji5Scene = (function () {
       var grip = new T.Mesh(CYL, mat('#23272f', .85));
       grip.scale.set(.025, .2, .025); grip.position.y = .1;
       parts.wristL.add(frame, gut, throat, grip);
+      racketParts = [frame, gut, throat, grip];
     }
     if (opt.glove) {
       var glove = new T.Mesh(SPHERE, mat('#8a5a2f', .8));
       glove.scale.set(.13, .15, .07); glove.castShadow = true; parts.handL.add(glove);
     }
     scene.add(root);
-    return { root: root, parts: parts };
+    return { root: root, parts: parts, bat: batParts, racket: racketParts };
   }
 
   /* ============ 舞台 ============ */
@@ -296,7 +319,7 @@ var ZDoji5Scene = (function () {
     fill.position.set(12, 14, 26); this.scene.add(fill);
 
     /* 地面 */
-    var ft = texture(fieldTexture());
+    var ft = texture(fieldTexture({ yakyu: 1, soccer: 1, tennis: 1, basket: 1, volley: 1 }));
     ft.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     var ground = new T.Mesh(new T.PlaneGeometry(FIELD.w, FIELD.d), new T.MeshStandardMaterial({ map: ft, roughness: .92 }));
     ground.rotation.x = -Math.PI / 2; ground.position.set(0, 0, FIELD.z0 + FIELD.d / 2);
@@ -343,8 +366,8 @@ var ZDoji5Scene = (function () {
       netPanel(0, 1.22, 1.6, 7.3, 2.44, .13, 'rgba(238,242,238,.85)');
       netPanel(0, 2.0, .8, 7.3, 1.7, .13, 'rgba(238,242,238,.5)');
     }
-    group(0, 78, 0, soccerGoal);
-    group(-26, 44, Math.PI / 2, soccerGoal);
+    var gear = this.gear = { yakyu: [], soccer: [], tennis: [], basket: [], volley: [] };
+    gear.soccer.push(group(0, 78, 0, soccerGoal), group(-26, 44, Math.PI / 2, soccerGoal));
 
     /* バスケットゴール。リングは手前側（-z）へ張り出す */
     function hoop() {
@@ -359,19 +382,21 @@ var ZDoji5Scene = (function () {
       netPanel(0, 2.82, -.43, .66, .45, .05, 'rgba(245,247,245,.9)');
       netPanel(0, 2.82, -.43, .66, .45, .05, 'rgba(245,247,245,.9)', Math.PI / 2);
     }
-    group(0, 24.5, 0, hoop);
-    group(-7.9, 15, -Math.PI / 2, hoop);
-    group(8.6, 30, Math.PI / 2, hoop);
+    gear.basket.push(group(0, 24.5, 0, hoop), group(-7.9, 15, -Math.PI / 2, hoop), group(8.6, 30, Math.PI / 2, hoop));
 
     /* バレーのネット */
-    post(-5.6, 1.3, 13, .07, 2.6, metal); post(5.6, 1.3, 13, .07, 2.6, metal);
-    netPanel(0, 2.05, 13, 11.2, 1, .1, 'rgba(232,236,232,.85)');
-    box(0, 2.53, 13, 11.2, .1, .03, white, false);
+    gear.volley.push(group(0, 13, 0, function () {
+      post(-5.6, 1.3, 0, .07, 2.6, metal); post(5.6, 1.3, 0, .07, 2.6, metal);
+      netPanel(0, 2.05, 0, 11.2, 1, .1, 'rgba(232,236,232,.85)');
+      box(0, 2.53, 0, 11.2, .1, .03, white, false);
+    }));
 
     /* テニスのネット */
-    post(-6.4, .6, 8, .06, 1.2, metal); post(6.4, .6, 8, .06, 1.2, metal);
-    netPanel(0, .52, 8, 12.8, 1.04, .045, 'rgba(70,80,92,.75)');
-    box(0, 1.06, 8, 12.8, .08, .03, white, false);
+    gear.tennis.push(group(0, 8, 0, function () {
+      post(-6.4, .6, 0, .06, 1.2, metal); post(6.4, .6, 0, .06, 1.2, metal);
+      netPanel(0, .52, 0, 12.8, 1.04, .045, 'rgba(70,80,92,.75)');
+      box(0, 1.06, 0, 12.8, .08, .03, white, false);
+    }));
 
     /* 野球のバックネット。打つ人の後ろなので、カメラの外に置く */
     var backstop = new T.Mesh(new T.CylinderGeometry(9, 9, 5, 20, 1, true, Math.PI * .74, Math.PI * .52), (function () {
@@ -380,6 +405,7 @@ var ZDoji5Scene = (function () {
       return new T.MeshBasicMaterial({ map: tx, transparent: true, side: T.DoubleSide, depthWrite: false });
     })());
     backstop.position.set(0, 2.5, -2); this.scene.add(backstop);
+    gear.yakyu.push(backstop);
 
     /* 観客席と照明 */
     var crowd = texture(crowdTexture());
@@ -415,23 +441,25 @@ var ZDoji5Scene = (function () {
     }
 
     /* 小物。どの競技のものも散らかしておく */
-    function flag(x, z, color) {
-      post(x, .8, z, .045, 1.6, white);
+    function flag(side, color) {
+      post(0, .8, 0, .045, 1.6, white);
       var f = new T.Mesh(new T.PlaneGeometry(.62, .42), new T.MeshBasicMaterial({ color: color, side: T.DoubleSide }));
-      f.position.set(x + (x < 0 ? -.31 : .31), 1.38, z); self.scene.add(f);
+      f.position.set(side * .31, 1.38, 0); self.scene.add(f);
     }
-    [[-28, 78, '#f0c33c'], [28, 78, '#f0c33c'], [-28, -18, '#e0604a'], [28, -18, '#e0604a']].forEach(function (p) { flag(p[0], p[1], p[2]); });
+    [[-28, 78, '#f0c33c'], [28, 78, '#f0c33c'], [-28, -18, '#e0604a'], [28, -18, '#e0604a']].forEach(function (p) {
+      gear.soccer.push(group(p[0], p[1], 0, function () { flag(p[0] < 0 ? -1 : 1, p[2]); }));
+    });
 
     function umpChair(x, z, rotY) {
-      group(x, z, rotY, function () {
+      return group(x, z, rotY, function () {
         [-.42, .42].forEach(function (s) { post(s, 1.15, -.33, .045, 2.3, metal); post(s, 1.15, .33, .045, 2.3, metal); });
         box(0, 2.32, 0, 1.05, .1, .86, mat('#39485a', .7));
         box(0, 2.7, -.42, 1.05, .76, .1, mat('#39485a', .7));
         box(0, 1.2, 0, .9, .06, .7, mat('#39485a', .7));
       });
     }
-    umpChair(7.4, 8, -Math.PI / 2);
-    umpChair(-6.6, 13, Math.PI / 2);
+    gear.tennis.push(umpChair(7.4, 8, -Math.PI / 2));
+    gear.volley.push(umpChair(-6.6, 13, Math.PI / 2));
 
     function bench(x, z, rotY) {
       group(x, z, rotY, function () {
@@ -472,6 +500,8 @@ var ZDoji5Scene = (function () {
     this.pitcher.root.rotation.y = Math.PI;
     var mound = new T.Mesh(new T.CylinderGeometry(2.9, 3.2, .3, 20), mat('#b77c47', .95));
     mound.position.set(0, .14, 11); mound.receiveShadow = true; this.scene.add(mound);
+    gear.yakyu.push(mound, this.pitcher.root);
+    this.ground = ground; this.fieldTex = ft; this.sportsKey = null;
 
     /* 味方と相手。立たせておくだけ */
     this.extras = [];
@@ -498,6 +528,21 @@ var ZDoji5Scene = (function () {
     /* タテ長でも横の写る範囲を保つ */
     this.camera.fov = 2 * Math.atan(Math.tan(30 * Math.PI / 180) * (h / w) / (960 / 540)) * 180 / Math.PI;
     this.camera.updateProjectionMatrix();
+  };
+
+  /* 入れてある競技だけを出す。地面の線は引き直し、道具と持ちものは見え隠れさせる */
+  Scene.prototype.applySports = function (key) {
+    var set = {}, self = this;
+    key.split(',').forEach(function (k) { if (k) set[k] = 1; });
+    Object.keys(this.gear).forEach(function (kind) {
+      self.gear[kind].forEach(function (o) { o.visible = !!set[kind]; });
+    });
+    this.player.bat.forEach(function (m) { m.visible = !!set.yakyu; });
+    this.player.racket.forEach(function (m) { m.visible = !!set.tennis; });
+    this.player.hasBat = !!set.yakyu;
+    this.player.hasRacket = !!set.tennis;
+    fieldTexture(set);
+    this.fieldTex.needsUpdate = true;
   };
 
   Scene.prototype.project = function (x, y, z) {
@@ -531,6 +576,9 @@ var ZDoji5Scene = (function () {
     P.shoulderL.rotation.set(-.45, 0, .34); P.elbowL.rotation.set(-1.30, 0, 0);
     P.hipL.rotation.set(-.16, 0, .1); P.kneeL.rotation.set(.26, 0, 0);
     P.hipR.rotation.set(-.16, 0, -.1); P.kneeR.rotation.set(.26, 0, 0);
+    /* 持っていない側の腕は、構えずに下ろす */
+    if (a.hasBat === false) { P.shoulderR.rotation.set(-.12, 0, -.16); P.elbowR.rotation.set(-.5, 0, 0); }
+    if (a.hasRacket === false) { P.shoulderL.rotation.set(-.12, 0, .16); P.elbowL.rotation.set(-.45, 0, 0); }
     var bat = BAT, racket = RKT, batLean = -.3, racketLean = .35;
     if (act) {
       var e = Math.max(0, Math.min(1, p));
@@ -607,6 +655,7 @@ var ZDoji5Scene = (function () {
   Scene.prototype.draw = function (ctx, W, H, snap) {
     this.logicalH = H;
     var t = snap.t, self = this;
+    if (this.sportsKey !== snap.on) { this.applySports(snap.on || ''); this.sportsKey = snap.on; }
 
     this.pose(this.player, snap.act, snap.actP, t);
     this.player.root.position.x = snap.leanX || 0;
