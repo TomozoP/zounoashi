@@ -40,7 +40,7 @@ function start(g) { g.press(" "); g.step(2); return g; }
     var before = g.probe.now().score;
     hitPad(g, kind);
     var after = g.probe.now();
-    if (after.score > before) { seen[kind] = true; points = after.score; }
+    if (after.score > before || (kind === "tennis" && after.tennisPoint === 0)) { seen[kind] = true; points = after.score; }
     else ok("間合いで合うボタンを押したのに当たらない（" + kind + "）", false, JSON.stringify(after.lives));
     if (after.state !== "play") break;
   }
@@ -144,10 +144,10 @@ function start(g) { g.press(" "); g.step(2); return g; }
   start(g);
   var seen = {};
   for (var i = 0; i < 60 && Object.keys(seen).length < 5; i++) {
-    var kind = g.probe.toBall(), before = g.probe.now().score;
+    var kind = g.probe.toBall(), before = g.probe.now().hits;
     if (!kind) break;
     g.press(String(keys.indexOf(kind) + 1));
-    ok("数字キーで当たる：" + kind, g.probe.now().score > before);
+    ok("数字キーで当たる：" + kind, g.probe.now().hits === before + 1);
 
     seen[kind] = true;
   }
@@ -194,6 +194,38 @@ function start(g) { g.press(" "); g.step(2); return g; }
   g.probe.reset();
   hitPad(g, "tennis");
   ok("やり直すと待ち時間も戻る", g.probe.now().act === "tennis");
+})();
+
+/* 変化球でも到着の位置と時刻は変わらず、途中の軌道だけ変わる。 */
+(function () {
+  var g = load("games/_doji5/index.html", { quiet: true });
+  [["yakyu","curve"],["yakyu","drop"],["soccer","swerve"],["tennis","spin"],["basket","bounce"],["volley","float"]].forEach(function (pair) {
+    var end = g.probe.trajectory(pair[0], pair[1], 1), normal = g.probe.trajectory(pair[0], null, 1);
+    ok("到着位置は同じ：" + pair[1], Math.hypot(end.x-normal.x,end.y-normal.y,end.z-normal.z)<.000001);
+    var changed = false;
+    for(var i=1;i<20;i++) {
+      var a=g.probe.trajectory(pair[0],pair[1],i/20), b=g.probe.trajectory(pair[0],null,i/20);
+      if(Math.hypot(a.x-b.x,a.y-b.y)>.1) changed=true;
+      ok("地面より下へ抜けない：" + pair[1], a.y>=0);
+    }
+    ok("途中の軌道が変わる：" + pair[1],changed);
+  });
+})();
+
+/* テニスは15、30、40、ゲームで一周する。 */
+(function () {
+  var g=start(load("games/_doji5/index.html",{quiet:true})), count=0;
+  for(var i=0;i<180&&count<5;i++) {
+    var kind=g.probe.toBall(), before=g.probe.now().score;
+    hitPad(g,kind);
+    var after=g.probe.now();
+    if(kind==="tennis") {
+      ok("テニスの進行"+count,after.tennisPoint===[15,30,40,0,15][count]);
+      ok("テニスの加点"+count,after.score-before===[15,15,10,0,15][count]);
+      count++;
+    }else ok("競技に応じた加点："+kind,after.score-before===(kind==="basket"?3:1));
+  }
+  ok("ゲーム成立後は15から再開",count===5&&g.probe.now().tennisGames===1);
 })();
 
 console.log(bad.length ? "\n直すところ: " + bad.join(" / ") : "\n問題なし");

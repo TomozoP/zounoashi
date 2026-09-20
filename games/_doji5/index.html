@@ -338,11 +338,11 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
   /* ============ 球 ============
      flight は投げてから打つ位置に届くまでの秒数。到着の時刻から逆算して出す。 */
   var KINDS = {
-    yakyu:  { flight: 1.2, z0: 11, y0: 1.95, y1: 1.2,  r: .12, pts: 3 },
-    soccer: { flight: 2.1, z0: 26, y0: .30,  y1: .45,  r: .23, pts: 2 },
-    tennis: { flight: 1.8, z0: 24, y0: 1.5,  y1: 1.05, r: .15, pts: 2 },
+    yakyu:  { flight: 1.2, z0: 11, y0: 1.95, y1: 1.2,  r: .12, pts: 1 },
+    soccer: { flight: 2.1, z0: 26, y0: .30,  y1: .45,  r: .23, pts: 1 },
+    tennis: { flight: 1.8, z0: 24, y0: 1.5,  y1: 1.05, r: .15, pts: 0 },
     basket: { flight: 2.4, z0: 28, y0: 2.0,  y1: 1.6,  r: .25, pts: 3 },
-    volley: { flight: 1.7, z0: 19, y0: 5.4,  y1: 2.1,  r: .23, pts: 2 }
+    volley: { flight: 1.7, z0: 19, y0: 5.4,  y1: 2.1,  r: .23, pts: 1 }
   };
   var KEYS = ["yakyu", "soccer", "tennis", "basket", "volley"];
   var WINDOW = .17, PERFECT = .07, LIVES = 5, GRAVITY = 17;
@@ -364,7 +364,21 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
   }
   function ballAt(b, t) {
     var k = KINDS[b.kind], u = (t - b.tArrive + k.flight) / k.flight;
-    return { x: b.xs + (b.xe - b.xs) * u, y: ballY(b.kind, u), z: PLATE + (k.z0 - PLATE) * (1 - u), u: u };
+    var x = b.xs + (b.xe - b.xs) * u, y = ballY(b.kind, u);
+    /* 変化は途中だけ。到着位置・時刻と押す間合いは通常球と揃える。 */
+    if (b.variant && u > 0 && u < 1) {
+      var arc = Math.sin(Math.PI * u), side = b.side || 1;
+      if (b.variant === "curve") x += side * 1.8 * arc * u;
+      else if (b.variant === "drop") y += .85 * arc * u;
+      else if (b.variant === "swerve") x += side * 2.2 * arc;
+      else if (b.variant === "spin" && u > .6) {
+        var bounce = (u - .6) / .4;
+        y += .65 * Math.sin(Math.PI * bounce); x += side * .65 * Math.sin(Math.PI * bounce);
+      } else if (b.variant === "bounce") {
+        y = u < .55 ? k.y0 + (k.r - k.y0) * u / .55 : k.r + (k.y1 - k.r) * (u - .55) / .45;
+      } else if (b.variant === "float") x += side * .55 * Math.sin(u * Math.PI * 5) * arc;
+    }
+    return { x: x, y: y, z: PLATE + (k.z0 - PLATE) * (1 - u), u: u };
   }
   /* tf 秒で目標へ届く速さ */
   function aimAt(from, to, tf) {
@@ -378,6 +392,8 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, hits, lives, T, held, keyMode = false;
+  var tennisPoint = 0, tennisGames = 0;
+  var lastWasVariant = false;
   var balls, nextArrive, lastKinds, act, actT, actKind, shake, flashes, pitchAt, leanX;
   var results = [], flash = {}, cursor = 0, animT = 0;           /* 押した目印、キー操作の選び位置、絵の時計 */
   var on = { yakyu: true, soccer: true, tennis: true, basket: true, volley: true };
@@ -411,8 +427,8 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    score = 0; hits = 0; lives = LIVES; T = 0; held = false; nextInput = 0; cameraTime = 0; calledKinds = {};
-    balls = []; lastKinds = []; flashes = [];
+    score = 0; hits = 0; tennisPoint = 0; tennisGames = 0; lives = LIVES; T = 0; held = false; nextInput = 0; cameraTime = 0; calledKinds = {};
+    balls = []; lastKinds = []; flashes = []; lastWasVariant = false;
     act = null; actT = 0; actKind = null; shake = 0; pitchAt = -9; leanX = 0;
     nextArrive = 1.9; cursor = 0; flash = {}; results = [];
   }
@@ -440,6 +456,11 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
         kind: kind, tArrive: nextArrive, xs: xs, xe: (Math.random() - .5) * 1.6,
         spin: Math.random() * 6, hit: false, dead: false, judged: false
       };
+      /* 最初は通常球。変化球は野球20%、ほか12%を目安にし、連続させない。 */
+      var varied = T > 4 && !lastWasVariant && Math.random() < (kind === "yakyu" ? .20 : .12);
+      b.variant = varied ? (kind === "yakyu" ? (Math.random() < .5 ? "curve" : "drop") : { soccer: "swerve", tennis: "spin", basket: "bounce", volley: "float" }[kind]) : null;
+      b.side = Math.random() < .5 ? -1 : 1;
+      lastWasVariant = varied;
       balls.push(b);
       if (kind === "yakyu") pitchAt = nextArrive - k.flight;
       var gap = Math.max(.40, .95 - T * .011) + (Math.random() - .5) * .14;
@@ -474,7 +495,7 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
         if (b.fy < k.r) { b.fy = k.r; }
         if (!b.resultShown && e >= b.resultAfter) {
           b.resultShown = true;
-          results.push({ kind: b.kind, x: b.resultAt.x, y: b.resultAt.y, z: b.resultAt.z, age: 0 });
+          results.push({ text: b.resultText, kind: b.kind, x: b.resultAt.x, y: b.resultAt.y, z: b.resultAt.z, age: 0 });
           cheerSound();
         }
         if (e > 2.4 || Math.abs(b.fz) > 95) b.dead = true;
@@ -535,7 +556,12 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     else if (b.kind === "basket") { to = { x: 0, y: 3.2, z: 24.2 }; tf = 1.15; }
     else { to = { x: (Math.random() - .5) * 6, y: .2, z: 19 }; tf = .9; }
     b.v = aimAt(from, to, tf);
-    score += k.pts * (perfect ? 2 : 1);
+    if (b.kind === "tennis") {
+      score += [15, 15, 10, 0][tennisPoint];
+      tennisPoint++;
+      b.resultText = tennisPoint === 4 ? "GAME!" : "WINNER! " + [0, 15, 30, 40][tennisPoint];
+      if (tennisPoint === 4) { tennisPoint = 0; tennisGames++; }
+    } else { score += k.pts; b.resultText = CHEERS[b.kind]; }
     hits++;
     b.resultAfter = tf; b.resultAt = to; b.resultShown = false;
     shake = Math.max(shake, perfect ? .9 : .6);
@@ -824,7 +850,7 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     /* 結果は球が届いた奥の場所に出す。 */
     results.forEach(function (r) {
       var p = view3d ? view3d.project(r.x, r.y, r.z) : { x: W / 2, y: H * .28 };
-      drawWord(CHEERS[r.kind], p.x, p.y - 20 - r.age * 16, ZDoji5Colors[r.kind], 26, (1.1 - r.age) / .2);
+      drawWord(r.text || CHEERS[r.kind], p.x, p.y - 20 - r.age * 16, ZDoji5Colors[r.kind], 26, (1.1 - r.age) / .2);
     });
     ctx.save();
     for (var i = 0; i < LIVES; i++) {
@@ -890,14 +916,15 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
   window.__probe = {
     now: function () {
       return {
-        state: state, score: score, hits: hits, lives: lives, T: T, act: act,
+        state: state, score: score, tennisPoint: [0,15,30,40][tennisPoint], tennisGames: tennisGames, hits: hits, lives: lives, T: T, act: act,
         balls: balls.map(function (b) {
-          return { kind: b.kind, dt: T - b.tArrive, hit: b.hit, judged: b.judged };
+          return { kind: b.kind, variant: b.variant, dt: T - b.tArrive, hit: b.hit, judged: b.judged };
         }),
         nextArrive: nextArrive, W: W, H: H, has3d: !!view3d,
-        on: kinds(), cheers: results.map(function (r) { return CHEERS[r.kind]; }), results: results.map(function (r) { return { kind: r.kind, x: r.x, y: r.y, z: r.z }; }), pads: state === S.PLAY ? pads(false) : []
+        on: kinds(), cheers: results.map(function (r) { return r.text || CHEERS[r.kind]; }), results: results.map(function (r) { return { kind: r.kind, x: r.x, y: r.y, z: r.z }; }), pads: state === S.PLAY ? pads(false) : []
       };
     },
+    trajectory: function (kind, variant, u) { return ballAt({ kind: kind, variant: variant, side: 1, xs: 0, xe: 0, tArrive: KINDS[kind].flight }, u * KINDS[kind].flight); },
     /* 次の球を、ちょうどの間合いまで進める */
     toBall: function () {
       var guard = 0;
