@@ -161,20 +161,81 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     else { noiseHit(.07, 1800, .45, .9, 700); tone(420, .12, .16, "square", 210); }
     if (perfect) { tone(1320, .1, .1, "triangle", null, .03); tone(1760, .14, .09, "triangle", null, .09); }
   }
-  /* 開始の合図。5競技を同時に重ね、カメラが寄る間に鳴らす。 */
+  /* 一輪車と同じ母音合成。録音やOSの読み上げ音声は使わない。 */
+  var VOWELS = { a: [800, 1200, 2600], i: [300, 2300, 3000], u: [350, 1300, 2400], e: [500, 1900, 2600], o: [500, 850, 2500] };
+  function speak(ac, at, pitch, words) {
+    var t = at, f0 = pitch || 300;
+    words = words || [
+      ["g", "o", 0.13], ["ch", "i", 0.12], ["s", "o", 0.12], ["", "o", 0.14], ["s", "a", 0.12],
+      ["m", "a", 0.13], ["d", "e", 0.12], ["sh", "i", 0.09], ["t", "a", 0.2]
+    ];
+    var out = ac.createGain();
+    out.gain.value = 0.11;
+    out.connect(MASTER || ac.destination);
+    var o = ac.createOscillator(), env = ac.createGain();
+    o.type = "sawtooth";
+    env.gain.value = 0.0001;
+    o.connect(env);
+    var bands = [0, 1, 2].map(function (k) {
+      var b = ac.createBiquadFilter(), g = ac.createGain();
+      b.type = "bandpass"; b.Q.value = [5, 6, 8][k]; g.gain.value = [2.2, 1.4, 0.6][k];
+      env.connect(b); b.connect(g); g.connect(out);
+      return b;
+    });
+    function hiss(t0, dur, freq, q, vol) {
+      var n = ac.createBufferSource(), b = ac.createBiquadFilter(), g = ac.createGain();
+      n.buffer = NOISE; b.type = "bandpass"; b.frequency.value = freq; b.Q.value = q;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      n.connect(b); b.connect(g); g.connect(out);
+      n.start(t0); n.stop(t0 + dur + 0.02);
+    }
+    var total = 0;
+    words.forEach(function (w) { total += w[2]; });
+    var start = t;
+    words.forEach(function (w, i) {
+      var c = w[0], vw = VOWELS[w[1]], dur = w[2];
+      var k = (t - start) / total;
+      var p = f0 * (1.12 - 0.3 * k);                 /* 少しずつ下がる */
+      o.frequency.setTargetAtTime(p, t, 0.02);
+      /* 子音 */
+      var cl = 0;
+      if (c === "s" || c === "sh" || c === "ch") {
+        cl = c === "ch" ? 0.05 : 0.07;
+        env.gain.setTargetAtTime(0.0001, t, 0.008);
+        if (c === "ch") hiss(t, 0.012, 3000, 0.8, 0.5);
+        hiss(t, cl, c === "s" ? 6500 : 3400, c === "s" ? 2 : 1.5, 0.55);
+      } else if (c === "g" || c === "d" || c === "t" || c === "p" || c === "b" || c === "k") {
+        cl = 0.03;
+        env.gain.setTargetAtTime(0.0001, t, 0.005);
+        hiss(t + 0.015, 0.02, (c === "p" || c === "b") ? 700 : c === "g" ? 1500 : 3500, 0.8, c === "t" ? 0.5 : 0.3);
+      } else if (c === "m") {
+        cl = 0.05;
+        /* 口を閉じて鼻に抜ける：低い響きだけにする */
+        env.gain.setTargetAtTime(0.35, t, 0.01);
+        bands[0].frequency.setTargetAtTime(250, t, 0.01);
+        bands[1].frequency.setTargetAtTime(1000, t, 0.01);
+        bands[2].frequency.setTargetAtTime(2200, t, 0.01);
+      }
+      /* 母音。「し」の i は声を小さく（ささやくように抜ける） */
+      var tv = t + cl, loud = c === "sh" ? 0.25 : 0.9;
+      bands.forEach(function (b, j) { b.frequency.setTargetAtTime(vw[j], tv, 0.015); });
+      env.gain.setTargetAtTime(loud, tv, 0.012);
+      t += dur;
+      if (i === words.length - 1) env.gain.setTargetAtTime(0.0001, t - 0.06, 0.03);
+    });
+    o.start(start); o.stop(t + 0.2);
+  }
   function startSound() {
     if (!AC) return;
-    hitSound("yakyu", false);
-    hitSound("tennis", false);
-    /* サッカーの長い笛と、バレーの短い二連の笛。 */
-    tone(2450, .48, .045, "sine", 2600);
-    tone(3100, .16, .035, "sine", 2950);
-    tone(3100, .16, .035, "sine", 2950, .22);
-    /* バスケの開始ブザー。高い笛を隠さない低めの音にする。 */
-    tone(180, .36, .055, "square", 180);
-    tone(270, .36, .03, "sawtooth", 270);
-    lastCheer = -10;
-    cheerSound();
+    var at = AC.currentTime + .02;
+    /* プレイボール、キックオフ、プレイ、レッツプレイ、サーブ。 */
+    speak(AC, at, 180, [["p","u",.10],["r","e",.14],["","i",.09],["b","o",.25],["r","u",.18]]);
+    speak(AC, at, 240, [["k","i",.14],["k","u",.10],["","o",.18],["f","u",.15]]);
+    speak(AC, at, 300, [["p","u",.12],["r","e",.22],["","i",.19]]);
+    speak(AC, at, 210, [["r","e",.13],["t","u",.10],["p","u",.10],["r","e",.20],["","i",.16]]);
+    speak(AC, at, 270, [["s","a",.30],["b","u",.22]]);
   }
   function missSound() { tone(200, .3, .2, "sawtooth", 70); noiseHit(.2, 420, .18, .6, 150); }
   /* ボウリングの得点時と同じ、母音が開く観客の歓声。 */
