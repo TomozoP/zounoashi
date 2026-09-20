@@ -204,12 +204,15 @@ var ZDoji5Scene = (function () {
       });
     } else {
       c.fillStyle = '#f7f6f1'; c.fillRect(0, 0, 256, 128);
-      ['#2f5fb0', '#e5c33f', '#2f5fb0'].forEach(function (col, n) {
-        c.fillStyle = col;
-        c.fillRect(n * 85 + 10, 0, 22, 128);
-      });
-      c.strokeStyle = '#c9c7bf'; c.lineWidth = 2;
-      for (i = 0; i < 6; i++) { c.beginPath(); c.moveTo(i * 43, 0); c.lineTo(i * 43, 128); c.stroke(); }
+      /* 三色の曲がったパネルを経度方向へ繰り返す。継ぎ目も帯と一緒に曲げる。 */
+      for (var n = -1; n < 7; n++) {
+        c.fillStyle = ['#294da0', '#f3d62d', '#f7f6f1'][(n + 3) % 3];
+        c.strokeStyle = '#39413d'; c.lineWidth = 1.3; c.beginPath();
+        for (var y = 0; y <= 128; y += 2) c.lineTo(n * 43 + Math.sin(y / 128 * Math.PI * 2) * 16, y);
+        for (var y = 128; y >= 0; y -= 2) c.lineTo((n + 1) * 43 + Math.sin(y / 128 * Math.PI * 2) * 16, y);
+        c.closePath(); c.fill(); c.stroke();
+        c.beginPath(); c.moveTo(n * 43, 64); c.lineTo((n + 1) * 43, 64); c.stroke();
+      }
     }
     return cv;
   }
