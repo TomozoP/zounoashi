@@ -899,7 +899,7 @@ var ZDoji5Scene = (function () {
     /* 開始前は全景、開始すると元の近い位置へゆっくり加速して寄る。 */
     var mix = snap.cameraMix == null ? 1 : snap.cameraMix;
     mix = mix * mix * (3 - 2 * mix);
-    var angle = 34 + (30 - 34) * mix;
+    var angle = 34 + (28 - 34) * mix;
     this.camera.fov = 2 * Math.atan(Math.tan(angle * Math.PI / 180) * (this.h / this.w) / (960 / 540)) * 180 / Math.PI;
     this.camera.updateProjectionMatrix();
     this.camera.position.set((Math.random() - .5) * sh, 16 + (5.2 - 16) * mix + (Math.random() - .5) * sh, -24 + (-7.8 + 24) * mix);
@@ -910,7 +910,7 @@ var ZDoji5Scene = (function () {
     if (!this.aimPoint) this.aimPoint = new T.Vector3();
     var ndc = this.aimPoint.set(0, 1.0, -.9).project(this.camera).y;
     var half = Math.tan(this.camera.fov * Math.PI / 360);
-    this.camera.rotateX(-(Math.atan(PLAYER_NDC * half) - Math.atan(ndc * half)));
+    this.camera.rotateX(-(Math.atan((PLAYER_NDC - .06 * mix) * half) - Math.atan(ndc * half)));
     this.camera.updateMatrixWorld();
 
     this.renderer.render(this.scene, this.camera);
