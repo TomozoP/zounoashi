@@ -4,6 +4,7 @@
 var ZDoji5Scene = (function () {
   'use strict';
 
+  var COLORS = ZDoji5Colors;
   var T;                                   /* THREE。Scene を作るときに入れる */
   var SPHERE, CYL, BOX;                    /* 使い回す形 */
 
@@ -253,30 +254,31 @@ var ZDoji5Scene = (function () {
     /* 競技ごとの持ちもの・身につけるもの。入切で見え隠れさせる */
     var worn = { yakyu: [], soccer: [], tennis: [], basket: [], volley: [] };
     if (opt.gear) {
+      cap.material.color.set(COLORS.yakyu); visor.material.color.set(COLORS.yakyu);
       worn.yakyu.push(cap, visor);                            /* 帽子は野球のもの */
       ['L', 'R'].forEach(function (tag) {
         var kn = parts['knee' + tag];
         /* サッカー: 長いソックスとスパイク */
-        worn.soccer.push(blob(kn, .083, .17, .086, mat('#2a6fd6', .75), -.27));
-        worn.soccer.push(blob(kn, .094, .056, .165, mat('#e8e24a', .6), -.425, .065));
+        worn.soccer.push(blob(kn, .083, .17, .086, mat(COLORS.soccer, .75), -.27));
+        worn.soccer.push(blob(kn, .094, .056, .165, mat(COLORS.soccer, .6), -.425, .065));
         /* バレー: ひざあて */
-        worn.volley.push(blob(kn, .09, .078, .092, mat('#2b3340', .8), -.02));
+        worn.volley.push(blob(kn, .09, .078, .092, mat(COLORS.volley, .8), -.02));
       });
       /* バスケ: ヘッドバンドと、右腕のスリーブ */
-      var band = new T.Mesh(new T.TorusGeometry(.119, .027, 6, 16), mat('#f0f3f7', .7));
+      var band = new T.Mesh(new T.TorusGeometry(.119, .027, 6, 16), mat(COLORS.basket, .7));
       band.rotation.x = Math.PI / 2; band.position.set(0, .565, 0); band.castShadow = true;
       torso.add(band); worn.basket.push(band);
-      worn.basket.push(blob(parts.shoulderR, .068, .155, .068, mat('#1b2330', .8), -.15));
-      worn.basket.push(blob(parts.elbowR, .061, .145, .061, mat('#1b2330', .8), -.13));
+      worn.basket.push(blob(parts.shoulderR, .068, .155, .068, mat(COLORS.basket, .8), -.15));
+      worn.basket.push(blob(parts.elbowR, .061, .145, .061, mat(COLORS.basket, .8), -.13));
       /* テニス: ラケットを持つ手のリストバンド */
-      var wristband = new T.Mesh(CYL, mat('#f2f5f8', .7));
+      var wristband = new T.Mesh(CYL, mat(COLORS.tennis, .7));
       wristband.scale.set(.062, .055, .062); wristband.position.y = .04;
       wristband.castShadow = true; parts.handL.add(wristband);
       worn.tennis.push(wristband);
     }
     var batParts = [], racketParts = [];
     if (opt.bat) {                                            /* 右手はバット。手首から上へ伸ばす */
-      var bat = new T.Mesh(new T.CylinderGeometry(.05, .023, .92, 12), mat('#c49055', .55));
+      var bat = new T.Mesh(new T.CylinderGeometry(.05, .023, .92, 12), mat(COLORS.yakyu, .55));
       bat.position.y = .46; bat.castShadow = true;
       var batGrip = new T.Mesh(CYL, mat('#23272f', .85));
       batGrip.scale.set(.026, .17, .026); batGrip.position.y = .08;
@@ -284,11 +286,11 @@ var ZDoji5Scene = (function () {
       batParts = [bat, batGrip];
     }
     if (opt.racket) {                                         /* 左手はラケット。面は体の横を向く */
-      var frame = new T.Mesh(new T.TorusGeometry(.165, .023, 8, 22), mat('#e8edf3', .4, .25));
+      var frame = new T.Mesh(new T.TorusGeometry(.165, .023, 8, 22), mat(COLORS.tennis, .4, .25));
       frame.position.y = .45; frame.rotation.y = Math.PI / 2; frame.castShadow = true;
       var gut = new T.Mesh(new T.CircleGeometry(.152, 20), new T.MeshBasicMaterial({ color: '#f4f7fa', transparent: true, opacity: .42, side: T.DoubleSide }));
       gut.position.y = .45; gut.rotation.y = Math.PI / 2;
-      var throat = new T.Mesh(CYL, mat('#e8edf3', .4, .25));
+      var throat = new T.Mesh(CYL, mat(COLORS.tennis, .4, .25));
       throat.scale.set(.02, .12, .02); throat.position.y = .26;
       var grip = new T.Mesh(CYL, mat('#23272f', .85));
       grip.scale.set(.025, .2, .025); grip.position.y = .1;
@@ -531,7 +533,7 @@ var ZDoji5Scene = (function () {
 
     /* 選手と投手 */
     this.player = makeAthlete(this.scene, { shirt: '#d8402f', pants: '#1f2a3a', bat: true, racket: true, gear: true });
-    this.pitcher = makeAthlete(this.scene, { shirt: '#f0f2f0', pants: '#39506e', glove: true });
+    this.pitcher = makeAthlete(this.scene, { shirt: COLORS.yakyu, pants: '#39506e', glove: true });
     this.pitcher.root.position.set(0, .28, 11);
     this.pitcher.root.rotation.y = Math.PI;
     var mound = new T.Mesh(new T.CylinderGeometry(2.9, 3.2, .3, 20), mat('#b77c47', .95));
@@ -541,9 +543,9 @@ var ZDoji5Scene = (function () {
 
     /* 奥に立っている人たち。競技ごとに揃いの色で、入切で出入りする */
     var UNIFORM = {
-      yakyu: ['#f0f2f0', '#39506e'], soccer: ['#3e63c8', '#f0f2f0'],
-      tennis: ['#f4f6f8', '#e6e9ee'], basket: ['#7a4fd0', '#2a2f3a'],
-      volley: ['#e8c53c', '#1f2a3a']
+      yakyu: [COLORS.yakyu, '#39506e'], soccer: [COLORS.soccer, '#f0f2f0'],
+      tennis: [COLORS.tennis, '#e6e9ee'], basket: [COLORS.basket, '#2a2f3a'],
+      volley: [COLORS.volley, '#1f2a3a']
     };
     this.extras = [];
     [['tennis', -4.6, 18], ['tennis', 4.3, 21.5], ['tennis', -8.6, 13],
