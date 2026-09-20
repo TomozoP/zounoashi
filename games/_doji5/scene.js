@@ -438,20 +438,24 @@ var ZDoji5Scene = (function () {
     /* 観客席と照明 */
     var crowd = texture(crowdTexture());
     crowd.wrapS = crowd.wrapT = T.RepeatWrapping;
-    function stand(x, z, w, d, rotY) {
+    /* w は客席の長さ、d は厚み。back のときは奥の正面に横へ寝かせる */
+    function stand(x, z, w, d, back) {
       var c = crowd.clone(); c.needsUpdate = true; c.repeat.set(w / 7, 1.6);
-      var base = box(x, 5, z, d, 10, w, dark, false);
-      base.rotation.y = rotY || 0;
+      box(x, 5, z, back ? w : d, 10, back ? d : w, dark, false);
       var face = new T.Mesh(new T.PlaneGeometry(w, 11), new T.MeshBasicMaterial({ map: c }));
-      face.position.set(x + (x < 0 ? d / 2 : -d / 2), 6.5, z);
-      face.rotation.y = x < 0 ? Math.PI / 2 : -Math.PI / 2;
-      face.rotation.x = -.16;
-      if (rotY) { face.position.set(x, 6.5, z - d / 2); face.rotation.set(-.16, Math.PI, 0); }
+      if (back) {
+        face.position.set(x, 6.5, z - d / 2);
+        face.rotation.set(-.16, Math.PI, 0);
+      } else {
+        face.position.set(x + (x < 0 ? d / 2 : -d / 2), 6.5, z);
+        face.rotation.y = x < 0 ? Math.PI / 2 : -Math.PI / 2;
+        face.rotation.x = -.16;
+      }
       self.scene.add(face);
     }
     stand(-34, 30, 104, 8);
     stand(34, 30, 104, 8);
-    stand(0, 90, 74, 8, Math.PI);
+    stand(0, 90, 74, 8, true);
     for (var i = 0; i < 4; i++) {
       var lx = i % 2 ? 22 : -22, lz = i < 2 ? 70 : 20;
       post(lx, 10, lz, .32, 20, metal);
