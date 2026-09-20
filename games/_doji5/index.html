@@ -112,6 +112,27 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     NOISE = AC.createBuffer(1, len, AC.sampleRate);
     var d = NOISE.getChannelData(0);
     for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    startAmbience();
+  }
+  /* 遠くの観客席。鋭い高音を避け、ゆっくりうねる小さなざわめきにする。 */
+  var ambience = null;
+  function startAmbience() {
+    if (!AC || !NOISE || ambience) return;
+    ambience = AC.createGain();
+    ambience.gain.setValueAtTime(.0001, AC.currentTime);
+    ambience.gain.linearRampToValueAtTime(.55, AC.currentTime + 1.5);
+    ambience.connect(MASTER);
+    [[420, .025], [1150, .012]].forEach(function (band, i) {
+      var crowd = AC.createBufferSource(), filter = AC.createBiquadFilter(), gain = AC.createGain();
+      crowd.buffer = NOISE; crowd.loop = true; crowd.playbackRate.value = .78 + i * .15;
+      filter.type = "bandpass"; filter.frequency.value = band[0]; filter.Q.value = .7;
+      gain.gain.value = band[1];
+      crowd.connect(filter); filter.connect(gain); gain.connect(ambience);
+      crowd.start(AC.currentTime, i * .6);
+      var swell = AC.createOscillator(), depth = AC.createGain();
+      swell.frequency.value = .13 + i * .06; depth.gain.value = band[1] * .28;
+      swell.connect(depth); depth.connect(gain.gain); swell.start();
+    });
   }
   function tone(freq, dur, vol, type, to, delay) {
     if (!AC) return;
@@ -227,21 +248,20 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     });
     o.start(start); o.stop(t + 0.2);
   }
-  function startSound() {
+  function firstBallSound(kind) {
     if (!AC) return;
     var at = AC.currentTime + .02;
-    /* 語尾を約0.1〜0.2秒ずつ重ねて、5競技の開始を順に告げる。 */
-    speak(AC, at, 180, [["p","u",.10],["r","e",.14],["","i",.09],["b","o",.25],["r","u",.18]]);
-    speak(AC, at + .58, 240, [["k","i",.14],["k","u",.10],["","o",.18],["f","u",.15]]);
-    speak(AC, at + 1.02, 300, [["p","u",.12],["r","e",.22],["","i",.19]]);
-    speak(AC, at + 1.42, 210, [["r","e",.13],["t","u",.10],["p","u",.10],["r","e",.20],["","i",.16]]);
-    speak(AC, at + 1.98, 270, [["s","a",.30],["b","u",.22]]);
-    /* サッカーとバレーの笛、バスケのブザーを小さく添える。 */
-    tone(2450, .20, .035, "sine", 2600, .52);
-    tone(180, .24, .035, "square", 180, 1.40);
-    tone(270, .24, .018, "sawtooth", 270, 1.40);
-    tone(3100, .12, .028, "sine", 2950, 2.00);
-    tone(3100, .12, .028, "sine", 2950, 2.18);
+    var calls = {
+      yakyu: [175, [["p","u",.10],["r","e",.14],["","i",.09],["b","o",.25],["r","u",.18]]],
+      soccer: [225, [["k","i",.14],["k","u",.10],["","o",.18],["f","u",.15]]],
+      tennis: [285, [["p","u",.12],["r","e",.22],["","i",.19]]],
+      basket: [200, [["r","e",.13],["t","u",.10],["p","u",.10],["r","e",.20],["","i",.16]]],
+      volley: [255, [["s","a",.30],["b","u",.22]]]
+    };
+    speak(AC, at, calls[kind][0], calls[kind][1]);
+    if (kind === "soccer") tone(2450, .20, .035, "sine", 2600);
+    if (kind === "basket") { tone(180, .24, .035, "square", 180); tone(270, .24, .018, "sawtooth", 270); }
+    if (kind === "volley") { tone(3100, .12, .028, "sine", 2950); tone(3100, .12, .028, "sine", 2950, .18); }
   }
   function missSound() { tone(200, .3, .2, "sawtooth", 70); noiseHit(.2, 420, .18, .6, 150); }
   /* ボウリングの得点時と同じ、母音が開く観客の歓声。 */
@@ -301,7 +321,7 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
   var KEYS = ["yakyu", "soccer", "tennis", "basket", "volley"];
   var WINDOW = .17, PERFECT = .07, LIVES = 5, GRAVITY = 17;
   var PLATE = 1.4;                                 /* 打つ場所。選手の少し前 */
-  var cameraTime = 0, CAMERA_MOVE = .9;
+  var calledKinds = {}, cameraTime = 0, CAMERA_MOVE = .9, START_PAUSE = .6;
   var nextInput = 0;                              /* 全競技で共通の、次に押せる時刻 */
   var ACT = .38;                                   /* 振ってから構えへ戻るまでの秒数 */
 
@@ -365,7 +385,7 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    score = 0; hits = 0; lives = LIVES; T = 0; held = false; nextInput = 0; cameraTime = 0;
+    score = 0; hits = 0; lives = LIVES; T = 0; held = false; nextInput = 0; cameraTime = 0; calledKinds = {};
     balls = []; lastKinds = []; flashes = [];
     act = null; actT = 0; actKind = null; shake = 0; pitchAt = -9; leanX = 0;
     nextArrive = 1.9; cursor = 0; flash = {}; results = [];
@@ -412,7 +432,7 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     flashes.forEach(function (f) { f.age += dt; });
     flashes = flashes.filter(function (f) { return f.age < .45; });
     if (state !== S.PLAY) return;
-    if (cameraTime < CAMERA_MOVE) { cameraTime = Math.min(CAMERA_MOVE, cameraTime + dt); return; }
+    if (cameraTime < CAMERA_MOVE + START_PAUSE) { cameraTime = Math.min(CAMERA_MOVE + START_PAUSE, cameraTime + dt); return; }
     T += dt;
     schedule();
 
@@ -435,6 +455,7 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
       }
       var p = ballAt(b, T);
       if (p.u < 0) return;
+      if (!calledKinds[b.kind]) { calledKinds[b.kind] = true; firstBallSound(b.kind); }
       if (!b.judged && T > b.tArrive + WINDOW) {          /* 見逃した */
         b.judged = true;
         lives--; missSound(); shake = Math.max(shake, .5);
@@ -906,7 +927,7 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
   document.addEventListener("pointercancel", function () { startingPointer = null; }, true);
 
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener("click", function (e) { e.stopPropagation(); if (state !== S.INTRO) return; audioOn(); resumeAudio(); newRound(); startSound(); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); if (state !== S.INTRO) return; audioOn(); resumeAudio(); newRound(); });
   newRound(); state = S.INTRO; startButton.hidden = false;
   layout();
   var last = performance.now();
