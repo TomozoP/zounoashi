@@ -613,8 +613,9 @@
     }
 
     this._wsp = s.wsp;
-    if (w[4] < 0.5 && s.wsp > 26) {            /* 地面があるあいだは土ぼこり */
-      var rate = Math.min(28, 3 + s.wsp / 24);
+    var dusty = clamp01(((s.kmh || 0) - 1.2) / 6);   /* 歩きだしてから立ちはじめる */
+    if (s.running && w[4] < 0.5 && dusty > 0.02) {
+      var rate = Math.min(28, 3 + s.wsp / 24) * dusty;
       this.dustTimer -= s.dt;
       var guard = 0;
       while (this.dustTimer <= 0 && guard++ < 8) {
@@ -629,6 +630,7 @@
 
     function setColor(c, arr) { c.setRGB(srgb(arr[0]), srgb(arr[1]), srgb(arr[2])); }
   };
+  function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
   function srgb(v) {
     v = Math.min(255, v) / 255;
     return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
