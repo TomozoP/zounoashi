@@ -192,11 +192,38 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, hits, lives, T, held, keyMode = false;
   var balls, nextArrive, lastKinds, act, actT, actKind, shake, flashes, pitchAt, leanX;
+  var flash = {}, cursor = 0;                      /* 押した目印と、キー操作のときの選び位置 */
+  var on = { yakyu: true, soccer: true, tennis: true, basket: true, volley: true };
+  function kinds() { return KEYS.filter(function (k) { return on[k]; }); }
 
-  var HUDY, SCOREY;
+  /* ============ 下の5ボタン ============
+     はじめの画面では5つとも出して入切を選び、遊びのあいだは入れたものだけ出す。 */
+  var HUDY, SCOREY, PADY, PADW = 92, PADGAP = 14;
   function place() {
     HUDY = Math.round(H * 0.045);
     SCOREY = Math.round(H * 0.105);
+    PADY = Math.round(H * 0.845);
+  }
+  function pads(all) {
+    var ks = all ? KEYS : kinds(), n = ks.length;
+    var total = n * PADW + (n - 1) * PADGAP, x0 = W / 2 - total / 2;
+    return ks.map(function (k, i) {
+      return { kind: k, x: x0 + i * (PADW + PADGAP), y: PADY - PADW / 2, w: PADW, h: PADW };
+    });
+  }
+  function padAt(x, y, all) {
+    var list = pads(all);
+    for (var i = 0; i < list.length; i++) {
+      var b = list[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
+    }
+    return null;
+  }
+  /* 入切。最後のひとつは切らせない */
+  function toggle(kind) {
+    if (on[kind] && kinds().length <= 1) return;
+    on[kind] = !on[kind];
+    flash[kind] = .16;
   }
 
   function newRound() {
@@ -206,13 +233,13 @@
     score = 0; hits = 0; lives = LIVES; T = 0; held = false;
     balls = []; lastKinds = []; flashes = [];
     act = null; actT = 0; actKind = null; shake = 0; pitchAt = -9; leanX = 0;
-    nextArrive = 1.9;
+    nextArrive = 1.9; cursor = 0; flash = {};
   }
 
   function pickKind() {
-    var k;
-    do { k = KEYS[(Math.random() * KEYS.length) | 0]; }
-    while (lastKinds.length >= 2 && lastKinds[0] === k && lastKinds[1] === k);
+    var ks = kinds(), k;
+    do { k = ks[(Math.random() * ks.length) | 0]; }
+    while (ks.length > 1 && lastKinds.length >= 2 && lastKinds[0] === k && lastKinds[1] === k);
     lastKinds.unshift(k); lastKinds.length = 2;
     return k;
   }
@@ -236,6 +263,7 @@
   function update(dt) {
     shake = Math.max(0, shake - dt * 4);
     if (act) { actT += dt; if (actT > ACT) act = null; }
+    KEYS.forEach(function (k) { if (flash[k] > 0) flash[k] = Math.max(0, flash[k] - dt); });
     flashes.forEach(function (f) { f.age += dt; });
     flashes = flashes.filter(function (f) { return f.age < .45; });
     if (state !== S.PLAY) return;
@@ -273,20 +301,28 @@
     leanX += (want - leanX) * Math.min(1, dt * 6);
   }
 
-  /* 押したときに狙う球 */
-  function bestTarget() {
+  /* その競技で、いま間合いにいちばん近い球 */
+  function targetOf(kind) {
     var best = null, bestD = 9;
     balls.forEach(function (b) {
-      if (b.hit || b.judged) return;
+      if (b.hit || b.judged || b.kind !== kind) return;
       var d = Math.abs(T - b.tArrive);
       if (d < bestD) { bestD = d; best = b; }
     });
-    return bestD < .7 ? best : null;
+    return bestD <= WINDOW ? best : null;
+  }
+
+  /* ボタンを押す。合っていれば打ち返し、外れていれば空振り */
+  function press(kind) {
+    if (state !== S.PLAY || !on[kind]) return;
+    flash[kind] = .16;
+    act = kind; actT = 0; actKind = kind;
+    var b = targetOf(kind);
+    if (b) swingAt(b); else whiff();
   }
 
   function swingAt(b) {
     var d = Math.abs(T - b.tArrive), k = KINDS[b.kind];
-    act = b.kind; actT = 0; actKind = b.kind;
     if (d > WINDOW) { whiff(); return; }
     var perfect = d < PERFECT;
     b.hit = true; b.judged = true; b.hitT = T;
@@ -311,9 +347,17 @@
   }
 
   /* ============ 入力 ============
-     タップとスペースキーで同じことができる。x が null のときはキー操作。 */
+     触るのは下の5ボタン。キーは 1〜5 がそのまま5ボタンに当たり、
+     矢印で選んでスペースでも押せる（ジョイパッドはスペースと矢印に化ける）。
+     x が null のときはキー操作。 */
+  var padPending = null;
   function down(x, y) {
-    if (state === S.INTRO) return;
+    if (state === S.INTRO) {
+      /* 入切の並びを押したとき。本物のブラウザでは下の捕捉側が先に受け取る */
+      var t = padAt(x, y, true);
+      padPending = t ? t.kind : null;
+      return;
+    }
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
@@ -321,12 +365,14 @@
       return;
     }
     held = true;
-    var b = bestTarget();
-    if (b) swingAt(b);
-    else { act = KEYS[(Math.random() * 5) | 0]; actT = 0; whiff(); }
+    var b = padAt(x, y);
+    if (b) press(b.kind);
   }
   function move() {}
-  function up() { held = false; }
+  function up() {
+    held = false;
+    if (state === S.INTRO && padPending) { toggle(padPending); padPending = null; }
+  }
 
   function atCanvas(e) {
     var r = canvas.getBoundingClientRect();
@@ -340,18 +386,36 @@
     var p = atCanvas(e); move(p.x, p.y);
   });
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { up(); });
+  wrap.addEventListener("pointercancel", function () { padPending = null; up(); });
   window.addEventListener("blur", function () { up(); });
 
   window.addEventListener("keydown", function (e) {
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    if (!esc && !go) return;
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    var flip = e.key === "ArrowUp" || e.key === "ArrowDown";
+    var num = /^[1-5]$/.test(e.key) ? parseInt(e.key, 10) - 1 : -1;
+    if (!esc && !go && !left && !right && !flip && num < 0) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
+    var list = pads(state === S.INTRO);
+    if (left || right) {                       /* 選び位置を動かす */
+      if (!list.length) return;
+      cursor = (cursor + (right ? 1 : list.length - 1)) % list.length;
+      return;
+    }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
-    down();
+    if (state === S.INTRO) {
+      if (num >= 0) { toggle(KEYS[num]); cursor = num; return; }
+      if (flip) { toggle(list[Math.min(cursor, list.length - 1)].kind); return; }
+      return;                                  /* 開始は keyup で */
+    }
+    if (flip) return;
+    if (num >= 0) { if (list[num]) press(list[num].kind); return; }
+    if (state === S.PLAY) { if (list[cursor]) press(list[cursor].kind); return; }
+    down();                                    /* 結果画面はスペースでもう一度 */
   });
   window.addEventListener("keyup", function (e) {
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
@@ -400,6 +464,94 @@
     });
   }
 
+  /* ボタンに出す球の絵。3Dの球と同じ見た目に寄せる */
+  function drawBall2D(kind, cx, cy, r) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = { yakyu: "#f6f3ea", soccer: "#f4f4f0", tennis: "#d3e64a", basket: "#d4702a", volley: "#f7f6f1" }[kind];
+    ctx.fill();
+    ctx.save();
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.clip();
+    if (kind === "yakyu") {
+      ctx.strokeStyle = "#c4384a"; ctx.lineWidth = r * .11;
+      [-1, 1].forEach(function (s) {
+        ctx.beginPath();
+        ctx.moveTo(s * r * .66, -r * .82);
+        ctx.quadraticCurveTo(s * r * .06, 0, s * r * .66, r * .82);
+        ctx.stroke();
+      });
+    } else if (kind === "soccer") {
+      ctx.fillStyle = "#20242a";
+      ctx.beginPath();
+      for (var i = 0; i < 5; i++) {
+        var a = i / 5 * Math.PI * 2 - Math.PI / 2;
+        ctx.lineTo(Math.cos(a) * r * .42, Math.sin(a) * r * .42);
+      }
+      ctx.closePath(); ctx.fill();
+      for (var j = 0; j < 5; j++) {
+        var b = j / 5 * Math.PI * 2 - Math.PI / 2 + Math.PI / 5;
+        ctx.beginPath(); ctx.arc(Math.cos(b) * r * .95, Math.sin(b) * r * .95, r * .3, 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (kind === "tennis") {
+      ctx.strokeStyle = "#f7f9ee"; ctx.lineWidth = r * .16;
+      [-1, 1].forEach(function (s) {
+        ctx.beginPath();
+        ctx.moveTo(s * r * .72, -r * .8);
+        ctx.quadraticCurveTo(s * r * .05, 0, s * r * .72, r * .8);
+        ctx.stroke();
+      });
+    } else if (kind === "basket") {
+      ctx.strokeStyle = "#231a14"; ctx.lineWidth = r * .09;
+      ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(0, r); ctx.stroke();
+      [-1, 1].forEach(function (s) {
+        ctx.beginPath(); ctx.arc(s * r * 1.35, 0, r * 1.05, -Math.PI * .5, Math.PI * .5); ctx.stroke();
+      });
+    } else {
+      ctx.lineWidth = r * .38;
+      [["#2f5fb0", -1], ["#e5c33f", 1]].forEach(function (v) {
+        ctx.strokeStyle = v[0];
+        ctx.beginPath();
+        ctx.moveTo(v[1] * r * .95, -r);
+        ctx.quadraticCurveTo(v[1] * r * .3, 0, v[1] * r * .95, r);
+        ctx.stroke();
+      });
+      ctx.strokeStyle = "rgba(150,150,145,.75)"; ctx.lineWidth = r * .07;
+      ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(0, r); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.restore();
+  }
+
+  /* 下の5ボタン。はじめの画面では入切の選び、遊びのあいだは押しどころ */
+  function drawPads(all) {
+    var list = pads(all);
+    list.forEach(function (b, i) {
+      var lit = flash[b.kind] > 0 ? flash[b.kind] / .16 : 0;
+      var off = all && !on[b.kind];
+      var r = b.w / 2;
+      ctx.save();
+      ctx.translate(b.x + r, b.y + r);
+      ctx.scale(1 - lit * .08, 1 - lit * .08);
+      roundRect(-r, -r, b.w, b.h, 22);
+      ctx.fillStyle = off ? "rgba(12,16,22,.42)" : "rgba(244,247,250,.92)";
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = off ? "rgba(255,255,255,.28)"
+        : (keyMode && i === Math.min(cursor, list.length - 1) ? "#f7cc71" : "rgba(22,32,46,.75)");
+      ctx.stroke();
+      ctx.globalAlpha = off ? .3 : 1;
+      drawBall2D(b.kind, 0, 0, r * .62);
+      ctx.globalAlpha = 1;
+      if (lit > 0) {
+        roundRect(-r, -r, b.w, b.h, 22);
+        ctx.fillStyle = "rgba(255,255,255," + (lit * .5) + ")"; ctx.fill();
+      }
+      ctx.restore();
+    });
+  }
+
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     var snap = snapshot();
@@ -421,6 +573,7 @@
 
     /* 残りと点。結果画面では出さない */
     if (state === S.RESULT) { drawResult(); return; }
+    drawPads(state === S.INTRO);
     ctx.save();
     for (var i = 0; i < LIVES; i++) {
       ctx.beginPath();
@@ -489,7 +642,8 @@
         balls: balls.map(function (b) {
           return { kind: b.kind, dt: T - b.tArrive, hit: b.hit, judged: b.judged };
         }),
-        nextArrive: nextArrive, W: W, H: H, has3d: !!view3d
+        nextArrive: nextArrive, W: W, H: H, has3d: !!view3d,
+        on: kinds(), pads: pads(state === S.INTRO)
       };
     },
     /* 次の球を、ちょうどの間合いまで進める */
@@ -508,7 +662,6 @@
       return null;
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
-    tap: function () { down(); up(); },
     reset: function () { newRound(); }
   };
 
@@ -520,8 +673,10 @@
       r.key();
       var guard = Date.now() + 45000;
       while (state !== S.RESULT && Date.now() < guard) {
-        var b = bestTarget();
-        if (b && Math.abs(T - b.tArrive) < .04) { down(); up(); }
+        for (var i = 0; i < balls.length; i++) {
+          var b = balls[i];
+          if (!b.hit && !b.judged && Math.abs(T - b.tArrive) < .04) { press(b.kind); break; }
+        }
         await r.wait(16);
       }
       await r.wait(1600);
@@ -531,18 +686,34 @@
   /* ============ ループ ============ */
   var startButton = document.getElementById("start");
   // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
-  var startingPointer = null;
+  var startingPointer = null, togglingPointer = null;
+  /* 入切の並びを触ったときだけは開始せず、その競技を入切する */
+  function introPad(e) {
+    var r = canvas.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return padAt((e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H, true);
+  }
   document.addEventListener("pointerdown", function (e) {
     if (!(state === S.INTRO)) return;
     if (e.isPrimary === false || e.button > 0) return;
+    keyMode = false;
+    if (introPad(e)) { togglingPointer = e.pointerId; e.stopImmediatePropagation(); return; }
     startingPointer = e.pointerId;
     e.stopImmediatePropagation();
   }, true);
   document.addEventListener("pointerup", function (e) {
-    if (!(state === S.INTRO) || startingPointer !== e.pointerId) return;
+    if (!(state === S.INTRO)) return;
+    if (togglingPointer === e.pointerId) {
+      togglingPointer = null;
+      var pad = introPad(e);
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (pad) toggle(pad.kind);
+      return;
+    }
+    if (startingPointer !== e.pointerId) return;
     startingPointer = null; e.preventDefault(); e.stopImmediatePropagation(); startButton.click();
   }, true);
-  document.addEventListener("pointercancel", function () { startingPointer = null; }, true);
+  document.addEventListener("pointercancel", function () { startingPointer = null; togglingPointer = null; }, true);
 
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
   startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
