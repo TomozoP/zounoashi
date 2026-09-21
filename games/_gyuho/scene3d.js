@@ -29,7 +29,8 @@
     this.fog = new T.Fog(new T.Color("#d5e9f6"), 900, 3000);
     this.scene.fog = this.fog;
 
-    this.scene.add(new T.HemisphereLight("#ffffff", "#6d7a5c", 2.1));
+    this.hemi = new T.HemisphereLight("#ffffff", "#6d7a5c", 2.1);
+    this.scene.add(this.hemi);
     this.sun = new T.DirectionalLight("#fff4df", 1.9);
     this.sun.position.set(-600, 950, 420);
     this.scene.add(this.sun);
@@ -95,8 +96,10 @@
     this.road.rotation.x = -Math.PI / 2;
     this.road.position.set(0, 0.9, -3600);
 
-    this.lineTex = lineTexture();
+    this.lineTex = lineTexture(false);
     this.lineTex.repeat.set(1, 11000 / 240);
+    this.lineTexCity = lineTexture(true);
+    this.lineTexCity.repeat.set(1, 11000 / 240);
     this.lineMat = new T.MeshBasicMaterial({ map: this.lineTex, transparent: true, opacity: 0 });
     this.lines = this.mesh(new T.PlaneGeometry(260, 11000), this.lineMat);
     this.lines.rotation.x = -Math.PI / 2;
@@ -216,15 +219,24 @@
     t.wrapS = t.wrapT = T.RepeatWrapping;
     return t;
   }
-  function lineTexture() {
+  function lineTexture(city) {
     var c = document.createElement("canvas");
     c.width = 64; c.height = 128;
     var g = c.getContext("2d");
     g.clearRect(0, 0, 64, 128);
     g.fillStyle = "#f1ead6";
-    g.fillRect(30, 0, 5, 54);                 /* まん中の破線 */
-    g.fillRect(2, 0, 3, 128);                 /* 路肩 */
-    g.fillRect(59, 0, 3, 128);
+    if (city) {                               /* 都市：車線の多い大通り */
+      g.fillRect(30, 0, 2, 128);              /* まん中の二重線 */
+      g.fillRect(34, 0, 2, 128);
+      g.fillRect(15, 0, 3, 52);               /* 車線の破線 */
+      g.fillRect(47, 0, 3, 52);
+      g.fillRect(2, 0, 4, 128);               /* 路肩 */
+      g.fillRect(58, 0, 4, 128);
+    } else {
+      g.fillRect(30, 0, 5, 54);               /* まん中の破線 */
+      g.fillRect(2, 0, 3, 128);               /* 路肩 */
+      g.fillRect(59, 0, 3, 128);
+    }
     var t = new T.CanvasTexture(c);
     t.wrapS = t.wrapT = T.RepeatWrapping;
     return t;
@@ -551,6 +563,12 @@
       this.camera.lookAt(LOOK.x * cs, LOOK.y * cs, LOOK.z * cs);
       this._cs = cs;
     }
+    var lit = s.light == null ? 1 : s.light;    /* 日が落ちると、あかりも落とす */
+    if (this._lit !== lit) {
+      this.sun.intensity = 1.9 * lit;
+      this.hemi.intensity = 2.1 * (0.3 + 0.7 * lit);
+      this._lit = lit;
+    }
     var fov = this._baseFov * (1 + 0.1 * (s.t || 0));
     if (Math.abs(fov - this.camera.fov) > 0.01) {
       this.camera.fov = fov;
@@ -565,8 +583,10 @@
     this.grassMat.opacity = 0.2 * (1 - w[5]);
     this.grass.visible = this.grassMat.opacity > 0.01;
     this.grassTex.offset.y = s.dist / 140;
-    this.lineTex.offset.y = s.dist / 240;
-    this.lineMat.opacity = Math.min(1, w[1] + w[2] + w[3] + w[4]) * (1 - w[5]);
+    var wantTex = w[3] ? this.lineTexCity : this.lineTex;
+    if (this.lineMat.map !== wantTex) { this.lineMat.map = wantTex; this.lineMat.needsUpdate = true; }
+    wantTex.offset.y = s.dist / 240;
+    this.lineMat.opacity = Math.min(1, w[1] + w[2] + w[3]) * (1 - w[5]);   /* 大陸に白線は無い */
     this.lines.visible = this.lineMat.opacity > 0.02;
     setColor(this.fog.color, s.fogColor);
     this.fog.near = (800 + 1200 * w[5]) * ws;    /* 世界が広くなったぶん、霞む距離ものばす */

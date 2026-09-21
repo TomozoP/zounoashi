@@ -79,11 +79,11 @@
   var PHASE_NAME = ["牧場", "道路", "町", "都市", "大陸", "宇宙"];
   var NEWS = [
     "",
-    "牧場から牛が逃走 県道を南へ",
-    "逃走中の牛 市街地に入る 住民は屋内へ",
-    "牛 都心を直進 高層ビルに被害",
+    "牧場から速い牛が逃走 県道を北上中、近隣住民は注意",
+    "脱走中の牛 市街地に入る 住民は屋内へ避難を開始",
+    "牛 都心を直進 建物等に被害発生中",
     "牛が国境を越える 各国が空を警戒",
-    "牛が大気圏を抜ける 宇宙空間へ"
+    "牛 大気圏を抜け宇宙空間へ突入 このまま加速すると宇宙崩壊との見解"
   ];
   var WORLD = [1, 1.25, 1.5, 1.8, 2.6, 3.4];   /* 景色ごとの世界の広さ */
   /* 見た目の速さ。景色のはじめと終わりで、ここからここまで登る。
@@ -262,10 +262,19 @@
   var dist, nextAt, legPhase, prevHalf, prevKmh, prevGear, sirenT, clickPulse, gearFlash, lastDt;
 
   var PIECE = ["#f4f1ea", "#2b2723", "#e0543c", "#45464b", "#7fb04a", "#3f7fd6"];
-  var SKY_HI = ["#3f8fd0", "#3f8fd0", "#4d92c8", "#6d8ba4", "#2a6ab4", "#04050d"];
-  var SKY_LO = ["#d5e9f6", "#d5e9f6", "#dbe7ef", "#c6ccd2", "#b9d6ea", "#0a0b1a"];
+  /* 空の色。ぜんぶの道のりを0〜1として、朝から夜へ移る */
+  var SKY_KEY = [
+    { t: 0.00, hi: "#6aa8dc", lo: "#ffd2a0" },   /* 朝やけ */
+    { t: 0.15, hi: "#3f8fd0", lo: "#d5e9f6" },   /* 朝 */
+    { t: 0.40, hi: "#2f86cf", lo: "#d8ecf8" },   /* 昼 */
+    { t: 0.60, hi: "#3f80bd", lo: "#e8d3a8" },   /* 午後 */
+    { t: 0.72, hi: "#436ea6", lo: "#f0a868" },   /* 夕 */
+    { t: 0.83, hi: "#2a3f70", lo: "#d4683f" },   /* 日ぐれ */
+    { t: 0.92, hi: "#101a3a", lo: "#34305c" },   /* 宵 */
+    { t: 1.00, hi: "#04050d", lo: "#0a0b1a" }    /* 夜 */
+  ];
   var GROUND = ["#7fb04a", "#74a648", "#8a9a6e", "#6e7278", "#8c8058", "#0a0b1a"];
-  var PAVE   = ["#b79a6b", "#4a4b50", "#4a4b50", "#3f4046", "#5b5449", "#0a0b1a"];
+  var PAVE   = ["#b79a6b", "#4a4b50", "#4a4b50", "#34373d", "#6d5f42", "#0a0b1a"];
 
   /* その景色のなかで、どこまで来たか（0〜1） */
   function phaseT(km) {
@@ -289,6 +298,32 @@
     w[gearIndex(km)] = 1;
     return w;
   }
+
+  /* ぜんぶの道のりのうち、どこまで来たか */
+  function progress() { return (gear + phaseT(speed)) / GEARS.length; }
+  function lerpHex(a, b, k) {
+    var A = hex(a), B = hex(b);
+    return [A[0] + (B[0] - A[0]) * k, A[1] + (B[1] - A[1]) * k, A[2] + (B[2] - A[2]) * k];
+  }
+  function skyNow() {
+    var t = progress();
+    for (var i = 1; i < SKY_KEY.length; i++) {
+      if (t <= SKY_KEY[i].t) {
+        var a = SKY_KEY[i - 1], b = SKY_KEY[i];
+        var k = (t - a.t) / (b.t - a.t);
+        return { hi: lerpHex(a.hi, b.hi, k), lo: lerpHex(a.lo, b.lo, k) };
+      }
+    }
+    var last = SKY_KEY[SKY_KEY.length - 1];
+    return { hi: hex(last.hi), lo: hex(last.lo) };
+  }
+  /* 日が傾くと、地面も暗くなる */
+  function dayLight() {
+    var t = progress();
+    if (t < 0.58) return 1;
+    return 1 - 0.55 * clamp01((t - 0.58) / 0.36);
+  }
+  function dim(c, k) { return [c[0] * k, c[1] * k, c[2] * k]; }
 
   function fmtSpeed(km) {
     if (km < 1000) return km.toFixed(2) + " km/h";
@@ -574,12 +609,13 @@
   }
 
   function drawSky() {
+    var sk = skyNow();
     var g = ctx.createLinearGradient(0, 0, 0, HY + 10);
-    g.addColorStop(0, rgb(mixW(SKY_HI)));
-    g.addColorStop(1, rgb(mixW(SKY_LO)));
+    g.addColorStop(0, rgb(sk.hi));
+    g.addColorStop(1, rgb(sk.lo));
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, HY + 10);
-    ctx.fillStyle = rgb(mixW(GROUND));           /* 立体が無いときの下地 */
+    ctx.fillStyle = rgb(dim(mixW(GROUND), dayLight()));   /* 立体が無いときの下地 */
     ctx.fillRect(0, HY, W, H - HY);
   }
 
@@ -587,7 +623,7 @@
     if (W8[3] || W8[5]) return;
     ctx.save();
     ctx.globalAlpha = 0.92;
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = rgb(dim([255, 255, 255], 0.45 + dayLight() * 0.55));
     var gap = 250, off = (dist * 0.05) % gap;
     for (var i = -1; i < Math.ceil(W / gap) + 3; i++) {
       var x = W + 140 - off - i * gap;
@@ -603,7 +639,7 @@
     if (!W8[3] && !W8[4] && !W8[5]) {
       ctx.save();
       var off = (dist * 0.03) % 420;
-      ctx.fillStyle = "#6f9f7d";
+      ctx.fillStyle = rgb(dim([111, 159, 125], dayLight()));
       ctx.beginPath();
       ctx.moveTo(-off - 420, HY + 4);
       for (var i = -1; i < 4; i++) {
@@ -618,7 +654,7 @@
     if (W8[4]) {                                 /* 大陸：とおくの山なみ */
       ctx.save();
       ctx.globalAlpha = 0.85;
-      ctx.fillStyle = "#7d8a93";
+      ctx.fillStyle = rgb(dim([125, 138, 147], dayLight()));
       var mg = 210, moff = (dist * 0.02) % mg;
       ctx.beginPath();
       ctx.moveTo(-40, HY + 30);
@@ -636,7 +672,7 @@
     if (W8[3]) {
       ctx.save();
       ctx.globalAlpha = 0.75;
-      ctx.fillStyle = "#6b7585";
+      ctx.fillStyle = rgb(dim([107, 117, 133], dayLight()));
       var gap = 58, off2 = (dist * 0.04) % gap;
       for (var j = -1; j < Math.ceil(W / gap) + 2; j++) {
         var x = W - off2 - j * gap;
@@ -822,7 +858,8 @@
         dist: dist, w: W8, gear: gear, legPhase: legPhase, wsp: wsp, beta: beta,
         props: props, dt: lastDt, clickPulse: clickPulse, lead: lead, t: phaseT(speed), world: WORLD[gear],
         kmh: speed, running: state === S.PLAY,
-        groundColor: mixW(GROUND), roadColor: mixW(PAVE), fogColor: mixW(SKY_LO)
+        groundColor: dim(mixW(GROUND), dayLight()), roadColor: dim(mixW(PAVE), dayLight()),
+        fogColor: skyNow().lo, light: dayLight()
       });
       place();                                   /* カメラが動くので測りなおす */
       scene3d.render();
