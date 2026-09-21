@@ -175,7 +175,9 @@ ok(t6.until(function () { return t6.probe.now().state === "result"; }, 300), "�
 /* 8. 結果画面から、もう一度 */
 var H = t6.probe.now().H, Wd = t6.probe.now().W;
 t6.tap(Wd / 2 - 115, H * 0.62 + 27);
-ok(t6.probe.now().state === "play", "「もう一度」で遊び直せる", t6.probe.now().state);
+ok(t6.probe.now().state === "result", "終了画面はタップしてもそのまま", t6.probe.now().state);
+t6.esc();
+ok(t6.probe.now().state === "play", "Escで遊び直せる", t6.probe.now().state);
 ok(t6.probe.now().score === 0 && Math.abs(t6.probe.now().kmh - 0.1) < 1e-9, "やり直すと牛歩から");
 
 /* 9. キーとジョイパッド */
