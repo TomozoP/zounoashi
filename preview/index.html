@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="doji5-1789896991329">
+<meta name="preview-version" content="gyuho-1789954046926">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>同時ボール</title>
+<title>牛歩シミュレーター</title>
 <style>
   html, body { margin: 0; height: 100%; background: #12100e; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -15,7 +15,7 @@
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
-  #start[hidden] { display:none; }
+  #start { display:none; }
   #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #share-button[hidden] { display:none; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
@@ -27,20 +27,22 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
+<script src="../games/share.js?v=gyuho-1789954046926"></script>
+<script src="../games/random-bowling/vendor/three.min.js?v=gyuho-1789954046926"></script>
+<script src="scene3d.js?v=gyuho-1789954046926"></script>
+<script src="../games/result-actions.js?v=gyuho-1789954046926"></script>
+<script src="../games/action-icons.js?v=gyuho-1789954046926"></script>
+<script src="../games/pad.js?v=gyuho-1789954046926"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* 装備・奥のユニフォームで共通に使う競技の色。 */
-var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", basket: "#ef963c", volley: "#ac75df" };
-</script>
-<script src="../games/random-bowling/vendor/three.min.js?v=doji5-1789896991329"></script>
-<script src="scene.js?v=doji5-1789896991329"></script>
-<script src="../games/share.js?v=doji5-1789896991329"></script>
-<script src="../games/result-actions.js?v=doji5-1789896991329"></script>
-<script src="../games/action-icons.js?v=doji5-1789896991329"></script>
-<script src="../games/pad.js?v=doji5-1789896991329"></script>   <!-- ジョイパッドと、絵の外のタップ -->
-<script>
-/* 同時ボール。
-   野球・サッカー・テニス・バスケ・バレーの球が、ぜんぶ同じ場所へ次々に飛んでくる。
-   押すのは1つだけ。いちばん近い球に合わせて、打つ・蹴る・打ち返す・撃つ・叩く。 */
+/* 牛歩シミュレーター
+
+   奥へ走る牛を、左後ろのすこし上から見ている（立体。組み立ては scene3d.js）。
+   押すたびに速くなり、道の先にあるものを壊す。景色は 牧場→道路→町→都市→宇宙。
+   変わるたびに1押しの効き（ギア）と壊すもの（わら・電柱・車・ビル・星）が変わる。
+   速さは落ちない。光の速さの手前で警告が出て、それでも押すと宇宙が壊れる。
+
+   空・雲・遠くの山なみと、数字まわりは2Dで描き、そのあいだに立体を重ねている。
+   WebGL が無いところでは立体を飛ばして、進行だけが動く。 */
 (function () {
   "use strict";
 
@@ -50,19 +52,90 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
 
-  var view3d = (window.WebGLRenderingContext && typeof ZDoji5Scene !== "undefined" && typeof THREE !== "undefined")
-    ? new ZDoji5Scene() : null;
+  var scene3d = null;
+  if (window.WebGLRenderingContext && window.GyuhoScene3D && window.THREE) {
+    try { scene3d = new window.GyuhoScene3D(); } catch (e) { scene3d = null; }
+  }
+
+  var TAU = Math.PI * 2;
+  var C_KMH = 1079252848.8;                  /* 光の速さ km/h */
+  var SONIC = 1234.8;                        /* 音の速さ km/h */
+  var STROKE = 160;                          /* このぶん指を上へはらうと、ひとこぎ */
+  var LUNGE = 2.2;                           /* 大きくはらったとき、何秒ぶん前へ出るか */
+  var GLIDE = 0.18;                          /* 指を離したあとの余韻。1秒でこの割合まで落ちる */
+  var GLIDE_MAX = 3000;                      /* 余韻の速さの上限（px／秒） */
+  var MIN_KMH = 0.1;                         /* 牛歩 */
+  var WARN_BETA = 0.9;                       /* ここから警告 */
+
+  /* 景色と、そこでの1押しの効き。上の速さに届くと次の景色へ移り、ギアが上がる。
+     宇宙に出たところで1押しの効きが一気に跳ね上がる。
+     1景色に要る押しの数は 100→200→200→250→264→300（合計1314）。 */
+  var GEARS = [
+    { top: 10,    step: 0.1 },               /* 牧場：わら */
+    { top: 50,    step: 0.2 },               /* 道路：人 */
+    { top: 200,   step: 0.75 },              /* 町：車 */
+    { top: 1000,  step: 3.2 },               /* 都市：大通りの車 */
+    { top: 3e4,   step: 110 },               /* 洋上：島と戦闘機 */
+    { top: C_KMH, step: 3.6e6 }              /* 宇宙：星 */
+  ];
+  var PHASE_NAME = ["牧場", "道路", "町", "都市", "洋上", "宇宙"];
+  var NEWS = [
+    "",
+    "牧場から速い牛が逃走 県道を北上中、近隣住民は注意",
+    "脱走中の牛 市街地に入る 住民は屋内へ避難を開始",
+    "牛 都心を直進 建物等に被害発生中",
+    "牛 国境を越え洋上を飛行中 各国が緊急事態を宣言、軍が出動開始",
+    "牛 大気圏を抜け宇宙空間へ突入 このまま加速すると宇宙崩壊との見解"
+  ];
+  var WORLD = [1, 1.25, 1.5, 1.8, 2.6, 3.4];   /* 景色ごとの世界の広さ */
+  /* 見た目の速さ。景色のはじめと終わりで、ここからここまで登る。
+     景色が変わると登りなおすが、はじまりの速さ自体が段ごとに上がっていく。
+     宇宙はいきなり速い。 */
+  var WSP_LO = [46, 82, 131, 210, 380, 900];
+  var WSP_HI = [700, 1000, 1400, 1950, 2500, 3600];
+  /* 景色ごとに、道の先へ置くもの。洋上だけ2種類から選ぶ */
+  function propType(g) {
+    if (g === 3) return 3;                     /* 都市の道路上には大型トラック */
+    if (g === 4) return Math.random() < 0.5 ? 4 : 6;   /* 島 / 戦闘機 */
+    return g;
+  }
+  function gearIndex(km) {
+    for (var i = 0; i < GEARS.length - 1; i++) if (km < GEARS[i].top) return i;
+    return GEARS.length - 1;
+  }
+
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+  function clamp01(v) { return clamp(v, 0, 1); }
+  function log10(v) { return Math.log(Math.max(v, 1e-9)) / Math.LN10; }
+  function hex(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
+  function rgb(c) { return "rgb(" + Math.round(c[0]) + "," + Math.round(c[1]) + "," + Math.round(c[2]) + ")"; }
+  /* 景色の重みで色を混ぜる */
+  function mixW(list) {
+    var r = 0, g = 0, b = 0, s = 0;
+    for (var i = 0; i < list.length; i++) {
+      var w = W8[i]; if (w <= 0) continue;
+      var c = hex(list[i]);
+      r += c[0] * w; g += c[1] * w; b += c[2] * w; s += w;
+    }
+    if (s <= 0) return [0, 0, 0];
+    return [r / s, g / s, b / s];
+  }
+  function rnd(i) { var x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x); }
+  function ell(x, y, rx, ry, rot) {
+    ctx.beginPath();
+    ctx.ellipse(x, y, Math.max(0.2, rx), Math.max(0.2, ry), rot || 0, 0, TAU);
+    ctx.fill();
+  }
 
   /* ============ 画面 ============
      タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。 */
   var W = 540, H = 960;
+  var HY, VAN, COWP, READ_Y;
   function layout() {
     var host = wrap.parentNode;
     var vw = host.clientWidth || window.innerWidth;
     var vh = host.clientHeight || window.innerHeight;
     H = Math.max(780, Math.min(1700, Math.round(W * vh / vw)));
-
-    place();                                   /* 高さが決まってから置き直す */
 
     var scale = Math.min(vw / W, vh / H);
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -72,13 +145,27 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     canvas.height = Math.round(H * scale * dpr);
     var k = canvas.width / W;
     ctx.setTransform(k, 0, 0, k, 0, 0);
-    if (view3d) view3d.resize(canvas.width, canvas.height);
+
+    if (scene3d) scene3d.resize(canvas.width, canvas.height, H);
+    place();
+  }
+  function place() {
+    if (scene3d) {
+      HY = scene3d.horizonY(H);
+      VAN = scene3d.vanish(W, H);
+      COWP = scene3d.cowScreen(W, H);
+    } else {
+      HY = Math.round(H * 0.30);
+      VAN = { x: W * 0.66, y: HY };
+      COWP = { x: W * 0.5, y: H * 0.62, s: 2 };
+    }
+    READ_Y = Math.round(H * 0.84);
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
 
   /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
-  var AC = null, NOISE = null, MASTER = null;
+  var AC = null, NOISE = null;
   var audioUnlocked = false;
   // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
   function resumeAudio() {
@@ -106,54 +193,10 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     if (!C) return;
     try { AC = new C(); } catch (e) { return; }
     resumeAudio();
-    MASTER = AC.createGain(); MASTER.gain.value = 1.6;
-    var limiter = AC.createDynamicsCompressor();
-    limiter.threshold.value = -8; limiter.ratio.value = 10; limiter.attack.value = .004; limiter.release.value = .12;
-    MASTER.connect(limiter); limiter.connect(AC.destination);
     var len = Math.floor(AC.sampleRate * 2);
     NOISE = AC.createBuffer(1, len, AC.sampleRate);
     var d = NOISE.getChannelData(0);
     for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-    startAmbience();
-  }
-  /* 遠くの観客席。音程や拍子を付けず、ざわつきと拍手を散らす。 */
-  var ambience = null, nextAmbient = 0;
-  function startAmbience() {
-    if (!AC || ambience) return;
-    ambience = AC.createGain();
-    ambience.gain.value = .35;
-    var soft = AC.createBiquadFilter();
-    soft.type = "lowpass"; soft.frequency.value = 3200; soft.Q.value = .5;
-    ambience.connect(soft); soft.connect(crowdOutput());
-    updateAmbience();
-  }
-  function updateAmbience() {
-    if (!AC || !NOISE || !ambience || AC.state !== "running" || AC.currentTime < nextAmbient) return;
-    nextAmbient = AC.currentTime + .55 + Math.random() * .35;
-    /* 音程を持たない広い帯域。発声に似た強弱だけを不規則に重ねる。 */
-    for (var i = 0; i < 7; i++) {
-      var clap = i === 0 && Math.random() < .55;
-      var at = AC.currentTime + Math.random() * .7;
-      var dur = clap ? .06 : .55 + Math.random() * .65;
-      var crowd = AC.createBufferSource(), filter = AC.createBiquadFilter(), envelope = AC.createGain();
-      crowd.buffer = NOISE; crowd.loop = true;
-      crowd.playbackRate.value = .8 + Math.random() * .4;
-      filter.type = "bandpass"; filter.Q.value = clap ? .7 : .5;
-      filter.frequency.value = clap ? 1900 : 700 + Math.random() * 1200;
-      var volume = clap ? .055 : .018 + Math.random() * .012;
-      envelope.gain.setValueAtTime(.0001, at);
-      envelope.gain.linearRampToValueAtTime(volume, at + (clap ? .003 : dur * .22));
-      if (!clap) envelope.gain.linearRampToValueAtTime(volume * .6, at + dur * .6);
-      envelope.gain.exponentialRampToValueAtTime(.0001, at + dur);
-      crowd.connect(filter); filter.connect(envelope);
-      var nodes = [crowd, filter, envelope];
-      if (AC.createStereoPanner) {
-        var pan = AC.createStereoPanner(); pan.pan.value = Math.random() * 1.8 - .9;
-        envelope.connect(pan); pan.connect(ambience); nodes.push(pan);
-      } else envelope.connect(ambience);
-      crowd.onended = (function (list) { return function () { list.forEach(function (n) { n.disconnect(); }); }; })(nodes);
-      crowd.start(at, Math.random()); crowd.stop(at + dur + .03);
-    }
   }
   function tone(freq, dur, vol, type, to, delay) {
     if (!AC) return;
@@ -165,171 +208,48 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     g.gain.setValueAtTime(0.0001, n);
     g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    o.connect(g); g.connect(MASTER || AC.destination);
+    o.connect(g); g.connect(AC.destination);
     o.start(n); o.stop(n + dur + 0.05);
   }
-  function noiseHit(dur, freq, vol, q, to, delay) {
+  function noiseHit(dur, freq, vol, q) {
     if (!AC || !NOISE) return;
     var s = AC.createBufferSource(); s.buffer = NOISE;
     var f = AC.createBiquadFilter();
     f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
-    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
-    if (to) f.frequency.exponentialRampToValueAtTime(to, n + dur);
+    var g = AC.createGain(), n = AC.currentTime;
     g.gain.setValueAtTime(vol, n);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    s.connect(f); f.connect(g); g.connect(MASTER || AC.destination);
-    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
   }
-  /* 競技ごとの当たった音 */
-  function hitSound(kind, perfect) {
-    if (kind === "yakyu") {
-      /* 打った芯の衝撃に、金属バットの高い響きと短い反響を重ねる。 */
-      noiseHit(.045, 3100, .42, .7, 1600);
-      tone(210, .10, .18, "sine", 95);
-      tone(1480, .62, .23, "sine", 1430);
-      tone(2390, .36, .10, "sine", 2330);
-      tone(3670, .20, .045, "sine", 3600);
-      tone(1480, .38, .045, "sine", 1430, .075);
-    }
-    else if (kind === "soccer") {
-      /* 足が球を捉える乾いた打音と、腹に響く低音。 */
-      noiseHit(.07, 1300, .38, .8, 550);
-      noiseHit(.15, 300, .62, .9, 100);
-      tone(155, .24, .34, "sine", 52);
-      tone(340, .08, .12, "triangle", 150);
-    }
-    else if (kind === "tennis") { noiseHit(.06, 3400, .42, 1.4, 1500); tone(760, .1, .14, "triangle", 420); }
-    else if (kind === "basket") { noiseHit(.11, 700, .34, .7, 260); tone(190, .18, .16, "sine", 90); }
-    else { noiseHit(.07, 1800, .45, .9, 700); tone(420, .12, .16, "square", 210); }
-    if (perfect) { tone(1320, .1, .1, "triangle", null, .03); tone(1760, .14, .09, "triangle", null, .09); }
-  }
-  /* 一輪車と同じ母音合成。録音やOSの読み上げ音声は使わない。 */
-  var VOWELS = { a: [800, 1200, 2600], i: [300, 2300, 3000], u: [350, 1300, 2400], e: [500, 1900, 2600], o: [500, 850, 2500] };
-  function speak(ac, at, pitch, words) {
-    var t = at, f0 = pitch || 300;
-    words = words || [
-      ["g", "o", 0.13], ["ch", "i", 0.12], ["s", "o", 0.12], ["", "o", 0.14], ["s", "a", 0.12],
-      ["m", "a", 0.13], ["d", "e", 0.12], ["sh", "i", 0.09], ["t", "a", 0.2]
-    ];
-    var out = ac.createGain();
-    out.gain.value = 0.11;
-    out.connect(MASTER || ac.destination);
-    var o = ac.createOscillator(), env = ac.createGain();
-    o.type = "sawtooth";
-    env.gain.value = 0.0001;
-    o.connect(env);
-    var bands = [0, 1, 2].map(function (k) {
-      var b = ac.createBiquadFilter(), g = ac.createGain();
-      b.type = "bandpass"; b.Q.value = [5, 6, 8][k]; g.gain.value = [2.2, 1.4, 0.6][k];
-      env.connect(b); b.connect(g); g.connect(out);
-      return b;
-    });
-    function hiss(t0, dur, freq, q, vol) {
-      var n = ac.createBufferSource(), b = ac.createBiquadFilter(), g = ac.createGain();
-      n.buffer = NOISE; b.type = "bandpass"; b.frequency.value = freq; b.Q.value = q;
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      n.connect(b); b.connect(g); g.connect(out);
-      n.start(t0); n.stop(t0 + dur + 0.02);
-    }
-    var total = 0;
-    words.forEach(function (w) { total += w[2]; });
-    var start = t;
-    words.forEach(function (w, i) {
-      var c = w[0], vw = VOWELS[w[1]], dur = w[2];
-      var k = (t - start) / total;
-      var p = f0 * (1.12 - 0.3 * k);                 /* 少しずつ下がる */
-      o.frequency.setTargetAtTime(p, t, 0.02);
-      /* 子音 */
-      var cl = 0;
-      if (c === "s" || c === "sh" || c === "ch") {
-        cl = c === "ch" ? 0.05 : 0.07;
-        env.gain.setTargetAtTime(0.0001, t, 0.008);
-        if (c === "ch") hiss(t, 0.012, 3000, 0.8, 0.5);
-        hiss(t, cl, c === "s" ? 6500 : 3400, c === "s" ? 2 : 1.5, 0.55);
-      } else if (c === "g" || c === "d" || c === "t" || c === "p" || c === "b" || c === "k") {
-        cl = 0.03;
-        env.gain.setTargetAtTime(0.0001, t, 0.005);
-        hiss(t + 0.015, 0.02, (c === "p" || c === "b") ? 700 : c === "g" ? 1500 : 3500, 0.8, c === "t" ? 0.5 : 0.3);
-      } else if (c === "m") {
-        cl = 0.05;
-        /* 口を閉じて鼻に抜ける：低い響きだけにする */
-        env.gain.setTargetAtTime(0.35, t, 0.01);
-        bands[0].frequency.setTargetAtTime(250, t, 0.01);
-        bands[1].frequency.setTargetAtTime(1000, t, 0.01);
-        bands[2].frequency.setTargetAtTime(2200, t, 0.01);
-      }
-      /* 母音。「し」の i は声を小さく（ささやくように抜ける） */
-      var tv = t + cl, loud = c === "sh" ? 0.25 : 0.9;
-      bands.forEach(function (b, j) { b.frequency.setTargetAtTime(vw[j], tv, 0.015); });
-      env.gain.setTargetAtTime(loud, tv, 0.012);
-      t += dur;
-      if (i === words.length - 1) env.gain.setTargetAtTime(0.0001, t - 0.06, 0.03);
-    });
-    o.start(start); o.stop(t + 0.2);
-  }
-  function firstBallSound(kind) {
+  function moo(pitch, dur, vol) {
     if (!AC) return;
-    var at = AC.currentTime + .02;
-    var calls = {
-      yakyu: [175, [["p","u",.10],["r","e",.14],["","i",.09],["b","o",.25],["r","u",.18]]],
-      soccer: [225, [["k","i",.14],["k","u",.10],["","o",.18],["f","u",.15]]],
-      tennis: [285, [["p","u",.12],["r","e",.22],["","i",.19]]],
-      basket: [200, [["r","e",.13],["t","u",.10],["p","u",.10],["r","e",.20],["","i",.16]]],
-      volley: [255, [["s","a",.30],["b","u",.22]]]
-    };
-    speak(AC, at, calls[kind][0], calls[kind][1]);
-    if (kind === "soccer") tone(2450, .20, .035, "sine", 2600);
-    if (kind === "basket") { tone(180, .24, .035, "square", 180); tone(270, .24, .018, "sawtooth", 270); }
-    if (kind === "volley") { tone(3100, .12, .028, "sine", 2950); tone(3100, .12, .028, "sine", 2950, .18); }
-  }
-  function missSound() { tone(200, .3, .2, "sawtooth", 70); noiseHit(.2, 420, .18, .6, 150); }
-  /* ボウリングの得点時と同じ、母音が開く観客の歓声。 */
-  var crowdBus=null;
-  function crowdOutput(){
-    if(crowdBus)return crowdBus;
-    // 観客席の短い反射音を共有し、遠近のある一団にまとめる。
-    crowdBus=AC.createGain();var dry=AC.createGain(),wet=AC.createGain(),room=AC.createConvolver(),filter=AC.createBiquadFilter(),limit=AC.createDynamicsCompressor();
-    var length=Math.floor(AC.sampleRate*.24),impulse=AC.createBuffer(2,length,AC.sampleRate);
-    for(var ch=0;ch<2;ch++){var data=impulse.getChannelData(ch);for(var n=0;n<length;n++){var t=n/AC.sampleRate;data[n]=t<.022?0:(Math.random()*2-1)*Math.exp(-t*24)*.35;}}
-    room.buffer=impulse;dry.gain.value=.8;wet.gain.value=.28;filter.type='lowpass';filter.frequency.value=3800;
-    limit.threshold.value=-19;limit.knee.value=12;limit.ratio.value=3;limit.attack.value=.008;limit.release.value=.15;
-    crowdBus.connect(dry);dry.connect(limit);crowdBus.connect(room);room.connect(filter);filter.connect(wet);wet.connect(limit);var voiceVolume=AC.createGain();voiceVolume.gain.value=3.2;limit.connect(voiceVolume);voiceVolume.connect(MASTER);return crowdBus;
-  }
-  var lastCheer = -10;
-  function cheerSound(){
-    if(!AC)return;
-    if(AC.currentTime-lastCheer<.18)return;
-    lastCheer=AC.currentTime;
-    /* ざわつきは短く控えめに膨らませ、拍手を主役にする。 */
-    if (!NOISE) return;
-    for(var i=0;i<6;i++){
-      var at=AC.currentTime+Math.random()*.16, dur=.55+Math.random()*.3;
-      var crowd=AC.createBufferSource(), filter=AC.createBiquadFilter(), gain=AC.createGain();
-      crowd.buffer=NOISE; crowd.loop=true; crowd.playbackRate.value=.8+Math.random()*.4;
-      filter.type="bandpass"; filter.Q.value=.5; filter.frequency.value=650+Math.random()*850;
-      var volume=.01+Math.random()*.006;
-      gain.gain.setValueAtTime(.0001,at);
-      gain.gain.linearRampToValueAtTime(volume,at+.10);
-      gain.gain.linearRampToValueAtTime(volume*.65,at+dur*.5);
-      gain.gain.exponentialRampToValueAtTime(.0001,at+dur);
-      crowd.connect(filter); filter.connect(gain);
-      var nodes=[crowd,filter,gain];
-      if(AC.createStereoPanner){
-        var pan=AC.createStereoPanner(); pan.pan.value=i/5*1.8-.9;
-        gain.connect(pan); pan.connect(crowdOutput()); nodes.push(pan);
-      }else gain.connect(crowdOutput());
-      crowd.onended=(function(list){return function(){list.forEach(function(n){n.disconnect();});};})(nodes);
-      crowd.start(at,Math.random()); crowd.stop(at+dur+.03);
-    }
-    /* 手のひらの低い打音と乾いた高音を重ね、複数人の拍手をはっきり出す。 */
-    for(var j=0;j<18;j++){
-      var delay=.04+j*.062+Math.random()*.025;
-      var volume=.045*(1-j/26)*(.85+Math.random()*.3);
-      noiseHit(.055,1100+Math.random()*650,volume,.8,700,delay);
-      noiseHit(.032,2600,volume*.7,.65,1500,delay+.009+Math.random()*.009);
-    }
+    var n = AC.currentTime;
+    var o = AC.createOscillator(), o2 = AC.createOscillator();
+    var lfo = AC.createOscillator(), lg = AC.createGain();
+    var f = AC.createBiquadFilter(), g = AC.createGain();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(pitch * 1.16, n);
+    o.frequency.exponentialRampToValueAtTime(pitch, n + dur * 0.22);
+    o.frequency.exponentialRampToValueAtTime(pitch * 0.74, n + dur);
+    o2.type = "triangle";
+    o2.frequency.setValueAtTime(pitch * 0.5, n);
+    o2.frequency.exponentialRampToValueAtTime(pitch * 0.37, n + dur);
+    lfo.frequency.setValueAtTime(6.5, n);        /* のどのふるえ */
+    lg.gain.setValueAtTime(pitch * 0.035, n);
+    lfo.connect(lg); lg.connect(o.frequency);
+    f.type = "bandpass";                         /* 口の開き */
+    f.frequency.setValueAtTime(pitch * 2.1, n);
+    f.frequency.exponentialRampToValueAtTime(pitch * 3.8, n + dur * 0.3);
+    f.frequency.exponentialRampToValueAtTime(pitch * 1.9, n + dur);
+    f.Q.value = 2.4;
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.1);
+    g.gain.setValueAtTime(vol, n + dur * 0.55);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(f); o2.connect(f); f.connect(g); g.connect(AC.destination);
+    o.start(n); o2.start(n); lfo.start(n);
+    o.stop(n + dur + 0.05); o2.stop(n + dur + 0.05); lfo.stop(n + dur + 0.05);
   }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
@@ -337,274 +257,323 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     else { try { AC.resume(); } catch (e) {} }
   });
 
-  /* ============ 球 ============
-     flight は投げてから打つ位置に届くまでの秒数。到着の時刻から逆算して出す。 */
-  var KINDS = {
-    yakyu:  { flight: 1.2, z0: 11, y0: 1.95, y1: 1.2,  r: .12, pts: 1 },
-    soccer: { flight: 2.1, z0: 26, y0: .30,  y1: .45,  r: .23, pts: 1 },
-    tennis: { flight: 1.8, z0: 24, y0: 1.5,  y1: 1.05, r: .11, pts: 0 },
-    basket: { flight: 2.4, z0: 28, y0: 2.0,  y1: 1.6,  r: .25, pts: 3 },
-    volley: { flight: 1.7, z0: 19, y0: 5.4,  y1: 2.1,  r: .23, pts: 1 }
-  };
-  var KEYS = ["yakyu", "soccer", "tennis", "basket", "volley"];
-  var WINDOW = .17, PERFECT = .07, LIVES = 3, GRAVITY = 17;
-  var PLATE = 1.4;                                 /* 打つ場所。選手の少し前 */
-  var calledKinds = {}, cameraTime = 0, CAMERA_MOVE = .9, START_PAUSE = .6;
-  var nextInput = 0;                              /* 全競技で共通の、次に押せる時刻 */
-  var ACT = .38;                                   /* 振ってから構えへ戻るまでの秒数 */
-
-  function ballY(kind, u) {
-    var k = KINDS[kind];
-    if (kind === "yakyu") return k.y0 + (k.y1 - k.y0) * u - .12 * u * u;
-    if (kind === "soccer") { var b = u * 2.6; return k.r + Math.abs(Math.sin(b * Math.PI)) * Math.max(0, .85 - .26 * b); }
-    if (kind === "tennis") {
-      if (u < .6) { var a = u / .6; return k.y0 + (.12 - k.y0) * a * a + Math.sin(a * Math.PI) * .5; }
-      var c = (u - .6) / .4; return .12 + (k.y1 + .35) * Math.sin(c * Math.PI * .85);
-    }
-    if (kind === "basket") return k.y0 + (k.y1 - k.y0) * u + Math.sin(u * Math.PI) * 3.2;
-    return k.y0 + (k.y1 - k.y0) * u + Math.sin(u * Math.PI) * .8;
-  }
-  function ballAt(b, t) {
-    var k = KINDS[b.kind], flight = b.variant === "fast" ? .98 : k.flight;
-    var u = (t - b.tArrive + flight) / flight;
-    var x = b.xs + (b.xe - b.xs) * u, y = ballY(b.kind, u);
-    /* 変化は途中だけ。到着位置・時刻と押す間合いは通常球と揃える。 */
-    if (b.variant && u > 0 && u < 1) {
-      var arc = Math.sin(Math.PI * u), side = b.side || 1;
-      if (b.variant === "curve") x += side * 1.8 * arc * u;
-      else if (b.variant === "drop") y += .85 * arc * u;
-      else if (b.variant === "swerve") x += side * 2.2 * arc;
-      else if (b.variant === "spin" && u > .6) {
-        var bounce = (u - .6) / .4;
-        y += .65 * Math.sin(Math.PI * bounce); x += side * .65 * Math.sin(Math.PI * bounce);
-      } else if (b.variant === "bounce") {
-        y = u < .55 ? k.y0 + (k.r - k.y0) * u / .55 : k.r + (k.y1 - k.r) * (u - .55) / .45;
-      } else if (b.variant === "float") x += side * .55 * Math.sin(u * Math.PI * 5) * arc;
-    }
-    return { x: x, y: y, z: PLATE + (k.z0 - PLATE) * (1 - u), u: u };
-  }
-  /* tf 秒で目標へ届く速さ */
-  function aimAt(from, to, tf) {
-    return {
-      x: (to.x - from.x) / tf,
-      y: (to.y - from.y) / tf + .5 * GRAVITY * tf,
-      z: (to.z - from.z) / tf
-    };
-  }
-
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
-  var state, score, hits, lives, T, held, keyMode = false;
-  var tennisPoint = 0, tennisGames = 0, fallenAt = 0;
-  var lastWasVariant = false;
-  var balls, nextArrive, lastKinds, act, actT, actKind, shake, flashes, pitchAt, leanX;
-  var results = [], flash = {}, cursor = 0, animT = 0;           /* 押した目印、キー操作の選び位置、絵の時計 */
-  var on = { yakyu: true, soccer: true, tennis: true, basket: true, volley: true };
-  function kinds() { return KEYS.slice(); }
-  var CHEERS = { yakyu: "HOME RUN!", soccer: "GOAL!", tennis: "WINNER!", basket: "BASKET!", volley: "POINT!" };
+  var S = { INTRO: "intro", PLAY: "play", BOOM: "boom", RESULT: "result" };
+  var state, score, scoreF, broken, T, bt;
+  var dragY = null, tickAcc = 0, mooAcc = 0, lastSmash = -9, boomT = 0, boost, lead;
+  var moveAcc = 0, flickVel = 0, glide = 0, impactShake = 0;   /* 指の勢いと、離したあとの余韻 */
+  var zips = [];                              /* 速いときに流れる線 */
+  var news = null;                            /* 上に流れる速報 */
+  var speed = MIN_KMH, beta = 0, wsp = 0, gear = 0, warning = false;
+  var W8 = [1, 0, 0, 0, 0, 0];                 /* 景色の重み（牧場・道路・町・都市・大陸・宇宙） */
+  var props, shards;
+  var dist, nextAt, legPhase, prevHalf, prevKmh, prevGear, sirenT, clickPulse, gearFlash, lastDt;
 
-  /* ============ 下の5ボタン ============
-     遊びのあいだは常に5つとも出す。 */
-  var HUDY, SCOREY, PADY, PADW = 92, PADGAP = 14;
-  function place() {
-    HUDY = Math.round(H * 0.045);
-    SCOREY = HUDY - 12;
-    PADY = Math.round(H * 0.85);                 /* 選手より下、STARTより上 */
+  var PIECE = ["#f4f1ea", "#2b2723", "#e0543c", "#45464b", "#7fb04a", "#3f7fd6"];
+  /* 空の色。ぜんぶの道のりを0〜1として、朝から夜へ移る */
+  var SKY_KEY = [
+    { t: 0.00, hi: "#6aa8dc", lo: "#ffd2a0" },   /* 朝やけ */
+    { t: 0.15, hi: "#3f8fd0", lo: "#d5e9f6" },   /* 朝 */
+    { t: 0.40, hi: "#2f86cf", lo: "#d8ecf8" },   /* 昼 */
+    { t: 0.60, hi: "#3f80bd", lo: "#e8d3a8" },   /* 午後 */
+    { t: 0.72, hi: "#436ea6", lo: "#f0a868" },   /* 夕 */
+    { t: 0.83, hi: "#2a3f70", lo: "#d4683f" },   /* 日ぐれ */
+    { t: 0.92, hi: "#101a3a", lo: "#34305c" },   /* 宵 */
+    { t: 1.00, hi: "#04050d", lo: "#0a0b1a" }    /* 夜 */
+  ];
+  var GROUND = ["#7fb04a", "#74a648", "#8a9a6e", "#6e7278", "#2a6a8f", "#0a0b1a"];
+  var PAVE   = ["#b79a6b", "#c5bbaa", "#4a4b50", "#34373d", "#2a6a8f", "#0a0b1a"];
+
+  /* その景色のなかで、どこまで来たか（0〜1） */
+  function phaseT(km) {
+    var g = gearIndex(km);
+    var lo = g === 0 ? MIN_KMH : GEARS[g - 1].top;
+    return clamp01((km - lo) / (GEARS[g].top - lo));
   }
-  function pads(all) {
-    var ks = all ? KEYS : kinds(), n = ks.length;
-    var total = n * PADW + (n - 1) * PADGAP, x0 = W / 2 - total / 2;
-    return ks.map(function (k, i) {
-      return { kind: k, x: x0 + i * (PADW + PADGAP), y: PADY - PADW / 2, w: PADW, h: PADW };
-    });
+  function quietSpace() { return gear === 5 && phaseT(speed) >= 0.5; }
+  function wspOf(km) {
+    var g = gearIndex(km);
+    return WSP_LO[g] + (WSP_HI[g] - WSP_LO[g]) * Math.pow(phaseT(km), 0.8);
   }
-  function padAt(x, y, all) {
-    var list = pads(all);
-    for (var i = 0; i < list.length; i++) {
-      var b = list[i];
-      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
+  /* 壊すものの間隔 */
+  function propGap() {
+    return wsp * (2.0 + 1.3 * phaseT(speed));   /* はじめ2秒に1つ、終わりで3.3秒に1つ */
+  }
+  function heatOf(km) { return clamp01((log10(km) - 2.8) / 1.6); }
+
+  /* 景色はまぜない。速さが切れ目を越えたところで、まるごと入れ替わる */
+  function weightsAt(km) {
+    var w = [0, 0, 0, 0, 0, 0];
+    w[gearIndex(km)] = 1;
+    return w;
+  }
+
+  /* ぜんぶの道のりのうち、どこまで来たか */
+  function progress() { return (gear + phaseT(speed)) / GEARS.length; }
+  function lerpHex(a, b, k) {
+    var A = hex(a), B = hex(b);
+    return [A[0] + (B[0] - A[0]) * k, A[1] + (B[1] - A[1]) * k, A[2] + (B[2] - A[2]) * k];
+  }
+  function skyNow() {
+    if (gear === 5) return { hi: [2, 3, 10], lo: [2, 3, 10] };
+    var t = progress();
+    for (var i = 1; i < SKY_KEY.length; i++) {
+      if (t <= SKY_KEY[i].t) {
+        var a = SKY_KEY[i - 1], b = SKY_KEY[i];
+        var k = (t - a.t) / (b.t - a.t);
+        return { hi: lerpHex(a.hi, b.hi, k), lo: lerpHex(a.lo, b.lo, k) };
+      }
     }
-    return null;
+    var last = SKY_KEY[SKY_KEY.length - 1];
+    return { hi: hex(last.hi), lo: hex(last.lo) };
   }
+  /* 日が傾くと、地面も暗くなる */
+  function dayLight() {
+    var t = progress();
+    if (t < 0.58) return 1;
+    return 1 - 0.55 * clamp01((t - 0.58) / 0.36);
+  }
+  function dim(c, k) { return [c[0] * k, c[1] * k, c[2] * k]; }
+
+  function fmtSpeed(km) {
+    if (km < 1000) return km.toFixed(2) + " km/h";
+    return Math.round(km).toLocaleString("en-US") + " km/h";
+  }
+
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    score = 0; hits = 0; tennisPoint = 0; tennisGames = 0; lives = LIVES; T = 0; held = false; nextInput = 0; cameraTime = 0; calledKinds = {};
-    balls = []; lastKinds = []; flashes = []; lastWasVariant = false;
-    act = null; actT = 0; actKind = null; shake = 0; pitchAt = -9; leanX = 0;
-    nextArrive = 1.9; cursor = 0; flash = {}; results = [];
-  }
-  /* 結果から「もう一度」は、開始画面へ戻す */
-  function toIntro() {
-    newRound();
-    state = S.INTRO;
-    shareButton.hidden = true;
-    document.getElementById("start").hidden = false;
+    score = 0; scoreF = 0; tickAcc = 0; mooAcc = 0; lastSmash = -9; dragY = null; broken = 0;
+    T = 0; bt = 0; lastDt = 1 / 60;
+    speed = MIN_KMH;
+    props = []; shards = [];
+    dist = 0; nextAt = 300; legPhase = 0; prevHalf = 0; prevKmh = MIN_KMH; prevGear = 0;
+    sirenT = 0; clickPulse = 0; gearFlash = 0; boost = 0; lead = 0; boomT = 0;
+    moveAcc = 0; flickVel = 0; glide = 0; impactShake = 0;
+    news = null;
+    zips = [];
+    for (var z = 0; z < 34; z++) {
+      zips.push({ a: Math.random() * TAU, r: Math.random() * 1.2,
+                  len: 0.09 + Math.random() * 0.22, v: 0.55 + Math.random() * 0.8 });
+    }
+    if (scene3d) scene3d.reset();
+    recalc();
   }
 
-  function pickKind() {
-    var ks = kinds(), k;
-    do { k = ks[(Math.random() * ks.length) | 0]; }
-    while (ks.length > 1 && lastKinds.length >= 2 && lastKinds[0] === k && lastKinds[1] === k);
-    lastKinds.unshift(k); lastKinds.length = 2;
-    return k;
+  function recalc() {
+    beta = speed / C_KMH;
+    wsp = wspOf(speed);
+    gear = gearIndex(speed);
+    W8 = weightsAt(speed);
+    warning = beta >= WARN_BETA;
   }
-  /* 来る球を先に決めておく。飛んでいる時間ぶん早く出す */
-  function schedule() {
-    while (nextArrive < T + 3.6) {
-      var kind = pickKind(), k = KINDS[kind];
-      var xs = (Math.random() - .5) * (kind === "yakyu" ? 1.2 : 9);
-      var b = {
-        kind: kind, tArrive: nextArrive, xs: xs, xe: (Math.random() - .5) * 1.6,
-        spin: Math.random() * 6, hit: false, dead: false, judged: false
-      };
-      /* 最初は通常球。変化球は野球20%、ほか12%を目安にし、連続させない。 */
-      var varied = T > 4 && !lastWasVariant && Math.random() < (kind === "yakyu" ? .20 : .12);
-      b.variant = varied ? (kind === "yakyu" ? (T > 10 ? ["curve", "drop", "fast"][Math.floor(Math.random() * 3)] : (Math.random() < .5 ? "curve" : "drop")) : { soccer: "swerve", tennis: "spin", basket: "bounce", volley: "float" }[kind]) : null;
-      b.side = Math.random() < .5 ? -1 : 1;
-      lastWasVariant = varied;
-      balls.push(b);
-      if (kind === "yakyu") pitchAt = nextArrive - (b.variant === "fast" ? .98 : k.flight);
-      var gap = Math.max(.40, .95 - T * .011) + (Math.random() - .5) * .14;
-      nextArrive += gap;
+
+  /* ============ こぐ ============ なぞった長さのぶんだけ速くなる */
+  function feed(px) {
+    if (state !== S.PLAY || !(px > 0)) return;
+    var u = px / STROKE;
+    scoreF += u;
+    score = Math.floor(scoreF);
+    speed += GEARS[gearIndex(speed)].step * u;
+    boost += (px / 900) * wsp * LUNGE;         /* はらった量ぶん、前へ突き出す */
+    clickPulse = Math.min(1, clickPulse + u * 0.6);
+    if (speed >= C_KMH) { speed = C_KMH; recalc(); reachLight(); return; }
+    recalc();
+    tickAcc += u;
+    if (tickAcc >= 1) {                        /* ひとこぎごとの足音 */
+      tickAcc -= Math.floor(tickAcc);
+      tone(180 + gear * 90 + Math.min(300, wsp * 0.1), 0.06, 0.07, "square");
+      noiseHit(0.05, 200 + gear * 120, 0.07, 1.4);
+    }
+    mooAcc += u;
+    if (mooAcc >= 5.5) {                       /* まとまってこぐと、モーと鳴く */
+      mooAcc = 0;
+      var big = u > 2.5;
+      moo(150 + gear * 20 + phaseT(speed) * 46, big ? 0.62 : 0.42, big ? 0.15 : 0.1);
+    }
+  }
+
+  function reachLight() {
+    state = S.BOOM; bt = 0;
+    shards = [];
+    for (var i = 0; i < 80; i++) {
+      var a = Math.random() * TAU, sp = 140 + Math.random() * 900;
+      shards.push({ x: W / 2, y: H * 0.5, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+                    rot: Math.random() * TAU, vr: (Math.random() - 0.5) * 12,
+                    w: 6 + Math.random() * 34, h: 3 + Math.random() * 11,
+                    c: PIECE[i % PIECE.length] });
+    }
+    noiseHit(1.5, 70, 0.5, 0.4);
+    tone(70, 2.0, 0.32, "sawtooth", 22);
+    tone(1400, 0.7, 0.18, "square", 60);
+  }
+
+  /* ============ 壊す ============ */
+  function smash(o) {
+    broken++;
+    impactShake = Math.max(impactShake, o.t === 3 || o.t === 4 || o.t === 5 ? 6 : 4);
+    if (scene3d) {
+      if (o.t === 1) scene3d.launchPerson(o.x, o.r, o.z, dist);   /* 衝突した場所から跳ね上げる */
+      else if (o.t === 2) scene3d.launchVehicle(o.x, o.r, o.z, dist, o.t);
+      else scene3d.burst(o.x, o.y || 0, o.t, o.r, o.z);
+    }
+    if (T - lastSmash < 0.07) return;          /* つづけざまのときは重ねない */
+    lastSmash = T;
+    if (o.t === 0) {                           /* わら：ザッ */
+      noiseHit(0.3, 1100, 0.3, 0.7);
+      tone(560, 0.12, 0.07, "triangle", 320);
+    } else if (o.t === 1) {                    /* 人：ボフッとひと声 */
+      noiseHit(0.16, 340, 0.32, 1.0);
+      tone(430, 0.09, 0.1, "triangle", 190);
+      tone(250, 0.16, 0.07, "sawtooth", 110, 0.05);
+    } else if (o.t === 2) {                    /* 車：低い衝撃と金属のきしみ */
+      noiseHit(0.55, 120, 0.44, 0.6);
+      noiseHit(0.24, 850, 0.16, 1.0);
+      tone(125, 0.55, 0.23, "sine", 38);
+      tone(230, 0.3, 0.10, "triangle", 65, 0.035);
+    } else if (o.t === 3) {                    /* 大型車：腹に響く衝撃と長い余韻 */
+      noiseHit(0.85, 85, 0.48, 0.5);
+      noiseHit(0.45, 650, 0.20, 0.8);
+      tone(100, 0.8, 0.28, "sine", 28);
+      tone(180, 0.48, 0.12, "triangle", 45, 0.04);
+    } else if (o.t === 4) {                    /* 島：ドシャーン */
+      noiseHit(0.8, 180, 0.46, 0.45);
+      noiseHit(0.5, 1300, 0.2, 0.9);
+      tone(110, 0.6, 0.16, "sawtooth", 44);
+    } else if (o.t === 6) {                    /* 戦闘機：爆発 */
+      noiseHit(0.55, 140, 0.5, 0.4);
+      noiseHit(0.3, 2400, 0.18, 1.5);
+      tone(170, 0.32, 0.16, "sawtooth", 48);
+    } else {                                   /* 星：キラン */
+      noiseHit(0.34, 1800, 0.22, 2.4);
+      tone(1600, 0.24, 0.1, "sine", 3200);
+      tone(2400, 0.18, 0.06, "sine", 4800, 0.06);
     }
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
-    updateAmbience();
-    shake = Math.max(0, shake - dt * 4);
-    if (act) { actT += dt; if (actT > ACT) act = null; }
-    KEYS.forEach(function (k) { if (flash[k] > 0) flash[k] = Math.max(0, flash[k] - dt); });
-    animT += dt;                                   /* 絵だけの時計。選ぶ画面でも奥の人は動く */
-    results.forEach(function (r) { r.age += dt; });
-    results = results.filter(function (r) { return r.age < 1.1; });
-    flashes.forEach(function (f) { f.age += dt; });
-    flashes = flashes.filter(function (f) { return f.age < .45; });
+    lastDt = dt;
+    if (state === S.BOOM) {
+      bt += dt;
+      for (var i = 0; i < shards.length; i++) {
+        var s = shards[i];
+        s.x += s.vx * dt; s.y += s.vy * dt; s.rot += s.vr * dt;
+        s.vx *= 0.985; s.vy *= 0.985;
+      }
+      if (bt > 2.2) state = S.RESULT;
+      return;
+    }
     if (state !== S.PLAY) return;
-    if (cameraTime < CAMERA_MOVE + START_PAUSE) { cameraTime = Math.min(CAMERA_MOVE + START_PAUSE, cameraTime + dt); return; }
     T += dt;
-    schedule();
 
-    var near = null, nearAbs = 9;
-    balls.forEach(function (b) {
-      var k = KINDS[b.kind];
-      if (b.hit) {
-        var e = T - b.hitT;
-        b.fx = b.hx + b.v.x * e;
-        b.fy = b.hy + b.v.y * e - .5 * GRAVITY * e * e;
-        b.fz = b.hz + b.v.z * e;
-        if (b.fy < k.r) { b.fy = k.r; }
-        if (!b.resultShown && e >= b.resultAfter) {
-          b.resultShown = true;
-          results.push({ text: b.resultText, kind: b.kind, x: b.resultAt.x, y: b.resultAt.y, z: b.resultAt.z, age: 0 });
-          cheerSound();
-        }
-        if (e > 2.4 || Math.abs(b.fz) > 95) b.dead = true;
-        return;
+    if (dragY != null) {                       /* なぞっているあいだ、勢いを測る */
+      flickVel = flickVel * 0.45 + (moveAcc / Math.max(dt, 1 / 120)) * 0.55;
+      moveAcc = 0;
+      glide = 0;
+    } else if (glide > 40) {                   /* 離したあとは、余韻でしばらく進む */
+      feed(glide * dt);
+      glide *= Math.pow(GLIDE, dt);
+      if (state !== S.PLAY) return;
+    } else { glide = 0; }
+
+    recalc();
+    dist += wsp * dt;
+    if (boost > 0) {                           /* 突き出したぶんを、みるみる使う */
+      var give = Math.min(boost, boost * 6 * dt + 40 * dt);
+      dist += give;
+      boost -= give;
+    }
+    /* ひとこぎで素早く踏み込み、戻りはゆっくりにして重みを出す。 */
+    var targetLead = Math.min(260, boost * 0.65 + clickPulse * 190);
+    lead += (targetLead - lead) * Math.min(1, dt * (targetLead > lead ? 22 : 4.5));
+    clickPulse = Math.max(0, clickPulse - dt * 2.8);
+    impactShake = Math.max(0, impactShake - dt * 24);
+    gearFlash = Math.max(0, gearFlash - dt * 1.6);
+
+    /* ギアが上がった */
+    if (gear !== prevGear) {
+      for (var g2 = 0; g2 < props.length; g2++) {                    /* 道の先のものも入れ替える */
+        props[g2].t = propType(gear);
+        props[g2].y = props[g2].t === 6 ? 150 + Math.random() * 130 : 0;
       }
-      var p = ballAt(b, T);
-      if (p.u < 0) return;
-      if (!calledKinds[b.kind]) { calledKinds[b.kind] = true; firstBallSound(b.kind); }
-      if (!b.judged && T > b.tArrive + WINDOW) {          /* 見逃した */
-        b.judged = true;
-        lives--; missSound(); shake = Math.max(shake, .5);
-        if (lives <= 0 && state === S.PLAY) {
-          state = S.RESULT; fallenAt = animT; shareButton.hidden = false;
-          /* 終了の合図は短く二回、最後だけ長く吹く。 */
-          [[0, .12], [.21, .12], [.43, .48]].forEach(function (v) {
-            tone(2950, v[1], .045, "sine", 2800, v[0]);
-            tone(3220, v[1], .018, "sine", 3100, v[0]);
-          });
-        }
+      if (gear > prevGear) {
+        gearFlash = gear === 5 ? 0 : 1;
+        if (NEWS[gear]) showNews(NEWS[gear]);
+        tone(330, 0.16, 0.16, "square", 660);
+        tone(660, 0.22, 0.12, "square", 990, 0.08);
+        noiseHit(0.3, 300, 0.22, 0.8);
       }
-      if (p.z < -9) b.dead = true;
-      var d = Math.abs(T - b.tArrive);
-      if (!b.judged && d < nearAbs) { nearAbs = d; near = b; }
-    });
-    balls = balls.filter(function (b) { return !b.dead; });
+      prevGear = gear;
+    }
 
-    /* 来ている球のほうへ体を寄せる */
-    var want = 0;
-    if (near) want = Math.max(-1.1, Math.min(1.1, near.xe * .6));
-    leanX += (want - leanX) * Math.min(1, dt * 6);
-  }
+    /* 歩調とひづめの音 */
+    var cad = Math.min(16, 0.9 + wsp / 24);
+    legPhase += cad * dt;
+    var half = Math.floor(legPhase * 2);
+    if (half !== prevHalf) {
+      if (cad < 7) noiseHit(0.07, 150, 0.12, 1.2);
+      prevHalf = half;
+    }
 
-  /* その競技で、いま間合いにいちばん近い球 */
-  function targetOf(kind) {
-    var best = null, bestD = 9;
-    balls.forEach(function (b) {
-      if (b.hit || b.judged || b.kind !== kind) return;
-      var d = Math.abs(T - b.tArrive);
-      if (d < bestD) { bestD = d; best = b; }
-    });
-    return bestD <= WINDOW ? best : null;
-  }
+    /* 音の壁 */
+    if (prevKmh < SONIC && speed >= SONIC) {
+      if (scene3d) scene3d.sonicBoom();
+      noiseHit(0.55, 110, 0.45, 0.5);
+      tone(160, 0.5, 0.2, "sawtooth", 50);
+    }
+    prevKmh = speed;
+    if (speed >= SONIC && scene3d) { /* 宇宙の後半も加速の輪を残す */
+      boomT -= dt;
+      if (boomT <= 0) { boomT = 0.36; scene3d.sonicBoom(1); }
+    } else { boomT = 0; }
 
-  /* ボタンを押す。合っていれば打ち返し、外れていれば空振り */
-  function press(kind) {
-    if (state !== S.PLAY || !on[kind] || T < nextInput) return;
-    nextInput = T + ACT;                        /* 空振りも含め、動作中は全ボタンの判定を止める */
-    flash[kind] = .16;
-    act = kind; actT = 0; actKind = kind;
-    var b = targetOf(kind);
-    if (b) swingAt(b); else whiff();
-  }
+    /* 道の先に置くもの */
+    if (quietSpace()) { props.length = 0; nextAt = dist + 1600; }
+    while (!quietSpace() && nextAt - dist < 2500 * WORLD[gear]) {
+      var pt = propType(gear);
+      props.push({ at: nextAt, x: (Math.random() - 0.5) * 92, y: pt === 6 ? 150 + Math.random() * 130 : 0,
+                   t: pt, r: Math.random(), z: nextAt - dist });
+      nextAt += propGap() * (0.82 + Math.random() * 0.36);
+    }
+    for (var j = props.length - 1; j >= 0; j--) {
+      var o = props[j];
+      /* 車は前方から向かってくる。牛の加速とは別に進ませる。 */
+      if (o.t === 2 || o.t === 3) o.at -= (o.t === 3 ? 180 : 130) * dt;
+      o.z = o.at - dist;
+      var contact = 96 + lead + (o.t === 5 ? 240 + o.r * 160 : o.t === 3 ? 150 : o.t === 2 ? 80 : 0);
+      if (o.z <= contact) { props.splice(j, 1); smash(o); }
+    }
+    if (props.length > 60) props.splice(0, props.length - 60);
 
-  function swingAt(b) {
-    var d = Math.abs(T - b.tArrive), k = KINDS[b.kind];
-    if (d > WINDOW) { whiff(); return; }
-    var perfect = d < PERFECT;
-    b.hit = true; b.judged = true; b.hitT = T;
-    var p = ballAt(b, T);
-    b.hx = p.x; b.hy = Math.max(k.r, p.y); b.hz = p.z;
-    var from = { x: b.hx, y: b.hy, z: b.hz }, to, tf;
-    if (b.kind === "yakyu") { to = { x: (Math.random() - .5) * 34, y: 11, z: 88 }; tf = 2.1; }
-    else if (b.kind === "soccer") { to = { x: (Math.random() - .5) * 5, y: 1.1, z: 78 }; tf = 1.6; }
-    else if (b.kind === "tennis") { to = { x: (Math.random() - .5) * 8, y: .2, z: 22 }; tf = 1.0; }
-    else if (b.kind === "basket") { to = { x: 0, y: 3.2, z: 24.2 }; tf = 1.15; }
-    else { to = { x: (Math.random() - .5) * 6, y: .2, z: 19 }; tf = .9; }
-    b.v = aimAt(from, to, tf);
-    if (b.kind === "tennis") {
-      score += [15, 15, 10, 0][tennisPoint];
-      tennisPoint++;
-      b.resultText = tennisPoint === 4 ? "GAME!" : "WINNER! " + [0, 15, 30, 40][tennisPoint];
-      if (tennisPoint === 4) { tennisPoint = 0; tennisGames++; }
-    } else { score += k.pts; b.resultText = CHEERS[b.kind]; }
-    hits++;
-    b.resultAfter = tf; b.resultAt = to; b.resultShown = false;
-    shake = Math.max(shake, perfect ? .9 : .6);
-    flashes.push({ x: b.hx, y: b.hy, z: b.hz, age: 0, big: perfect });
-    hitSound(b.kind, perfect);
-  }
-  /* 空振り。振っただけでは減らない。減るのは球を見逃したときだけ */
-  function whiff() {
-    noiseHit(.12, 900, .12, .8, 320);
-    shake = Math.max(shake, .18);
+    if (news) { news.t += dt; if (news.t > news.dur) news = null; }
+
+    /* 速いときの流れ線 */
+    var zk = zipAmount();
+    if (zk > 0.01) {
+      for (var zi = 0; zi < zips.length; zi++) {
+        var zp = zips[zi];
+        zp.r += zp.v * dt * (0.5 + zk * 3.2);
+        if (zp.r > 1.35) { zp.r = 0.04 + Math.random() * 0.12; zp.a = Math.random() * TAU; }
+      }
+    }
+
+    /* 警告の音 */
+    if (warning) {
+      sirenT -= dt;
+      if (sirenT <= 0) { sirenT = 0.42; tone(1046, 0.16, 0.08, "square"); tone(784, 0.16, 0.07, "square", null, 0.19); }
+    } else { sirenT = 0; }
   }
 
   /* ============ 入力 ============
-     触るのは下の5ボタン。キーは 1〜5 がそのまま5ボタンに当たり、
-     矢印で選んでスペースでも押せる（ジョイパッドはスペースと矢印に化ける）。
-     x が null のときはキー操作。 */
-  var padPending = null;
+     絵の中ならどこを押してもよい。スペースとジョイパッドも同じ。 */
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
-    if (state === S.RESULT) {
-      var hit = x == null ? "retry" : hitButton(x, y);
-      if (hit === "retry") toIntro();
-      return;
-    }
-    held = true;
-    var b = padAt(x, y);
-    if (b) press(b.kind);
-  }
-  function move() {}
-  function up() {
-    held = false;
-
+    if (state === S.RESULT) return;
+    if (x == null) feed(STROKE);               /* キーとジョイパッドは、ひとこぎぶん */
+    else dragY = y;
   }
 
   function atCanvas(e) {
@@ -612,63 +581,66 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
   }
   wrap.addEventListener("pointerdown", function (e) {
-    e.preventDefault(); keyMode = false;
+    e.preventDefault();
     var p = atCanvas(e); down(p.x, p.y);
   });
   wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
+    if (dragY == null || state !== S.PLAY) return;
+    var p = atCanvas(e);
+    var dy = dragY - p.y;                      /* 上へはらったぶんだけ進む */
+    dragY = p.y;
+    if (dy > 0) { feed(dy); moveAcc += dy; }
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { padPending = null; up(); });
-  window.addEventListener("blur", function () { up(); });
-
+  function release() {
+    if (dragY == null) return;
+    dragY = null;
+    glide = Math.min(GLIDE_MAX, flickVel);     /* 勢いをそのまま余韻へ */
+    flickVel = 0; moveAcc = 0;
+  }
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); release(); });
+  wrap.addEventListener("pointercancel", release);
+  window.addEventListener("pointerup", release);   /* 絵の外で離したときのため */
+  window.addEventListener("blur", release);
+  wrap.addEventListener("wheel", function (e) {   /* ころがしても進む */
+    if (state !== S.PLAY) return;
+    e.preventDefault();
+    audioOn();
+    feed(Math.max(0, e.deltaY) * 0.7);
+  }, { passive: false });
   window.addEventListener("keydown", function (e) {
+    /* 手元では数字キーで景色の先頭へ飛ぶ。 */
+    if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && /^[1-6]$/.test(e.key)) {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (state !== S.PLAY) newRound();
+      var target = Number(e.key) - 1;
+      speed = target === 0 ? MIN_KMH : GEARS[target - 1].top;
+      boost = 0; glide = 0; lead = 0; dragY = null; flickVel = 0; moveAcc = 0;
+      props.length = 0; nextAt = dist + 1600;
+      if (scene3d) scene3d.reset();
+      recalc();
+      return;
+    }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
-    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
-    var flip = e.key === "ArrowUp" || e.key === "ArrowDown";
-    var num = /^[1-5]$/.test(e.key) ? parseInt(e.key, 10) - 1 : -1;
-    if (!esc && !go && !left && !right && !flip && num < 0) return;
+    if (!esc && !go) return;
     e.preventDefault();
-    if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
-    var list = pads(state === S.INTRO);
-    if (left || right) {                       /* 選び位置を動かす */
-      if (!list.length) return;
-      cursor = (cursor + (right ? 1 : list.length - 1)) % list.length;
-      return;
-    }
-    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
-    if (state === S.INTRO) {
-      if (!go) return;
-      introArmed = true;                       /* 開始は、この指を離したとき */
-      return;
-    }
-    if (flip) return;
-    if (num >= 0) {
-      var kind = KEYS[num];                    /* 競技を切ってもキーの割り当ては変えない */
-      if (on[kind]) { cursor = kinds().indexOf(kind); press(kind); }
-      return;
-    }
-    if (state === S.PLAY) { if (list[cursor]) press(list[cursor].kind); return; }
-    down();                                    /* 結果画面はスペースでもう一度 */
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない。連打で進む */
+    down();
   });
-  /* 結果画面でスペースを押すと開始画面へ戻る。その指を離したぶんで
-     そのまま始まってしまわないよう、押した時点で開始画面だったときだけ開始する。 */
-  var introArmed = false;
   window.addEventListener("keyup", function (e) {
-    if (e.code !== "Space" && e.key !== " " && e.key !== "Enter") return;
-    if (introArmed) { introArmed = false; if (state === S.INTRO) startButton.click(); return; }
-    up();
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") {
+      if (state === S.INTRO) startButton.click();
+    }
   });
 
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。 */
-    window.zResultActions.x({ text: score + "点でした #同時ボール" });
+    window.zResultActions.x({ text: score + "回押して宇宙を壊しました #牛歩シミュレーター" });
   }
 
-  /* ============ 描画 ============ */
+  /* ============ 描画 ============ 空と雲は2D、そのうえに立体、いちばん上に数字 */
   function roundRect(x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -679,229 +651,290 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     ctx.closePath();
   }
 
-  function snapshot() {
-    var list = [];
-    balls.forEach(function (b) {
-      var k = KINDS[b.kind];
-      if (b.hit) { list.push({ kind: b.kind, x: b.fx, y: b.fy, z: b.fz, r: k.r, spin: b.spin }); return; }
-      var p = ballAt(b, T);
-      if (p.u < 0 || p.z < -9) return;
-      var trail = [];
-      for (var j = 0; j < 12; j++) {
-        var past = ballAt(b, T - j * .020);
-        if (past.u < 0) break;
-        trail.push({ x: past.x, y: past.y, z: past.z });
-      }
-      list.push({ kind: b.kind, x: p.x, y: p.y, z: p.z, r: k.r, spin: b.spin, trail: trail });
-    });
-    var pitch = -1;
-    if (T - pitchAt > -.55 && T - pitchAt < .55) pitch = (T - pitchAt + .55) / 1.1;
-    return { fall: state === S.RESULT ? Math.min(1, (animT - fallenAt) / .8) : -1, cameraMix: state === S.INTRO ? 0 : Math.min(1, cameraTime / CAMERA_MOVE), t: animT, balls: list, act: act, actP: act ? actT / ACT : 0, shake: shake, leanX: leanX, pitch: pitch,
-             on: kinds().join(",") };
+  function drawSky() {
+    var sk = skyNow();
+    var g = ctx.createLinearGradient(0, 0, 0, HY + 10);
+    g.addColorStop(0, rgb(sk.hi));
+    g.addColorStop(1, rgb(sk.lo));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, HY + 10);
+    /* 地平線から下は、空の下はしと同じ色でつないでおく。
+       立体の地面は遠くがこの色に溶けるので、境目が出ない。 */
+    ctx.fillStyle = scene3d ? rgb(sk.lo) : rgb(dim(mixW(GROUND), dayLight()));
+    ctx.fillRect(0, HY, W, H - HY);
   }
 
-  /* 3Dが使えないとき（自動確認の台など）の簡単な絵 */
-  function drawFlat(snap) {
-    ctx.fillStyle = "#16283a"; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = "#2e7a3b"; ctx.fillRect(0, H * .42, W, H * .58);
-    var colors = { yakyu: "#f6f3ea", soccer: "#f4f4f0", tennis: "#d3e64a", basket: "#d4702a", volley: "#f7f6f1" };
-    snap.balls.forEach(function (b) {
-      var f = 620 / Math.max(.3, b.z + 7.4);
-      var x = W / 2 + b.x * f * .55, y = H * .62 - (b.y - 1.2) * f * .55;
-      ctx.fillStyle = colors[b.kind];
-      ctx.beginPath(); ctx.arc(x, y, Math.max(1, b.r * f * .55), 0, Math.PI * 2); ctx.fill();
-    });
-  }
-
-  /* ボタンに出す球の絵。3Dの球と同じ見た目に寄せる */
-  function drawBall2D(kind, cx, cy, r) {
+  function drawClouds() {
+    if (W8[3] || W8[5]) return;
     ctx.save();
-    ctx.translate(cx, cy);
-    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.fillStyle = { yakyu: "#f6f3ea", soccer: "#f4f4f0", tennis: "#d3e64a", basket: "#d4702a", volley: "#f7f6f1" }[kind];
-    ctx.fill();
-    ctx.save();
-    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.clip();
-    if (kind === "yakyu") {
-      ctx.strokeStyle = "#c4384a"; ctx.lineWidth = r * .11;
-      [-1, 1].forEach(function (s) {
-        ctx.beginPath();
-        ctx.moveTo(s * r * .66, -r * .82);
-        ctx.quadraticCurveTo(s * r * .06, 0, s * r * .66, r * .82);
-        ctx.stroke();
-      });
-    } else if (kind === "soccer") {
-      ctx.fillStyle = "#20242a";
-      ctx.beginPath();
-      for (var i = 0; i < 5; i++) {
-        var a = i / 5 * Math.PI * 2 - Math.PI / 2;
-        ctx.lineTo(Math.cos(a) * r * .42, Math.sin(a) * r * .42);
-      }
-      ctx.closePath(); ctx.fill();
-      /* 中央の五角形から白い六角形の継ぎ目を伸ばす。周縁は球面で縮む五角形。 */
-      ctx.strokeStyle = "#b9beb9"; ctx.lineWidth = r * .018;
-      for (var j = 0; j < 5; j++) {
-        var b = j / 5 * Math.PI * 2 - Math.PI / 2;
-        var ux = Math.cos(b), uy = Math.sin(b), vx = -uy, vy = ux;
-        ctx.beginPath(); ctx.moveTo(ux * r * .42, uy * r * .42);
-        ctx.lineTo(ux * r * .77, uy * r * .77); ctx.stroke();
-        ctx.beginPath();
-        [[.77, 0], [.86, -.25], [1.08, -.29], [1.16, 0], [1.08, .29], [.86, .25]].forEach(function (p, n) {
-          var x = (ux * p[0] + vx * p[1]) * r, y = (uy * p[0] + vy * p[1]) * r;
-          if (n === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.closePath(); ctx.fill();
-        [-1, 1].forEach(function (side) {
-          ctx.beginPath(); ctx.moveTo((ux * .86 + vx * .25 * side) * r, (uy * .86 + vy * .25 * side) * r);
-          ctx.lineTo((ux * .78 + vx * .64 * side) * r, (uy * .78 + vy * .64 * side) * r); ctx.stroke();
-        });
-      }
-    } else if (kind === "tennis") {
-      ctx.strokeStyle = "#f7f9ee"; ctx.lineWidth = r * .16;
-      [-1, 1].forEach(function (s) {
-        ctx.beginPath();
-        ctx.moveTo(s * r * .72, -r * .8);
-        ctx.quadraticCurveTo(s * r * .05, 0, s * r * .72, r * .8);
-        ctx.stroke();
-      });
-    } else if (kind === "basket") {
-      /* 正面の十字と、左右から内側へ回り込む切れ目のない継ぎ目。 */
-      ctx.strokeStyle = "#30251d"; ctx.lineWidth = r * .065;
-      ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(0, r);
-      ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.stroke();
-      [-1, 1].forEach(function (side) {
-        ctx.beginPath(); ctx.moveTo(side * r * .76, -r * .72);
-        ctx.bezierCurveTo(side * r * .24, -r * .34, side * r * .24, r * .34, side * r * .76, r * .72);
-        ctx.stroke();
-      });
-    } else {
-      /* 斜めに巻き付く三色のパネル。帯の端は球の輪郭までつなぐ。 */
-      ctx.rotate(.48);
-      ctx.fillStyle = "#294da0"; ctx.fillRect(-r, -r, r * 2, r * 2);
-      ctx.strokeStyle = "#303634"; ctx.lineWidth = r * .045;
-      function panel(color, x1, x2) {
-        ctx.fillStyle = color; ctx.beginPath();
-        ctx.moveTo(x1 * r, -r * 1.05);
-        ctx.bezierCurveTo((x1 + .25) * r, -r * .35, (x1 + .25) * r, r * .35, x1 * r, r * 1.05);
-        ctx.lineTo(x2 * r, r * 1.05);
-        ctx.bezierCurveTo((x2 + .25) * r, r * .35, (x2 + .25) * r, -r * .35, x2 * r, -r * 1.05);
-        ctx.closePath(); ctx.fill(); ctx.stroke();
-      }
-      panel("#f7f6f1", -.58, -.14);
-      panel("#f3d62d", -.14, .32);
-      panel("#f7f6f1", .32, .77);
-      ctx.fillStyle = "#f3d62d";
-      ctx.beginPath(); ctx.moveTo(-r, -r * .15); ctx.lineTo(-r * .38, -r * .15);
-      ctx.lineTo(-r * .38, r * .28); ctx.lineTo(-r, r * .28); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = rgb(dim([255, 255, 255], 0.45 + dayLight() * 0.55));
+    var gap = 250, off = (dist * 0.05) % gap;
+    for (var i = -1; i < Math.ceil(W / gap) + 3; i++) {
+      var x = W + 140 - off - i * gap;
+      if (x < -160 || x > W + 160) continue;
+      var cloudId = i - Math.floor(dist * 0.05 / gap);
+      var y = HY - 120 - ((cloudId % 3 + 3) % 3) * 84;
+      ell(x, y, 56, 23); ell(x - 42, y + 11, 36, 17); ell(x + 40, y + 9, 41, 19);
     }
     ctx.restore();
-    ctx.restore();
   }
 
-  /* 下の5ボタン。球そのものが押しどころ。白い球が背景に埋もれないよう縁を付ける */
-  function drawPads(all) {
-    var list = pads(all);
-    var showKeys = !window.__recordingActive && !/[?&]recorder-cli=1(?:&|$)/.test(location.search) && window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-    list.forEach(function (b, i) {
-      var lit = flash[b.kind] > 0 ? flash[b.kind] / .16 : 0;
-      var off = all && !on[b.kind];
-      var r = b.w / 2 - 4;
+  /* 地平線のむこう（山なみ・遠いビルの影） */
+  function drawFar() {
+    if (!W8[3] && !W8[4] && !W8[5]) {
       ctx.save();
-      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
-      ctx.scale(1 - lit * .1, 1 - lit * .1);
-      /* 影で地面から浮かせる。切ってあるときはこの暗い下地が透けて沈む */
-      ctx.save();
-      ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = 12; ctx.shadowOffsetY = 3;
-      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-      ctx.fillStyle = "#0f151d"; ctx.fill();
-      ctx.restore();
-      ctx.globalAlpha = off ? .26 : 1;
-      drawBall2D(b.kind, 0, 0, r);
-      ctx.globalAlpha = 1;
-      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-      ctx.lineWidth = 5;
-      ctx.strokeStyle = off ? "rgba(226,236,246,.5)" : "#101820";
-      ctx.stroke();
-      if (keyMode && i === Math.min(cursor, list.length - 1)) {
-        ctx.beginPath(); ctx.arc(0, 0, r + 8, 0, Math.PI * 2);
-        ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71"; ctx.stroke();
+      var off = (dist * 0.03) % 420;
+      ctx.fillStyle = rgb(dim([111, 159, 125], dayLight()));
+      ctx.beginPath();
+      ctx.moveTo(-off - 420, HY + 4);
+      for (var i = -1; i < 4; i++) {
+        var bx = -off + i * 420;
+        ctx.quadraticCurveTo(bx + 105, HY - 74, bx + 210, HY + 4);
+        ctx.quadraticCurveTo(bx + 315, HY - 38, bx + 420, HY + 4);
       }
-      if (lit > 0) {
-        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255,255,255," + (lit * .45) + ")"; ctx.fill();
+      ctx.lineTo(W + 500, HY + 40); ctx.lineTo(-500, HY + 40);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    if (W8[3]) {
+      ctx.save();
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = rgb(dim([107, 117, 133], dayLight()));
+      var gap = 58, off2 = (dist * 0.04) % gap;
+      for (var j = -1; j < Math.ceil(W / gap) + 2; j++) {
+        var x = W - off2 - j * gap;
+        var hgt = 34 + rnd(j - Math.floor((dist * 0.04) / gap)) * 110;
+        ctx.fillRect(x - gap * 0.42, HY - hgt, gap * 0.84, hgt + 10);
       }
       ctx.restore();
-      if (showKeys) {
-        ctx.save();
-        ctx.font = "bold 24px sans-serif";
-        ctx.textAlign = "center"; ctx.textBaseline = "top";
-        ctx.lineWidth = 4; ctx.strokeStyle = "#101820";
-        ctx.fillStyle = off ? "#899099" : "#ffffff";
-        var label = String(KEYS.indexOf(b.kind) + 1);
-        ctx.strokeText(label, b.x + b.w / 2, b.y + b.h + 10);
-        ctx.fillText(label, b.x + b.w / 2, b.y + b.h + 10);
-        ctx.restore();
-      }
-    });
+    }
   }
 
-  function drawWord(word, x, y, color, size, alpha) {
+  /* 大気との摩擦。牛が見えている場所に重ねる */
+  function drawFlame() {
+    var heat = heatOf(speed);
+    if (heat < 0.03) return;
+    var s = COWP.s;
     ctx.save();
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.font = "bold " + size + "px sans-serif";
-    var margin = ctx.measureText(word).width / 2 + 8;
-    x = Math.max(margin, Math.min(W - margin, x));
-    y = Math.max(size, Math.min(H - size, y));
-    ctx.globalAlpha = Math.min(1, alpha);
-    ctx.lineWidth = 5; ctx.strokeStyle = "#101820"; ctx.fillStyle = color;
-    ctx.strokeText(word, x, y); ctx.fillText(word, x, y);
+    ctx.globalCompositeOperation = "lighter";
+    for (var i = 0; i < 14; i++) {
+      var f = Math.random(), l = (26 + f * 84 * heat) * s;
+      var side = (Math.random() - 0.5) * 60 * s;
+      ctx.fillStyle = f > 0.66 ? "rgba(255,246,205,.4)"
+                    : (f > 0.33 ? "rgba(255,168,45,.32)" : "rgba(255,74,18,.26)");
+      ell(COWP.x + side, COWP.y - 16 * s + l * 0.3, 9 * s + l * 0.13, l * 0.36);
+    }
     ctx.restore();
+  }
+
+  /* 上に出る速報。文が右から左へ流れきったら消える */
+  var NEWS_LOOPS = 3;
+  function showNews(text) {
+    ctx.save();
+    ctx.font = "700 27px sans-serif";
+    var tw = ctx.measureText(text).width;
+    ctx.restore();
+    var span = W - 104 + tw + 150;             /* 文ひとまわりぶんの長さ */
+    news = { text: text, t: 0, w: tw, span: span,
+             dur: 0.3 + (span / 168) * NEWS_LOOPS + 0.3 };
+  }
+  function drawNews() {
+    if (!news) return;
+    var t = news.t;
+    var sl = Math.min(1, t / 0.28, (news.dur - t) / 0.28);
+    if (sl <= 0) return;
+    var h = 56, top = Math.round(H * 0.045) - (1 - sl) * (h + 22);
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, sl);
+    ctx.fillStyle = "rgba(252,250,246,.95)";
+    ctx.fillRect(0, top, W, h);
+    ctx.fillStyle = "#d8262b";
+    ctx.fillRect(0, top, 104, h);
+    ctx.fillStyle = "rgba(0,0,0,.18)";
+    ctx.fillRect(0, top + h, W, 3);
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 27px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("速報", 52, top + h / 2 + 1);
+    ctx.beginPath();
+    ctx.rect(104, top, W - 104, h);
+    ctx.clip();
+    ctx.fillStyle = "#16202e";
+    ctx.font = "700 27px sans-serif";
+    ctx.textAlign = "left";
+    var run = Math.max(0, t - 0.3) * 168;
+    ctx.fillText(news.text, W - (run % news.span), top + h / 2 + 1);
+    ctx.restore();
+    ctx.textBaseline = "alphabetic";
+  }
+
+  /* 速いときに、奥から手前へ流れる線 */
+  function zipAmount() {
+    return clamp01((wsp - 300) / 1500) * (W8[5] ? 0.55 : 1);
+  }
+  function drawZips() {
+    var k = zipAmount();
+    if (k <= 0.01) return;
+    var R = Math.max(W, H) * 0.9;
+    ctx.save();
+    ctx.lineCap = "round";
+    for (var i = 0; i < zips.length; i++) {
+      var z = zips[i];
+      var c = Math.cos(z.a), si = Math.sin(z.a);
+      var r0 = z.r, r1 = z.r + z.len * (0.4 + k);
+      var fade = clamp01(r0 * 3) * clamp01((1.35 - r0) * 2.5);
+      ctx.strokeStyle = "rgba(255,255,255," + (k * 0.42 * fade) + ")";
+      ctx.lineWidth = 1.5 + k * 3.5;
+      ctx.beginPath();
+      ctx.moveTo(VAN.x + c * r0 * R, VAN.y + si * r0 * R * 0.88);
+      ctx.lineTo(VAN.x + c * r1 * R, VAN.y + si * r1 * R * 0.88);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawBlue() {
+    if (gear !== 5) return;
+    var a = Math.pow(phaseT(speed), 0.8);
+    var radius = 24 + a * Math.max(W, H) * 1.8;
+    var g = ctx.createRadialGradient(VAN.x, VAN.y, 0, VAN.x, VAN.y, radius);
+    g.addColorStop(0, "rgba(240,248,255," + (0.45 + 0.5 * a) + ")");
+    g.addColorStop(0.12, "rgba(175,215,255," + (0.2 + 0.5 * a) + ")");
+    g.addColorStop(0.45, "rgba(85,125,255," + (0.08 + 0.25 * a) + ")");
+    g.addColorStop(1, "rgba(30,20,90,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawWarn() {
+    if (!warning || state !== S.PLAY) return;
+    var p = 0.5 + 0.5 * Math.sin(T * 13);
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,46,46," + (0.3 + 0.55 * p) + ")";
+    ctx.lineWidth = 28;
+    ctx.strokeRect(14, 14, W - 28, H - 28);
+    ctx.restore();
+  }
+
+  /* 速さの数字 */
+  function drawMeter() {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.shadowColor = "rgba(0,0,0,.75)";
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = warning ? "#ff6b60" : "#fff";
+    var text = fmtSpeed(speed), size = Math.round(46 * (1 + clickPulse * 0.08));
+    ctx.font = "800 " + size + "px sans-serif";
+    var room = W - 44;
+    if (ctx.measureText(text).width > room) {
+      size = Math.floor(size * room / ctx.measureText(text).width);
+      ctx.font = "800 " + size + "px sans-serif";
+    }
+    ctx.fillText(text, W / 2, READ_Y);
+    ctx.restore();
+  }
+
+  function drawBoom() {
+    if (bt < 0.45) {
+      ctx.fillStyle = "rgba(255,255,255," + Math.min(1, bt / 0.3) + ")";
+      ctx.fillRect(0, 0, W, H);
+      return;
+    }
+    var k = Math.min(1, (bt - 0.45) / 0.55);
+    var v = Math.round(255 * (1 - k));
+    ctx.fillStyle = "rgb(" + v + "," + v + "," + v + ")";
+    ctx.fillRect(0, 0, W, H);
+    var a = clamp01(1 - (bt - 0.45) / 1.3);
+    for (var i = 0; i < shards.length; i++) {
+      var s = shards[i];
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.rot);
+      ctx.fillStyle = s.c;
+      ctx.fillRect(-s.w / 2, -s.h / 2, s.w, s.h);
+      ctx.restore();
+    }
+    var r = Math.max(0, 150 * (1 - (bt - 0.45) / 0.95));
+    if (r > 0.5) {
+      var g = ctx.createRadialGradient(W / 2, H * 0.5, 0, W / 2, H * 0.5, r);
+      g.addColorStop(0, "rgba(255,255,255," + a + ")");
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(W / 2, H * 0.5, r, 0, TAU); ctx.fill();
+    }
   }
 
   function draw() {
-    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
-    var snap = snapshot();
-    if (view3d) { ctx.clearRect(0, 0, W, H); view3d.draw(ctx, W, H, snap); }
-    else drawFlat(snap);
-
-    /* 当たった場所の光 */
-    flashes.forEach(function (f) {
-      var p = view3d ? view3d.project(f.x, f.y, f.z) : { x: W / 2, y: H * .6, z: 0 };
-      if (p.z > 1) return;
-      var a = 1 - f.age / .45, rad = (f.big ? 90 : 60) * (.3 + f.age / .45);
-      ctx.save();
-      ctx.globalAlpha = a * .8;
-      ctx.strokeStyle = f.big ? "#ffe27a" : "#ffffff";
-      ctx.lineWidth = f.big ? 9 : 6;
-      ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
-    });
-
-    /* 残りと点。結果画面では出さない */
+    shareButton.hidden = true;
     if (state === S.RESULT) { drawResult(); return; }
-    if (state === S.INTRO) return;
-    drawPads(false);
-    /* 結果は球が届いた奥の場所に出す。 */
-    results.forEach(function (r) {
-      var p = view3d ? view3d.project(r.x, r.y, r.z) : { x: W / 2, y: H * .28 };
-      drawWord(r.text || CHEERS[r.kind], p.x, p.y - 20 - r.age * 16, ZDoji5Colors[r.kind], 26, (1.1 - r.age) / .2);
-    });
+    ctx.clearRect(0, 0, W, H);
+
+    if (state === S.BOOM && bt >= 0.45) { drawBoom(); return; }
+
+    var shake = clamp01(wsp / 2400) * 3 + (warning ? 5 : 0) + clickPulse * 3 + impactShake;
     ctx.save();
-    for (var i = 0; i < LIVES; i++) {
-      ctx.beginPath();
-      ctx.arc(30 + i * 26, HUDY, 8, 0, Math.PI * 2);
-      ctx.fillStyle = i < lives ? "#ffffff" : "rgba(255,255,255,.22)";
-      ctx.fill();
+    if (shake > 0.2) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+
+    drawSky();
+    drawClouds();
+    drawFar();
+    drawBlue();
+
+    if (scene3d) {
+      scene3d.sync({
+        dist: dist, w: W8, gear: gear, legPhase: legPhase, wsp: wsp, beta: beta,
+        props: props, dt: lastDt, clickPulse: clickPulse, lead: lead, t: phaseT(speed), world: WORLD[gear],
+        kmh: speed, running: state === S.PLAY, quietSpace: quietSpace(),
+        groundColor: dim(mixW(GROUND), dayLight()), roadColor: dim(mixW(PAVE), dayLight()),
+        fogColor: skyNow().lo, light: dayLight()
+      });
+      place();                                   /* カメラが動くので測りなおす */
+      scene3d.render();
+      ctx.drawImage(scene3d.dom, 0, 0, W, H);
     }
-    ctx.fillStyle = "#ffffff";
-    ctx.shadowColor = "rgba(0,0,0,.65)"; ctx.shadowBlur = 12;
-    ctx.font = "800 52px sans-serif";
-    ctx.textAlign = "right"; ctx.textBaseline = "top";
-    ctx.fillText(String(score), W - 24, SCOREY);
+
+    drawFlame();
+    drawZips();
+    if (gearFlash > 0.01) {
+      ctx.fillStyle = "rgba(255,255,255," + (gearFlash * 0.35) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.restore();
+
+    /* 奥の光が画面全体へ満ちる。光速の直前にはほぼ白くなる。 */
+    if (gear === 5) {
+      var white = Math.pow(clamp01((phaseT(speed) - 0.35) / 0.65), 1.25) * 0.98;
+      ctx.fillStyle = "rgba(255,255,255," + white + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+    drawWarn();
+    if (state !== S.RESULT && state !== S.INTRO) { drawMeter(); drawNews(); }
+    if (state === S.INTRO) drawDragGuide();
+
+    if (state === S.BOOM) drawBoom();
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
+  function drawDragGuide() {
+    var phase = (performance.now() % 1800) / 1800;
+    var travel = Math.min(1, phase / 0.7);
+    var x = W / 2, bottom = H * 0.82, top = bottom - 140;
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.85)";
+    ctx.lineWidth = 6; ctx.lineCap = "round";
+    ctx.shadowColor = "rgba(0,0,0,.5)"; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.moveTo(x, bottom); ctx.lineTo(x, top);
+    ctx.moveTo(x - 18, top + 22); ctx.lineTo(x, top); ctx.lineTo(x + 18, top + 22); ctx.stroke();
+    ctx.globalAlpha = phase > 0.7 ? (1 - phase) / 0.3 : 1;
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(x, bottom - travel * 130, 17, 0, TAU); ctx.fill();
     ctx.restore();
   }
 
-  /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
     var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
@@ -919,60 +952,27 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
     return null;
   }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
-    ctx.font = "800 108px sans-serif";
+    ctx.font = "800 64px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.textBaseline = "middle";
+    ctx.fillText("宇宙崩壊", W / 2, H / 2);
     ctx.restore();
-    resultButtons().forEach(function (b) {
-      ctx.save();
-      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
-      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
-      ctx.fillStyle = "#fff"; ctx.fill();
-      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
-      ctx.fillStyle = "#16202e";
-      ctx.font = "800 24px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
-      ctx.restore();
-      ctx.textBaseline = "alphabetic";
-    });
   }
 
   /* ============ 覗き穴 ============
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
   window.__probe = {
     now: function () {
-      return {
-        state: state, score: score, tennisPoint: [0,15,30,40][tennisPoint], tennisGames: tennisGames, hits: hits, lives: lives, T: T, act: act,
-        balls: balls.map(function (b) {
-          return { kind: b.kind, variant: b.variant, dt: T - b.tArrive, hit: b.hit, judged: b.judged };
-        }),
-        nextArrive: nextArrive, W: W, H: H, has3d: !!view3d,
-        on: kinds(), cheers: results.map(function (r) { return r.text || CHEERS[r.kind]; }), results: results.map(function (r) { return { kind: r.kind, x: r.x, y: r.y, z: r.z }; }), pads: state === S.PLAY ? pads(false) : []
-      };
-    },
-    trajectory: function (kind, variant, u) { return ballAt({ kind: kind, variant: variant, side: 1, xs: 0, xe: 0, tArrive: KINDS[kind].flight }, u * KINDS[kind].flight); },
-    /* 次の球を、ちょうどの間合いまで進める */
-    toBall: function () {
-      var guard = 0;
-      while (guard++ < 1200) {
-        var b = null, d = 9;
-        for (var i = 0; i < balls.length; i++) {
-          if (balls[i].hit || balls[i].judged) continue;
-          var e = balls[i].tArrive - T;
-          if (e > -WINDOW && e < d) { d = e; b = balls[i]; }
-        }
-        if (b && Math.abs(T - b.tArrive) < .02) return b.kind;
-        update(1 / 60); draw();
-      }
-      return null;
+      return { state: state, score: score, broken: broken, W: W, H: H,
+               kmh: speed, beta: beta, wsp: wsp, gear: gear, step: GEARS[gear].step,
+               phase: PHASE_NAME[gear], props: props.length, quietSpace: quietSpace(),
+               bits: scene3d ? scene3d.bits.length : 0, solid: !!scene3d,
+               boost: Math.round(boost), lead: Math.round(lead), glide: Math.round(glide), news: news ? news.text : "",
+               warn: warning, read: fmtSpeed(speed) };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
@@ -982,45 +982,38 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
-      await r.wait(800);
+      await r.wait(900);
       r.key();
-      var guard = Date.now() + 45000;
-      while (state !== S.RESULT && Date.now() < guard) {
-        for (var i = 0; i < balls.length; i++) {
-          var b = balls[i];
-          if (!b.hit && !b.judged && Math.abs(T - b.tArrive) < .04) { press(b.kind); break; }
-        }
-        await r.wait(16);
-      }
-      await r.wait(1600);
+      await r.wait(600);
+      while (state === S.PLAY) { r.key(); await r.wait(38); }
+      if (!await r.until(function () { return state === S.RESULT; }, 8)) throw Error("宇宙が壊れない");
+      await r.wait(1500);
     }
   };
 
   /* ============ ループ ============ */
-  var startButton = document.getElementById("start");
+  var startButton = document.getElementById('start');
   // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
   var startingPointer = null;
-  document.addEventListener("pointerdown", function (e) {
+  document.addEventListener('pointerdown', function (e) {
     if (!(state === S.INTRO)) return;
     if (e.isPrimary === false || e.button > 0) return;
-    keyMode = false;
     startingPointer = e.pointerId;
     e.stopImmediatePropagation();
   }, true);
-  document.addEventListener("pointerup", function (e) {
-    if (!(state === S.INTRO)) return;
-    if (startingPointer !== e.pointerId) return;
+  document.addEventListener('pointerup', function (e) {
+    if (!(state === S.INTRO) || startingPointer !== e.pointerId) return;
     startingPointer = null; e.preventDefault(); e.stopImmediatePropagation(); startButton.click();
   }, true);
-  document.addEventListener("pointercancel", function () { startingPointer = null; }, true);
+  document.addEventListener('pointercancel', function () { startingPointer = null; }, true);
 
-  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener("click", function (e) { e.stopPropagation(); if (state !== S.INTRO) return; audioOn(); resumeAudio(); newRound(); });
-  newRound(); state = S.INTRO; startButton.hidden = false;
+  ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener('click', function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  newRound(); state = S.INTRO; startButton.hidden = true;
   layout();
   var last = performance.now();
   function loop(now) {
-    var dt = Math.max(0, Math.min(0.033, (now - last) / 1000));   /* 戻ってきたとき飛ばないように上限 */
+    var dt = Math.min(0.033, (now - last) / 1000);   /* 戻ってきたとき飛ばないように上限 */
     last = now;
     if (!window.__recordManual) { update(dt); draw(); }
     requestAnimationFrame(loop);
@@ -1031,10 +1024,10 @@ var ZDoji5Colors = { yakyu: "#e65a55", soccer: "#448bea", tennis: "#b6d94c", bas
 <script>
 if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = "../games/_tools/recorder-ui.js?v=doji5-1789896991329";
+  recorderScript.src = "../games/_tools/recorder-ui.js?v=gyuho-1789954046926";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js"></script>
+<script src="./auto-reload.js?v=gyuho-1789954046926"></script>
 </body>
 </html>
