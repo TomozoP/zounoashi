@@ -125,7 +125,7 @@ var nw = start();
 ok(nw.probe.now().news === "", "はじめは速報なし");
 while (nw.probe.now().gear === 0 && nw.probe.now().state === "play") nw.press(" ");
 nw.step(1);
-ok(nw.probe.now().news.indexOf("逃走") >= 0, "道路に出ると速報が流れる", nw.probe.now().news);
+ok(nw.probe.now().news.indexOf("脱走し県道を北上中") >= 0, "歩道に出ると速報が流れる", nw.probe.now().news);
 nw.step(60 * 8);
 ok(nw.probe.now().news !== "", "速報は何周かくり返す");
 nw.step(60 * 22);
