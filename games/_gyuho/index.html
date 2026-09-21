@@ -163,7 +163,7 @@
   window.addEventListener("orientationchange", layout);
 
   /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
-  var AC = null, NOISE = null;
+  var AC = null, NOISE = null, windGain = null, windFilter = null;
   var audioUnlocked = false, showDragGuide = false;
   // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
   function resumeAudio() {
@@ -197,7 +197,23 @@
     NOISE = AC.createBuffer(1, len, AC.sampleRate);
     var d = NOISE.getChannelData(0);
     for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    var wind = AC.createBufferSource(); wind.buffer = NOISE; wind.loop = true;
+    windFilter = AC.createBiquadFilter(); windFilter.type = "lowpass"; windFilter.frequency.value = 160;
+    windGain = AC.createGain(); windGain.gain.value = 0;
+    wind.connect(windFilter); windFilter.connect(windGain); windGain.connect(AC.destination); wind.start();
   }
+  function updateWind() {
+    if (!AC || !windGain) return;
+    var active = state === S.PLAY && !document.hidden;
+    var amount = active ? clamp01((wsp - 65) / 3000) : 0;
+    var push = active ? clickPulse : 0;
+    windGain.gain.setTargetAtTime(active ? amount * 0.045 + push * 0.018 : 0, AC.currentTime, 0.12);
+    windFilter.frequency.setTargetAtTime(160 + amount * 1300 + push * 850, AC.currentTime, 0.1);
+  }
+  document.addEventListener("visibilitychange", updateWind);
+  window.addEventListener("blur", function () {
+    if (windGain) windGain.gain.setTargetAtTime(0, AC.currentTime, 0.04);
+  });
   function tone(freq, dur, vol, type, to, delay) {
     if (!AC) return;
     var o = AC.createOscillator(), g = AC.createGain();
@@ -456,6 +472,7 @@
   /* ============ 進行 ============ */
   function update(dt) {
     lastDt = dt;
+    updateWind();
     if (state === S.BOOM) {
       bt += dt;
       for (var i = 0; i < shards.length; i++) {

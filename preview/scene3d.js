@@ -133,6 +133,18 @@
     /* 牛 */
     this.cow = this.buildCow();
     this.scene.add(this.cow.root);
+    /* 高速時だけ脚の直前の姿勢を薄く残す。 */
+    this.legEchoMat = new T.MeshBasicMaterial({ color: "#eee9dd", transparent: true, opacity: 0, depthWrite: false });
+    this.legEchoes = this.cow.legs.map(function (leg) {
+      var echo = leg.clone(true);
+      echo.traverse(function (m) { if (m.isMesh) m.material = self.legEchoMat; });
+      self.cow.root.add(echo); return echo;
+    });
+    this.edgeBits = [];
+    var edgeMat = mat("#b1aa8e");
+    for (var edge = 0; edge < 28; edge++) {
+      this.edgeBits.push(this.mesh(this.geo.puff, edgeMat));
+    }
 
     this.M = {
       fenceWood: mat("#8f7048"),
@@ -731,11 +743,12 @@
       this.lines.scale.x = ws;
       this._ws = ws;
     }
-    if (this._cs !== cs) {
-      this.camera.position.set(CAM.x * cs, CAM.y * cs, CAM.z * cs);
-      this.camera.lookAt(LOOK.x * cs, LOOK.y * cs, LOOK.z * cs);
-      this._cs = cs;
-    }
+    /* 牛が先に踏み込み、カメラは少し遅れて追いつく。 */
+    if (this._cs !== cs) this._follow = 0;
+    this._follow = (this._follow || 0) + ((s.lead || 0) * 0.42 - (this._follow || 0)) * Math.min(1, s.dt * 4);
+    this.camera.position.set(CAM.x * cs, CAM.y * cs, CAM.z * cs - this._follow);
+    this.camera.lookAt(LOOK.x * cs, LOOK.y * cs, LOOK.z * cs - this._follow);
+    this._cs = cs;
     var lit = s.light == null ? 1 : s.light;    /* 日が落ちると、あかりも落とす */
     if (this._lit !== lit) {
       this.sun.intensity = 1.9 * lit;
@@ -779,6 +792,15 @@
     for (var i = 0; i < cow.legs.length; i++) {
       var off = (i === 0 || i === 3) ? 0 : 0.5;
       cow.legs[i].rotation.x = Math.sin((s.legPhase + off) * Math.PI * 2) * 0.62;
+      this.legEchoes[i].rotation.x = Math.sin((s.legPhase + off - 0.12) * Math.PI * 2) * 0.62;
+    }
+    this.legEchoMat.opacity = clamp01((s.wsp - 350) / 1400) * 0.16;
+    for (var ei = 0; ei < this.edgeBits.length; ei++) {
+      var pebble = this.edgeBits[ei], pair = Math.floor(ei / 2), side = ei % 2 ? 1 : -1;
+      pebble.visible = s.running && s.gear < 4;
+      var ez = ((pair * 150 - s.dist) % 2100 + 2100) % 2100 - 900;
+      pebble.position.set(side * (155 * ws + 18 + pair % 3 * 24), 3, -ez);
+      pebble.scale.set(5 + pair % 4 * 2, 3, 10 + pair % 3 * 6);
     }
     cow.tail.rotation.x = Math.sin(s.legPhase * Math.PI) * 0.26 - 0.1;
 
@@ -944,6 +966,7 @@
   Scene3D.prototype.reset = function () {
     this.clearBits();
     this._lastDist = null;
+    this._follow = 0;
     this.dustTimer = 0;
   };
 
