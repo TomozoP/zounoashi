@@ -171,7 +171,7 @@
       pool(10, function () { return self.makeStraw(); }),
       pool(10, function () { return self.makePerson(); }),
       pool(10, function () { return self.makeCar(); }),
-      pool(8,  function () { return self.makeBuilding(); }),
+      pool(8,  function () { return self.makeTruck(); }),
       pool(8,  function () { return self.makeIsland(1); }),
       pool(10, function () { return self.makeStar(); }),
       pool(8,  function () { return self.makeJet(); })
@@ -416,6 +416,17 @@
     this.put(this.mesh(this.geo.box, mat("#e0543c", { rough: 0.5 }), g), 0, 26, 0, 92, 40, 160);
     this.put(this.mesh(this.geo.box, mat("#cfe0ea", { rough: 0.3 }), g), 0, 54, 6, 72, 30, 86);
     g.userData.body = g.children[0];
+    var trim = mat("#444b51"), light = mat("#fff0c4", { flat: true }), red = mat("#b82e28", { flat: true });
+    this.put(this.mesh(this.geo.box, trim, g), 0, 69, 6, 76, 5, 90);
+    this.put(this.mesh(this.geo.box, trim, g), 0, 54, 6, 76, 30, 5);
+    [-1, 1].forEach(function (side) {
+      this.put(this.mesh(this.geo.box, light, g), side * 30, 32, -81, 18, 10, 3);
+      this.put(this.mesh(this.geo.box, red, g), side * 32, 32, 81, 15, 9, 3);
+      this.put(this.mesh(this.geo.box, trim, g), side * 46, 42, 12, 3, 4, 13);
+      this.put(this.mesh(this.geo.box, trim, g), side * 44, 53, -25, 13, 7, 9);
+    }, this);
+    this.put(this.mesh(this.geo.box, trim, g), 0, 16, 82, 84, 7, 5);
+    this.put(this.mesh(this.geo.box, trim, g), 0, 22, -82, 52, 9, 4);
     var wheel = mat("#23242a");
     [[-44, -52], [44, -52], [-44, 52], [44, 52]].forEach(function (p) {
       var w = new T.Mesh(this.geo.tube, wheel);
@@ -426,12 +437,42 @@
     }, this);
     return g;
   };
-  Scene3D.prototype.makeBuilding = function () {
+  Scene3D.prototype.makeTruck = function () {
     var g = new T.Group();
-    this.put(this.mesh(this.geo.box, mat("#596373"), g), 0, 150, 0, 130, 300, 130);
-    this.put(this.mesh(this.geo.box, mat("#f6e9bb", { flat: true }), g), 0, 155, -66, 92, 250, 3);
+    var metal = mat("#d7d9d5"), dark = mat("#343a40"), glass = mat("#94bacb", { rough: 0.3 });
+    this.put(this.mesh(this.geo.box, mat("#4273a4"), g), 0, 65, -104, 125, 94, 80);
     g.userData.body = g.children[0];
+    this.put(this.mesh(this.geo.box, metal, g), 0, 92, 30, 136, 136, 218);
+    this.put(this.mesh(this.geo.box, dark, g), 0, 24, 0, 112, 18, 290);
+    this.put(this.mesh(this.geo.box, glass, g), 0, 91, -145, 103, 32, 3);
+    [-1, 1].forEach(function (side) {
+      this.put(this.mesh(this.geo.box, glass, g), side * 63, 91, -105, 3, 30, 47);
+      this.put(this.mesh(this.geo.box, dark, g), side * 77, 86, -127, 12, 20, 9);
+      this.put(this.mesh(this.geo.box, mat("#fff1c0", { flat: true }), g), side * 44, 43, -146, 22, 12, 3);
+      this.put(this.mesh(this.geo.box, mat("#bc302c", { flat: true }), g), side * 48, 38, 141, 18, 10, 3);
+      [-104, 62, 111].forEach(function (z) {
+        this.put(this.mesh(this.geo.tube, dark, g), side * 64, 21, z, 21, 14, 21).rotation.z = Math.PI / 2;
+        this.put(this.mesh(this.geo.tube, metal, g), side * 72, 21, z, 10, 2, 10).rotation.z = Math.PI / 2;
+      }, this);
+    }, this);
+    this.put(this.mesh(this.geo.box, dark, g), 0, 29, -148, 127, 10, 6);
+    this.put(this.mesh(this.geo.box, dark, g), 0, 54, -146, 54, 20, 3);
+    this.put(this.mesh(this.geo.box, dark, g), 0, 96, 140, 3, 121, 3);
+    this.put(this.mesh(this.geo.box, dark, g), 0, 32, 142, 131, 5, 5);
     return g;
+  };
+
+  /* 車は車体を保ったまま跳ね飛ぶ。通り過ぎた車体を繰り返し使う。 */
+  Scene3D.prototype.launchVehicle = function (x, r, z, dist, type) {
+    if (!this.vehiclePool) this.vehiclePool = { 2: [], 3: [] };
+    var m = this.vehiclePool[type].pop();
+    if (!m) { m = type === 3 ? this.makeTruck() : this.makeCar(); this.scene.add(m); }
+    m.visible = true;
+    m.position.set(x, 0, -z); m.rotation.set(0, (r - 0.5) * 0.16, 0);
+    m.userData.body.material = this.carMat(r);
+    this.flying.push({ m: m, life: 0, dist: dist, vehicle: type,
+      vx: (x < 0 ? -1 : 1) * (150 + r * 140), vy: type === 3 ? 420 : 560,
+      vz: -180, rx: -1.5 - r, ry: (r - 0.5) * 2, rz: (x < 0 ? -1 : 1) * 2 });
   };
   /* 島。洋上で道の先に浮かび、まわりにはもっと大きいものを並べる */
   Scene3D.prototype.makeIsland = function (k) {
@@ -599,8 +640,9 @@
   Scene3D.prototype.launchPerson = function (x, r, z, dist) {
     var m = this.flyPool.pop();
     if (!m) {
-      var old = this.flying.shift();
-      if (!old) return;
+      var personIndex = this.flying.findIndex(function (f) { return !f.vehicle; });
+      if (personIndex < 0) return;
+      var old = this.flying.splice(personIndex, 1)[0];
       m = old.m;
     }
     m.visible = true;
@@ -629,7 +671,8 @@
       f.m.rotation.z += f.rz * dt;
       if (f.m.position.z > 900 || f.m.position.y < -240 || f.life > 3) {
         f.m.visible = false;
-        this.flyPool.push(f.m);
+        if (f.vehicle) this.vehiclePool[f.vehicle].push(f.m);
+        else this.flyPool.push(f.m);
         this.flying.splice(i, 1);
       }
     }
@@ -666,7 +709,8 @@
     for (var r2 = 0; r2 < this.ringMesh.length; r2++) this.ringMesh[r2].visible = false;
     for (var j = 0; j < this.flying.length; j++) {
       this.flying[j].m.visible = false;
-      this.flyPool.push(this.flying[j].m);
+      if (this.flying[j].vehicle) this.vehiclePool[this.flying[j].vehicle].push(this.flying[j].m);
+      else this.flyPool.push(this.flying[j].m);
     }
     this.flying.length = 0;
   };
@@ -763,11 +807,11 @@
         m.userData.body.material = this.planetMats[kind];
         m.userData.ring.visible = kind === 3;
       }
-      m.rotation.y = o.t === 2 ? (o.r - 0.5) * 0.24 : (o.t === 6 ? Math.PI : o.r * 3.14);
+      m.rotation.y = o.t === 2 || o.t === 3 ? (o.r - 0.5) * 0.16 : (o.t === 6 ? Math.PI : o.r * 3.14);
       if (o.t === 6) m.rotation.z = (o.r - 0.5) * 0.5;
       if (o.t === 1 && m.userData.shirt) m.userData.shirt.color.copy(this.shirtColor(o.r));
       if (o.t === 2 && m.userData.body) m.userData.body.material = this.carMat(o.r);
-      if (o.t === 3 && m.userData.body) m.userData.body.scale.y = 300 * (0.7 + o.r * 0.7);
+      if (o.t === 3 && m.userData.body) m.userData.body.material = this.carMat(o.r);
     }
     for (var t = 0; t < 7; t++) {
       for (var k = used[t]; k < this.propPool[t].length; k++) this.propPool[t][k].visible = false;
