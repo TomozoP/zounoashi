@@ -105,6 +105,31 @@
     this.lines.rotation.x = -Math.PI / 2;
     this.lines.position.set(0, 1.4, -3600);
 
+    /* 歩道の敷石と両端の縁石。第2段階だけ表示する。 */
+    var pavingCanvas = document.createElement("canvas");
+    pavingCanvas.width = 128; pavingCanvas.height = 128;
+    var paving = pavingCanvas.getContext("2d");
+    paving.fillStyle = "#c5bbaa"; paving.fillRect(0, 0, 128, 128);
+    paving.strokeStyle = "#a29787"; paving.lineWidth = 2;
+    paving.beginPath();
+    paving.moveTo(0, 0); paving.lineTo(128, 0);
+    paving.moveTo(0, 64); paving.lineTo(128, 64);
+    paving.moveTo(64, 0); paving.lineTo(64, 64);
+    paving.moveTo(0, 64); paving.lineTo(0, 128); paving.stroke();
+    this.pavingTex = new T.CanvasTexture(pavingCanvas);
+    this.pavingTex.colorSpace = T.SRGBColorSpace;
+    this.pavingTex.wrapS = this.pavingTex.wrapT = T.RepeatWrapping;
+    this.pavingTex.repeat.set(3, 11000 / 110);
+    this.pavingMat = new T.MeshStandardMaterial({ map: this.pavingTex, roughness: 1 });
+    this.paving = this.mesh(new T.PlaneGeometry(260, 11000), this.pavingMat);
+    this.paving.rotation.x = -Math.PI / 2;
+    this.paving.position.set(0, 2, -3600);
+    this.curbs = new T.Group(); this.scene.add(this.curbs);
+    var curbMat = mat("#d8d3c9");
+    [-1, 1].forEach(function (side) {
+      self.put(self.mesh(self.geo.box, curbMat, self.curbs), side * 170, 4, -3600, 15, 8, 11000);
+    });
+
     /* 牛 */
     this.cow = this.buildCow();
     this.scene.add(this.cow.root);
@@ -691,7 +716,10 @@
     var wantTex = w[3] ? this.lineTexCity : this.lineTex;
     if (this.lineMat.map !== wantTex) { this.lineMat.map = wantTex; this.lineMat.needsUpdate = true; }
     wantTex.offset.y = s.dist / 240;
-    this.lineMat.opacity = Math.min(1, w[1] + w[2] + w[3]) * (1 - w[5]);   /* 大陸に白線は無い */
+    this.lineMat.opacity = Math.min(1, w[2] + w[3]) * (1 - w[5]);   /* 歩道には白線を引かない */
+    this.paving.visible = this.curbs.visible = !!w[1];
+    this.paving.scale.x = ws;
+    this.pavingTex.offset.y = s.dist / 110;
     this.lines.visible = this.lineMat.opacity > 0.02;
     setColor(this.fog.color, s.fogColor);
     this.fog.near = (800 + 1200 * w[5]) * ws;    /* 世界が広くなったぶん、霞む距離ものばす */
@@ -713,7 +741,7 @@
     this.row("fence", w[0], 112 * ws, 176 * ws, s.dist);
     this.row("barn", w[0], 520 * ws, 430 * ws, s.dist);
     this.row("pole", w[1] + w[2], 440 * ws, 300 * ws, s.dist);
-    this.row("rail", w[1] + w[2] + w[3], 210 * ws, 156 * ws, s.dist);
+    this.row("rail", w[2] + w[3], 210 * ws, 156 * ws, s.dist);
     this.row("house", w[2], 340 * ws, 380 * ws, s.dist);
     this.row("tower", w[3], 420 * ws, 450 * ws, s.dist);
     this.row("isle", w[4], 880 * ws, 430 * ws, s.dist);
