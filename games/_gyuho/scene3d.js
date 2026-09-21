@@ -250,57 +250,56 @@
 
   /* ============ 牛 ============ 頭が -Z を向いて走る */
   Scene3D.prototype.buildCow = function () {
-    var root = new T.Group(), self = this;
-    var white = mat("#f5f2ea"), black = mat("#2b2723"), pink = mat("#e9a9a3"), horn = mat("#e7dfcb", { rough: 0.7 });
-    var body = new T.Group();
+    var root = new T.Group(), body = new T.Group(), self = this;
     root.add(body);
-
-    add(this.geo.ball, white, 0, 74, 4, 46, 40, 64, body);          /* 胴 */
-    add(this.geo.ball, black, -32, 84, 14, 21, 19, 22, body);       /* 斑 */
-    add(this.geo.ball, black, 28, 66, -14, 15, 14, 16, body);
-    add(this.geo.ball, black, -4, 98, -30, 17, 13, 15, body);
-    add(this.geo.tube, white, 0, 96, -44, 19, 42, 19, body).rotation.x = 0.62;   /* 首 */
-    add(this.geo.ball, white, 0, 112, -72, 23, 20, 27, body);       /* 頭 */
-    add(this.geo.ball, pink,  0, 103, -95, 13, 11, 10, body);       /* 鼻 */
-    add(this.geo.ball, black, -12, 120, -88, 3.6, 3.6, 3.6, body);  /* 目 */
-    add(this.geo.ball, black, 12, 120, -88, 3.6, 3.6, 3.6, body);
-    add(this.geo.ball, white, -25, 119, -62, 13, 6, 9, body);       /* 耳 */
-    add(this.geo.ball, white, 25, 119, -62, 13, 6, 9, body);
-    add(this.geo.ball, horn, -13, 133, -68, 5, 9, 5, body);         /* 角 */
-    add(this.geo.ball, horn, 13, 133, -68, 5, 9, 5, body);
-    /* 鼻の穴、耳の内側、口元。斑は背中からも見える位置に足す。 */
-    add(this.geo.ball, black, -6, 105, -104, 2.5, 2, 1.5, body);
-    add(this.geo.ball, black, 6, 105, -104, 2.5, 2, 1.5, body);
-    add(this.geo.ball, pink, -27, 120, -67, 8, 3, 4, body);
-    add(this.geo.ball, pink, 27, 120, -67, 8, 3, 4, body);
-    add(this.geo.ball, black, 0, 98, -103, 9, 1, 1.5, body);
-    add(this.geo.ball, black, 16, 109, 26, 19, 7, 22, body);
-    add(this.geo.ball, white, -13, 121, -90, 1.2, 1.2, 1.2, body);
-    add(this.geo.ball, white, 13, 121, -90, 1.2, 1.2, 1.2, body);
-
-    var legs = [];
-    [[-27, -38], [27, -38], [-27, 34], [27, 34]].forEach(function (p) {
-      var L = new T.Group();
-      L.position.set(p[0], 58, p[1]);
-      add(self.geo.tube, white, 0, -29, 0, 9, 58, 9, L);
-      add(self.geo.ball, black, 0, -58, 2, 10, 6, 12, L);
-      root.add(L);
-      legs.push(L);
+    var white = mat("#f4f0e5"), black = mat("#272625"), pink = mat("#d99b96");
+    var hoof = mat("#45403c"), horn = mat("#ded3b8"), eye = mat("#17191b", { rough: 0.25 });
+    /* 胴は横に長く、肩と腰をなだらかにつなぐ。 */
+    add(this.geo.ball, white, 0, 76, 6, 43, 37, 66, body);
+    add(this.geo.ball, white, 0, 79, -35, 35, 35, 35, body);
+    add(this.geo.ball, white, 0, 77, 48, 38, 35, 32, body);
+    /* 斑は表面に沿わせて薄く置く。 */
+    add(this.geo.ball, black, -37, 83, 12, 7, 23, 27, body).rotation.z = -0.2;
+    add(this.geo.ball, black, 37, 74, -8, 6, 20, 25, body);
+    add(this.geo.ball, black, -10, 110, 13, 22, 4, 24, body);
+    add(this.geo.ball, black, 22, 97, 46, 15, 12, 20, body).rotation.z = -0.5;
+    /* 首は前上がりの丸い塊。筒の端が背中から突き出ない形にする。 */
+    add(this.geo.ball, white, 0, 94, -52, 26, 34, 27, body).rotation.x = -0.48;
+    add(this.geo.ball, white, 0, 78, -54, 22, 25, 22, body);
+    var head = new T.Group(); head.position.set(0, 117, -77); body.add(head);
+    add(this.geo.ball, white, 0, 0, 0, 22, 23, 24, head);
+    add(this.geo.ball, white, 0, -9, -18, 18, 17, 23, head);
+    add(this.geo.ball, pink, 0, -16, -35, 19, 12, 13, head);
+    add(this.geo.ball, black, -8, -13, -46, 3.4, 2.3, 1.7, head);
+    add(this.geo.ball, black, 8, -13, -46, 3.4, 2.3, 1.7, head);
+    add(this.geo.ball, hoof, 0, -22, -45, 11, 0.8, 1, head);
+    [-1, 1].forEach(function (side) {
+      add(self.geo.ball, black, side * 18, 5, -13, 5, 8, 9, head);
+      add(self.geo.ball, eye, side * 21, 5, -18, 3, 4, 3, head);
+      add(self.geo.ball, white, side * 22, 6, -20, 1, 1.2, 1, head);
+      var ear = new T.Group(); ear.position.set(side * 23, 10, 3); ear.rotation.z = side * 0.2; head.add(ear);
+      add(self.geo.ball, white, side * 9, 0, 0, 15, 6, 9, ear);
+      add(self.geo.ball, pink, side * 10, 1, -5, 10, 3, 3, ear);
+      var h = add(self.geo.peak, horn, side * 14, 26, 3, 4.5, 17, 4.5, head);
+      h.rotation.z = -side * 0.32;
     });
-    var tail = new T.Group();
-    tail.position.set(0, 100, 58);
-    add(this.geo.tube, white, 0, -22, 8, 4, 46, 4, tail).rotation.x = -0.3;
-    add(this.geo.ball, black, 0, -44, 15, 7, 10, 7, tail);
-    root.add(tail);
-
+    /* 腿から細い脚へ。脚全体の振りは従来の歩調に合わせる。 */
+    var legs = [];
+    [[-26, -34], [26, -34], [-27, 44], [27, 44]].forEach(function (p, i) {
+      var leg = new T.Group(); leg.position.set(p[0], 61, p[1]); root.add(leg);
+      add(self.geo.ball, white, 0, -10, 0, i < 2 ? 10 : 13, 22, 12, leg);
+      add(self.geo.tube, white, 0, -35, 0, 6.5, 35, 6.5, leg);
+      add(self.geo.ball, white, 0, -30, 0, 8, 9, 8, leg);
+      add(self.geo.ball, hoof, 0, -55, -3, 9, 6, 12, leg);
+      add(self.geo.box, black, 0, -56, -13, 1, 5, 2, leg);
+      legs.push(leg);
+    });
+    var tail = new T.Group(); tail.position.set(0, 97, 65); root.add(tail);
+    add(this.geo.ball, white, 0, -20, 6, 3.5, 25, 4, tail).rotation.x = -0.22;
+    add(this.geo.ball, black, 0, -44, 11, 6, 11, 6, tail);
     return { root: root, body: body, legs: legs, tail: tail };
-
     function add(geo, material, x, y, z, sx, sy, sz, parent) {
-      var m = new T.Mesh(geo, material);
-      m.position.set(x, y, z);
-      m.scale.set(sx, sy, sz);
-      parent.add(m);
-      return m;
+      var m = new T.Mesh(geo, material); m.position.set(x, y, z); m.scale.set(sx, sy, sz); parent.add(m); return m;
     }
   };
 
