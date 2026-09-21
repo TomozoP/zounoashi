@@ -468,7 +468,7 @@
     var m = this.vehiclePool[type].pop();
     if (!m) { m = type === 3 ? this.makeTruck() : this.makeCar(); this.scene.add(m); }
     m.visible = true;
-    m.position.set(x, 0, -z); m.rotation.set(0, (r - 0.5) * 0.16, 0);
+    m.position.set(x, 0, -z); m.rotation.set(0, Math.PI + (r - 0.5) * 0.16, 0);
     m.userData.body.material = this.carMat(r);
     this.flying.push({ m: m, life: 0, dist: dist, vehicle: type,
       vx: (x < 0 ? -1 : 1) * (150 + r * 140), vy: type === 3 ? 420 : 560,
@@ -808,7 +808,7 @@
         m.userData.body.material = this.planetMats[kind];
         m.userData.ring.visible = kind === 3;
       }
-      m.rotation.y = o.t === 2 || o.t === 3 ? (o.r - 0.5) * 0.16 : (o.t === 6 ? Math.PI : o.r * 3.14);
+      m.rotation.y = o.t === 2 || o.t === 3 ? Math.PI + (o.r - 0.5) * 0.16 : (o.t === 6 ? Math.PI : o.r * 3.14);
       if (o.t === 6) m.rotation.z = (o.r - 0.5) * 0.5;
       if (o.t === 1 && m.userData.shirt) m.userData.shirt.color.copy(this.shirtColor(o.r));
       if (o.t === 2 && m.userData.body) m.userData.body.material = this.carMat(o.r);
