@@ -523,16 +523,17 @@
     m.material.opacity = 0.5;
     var sz = 13 + Math.random() * 15;
     m.scale.set(sz, sz, sz);
-    m.position.set((Math.random() - 0.5) * 74, 6 + Math.random() * 12, 30 + Math.random() * 30);
+    m.position.set((Math.random() - 0.5) * 54, 6 + Math.random() * 12,
+      this.cow.root.position.z + 38 + Math.random() * 20);
     this.dust.push({ m: m, life: 0, vx: (Math.random() - 0.5) * 95, vy: 34 + Math.random() * 72, gr: 1 + Math.random() * 1.6 });
   };
-  Scene3D.prototype.stepDust = function (dt, wsp) {
+  Scene3D.prototype.stepDust = function (dt, travel) {
     for (var i = this.dust.length - 1; i >= 0; i--) {
       var d = this.dust[i];
       d.life += dt;
       d.m.position.x += d.vx * dt;
       d.m.position.y += d.vy * dt;
-      d.m.position.z += wsp * 0.85 * dt;
+      d.m.position.z += travel;
       var gs = 1 + d.gr * dt;
       d.m.scale.multiplyScalar(gs);
       d.m.material.opacity = Math.max(0, 0.5 * (1 - d.life / 0.85));
@@ -570,7 +571,7 @@
   };
 
   /* 人をひとり、宙へ跳ね上げる（こわさない） */
-  Scene3D.prototype.launchPerson = function (x, r) {
+  Scene3D.prototype.launchPerson = function (x, r, z, dist) {
     var m = this.flyPool.pop();
     if (!m) {
       var old = this.flying.shift();
@@ -578,25 +579,26 @@
       m = old.m;
     }
     m.visible = true;
-    m.position.set(x, 8, 0);
+    m.position.set(x, 8, -z);
     m.rotation.set(0, r * 3.14, 0);
     if (m.userData.shirt) m.userData.shirt.color.copy(this.shirtColor(r));
     this.flying.push({
-      m: m, life: 0,
-      vx: (Math.random() - 0.5) * 240,
+      m: m, life: 0, dist: dist,
+      vx: (x < 0 ? -1 : 1) * (100 + Math.random() * 160),
       vy: 470 + Math.random() * 260,
-      vz: (this._wsp || 100) + 170 + Math.random() * 150,
+      vz: -(120 + Math.random() * 100),  /* 前へ跳ね、牛が進むと後方へ流れる */
       rx: (Math.random() - 0.5) * 10, ry: (Math.random() - 0.5) * 7, rz: (Math.random() - 0.5) * 10
     });
   };
-  Scene3D.prototype.stepFlying = function (dt) {
+  Scene3D.prototype.stepFlying = function (dt, dist) {
     for (var i = this.flying.length - 1; i >= 0; i--) {
       var f = this.flying[i];
       f.life += dt;
       f.vy -= 1250 * dt;
       f.m.position.x += f.vx * dt;
       f.m.position.y += f.vy * dt;
-      f.m.position.z += f.vz * dt;
+      f.m.position.z += f.vz * dt + Math.max(0, dist - f.dist);
+      f.dist = dist;
       f.m.rotation.x += f.rx * dt;
       f.m.rotation.y += f.ry * dt;
       f.m.rotation.z += f.rz * dt;
@@ -647,6 +649,8 @@
   /* ============ 毎コマの更新 ============
      s: { dist, w, gear, legPhase, wsp, beta, props, dt, sky } */
   Scene3D.prototype.sync = function (s) {
+    var travel = this._lastDist == null ? 0 : Math.max(0, s.dist - this._lastDist);
+    this._lastDist = s.dist;
     var w = s.w;
     if (s.quietSpace && !this._quietSpace) this.clearBits();
     this._quietSpace = !!s.quietSpace;
@@ -759,9 +763,11 @@
     }
 
     this._wsp = s.wsp;
+    /* 出た煙は地面と同じ距離だけ流し、新しい煙は踏み込んだ足元に出す。 */
+    this.stepDust(s.dt, travel);
     var dusty = clamp01(((s.kmh || 0) - 1.2) / 6);   /* 歩きだしてから立ちはじめる */
     if (s.running && w[5] < 0.5 && dusty > 0.02) {
-      var rate = Math.min(28, 3 + s.wsp / 24) * dusty;
+      var rate = Math.min(48, 3 + Math.max(s.wsp, travel / Math.max(s.dt, 1 / 120)) / 24) * dusty;
       this.dustTimer -= s.dt;
       var guard = 0;
       while (this.dustTimer <= 0 && guard++ < 8) {
@@ -769,10 +775,9 @@
         this.dustTimer += 1 / rate;
       }
     }
-    this.stepDust(s.dt, s.wsp);
     this.stepRings(s.dt);
     this.stepBits(s.dt);
-    this.stepFlying(s.dt);
+    this.stepFlying(s.dt, s.dist);
 
     function setColor(c, arr) { c.setRGB(srgb(arr[0]), srgb(arr[1]), srgb(arr[2])); }
   };
@@ -865,6 +870,8 @@
   };
   Scene3D.prototype.reset = function () {
     this.clearBits();
+    this._lastDist = null;
+    this.dustTimer = 0;
   };
 
   global.GyuhoScene3D = Scene3D;
