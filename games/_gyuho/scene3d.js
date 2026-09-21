@@ -23,11 +23,11 @@
     this.renderer.outputColorSpace = T.SRGBColorSpace;
     this.dom = this.renderer.domElement;
     this.scene = new T.Scene();
-    this.camera = new T.PerspectiveCamera(60, 1, 8, 24000);
+    this.camera = new T.PerspectiveCamera(60, 1, 8, 7000);
     this.camera.position.set(CAM.x, CAM.y, CAM.z);
     this.camera.lookAt(LOOK.x, LOOK.y, LOOK.z);
     this.fog = new T.Fog(new T.Color("#d5e9f6"), 900, 3000);
-    this.scene.fog = null;
+    this.scene.fog = this.fog;
 
     this.hemi = new T.HemisphereLight("#ffffff", "#6d7a5c", 2.1);
     this.scene.add(this.hemi);
@@ -80,30 +80,30 @@
 
     /* 地面と道。長い板をZ方向に敷いて、模様だけ流す */
     this.groundMat = mat("#7fb04a", { rough: 1 });
-    this.ground = this.mesh(new T.PlaneGeometry(30000, 22000), this.groundMat);
+    this.ground = this.mesh(new T.PlaneGeometry(14000, 11000), this.groundMat);
     this.ground.rotation.x = -Math.PI / 2;
-    this.ground.position.set(0, 0, -9000);
+    this.ground.position.set(0, 0, -3600);
 
     this.grassTex = stripeTexture();
-    this.grassTex.repeat.set(1, 22000 / 140);
+    this.grassTex.repeat.set(1, 11000 / 140);
     this.grassMat = new T.MeshBasicMaterial({ map: this.grassTex, transparent: true, opacity: 0.2 });
-    this.grass = this.mesh(new T.PlaneGeometry(30000, 22000), this.grassMat);
+    this.grass = this.mesh(new T.PlaneGeometry(14000, 11000), this.grassMat);
     this.grass.rotation.x = -Math.PI / 2;
-    this.grass.position.set(0, 0.4, -9000);
+    this.grass.position.set(0, 0.4, -3600);
 
     this.roadMat = mat("#4a4b50", { rough: 1, transparent: true });
-    this.road = this.mesh(new T.PlaneGeometry(260, 22000), this.roadMat);
+    this.road = this.mesh(new T.PlaneGeometry(260, 11000), this.roadMat);
     this.road.rotation.x = -Math.PI / 2;
-    this.road.position.set(0, 0.9, -9000);
+    this.road.position.set(0, 0.9, -3600);
 
     this.lineTex = lineTexture(false);
-    this.lineTex.repeat.set(1, 22000 / 240);
+    this.lineTex.repeat.set(1, 11000 / 240);
     this.lineTexCity = lineTexture(true);
-    this.lineTexCity.repeat.set(1, 22000 / 240);
+    this.lineTexCity.repeat.set(1, 11000 / 240);
     this.lineMat = new T.MeshBasicMaterial({ map: this.lineTex, transparent: true, opacity: 0 });
-    this.lines = this.mesh(new T.PlaneGeometry(260, 22000), this.lineMat);
+    this.lines = this.mesh(new T.PlaneGeometry(260, 11000), this.lineMat);
     this.lines.rotation.x = -Math.PI / 2;
-    this.lines.position.set(0, 1.4, -9000);
+    this.lines.position.set(0, 1.4, -3600);
 
     /* 牛 */
     this.cow = this.buildCow();
@@ -133,13 +133,13 @@
     };
     /* 道ばたのもの */
     this.side = {
-      fence: pool(160, function () { return self.makeFence(); }),
-      barn:  pool(36, function () { return self.makeBarn(); }),
-      pole:  pool(36, function () { return self.makePole(160, self.M.poleWood); }),
-      rail:  pool(72, function () { return self.makeRail(); }),
-      house: pool(42, function () { return self.makeHouse(); }),
-      tower: pool(32, function () { return self.makeTower(); }),
-      isle:  pool(14, function () { return self.makeIsland(2.1); })
+      fence: pool(72, function () { return self.makeFence(); }),
+      barn:  pool(18, function () { return self.makeBarn(); }),
+      pole:  pool(20, function () { return self.makePole(160, self.M.poleWood); }),
+      rail:  pool(40, function () { return self.makeRail(); }),
+      house: pool(24, function () { return self.makeHouse(); }),
+      tower: pool(22, function () { return self.makeTower(); }),
+      isle:  pool(12, function () { return self.makeIsland(2.1); })
     };
     /* 壊すもの */
     this.propPool = [
@@ -651,7 +651,7 @@
     var w = s.w;
     if (s.quietSpace && !this._quietSpace) this.clearBits();
     this._quietSpace = !!s.quietSpace;
-    this.scene.fog = null;
+    this.scene.fog = w[5] ? null : this.fog;
     var ws = s.world || 1, cs = CAMS[s.gear] || 1;
     if (this._ws !== ws) {
       this.road.scale.x = ws;
@@ -813,7 +813,7 @@
     for (var k = 0; k < half; k++) {
       var z = start + k * gap - dist;
       var left = list[k * 2], right = list[k * 2 + 1];
-      if (z > 7800) { left.visible = right.visible = false; continue; }
+      if (z > 2600) { left.visible = right.visible = false; continue; }
       var id = Math.round((start + k * gap) / gap);
       place(left, -x, z, id);
       place(right, x, z, id + 911);
