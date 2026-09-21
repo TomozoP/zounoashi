@@ -193,6 +193,9 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
         <div class="row"><label>1枚の文字数</label><input type="range" id="stMax" min="6" max="30" step="1" value="16"><span class="val" id="stMaxV"></span></div>
         <div class="row"><label>画面サイズ</label>
           <select id="stOut" style="flex:1"><option value="source">元の動画のまま</option><option value="vertical">縦 1080×1920</option></select></div>
+        <div class="row"><label>ヘッダーの高さ</label><input type="range" id="stHeadH" min="0" max="0.5" step="0.01" value="0.2"><span class="val" id="stHeadHV"></span></div>
+        <div class="row"><label>ヘッダーの背景</label>
+          <select id="stHeadBg" style="flex:1"><option value="blur">映像のぼかし</option><option value="black">黒</option><option value="white">白</option></select></div>
         <div class="row"><label>映像の配置</label>
           <select id="stFit" style="flex:1"><option value="blur">収める（背景ぼかし）</option><option value="cover">画面いっぱい</option></select></div>
       </div>
@@ -281,7 +284,7 @@ const buffers = new Map();   // id -> {raw, peaks, proc, procKey}
 let vclips = [];             // {id,src,in,out,at,gain}  at の順に並べておく
 let aclips = [];             // {id,buf,in,out,at,gain}
 let subs = [];               // {id,text,start,end}
-const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur', out: 'source' };
+const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur', out: 'source', headH: 0.2, headBg: 'blur' };
 const opt = { norm: true, enhance: true, gate: 0.5, vvol: 1, avol: 1, sevol: 1, bgmvol: 0.5 };
 // 音声のレーン：vo=ナレーション（補正あり） se=効果音 bgm=BGM
 const LANES = { vo: 'ナレーション', se: '効果音', bgm: 'BGM' };
@@ -485,14 +488,16 @@ async function ensureMix() {
 const view = $('view'), g = view.getContext('2d');
 const base = document.createElement('canvas'); base.width = W; base.height = H; const bg = base.getContext('2d');
 // 画面サイズ：既定は先頭の動画の大きさそのまま。動画がなければ縦 1080×1920
+let BAND = 0; // ヘッダーのために上へ足した高さ
 function outSize() {
   const c = vclips[0], src = c && sources.get(c.src);
-  if (style.out === 'vertical' || !src || !src.w) return [1080, 1920];
-  return [src.w - src.w % 2, src.h - src.h % 2];
+  const base = (style.out === 'vertical' || !src || !src.w) ? [1080, 1920] : [src.w - src.w % 2, src.h - src.h % 2];
+  const band = subs.some(isHeader) ? Math.round(base[1] * style.headH / 2) * 2 : 0;
+  return [base[0], base[1] + band, band];
 }
 function applyOutSize() {
-  const [w, h] = outSize(); if (w === W && h === H) return;
-  W = w; H = h; view.width = base.width = W; view.height = base.height = H;
+  const [w, h, band] = outSize(); if (w === W && h === H && band === BAND) return;
+  W = w; H = h; BAND = band; view.width = base.width = W; view.height = base.height = H;
   if (typeof fitView === 'function') fitView();
 }
 // 字幕などの大きさは、1080 を基準に画面の短い辺に合わせる
@@ -503,17 +508,20 @@ let curV = 0; const vState = [{ clip: null }, { clip: null }];
 
 function drawVideoFrame(el) {
   if (!el.videoWidth) return;
-  const vw = el.videoWidth, vh = el.videoHeight;
+  const vw = el.videoWidth, vh = el.videoHeight, ah = H - BAND;
   bg.fillStyle = '#000'; bg.fillRect(0, 0, W, H);
-  if (style.fit === 'blur') {
+  // 背景のぼかし（映像を収めるときと、ヘッダー帯の背景に使う）
+  if (style.fit === 'blur' || (BAND && style.headBg === 'blur')) {
     const sc = Math.max(54 / vw, 96 / vh);
     blg.drawImage(el, (54 - vw * sc) / 2, (96 - vh * sc) / 2, vw * sc, vh * sc);
     bg.save(); bg.filter = 'blur(6px) brightness(0.55)'; bg.imageSmoothingEnabled = true;
     bg.drawImage(blurC, -60, -60, W + 120, H + 120); bg.restore();
-    const s = Math.min(W / vw, H / vh); bg.drawImage(el, (W - vw * s) / 2, (H - vh * s) / 2, vw * s, vh * s);
-  } else {
-    const s = Math.max(W / vw, H / vh); bg.drawImage(el, (W - vw * s) / 2, (H - vh * s) / 2, vw * s, vh * s);
   }
+  if (BAND && style.headBg !== 'blur') { bg.fillStyle = style.headBg === 'white' ? '#fff' : '#000'; bg.fillRect(0, 0, W, BAND); }
+  const s = style.fit === 'cover' ? Math.max(W / vw, ah / vh) : Math.min(W / vw, ah / vh);
+  bg.save(); bg.beginPath(); bg.rect(0, BAND, W, ah); bg.clip();
+  bg.drawImage(el, (W - vw * s) / 2, BAND + (ah - vh * s) / 2, vw * s, vh * s);
+  bg.restore();
 }
 function compose(t) {
   g.drawImage(base, 0, 0);
@@ -546,7 +554,10 @@ function drawSubs(ctx, t) {
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.miterLimit = 2;
     const lines = wrapLines(ctx, s.text, W * 0.88);
     const lh = fs * 1.22, ext = (lines.length - 1) * lh;
-    const y0 = s.pos === 'top' ? POSY.top * H : s.pos === 'bottom' ? POSY.bottom * H - ext : style.y * H - ext / 2;
+    const ah = H - BAND;
+    const y0 = s.pos === 'top'
+      ? (BAND ? BAND / 2 - ext / 2 : POSY.top * H)
+      : s.pos === 'bottom' ? BAND + POSY.bottom * ah - ext : BAND + style.y * ah - ext / 2;
     const sw = fs * 0.2, x = W / 2;
     if (s.box) {
       // 黒帯を敷く
@@ -1410,11 +1421,13 @@ bindRange('optBGMVol', v => Math.round(v * 100) + '%', v => { opt.bgmvol = v; mi
 bindRange('stSize', v => v, v => { style.size = v; compose(playhead); });
 bindRange('stY', v => Math.round(v * 100) + '%', v => { style.y = v; compose(playhead); });
 bindRange('stMax', v => v, v => { style.max = v; });
+bindRange('stHeadH', v => Math.round(v * 100) + '%', v => { style.headH = v; applyOutSize(); drawStill(); });
 $('optEnhance').onchange = e => { opt.enhance = e.target.checked; mixDirty = true; };
 $('optNorm').onchange = e => { opt.norm = e.target.checked; mixDirty = true; if (playing && !recording) { pause(); play(); } };
 $('stFont').onchange = e => { style.font = e.target.value; loadFonts(); compose(playhead); };
 $('stFit').onchange = e => { style.fit = e.target.value; drawStill(); };
 $('stOut').onchange = e => { style.out = e.target.value; applyOutSize(); drawStill(); };
+$('stHeadBg').onchange = e => { style.headBg = e.target.value; drawStill(); };
 ['optGate', 'optVVol', 'optAVol', 'optSEVol', 'optBGMVol'].forEach(id => $(id).addEventListener('change', () => { if (playing && !recording) { pause(); play(); } }));
 $('optEnhance').addEventListener('change', () => { if (playing && !recording) { pause(); play(); } });
 PRESETS.forEach((p, i) => {
@@ -1515,7 +1528,7 @@ addEventListener('pagehide', saveState);
 function syncControls() {
   const set = (id, v) => { const e = $(id); if (e.type === 'checkbox') e.checked = v; else e.value = v; e.dispatchEvent(new Event('input')); };
   set('optNorm', opt.norm !== false); set('optEnhance', opt.enhance); set('optGate', opt.gate); set('optVVol', opt.vvol); set('optAVol', opt.avol); set('optSEVol', opt.sevol); set('optBGMVol', opt.bgmvol);
-  set('stSize', style.size); set('stY', style.y); set('stMax', style.max); set('stFont', style.font); set('stFit', style.fit); set('stOut', style.out);
+  set('stHeadH', style.headH ?? 0.2); set('stHeadBg', style.headBg || 'blur'); set('stSize', style.size); set('stY', style.y); set('stMax', style.max); set('stFont', style.font); set('stFit', style.fit); set('stOut', style.out);
   [...$('presets').children].forEach((x, j) => x.classList.toggle('on', j === style.preset));
 }
 async function restoreProject() {
