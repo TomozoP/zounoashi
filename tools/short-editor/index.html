@@ -106,6 +106,7 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
 .clip.a.se{background:#6b4a17}
 .clip.a.bgm{background:#3f3170}
 .clip.a canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.clip.s.top{background:#8a5520}
 .clip.s{background:#6f5412;padding:0 8px;display:flex;align-items:center;font-weight:700;font-size:12px;white-space:nowrap}
 #phead{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);pointer-events:none;z-index:5}
 #phead:before{content:"";position:absolute;top:0;left:-5px;border:6px solid transparent;border-top:8px solid var(--accent)}
@@ -232,13 +233,16 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
       <span style="color:var(--dim)">ズーム</span><input type="range" id="zoom" min="8" max="400" value="60">
     </div>
     <div id="tlbody">
-      <div id="labels"><div class="rl"></div><div>字幕</div><div>映像</div><div>ナレーション</div>
+      <div id="labels"><div class="rl"></div>
+        <div class="ln">ヘッダー<button id="addHead" title="ヘッダーの文字を追加">＋</button></div>
+        <div>字幕</div><div>映像</div><div>ナレーション</div>
         <div class="ln">効果音<button data-lane="se" title="効果音を追加">＋</button></div>
         <div class="ln">BGM<button data-lane="bgm" title="BGMを追加">＋</button></div></div>
       <input id="laneIn" type="file" accept="audio/*,video/*" multiple hidden>
       <div id="tlscroll">
         <div id="tlinner">
           <div id="ruler"></div>
+          <div class="track" id="trH"></div>
           <div class="track" id="trS"></div>
           <div class="track" id="trV"></div>
           <div class="track" id="trA"></div>
@@ -532,6 +536,7 @@ function wrapLines(ctx, text, maxW) {
 }
 // 文字ごとの縦位置：上 / 字幕の位置 / 下
 const POSY = { top: 0.13, bottom: 0.87 };
+const isHeader = x => x.pos === 'top';
 function drawSubs(ctx, t) {
   const p = PRESETS[style.preset];
   for (const s of subs) {
@@ -1015,9 +1020,10 @@ function delSel(ripple) {
   playhead = Math.min(playhead, totalDur());
   changed(true);
 }
-function addSub() {
+function addSub(header) {
   commit();
   const s = { id: nid(), text: 'テキスト', start: playhead, end: playhead + 2 };
+  if (header) { s.pos = 'top'; s.size = Math.round(style.size * 1.15); }
   subs.push(s); subs.sort((a, b) => a.start - b.start);
   setSel('s', s.id);
   changed(true);
@@ -1070,12 +1076,12 @@ function setTool(tl) {
   $('tl').classList.toggle('razor', tl === 'razor'); if (tl !== 'razor') $('razorLine').style.display = 'none';
 }
 $('tSel').onclick = () => setTool('select'); $('tRazor').onclick = () => setTool('razor');
-$('bSplit').onclick = splitAt; $('bDel').onclick = e => delSel(e.shiftKey); $('bCopy').onclick = e => copySel(e.shiftKey); $('bPaste').onclick = paste; $('bSub').onclick = addSub; $('bUndo').onclick = undo; $('bRedo').onclick = redo;
+$('bSplit').onclick = splitAt; $('bDel').onclick = e => delSel(e.shiftKey); $('bCopy').onclick = e => copySel(e.shiftKey); $('bPaste').onclick = paste; $('bSub').onclick = () => addSub(); $('addHead').onclick = () => addSub(true); $('bUndo').onclick = undo; $('bRedo').onclick = redo;
 $('playBtn').onclick = () => playing ? (recording ? stopRec() : pause()) : play();
 $('recBtn').onclick = toggleRec;
 
 /* ---------- timeline ---------- */
-const trS = $('trS'), trV = $('trV'), trA = $('trA'), trSE = $('trSE'), trBGM = $('trBGM'), inner = $('tlinner'), scroller = $('tlscroll');
+const trH = $('trH'), trS = $('trS'), trV = $('trV'), trA = $('trA'), trSE = $('trSE'), trBGM = $('trBGM'), inner = $('tlinner'), scroller = $('tlscroll');
 function renderTimeline() {
   const dur = totalDur();
   const w = Math.max(scroller.clientWidth, (dur + 5) * pps);
@@ -1110,21 +1116,24 @@ function renderTimeline() {
     d.insertAdjacentHTML('afterbegin', `<div class="lb">${a.name ? esc(a.name) : ''}</div>`);
     d.prepend(cv); laneEl[laneOf(a)].appendChild(d);
   }
-  // subs
-  trS.innerHTML = '';
-  // 時間が重なっている文字は段違いに出す
-  const rowEnd = [], rowOf = new Map();
-  for (const x of [...subs].sort((m, n) => m.start - n.start)) {
-    let r = rowEnd.findIndex(e => e <= x.start + 1e-3);
-    if (r < 0) { r = rowEnd.length; rowEnd.push(0); }
-    rowEnd[r] = x.end; rowOf.set(x.id, r);
-  }
-  const rowH = (trS.clientHeight - 8) / Math.max(1, rowEnd.length);
-  for (const s of subs) {
-    const d = mkClip('s', s.id, s.start, s.end - s.start);
-    d.insertAdjacentText('afterbegin', (s.pos === 'top' ? '▲ ' : s.pos === 'bottom' ? '▼ ' : '') + s.text.replace(/\n/g, ' '));
-    if (rowEnd.length > 1) { d.style.top = (4 + rowOf.get(s.id) * rowH) + 'px'; d.style.bottom = 'auto'; d.style.height = Math.max(10, rowH - 2) + 'px'; }
-    trS.appendChild(d);
+  // 文字：上に出すものはヘッダーのトラック、それ以外は字幕のトラック
+  trH.innerHTML = ''; trS.innerHTML = '';
+  for (const [tr, list] of [[trH, subs.filter(isHeader)], [trS, subs.filter(x => !isHeader(x))]]) {
+    // 時間が重なっている文字は段違いに出す
+    const rowEnd = [], rowOf = new Map();
+    for (const x of [...list].sort((m, n) => m.start - n.start)) {
+      let r = rowEnd.findIndex(e => e <= x.start + 1e-3);
+      if (r < 0) { r = rowEnd.length; rowEnd.push(0); }
+      rowEnd[r] = x.end; rowOf.set(x.id, r);
+    }
+    const rowH = (tr.clientHeight - 8) / Math.max(1, rowEnd.length);
+    for (const x of list) {
+      const d = mkClip('s', x.id, x.start, x.end - x.start);
+      if (isHeader(x)) d.classList.add('top');
+      d.insertAdjacentText('afterbegin', (x.pos === 'bottom' ? '▼ ' : '') + x.text.replace(/\n/g, ' '));
+      if (rowEnd.length > 1) { d.style.top = (4 + rowOf.get(x.id) * rowH) + 'px'; d.style.bottom = 'auto'; d.style.height = Math.max(10, rowH - 2) + 'px'; }
+      tr.appendChild(d);
+    }
   }
   updatePlayhead(); updateTime();
 }
@@ -1221,7 +1230,14 @@ function clipDown(e, type, id, el) {
       else { const end = snapT(orig.at + len + dt, pts); o.out = clamp(orig.in + end - orig.at, orig.in + 0.1, buf.duration); }
     } else {
       const len = orig.end - orig.start;
-      if (mode === 'm') { let s = orig.start + dt; const s1 = snapT(s, pts); if (s1 !== s) s = s1; else { const s2 = snapT(s + len, pts); s += s2 - (s + len); } s = Math.max(0, s); o.start = s; o.end = s + len; }
+      if (mode === 'm') {
+        let s = orig.start + dt; const s1 = snapT(s, pts); if (s1 !== s) s = s1; else { const s2 = snapT(s + len, pts); s += s2 - (s + len); } s = Math.max(0, s); o.start = s; o.end = s + len;
+        if (!group.length) {
+          const rh = trH.getBoundingClientRect(), rs = trS.getBoundingClientRect();
+          if (ev.clientY >= rh.top && ev.clientY < rh.bottom) o.pos = 'top';
+          else if (ev.clientY >= rs.top && ev.clientY < rs.bottom && o.pos === 'top') delete o.pos;
+        }
+      }
       else if (mode === 'l') o.start = clamp(snapT(orig.start + dt, pts), 0, o.end - 0.1);
       else o.end = Math.max(o.start + 0.1, snapT(orig.end + dt, pts));
     }
@@ -1263,7 +1279,7 @@ function marqueeDown(e) {
     box.style.top = (y1 - r0.top) + 'px'; box.style.height = (y2 - y1) + 'px';
     const t1 = (x1 - r0.left) / pps, t2 = (x2 - r0.left) / pps;
     sel = new Set();
-    for (const [ty, tr, list, lane] of [['s', trS, subs, null], ['v', trV, vclips, null], ['a', trA, aclips, 'vo'], ['a', trSE, aclips, 'se'], ['a', trBGM, aclips, 'bgm']]) {
+    for (const [ty, tr, list, lane] of [['s', trH, subs.filter(isHeader), null], ['s', trS, subs.filter(x => !isHeader(x)), null], ['v', trV, vclips, null], ['a', trA, aclips, 'vo'], ['a', trSE, aclips, 'se'], ['a', trBGM, aclips, 'bgm']]) {
       const tb = tr.getBoundingClientRect();
       if (tb.bottom < y1 || tb.top > y2) continue;
       for (const it of list) {
@@ -1293,7 +1309,7 @@ function scrubDown(e) {
   addEventListener('pointermove', f); addEventListener('pointerup', up);
 }
 $('ruler').onpointerdown = scrubDown;
-[trS, trV, trA, trSE, trBGM].forEach(tr => tr.onpointerdown = marqueeDown);
+[trH, trS, trV, trA, trSE, trBGM].forEach(tr => tr.onpointerdown = marqueeDown);
 $('zoom').oninput = e => { const c = playhead * pps - scroller.scrollLeft; pps = +e.target.value; renderTimeline(); scroller.scrollLeft = playhead * pps - c; };
 scroller.addEventListener('wheel', e => { if (e.ctrlKey) { e.preventDefault(); const z = $('zoom'); z.value = clamp(pps * (e.deltaY < 0 ? 1.15 : 0.87), 8, 400); z.oninput({ target: z }); } else if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { scroller.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
 addEventListener('resize', applyLayout);
@@ -1319,7 +1335,7 @@ function renderInspector() {
   const o = selected && find(selected.type, selected.id);
   if (!o) { el.innerHTML = '<h3>選択中</h3><div class="status">タイムラインのクリップを選ぶと、ここで調整できます</div>'; return; }
   if (selected.type === 's') {
-    el.innerHTML = `<h3>字幕</h3><textarea></textarea>
+    el.innerHTML = `<h3>${isHeader(o) ? 'ヘッダー' : '字幕'}</h3><textarea></textarea>
       <div class="row"><label>開始</label><input type="number" step="0.05" id="iS" style="flex:1"><label style="flex:0 0 auto">終了</label><input type="number" step="0.05" id="iE" style="flex:1"></div>`;
     const ta = el.querySelector('textarea'); ta.value = o.text;
     let first = true;
@@ -1345,7 +1361,7 @@ function renderInspector() {
 function textControls(el, items) {
   el.insertAdjacentHTML('beforeend', `
     <div class="row"><label>縦の位置</label>
-      <select id="tPos" style="flex:1"><option value="">字幕の位置</option><option value="top">上</option><option value="bottom">下</option></select></div>
+      <select id="tPos" style="flex:1"><option value="">字幕の位置</option><option value="top">ヘッダー（上）</option><option value="bottom">下</option></select></div>
     <div class="row"><label>大きさ</label><input type="range" id="tSize" min="40" max="200" step="2"><span class="val" id="tSizeV"></span></div>
     <label class="chk"><input type="checkbox" id="tBox">黒帯をつける</label>`);
   const o = items[0];
@@ -1431,7 +1447,7 @@ addEventListener('keydown', e => {
 });
 
 /* ---------- 窓の大きさ（境目をドラッグ。ダブルクリックで元に戻す） ---------- */
-const LAY_KEY = 'shortEditor.layout', LAY_DEF = { scriptW: 260, sideW: 320, tlH: 290 };
+const LAY_KEY = 'shortEditor.layout', LAY_DEF = { scriptW: 260, sideW: 320, tlH: 330 };
 const lay = { ...LAY_DEF };
 try { Object.assign(lay, JSON.parse(localStorage.getItem(LAY_KEY) || '{}')); } catch (e) {}
 function fitView() {
@@ -1451,7 +1467,7 @@ function applyLayout() {
   $('spScript').style.display = innerWidth > 820 ? '' : 'none';
   // トラックの高さはタイムラインの高さに合わせる
   const rest = lay.tlH - $('tlbar').offsetHeight - 24 - (scroller.offsetHeight - scroller.clientHeight);
-  app.style.setProperty('--h', clamp(Math.floor(rest / 5), 26, 120) + 'px');
+  app.style.setProperty('--h', clamp(Math.floor(rest / 6), 24, 120) + 'px');
   fitView(); renderTimeline();
 }
 function splitter(el, key, move) {
