@@ -268,6 +268,15 @@
     add(this.geo.ball, white, 25, 119, -62, 13, 6, 9, body);
     add(this.geo.ball, horn, -13, 133, -68, 5, 9, 5, body);         /* 角 */
     add(this.geo.ball, horn, 13, 133, -68, 5, 9, 5, body);
+    /* 鼻の穴、耳の内側、口元。斑は背中からも見える位置に足す。 */
+    add(this.geo.ball, black, -6, 105, -104, 2.5, 2, 1.5, body);
+    add(this.geo.ball, black, 6, 105, -104, 2.5, 2, 1.5, body);
+    add(this.geo.ball, pink, -27, 120, -67, 8, 3, 4, body);
+    add(this.geo.ball, pink, 27, 120, -67, 8, 3, 4, body);
+    add(this.geo.ball, black, 0, 98, -103, 9, 1, 1.5, body);
+    add(this.geo.ball, black, 16, 109, 26, 19, 7, 22, body);
+    add(this.geo.ball, white, -13, 121, -90, 1.2, 1.2, 1.2, body);
+    add(this.geo.ball, white, 13, 121, -90, 1.2, 1.2, 1.2, body);
 
     var legs = [];
     [[-27, -38], [27, -38], [-27, 34], [27, 34]].forEach(function (p) {
@@ -301,6 +310,7 @@
     this.put(this.mesh(this.geo.box, this.M.fenceWood, g), 0, 27, 0, 9, 54, 9);
     this.put(this.mesh(this.geo.box, this.M.fenceBar, g), 0, 44, 0, 5, 7, 112);
     this.put(this.mesh(this.geo.box, this.M.fenceBar, g), 0, 24, 0, 5, 7, 112);
+    this.put(this.mesh(this.geo.peak, this.M.fenceWood, g), 0, 58, 0, 7, 9, 7);
     return g;
   };
   Scene3D.prototype.makeBarn = function () {
@@ -309,6 +319,8 @@
     var roof = this.put(this.mesh(this.geo.cone, this.M.barnRoof, g), 0, 118, 0, 118, 62, 104);
     roof.rotation.y = Math.PI / 4;
     this.put(this.mesh(this.geo.box, this.M.barnDoor, g), 0, 23, -66, 40, 46, 4);
+    this.put(this.mesh(this.geo.box, this.M.houseWall, g), 0, 24, -69, 3, 48, 2);
+    this.put(this.mesh(this.geo.box, this.M.houseWall, g), 0, 48, -69, 45, 4, 2);
     return g;
   };
   Scene3D.prototype.makePole = function (h, m) {
@@ -316,6 +328,9 @@
     this.put(this.mesh(this.geo.tube, m, g), 0, h / 2, 0, 7, h, 7);
     this.put(this.mesh(this.geo.box, m, g), 0, h - 14, 0, 62, 8, 8);
     this.put(this.mesh(this.geo.box, m, g), 0, h - 40, 0, 48, 7, 7);
+    [-22, 22].forEach(function (x) {
+      this.put(this.mesh(this.geo.tube, this.M.houseWall, g), x, h - 6, 0, 5, 12, 5);
+    }, this);
     return g;
   };
   Scene3D.prototype.makeRail = function () {
@@ -331,12 +346,20 @@
     roof.rotation.y = Math.PI / 4;
     this.put(this.mesh(this.geo.box, this.M.houseWin, g), -26, 62, -53, 30, 26, 4);
     this.put(this.mesh(this.geo.box, this.M.houseWin, g), 26, 62, -53, 30, 26, 4);
+    this.put(this.mesh(this.geo.box, this.M.barnDoor, g), 0, 22, -54, 22, 44, 4);
+    this.put(this.mesh(this.geo.box, this.M.houseWall, g), 0, 48, -57, 106, 3, 3);
+    this.put(this.mesh(this.geo.box, this.M.rock, g), 30, 133, 15, 15, 45, 17);
     return g;
   };
   Scene3D.prototype.makeTower = function () {
     var g = new T.Group();
     this.put(this.mesh(this.geo.box, this.M.towerWall, g), 0, 200, 0, 130, 400, 120);
     this.put(this.mesh(this.geo.box, this.M.towerWin, g), 0, 200, -61, 96, 330, 3);
+    for (var floor = 48; floor < 370; floor += 40) {
+      this.put(this.mesh(this.geo.box, this.M.towerWall, g), 0, floor, -64, 103, 7, 4);
+    }
+    this.put(this.mesh(this.geo.box, this.M.towerWall, g), 0, 200, -65, 7, 335, 3);
+    this.put(this.mesh(this.geo.box, this.M.railLeg, g), 22, 411, 12, 34, 22, 30);
     return g;
   };
 
@@ -394,6 +417,13 @@
     hill.rotation.y = 0.4;
     this.put(this.mesh(this.geo.tube, this.M.palm, g), 74 * k, 46 * k, 40 * k, 6 * k, 92 * k, 6 * k).rotation.z = 0.2;
     this.put(this.mesh(this.geo.ball, this.M.isle, g), 80 * k, 96 * k, 40 * k, 34 * k, 12 * k, 34 * k);
+    for (var leaf = 0; leaf < 5; leaf++) {
+      var angle = leaf * Math.PI * 2 / 5;
+      var frond = this.put(this.mesh(this.geo.ball, this.M.isle, g),
+        (80 + Math.cos(angle) * 24) * k, 100 * k, (40 + Math.sin(angle) * 24) * k, 38 * k, 4 * k, 10 * k);
+      frond.rotation.y = -angle;
+    }
+    this.put(this.mesh(this.geo.puff, this.M.rock, g), -100 * k, 15 * k, 50 * k, 25 * k, 24 * k, 32 * k);
     return g;
   };
 
@@ -619,6 +649,8 @@
      s: { dist, w, gear, legPhase, wsp, beta, props, dt, sky } */
   Scene3D.prototype.sync = function (s) {
     var w = s.w;
+    if (s.quietSpace && !this._quietSpace) this.clearBits();
+    this._quietSpace = !!s.quietSpace;
     this.scene.fog = w[5] ? null : this.fog;
     var ws = s.world || 1, cs = CAMS[s.gear] || 1;
     if (this._ws !== ws) {
@@ -710,7 +742,7 @@
 
     /* 星 */
     this.starMat.opacity = w[5];
-    this.stars.visible = w[5] > 0.02;
+    this.stars.visible = w[5] > 0.02 && !s.quietSpace;
     if (this.stars.visible) {
       var pos = this.stars.geometry.attributes.position, a = pos.array;
       var move = s.wsp * s.dt * 1.8;

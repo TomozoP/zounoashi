@@ -196,5 +196,17 @@ ok(t7.probe.now().score === 0, "Escで最初から");
      "画面 " + v[0] + "x" + v[1] + " で押せる", "高さ" + t.probe.now().H + " / " + t.probe.now().read);
 });
 
+/* 宇宙の後半は惑星を壊さず、光の広がりだけになる。 */
+var space = start();
+space.press("6"); space.step(2);
+ok(!space.probe.now().quietSpace && space.probe.now().props > 0, "宇宙の前半には惑星がある");
+push(space, 150); space.step(2);
+var brokenBefore = space.probe.now().broken;
+space.step(600);
+ok(space.probe.now().quietSpace && space.probe.now().props === 0 && space.probe.now().broken === brokenBefore,
+   "宇宙の後半は惑星も新たな破壊もない");
+space.press("5"); space.step(2);
+ok(!space.probe.now().quietSpace && space.probe.now().props > 0, "洋上へ戻すと景色のものが復帰する");
+
 console.log(ng ? "\n問題 " + ng + " 件" : "\nぜんぶ通った");
 process.exit(ng ? 1 : 0);
