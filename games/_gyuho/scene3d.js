@@ -124,7 +124,12 @@
       towerWall: mat("#454f5f"),
       towerWin:  new T.MeshBasicMaterial({ color: "#f6e9bb" }),
       rock:      mat("#6f6a55"),
-      snow:      mat("#eef2f5")
+      snow:      mat("#eef2f5"),
+      sand:      mat("#ddc89b"),
+      isle:      mat("#4f8a4a"),
+      palm:      mat("#6b5433"),
+      jet:       mat("#8d949c", { rough: 0.45 }),
+      jetDark:   mat("#5b626b", { rough: 0.45 })
     };
     /* 道ばたのもの */
     this.side = {
@@ -134,7 +139,7 @@
       rail:  pool(34, function () { return self.makeRail(); }),
       house: pool(18, function () { return self.makeHouse(); }),
       tower: pool(20, function () { return self.makeTower(); }),
-      peak:  pool(12, function () { return self.makeMountain(3.1); })
+      isle:  pool(12, function () { return self.makeIsland(2.1); })
     };
     /* 壊すもの */
     this.propPool = [
@@ -142,8 +147,9 @@
       pool(10, function () { return self.makePerson(); }),
       pool(10, function () { return self.makeCar(); }),
       pool(8,  function () { return self.makeBuilding(); }),
-      pool(8,  function () { return self.makeMountain(1); }),
-      pool(10, function () { return self.makeStar(); })
+      pool(8,  function () { return self.makeIsland(1); }),
+      pool(10, function () { return self.makeStar(); }),
+      pool(8,  function () { return self.makeJet(); })
     ];
 
     /* 吹っ飛ぶ人 */
@@ -155,7 +161,7 @@
     }
 
     /* 破片 */
-    this.bitMats = ["#e8c25a", "#d9b24a", "#7b6a56", "#e0543c", "#3f7fd6", "#5a6472", "#f6e9bb", "#ffffff", "#f0c9a6", "#4c7fd6", "#6f6a55", "#eef2f5"]
+    this.bitMats = ["#e8c25a", "#d9b24a", "#7b6a56", "#e0543c", "#3f7fd6", "#5a6472", "#f6e9bb", "#ffffff", "#f0c9a6", "#4c7fd6", "#4f8a4a", "#ddc89b", "#8d949c", "#ff8a3a"]
       .map(function (c) { return mat(c, { rough: 0.9 }); });
     for (var i = 0; i < 120; i++) {
       var b = this.mesh(this.geo.box, this.bitMats[0]);
@@ -173,7 +179,7 @@
 
     /* 音の壁を抜けたときの輪 */
     this.ringMesh = [];
-    for (var r = 0; r < 3; r++) {
+    for (var r = 0; r < 7; r++) {
       var rm = new T.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0, side: T.DoubleSide, depthWrite: false });
       var ring = this.mesh(this.geo.ring, rm);
       ring.visible = false;
@@ -380,13 +386,26 @@
     g.userData.body = g.children[0];
     return g;
   };
-  /* 山。大陸で道の先に立ちはだかり、道ばたには大きいものを並べる */
-  Scene3D.prototype.makeMountain = function (k) {
+  /* 島。洋上で道の先に浮かび、まわりにはもっと大きいものを並べる */
+  Scene3D.prototype.makeIsland = function (k) {
     var g = new T.Group();
-    var body = this.put(this.mesh(this.geo.peak, this.M.rock, g), 0, 150 * k, 0, 220 * k, 300 * k, 220 * k);
-    body.rotation.y = 0.5;
-    var cap = this.put(this.mesh(this.geo.peak, this.M.snow, g), 0, 246 * k, 0, 82 * k, 112 * k, 82 * k);
-    cap.rotation.y = 0.5;
+    this.put(this.mesh(this.geo.tube, this.M.sand, g), 0, 5 * k, 0, 200 * k, 14 * k, 200 * k);
+    var hill = this.put(this.mesh(this.geo.peak, this.M.isle, g), 0, 62 * k, 0, 140 * k, 124 * k, 140 * k);
+    hill.rotation.y = 0.4;
+    this.put(this.mesh(this.geo.tube, this.M.palm, g), 74 * k, 46 * k, 40 * k, 6 * k, 92 * k, 6 * k).rotation.z = 0.2;
+    this.put(this.mesh(this.geo.ball, this.M.isle, g), 80 * k, 96 * k, 40 * k, 34 * k, 12 * k, 34 * k);
+    return g;
+  };
+
+  /* 戦闘機。機首をこちらへ向けて飛んでくる */
+  Scene3D.prototype.makeJet = function () {
+    var g = new T.Group();
+    this.put(this.mesh(this.geo.tube, this.M.jet, g), 0, 0, 0, 15, 160, 15).rotation.x = Math.PI / 2;
+    this.put(this.mesh(this.geo.cone, this.M.jet, g), 0, 0, -92, 15, 44, 15).rotation.x = -Math.PI / 2;
+    this.put(this.mesh(this.geo.box, this.M.jet, g), 0, -2, 16, 190, 7, 44);       /* 主翼 */
+    this.put(this.mesh(this.geo.box, this.M.jetDark, g), 0, 22, 62, 7, 42, 30);    /* 尾翼 */
+    this.put(this.mesh(this.geo.box, this.M.jet, g), 0, 0, 66, 76, 6, 24);
+    this.put(this.mesh(this.geo.ball, this.M.jetDark, g), 0, 11, -44, 13, 10, 28); /* 風防 */
     return g;
   };
 
@@ -399,9 +418,9 @@
   };
 
   /* ============ 破片 ============ */
-  Scene3D.prototype.burst = function (x, z, type) {
-    var cols = [[0, 1], [8, 9], [3, 4], [5, 6], [10, 11], [6, 7]][type] || [0, 1];
-    var high = [40, 160, 46, 260, 320, 120][type] || 40;
+  Scene3D.prototype.burst = function (x, baseY, type) {
+    var cols = [[0, 1], [8, 9], [3, 4], [5, 6], [10, 11], [6, 7], [12, 13]][type] || [0, 1];
+    var high = [40, 160, 46, 260, 150, 120, 60][type] || 40;
     for (var i = 0; i < 9; i++) {
       var m = this.bitPool.pop();
       if (!m) break;
@@ -409,7 +428,7 @@
       m.visible = true;
       var sx = 8 + Math.random() * 22;
       m.scale.set(sx, sx * (0.4 + Math.random() * 0.5), 6 + Math.random() * 14);
-      m.position.set(x + (Math.random() - 0.5) * 70, 20 + Math.random() * high, z + (Math.random() - 0.5) * 60);
+      m.position.set(x + (Math.random() - 0.5) * 70, (baseY || 0) + 20 + Math.random() * high, (Math.random() - 0.5) * 60);
       m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
       var pw = Math.min(2.4, 0.85 + (this._wsp || 100) / 850);   /* 速いほど豪快に飛ぶ */
       this.bits.push({
@@ -452,10 +471,13 @@
   };
 
   /* 音の壁を抜けた。輪を3枚、すこしずらして広げる */
-  Scene3D.prototype.sonicBoom = function () {
-    for (var i = 0; i < this.ringMesh.length; i++) {
+  Scene3D.prototype.sonicBoom = function (count) {
+    var want = count || 3, got = 0;
+    for (var i = 0; i < this.ringMesh.length && got < want; i++) {
+      if (this.ringMesh[i].visible) continue;   /* 空いている輪から使う */
       this.ringMesh[i].visible = true;
-      this.ringLife[i] = -i * 0.13;
+      this.ringLife[i] = -got * 0.13;
+      got++;
     }
   };
   Scene3D.prototype.stepRings = function (dt) {
@@ -578,9 +600,9 @@
     /* 地面と道の色 */
     setColor(this.groundMat.color, s.groundColor);
     setColor(this.roadMat.color, s.roadColor);
-    this.roadMat.opacity = 1 - w[5];
+    this.roadMat.opacity = 1 - w[5] - w[4];   /* 洋上に道は無い */
     this.road.visible = this.roadMat.opacity > 0.02;
-    this.grassMat.opacity = 0.2 * (1 - w[5]);
+    this.grassMat.opacity = (w[4] ? 0.17 : 0.2) * (1 - w[5]);  /* 洋上では波として使う */
     this.grass.visible = this.grassMat.opacity > 0.01;
     this.grassTex.offset.y = s.dist / 140;
     var wantTex = w[3] ? this.lineTexCity : this.lineTex;
@@ -610,10 +632,10 @@
     this.row("rail", w[1] + w[2] + w[3], 210 * ws, 156 * ws, s.dist);
     this.row("house", w[2], 340 * ws, 380 * ws, s.dist);
     this.row("tower", w[3], 420 * ws, 450 * ws, s.dist);
-    this.row("peak", w[4], 880 * ws, 430 * ws, s.dist);
+    this.row("isle", w[4], 880 * ws, 430 * ws, s.dist);
 
     /* 壊すもの */
-    var used = [0, 0, 0, 0, 0, 0];
+    var used = [0, 0, 0, 0, 0, 0, 0];
     for (var p = 0; p < s.props.length; p++) {
       var o = s.props[p];
       if (o.z == null || o.z < -60 || o.z > 2600) continue;
@@ -621,13 +643,14 @@
       if (used[o.t] >= lane.length) continue;
       var m = lane[used[o.t]++];
       m.visible = true;
-      m.position.set(o.x, 0, -o.z);
-      m.rotation.y = o.t === 2 ? (o.r - 0.5) * 0.24 : o.r * 3.14;
+      m.position.set(o.x, o.y || 0, -o.z);
+      m.rotation.y = o.t === 2 ? (o.r - 0.5) * 0.24 : (o.t === 6 ? Math.PI : o.r * 3.14);
+      if (o.t === 6) m.rotation.z = (o.r - 0.5) * 0.5;
       if (o.t === 1 && m.userData.shirt) m.userData.shirt.color.copy(this.shirtColor(o.r));
       if (o.t === 2 && m.userData.body) m.userData.body.material = this.carMat(o.r);
       if (o.t === 3 && m.userData.body) m.userData.body.scale.y = 300 * (0.7 + o.r * 0.7);
     }
-    for (var t = 0; t < 6; t++) {
+    for (var t = 0; t < 7; t++) {
       for (var k = used[t]; k < this.propPool[t].length; k++) this.propPool[t][k].visible = false;
     }
 
@@ -655,7 +678,7 @@
       this.dustTimer -= s.dt;
       var guard = 0;
       while (this.dustTimer <= 0 && guard++ < 8) {
-        this.puffUp(s.roadColor);
+        this.puffUp(w[4] ? [236, 244, 248] : s.roadColor);
         this.dustTimer += 1 / rate;
       }
     }

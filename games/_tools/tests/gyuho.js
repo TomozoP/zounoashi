@@ -8,7 +8,7 @@
      - 景色が変わると、上に速報が流れる
      - 景色の切れ目は 時速10 / 50 / 200 / 1000 / 3万。宇宙に出ると一気に上がる
      - 景色ごとに要るこぎの数（100 / 200 / 200 / 250 / 264 / 300）と、光の速さまでの合計
-     - 壊すものが景色ごとに変わる（わら・人・車・ビル・山・星）
+     - 壊すものが景色ごとに変わる（わら・人・車・ビル・島と戦闘機・星）
      - 速さの表記は時速で統一（光の速さは 1,079,252,849 km/h）
      - 光の速さの手前で警告。押すのをやめれば壊れない
      - 光の速さに届くと宇宙が壊れ、結果は押した回数
@@ -107,7 +107,7 @@ while (g.probe.now().state === "play" && guard++ < 5000) {
   g.press(" "); total++;
   var n = g.probe.now();
   if (n.gear !== before || n.state !== "play") {
-    marks.push({ phase: ["牧場", "道路", "町", "都市", "大陸", "宇宙"][before], clicks: total - seen });
+    marks.push({ phase: ["牧場", "道路", "町", "都市", "洋上", "宇宙"][before], clicks: total - seen });
     seen = total;
   }
 }
@@ -126,11 +126,13 @@ ok(nw.probe.now().news === "", "はじめは速報なし");
 while (nw.probe.now().gear === 0 && nw.probe.now().state === "play") nw.press(" ");
 nw.step(1);
 ok(nw.probe.now().news.indexOf("逃走") >= 0, "道路に出ると速報が流れる", nw.probe.now().news);
-nw.step(60 * 9);
-ok(nw.probe.now().news === "", "速報は流れきると消える");
+nw.step(60 * 8);
+ok(nw.probe.now().news !== "", "速報は何周かくり返す");
+nw.step(60 * 22);
+ok(nw.probe.now().news === "", "くり返しが終わると消える");
 
 /* 4. ギアの中身 */
-[[0, "牧場", 0.1], [120, "道路", 0.2], [320, "町", 0.75], [510, "都市", 3.2], [760, "大陸", 110], [1020, "宇宙", 3600000]].forEach(function (c) {
+[[0, "牧場", 0.1], [120, "道路", 0.2], [320, "町", 0.75], [510, "都市", 3.2], [760, "洋上", 110], [1020, "宇宙", 3600000]].forEach(function (c) {
   var t = start();
   push(t, c[0]);
   var n = t.probe.now();
@@ -139,7 +141,7 @@ ok(nw.probe.now().news === "", "速報は流れきると消える");
 });
 
 /* 5. 壊すものが景色ごとに変わる */
-[[40, "牧場"], [180, "道路"], [380, "町"], [580, "都市"], [800, "大陸"], [1060, "宇宙"]].forEach(function (c) {
+[[40, "牧場"], [180, "道路"], [380, "町"], [580, "都市"], [800, "洋上"], [1060, "宇宙"]].forEach(function (c) {
   var t = start();
   push(t, c[0], 1);
   var before = t.probe.now().broken;

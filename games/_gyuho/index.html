@@ -73,16 +73,16 @@
     { top: 50,    step: 0.2 },               /* 道路：人 */
     { top: 200,   step: 0.75 },              /* 町：車 */
     { top: 1000,  step: 3.2 },               /* 都市：ビル */
-    { top: 3e4,   step: 110 },               /* 大陸：山 */
+    { top: 3e4,   step: 110 },               /* 洋上：島と戦闘機 */
     { top: C_KMH, step: 3.6e6 }              /* 宇宙：星 */
   ];
-  var PHASE_NAME = ["牧場", "道路", "町", "都市", "大陸", "宇宙"];
+  var PHASE_NAME = ["牧場", "道路", "町", "都市", "洋上", "宇宙"];
   var NEWS = [
     "",
     "牧場から速い牛が逃走 県道を北上中、近隣住民は注意",
     "脱走中の牛 市街地に入る 住民は屋内へ避難を開始",
     "牛 都心を直進 建物等に被害発生中",
-    "牛が国境を越える 各国が空を警戒",
+    "牛 国境を越え洋上を飛行中 各国が緊急事態を宣言、軍が出動開始",
     "牛 大気圏を抜け宇宙空間へ突入 このまま加速すると宇宙崩壊との見解"
   ];
   var WORLD = [1, 1.25, 1.5, 1.8, 2.6, 3.4];   /* 景色ごとの世界の広さ */
@@ -91,6 +91,11 @@
      宇宙はいきなり速い。 */
   var WSP_LO = [46, 82, 131, 210, 380, 900];
   var WSP_HI = [700, 1000, 1400, 1950, 2500, 3600];
+  /* 景色ごとに、道の先へ置くもの。洋上だけ2種類から選ぶ */
+  function propType(g) {
+    if (g === 4) return Math.random() < 0.5 ? 4 : 6;   /* 島 / 戦闘機 */
+    return g;
+  }
   function gearIndex(km) {
     for (var i = 0; i < GEARS.length - 1; i++) if (km < GEARS[i].top) return i;
     return GEARS.length - 1;
@@ -252,7 +257,7 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", BOOM: "boom", RESULT: "result" };
   var state, score, scoreF, broken, T, bt;
-  var dragY = null, tickAcc = 0, mooAcc = 0, lastSmash = -9, boost, lead;
+  var dragY = null, tickAcc = 0, mooAcc = 0, lastSmash = -9, boomT = 0, boost, lead;
   var moveAcc = 0, flickVel = 0, glide = 0;   /* 指の勢いと、離したあとの余韻 */
   var zips = [];                              /* 速いときに流れる線 */
   var news = null;                            /* 上に流れる速報 */
@@ -273,8 +278,8 @@
     { t: 0.92, hi: "#101a3a", lo: "#34305c" },   /* 宵 */
     { t: 1.00, hi: "#04050d", lo: "#0a0b1a" }    /* 夜 */
   ];
-  var GROUND = ["#7fb04a", "#74a648", "#8a9a6e", "#6e7278", "#8c8058", "#0a0b1a"];
-  var PAVE   = ["#b79a6b", "#4a4b50", "#4a4b50", "#34373d", "#6d5f42", "#0a0b1a"];
+  var GROUND = ["#7fb04a", "#74a648", "#8a9a6e", "#6e7278", "#2a6a8f", "#0a0b1a"];
+  var PAVE   = ["#b79a6b", "#4a4b50", "#4a4b50", "#34373d", "#2a6a8f", "#0a0b1a"];
 
   /* その景色のなかで、どこまで来たか（0〜1） */
   function phaseT(km) {
@@ -339,7 +344,7 @@
     speed = MIN_KMH;
     props = []; shards = [];
     dist = 0; nextAt = 300; legPhase = 0; prevHalf = 0; prevKmh = MIN_KMH; prevGear = 0;
-    sirenT = 0; clickPulse = 0; gearFlash = 0; boost = 0; lead = 0;
+    sirenT = 0; clickPulse = 0; gearFlash = 0; boost = 0; lead = 0; boomT = 0;
     moveAcc = 0; flickVel = 0; glide = 0;
     news = null;
     zips = [];
@@ -404,7 +409,7 @@
     broken++;
     if (scene3d) {
       if (o.t === 1) scene3d.launchPerson(o.x, o.r);   /* 人はこわさず跳ね上げる */
-      else scene3d.burst(o.x, 0, o.t);
+      else scene3d.burst(o.x, o.y || 0, o.t);
     }
     if (T - lastSmash < 0.07) return;          /* つづけざまのときは重ねない */
     lastSmash = T;
@@ -423,10 +428,14 @@
       noiseHit(0.7, 90, 0.46, 0.4);
       noiseHit(0.4, 520, 0.18, 0.8);
       tone(90, 0.5, 0.16, "sawtooth", 40);
-    } else if (o.t === 4) {                    /* 山：ズズン */
-      noiseHit(1.0, 62, 0.5, 0.3);
-      noiseHit(0.5, 380, 0.2, 0.7);
-      tone(62, 0.8, 0.18, "sawtooth", 28);
+    } else if (o.t === 4) {                    /* 島：ドシャーン */
+      noiseHit(0.8, 180, 0.46, 0.45);
+      noiseHit(0.5, 1300, 0.2, 0.9);
+      tone(110, 0.6, 0.16, "sawtooth", 44);
+    } else if (o.t === 6) {                    /* 戦闘機：爆発 */
+      noiseHit(0.55, 140, 0.5, 0.4);
+      noiseHit(0.3, 2400, 0.18, 1.5);
+      tone(170, 0.32, 0.16, "sawtooth", 48);
     } else {                                   /* 星：キラン */
       noiseHit(0.34, 1800, 0.22, 2.4);
       tone(1600, 0.24, 0.1, "sine", 3200);
@@ -473,7 +482,10 @@
 
     /* ギアが上がった */
     if (gear !== prevGear) {
-      for (var g2 = 0; g2 < props.length; g2++) props[g2].t = gear;   /* 道の先のものも入れ替える */
+      for (var g2 = 0; g2 < props.length; g2++) {                    /* 道の先のものも入れ替える */
+        props[g2].t = propType(gear);
+        props[g2].y = props[g2].t === 6 ? 150 + Math.random() * 130 : 0;
+      }
       if (gear > prevGear) {
         gearFlash = 1;
         if (NEWS[gear]) showNews(NEWS[gear]);
@@ -500,10 +512,16 @@
       tone(160, 0.5, 0.2, "sawtooth", 50);
     }
     prevKmh = speed;
+    if (speed >= SONIC && scene3d) {           /* 超えているあいだは出しつづける */
+      boomT -= dt;
+      if (boomT <= 0) { boomT = 0.36; scene3d.sonicBoom(1); }
+    } else { boomT = 0; }
 
     /* 道の先に置くもの */
     while (nextAt - dist < 2500 * WORLD[gear]) {
-      props.push({ at: nextAt, x: (Math.random() - 0.5) * 92, t: gear, r: Math.random(), z: nextAt - dist });
+      var pt = propType(gear);
+      props.push({ at: nextAt, x: (Math.random() - 0.5) * 92, y: pt === 6 ? 150 + Math.random() * 130 : 0,
+                   t: pt, r: Math.random(), z: nextAt - dist });
       nextAt += propGap() * (0.82 + Math.random() * 0.36);
     }
     for (var j = props.length - 1; j >= 0; j--) {
@@ -651,24 +669,6 @@
       ctx.closePath(); ctx.fill();
       ctx.restore();
     }
-    if (W8[4]) {                                 /* 大陸：とおくの山なみ */
-      ctx.save();
-      ctx.globalAlpha = 0.85;
-      ctx.fillStyle = rgb(dim([125, 138, 147], dayLight()));
-      var mg = 210, moff = (dist * 0.02) % mg;
-      ctx.beginPath();
-      ctx.moveTo(-40, HY + 30);
-      for (var mi = -1; mi < Math.ceil(W / mg) + 2; mi++) {
-        var mx = -moff + mi * mg;
-        var mh = 40 + rnd(mi + Math.floor((dist * 0.02) / mg)) * 96;
-        ctx.lineTo(mx, HY + 4);
-        ctx.lineTo(mx + mg * 0.5, HY - mh);
-        ctx.lineTo(mx + mg, HY + 4);
-      }
-      ctx.lineTo(W + 40, HY + 30);
-      ctx.closePath(); ctx.fill();
-      ctx.restore();
-    }
     if (W8[3]) {
       ctx.save();
       ctx.globalAlpha = 0.75;
@@ -701,12 +701,15 @@
   }
 
   /* 上に出る速報。文が右から左へ流れきったら消える */
+  var NEWS_LOOPS = 3;
   function showNews(text) {
     ctx.save();
     ctx.font = "700 27px sans-serif";
     var tw = ctx.measureText(text).width;
     ctx.restore();
-    news = { text: text, t: 0, w: tw, dur: 0.3 + (W - 104 + tw) / 168 + 0.3 };
+    var span = W - 104 + tw + 150;             /* 文ひとまわりぶんの長さ */
+    news = { text: text, t: 0, w: tw, span: span,
+             dur: 0.3 + (span / 168) * NEWS_LOOPS + 0.3 };
   }
   function drawNews() {
     if (!news) return;
@@ -733,7 +736,8 @@
     ctx.fillStyle = "#16202e";
     ctx.font = "700 27px sans-serif";
     ctx.textAlign = "left";
-    ctx.fillText(news.text, W - (t - 0.3) * 168, top + h / 2 + 1);
+    var run = Math.max(0, t - 0.3) * 168;
+    ctx.fillText(news.text, W - (run % news.span), top + h / 2 + 1);
     ctx.restore();
     ctx.textBaseline = "alphabetic";
   }
