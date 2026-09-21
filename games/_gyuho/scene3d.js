@@ -742,7 +742,7 @@
 
     /* 星 */
     this.starMat.opacity = w[5];
-    this.stars.visible = w[5] > 0.02 && !s.quietSpace;
+    this.stars.visible = w[5] > 0.02;
     if (this.stars.visible) {
       var pos = this.stars.geometry.attributes.position, a = pos.array;
       var move = s.wsp * s.dt * 1.8;

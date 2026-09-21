@@ -196,7 +196,7 @@ ok(t7.probe.now().score === 0, "Escで最初から");
      "画面 " + v[0] + "x" + v[1] + " で押せる", "高さ" + t.probe.now().H + " / " + t.probe.now().read);
 });
 
-/* 宇宙の後半は惑星を壊さず、光の広がりだけになる。 */
+/* 宇宙の後半は惑星を壊さず、星と加速の演出は続く。 */
 var space = start();
 space.press("6"); space.step(2);
 ok(!space.probe.now().quietSpace && space.probe.now().props > 0, "宇宙の前半には惑星がある");
