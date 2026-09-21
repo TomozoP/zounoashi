@@ -7,7 +7,7 @@
 <title>ショート編集</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@800;900&family=Dela+Gothic+One&family=Noto+Sans+JP:wght@900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@800;900&family=Dela+Gothic+One&family=Noto+Sans+JP:wght@900&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#141518; --panel:#1d1f24; --panel2:#25282e; --line:#33363d; --text:#e8e9ec; --dim:#9a9ea8;
@@ -184,6 +184,7 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
           <select id="stFont" style="flex:1">
             <option value="'M PLUS Rounded 1c'|900">丸ゴシック</option>
             <option value="'Noto Sans JP'|900">ゴシック</option>
+            <option value="'Noto Serif JP'|700">明朝</option>
             <option value="'Dela Gothic One'|400">極太</option>
           </select></div>
         <div class="row"><label>大きさ</label><input type="range" id="stSize" min="40" max="180" step="2" value="96"><span class="val" id="stSizeV"></span></div>
@@ -491,7 +492,7 @@ function applyOutSize() {
   if (typeof fitView === 'function') fitView();
 }
 // 字幕などの大きさは、1080 を基準に画面の短い辺に合わせる
-const sz = () => style.size * Math.min(W, H) / 1080;
+const sz = (n) => (n || style.size) * Math.min(W, H) / 1080;
 const blurC = document.createElement('canvas'); blurC.width = 54; blurC.height = 96; const blg = blurC.getContext('2d');
 const vids = [$('vA'), $('vB')];
 let curV = 0; const vState = [{ clip: null }, { clip: null }];
@@ -514,7 +515,7 @@ function compose(t) {
   g.drawImage(base, 0, 0);
   drawSubs(g, t);
 }
-function subFont() { const [fam, w] = style.font.split('|'); return `${w} ${sz()}px ${fam}, "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif`; }
+function subFont(n) { const [fam, w] = style.font.split('|'); return `${w} ${sz(n)}px ${fam}, "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif`; }
 function wrapLines(ctx, text, maxW) {
   const out = [];
   for (const para of text.split('\n')) {
@@ -529,20 +530,32 @@ function wrapLines(ctx, text, maxW) {
   }
   return out;
 }
+// 文字ごとの縦位置：上 / 字幕の位置 / 下
+const POSY = { top: 0.13, bottom: 0.87 };
 function drawSubs(ctx, t) {
   const p = PRESETS[style.preset];
   for (const s of subs) {
     if (t < s.start || t >= s.end || !s.text.trim()) continue;
     ctx.save();
-    ctx.font = subFont(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.miterLimit = 2;
+    const fs = sz(s.size); ctx.font = subFont(s.size);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.miterLimit = 2;
     const lines = wrapLines(ctx, s.text, W * 0.88);
-    const fs = sz(), lh = fs * 1.22, y0 = style.y * H - (lines.length - 1) * lh / 2;
-    const sw = fs * 0.2;
+    const lh = fs * 1.22, y0 = (POSY[s.pos] ?? style.y) * H - (lines.length - 1) * lh / 2;
+    const sw = fs * 0.2, x = W / 2;
+    if (s.box) {
+      // 黒帯を敷く
+      const wide = Math.max(...lines.map(l => ctx.measureText(l).width));
+      const px = fs * 0.4, py = fs * 0.22;
+      ctx.fillStyle = 'rgba(0,0,0,.88)';
+      ctx.fillRect(x - wide / 2 - px, y0 - fs * 0.7 - py, wide + px * 2, (lines.length - 1) * lh + fs * 1.4 + py * 2);
+    }
     lines.forEach((ln, i) => {
-      const y = y0 + i * lh, x = W / 2;
-      ctx.strokeStyle = p.shadow; ctx.fillStyle = p.shadow; ctx.lineWidth = sw;
-      ctx.strokeText(ln, x + fs * 0.05, y + fs * 0.08); ctx.fillText(ln, x + fs * 0.05, y + fs * 0.08);
-      ctx.strokeStyle = p.stroke; ctx.strokeText(ln, x, y);
+      const y = y0 + i * lh;
+      if (!s.box) {
+        ctx.strokeStyle = p.shadow; ctx.fillStyle = p.shadow; ctx.lineWidth = sw;
+        ctx.strokeText(ln, x + fs * 0.05, y + fs * 0.08); ctx.fillText(ln, x + fs * 0.05, y + fs * 0.08);
+        ctx.strokeStyle = p.stroke; ctx.strokeText(ln, x, y);
+      }
       ctx.fillStyle = p.fill; ctx.fillText(ln, x, y);
     });
     ctx.restore();
@@ -550,6 +563,7 @@ function drawSubs(ctx, t) {
 }
 function loadFonts() {
   const txt = subs.map(s => s.text).join('') + 'あ';
+  [...new Set([style.size, ...subs.map(s => s.size).filter(Boolean)])].forEach(n => document.fonts.load(subFont(n), txt).catch(() => {}));
   document.fonts.load(subFont(), txt).then(() => { if (!playing) compose(playhead); }).catch(() => {});
 }
 
@@ -1098,7 +1112,20 @@ function renderTimeline() {
   }
   // subs
   trS.innerHTML = '';
-  for (const s of subs) { const d = mkClip('s', s.id, s.start, s.end - s.start); d.insertAdjacentText('afterbegin', s.text.replace(/\n/g, ' ')); trS.appendChild(d); }
+  // 時間が重なっている文字は段違いに出す
+  const rowEnd = [], rowOf = new Map();
+  for (const x of [...subs].sort((m, n) => m.start - n.start)) {
+    let r = rowEnd.findIndex(e => e <= x.start + 1e-3);
+    if (r < 0) { r = rowEnd.length; rowEnd.push(0); }
+    rowEnd[r] = x.end; rowOf.set(x.id, r);
+  }
+  const rowH = (trS.clientHeight - 8) / Math.max(1, rowEnd.length);
+  for (const s of subs) {
+    const d = mkClip('s', s.id, s.start, s.end - s.start);
+    d.insertAdjacentText('afterbegin', (s.pos === 'top' ? '▲ ' : s.pos === 'bottom' ? '▼ ' : '') + s.text.replace(/\n/g, ' '));
+    if (rowEnd.length > 1) { d.style.top = (4 + rowOf.get(s.id) * rowH) + 'px'; d.style.bottom = 'auto'; d.style.height = Math.max(10, rowH - 2) + 'px'; }
+    trS.appendChild(d);
+  }
   updatePlayhead(); updateTime();
 }
 function esc(s) { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }
@@ -1279,6 +1306,8 @@ function renderInspector() {
     const clips = many.filter(([t]) => t !== 's').map(([t, o]) => o);
     el.innerHTML = `<h3>${many.length}個を選択中</h3>` +
       (clips.length ? '<div class="row"><label>音量</label><input type="range" id="iG" min="0" max="2" step="0.05"><span class="val" id="iGV"></span></div>' : '');
+    const texts = many.filter(([t]) => t === 's').map(([t, o]) => o);
+    if (texts.length) textControls(el, texts);
     if (clips.length) {
       const iG = $('iG'); iG.value = clips[0].gain ?? 1; $('iGV').textContent = Math.round(iG.value * 100) + '%';
       let first = true;
@@ -1296,6 +1325,7 @@ function renderInspector() {
     let first = true;
     ta.oninput = () => { if (first) { undoStack.push(snap()); redoStack.length = 0; first = false; } o.text = ta.value; renderTimeline(); renderSubList(); loadFonts(); compose(playhead); };
     ta.onkeydown = e => e.stopPropagation();
+    textControls(el, [o]);
     const iS = $('iS'), iE = $('iE'); iS.value = o.start.toFixed(2); iE.value = o.end.toFixed(2);
     iS.onchange = () => { commit(); o.start = clamp(+iS.value, 0, o.end - 0.05); changed(true); };
     iE.onchange = () => { commit(); o.end = Math.max(o.start + 0.05, +iE.value); changed(true); };
@@ -1310,6 +1340,23 @@ function renderInspector() {
   let first = true;
   iG.oninput = () => { if (first) { undoStack.push(snap()); redoStack.length = 0; first = false; } o.gain = +iG.value; $('iGV').textContent = Math.round(o.gain * 100) + '%'; mixDirty = true; };
   iG.onchange = () => { first = true; renderTimeline(); };
+}
+// 文字の見せ方（1つでも、まとめて選んでいても同じ）
+function textControls(el, items) {
+  el.insertAdjacentHTML('beforeend', `
+    <div class="row"><label>縦の位置</label>
+      <select id="tPos" style="flex:1"><option value="">字幕の位置</option><option value="top">上</option><option value="bottom">下</option></select></div>
+    <div class="row"><label>大きさ</label><input type="range" id="tSize" min="40" max="200" step="2"><span class="val" id="tSizeV"></span></div>
+    <label class="chk"><input type="checkbox" id="tBox">黒帯をつける</label>`);
+  const o = items[0];
+  $('tPos').value = o.pos || '';
+  $('tPos').onchange = e => { commit(); items.forEach(x => e.target.value ? x.pos = e.target.value : delete x.pos); changed(true); };
+  const ts = $('tSize'); ts.value = o.size || style.size; $('tSizeV').textContent = ts.value;
+  let first = true;
+  ts.oninput = () => { if (first) { undoStack.push(snap()); redoStack.length = 0; first = false; } items.forEach(x => x.size = +ts.value); $('tSizeV').textContent = ts.value; compose(playhead); loadFonts(); };
+  ts.onchange = () => { first = true; };
+  $('tBox').checked = !!o.box;
+  $('tBox').onchange = e => { commit(); items.forEach(x => x.box = e.target.checked); changed(true); };
 }
 function renderSubList(onlyCur) {
   const box = $('subList');
