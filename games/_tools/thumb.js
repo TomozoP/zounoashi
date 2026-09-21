@@ -27,25 +27,17 @@ var cp = require("child_process");
 var stopBrowser = require("./browser-stop");   /* 借りたブラウザを残さず止める */
 
 /* ---------------- 言われたことを読む ---------------- */
-var args = process.argv.slice(2);
-var id = null, secs = 3, firstKey = " ", topY = 90, topH = 170, quality = 90, query = "";
-for (var i = 0; i < args.length; i++) {
-  var a = args[i];
-  if (a === "-t") secs = Number(args[++i]);
-  else if (a === "-k") { var k = args[++i]; firstKey = (k === "なし" || k === "none") ? null : k; }
-  else if (a === "--top") topY = Number(args[++i]);
-  else if (a === "--toph") topH = Number(args[++i]);
-  else if (a === "--query") query = args[++i] || "";
-  else if (a === "-q") quality = Number(args[++i]);
-  else if (a[0] === "-") { console.log("知らない指定: " + a); process.exit(1); }
-  else id = a;
-}
-if (!id) { console.log("使い方: node games/_tools/thumb.js <id> [-t 秒] [--top y] [--toph h]"); process.exit(1); }
-
-var root = path.join(__dirname, "..", "..");
-var dir = fs.existsSync(path.join(root, "games", "_" + id)) ? "_" + id : id;
-var gamePath = path.join(root, "games", dir, "index.html");
-if (!fs.existsSync(gamePath)) { console.log("ゲームが無い: games/" + dir + "/index.html"); process.exit(1); }
+var workflow = require("./workflow");
+var id = process.argv[2], gameDir, config, parsed;
+try {
+  gameDir = workflow.game(id);
+  config = workflow.read(gameDir);
+  parsed = require("./thumb-options")(config.thumbnail, process.argv.slice(3));
+} catch (e) { console.error(e.message); process.exit(1); }
+var preset = parsed.preset;
+if (parsed.print) { console.log(JSON.stringify(preset, null, 2)); process.exit(0); }
+var secs = preset.seconds, firstKey = preset.key, topY = preset.top, topH = preset.topHeight, quality = preset.quality, query = preset.query;
+var root = workflow.root, dir = path.basename(gameDir), gamePath = path.join(gameDir, "index.html");
 var out = path.join(root, "games", dir, "img", "thumb.webp");
 fs.mkdirSync(path.dirname(out), { recursive: true });
 
@@ -78,7 +70,9 @@ var shot =
 '  }\n' +
 '  function fail(why) { fetch("/__fail", { method: "POST", body: why }); }\n' +
 '  window.addEventListener("error", function (e) { fail("ゲームが落ちた: " + e.message); });\n' +
-'  setTimeout(function () {\n' +
+'  setTimeout(async function () {\n' +
+'    var setup = __SETUP__;\n' +
+'    if (setup !== null) { try { if (typeof window.__thumbnail !== "function") throw Error("撮影用の覗き穴 __thumbnail がありません"); await window.__thumbnail(setup); } catch(e) { fail(e.message); return; } }\n' +
 '    if (KEY) key(KEY);\n' +
 '    setTimeout(shoot, SEC * 1000);\n' +
 '  }, 400);\n' +
@@ -86,10 +80,11 @@ var shot =
 '</script>';
 
 shot = shot.replace("__SEC__", String(secs))
-           .replace("__KEY__", firstKey == null ? "null" : JSON.stringify(firstKey))
+           .replace("__KEY__", () => firstKey == null ? "null" : JSON.stringify(firstKey).replace(/</g, "\\u003c"))
            .replace("__TOPY__", String(topY))
            .replace("__TOPH__", String(topH))
-           .replace("__Q__", String(quality));
+           .replace("__Q__", String(quality))
+           .replace("__SETUP__", () => JSON.stringify(preset.setup).replace(/</g, "\\u003c"));
 
 /* ---------------- 配る側 ---------------- */
 var MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -135,7 +130,7 @@ var server = http.createServer(function (req, res) {
 
   if (u === gameUrl) {                         /* ゲームの本体にだけ、撮る係を足す */
     var html = fs.readFileSync(file, "utf8");
-    res.end(html.indexOf("</body>") >= 0 ? html.replace("</body>", shot + "\n</body>") : html + shot);
+    res.end(html.indexOf("</body>") >= 0 ? html.replace("</body>", () => shot + "\n</body>") : html + shot);
     return;
   }
   fs.createReadStream(file).pipe(res);
@@ -167,9 +162,9 @@ server.listen(0, "127.0.0.1", function () {
   child = cp.spawn(exe, [
     "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
     "--autoplay-policy=no-user-gesture-required",
-    "--window-size=430,900",                   /* タテ画面で動かす */
+    "--window-size=" + preset.width + "," + preset.height,                   /* タテ画面で動かす */
     "--user-data-dir=" + profile, url
-  ], { stdio: "ignore" });
+  ], { stdio: "ignore", windowsHide: true });
   child.on("error", function (e) {
     why = "ブラウザを立ち上げられない: " + e.message;
     console.log(why);
@@ -190,6 +185,7 @@ function finish() {
     console.log("NG  " + (why || "撮れなかった"));
     process.exit(1);
   }
+  if (parsed.save) { config.thumbnail = preset; fs.writeFileSync(path.join(gameDir, "_制作.json"), JSON.stringify(config, null, 2) + "\n"); }
   var n = fs.statSync(out).size;
   console.log("OK  games/" + dir + "/img/thumb.webp  600x600  " + Math.round(n / 1024) + "KB");
   console.log("※ 切り取り位置は --top / --toph で調整できます");
