@@ -411,20 +411,65 @@
 
   Scene3D.prototype.makeStar = function () {
     var g = new T.Group();
-    this.put(this.mesh(this.geo.ball, mat("#ffffff", { flat: true }), g), 0, 120, 0, 26, 26, 26);
-    this.put(this.mesh(this.geo.ball, new T.MeshBasicMaterial({ color: "#9fc4ff", transparent: true, opacity: 0.32 }), g),
-             0, 120, 0, 46, 46, 46);
+    if (!this.planetMats) {
+      /* 地球・火星・木星・土星・海王星。表面の模様は球に巻き付ける。 */
+      this.planetColors = ["#398aca", "#cb6544", "#d6ae80", "#ddc795", "#3876da"];
+      this.planetMats = this.planetColors.map(function (color, kind) {
+        var c = document.createElement("canvas"); c.width = 512; c.height = 256;
+        var p = c.getContext("2d"); p.fillStyle = color; p.fillRect(0, 0, 512, 256);
+        for (var i = 0; i < 90; i++) {
+          var x = Math.random() * 512, y = Math.random() * 256;
+          p.fillStyle = kind === 0 ? (i % 3 ? "#579654" : "#c6e3d9")
+            : kind === 1 ? (i % 2 ? "#97412f" : "#e69a6b")
+            : (i % 2 ? "rgba(255,245,215,.24)" : "rgba(65,40,45,.2)");
+          p.beginPath();
+          p.ellipse(x, y, kind < 2 ? 8 + Math.random() * 30 : 290,
+            kind < 2 ? 5 + Math.random() * 16 : 2 + Math.random() * 7, 0, 0, Math.PI * 2);
+          p.fill();
+        }
+        if (kind === 2) {
+          p.fillStyle = "#ad634b"; p.beginPath(); p.ellipse(330, 165, 40, 15, 0, 0, Math.PI * 2); p.fill();
+        }
+        var tex = new T.CanvasTexture(c); tex.colorSpace = T.SRGBColorSpace;
+        return new T.MeshStandardMaterial({ map: tex, roughness: 1, emissive: color, emissiveIntensity: 0.12 });
+      });
+      this.planetGeo = new T.SphereGeometry(1, 40, 28);
+      this.planetRingGeo = new T.RingGeometry(1.35, 2.05, 64);
+      this.planetRingMat = new T.MeshStandardMaterial({ color: "#cbb68c", side: T.DoubleSide, transparent: true, opacity: 0.8 });
+    }
+    g.userData.body = this.mesh(this.planetGeo, this.planetMats[0], g);
+    var ring = this.mesh(this.planetRingGeo, this.planetRingMat, g);
+    ring.rotation.x = -1.1; ring.rotation.y = 0.25;
+    g.userData.ring = ring;
     return g;
   };
 
   /* ============ 破片 ============ */
-  Scene3D.prototype.burst = function (x, baseY, type) {
+  Scene3D.prototype.burst = function (x, baseY, type, variant, z) {
+    if (type === 5) {
+      var radius = 240 + (variant || 0) * 160;
+      var material = this.planetMats[Math.min(4, Math.floor((variant || 0) * 5))];
+      for (var j = 0; j < 32; j++) {
+        var shard = this.bitPool.pop(); if (!shard) break;
+        var az = Math.random() * Math.PI * 2, up = Math.random() * 2 - 1;
+        var side = Math.sqrt(1 - up * up), dx = Math.cos(az) * side, dz = Math.sin(az) * side;
+        shard.geometry = this.geo.puff; shard.material = material; shard.visible = true;
+        var size = radius * (0.07 + Math.random() * 0.10);
+        shard.scale.set(size, size * 0.7, size * 0.85);
+        shard.position.set(x + dx * radius * 0.7, 110 + up * radius * 0.7, -z + dz * radius * 0.7);
+        this.bits.push({ m: shard, life: 0, space: true,
+          vx: dx * 650, vy: up * 650, vz: dz * 650 + 280,
+          rx: Math.random() * 7, ry: Math.random() * 7 });
+      }
+      return;
+    }
     var cols = [[0, 1], [8, 9], [3, 4], [5, 6], [10, 11], [6, 7], [12, 13]][type] || [0, 1];
     var high = [40, 160, 46, 260, 150, 120, 60][type] || 40;
     for (var i = 0; i < 9; i++) {
       var m = this.bitPool.pop();
       if (!m) break;
       m.material = this.bitMats[cols[i % cols.length]];
+      m.geometry = this.geo.box;
       m.visible = true;
       var sx = 8 + Math.random() * 22;
       m.scale.set(sx, sx * (0.4 + Math.random() * 0.5), 6 + Math.random() * 14);
@@ -538,13 +583,13 @@
     for (var i = this.bits.length - 1; i >= 0; i--) {
       var b = this.bits[i];
       b.life += dt;
-      b.vy -= 1500 * dt;
+      if (!b.space) b.vy -= 1500 * dt;
       b.m.position.x += b.vx * dt;
       b.m.position.y += b.vy * dt;
       b.m.position.z += b.vz * dt;
       b.m.rotation.x += b.rx * dt;
       b.m.rotation.y += b.ry * dt;
-      if (b.life > 1.1 || b.m.position.y < -60 || b.m.position.z > 700) {
+      if (b.life > (b.space ? 1.7 : 1.1) || (!b.space && b.m.position.y < -60) || b.m.position.z > 700) {
         b.m.visible = false;
         this.bitPool.push(b.m);
         this.bits.splice(i, 1);
@@ -574,6 +619,7 @@
      s: { dist, w, gear, legPhase, wsp, beta, props, dt, sky } */
   Scene3D.prototype.sync = function (s) {
     var w = s.w;
+    this.scene.fog = w[5] ? null : this.fog;
     var ws = s.world || 1, cs = CAMS[s.gear] || 1;
     if (this._ws !== ws) {
       this.road.scale.x = ws;
@@ -603,6 +649,7 @@
     this.roadMat.opacity = 1 - w[5] - w[4];   /* 洋上に道は無い */
     this.road.visible = this.roadMat.opacity > 0.02;
     this.grassMat.opacity = (w[4] ? 0.17 : 0.2) * (1 - w[5]);  /* 洋上では波として使う */
+    this.ground.visible = !w[5];                /* 宇宙に地面は無い（空とのつなぎ目も消える） */
     this.grass.visible = this.grassMat.opacity > 0.01;
     this.grassTex.offset.y = s.dist / 140;
     var wantTex = w[3] ? this.lineTexCity : this.lineTex;
@@ -638,12 +685,19 @@
     var used = [0, 0, 0, 0, 0, 0, 0];
     for (var p = 0; p < s.props.length; p++) {
       var o = s.props[p];
-      if (o.z == null || o.z < -60 || o.z > 2600) continue;
+      if (o.z == null || o.z < -60 || o.z > (o.t === 5 ? 6500 : 2600)) continue;
       var lane = this.propPool[o.t];
       if (used[o.t] >= lane.length) continue;
       var m = lane[used[o.t]++];
       m.visible = true;
       m.position.set(o.x, o.y || 0, -o.z);
+      if (o.t === 5) {
+        var kind = Math.min(4, Math.floor(o.r * 5)), radius = 240 + o.r * 160;
+        m.position.y = 110;
+        m.scale.setScalar(radius);
+        m.userData.body.material = this.planetMats[kind];
+        m.userData.ring.visible = kind === 3;
+      }
       m.rotation.y = o.t === 2 ? (o.r - 0.5) * 0.24 : (o.t === 6 ? Math.PI : o.r * 3.14);
       if (o.t === 6) m.rotation.z = (o.r - 0.5) * 0.5;
       if (o.t === 1 && m.userData.shirt) m.userData.shirt.color.copy(this.shirtColor(o.r));

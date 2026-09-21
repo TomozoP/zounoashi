@@ -311,6 +311,7 @@
     return [A[0] + (B[0] - A[0]) * k, A[1] + (B[1] - A[1]) * k, A[2] + (B[2] - A[2]) * k];
   }
   function skyNow() {
+    if (gear === 5) return { hi: [2, 3, 10], lo: [2, 3, 10] };
     var t = progress();
     for (var i = 1; i < SKY_KEY.length; i++) {
       if (t <= SKY_KEY[i].t) {
@@ -409,7 +410,7 @@
     broken++;
     if (scene3d) {
       if (o.t === 1) scene3d.launchPerson(o.x, o.r);   /* 人はこわさず跳ね上げる */
-      else scene3d.burst(o.x, o.y || 0, o.t);
+      else scene3d.burst(o.x, o.y || 0, o.t, o.r, o.z);
     }
     if (T - lastSmash < 0.07) return;          /* つづけざまのときは重ねない */
     lastSmash = T;
@@ -487,7 +488,7 @@
         props[g2].y = props[g2].t === 6 ? 150 + Math.random() * 130 : 0;
       }
       if (gear > prevGear) {
-        gearFlash = 1;
+        gearFlash = gear === 5 ? 0 : 1;
         if (NEWS[gear]) showNews(NEWS[gear]);
         tone(330, 0.16, 0.16, "square", 660);
         tone(660, 0.22, 0.12, "square", 990, 0.08);
@@ -527,7 +528,8 @@
     for (var j = props.length - 1; j >= 0; j--) {
       var o = props[j];
       o.z = o.at - dist;
-      if (o.z <= 96) { props.splice(j, 1); smash(o); }
+      var contact = o.t === 5 ? 96 + lead + 240 + o.r * 160 : 96;
+      if (o.z <= contact) { props.splice(j, 1); smash(o); }
     }
     if (props.length > 60) props.splice(0, props.length - 60);
 
@@ -596,6 +598,19 @@
     feed(Math.max(0, e.deltaY) * 0.7);
   }, { passive: false });
   window.addEventListener("keydown", function (e) {
+    /* 手元では数字キーで景色の先頭へ飛ぶ。 */
+    if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && /^[1-6]$/.test(e.key)) {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (state !== S.PLAY) newRound();
+      var target = Number(e.key) - 1;
+      speed = target === 0 ? MIN_KMH : GEARS[target - 1].top;
+      boost = 0; glide = 0; lead = 0; dragY = null; flickVel = 0; moveAcc = 0;
+      props.length = 0; nextAt = dist + 1600;
+      if (scene3d) scene3d.reset();
+      recalc();
+      return;
+    }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
     if (!esc && !go) return;
@@ -633,7 +648,9 @@
     g.addColorStop(1, rgb(sk.lo));
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, HY + 10);
-    ctx.fillStyle = rgb(dim(mixW(GROUND), dayLight()));   /* 立体が無いときの下地 */
+    /* 地平線から下は、空の下はしと同じ色でつないでおく。
+       立体の地面は遠くがこの色に溶けるので、境目が出ない。 */
+    ctx.fillStyle = scene3d ? rgb(sk.lo) : rgb(dim(mixW(GROUND), dayLight()));
     ctx.fillRect(0, HY, W, H - HY);
   }
 
@@ -768,11 +785,13 @@
   }
 
   function drawBlue() {
-    if (beta < 0.2) return;
-    var a = Math.pow(clamp01((beta - 0.2) / 0.8), 1.6);
-    var g = ctx.createRadialGradient(VAN.x, VAN.y, 10, VAN.x, VAN.y, W * 1.2);
-    g.addColorStop(0, "rgba(225,240,255," + (0.85 * a) + ")");
-    g.addColorStop(0.3, "rgba(120,170,255," + (0.36 * a) + ")");
+    if (gear !== 5) return;
+    var a = Math.pow(phaseT(speed), 0.8);
+    var radius = 24 + a * Math.max(W, H) * 0.95;
+    var g = ctx.createRadialGradient(VAN.x, VAN.y, 0, VAN.x, VAN.y, radius);
+    g.addColorStop(0, "rgba(240,248,255," + (0.45 + 0.5 * a) + ")");
+    g.addColorStop(0.12, "rgba(175,215,255," + (0.2 + 0.5 * a) + ")");
+    g.addColorStop(0.45, "rgba(85,125,255," + (0.08 + 0.25 * a) + ")");
     g.addColorStop(1, "rgba(30,20,90,0)");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
@@ -856,6 +875,7 @@
     drawSky();
     drawClouds();
     drawFar();
+    drawBlue();
 
     if (scene3d) {
       scene3d.sync({
@@ -872,7 +892,6 @@
 
     drawFlame();
     drawZips();
-    drawBlue();
     if (gearFlash > 0.01) {
       ctx.fillStyle = "rgba(255,255,255," + (gearFlash * 0.35) + ")";
       ctx.fillRect(0, 0, W, H);
