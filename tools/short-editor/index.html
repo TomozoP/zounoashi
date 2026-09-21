@@ -222,6 +222,8 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
       <div class="gap"></div>
       <button id="bSplit" title="再生ヘッドで分割 (Ctrl+K / 全トラック Ctrl+Shift+K)">✂ 分割</button>
       <button id="bDel" title="削除 (Delete) / 詰めて削除 (Shift+Delete)">削除</button>
+      <button id="bCopy" title="コピー (Ctrl+C) / 切り取り (Ctrl+X)">コピー</button>
+      <button id="bPaste" title="再生ヘッドの位置に貼り付け (Ctrl+V)">貼り付け</button>
       <button id="bSub" title="字幕を追加 (T)">＋字幕</button>
       <button id="bUndo" title="元に戻す (Ctrl+Z)">↶</button>
       <button id="bRedo" title="やり直し (Ctrl+Shift+Z)">↷</button>
@@ -651,7 +653,7 @@ function tick() {
   updateTime(); updatePlayhead(true);
 }
 function seek(t) {
-  playhead = clamp(t, 0, Math.max(totalDur(), 0));
+  playhead = clamp(t, 0, Math.max(totalDur(), 0) + 5); // 終わりの少し先まで置ける
   if (playing) { const was = true; pause(); if (was) play(); }
   else drawStill();
   updateTime(); updatePlayhead(); renderSubList(true);
@@ -1007,6 +1009,33 @@ function addSub() {
   changed(true);
   const ta = document.querySelector('#insp textarea'); if (ta) { ta.focus(); ta.select(); }
 }
+// コピーと貼り付け（先頭を基準にした相対位置で覚える）
+let clipboard = [];
+function copySel(cut) {
+  const items = selItems(); if (!items.length) return;
+  const base = Math.min(...items.map(([t, o]) => itemStart(t, o)));
+  clipboard = items.map(([t, o]) => ({ t, off: itemStart(t, o) - base, data: { ...o } }));
+  if (cut) delSel();
+  else toast(items.length + '個をコピーしました');
+}
+function paste() {
+  if (!clipboard.length) return;
+  // 素材が消えているものは貼れない
+  const use = clipboard.filter(it => it.t === 's' || (it.t === 'v' ? sources.has(it.data.src) : buffers.has(it.data.buf)));
+  if (!use.length) return;
+  commit();
+  const made = [], vnew = [];
+  for (const it of use) {
+    const o = { ...it.data, id: nid() };
+    if (it.t === 's') { const len = o.end - o.start; o.start = playhead + it.off; o.end = o.start + len; subs.push(o); }
+    else { o.at = playhead + it.off; (it.t === 'v' ? vclips : aclips).push(o); if (it.t === 'v') vnew.push(o); }
+    made.push(keyOf(it.t, o.id));
+  }
+  overwriteV(vnew);
+  subs.sort((a, b) => a.start - b.start);
+  sel = new Set(made); selected = { type: use[0].t, id: +made[0].slice(made[0].indexOf(':') + 1) };
+  changed(true);
+}
 function select(type, id, add) {
   if (!type) { sel.clear(); selected = null; }
   else if (add) {
@@ -1027,7 +1056,7 @@ function setTool(tl) {
   $('tl').classList.toggle('razor', tl === 'razor'); if (tl !== 'razor') $('razorLine').style.display = 'none';
 }
 $('tSel').onclick = () => setTool('select'); $('tRazor').onclick = () => setTool('razor');
-$('bSplit').onclick = splitAt; $('bDel').onclick = e => delSel(e.shiftKey); $('bSub').onclick = addSub; $('bUndo').onclick = undo; $('bRedo').onclick = redo;
+$('bSplit').onclick = splitAt; $('bDel').onclick = e => delSel(e.shiftKey); $('bCopy').onclick = e => copySel(e.shiftKey); $('bPaste').onclick = paste; $('bSub').onclick = addSub; $('bUndo').onclick = undo; $('bRedo').onclick = redo;
 $('playBtn').onclick = () => playing ? (recording ? stopRec() : pause()) : play();
 $('recBtn').onclick = toggleRec;
 
@@ -1340,6 +1369,9 @@ addEventListener('keydown', e => {
   else if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'a') { e.preventDefault(); selectAll(); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'c') { e.preventDefault(); copySel(); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'x') { e.preventDefault(); copySel(true); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'v') { e.preventDefault(); paste(); }
   else if ((e.ctrlKey || e.metaKey) && k === 'k') { e.preventDefault(); e.shiftKey ? cutAll(playhead) : splitAt(); }
   else if (k === 'v' && !e.ctrlKey && !e.metaKey) setTool('select');
   else if (k === 'c' && !e.ctrlKey && !e.metaKey) setTool('razor');
