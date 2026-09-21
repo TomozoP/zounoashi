@@ -669,7 +669,8 @@
       this.hemi.intensity = 2.1 * (0.3 + 0.7 * lit);
       this._lit = lit;
     }
-    var fov = this._baseFov * (1 + 0.1 * (s.t || 0));
+    var thrust = Math.min(1, (s.lead || 0) / 260);
+    var fov = this._baseFov * (1 + 0.1 * (s.t || 0) + thrust * 0.055);
     if (Math.abs(fov - this.camera.fov) > 0.01) {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
@@ -697,7 +698,8 @@
     var cow = this.cow;
     var bob = Math.abs(Math.sin(s.legPhase * Math.PI * 2)) * 5;
     cow.root.position.set(0, bob, -(s.lead || 0));       /* はらうと前へ出る */
-    cow.root.rotation.x = -0.06 * Math.min(1, s.wsp / 2400) - Math.min(0.12, (s.lead || 0) * 0.0012);
+    cow.root.rotation.x = -0.06 * Math.min(1, s.wsp / 2400) - thrust * 0.21;
+    cow.body.scale.set(1 - thrust * 0.035, 1 - thrust * 0.07, 1 + thrust * 0.09);
     for (var i = 0; i < cow.legs.length; i++) {
       var off = (i === 0 || i === 3) ? 0 : 0.5;
       cow.legs[i].rotation.x = Math.sin((s.legPhase + off) * Math.PI * 2) * 0.62;
@@ -850,9 +852,10 @@
   };
   /* 牛が画面のどこに、どれくらいの大きさで見えるか */
   Scene3D.prototype.cowScreen = function (gameW, gameH) {
-    var p = this._v.set(0, 40, 0).project(this.camera);
+    var cowPos = this.cow.root.position;
+    var p = this._v.set(0, cowPos.y + 40, cowPos.z).project(this.camera);
     var x = (p.x + 1) / 2 * gameW, y = (1 - p.y) / 2 * gameH;
-    var q = this._v.set(0, 140, 0).project(this.camera);
+    var q = this._v.set(0, cowPos.y + 140, cowPos.z).project(this.camera);
     var top = (1 - q.y) / 2 * gameH;
     return { x: x, y: y, s: Math.max(0.2, (y - top) / 100) };
   };
