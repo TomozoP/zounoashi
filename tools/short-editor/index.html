@@ -84,9 +84,13 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
 #marq{position:absolute;border:1px solid #9cc4ff;background:rgba(156,196,255,.14);pointer-events:none;z-index:7;display:none}
 #razorLine{position:absolute;top:22px;bottom:0;width:1px;background:#6fb4ff;pointer-events:none;z-index:6;display:none}
 #tlbar input[type=range]{width:120px}
-#tlbody{display:grid;grid-template-columns:76px 1fr}
+#tlbody{display:grid;grid-template-columns:96px 1fr}
 #labels .ln{gap:4px}
 #labels .ln button{padding:0 5px;line-height:16px;font-size:12px;border-radius:4px}
+#labels .ln button.pw{padding:0;width:14px;height:14px;line-height:12px;font-size:9px;border-radius:50%;color:#6fb4ff;flex:0 0 14px}
+#labels .ln button.pw.off{color:#777;background:#1a1b1f}
+#labels .ln.off{color:#5a5e66;text-decoration:line-through}
+.track.off{opacity:.4}
 #labels div{height:var(--h);display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:11px;border-bottom:1px solid var(--line)}
 #labels .rl{height:22px}
 #tlscroll{overflow-x:scroll;overflow-y:hidden;position:relative}
@@ -237,10 +241,12 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
     </div>
     <div id="tlbody">
       <div id="labels"><div class="rl"></div>
-        <div class="ln">ヘッダー<button id="addHead" title="ヘッダーの文字を追加">＋</button></div>
-        <div>字幕</div><div>映像</div><div>ナレーション</div>
-        <div class="ln">効果音<button data-lane="se" title="効果音を追加">＋</button></div>
-        <div class="ln">BGM<button data-lane="bgm" title="BGMを追加">＋</button></div></div>
+        <div class="ln"><button class="pw" data-off="header"></button>ヘッダー<button id="addHead" title="ヘッダーの文字を追加">＋</button></div>
+        <div class="ln"><button class="pw" data-off="sub"></button>字幕</div>
+        <div class="ln"><button class="pw" data-off="video"></button>映像</div>
+        <div class="ln"><button class="pw" data-off="vo"></button>ナレ</div>
+        <div class="ln"><button class="pw" data-off="se"></button>効果音<button data-lane="se" title="効果音を追加">＋</button></div>
+        <div class="ln"><button class="pw" data-off="bgm"></button>BGM<button data-lane="bgm" title="BGMを追加">＋</button></div></div>
       <input id="laneIn" type="file" accept="audio/*,video/*" multiple hidden>
       <div id="tlscroll">
         <div id="tlinner">
@@ -285,11 +291,12 @@ let vclips = [];             // {id,src,in,out,at,gain}  at の順に並べて�
 let aclips = [];             // {id,buf,in,out,at,gain}
 let subs = [];               // {id,text,start,end}
 const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur', out: 'source', headH: 0.2, headBg: 'blur' };
-const opt = { norm: true, enhance: true, gate: 0.5, vvol: 1, avol: 1, sevol: 1, bgmvol: 0.5 };
+const opt = { off: {}, norm: true, enhance: true, gate: 0.5, vvol: 1, avol: 1, sevol: 1, bgmvol: 0.5 };
 // 音声のレーン：vo=ナレーション（補正あり） se=効果音 bgm=BGM
 const LANES = { vo: 'ナレーション', se: '効果音', bgm: 'BGM' };
 const laneOf = a => a.lane || 'vo';
-const laneVol = a => ({ vo: opt.avol, se: opt.sevol, bgm: opt.bgmvol })[laneOf(a)];
+const isOff = k => !!(opt.off && opt.off[k]);
+const laneVol = a => (isOff(laneOf(a)) ? 0 : { vo: opt.avol, se: opt.sevol, bgm: opt.bgmvol }[laneOf(a)]);
 const PRESETS = [
   { name: 'あ', fill: '#ffffff', stroke: '#111111', shadow: 'rgba(0,0,0,.55)' },
   { name: 'あ', fill: '#ffe23d', stroke: '#111111', shadow: 'rgba(0,0,0,.55)' },
@@ -331,7 +338,7 @@ function totalDur() {
   for (const s of subs) d = Math.max(d, s.end);
   return d;
 }
-function clipAt(t) { for (let i = vclips.length - 1; i >= 0; i--) { const c = vclips[i]; if (t >= c.at - 1e-6 && t < vEnd(c) - 1e-6) return { i, c, local: Math.max(0, t - c.at), start: c.at }; } return null; }
+function clipAt(t) { if (isOff('video')) return null; for (let i = vclips.length - 1; i >= 0; i--) { const c = vclips[i]; if (t >= c.at - 1e-6 && t < vEnd(c) - 1e-6) return { i, c, local: Math.max(0, t - c.at), start: c.at }; } return null; }
 const DB = new Promise(res => {
   try {
     const r = indexedDB.open('shortEditor', 1);
@@ -430,7 +437,7 @@ async function buildMix() {
     g.gain.setValueAtTime(gain, when + len - f); g.gain.linearRampToValueAtTime(0, when + len);
     s.connect(g); g.connect(lim); s.start(when, offset, len);
   };
-  for (const c of vclips) place(sources.get(c.src).audio, c.at, c.in, c.out - c.in, opt.vvol * (c.gain ?? 1));
+  for (const c of vclips) place(sources.get(c.src).audio, c.at, c.in, c.out - c.in, (isOff('video') ? 0 : opt.vvol) * (c.gain ?? 1));
   for (const a of aclips) place(await procBuffer(a.buf, laneOf(a)), a.at, a.in, a.out - a.in, laneVol(a) * (a.gain ?? 1));
   const out = await off.startRendering();
   if (opt.norm) await normalizeLoudness(out);
@@ -492,7 +499,7 @@ let BAND = 0; // ヘッダーのために上へ足した高さ
 function outSize() {
   const c = vclips[0], src = c && sources.get(c.src);
   const base = (style.out === 'vertical' || !src || !src.w) ? [1080, 1920] : [src.w - src.w % 2, src.h - src.h % 2];
-  const band = subs.some(isHeader) ? Math.round(base[1] * style.headH / 2) * 2 : 0;
+  const band = (!isOff('header') && subs.some(isHeader)) ? Math.round(base[1] * style.headH / 2) * 2 : 0;
   return [base[0], base[1] + band, band];
 }
 function applyOutSize() {
@@ -549,6 +556,7 @@ function drawSubs(ctx, t) {
   const p = PRESETS[style.preset];
   for (const s of subs) {
     if (t < s.start || t >= s.end || !s.text.trim()) continue;
+    if (isOff(isHeader(s) ? 'header' : 'sub')) continue;
     ctx.save();
     const fs = sz(s.size); ctx.font = subFont(s.size);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.miterLimit = 2;
@@ -747,6 +755,22 @@ async function addAudioFile(file, lane, at) {
   } catch (e) { toast('音声を読み込めませんでした'); return 0; }
 }
 let laneTarget = 'se';
+function syncOff() {
+  document.querySelectorAll('#labels button.pw').forEach(b => {
+    const off = isOff(b.dataset.off);
+    b.textContent = off ? '○' : '●'; b.classList.toggle('off', off);
+    b.closest('.ln').classList.toggle('off', off);
+    b.title = off ? 'このレーンを使う' : 'このレーンを使わない';
+  });
+  const map = { header: trH, sub: trS, video: trV, vo: trA, se: trSE, bgm: trBGM };
+  for (const k in map) map[k].classList.toggle('off', isOff(k));
+}
+document.querySelectorAll('#labels button.pw').forEach(b => b.onclick = () => {
+  opt.off = { ...opt.off, [b.dataset.off]: !isOff(b.dataset.off) };
+  syncOff(); mixDirty = true;
+  if (playing && !recording) { pause(); play(); } else drawStill();
+  applyOutSize(); drawStill();
+});
 document.querySelectorAll('#labels button[data-lane]').forEach(b => b.onclick = () => { laneTarget = b.dataset.lane; $('laneIn').click(); });
 $('laneIn').onchange = e => { addFiles([...e.target.files], laneTarget); e.target.value = ''; };
 $('fileIn').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
@@ -1550,7 +1574,7 @@ async function restoreProject() {
       vclips = o.vclips.filter(c => sources.has(c.src));
       aclips = o.aclips.filter(a => buffers.has(a.buf));
       subs = o.subs || [];
-      Object.assign(opt, o.opt); Object.assign(style, o.style); syncControls();
+      Object.assign(opt, o.opt); Object.assign(style, o.style); syncControls(); syncOff();
       playhead = o.playhead || 0;
       if (vclips.length) $('drop').style.display = 'none';
       // もう使っていない素材は消す
@@ -1566,6 +1590,7 @@ $('newBtn').onclick = async () => {
   restoring = true; await dbClear('state'); await dbClear('media'); location.reload();
 };
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {}); } catch (e) {}
+syncOff();
 refresh();
 restoreProject();
 </script>
