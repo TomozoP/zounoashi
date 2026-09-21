@@ -17,6 +17,7 @@ var hook =
   '  now: function () { return { state: (state === "play" && !live().length) ? "serve" : state,\n' +
   '    key: bomb.key, bomb: bomb, score: score, staff: staff.map(function (s) { return { x: Math.round(s.x), mode: s.mode }; }),\n' +
   '    twin: isTwin(), cur: cur, ft: bomb.fuseTime }; }\n};\n';
+code = fs.readFileSync(require("path").join(__dirname, "../../audio.js"), "utf8") + "\n;\n" + code;
 code = code.replace("  /* ============ ループ ============ */", hook + "  /* ============ ループ ============ */");
 
 var gradient = { addColorStop: function () {} };

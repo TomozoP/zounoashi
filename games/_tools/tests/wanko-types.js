@@ -17,6 +17,7 @@ var hook =
   '  face: FACE, cx: function () { return CX; }, H: function () { return H; },\n' +
   '  ground: function () { return GROUND; }, endY: function () { return END_Y; }, S: S\n' +
   '};\n';
+code = fs.readFileSync(require("path").join(__dirname, "../../audio.js"), "utf8") + "\n;\n" + code;
 code = code.replace("  /* ============ ループ ============ */", hook + "  /* ============ ループ ============ */");
 
 /* ---- 偽のcanvas ---- */

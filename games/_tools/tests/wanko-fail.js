@@ -10,6 +10,7 @@ var hook =
   '  scr: function (b, x, y) { var p = posOf(b), cy = GROUND - 150; return { x: CX + p.x + (x - CX) * p.s, y: cy + p.y + (y - cy) * p.s }; },\n' +
   '  bombs: function () { return bombs; }, live: function () { return live(); },\n' +
   '  face: FACE, cx: function () { return CX; }, S: S\n};\n';
+code = fs.readFileSync(require("path").join(__dirname, "../../audio.js"), "utf8") + "\n;\n" + code;
 code = code.replace("  /* ============ ループ ============ */", hook + "  /* ============ ループ ============ */");
 
 var gradient = { addColorStop: function () {} };

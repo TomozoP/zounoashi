@@ -34,7 +34,7 @@ function load(file, opts) {
     if (!src) { parts.push(body); found++; return m; }
     var plain = src.split("?")[0];          /* preview の ?v=… は外して見る */
     if (/share\.js$/.test(plain) || /^https?:/.test(plain)) return m;
-    if (!opts.withScripts && !/(?:pad|action-icons|result-actions)\.js$/.test(plain)) return m;
+    if (!opts.withScripts && !/(?:pad|action-icons|result-actions|audio)\.js$/.test(plain)) return m;
     var p = path.join(dir, plain);
     if (fs.existsSync(p)) parts.push(fs.readFileSync(p, "utf8"));
     return m;
