@@ -14,7 +14,7 @@
   var LOOK = { x: 26, y: 76, z: -216 };
   var FOCAL = 900;                       /* 画面の高さに対する画角のもと */
   var BEHIND = 760;                      /* 牛を通りすぎたものを、どこまで残すか */
-  var CAMS = [1, 1.09, 1.19, 1.31, 1.46];  /* 景色が変わるたび、カメラを引いて広く見せる */
+  var CAMS = [1, 1.09, 1.19, 1.31, 1.52, 1.75];  /* 景色が変わるたび、カメラを引いて広く見せる */
 
   function Scene3D() {
     T = global.THREE;
@@ -39,6 +39,7 @@
       box: new T.BoxGeometry(1, 1, 1),
       tube: new T.CylinderGeometry(1, 1, 1, 12),
       cone: new T.ConeGeometry(1, 1, 4),
+      peak: new T.ConeGeometry(1, 1, 6),
       puff: new T.SphereGeometry(1, 6, 4),
       ring: new T.RingGeometry(0.86, 1, 36)
     };
@@ -118,7 +119,9 @@
       houseRoof: mat("#c25a4a"),
       houseWin:  mat("#8fb6cf", { rough: 0.4 }),
       towerWall: mat("#454f5f"),
-      towerWin:  new T.MeshBasicMaterial({ color: "#f6e9bb" })
+      towerWin:  new T.MeshBasicMaterial({ color: "#f6e9bb" }),
+      rock:      mat("#6f6a55"),
+      snow:      mat("#eef2f5")
     };
     /* 道ばたのもの */
     this.side = {
@@ -127,7 +130,8 @@
       pole:  pool(16, function () { return self.makePole(160, self.M.poleWood); }),
       rail:  pool(34, function () { return self.makeRail(); }),
       house: pool(18, function () { return self.makeHouse(); }),
-      tower: pool(20, function () { return self.makeTower(); })
+      tower: pool(20, function () { return self.makeTower(); }),
+      peak:  pool(12, function () { return self.makeMountain(3.1); })
     };
     /* 壊すもの */
     this.propPool = [
@@ -135,6 +139,7 @@
       pool(10, function () { return self.makePerson(); }),
       pool(10, function () { return self.makeCar(); }),
       pool(8,  function () { return self.makeBuilding(); }),
+      pool(8,  function () { return self.makeMountain(1); }),
       pool(10, function () { return self.makeStar(); })
     ];
 
@@ -147,7 +152,7 @@
     }
 
     /* 破片 */
-    this.bitMats = ["#e8c25a", "#d9b24a", "#7b6a56", "#e0543c", "#3f7fd6", "#5a6472", "#f6e9bb", "#ffffff", "#f0c9a6", "#4c7fd6"]
+    this.bitMats = ["#e8c25a", "#d9b24a", "#7b6a56", "#e0543c", "#3f7fd6", "#5a6472", "#f6e9bb", "#ffffff", "#f0c9a6", "#4c7fd6", "#6f6a55", "#eef2f5"]
       .map(function (c) { return mat(c, { rough: 0.9 }); });
     for (var i = 0; i < 120; i++) {
       var b = this.mesh(this.geo.box, this.bitMats[0]);
@@ -363,6 +368,16 @@
     g.userData.body = g.children[0];
     return g;
   };
+  /* 山。大陸で道の先に立ちはだかり、道ばたには大きいものを並べる */
+  Scene3D.prototype.makeMountain = function (k) {
+    var g = new T.Group();
+    var body = this.put(this.mesh(this.geo.peak, this.M.rock, g), 0, 150 * k, 0, 220 * k, 300 * k, 220 * k);
+    body.rotation.y = 0.5;
+    var cap = this.put(this.mesh(this.geo.peak, this.M.snow, g), 0, 246 * k, 0, 82 * k, 112 * k, 82 * k);
+    cap.rotation.y = 0.5;
+    return g;
+  };
+
   Scene3D.prototype.makeStar = function () {
     var g = new T.Group();
     this.put(this.mesh(this.geo.ball, mat("#ffffff", { flat: true }), g), 0, 120, 0, 26, 26, 26);
@@ -373,8 +388,8 @@
 
   /* ============ 破片 ============ */
   Scene3D.prototype.burst = function (x, z, type) {
-    var cols = [[0, 1], [8, 9], [3, 4], [5, 6], [6, 7]][type] || [0, 1];
-    var high = [40, 160, 46, 260, 120][type] || 40;
+    var cols = [[0, 1], [8, 9], [3, 4], [5, 6], [10, 11], [6, 7]][type] || [0, 1];
+    var high = [40, 160, 46, 260, 320, 120][type] || 40;
     for (var i = 0; i < 9; i++) {
       var m = this.bitPool.pop();
       if (!m) break;
@@ -545,17 +560,17 @@
     /* 地面と道の色 */
     setColor(this.groundMat.color, s.groundColor);
     setColor(this.roadMat.color, s.roadColor);
-    this.roadMat.opacity = 1 - w[4];
+    this.roadMat.opacity = 1 - w[5];
     this.road.visible = this.roadMat.opacity > 0.02;
-    this.grassMat.opacity = 0.2 * (1 - w[4]);
+    this.grassMat.opacity = 0.2 * (1 - w[5]);
     this.grass.visible = this.grassMat.opacity > 0.01;
     this.grassTex.offset.y = s.dist / 140;
     this.lineTex.offset.y = s.dist / 240;
-    this.lineMat.opacity = Math.min(1, w[1] + w[2] + w[3]) * (1 - w[4]);
+    this.lineMat.opacity = Math.min(1, w[1] + w[2] + w[3] + w[4]) * (1 - w[5]);
     this.lines.visible = this.lineMat.opacity > 0.02;
     setColor(this.fog.color, s.fogColor);
-    this.fog.near = (800 + 1200 * w[4]) * ws;    /* 世界が広くなったぶん、霞む距離ものばす */
-    this.fog.far = (2800 + 2600 * w[4]) * ws;
+    this.fog.near = (800 + 1200 * w[5]) * ws;    /* 世界が広くなったぶん、霞む距離ものばす */
+    this.fog.far = (2800 + 2600 * w[5]) * ws;
 
     /* 牛 */
     var cow = this.cow;
@@ -575,9 +590,10 @@
     this.row("rail", w[1] + w[2] + w[3], 210 * ws, 156 * ws, s.dist);
     this.row("house", w[2], 340 * ws, 380 * ws, s.dist);
     this.row("tower", w[3], 420 * ws, 450 * ws, s.dist);
+    this.row("peak", w[4], 880 * ws, 430 * ws, s.dist);
 
     /* 壊すもの */
-    var used = [0, 0, 0, 0, 0];
+    var used = [0, 0, 0, 0, 0, 0];
     for (var p = 0; p < s.props.length; p++) {
       var o = s.props[p];
       if (o.z == null || o.z < -60 || o.z > 2600) continue;
@@ -591,13 +607,13 @@
       if (o.t === 2 && m.userData.body) m.userData.body.material = this.carMat(o.r);
       if (o.t === 3 && m.userData.body) m.userData.body.scale.y = 300 * (0.7 + o.r * 0.7);
     }
-    for (var t = 0; t < 5; t++) {
+    for (var t = 0; t < 6; t++) {
       for (var k = used[t]; k < this.propPool[t].length; k++) this.propPool[t][k].visible = false;
     }
 
     /* 星 */
-    this.starMat.opacity = w[4];
-    this.stars.visible = w[4] > 0.02;
+    this.starMat.opacity = w[5];
+    this.stars.visible = w[5] > 0.02;
     if (this.stars.visible) {
       var pos = this.stars.geometry.attributes.position, a = pos.array;
       var move = s.wsp * s.dt * 1.8;
@@ -614,7 +630,7 @@
 
     this._wsp = s.wsp;
     var dusty = clamp01(((s.kmh || 0) - 1.2) / 6);   /* 歩きだしてから立ちはじめる */
-    if (s.running && w[4] < 0.5 && dusty > 0.02) {
+    if (s.running && w[5] < 0.5 && dusty > 0.02) {
       var rate = Math.min(28, 3 + s.wsp / 24) * dusty;
       this.dustTimer -= s.dt;
       var guard = 0;

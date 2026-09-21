@@ -6,9 +6,9 @@
      - 大きくはらうと、そのぶん牛がぐっと前へ出る（boost）
      - 指を離したあとは、サイトのスクロールのように余韻で進んで止まる（glide）
      - 景色が変わると、上に速報が流れる
-     - 景色の切れ目は 時速10 / 50 / 200 / 1000。宇宙に出ると1押しで一気に上がる
-     - 景色ごとに要る押しの数（100 / 200 / 200 / 250 / 300）と、光の速さまでの合計
-     - 壊すものが景色ごとに変わる（わら・人・車・ビル・星）
+     - 景色の切れ目は 時速10 / 50 / 200 / 1000 / 3万。宇宙に出ると一気に上がる
+     - 景色ごとに要るこぎの数（100 / 200 / 200 / 250 / 264 / 300）と、光の速さまでの合計
+     - 壊すものが景色ごとに変わる（わら・人・車・ビル・山・星）
      - 速さの表記は時速で統一（光の速さは 1,079,252,849 km/h）
      - 光の速さの手前で警告。押すのをやめれば壊れない
      - 光の速さに届くと宇宙が壊れ、結果は押した回数
@@ -107,17 +107,17 @@ while (g.probe.now().state === "play" && guard++ < 5000) {
   g.press(" "); total++;
   var n = g.probe.now();
   if (n.gear !== before || n.state !== "play") {
-    marks.push({ phase: ["牧場", "道路", "町", "都市", "宇宙"][before], clicks: total - seen });
+    marks.push({ phase: ["牧場", "道路", "町", "都市", "大陸", "宇宙"][before], clicks: total - seen });
     seen = total;
   }
 }
 ok(g.probe.now().state !== "play", "押し続ければ必ず光の速さに届く", g.probe.now().state);
-marks.forEach(function (m) { console.log("    " + m.phase + " … " + m.clicks + "押し"); });
-ok(marks.length === 5, "景色は5つ", marks.length + "つ");
+marks.forEach(function (m) { console.log("    " + m.phase + " … " + m.clicks + "こぎ"); });
+ok(marks.length === 6, "景色は6つ", marks.length + "つ");
 ok(marks[0].clicks === 100, "牧場は100押し", marks[0].clicks);
 var inc = marks.every(function (m, i) { return i === 0 || m.clicks >= marks[i - 1].clicks; });
 ok(inc, "先へ行くほど押す数が増える", marks.map(function (m) { return m.clicks; }).join(" → "));
-ok(total > 980 && total < 1120, "光の速さまで合計1050押しくらい", total + "押し");
+ok(total > 1250 && total < 1400, "光の速さまで合計1300こぎくらい", total + "こぎ");
 ok(g.probe.now().score === total, "結果の数字は押した回数", g.probe.now().score);
 
 /* 3b. 景色が変わると速報が出る */
@@ -130,7 +130,7 @@ nw.step(60 * 9);
 ok(nw.probe.now().news === "", "速報は流れきると消える");
 
 /* 4. ギアの中身 */
-[[0, "牧場", 0.1], [120, "道路", 0.2], [320, "町", 0.75], [510, "都市", 3.2], [760, "宇宙", 3600000]].forEach(function (c) {
+[[0, "牧場", 0.1], [120, "道路", 0.2], [320, "町", 0.75], [510, "都市", 3.2], [760, "大陸", 110], [1020, "宇宙", 3600000]].forEach(function (c) {
   var t = start();
   push(t, c[0]);
   var n = t.probe.now();
@@ -139,7 +139,7 @@ ok(nw.probe.now().news === "", "速報は流れきると消える");
 });
 
 /* 5. 壊すものが景色ごとに変わる */
-[[40, "牧場"], [180, "道路"], [380, "町"], [580, "都市"], [800, "宇宙"]].forEach(function (c) {
+[[40, "牧場"], [180, "道路"], [380, "町"], [580, "都市"], [800, "大陸"], [1060, "宇宙"]].forEach(function (c) {
   var t = start();
   push(t, c[0], 1);
   var before = t.probe.now().broken;
