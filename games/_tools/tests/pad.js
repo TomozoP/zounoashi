@@ -20,6 +20,15 @@ var games = fs.readdirSync(path.join(root, "games")).filter(function (n) {
   return fs.existsSync(f) && /src="\.\.\/pad\.js"/.test(fs.readFileSync(f, "utf8"));
 }).sort();
 
+/* ゲーム名を渡した場合は、そのゲームだけを確認する。省略時は従来どおり全部。 */
+var requested = process.argv.slice(2);
+if (requested.length) {
+  requested.forEach(function (id) {
+    if (games.indexOf(id) < 0) throw Error("確認対象が見つからない: " + id);
+  });
+  games = requested;
+}
+
 if (!games.length) { console.log("pad.js を読んでいるゲームが無い"); process.exit(1); }
 console.log("見ているゲーム: " + games.join(", "));
 console.log("");

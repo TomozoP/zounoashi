@@ -62,6 +62,24 @@ function setup(mode) {
   handlers.click(event); assert.equal(fired, 1);
   actions.place(button, { x: 270, y: 480, w: 100, h: 80 }, 540, 960, true);
   assert.equal(button.style.left, '50%'); assert.equal(button.style.top, '50%');
+  let writes = 0, hidden = false;
+  const measured = { style: new Proxy({}, { set(o,k,v) { writes++; o[k]=parseFloat(v).toFixed(4)+'%'; return true; } }),
+    get hidden() { return hidden; }, set hidden(v) { writes++; hidden=v; } };
+  const box = { x: 270, y: 480, w: 100, h: 80 };
+  actions.place(measured, box, 540, 960, true);
+  assert.equal(writes, 4);
+  writes=0;
+  for(let i=0;i<600;i++)actions.place(measured, box, 540, 960, true);
+  assert.equal(writes,0,'静止した600コマでは表示を書き直さない');
+  actions.place(measured, box, 540, 1200, true);
+  assert.equal(writes,2,'画面の高さが変われば縦位置と高さを更新');
+  actions.place(measured, box, 540, 1200, false);
+  assert(measured.hidden);
+  actions.place(measured, box, 540, 1200, true);
+  assert(!measured.hidden,'ゲーム側で隠したあとも再表示できる');
+  measured.style.left='0%';writes=0;
+  actions.place(measured, box, 540, 1200, true);
+  assert.equal(writes,1,'別の処理で動かされた位置は戻す');
   button.disabled = true; handlers.click(event); assert.equal(fired, 1);
   unbind(); assert.equal(Object.keys(handlers).length, 0); assert(stopped > 0);
   console.log('X専用・総合共有・PNG保存・取消・失敗・通常クリック・解除を確認しました');

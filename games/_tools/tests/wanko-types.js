@@ -1,12 +1,5 @@
 /* わんこ爆弾解除を、偽のDOMの上で自動運転して確かめる */
-var fs = require("fs");
-var SRC = "C:/Users/megus/Documents/zounoashi/games/wanko/index.html";
-
-var html = fs.readFileSync(SRC, "utf8");
-var m = html.match(/<script>\n([\s\S]*?)<\/script>/);
-var code = m[1];
-
-/* 内部を覗く穴を、テストのときだけ開ける（ファイルには入れない） */
+var load = require("../harness");
 var hook =
   'window.__dbg = {\n' +
   '  only: function (k) { TYPE_KEYS.length = 0; TYPE_KEYS.push(k); },\n' +
@@ -17,80 +10,14 @@ var hook =
   '  face: FACE, cx: function () { return CX; }, H: function () { return H; },\n' +
   '  ground: function () { return GROUND; }, endY: function () { return END_Y; }, S: S\n' +
   '};\n';
-code = fs.readFileSync(require("path").join(__dirname, "../../audio.js"), "utf8") + "\n;\n" + code;
-code = code.replace("  /* ============ ループ ============ */", hook + "  /* ============ ループ ============ */");
-
-/* ---- 偽のcanvas ---- */
-var drawn = [];
-var gradient = { addColorStop: function () {} };
-var ctx = new Proxy({}, {
-  get: function (t, k) {
-    if (k === "createLinearGradient" || k === "createRadialGradient") return function () { return gradient; };
-    if (k === "measureText") return function (s) { return { width: s.length * 10 }; };
-    if (k === "canvas") return { width: 960, height: 540 };
-    if (typeof k === "symbol") return undefined;
-    return function () {
-      var a = Array.prototype.slice.call(arguments);
-      drawn.push([k].concat(a));
-      return undefined;
-    };
-  },
-  set: function () { return true; }
-});
-
-/* 画面の形。VIEW を変えれば別の縦横比で試せる */
+var game = load("games/wanko/index.html", { inject: hook });
 var VIEW = { w: 430, h: 900 };
-function el() {
-  var h = {};
-  return {
-    style: {},
-    _h: h,
-    parentNode: { get clientWidth() { return VIEW.w; }, get clientHeight() { return VIEW.h; } },
-    getContext: function () { return ctx; },
-    addEventListener: function (n, f) { (h[n] = h[n] || []).push(f); },
-    /* ゲーム座標のまま押せるように、表示サイズ＝ゲーム座標にしておく */
-    getBoundingClientRect: function () { return { left: 0, top: 0, width: 540, height: gameH() }; },
-    fire: function (n, e) { (h[n] || []).forEach(function (f) { f(e || {}); }); }
-  };
-}
-function gameH() { return Math.max(780, Math.min(1700, Math.round(540 * VIEW.h / VIEW.w))); }
-var canvas = el(), wrap = el(), win = el(), doc = el();
-
-/* 触るのは wrap でも window でも受けられるよう、wrap へ投げたぶんは window にも流す */
-(function () { var f = wrap.fire; wrap.fire = function (n, e) { f(n, e); win.fire(n, e); }; })();
-
-var document = {
-  getElementById: function (id) { return id === "c" ? canvas : wrap; },
-  addEventListener: doc.addEventListener,
-  hidden: false,
-  createElement: function () { return { style: {}, click: function () {} }; },
-  body: { appendChild: function () {}, removeChild: function () {} }
-};
-var raf = [];
-var window_ = {
-  addEventListener: win.addEventListener,
-  devicePixelRatio: 1,
-  AudioContext: null,
-  webkitAudioContext: null,
-  navigator: {},
-  open: function () { return null; }
-};
-
-var T = 0;
+var wrap = game.wrap, window_ = { __dbg: game.dbg };
 function noop() {}
-var fn = new Function("window", "document", "performance", "requestAnimationFrame", "zShare", "console", code);
-fn(window_, document, { now: function () { return T; } }, function (f) { raf.push(f); }, noop, console);
+function step(n) { game.step(n); game.drawn.length = 0; }
+function key(k, code, up) { game.key(k, up); }
+var win = { fire: function (name) { if (name === "resize") game.view(VIEW.w, VIEW.h); } };
 
-function step(n) {
-  for (var i = 0; i < (n || 1); i++) {
-    T += 1000 / 60;
-    var q = raf; raf = [];
-    q.forEach(function (f) { f(T); });
-  }
-}
-function key(k, code2, up) {
-  win.fire(up ? "keyup" : "keydown", { key: k, code: code2 || "", repeat: false, preventDefault: noop });
-}
 function tapAt(x, y) {
   wrap.fire("pointerdown", { clientX: x, clientY: y, preventDefault: noop });
   wrap.fire("pointerup", { clientX: x, clientY: y, preventDefault: noop });
@@ -238,7 +165,6 @@ else console.log("OK  Escで最初から");
 
 /* ---- 5: 全体を通しで（乱数まかせ）100個 ---- */
 (function () {
-  var src = fs.readFileSync(SRC, "utf8");
   var keys = ["wire", "color", "sw", "screw", "dial", "time", "pump", "hold", "trace", "keypad"];
   TYPE_RESET();
   function TYPE_RESET() { keys.forEach(function () {}); }
@@ -262,3 +188,5 @@ else console.log("OK  Escで最初から");
 console.log("");
 if (bad.length) { console.log("問題:"); bad.forEach(function (b) { console.log("  - " + b); }); }
 else console.log("問題なし");
+
+if (bad.length) process.exitCode = 1;

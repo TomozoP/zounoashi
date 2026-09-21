@@ -1,7 +1,5 @@
 /* 20個目から出てくる「左右に2台同時」を確かめる */
-var fs = require("fs");
-var SRC = "C:/Users/megus/Documents/zounoashi/games/wanko/index.html";
-var code = fs.readFileSync(SRC, "utf8").match(/<script>\n([\s\S]*?)<\/script>/)[1];
+var load = require("../harness");
 var hook =
   'window.__dbg = {\n' +
   '  only: function (k) { TYPE_KEYS.length = 0; TYPE_KEYS.push(k); },\n' +
@@ -17,45 +15,14 @@ var hook =
   '  now: function () { return { state: (state === "play" && !live().length) ? "serve" : state,\n' +
   '    key: bomb.key, bomb: bomb, score: score, staff: staff.map(function (s) { return { x: Math.round(s.x), mode: s.mode }; }),\n' +
   '    twin: isTwin(), cur: cur, ft: bomb.fuseTime }; }\n};\n';
-code = fs.readFileSync(require("path").join(__dirname, "../../audio.js"), "utf8") + "\n;\n" + code;
-code = code.replace("  /* ============ ループ ============ */", hook + "  /* ============ ループ ============ */");
-
-var gradient = { addColorStop: function () {} };
-var ctx = new Proxy({}, {
-  get: function (t, k) {
-    if (k === "createLinearGradient" || k === "createRadialGradient") return function () { return gradient; };
-    if (k === "measureText") return function (s) { return { width: s.length * 10 }; };
-    if (typeof k === "symbol") return undefined;
-    return function () {};
-  },
-  set: function () { return true; }
-});
+var game = load("games/wanko/index.html", { inject: hook });
 var VIEW = { w: 430, h: 900 };
-function gameH() { return Math.max(780, Math.min(1700, Math.round(540 * VIEW.h / VIEW.w))); }
-function el() {
-  var h = {};
-  return { style: {}, getContext: function () { return ctx; },
-    parentNode: { get clientWidth() { return VIEW.w; }, get clientHeight() { return VIEW.h; } },
-    addEventListener: function (n, f) { (h[n] = h[n] || []).push(f); },
-    getBoundingClientRect: function () { return { left: 0, top: 0, width: 540, height: gameH() }; },
-    fire: function (n, e) { (h[n] || []).forEach(function (f) { f(e || {}); }); } };
-}
-var canvas = el(), wrap = el(), win = el(), doc = el();
-
-/* 触るのは wrap でも window でも受けられるよう、wrap へ投げたぶんは window にも流す */
-(function () { var f = wrap.fire; wrap.fire = function (n, e) { f(n, e); win.fire(n, e); }; })();
-var document = { getElementById: function (id) { return id === "c" ? canvas : wrap; },
-  addEventListener: doc.addEventListener, hidden: false,
-  createElement: function () { return { style: {}, click: function () {} }; },
-  body: { appendChild: function () {}, removeChild: function () {} } };
-var raf = [], T = 0;
+var wrap = game.wrap, window_ = { __dbg: game.dbg };
 function noop() {}
-var window_ = { addEventListener: win.addEventListener, devicePixelRatio: 1, navigator: {}, open: function () { return null; } };
-new Function("window", "document", "performance", "requestAnimationFrame", "zShare", "console", code)(
-  window_, document, { now: function () { return T; } }, function (f) { raf.push(f); }, noop, console);
+function step(n) { game.step(n); game.drawn.length = 0; }
+function key(k, code, up) { game.key(k, up); }
+var win = { fire: function (name) { if (name === "resize") game.view(VIEW.w, VIEW.h); } };
 
-function step(n) { for (var i = 0; i < (n || 1); i++) { T += 1000 / 60; var q = raf; raf = []; q.forEach(function (f) { f(T); }); } }
-function key(k, c, up) { win.fire(up ? "keyup" : "keydown", { key: k, code: c || "", repeat: false, preventDefault: noop }); }
 var D = window_.__dbg, bad = [];
 function pdown(b, x, y) { var p = D.scr(b, x, y); wrap.fire("pointerdown", { clientX: p.x, clientY: p.y, preventDefault: noop }); }
 function pup() { wrap.fire("pointerup", { clientX: 0, clientY: 0, preventDefault: noop }); }
@@ -245,3 +212,5 @@ console.log((bad.length ? "NG  " : "OK  ") + "全" + checked + "通りの組み�
 console.log("");
 if (bad.length) { console.log("問題:"); bad.forEach(function (b) { console.log("  - " + b); }); }
 else console.log("問題なし");
+
+if (bad.length) process.exitCode = 1;

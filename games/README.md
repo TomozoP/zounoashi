@@ -317,6 +317,17 @@ node games/_tools/img.js 拾った絵/ -o games/_hoge/img -w 1080   # 横1080ま
 
 ## 開始画面・スマホの音・長押し（制作時の共通ルール）
 
+雛形の共通処理を使い、同じ処理を新しいゲームへ複製しません。
+
+- `view.js`：`zGameView.measure(wrap, W)` で画面の高さを決め、配置計算後に `fit(canvas, wrap, ctx, W, H, view)` で表示へ反映します。タップ座標は `point(canvas, event, W, H)`。配置計算と3D画面更新の順序はゲームごとに保ちます。
+- `start.js`：`zStartTap(待機中かを返す関数, 指を離したときの関数)` で開始タップを受け取ります。後者には元の出来事が渡ります。段階選択・音声起動・演出はその関数に残し、スワイプ開始など専用の操作へ無理に適用しません。戻り値は登録の解除関数です。
+- `result-actions.js`：結果のボタン位置は `place` に任せます。同じ位置・表示状態の書き直しは共通側で省きます。
+
+これらの変更後は `node games/_tools/tests/common-view-start.js`、
+`node games/_tools/tests/result-actions.js` と対象ゲームのテストを実行します。
+新しい動作確認は `_tools/harness.js` を使い、独自の偽DOMを増やしません。
+ジョイパッドの確認は `node games/_tools/tests/pad.js ゲーム名` で対象を指定できます。省略時は全部を確認します。
+
 音声の再開は `audio.js` の `window.zAudioResume(音声)` を使います。雛形にも入っています。
 初回操作・中断後の再開・短い無音による起動補助をここにまとめ、同じ処理をゲームへ複製しません。
 音声の作成、効果音の作り方、操作を受け取る場所は各ゲームに残します。

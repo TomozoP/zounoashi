@@ -15,7 +15,8 @@ function ok(label, cond, extra) {
 function fresh(kind) {
   for (var i = 0; i < 300; i++) {
     var g = load(FILE, { quiet: true });
-    g.until(function () { return g.probe.now().state === "play"; }, 300);
+    g.press(" ");
+    if (!g.until(function () { return g.probe.now().state === "play"; }, 300)) throw Error("開始後に出番が来ない");
     if (g.probe.now().key === kind) return g;
   }
   return null;

@@ -1,6 +1,14 @@
 /* 結果画面の操作。見た目はゲーム側、共有と保存・クリックの受け口はここに集める。 */
 (function (global) {
   'use strict';
+  var placements = new WeakMap();
+  function placeStyle(button, key, value, previous) {
+    // ブラウザが小数を丸めても、同じ指定を繰り返し書き込まない。
+    if (previous[key] === value && previous[key + 'Applied'] === button.style[key]) return;
+    button.style[key] = value;
+    previous[key] = value;
+    previous[key + 'Applied'] = button.style[key];
+  }
   function done(opt, result) { if (opt.done) opt.done(result); }
   function phone() {
     var n = global.navigator || {};
@@ -80,12 +88,17 @@
       };
     },
     place: function (button, box, width, height, visible) {
-      button.hidden = !visible;
+      if (button.hidden !== !visible) button.hidden = !visible;
       if (!visible) return;
-      button.style.left = box.x / width * 100 + '%';
-      button.style.top = box.y / height * 100 + '%';
-      button.style.width = box.w / width * 100 + '%';
-      button.style.height = box.h / height * 100 + '%';
+      // 動かない結果画面では、同じ表示指定を毎コマ書き直さない。
+      var left = box.x / width * 100 + '%', top = box.y / height * 100 + '%';
+      var w = box.w / width * 100 + '%', h = box.h / height * 100 + '%';
+      var previous = placements.get(button);
+      if (!previous) { previous = {}; placements.set(button, previous); }
+      placeStyle(button, 'left', left, previous);
+      placeStyle(button, 'top', top, previous);
+      placeStyle(button, 'width', w, previous);
+      placeStyle(button, 'height', h, previous);
     }
   };
   global.zResultActions = actions;

@@ -1,40 +1,13 @@
 /* いまの難易度カーブを、ゲーム本体から読み出して並べる */
-var fs = require("fs");
-var SRC = "C:/Users/megus/Documents/zounoashi/games/wanko/index.html";
-var code = fs.readFileSync(SRC, "utf8").match(/<script>\n([\s\S]*?)<\/script>/)[1];
+var load = require("../harness");
 var hook =
   'window.__dbg = {\n' +
   '  make: function (key, k, dual) { TYPE_KEYS.length = 0; TYPE_KEYS.push(key); DUAL_FROM = dual ? 0 : 9999; score = dual ? 10 : (k || 1); spawnWave();\n' +
   '    var b = bombs[0]; return { key: b.key, ft: b.fuseTime, n: b.n, need: b.need, half: b.half,\n' +
   '      sp: b.sp, wid: b.wid, len: b.code && b.code.length, on: b.on && b.on.filter(Boolean).length,\n' +
   '      pts: b.ry && b.ry.length }; }\n};\n';
-code = code.replace("  /* ============ ループ ============ */", hook + "  /* ============ ループ ============ */");
+var D = load("games/wanko/index.html", { inject: hook }).dbg;
 
-var gradient = { addColorStop: function () {} };
-var ctx = new Proxy({}, { get: function (t, k) {
-  if (k === "createLinearGradient" || k === "createRadialGradient") return function () { return gradient; };
-  if (k === "measureText") return function (s) { return { width: s.length * 10 }; };
-  if (typeof k === "symbol") return undefined;
-  return function () {};
-}, set: function () { return true; } });
-function el() {
-  var h = {};
-  return { style: {}, getContext: function () { return ctx; },
-    parentNode: { clientWidth: 430, clientHeight: 900 },
-    addEventListener: function (n, f) { (h[n] = h[n] || []).push(f); },
-    getBoundingClientRect: function () { return { left: 0, top: 0, width: 540, height: 1130 }; },
-    fire: function () {} };
-}
-var canvas = el(), wrap = el(), win = el(), doc = el();
-var document = { getElementById: function (id) { return id === "c" ? canvas : wrap; },
-  addEventListener: function () {}, hidden: false,
-  createElement: function () { return { style: {}, click: function () {} }; },
-  body: { appendChild: function () {}, removeChild: function () {} } };
-function noop() {}
-var window_ = { addEventListener: function () {}, devicePixelRatio: 1, navigator: {}, open: function () { return null; } };
-new Function("window", "document", "performance", "requestAnimationFrame", "zShare", "console", code)(
-  window_, document, { now: function () { return 0; } }, function () {}, noop, console);
-var D = window_.__dbg;
 
 var KS = [0, 5, 10, 15, 20, 30, 40];
 function row(label, f) {
