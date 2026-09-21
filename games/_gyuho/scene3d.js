@@ -559,8 +559,8 @@
       return;
     }
     var cols = [[0, 1], [8, 9], [3, 4], [5, 6], [10, 11], [6, 7], [12, 13]][type] || [0, 1];
-    var high = [40, 160, 46, 260, 150, 120, 60][type] || 40;
-    for (var i = 0; i < 9; i++) {
+    var high = [40, 160, 46, 140, 150, 120, 60][type] || 40;
+    for (var i = 0; i < (type === 3 ? 18 : 9); i++) {
       var m = this.bitPool.pop();
       if (!m) break;
       m.material = this.bitMats[cols[i % cols.length]];
@@ -568,7 +568,8 @@
       m.visible = true;
       var sx = 8 + Math.random() * 22;
       m.scale.set(sx, sx * (0.4 + Math.random() * 0.5), 6 + Math.random() * 14);
-      m.position.set(x + (Math.random() - 0.5) * 70, (baseY || 0) + 20 + Math.random() * high, (Math.random() - 0.5) * 60);
+      m.position.set(x + (Math.random() - 0.5) * 70, (baseY || 0) + 20 + Math.random() * high,
+        (type === 3 ? -z : 0) + (Math.random() - 0.5) * (type === 3 ? 260 : 60));
       m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
       var pw = Math.min(2.4, 0.85 + (this._wsp || 100) / 850);   /* 速いほど豪快に飛ぶ */
       this.bits.push({
