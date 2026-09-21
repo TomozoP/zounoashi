@@ -133,12 +133,12 @@
     };
     /* 道ばたのもの */
     this.side = {
-      fence: pool(40, function () { return self.makeFence(); }),
-      barn:  pool(10, function () { return self.makeBarn(); }),
-      pole:  pool(16, function () { return self.makePole(160, self.M.poleWood); }),
-      rail:  pool(34, function () { return self.makeRail(); }),
-      house: pool(18, function () { return self.makeHouse(); }),
-      tower: pool(20, function () { return self.makeTower(); }),
+      fence: pool(72, function () { return self.makeFence(); }),
+      barn:  pool(18, function () { return self.makeBarn(); }),
+      pole:  pool(20, function () { return self.makePole(160, self.M.poleWood); }),
+      rail:  pool(40, function () { return self.makeRail(); }),
+      house: pool(24, function () { return self.makeHouse(); }),
+      tower: pool(22, function () { return self.makeTower(); }),
       isle:  pool(12, function () { return self.makeIsland(2.1); })
     };
     /* 壊すもの */
@@ -807,7 +807,9 @@
       return;
     }
     var half = Math.floor(list.length / 2);
-    var start = Math.ceil((dist - BEHIND) / gap) * gap;   /* 通りすぎたぶんも残す */
+    /* カメラと物の奥行きより後ろへ抜けてから、遠方へ戻す。 */
+    var behind = Math.max(BEHIND, this.camera.position.z + (kind === "isle" ? 1100 : 300));
+    var start = Math.ceil((dist - behind) / gap) * gap;
     for (var k = 0; k < half; k++) {
       var z = start + k * gap - dist;
       var left = list[k * 2], right = list[k * 2 + 1];
