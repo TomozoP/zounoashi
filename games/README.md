@@ -19,7 +19,8 @@ node games/_tools/new.js hoge "ほげゲーム" "ひとこと説明"
 | `▼DRAW` | 毎コマの絵 |
 | `▼SHARE` | シェアの文 |
 
-制作中の変更はローカルHTTP配信で確認し、そのページを開いて持ち主に見せます。
+制作中の変更はローカルHTTP配信で確認し、既存のプレビュータブを再利用して持ち主に見せます。
+タブを重複させない手順は、直下の `AGENTS.md` の「制作中はローカルプレビューを開く」に従います。
 
 ```bash
 node games/_tools/smoke.js games/_hoge/index.html   # 壊れていないか
