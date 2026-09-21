@@ -1,4 +1,4 @@
-/* 牛歩シミュレーター：押した数・景色の移り変わり・壊すものを測る。
+/* スワイプで加速する牛：押した数・景色の移り変わり・壊すものを測る。
      node games/_tools/tests/gyuho.js
    見るもの
      - 指を上へなぞったぶんだけ速くなる。なぞらなければ落ちも進みもしない
@@ -14,7 +14,7 @@
      - 光の速さに届くと宇宙が壊れ、結果は押した回数
      - 画面の形が変わっても遊べる */
 var load = require("../harness");
-var FILE = "games/_gyuho/index.html";
+var FILE = "games/gyuho/index.html";
 
 var ng = 0;
 function ok(cond, name, info) {
