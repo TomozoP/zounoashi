@@ -183,6 +183,22 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
       </div>
 
       <div class="sec">
+        <h3>ヘッダー</h3>
+        <div class="presets" id="headPresets"></div>
+        <div class="row"><label>フォント</label>
+          <select id="stHeadFont" style="flex:1">
+            <option value="'M PLUS Rounded 1c'|900">丸ゴシック</option>
+            <option value="'Noto Sans JP'|900">ゴシック</option>
+            <option value="'Noto Serif JP'|700">明朝</option>
+            <option value="'Dela Gothic One'|400">極太</option>
+          </select></div>
+        <div class="row"><label>大きさ</label><input type="range" id="stHeadSize" min="40" max="220" step="2" value="110"><span class="val" id="stHeadSizeV"></span></div>
+        <div class="row"><label>帯の高さ</label><input type="range" id="stHeadH" min="0" max="0.5" step="0.01" value="0.2"><span class="val" id="stHeadHV"></span></div>
+        <div class="row"><label>帯の背景</label>
+          <select id="stHeadBg" style="flex:1"><option value="blur">映像のぼかし</option><option value="black">黒</option><option value="white">白</option></select></div>
+      </div>
+
+      <div class="sec">
         <h3>字幕</h3>
         <div class="presets" id="presets"></div>
         <div class="row"><label>フォント</label>
@@ -197,9 +213,6 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
         <div class="row"><label>1枚の文字数</label><input type="range" id="stMax" min="6" max="30" step="1" value="16"><span class="val" id="stMaxV"></span></div>
         <div class="row"><label>画面サイズ</label>
           <select id="stOut" style="flex:1"><option value="source">元の動画のまま</option><option value="vertical">縦 1080×1920</option></select></div>
-        <div class="row"><label>ヘッダーの高さ</label><input type="range" id="stHeadH" min="0" max="0.5" step="0.01" value="0.2"><span class="val" id="stHeadHV"></span></div>
-        <div class="row"><label>ヘッダーの背景</label>
-          <select id="stHeadBg" style="flex:1"><option value="blur">映像のぼかし</option><option value="black">黒</option><option value="white">白</option></select></div>
         <div class="row"><label>映像の配置</label>
           <select id="stFit" style="flex:1"><option value="blur">収める（背景ぼかし）</option><option value="cover">画面いっぱい</option></select></div>
       </div>
@@ -290,7 +303,7 @@ const buffers = new Map();   // id -> {raw, peaks, proc, procKey}
 let vclips = [];             // {id,src,in,out,at,gain}  at の順に並べておく
 let aclips = [];             // {id,buf,in,out,at,gain}
 let subs = [];               // {id,text,start,end}
-const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur', out: 'source', headH: 0.2, headBg: 'blur' };
+const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur', out: 'source', headH: 0.2, headBg: 'blur', headSize: 110, headFont: "'M PLUS Rounded 1c'|900", headPreset: 0 };
 const opt = { off: {}, norm: true, enhance: true, gate: 0.5, vvol: 1, avol: 1, sevol: 1, bgmvol: 0.5 };
 // 音声のレーン：vo=ナレーション（補正あり） se=効果音 bgm=BGM
 const LANES = { vo: 'ナレーション', se: '効果音', bgm: 'BGM' };
@@ -508,7 +521,7 @@ function applyOutSize() {
   if (typeof fitView === 'function') fitView();
 }
 // 字幕などの大きさは、1080 を基準に画面の短い辺に合わせる
-const sz = (n) => (n || style.size) * Math.min(W, H) / 1080;
+const sz = (n, base) => (n || base || style.size) * Math.min(W, H) / 1080;
 const blurC = document.createElement('canvas'); blurC.width = 54; blurC.height = 96; const blg = blurC.getContext('2d');
 const vids = [$('vA'), $('vB')];
 let curV = 0; const vState = [{ clip: null }, { clip: null }];
@@ -534,7 +547,7 @@ function compose(t) {
   g.drawImage(base, 0, 0);
   drawSubs(g, t);
 }
-function subFont(n) { const [fam, w] = style.font.split('|'); return `${w} ${sz(n)}px ${fam}, "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif`; }
+function subFont(n, f, base) { const [fam, w] = (f || style.font).split('|'); return `${w} ${sz(n, base)}px ${fam}, "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif`; }
 function wrapLines(ctx, text, maxW) {
   const out = [];
   for (const para of text.split('\n')) {
@@ -553,12 +566,13 @@ function wrapLines(ctx, text, maxW) {
 const POSY = { top: 0.13, bottom: 0.87 };
 const isHeader = x => x.pos === 'top';
 function drawSubs(ctx, t) {
-  const p = PRESETS[style.preset];
   for (const s of subs) {
     if (t < s.start || t >= s.end || !s.text.trim()) continue;
     if (isOff(isHeader(s) ? 'header' : 'sub')) continue;
     ctx.save();
-    const fs = sz(s.size); ctx.font = subFont(s.size);
+    const head = isHeader(s);
+    const fs = sz(s.size, head ? style.headSize : style.size);
+    ctx.font = subFont(s.size, head ? style.headFont : style.font, head ? style.headSize : style.size);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.miterLimit = 2;
     const lines = wrapLines(ctx, s.text, W * 0.88);
     const lh = fs * 1.22, ext = (lines.length - 1) * lh;
@@ -566,7 +580,7 @@ function drawSubs(ctx, t) {
     const y0 = s.pos === 'top'
       ? (BAND ? BAND / 2 - ext / 2 : POSY.top * H)
       : s.pos === 'bottom' ? BAND + POSY.bottom * ah - ext : BAND + style.y * ah - ext / 2;
-    const sw = fs * 0.2, x = W / 2;
+    const sw = fs * 0.2, x = W / 2, p = PRESETS[head ? style.headPreset : style.preset];
     if (s.box) {
       // 黒帯を敷く
       const wide = Math.max(...lines.map(l => ctx.measureText(l).width));
@@ -588,7 +602,7 @@ function drawSubs(ctx, t) {
 }
 function loadFonts() {
   const txt = subs.map(s => s.text).join('') + 'あ';
-  [...new Set([style.size, ...subs.map(s => s.size).filter(Boolean)])].forEach(n => document.fonts.load(subFont(n), txt).catch(() => {}));
+  for (const f of [style.font, style.headFont]) [...new Set([style.size, style.headSize, ...subs.map(s => s.size).filter(Boolean)])].forEach(n => document.fonts.load(subFont(n, f), txt).catch(() => {}));
   document.fonts.load(subFont(), txt).then(() => { if (!playing) compose(playhead); }).catch(() => {});
 }
 
@@ -1059,7 +1073,7 @@ function delSel(ripple) {
 function addSub(header) {
   commit();
   const s = { id: nid(), text: 'テキスト', start: playhead, end: playhead + 2 };
-  if (header) { s.pos = 'top'; s.size = Math.round(style.size * 1.15); }
+  if (header) s.pos = 'top';
   subs.push(s); subs.sort((a, b) => a.start - b.start);
   setSel('s', s.id);
   changed(true);
@@ -1403,7 +1417,7 @@ function textControls(el, items) {
   const o = items[0];
   $('tPos').value = o.pos || '';
   $('tPos').onchange = e => { commit(); items.forEach(x => e.target.value ? x.pos = e.target.value : delete x.pos); changed(true); };
-  const ts = $('tSize'); ts.value = o.size || style.size; $('tSizeV').textContent = ts.value;
+  const ts = $('tSize'); ts.value = o.size || (isHeader(o) ? style.headSize : style.size); $('tSizeV').textContent = ts.value;
   let first = true;
   ts.oninput = () => { if (first) { undoStack.push(snap()); redoStack.length = 0; first = false; } items.forEach(x => x.size = +ts.value); $('tSizeV').textContent = ts.value; compose(playhead); loadFonts(); };
   ts.onchange = () => { first = true; };
@@ -1446,21 +1460,25 @@ bindRange('stSize', v => v, v => { style.size = v; compose(playhead); });
 bindRange('stY', v => Math.round(v * 100) + '%', v => { style.y = v; compose(playhead); });
 bindRange('stMax', v => v, v => { style.max = v; });
 bindRange('stHeadH', v => Math.round(v * 100) + '%', v => { style.headH = v; applyOutSize(); drawStill(); });
+bindRange('stHeadSize', v => v, v => { style.headSize = v; loadFonts(); compose(playhead); });
 $('optEnhance').onchange = e => { opt.enhance = e.target.checked; mixDirty = true; };
 $('optNorm').onchange = e => { opt.norm = e.target.checked; mixDirty = true; if (playing && !recording) { pause(); play(); } };
 $('stFont').onchange = e => { style.font = e.target.value; loadFonts(); compose(playhead); };
 $('stFit').onchange = e => { style.fit = e.target.value; drawStill(); };
 $('stOut').onchange = e => { style.out = e.target.value; applyOutSize(); drawStill(); };
 $('stHeadBg').onchange = e => { style.headBg = e.target.value; drawStill(); };
+$('stHeadFont').onchange = e => { style.headFont = e.target.value; loadFonts(); compose(playhead); };
 ['optGate', 'optVVol', 'optAVol', 'optSEVol', 'optBGMVol'].forEach(id => $(id).addEventListener('change', () => { if (playing && !recording) { pause(); play(); } }));
 $('optEnhance').addEventListener('change', () => { if (playing && !recording) { pause(); play(); } });
-PRESETS.forEach((p, i) => {
-  const b = document.createElement('button'); b.textContent = p.name;
-  b.style.color = p.fill; b.style.webkitTextStroke = `1.5px ${p.stroke}`; b.style.fontSize = '18px';
-  b.onclick = () => { style.preset = i; [...$('presets').children].forEach((x, j) => x.classList.toggle('on', j === i)); compose(playhead); };
-  if (i === 0) b.classList.add('on');
-  $('presets').appendChild(b);
-});
+for (const [boxId, key] of [['presets', 'preset'], ['headPresets', 'headPreset']]) {
+  PRESETS.forEach((pr, i) => {
+    const b = document.createElement('button'); b.textContent = pr.name;
+    b.style.color = pr.fill; b.style.webkitTextStroke = `1.5px ${pr.stroke}`; b.style.fontSize = '18px';
+    b.onclick = () => { style[key] = i; [...$(boxId).children].forEach((x, j) => x.classList.toggle('on', j === i)); compose(playhead); };
+    if (i === 0) b.classList.add('on');
+    $(boxId).appendChild(b);
+  });
+}
 
 /* ---------- keyboard ---------- */
 addEventListener('keydown', e => {
@@ -1552,8 +1570,10 @@ addEventListener('pagehide', saveState);
 function syncControls() {
   const set = (id, v) => { const e = $(id); if (e.type === 'checkbox') e.checked = v; else e.value = v; e.dispatchEvent(new Event('input')); };
   set('optNorm', opt.norm !== false); set('optEnhance', opt.enhance); set('optGate', opt.gate); set('optVVol', opt.vvol); set('optAVol', opt.avol); set('optSEVol', opt.sevol); set('optBGMVol', opt.bgmvol);
-  set('stHeadH', style.headH ?? 0.2); set('stHeadBg', style.headBg || 'blur'); set('stSize', style.size); set('stY', style.y); set('stMax', style.max); set('stFont', style.font); set('stFit', style.fit); set('stOut', style.out);
+  set('stHeadH', style.headH ?? 0.2); set('stHeadBg', style.headBg || 'blur');
+  set('stHeadSize', style.headSize || 110); set('stHeadFont', style.headFont || style.font); set('stSize', style.size); set('stY', style.y); set('stMax', style.max); set('stFont', style.font); set('stFit', style.fit); set('stOut', style.out);
   [...$('presets').children].forEach((x, j) => x.classList.toggle('on', j === style.preset));
+  [...$('headPresets').children].forEach((x, j) => x.classList.toggle('on', j === (style.headPreset || 0)));
 }
 async function restoreProject() {
   const st = await dbGet('state', 'project');
