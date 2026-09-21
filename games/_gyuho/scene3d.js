@@ -27,7 +27,7 @@
     this.camera.position.set(CAM.x, CAM.y, CAM.z);
     this.camera.lookAt(LOOK.x, LOOK.y, LOOK.z);
     this.fog = new T.Fog(new T.Color("#d5e9f6"), 900, 3000);
-    this.scene.fog = this.fog;
+    this.scene.fog = null;
 
     this.hemi = new T.HemisphereLight("#ffffff", "#6d7a5c", 2.1);
     this.scene.add(this.hemi);
@@ -651,7 +651,7 @@
     var w = s.w;
     if (s.quietSpace && !this._quietSpace) this.clearBits();
     this._quietSpace = !!s.quietSpace;
-    this.scene.fog = w[5] ? null : this.fog;
+    this.scene.fog = null;
     var ws = s.world || 1, cs = CAMS[s.gear] || 1;
     if (this._ws !== ws) {
       this.road.scale.x = ws;
