@@ -20,8 +20,8 @@
     return p.map(v=>({x:s.x+v[0]*Math.cos(s.roll)-v[1]*Math.sin(s.roll),y:v[0]*Math.sin(s.roll)+v[1]*Math.cos(s.roll),z:s.z+v[2]}));
   }
   function create(){
-    const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:3.65,roll:.015,rv:0,bend:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
-    for(let i=0;i<7;i++)s.gates.push({z:13+i*15,height:1.82-i*.085+.28*Math.max(0,1-i/3),passed:false,hit:false,drop:0});
+    const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:4.38,roll:.015,rv:0,bend:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
+    for(let i=0;i<7;i++)s.gates.push({z:16+i*19,height:1.82-i*.085+.28*Math.max(0,1-i/3),passed:false,hit:false,drop:0});
     s.goal=s.gates[s.gates.length-1].z+1.5;
     return s;
   }
@@ -57,7 +57,7 @@
     s.rv+=(s.roll*(1.0+s.bend*1.8)-s.weight*2.9+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
     s.rv*=Math.exp(-1.55*dt);s.roll+=s.rv*dt;
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
-    s.speed+=(4.8+s.score*.10-s.bend*1.65-s.speed)*dt*.85;s.z+=s.speed*dt;
+    s.speed+=(5.76+s.score*.12-s.bend*1.98-s.speed)*dt*.85;s.z+=s.speed*dt;
     s.distance=clamp(s.z,0,s.goal);
     if(Math.abs(s.roll)>.76||Math.abs(s.x)>3.2){fall(s,'balance');return;}
     const p=pose(s);
