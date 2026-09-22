@@ -70,7 +70,7 @@
     function draw(s,w,h){
       const dt=festivalTime===null||s.t<festivalTime?0:Math.min(.05,s.t-festivalTime);festivalTime=s.t;
       const target=s.state==='play'?window.SkatePhysics.clamp((s.bend-.04)/.55,0,1):0;
-      if(s.state==='intro'||s.t===0)festivalFade=0;else festivalFade+=(target-festivalFade)*(1-Math.exp(-dt*4));
+      if(s.state==='intro'||s.state==='fall'||(s.state==='result'&&s.reason!=='clear')||s.t===0)festivalFade=0;else festivalFade+=(target-festivalFade)*(1-Math.exp(-dt*4));
       // 小さな揺れでは切り替えず、起こしてから再び反るたびに次の写真へ。
       if(s.state!=='play'||s.bend<.08)limboActive=false;
       if(s.state==='play'&&s.bend>.18&&!limboActive){limboActive=true;photoIndex=(photoIndex+1)%photos.length;}
