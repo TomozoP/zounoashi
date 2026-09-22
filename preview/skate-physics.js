@@ -21,7 +21,7 @@
   }
   function create(){
     const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:3.65,roll:.015,rv:0,bend:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
-    for(let i=0;i<7;i++)s.gates.push({z:13+i*15,height:1.82-i*.085,passed:false,hit:false,drop:0});
+    for(let i=0;i<7;i++)s.gates.push({z:13+i*15,height:1.82-i*.085+.28*Math.max(0,1-i/3),passed:false,hit:false,drop:0});
     s.goal=s.gates[s.gates.length-1].z+1.5;
     return s;
   }
