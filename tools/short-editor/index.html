@@ -56,6 +56,11 @@ header .title{font-weight:800;margin-right:auto;letter-spacing:.04em}
 #recBtn.on .dot{background:#fff;animation:blink 1s infinite}
 @keyframes blink{50%{opacity:.2}}
 aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;min-height:0}
+#sideNav{position:sticky;top:0;z-index:4;display:flex;flex-wrap:wrap;gap:4px;padding:10px;background:var(--panel);border-bottom:1px solid var(--line)}
+#sideNav button{flex:1 0 auto;padding:7px 8px;font-size:12px}
+#sideNav button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+aside .sec>h3{cursor:default}
+aside .sec>h3:before{content:none}
 [hidden]{display:none!important}
 .sec{padding:12px;border-bottom:1px solid var(--line)}
 .sec h3{margin:0 0 8px;font-size:12px;color:var(--dim);font-weight:600;letter-spacing:.05em;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
@@ -175,6 +180,13 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
     <div class="split col" id="spSide"></div>
 
     <aside>
+      <nav id="sideNav" aria-label="編集設定">
+        <button type="button" data-panel="selection">選択中</button>
+        <button type="button" data-panel="header">ヘッダー</button>
+        <button type="button" data-panel="subtitles">字幕</button>
+        <button type="button" data-panel="audio">音声</button>
+        <button type="button" data-panel="simulation">表示確認</button>
+      </nav>
       <div class="sec" data-section="selection" id="insp"></div>
 
       <div class="sec" data-section="simulation" id="simSettings" hidden>
@@ -253,7 +265,6 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
         <div class="subgroup">
           <h4>録音</h4>
           <label class="chk"><input type="checkbox" id="optMuteRec" checked>録音中は再生音を消す</label>
-          <label class="chk"><input type="checkbox" id="optLiveSTT" checked>録音と同時に文字起こしして字幕にする</label>
         </div>
       </div>
 
@@ -909,7 +920,6 @@ addEventListener('drop', e => {
 
 /* ---------- recording ---------- */
 let recorder = null, recStream = null, recChunks = [], recAt = 0, recT0 = 0, recTimer = 0;
-let sr = null, srSession = 0, srSegs = [], srFirst = {}, srDone = {};
 async function toggleRec() {
   if (exporting) return;
   if (counting) { counting.cancel(); return; }
@@ -929,7 +939,6 @@ async function toggleRec() {
   recording = true;
   if ($('optMuteRec').checked) master.gain.value = 0;
   mr.start(); recT0 = performance.now();
-  startSTT();
   play();
   $('recBtn').classList.add('on');
   recTimer = setInterval(() => $('recLbl').textContent = fmt((performance.now() - recT0) / 1000).slice(0, -3), 200);
@@ -949,7 +958,6 @@ function countdown() {
 function stopRec() {
   recording = false;
   clearInterval(recTimer); $('recLbl').textContent = '録音'; $('recBtn').classList.remove('on');
-  stopSTT();
   if (recorder && recorder.state !== 'inactive') recorder.stop();
   pause(); master.gain.value = 1;
 }
@@ -964,38 +972,10 @@ async function onRecStop() {
   commit();
   const clip = { id: nid(), buf: bid, in: 0, out: raw.duration, at: recAt, gain: 1 };
   aclips.push(clip);
-  if (srSegs.length) addSubsFromSegs(srSegs.map(s => ({ text: s.text, start: recAt + s.start, end: recAt + s.end })));
   setSel('a', clip.id);
   playhead = recAt;
   changed(true);
 }
-function startSTT() {
-  srSegs = []; srFirst = {}; srDone = {};
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!$('optLiveSTT').checked || !SR) { sr = null; return; }
-  const begin = () => {
-    const r = new SR(); r.lang = 'ja-JP'; r.continuous = true; r.interimResults = true;
-    const ses = ++srSession;
-    r.onresult = e => {
-      const t = (performance.now() - recT0) / 1000;
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const key = ses + ':' + i;
-        if (srFirst[key] == null) srFirst[key] = Math.max(0, t - 0.4);
-        if (e.results[i].isFinal && !srDone[key]) {
-          srDone[key] = 1;
-          const text = e.results[i][0].transcript.trim();
-          if (text) srSegs.push({ text, start: srFirst[key], end: t + 0.2 });
-        }
-      }
-    };
-    r.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { toast('この環境では同時文字起こしが使えません'); sr = null; } };
-    r.onend = () => { if (recording && sr === r) begin(); };
-    sr = r; try { r.start(); } catch (e) {}
-  };
-  begin();
-}
-function stopSTT() { const r = sr; sr = null; if (r) try { r.stop(); } catch (e) {} }
-
 // 長い文を字幕1枚ぶんずつに分けて時間を按分
 function splitText(text, max) {
   text = text.replace(/\s+/g, ' ').trim();
@@ -1473,6 +1453,10 @@ addEventListener('resize', applyLayout);
 
 /* ---------- inspector / side ---------- */
 function renderInspector() {
+  const selectionKey = [...sel].sort().join(',');
+  const sidebar = document.querySelector('aside');
+  if (selectionKey && sidebar.dataset.selectionKey !== selectionKey) showSidePanel('selection');
+  sidebar.dataset.selectionKey = selectionKey;
   const el = $('insp');
   const many = selItems();
   if (many.length > 1) {
@@ -1637,7 +1621,7 @@ function fitView() {
 // 端末名は初期値の切り替えだけに使い、比率は実際の表示に合わせて変更できる。
 function updateSimulationControls() {
   const mode = $('simMode').value;
-  $('simSettings').hidden = mode === 'off';
+  showSidePanel(mode === 'off' ? 'header' : 'simulation');
   document.querySelectorAll('[data-sim]').forEach(el => { el.hidden = el.dataset.sim === 'play' ? mode !== 'play' : mode === 'play'; });
 }
 const simRatios = { pc: '0.6666666667', mobile: '0.6666666667' };
@@ -1685,26 +1669,21 @@ splitter($('spTl'), 'tlH', (dx, dy, st) => { lay.tlH = st.tlH - dy; });
 new ResizeObserver(fitView).observe($('stageMain'));
 applyLayout();
 
-// 右の設定は見出しを押すと畳める（開き閉じはこのブラウザに残す）
-(() => {
-  const SEC_KEY = 'shortEditor.secsByName', secs = [...document.querySelectorAll('aside .sec')];
-  let closed = [];
-  try {
-    const saved = localStorage.getItem(SEC_KEY);
-    if (saved) closed = JSON.parse(saved);
-    else {
-      const oldNames = ['selection', 'recording', 'audio', 'header', 'subtitles', 'transcription', 'list', 'simulation'];
-      closed = JSON.parse(localStorage.getItem('shortEditor.secs') || '[]').map(i => oldNames[i]).filter(Boolean);
-    }
-  } catch (e) {}
-  secs.forEach(el => el.classList.toggle('closed', closed.includes(el.dataset.section)));
-  document.querySelector('aside').addEventListener('click', e => {
-    const h = e.target.closest('.sec > h3'); if (!h) return;
-    h.parentElement.classList.toggle('closed');
-    const now = secs.filter(el => el.classList.contains('closed')).map(el => el.dataset.section);
-    try { localStorage.setItem(SEC_KEY, JSON.stringify(now)); } catch (e) {}
+// 設定は用途ごとに切り替え、同時にひとつだけ表示する。
+function showSidePanel(name) {
+  if (name === 'simulation' && $('simMode').value === 'off') name = 'header';
+  document.querySelector('aside').dataset.panel = name;
+  document.querySelectorAll('aside .sec').forEach(el => { el.hidden = el.dataset.section !== name; });
+  document.querySelectorAll('#sideNav button').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.panel === name));
+    if (button.dataset.panel === 'simulation') button.disabled = $('simMode').value === 'off';
   });
-})();
+  document.querySelector('aside').scrollTop = 0;
+}
+document.querySelectorAll('#sideNav button').forEach(button => {
+  button.onclick = () => showSidePanel(button.dataset.panel);
+});
+showSidePanel('header');
 
 // 台本はこのブラウザに残す
 (() => {
