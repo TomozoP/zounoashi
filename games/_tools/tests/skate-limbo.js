@@ -9,7 +9,7 @@ g.key(' ');g.step(20);assert.equal(g.probe.now().state,'intro');g.key(' ',true);
 g.key('ArrowDown');g.step(60);assert(g.probe.now().bend>.98);g.key('ArrowDown',true);g.step(60);assert(g.probe.now().bend<.02);
 g.probe.reset();const H=g.probe.now().H;g.down(270,H-46);g.step(30);assert(g.probe.now().bend>.9);g.wrap.fire('pointercancel',{pointerId:1});g.step(60);assert.equal(g.probe.now().target,-1);assert.equal(g.probe.now().weight,0);
 g.probe.reset();g.down(380,H-150);g.step(15);assert(g.probe.now().roll>0,'右入力の重心移動が以前と逆になる');g.win.fire('blur');g.step(1);assert.equal(g.probe.now().weight,0);
-g.probe.reset();g.key('ArrowRight');g.step(15);assert(g.probe.now().roll>0,'右キーも反転する');g.key('ArrowRight',true);g.probe.reset();g.down(25,H-25);g.step(1);assert(g.probe.now().weight>.9,'広げた左下の端も操作できる');g.up();
+g.probe.reset();g.key('ArrowRight');g.step(15);assert(g.probe.now().roll>0,'右キーも反転する');g.key('ArrowRight',true);g.probe.reset();g.down(65,H-25);g.step(1);assert(g.probe.now().weight>.9,'パッド左下の端も操作できる');g.up();
 g.probe.reset();g.down(50,100);g.step(2);assert.equal(g.probe.now().weight,0,'操作面の外を押しても力は加わらない');
 g=game();const e={pointerId:8,isPrimary:true,button:0,clientX:30,clientY:40,preventDefault(){},stopImmediatePropagation(){}};g.doc.fire('pointerdown',e);g.doc.fire('pointercancel',e);g.doc.fire('pointerup',e);assert.equal(g.probe.now().state,'intro');g.doc.fire('pointerdown',e);g.doc.fire('pointerup',e);assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().target,-1);
 for(const [w,h] of load.SHAPES){g.view(w,h);g.step(2);assert(Number.isFinite(g.probe.now().z));assert(g.probe.now().H>=780);}
@@ -21,7 +21,7 @@ s=running();s.weight=1;for(let i=0;i<240&&s.state==='play';i++)P.step(s,1/60);as
 const stopped=drive(running(),1,240);assert.equal(stopped.speed,0);assert.equal(stopped.state,'play');const stopZ=stopped.z;drive(stopped,1,60);assert.equal(stopped.z,stopZ);drive(stopped,0,60);assert(stopped.speed>2&&stopped.z>stopZ,'起こすと再発進する');
 /* 指の左右調整だけで全バーを通れることを台で確認。内部状態は書き換えない。 */
 g=game();g.press(' ');let steps=0;g.down(270,g.probe.now().H-46);
-while(g.probe.now().state==='play'&&steps++<4200){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);const gate=n.gates.find(v=>!v.passed),brake=gate&&gate.z-n.z<4.8;g.moveTo(270-weight*220,n.H-(brake?46:246));g.step(1);}
+while(g.probe.now().state==='play'&&steps++<4200){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);const gate=n.gates.find(v=>!v.passed),brake=gate&&gate.z-n.z<4.8;g.moveTo(270-weight*180,n.H-(brake?46:246));g.step(1);}
 assert.equal(g.probe.now().score,12);assert.equal(g.probe.now().reason,'clear');g.press(' ');assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().score,0);assert.equal(g.probe.now().z,0);
 console.log('開始・取消・左右の向き・反り・画面6種・衝突・転倒後の関節・再挑戦：確認済み');
 console.log('反り90%まで約0.45秒。上で加速、中央で惰性、下で減速。');
