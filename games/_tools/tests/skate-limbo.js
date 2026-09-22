@@ -28,7 +28,7 @@ console.log('反り90%まで約0.45秒。立つと加速、反ると減速。');
 console.log('転倒後の移動 '+(furthest-collisionZ).toFixed(2)+'m、12本通過 '+(steps/60).toFixed(2)+'秒。');
 
 /* 転倒直後に距離を共有でき、転がった距離で記録が増えない。 */
-g=game();assert.equal(g.probe.now().distance,0);assert.equal(g.probe.now().remaining,226.5);g.press(' ');assert(g.until(()=>g.probe.now().state==='fall',400));
+g=game();assert.equal(g.probe.now().distance,0);assert.equal(g.probe.now().remaining,231);g.press(' ');assert(g.until(()=>g.probe.now().state==='fall',400));
 const record=g.probe.now().distance;assert(record>0);assert(g.probe.now().shareVisible);assert(g.probe.now().shareText.includes(record.toFixed(1)+'m'));
 g.step(180);assert.equal(g.probe.now().distance,record);assert(g.probe.now().z>record);g.tap(150,g.probe.now().H-92);g.step(1);assert.equal(g.probe.now().state,'play');assert(!g.probe.now().shareVisible);assert(g.probe.now().distance<.1);
 console.log('転倒直後の共有・距離の固定・残り距離・ゴール・再挑戦を確認');
@@ -39,3 +39,8 @@ const upright=running(),bent=running();upright.gates.forEach(g=>g.z+=1000);bent.
 // 同じ姿勢でも、斜めバーの低い側は衝突し、高い側は通れる。
 for(const slope of [-.12,.12]){for(const side of [-1,1]){const trial=running();trial.x=side*Math.sign(slope);trial.bend=.8;trial.gates=[{z:5,height:1.5,slope,passed:false,hit:false,drop:0}];trial.goal=6.5;drive(trial,.8,200);assert.equal(trial.reason,side<0?'bar':'clear');}}
 console.log('左右両向きの斜めバーの高さに沿った衝突を確認');
+
+// 最後のバー通過とゴールライン到達を別々に確かめる。
+const finish=running();finish.z=227;finish.distance=227;finish.bend=1;finish.score=12;finish.gates.forEach(g=>g.passed=true);drive(finish,1,1);assert.equal(finish.state,'play');drive(finish,1,180);assert.equal(finish.reason,'clear');assert.equal(finish.distance,231);
+const flat=running(),slopeRun=running();flat.z=100;slopeRun.z=180;for(const v of [flat,slopeRun])v.gates.forEach(g=>g.z+=1000);drive(flat,1,180);drive(slopeRun,1,180);assert(slopeRun.speed>flat.speed+1.8);assert(P.ground(200)<P.ground(170));
+const tumble=running();tumble.z=200;tumble.roll=.77;P.step(tumble,1/60);for(let i=0;i<240;i++)P.step(tumble,1/60);assert(tumble.rag.every(p=>p.y>=P.ground(p.z)+.12));console.log('下り坂の加速・坂での転倒・ゴールライン到達を確認');

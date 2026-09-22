@@ -2,6 +2,9 @@
 (function(root){
   'use strict';
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  // 9本目の手前から、緩やかに下り坂へ移る。
+  const ground=z=>{const d=Math.max(0,z-158);return d<12?-.003*d*d:-.432-(d-12)*.072;};
+  const downhill=z=>clamp((z-158)/12,0,1);
   const links=[[0,1],[1,2],[2,3],[2,4],[4,5],[2,6],[6,7],[0,8],[8,9],[0,10],[10,11],[4,6],[8,10],[0,2]];
   function pose(s){
     const b=s.bend, a=b*1.48, hip=1.35-b*.55-.12*clamp(Math.abs(s.roll)/.6,0,1);
@@ -21,12 +24,12 @@
     // 深く反ると上半身が小刻みに震える。足元は氷につけたまま。
     const tremble=clamp((b-.25)/.75,0,1);
     for(let i=1;i<8;i++){p[i][0]+=Math.sin(s.t*44+i*.35)*.009*tremble;p[i][1]+=Math.sin(s.t*51+i*.45)*.006*tremble;}
-    return p.map(v=>({x:s.x+v[0]*Math.cos(s.roll)-v[1]*Math.sin(s.roll),y:v[0]*Math.sin(s.roll)+v[1]*Math.cos(s.roll),z:s.z+v[2]}));
+    return p.map(v=>({x:s.x+v[0]*Math.cos(s.roll)-v[1]*Math.sin(s.roll),y:ground(s.z+v[2])+v[0]*Math.sin(s.roll)+v[1]*Math.cos(s.roll),z:s.z+v[2]}));
   }
   function create(){
     const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:4.9,roll:.015,rv:0,bend:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
-    for(let i=0;i<12;i++)s.gates.push({z:16+i*19,height:Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3),slope:i<9?0:(i%2===0?.12:-.12),passed:false,hit:false,drop:0});
-    s.goal=s.gates[s.gates.length-1].z+1.5;
+    for(let i=0;i<12;i++)s.gates.push({z:16+i*19,height:Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3),slope:i<4||i>7?0:(i%2===0?.12:-.12),passed:false,hit:false,drop:0});
+    s.goal=s.gates[s.gates.length-1].z+6;
     return s;
   }
   function fall(s,reason,hit){
@@ -50,7 +53,7 @@
       }
       for(let n=0;n<7;n++){
         links.forEach(([a,b],i)=>{const p=s.rag[a],q=s.rag[b],dx=q.x-p.x,dy=q.y-p.y,dz=q.z-p.z,d=Math.hypot(dx,dy,dz)||1,k=(d-s.lengths[i])/d*.5;p.x+=dx*k;p.y+=dy*k;p.z+=dz*k;q.x-=dx*k;q.y-=dy*k;q.z-=dz*k;});
-        s.rag.forEach((p,i)=>{const r=i===3?.16:.13;if(p.y<r){const vy=p.y-p.oy;if(vy<-.04)s.impact=Math.max(s.impact,Math.min(.7,-vy*5));p.y=r;p.oy=r+vy*.23;if(n===6){p.ox=p.x-(p.x-p.ox)*.97;p.oz=p.z-(p.z-p.oz)*.99;}}if(Math.abs(p.x)>3.7){p.x=clamp(p.x,-3.7,3.7);p.ox=p.x+(p.x-p.ox)*.3;}});
+        s.rag.forEach((p,i)=>{const r=ground(p.z)+(i===3?.16:.13);if(p.y<r){const vy=p.y-p.oy;if(vy<-.04)s.impact=Math.max(s.impact,Math.min(.7,-vy*5));p.y=r;p.oy=r+vy*.23;if(n===6){p.ox=p.x-(p.x-p.ox)*.97;p.oz=p.z-(p.z-p.oz)*.99;}}if(Math.abs(p.x)>3.7){p.x=clamp(p.x,-3.7,3.7);p.ox=p.x+(p.x-p.ox)*.3;}});
       }
       s.z=s.rag[0].z;s.x=s.rag[0].x;
       if(s.fallTime>4.5)s.state='result';
@@ -61,28 +64,28 @@
     s.rv+=(s.roll*(1.15+s.bend*2.15)-s.weight*3.35+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
     s.rv*=Math.exp(-1.3*dt);s.roll+=s.rv*dt;
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
-    s.speed+=(6.45+s.score*.13-s.bend*3.05-s.speed)*dt*.85;s.z+=s.speed*dt;
+    s.speed+=(6.45+s.score*.13-s.bend*3.05+downhill(s.z)*2.2-s.speed)*dt*.85;s.z+=s.speed*dt;
     s.distance=clamp(s.z,0,s.goal);
     if(Math.abs(s.roll)>.76||Math.abs(s.x)>3.2){fall(s,'balance');return;}
     const p=pose(s);
     for(const g of s.gates){
       if(g.passed)continue;
-      const slope=g.slope||0,normal=Math.sqrt(1+slope*slope);
+      const slope=g.slope||0,normal=Math.sqrt(1+slope*slope),height=g.height+ground(g.z);
       for(let i=0;i<p.length;i++){
         const v=p[i],radius=i===3?.16:i<3?.2:.12;
-        if(Math.abs(v.z-g.z)<radius+.07&&Math.abs((v.y-g.height-slope*v.x)/normal)<radius+.065&&Math.abs(v.x)<2.5){fall(s,'bar',g);return;}
+        if(Math.abs(v.z-g.z)<radius+.07&&Math.abs((v.y-height-slope*v.x)/normal)<radius+.065&&Math.abs(v.x)<2.5){fall(s,'bar',g);return;}
         if(Math.abs(v.z-g.z)<radius+.09&&Math.abs(v.x)>2.34){fall(s,'post',g);return;}
       }
       /* 関節の点だけでなく、点と点の間の胴体や手足もバーへ当てる。 */
       for(let i=0;i<11;i++){
-        const a=p[links[i][0]],b=p[links[i][1]],dy=(b.y-a.y-slope*(b.x-a.x))/normal,dz=b.z-a.z,ay=(a.y-g.height-slope*a.x)/normal;
+        const a=p[links[i][0]],b=p[links[i][1]],dy=(b.y-a.y-slope*(b.x-a.x))/normal,dz=b.z-a.z,ay=(a.y-height-slope*a.x)/normal;
         const u=clamp((-ay*dy+(g.z-a.z)*dz)/(dy*dy+dz*dz||1),0,1);
         if(Math.abs(a.x+(b.x-a.x)*u)<2.5&&Math.hypot(ay+dy*u,a.z+dz*u-g.z)<(i<2?.24:i===2?.075:.13)+.065){fall(s,'bar',g);return;}
       }
       if(s.z>g.z+1.5){g.passed=true;s.score++;s.flash=1;}
     }
-    if(s.score===s.gates.length){s.state='result';s.reason='clear';}
+    if(s.score===s.gates.length&&s.z>=s.goal){s.state='result';s.reason='clear';}
   }
-  root.SkatePhysics={create,step,pose,links,clamp};
+  root.SkatePhysics={create,step,pose,links,clamp,ground,downhill};
   if(typeof module!=='undefined')module.exports=root.SkatePhysics;
 })(typeof window!=='undefined'?window:globalThis);

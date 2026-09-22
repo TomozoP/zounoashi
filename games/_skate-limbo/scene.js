@@ -3,12 +3,13 @@
   'use strict';
   window.SkateScene=function(){
     const T=window.THREE,scene=new T.Scene();scene.background=new T.Color('#d7edef');scene.fog=new T.Fog('#d7edef',26,83);
+    const ground=window.SkatePhysics.ground,course=window.SkatePhysics.create();
     const renderer=new T.WebGLRenderer({antialias:true,alpha:false,preserveDrawingBuffer:true});renderer.setPixelRatio(1);renderer.outputColorSpace=T.SRGBColorSpace;
     const camera=new T.PerspectiveCamera(40,1,.1,130);
     scene.add(new T.HemisphereLight(0xffffff,0x547d8c,2.0));const sun=new T.DirectionalLight(0xfff1d9,2.2);sun.position.set(-4,12,7);scene.add(sun);
     const mat=c=>new T.MeshStandardMaterial({color:c,roughness:.65});
     const ice=mat('#b9e0e5'),white=mat('#fffaf0'),navy=mat('#203e51'),coral=mat('#ee715b'),skin=mat('#f5d447'),teal=mat('#318c92'),metal=mat('#759baa'),hair=mat('#47362e');
-    function box(w,h,d,m,x,y,z,parent=scene){const o=new T.Mesh(new T.BoxGeometry(w,h,d),m);o.position.set(x,y,z);parent.add(o);return o;}
+    function box(w,h,d,m,x,y,z,parent=scene){const o=new T.Mesh(new T.BoxGeometry(w,h,d,1,1,Math.max(1,Math.ceil(d/2))),m);o.position.set(x,y,z);parent.add(o);return o;}
     function ball(r,m,parent=scene){const o=new T.Mesh(new T.SphereGeometry(r,12,8),m);parent.add(o);return o;}
     const cylinder=new T.CylinderGeometry(1,1,1,10),axis=new T.Vector3(0,1,0);
     function bone(m,r,parent=scene){const o=new T.Mesh(cylinder,m);o.userData.r=r;parent.add(o);return o;}
@@ -24,9 +25,14 @@
     for(let z=-8;z<265;z+=6)box(7.7,.012,.028,lineMat,0,.009,z);
     for(let x of [-2.5,2.5])box(.025,.015,280,lineMat,x,.011,124);
     const circle=new T.Mesh(new T.RingGeometry(2.4,2.43,64),lineMat);circle.rotation.x=-Math.PI/2;circle.position.set(0,.018,7);scene.add(circle);
+    // 床・柵・客席の形を同じ坂へ沿わせる。
+    scene.updateMatrixWorld(true);
+    scene.traverse(o=>{if(!o.isMesh)return;const a=o.geometry.attributes.position,v=new T.Vector3();for(let i=0;i<a.count;i++){v.fromBufferAttribute(a,i);o.localToWorld(v);v.y+=ground(v.z);o.worldToLocal(v);a.setXYZ(i,v.x,v.y,v.z);}a.needsUpdate=true;o.geometry.computeVertexNormals();});
+    // 床に敷いた市松模様の先頭をゴール地点にする。
+    for(let row=0;row<2;row++)for(let col=0;col<16;col++){const z=course.goal+row*.5+.25;const tile=box(.5,.012,.5,(row+col)%2?navy:white,-3.75+col*.5,ground(z)+.02,z);tile.rotation.x=Math.atan(.072);}
     const gates=[];
     for(let i=0;i<12;i++){
-      const g=new T.Group();g.position.z=16+i*19;scene.add(g);const height=Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3),slope=i<9?0:(i%2===0?.12:-.12);
+      const g=new T.Group();g.position.z=16+i*19;g.position.y=ground(g.position.z);scene.add(g);const height=Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3),slope=i<4||i>7?0:(i%2===0?.12:-.12);
       for(let side of [-1,1]){const endHeight=height+side*2.5*slope;box(.14,endHeight+.25,.14,navy,side*2.5,endHeight/2,0,g);box(.6,.07,.65,navy,side*2.5,.035,0,g);ball(.115,white,g).position.set(side*2.5,endHeight+.13,0);}
       const bar=new T.Group();bar.position.y=height;bar.rotation.z=Math.atan(slope);bar.scale.x=Math.sqrt(1+slope*slope);g.add(bar);
       box(5.15,.105,.105,coral,0,0,0,bar);for(let x=-2.4;x<2.5;x+=.45)box(.17,.11,.11,white,x,0,0,bar);
@@ -57,11 +63,11 @@
     function draw(s,w,h){
       if(renderer.domElement.width!==w||renderer.domElement.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(Math.tan(22*Math.PI/180)*h/w)*180/Math.PI;camera.updateProjectionMatrix();}
       const p=s.rag||window.SkatePhysics.pose(s);
-      p.forEach((v,i)=>{spheres[i].position.set(v.x,v.y,v.z);shadows[i].position.x=v.x;shadows[i].position.z=v.z;});
+      p.forEach((v,i)=>{spheres[i].position.set(v.x,v.y,v.z);shadows[i].position.x=v.x;shadows[i].position.z=v.z;shadows[i].position.y=ground(v.z)+.025;});
       parts.forEach(o=>join(o.mesh,p[o.a],p[o.b]));
       head.position.copy(spheres[3].position);head.quaternion.setFromUnitVectors(axis,new T.Vector3(p[3].x-p[2].x,p[3].y-p[2].y,p[3].z-p[2].z).normalize());
       join(scarf,p[2],{x:p[2].x+.005,y:p[2].y+.10,z:p[2].z});
-      boots.forEach((b,i)=>{const v=p[i?11:9],k=p[i?10:8];b.position.set(v.x,v.y,v.z);b.rotation.set(s.rag?Math.atan2(k.z-v.z,k.y-v.y):0,0,s.rag?-(k.x-v.x):s.roll*.3);});
+      boots.forEach((b,i)=>{const v=p[i?11:9],k=p[i?10:8];b.position.set(v.x,v.y,v.z);b.rotation.set(s.rag?Math.atan2(k.z-v.z,k.y-v.y):Math.atan(.072*window.SkatePhysics.downhill(s.z)),0,s.rag?-(k.x-v.x):s.roll*.3);});
       gates.forEach((g,i)=>{const v=s.gates[i];g.bar.position.y=v.hit?Math.max(.12,v.height-v.drop*v.drop*3):v.height;g.bar.rotation.z=Math.atan(v.slope||0)+(v.hit?Math.min(.3,v.drop*.5):0);g.bar.position.z=v.hit?v.drop*1.4:0;});
       if(s.state==='play'){
         if(trackRound!==s){
@@ -73,15 +79,15 @@
         if(!previousFeet)previousFeet=feet.map(v=>({x:v.x,z:v.z}));
         if(Math.abs(s.z-lastZ)>.08){
           const current=trackHistory[trackSlot];
-          feet.forEach((v,i)=>{const prev=previousFeet[i],offset=trackIndex++%3200*6;current.data.set([prev.x,.022,prev.z,v.x,.022,v.z],offset);});
+          feet.forEach((v,i)=>{const prev=previousFeet[i],offset=trackIndex++%3200*6;current.data.set([prev.x,ground(prev.z)+.022,prev.z,v.x,ground(v.z)+.022,v.z],offset);});
           current.count=Math.min(trackIndex,3200);current.geometry.setDrawRange(0,current.count*2);current.geometry.attributes.position.needsUpdate=true;
           previousFeet=feet.map(v=>({x:v.x,z:v.z}));lastZ=s.z;
         }
       }
-      particles.forEach((o,i)=>{const fall=s.state==='fall',phase=fall?s.fallTime-i*.009:(s.t*2+i*.19)%1;o.visible=(fall?phase>0&&phase<1.8:s.state==='play'&&Math.abs(s.roll)>.1);if(o.visible){const origin=p[fall?0:i%2?9:11],k=fall?3:.5;o.position.set(origin.x+Math.sin(i*23)*phase*k,Math.max(.025,(fall?2:.35)*phase-1.3*phase*phase),origin.z-phase*(fall?2:1));}});
+      particles.forEach((o,i)=>{const fall=s.state==='fall',phase=fall?s.fallTime-i*.009:(s.t*2+i*.19)%1;o.visible=(fall?phase>0&&phase<1.8:s.state==='play'&&Math.abs(s.roll)>.1);if(o.visible){const origin=p[fall?0:i%2?9:11],k=fall?3:.5;o.position.set(origin.x+Math.sin(i*23)*phase*k,ground(origin.z-phase*(fall?2:1))+Math.max(.025,(fall?2:.35)*phase-1.3*phase*phase),origin.z-phase*(fall?2:1));}});
       if(s.state==='intro'||s.z<.1)follow=s.z;else follow+=(s.z-follow)*.13;
       const shake=s.impact*.035;
-      camera.position.set(s.x*.8+1.65+Math.sin(s.t*65)*shake,3.2,follow-6.8);camera.lookAt(s.x*.8,.75,follow+1.0);
+      camera.position.set(s.x*.8+1.65+Math.sin(s.t*65)*shake,ground(follow)+3.2,follow-6.8);camera.lookAt(s.x*.8,ground(follow)+.75,follow+1.0);
       renderer.render(scene,camera);return renderer.domElement;
     }
     return {draw};
