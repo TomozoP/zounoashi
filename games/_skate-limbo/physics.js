@@ -8,7 +8,7 @@
   const links=[[0,1],[1,2],[2,3],[2,4],[4,5],[2,6],[6,7],[0,8],[8,9],[0,10],[10,11],[4,6],[8,10],[0,2]];
   function pose(s){
     const b=s.bend, a=b*1.48, hip=1.35-b*.55-.12*clamp(Math.abs(s.roll)/.6,0,1);
-    const skating=(1-b)*(1-b),cycle=Math.sin(s.t*4.8);
+    const skating=(s.thrust||0)*(1-b)*(1-b),cycle=Math.sin(s.t*4.8);
     const p=[[0,hip,.13+b*.3],[0,hip+.34*Math.cos(a),.13+b*.3-.34*Math.sin(a)],
       [0,hip+.68*Math.cos(a),.13+b*.3-.68*Math.sin(a)],
       [0,hip+.91*Math.cos(a),.13+b*.3-.91*Math.sin(a)]];
@@ -31,7 +31,7 @@
     return world;
   }
   function create(){
-    const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:4.9,roll:.015,rv:0,bend:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
+    const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:4.9,roll:.015,rv:0,bend:0,thrust:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
     for(let i=0;i<12;i++)s.gates.push({z:16+i*19,height:Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3),slope:i<4||i>7?0:(i%2===0?.12:-.12),passed:false,hit:false,drop:0});
     s.goal=s.gates[s.gates.length-1].z+6;
     return s;
@@ -63,13 +63,13 @@
       if(s.fallTime>4.5)s.state='result';
       return;
     }
-    const old=s.bend;s.bend+=(s.target-s.bend)*Math.min(1,dt*5);
+    const old=s.bend;s.bend+=(Math.max(0,s.target)-s.bend)*Math.min(1,dt*5);s.thrust+=(Math.max(0,-s.target)-s.thrust)*Math.min(1,dt*6);
     /* 深く反るほど刃の上の重心が不安定。入力は重心への力で、姿勢を直接戻さない。 */
     s.rv+=(s.roll*(1.15+s.bend*2.15)-s.weight*3.35+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
     s.rv*=Math.exp(-1.3*dt);s.roll+=s.rv*dt;
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
-    // 直立で加速、反りで制動。坂でも深く反り続ければ停止できる。
-    const acceleration=(6.45+s.score*.13-s.speed)*.85*(1-s.bend)+downhill(s.z)*1.3-s.bend*2.6;
+    // 上入力で蹴って加速。中央は惰性で滑り、下入力で反って制動する。
+    const acceleration=(6.45+s.score*.13-s.speed)*.85*s.thrust+downhill(s.z)*1.3-s.bend*3.3-.03*(1-s.thrust);
     s.speed=Math.max(0,s.speed+acceleration*dt);s.z+=s.speed*dt;
     s.distance=clamp(s.z,0,s.goal);
     const p=pose(s);
