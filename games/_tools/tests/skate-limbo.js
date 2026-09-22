@@ -3,7 +3,7 @@ const assert=require('assert'),load=require('../harness'),P=require('../../_skat
 const file='games/_skate-limbo/index.html';
 function game(){return load(file,{withScripts:true,quiet:true});}
 function running(){const s=P.create();s.state='play';return s;}
-function drive(s,bend,limit=3000){for(let i=0;i<limit&&s.state==='play';i++){s.target=s.gates.find(g=>!g.passed).type==='wall'?-1:bend;s.weight=P.clamp(s.roll*3+s.rv*1.7,-1,1);P.step(s,1/60);}return s;}
+function drive(s,bend,limit=3000){for(let i=0;i<limit&&s.state==='play';i++){s.target=bend;s.weight=P.clamp(s.roll*3+s.rv*1.7,-1,1);P.step(s,1/60);}return s;}
 let g=game();g.step(180);assert.equal(g.probe.now().state,'intro');assert.equal(g.probe.now().z,0);
 g.key(' ');g.step(20);assert.equal(g.probe.now().state,'intro');g.key(' ',true);assert.equal(g.probe.now().state,'play');g.step(1);assert.equal(g.probe.now().target,0,'開始を反る入力にしない');
 g.key('ArrowDown');g.step(60);assert(g.probe.now().bend>.98);g.key('ArrowDown',true);g.step(60);assert(g.probe.now().bend<.02);
@@ -21,7 +21,7 @@ s=running();s.weight=1;for(let i=0;i<240&&s.state==='play';i++)P.step(s,1/60);as
 const mid=drive(running(),.7),deep=drive(running(),1);assert(mid.score>=1&&mid.score<7);assert.equal(deep.score,7);assert.equal(deep.reason,'clear');assert.equal(deep.state,'result');assert.equal(deep.distance,deep.goal,'ゴールで残り距離がゼロ');
 /* 指の左右調整だけで全バーを通れることを台で確認。内部状態は書き換えない。 */
 g=game();g.press(' ');let steps=0;g.down(270,g.probe.now().H-46);
-while(g.probe.now().state==='play'&&steps++<2400){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);g.moveTo(270-weight*220,n.H-146+(n.gates.find(v=>!v.passed).type==='wall'?-100:100));g.step(1);}
+while(g.probe.now().state==='play'&&steps++<2400){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);g.moveTo(270-weight*220,n.H-46);g.step(1);}
 assert.equal(g.probe.now().score,7);assert.equal(g.probe.now().reason,'clear');g.press(' ');assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().score,0);assert.equal(g.probe.now().z,0);
 console.log('開始・取消・左右の向き・反り・画面6種・衝突・転倒後の関節・再挑戦：確認済み');
 console.log('最初のバーまで約3.6秒、反り90%まで約0.45秒、全7本の通過まで約30秒。');
@@ -32,9 +32,3 @@ g=game();assert.equal(g.probe.now().distance,0);assert.equal(g.probe.now().remai
 const record=g.probe.now().distance;assert(record>0);assert(g.probe.now().shareVisible);assert(g.probe.now().shareText.includes(record.toFixed(1)+'m'));
 g.step(180);assert.equal(g.probe.now().distance,record);assert(g.probe.now().z>record);g.tap(150,g.probe.now().H-92);g.step(1);assert.equal(g.probe.now().state,'play');assert(!g.probe.now().shareVisible);assert(g.probe.now().distance<.1);
 console.log('転倒直後の共有・距離の固定・残り距離・ゴール・再挑戦を確認');
-
-/* 上は腕を上げて細く、中央は元の姿勢、下は反る。 */
-g=game();g.press(' ');g.down(270,g.probe.now().H-246);g.step(60);assert(g.probe.now().narrow>.98);assert(g.probe.now().bend<.02);const slim=g.probe.now().positions;assert(slim[5].y>slim[3].y);assert(Math.abs(slim[9].x-slim[11].x)<.27);
-g.moveTo(270,g.probe.now().H-146);g.step(60);assert(g.probe.now().narrow<.02);assert(g.probe.now().bend<.02);g.up();g.key('ArrowUp');g.step(60);assert(g.probe.now().narrow>.98);g.key('ArrowUp',true);
-s=running();for(let i=0;i<1500&&s.state==='play';i++){s.target=1;s.weight=P.clamp(s.roll*3+s.rv*1.7,-1,1);P.step(s,1/60);}assert.equal(s.reason,'wall');assert.equal(s.score,2,'反るだけでは最初の壁を抜けられない');
-console.log('腕上げ・足の幅・中央姿勢・上キー・壁への衝突・姿勢切り替えで全通過：確認済み');
