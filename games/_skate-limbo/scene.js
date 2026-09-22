@@ -82,7 +82,7 @@
       particles.forEach((o,i)=>{const fall=s.state==='fall',phase=fall?s.fallTime-i*.009:(s.t*2+i*.19)%1;o.visible=(fall?phase>0&&phase<1.8:s.state==='play'&&Math.abs(s.roll)>.1);if(o.visible){const origin=p[fall?0:i%2?9:11],k=fall?3:.5;o.position.set(origin.x+Math.sin(i*23)*phase*k,Math.max(.025,(fall?2:.35)*phase-1.3*phase*phase),origin.z-phase*(fall?2:1));}});
       if(s.state==='intro'||s.z<.1)follow=s.z;else follow+=(s.z-follow)*.13;
       const shake=s.impact*.035;
-      camera.position.set(s.x*.8+3.5+Math.sin(s.t*65)*shake,3.4,follow-6);camera.lookAt(s.x*.8,.75,follow+1.0);
+      camera.position.set(s.x*.8+1.65+Math.sin(s.t*65)*shake,3.2,follow-6.8);camera.lookAt(s.x*.8,.75,follow+1.0);
       renderer.render(scene,camera);return renderer.domElement;
     }
     return {draw};
