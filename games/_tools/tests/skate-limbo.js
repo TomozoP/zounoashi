@@ -18,7 +18,7 @@ let furthest=s.z,maxLift=0;for(let i=0;i<280;i++){P.step(s,1/60);furthest=Math.m
 assert.equal(s.state,'result');assert(furthest-collisionZ>1,'転んだ勢いが氷上の滑りに残る');assert(maxLift>1.4,'手足が持ち上がる');
 P.links.forEach(([a,b],i)=>{const p=s.rag[a],q=s.rag[b];assert(Math.abs(Math.hypot(p.x-q.x,p.y-q.y,p.z-q.z)-s.lengths[i])<.12,'手足がちぎれない');});
 s=running();s.weight=1;for(let i=0;i<240&&s.state==='play';i++)P.step(s,1/60);assert.equal(s.reason,'balance');assert(s.z<13,'バーの前でも重心を崩すと転ぶ');
-const mid=drive(running(),.7),deep=drive(running(),1);assert(mid.score>=1&&mid.score<7);assert.equal(deep.score,7);assert.equal(deep.reason,'clear');assert.equal(deep.state,'result');
+const mid=drive(running(),.7),deep=drive(running(),1);assert(mid.score>=1&&mid.score<7);assert.equal(deep.score,7);assert.equal(deep.reason,'clear');assert.equal(deep.state,'result');assert.equal(deep.distance,deep.goal,'ゴールで残り距離がゼロ');
 /* 指の左右調整だけで全バーを通れることを台で確認。内部状態は書き換えない。 */
 g=game();g.press(' ');let steps=0;g.down(270,g.probe.now().H-46);
 while(g.probe.now().state==='play'&&steps++<2400){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);g.moveTo(270-weight*220,n.H-46);g.step(1);}
@@ -26,3 +26,9 @@ assert.equal(g.probe.now().score,7);assert.equal(g.probe.now().reason,'clear');g
 console.log('開始・取消・左右の向き・反り・画面6種・衝突・転倒後の関節・再挑戦：確認済み');
 console.log('最初のバーまで約3.6秒、反り90%まで約0.45秒、全7本の通過まで約30秒。');
 console.log('転倒後の移動 '+(furthest-collisionZ).toFixed(2)+'m、7本通過 '+(steps/60).toFixed(2)+'秒。');
+
+/* 転倒直後に距離を共有でき、転がった距離で記録が増えない。 */
+g=game();assert.equal(g.probe.now().distance,0);assert.equal(g.probe.now().remaining,104.5);g.press(' ');assert(g.until(()=>g.probe.now().state==='fall',400));
+const record=g.probe.now().distance;assert(record>0);assert(g.probe.now().shareVisible);assert(g.probe.now().shareText.includes(record.toFixed(1)+'m'));
+g.step(180);assert.equal(g.probe.now().distance,record);assert(g.probe.now().z>record);g.tap(150,g.probe.now().H-92);g.step(1);assert.equal(g.probe.now().state,'play');assert(!g.probe.now().shareVisible);assert(g.probe.now().distance<.1);
+console.log('転倒直後の共有・距離の固定・残り距離・ゴール・再挑戦を確認');
