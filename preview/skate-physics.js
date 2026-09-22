@@ -68,7 +68,9 @@
     s.rv+=(s.roll*(1.15+s.bend*2.15)-s.weight*3.35+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
     s.rv*=Math.exp(-1.3*dt);s.roll+=s.rv*dt;
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
-    s.speed+=(6.45+s.score*.13-s.bend*3.05+downhill(s.z)*2.2-s.speed)*dt*.85;s.z+=s.speed*dt;
+    // 直立で加速、反りで制動。坂でも深く反り続ければ停止できる。
+    const acceleration=(6.45+s.score*.13-s.speed)*.85*(1-s.bend)+downhill(s.z)*1.3-s.bend*2.6;
+    s.speed=Math.max(0,s.speed+acceleration*dt);s.z+=s.speed*dt;
     s.distance=clamp(s.z,0,s.goal);
     const p=pose(s);
     // 靴の刃以外が氷へ触れたら転倒する。大きさは描画に合わせる。
