@@ -26,9 +26,9 @@
     const circle=new T.Mesh(new T.RingGeometry(2.4,2.43,64),lineMat);circle.rotation.x=-Math.PI/2;circle.position.set(0,.018,7);scene.add(circle);
     const gates=[];
     for(let i=0;i<7;i++){
-      const g=new T.Group();g.position.z=16+i*19;scene.add(g);const height=1.82-i*.085+.28*Math.max(0,1-i/3);
-      for(let side of [-1,1]){box(.14,height+.25,.14,navy,side*2.5,height/2,0,g);box(.6,.07,.65,navy,side*2.5,.035,0,g);ball(.115,white,g).position.set(side*2.5,height+.13,0);}
-      const bar=new T.Group();bar.position.y=height;g.add(bar);
+      const g=new T.Group();g.position.z=16+i*19;scene.add(g);const height=1.82-i*.085+.28*Math.max(0,1-i/3),slope=i<4?0:(i%2===0?.12:-.12);
+      for(let side of [-1,1]){const endHeight=height+side*2.5*slope;box(.14,endHeight+.25,.14,navy,side*2.5,endHeight/2,0,g);box(.6,.07,.65,navy,side*2.5,.035,0,g);ball(.115,white,g).position.set(side*2.5,endHeight+.13,0);}
+      const bar=new T.Group();bar.position.y=height;bar.rotation.z=Math.atan(slope);bar.scale.x=Math.sqrt(1+slope*slope);g.add(bar);
       box(5.15,.105,.105,coral,0,0,0,bar);for(let x=-2.4;x<2.5;x+=.45)box(.17,.11,.11,white,x,0,0,bar);
       gates.push({group:g,bar});
     }
@@ -62,7 +62,7 @@
       head.position.copy(spheres[3].position);head.quaternion.setFromUnitVectors(axis,new T.Vector3(p[3].x-p[2].x,p[3].y-p[2].y,p[3].z-p[2].z).normalize());
       join(scarf,p[2],{x:p[2].x+.005,y:p[2].y+.10,z:p[2].z});
       boots.forEach((b,i)=>{const v=p[i?11:9],k=p[i?10:8];b.position.set(v.x,v.y,v.z);b.rotation.set(s.rag?Math.atan2(k.z-v.z,k.y-v.y):0,0,s.rag?-(k.x-v.x):s.roll*.3);});
-      gates.forEach((g,i)=>{const v=s.gates[i];g.bar.position.y=v.hit?Math.max(.12,v.height-v.drop*v.drop*3):v.height;g.bar.rotation.z=v.hit?Math.min(.3,v.drop*.5):0;g.bar.position.z=v.hit?v.drop*1.4:0;});
+      gates.forEach((g,i)=>{const v=s.gates[i];g.bar.position.y=v.hit?Math.max(.12,v.height-v.drop*v.drop*3):v.height;g.bar.rotation.z=Math.atan(v.slope||0)+(v.hit?Math.min(.3,v.drop*.5):0);g.bar.position.z=v.hit?v.drop*1.4:0;});
       if(s.state==='play'){
         if(trackRound!==s){
           trackRound=s;trackSlot=(trackSlot+1)%trackHistory.length;trackIndex=0;lastZ=s.z;previousFeet=null;

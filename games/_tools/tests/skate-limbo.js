@@ -34,4 +34,8 @@ g.step(180);assert.equal(g.probe.now().distance,record);assert(g.probe.now().z>r
 console.log('転倒直後の共有・距離の固定・残り距離・ゴール・再挑戦を確認');
 
 // バーのない区間で、姿勢だけによる速度差を確かめる。
-const upright=running(),bent=running();upright.gates.forEach(g=>g.z+=1000);bent.gates.forEach(g=>g.z+=1000);drive(upright,0,180);drive(bent,1,180);assert(upright.speed>bent.speed+1.2,'立った姿勢では十分に速くなる');assert(upright.speed<5.77&&bent.speed>3.7,'速度は急激に変えず範囲内に収める');console.log('3秒後の速度：直立 '+upright.speed.toFixed(2)+'m/s、反り '+bent.speed.toFixed(2)+'m/s');
+const upright=running(),bent=running();upright.gates.forEach(g=>g.z+=1000);bent.gates.forEach(g=>g.z+=1000);drive(upright,0,180);drive(bent,1,180);assert(upright.speed>bent.speed+1.2,'立った姿勢では十分に速くなる');assert(upright.speed<6.46&&bent.speed>4.2,'速度は急激に変えず範囲内に収める');console.log('3秒後の速度：直立 '+upright.speed.toFixed(2)+'m/s、反り '+bent.speed.toFixed(2)+'m/s');
+
+// 同じ姿勢でも、斜めバーの低い側は衝突し、高い側は通れる。
+for(const slope of [-.12,.12]){for(const side of [-1,1]){const trial=running();trial.x=side*Math.sign(slope);trial.bend=.8;trial.gates=[{z:5,height:1.5,slope,passed:false,hit:false,drop:0}];trial.goal=6.5;drive(trial,.8,200);assert.equal(trial.reason,side<0?'bar':'clear');}}
+console.log('左右両向きの斜めバーの高さに沿った衝突を確認');

@@ -20,8 +20,8 @@
     return p.map(v=>({x:s.x+v[0]*Math.cos(s.roll)-v[1]*Math.sin(s.roll),y:v[0]*Math.sin(s.roll)+v[1]*Math.cos(s.roll),z:s.z+v[2]}));
   }
   function create(){
-    const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:4.38,roll:.015,rv:0,bend:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
-    for(let i=0;i<7;i++)s.gates.push({z:16+i*19,height:1.82-i*.085+.28*Math.max(0,1-i/3),passed:false,hit:false,drop:0});
+    const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:4.9,roll:.015,rv:0,bend:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
+    for(let i=0;i<7;i++)s.gates.push({z:16+i*19,height:1.82-i*.085+.28*Math.max(0,1-i/3),slope:i<4?0:(i%2===0?.12:-.12),passed:false,hit:false,drop:0});
     s.goal=s.gates[s.gates.length-1].z+1.5;
     return s;
   }
@@ -57,22 +57,23 @@
     s.rv+=(s.roll*(1.0+s.bend*1.8)-s.weight*2.9+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
     s.rv*=Math.exp(-1.55*dt);s.roll+=s.rv*dt;
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
-    s.speed+=(5.76+s.score*.12-s.bend*1.98-s.speed)*dt*.85;s.z+=s.speed*dt;
+    s.speed+=(6.45+s.score*.13-s.bend*2.22-s.speed)*dt*.85;s.z+=s.speed*dt;
     s.distance=clamp(s.z,0,s.goal);
     if(Math.abs(s.roll)>.76||Math.abs(s.x)>3.2){fall(s,'balance');return;}
     const p=pose(s);
     for(const g of s.gates){
       if(g.passed)continue;
+      const slope=g.slope||0,normal=Math.sqrt(1+slope*slope);
       for(let i=0;i<p.length;i++){
         const v=p[i],radius=i===3?.16:i<3?.2:.12;
-        if(Math.abs(v.z-g.z)<radius+.07&&v.y+radius>g.height-.065&&v.y-radius<g.height+.065&&Math.abs(v.x)<2.5){fall(s,'bar',g);return;}
+        if(Math.abs(v.z-g.z)<radius+.07&&Math.abs((v.y-g.height-slope*v.x)/normal)<radius+.065&&Math.abs(v.x)<2.5){fall(s,'bar',g);return;}
         if(Math.abs(v.z-g.z)<radius+.09&&Math.abs(v.x)>2.34){fall(s,'post',g);return;}
       }
       /* 関節の点だけでなく、点と点の間の胴体や手足もバーへ当てる。 */
       for(let i=0;i<11;i++){
-        const a=p[links[i][0]],b=p[links[i][1]],dy=b.y-a.y,dz=b.z-a.z;
-        const u=clamp(((g.height-a.y)*dy+(g.z-a.z)*dz)/(dy*dy+dz*dz||1),0,1);
-        if(Math.abs(a.x+(b.x-a.x)*u)<2.5&&Math.hypot(a.y+dy*u-g.height,a.z+dz*u-g.z)<(i<2?.24:i===2?.075:.13)+.065){fall(s,'bar',g);return;}
+        const a=p[links[i][0]],b=p[links[i][1]],dy=(b.y-a.y-slope*(b.x-a.x))/normal,dz=b.z-a.z,ay=(a.y-g.height-slope*a.x)/normal;
+        const u=clamp((-ay*dy+(g.z-a.z)*dz)/(dy*dy+dz*dz||1),0,1);
+        if(Math.abs(a.x+(b.x-a.x)*u)<2.5&&Math.hypot(ay+dy*u,a.z+dz*u-g.z)<(i<2?.24:i===2?.075:.13)+.065){fall(s,'bar',g);return;}
       }
       if(s.z>g.z+1.5){g.passed=true;s.score++;s.flash=1;}
     }
