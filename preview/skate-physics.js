@@ -4,7 +4,7 @@
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const links=[[0,1],[1,2],[2,3],[2,4],[4,5],[2,6],[6,7],[0,8],[8,9],[0,10],[10,11],[4,6],[8,10],[0,2]];
   function pose(s){
-    const b=s.bend, a=b*1.48, hip=1.35-b*.55;
+    const b=s.bend, a=b*1.48, hip=1.35-b*.55-.12*clamp(Math.abs(s.roll)/.6,0,1);
     const p=[[0,hip,.13+b*.3],[0,hip+.34*Math.cos(a),.13+b*.3-.34*Math.sin(a)],
       [0,hip+.68*Math.cos(a),.13+b*.3-.68*Math.sin(a)],
       [0,hip+.91*Math.cos(a),.13+b*.3-.91*Math.sin(a)]];

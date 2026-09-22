@@ -38,10 +38,9 @@
     segments.forEach(([a,b,r,m])=>parts.push({a,b,mesh:bone(m,r,person)}));
     for(let i=0;i<12;i++)spheres.push(ball(i===3?.155:i===0?.21:i===1?.23:i===2?.16:i===5||i===7?.085:.11,i===3||i===5||i===7?skin:i<3?coral:i<8?coral:navy,person));
     const head=new T.Group();person.add(head);const cap=ball(.158,hair,head);cap.scale.set(1,.6,1);cap.position.y=.083;
-    const nose=ball(.045,skin,head);nose.position.set(0,-.01,.153);
-    for(const side of [-1,1]){const eye=ball(.022,navy,head);eye.position.set(side*.064,.030,.143);}
+    const nose=ball(.045,skin,head);nose.scale.set(.8,.85,2.8);nose.position.set(0,-.01,.22);
     const scarf=bone(white,.085,person);
-    const boots=[];for(let i=0;i<2;i++){const b=new T.Group();person.add(b);box(.24,.22,.46,white,0,.04,.07,b);box(.035,.075,.60,metal,0,-.10,.05,b);for(let z of [-.03,.08,.19])box(.25,.025,.028,navy,0,.14,z,b);boots.push(b);}
+    const boots=[];for(let i=0;i<2;i++){const b=new T.Group();person.add(b);const toe=ball(1,white,b);toe.scale.set(.125,.105,.24);toe.position.set(0,.015,.09);const ankle=ball(1,white,b);ankle.scale.set(.105,.16,.12);ankle.position.set(0,.09,-.055);const sole=ball(1,navy,b);sole.scale.set(.127,.035,.245);sole.position.set(0,-.06,.08);box(.035,.075,.60,metal,0,-.10,.05,b);for(let z of [-.03,.08,.19])box(.15,.015,.022,navy,0,.115,z,b);boots.push(b);}
     const shadowMat=new T.MeshBasicMaterial({color:0x31566b,transparent:true,opacity:.13,depthWrite:false});
     const shadows=[];for(let i=0;i<12;i++){const m=new T.Mesh(new T.CircleGeometry(i<4?.35:.17,20),shadowMat);m.rotation.x=-Math.PI/2;m.position.y=.025;scene.add(m);shadows.push(m);}
     const particles=[];for(let i=0;i<48;i++){const p=ball(.025+(i%3)*.012,white);p.visible=false;particles.push(p);}
