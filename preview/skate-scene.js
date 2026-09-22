@@ -64,7 +64,7 @@
     });
     let trackRound=null,trackSlot=-1,trackIndex=0,lastZ=-99,previousFeet=null;
     let follow=0,cameraStopped=false;
-    function draw(s,w,h){
+    function draw(s,w,h,thumbnail=false){
       const dt=festivalTime===null||s.t<festivalTime?0:Math.min(.05,s.t-festivalTime);festivalTime=s.t;
       const target=s.state==='play'?window.SkatePhysics.clamp((s.bend-.04)/.55,0,1):0;
       if(s.state==='intro'||s.state==='fall'||(s.state==='result'&&s.reason!=='clear')||s.t===0)festivalFade=0;else festivalFade+=(target-festivalFade)*(1-Math.exp(-dt*4));
@@ -106,6 +106,8 @@
       camera.position.set(s.x*.8+1.65+Math.sin(s.t*65)*shake,ground(follow)+3.2,follow-6.8);camera.lookAt(s.x*.8,ground(follow)+.75,follow+1.0);
       if(s.state==='result'&&s.reason==='clear')cameraStopped=true;
       }
+      // 撮影時だけ、反った体とバーを斜め横から大きく写す。
+      if(thumbnail){camera.position.set(s.x+3.4,ground(s.z)+2.2,s.z-3.4);camera.lookAt(s.x,ground(s.z)+.95,s.z);}
       renderer.render(scene,camera);return renderer.domElement;
     }
     return {draw};

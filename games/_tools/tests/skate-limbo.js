@@ -30,7 +30,7 @@ console.log('転倒後の移動 '+(furthest-collisionZ).toFixed(2)+'m、12本通
 /* 転倒直後に距離を共有でき、転がった距離で記録が増えない。 */
 g=game();assert.equal(g.probe.now().distance,0);assert.equal(g.probe.now().remaining,231);g.press(' ');assert(g.until(()=>g.probe.now().state==='fall',400));
 const record=g.probe.now().distance;assert(record>0);assert(g.probe.now().shareVisible);assert(g.probe.now().shareText.includes(record.toFixed(1)+'m'));
-g.step(180);assert.equal(g.probe.now().distance,record);assert(g.probe.now().z>record);g.tap(150,g.probe.now().H-92);g.step(1);assert.equal(g.probe.now().state,'play');assert(!g.probe.now().shareVisible);assert(g.probe.now().distance<.1);
+g.step(180);assert.equal(g.probe.now().distance,record);assert(g.probe.now().z>record);g.tap(150,g.probe.now().H*.62+31.5);g.step(1);assert.equal(g.probe.now().state,'play');assert(!g.probe.now().shareVisible);assert(g.probe.now().distance<.1);
 console.log('転倒直後の共有・距離の固定・残り距離・ゴール・再挑戦を確認');
 
 // バーのない区間で、姿勢だけによる速度差を確かめる。
