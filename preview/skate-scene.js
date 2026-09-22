@@ -9,18 +9,23 @@
     const camera=new T.PerspectiveCamera(40,1,.1,130);
     scene.add(new T.HemisphereLight(0xffffff,0x547d8c,2.0));const sun=new T.DirectionalLight(0xfff1d9,2.2);sun.position.set(-4,12,7);scene.add(sun);
     const mat=c=>new T.MeshStandardMaterial({color:c,roughness:.65});
-    const ice=mat('#b9e0e5'),white=mat('#fffaf0'),navy=mat('#203e51'),coral=mat('#ee715b'),skin=mat('#f5d447'),metal=mat('#759baa'),hair=mat('#47362e');
+    const ice=mat('#b9e0e5'),white=mat('#fffaf0'),navy=mat('#203e51'),coral=mat('#ee715b'),skin=mat('#f5d447'),teal=mat('#318c92'),metal=mat('#759baa'),hair=mat('#47362e');
     function box(w,h,d,m,x,y,z,parent=scene){const o=new T.Mesh(new T.BoxGeometry(w,h,d,1,1,Math.max(1,Math.ceil(d/2))),m);o.position.set(x,y,z);parent.add(o);return o;}
     function ball(r,m,parent=scene){const o=new T.Mesh(new T.SphereGeometry(r,12,8),m);parent.add(o);return o;}
     const cylinder=new T.CylinderGeometry(1,1,1,10),axis=new T.Vector3(0,1,0);
     function bone(m,r,parent=scene){const o=new T.Mesh(cylinder,m);o.userData.r=r;parent.add(o);return o;}
     function join(o,a,b){const av=new T.Vector3(a.x,a.y,a.z),bv=new T.Vector3(b.x,b.y,b.z),d=bv.clone().sub(av);o.position.copy(av).add(bv).multiplyScalar(.5);o.scale.set(o.userData.r,d.length(),o.userData.r);o.quaternion.setFromUnitVectors(axis,d.normalize());}
     box(8,.15,280,ice,0,-.09,124);
+    for(let side of [-1,1]){
+      box(.19,.78,280,white,side*4,.36,124);box(.24,.10,280,teal,side*4,.8,124);box(.21,.15,280,coral,side*4,.12,124);
+      for(let z=-8;z<260;z+=5){box(.06,1.1,.08,metal,side*4,.98,z);}
+      for(let row=0;row<3;row++)box(1.15,.32,280,mat(row%2?'#9dbec5':'#769ba7'),side*(5+row*.85),.3+row*.43,124);
+    }
     const lineMat=new T.MeshBasicMaterial({color:'#e8f6f5',transparent:true,opacity:.5});
     for(let z=-8;z<265;z+=6)box(7.7,.012,.028,lineMat,0,.009,z);
     for(let x of [-2.5,2.5])box(.025,.015,280,lineMat,x,.011,124);
     const circle=new T.Mesh(new T.RingGeometry(2.4,2.43,64),lineMat);circle.rotation.x=-Math.PI/2;circle.position.set(0,.018,7);scene.add(circle);
-    // 床とラインを同じ坂へ沿わせる。
+    // 床・柵・客席の形を同じ坂へ沿わせる。
     scene.updateMatrixWorld(true);
     scene.traverse(o=>{if(!o.isMesh)return;const a=o.geometry.attributes.position,v=new T.Vector3();for(let i=0;i<a.count;i++){v.fromBufferAttribute(a,i);o.localToWorld(v);v.y+=ground(v.z);o.worldToLocal(v);a.setXYZ(i,v.x,v.y,v.z);}a.needsUpdate=true;o.geometry.computeVertexNormals();});
     // 床に敷いた市松模様の先頭をゴール地点にする。
