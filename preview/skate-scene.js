@@ -34,13 +34,13 @@
     }
     const person=new T.Group();scene.add(person);
     const parts=[],spheres=[];
-    const segments=[[0,1,.27,coral],[1,2,.27,coral],[2,3,.095,skin],[1,4,.105,coral],[4,5,.085,skin],[1,6,.105,coral],[6,7,.085,skin],[0,8,.13,navy],[8,9,.10,navy],[0,10,.13,navy],[10,11,.10,navy]];
+    const segments=[[0,1,.21,coral],[1,2,.24,coral],[2,3,.075,skin],[2,4,.10,coral],[4,5,.085,skin],[2,6,.10,coral],[6,7,.085,skin],[0,8,.145,navy],[8,9,.10,navy],[0,10,.145,navy],[10,11,.10,navy]];
     segments.forEach(([a,b,r,m])=>parts.push({a,b,mesh:bone(m,r,person)}));
-    for(let i=0;i<12;i++)spheres.push(ball(i===3?.24:i===0?.25:i===1?.25:i===2?.21:i===5||i===7?.105:.12,i===3||i===5||i===7?skin:i<3?coral:i<8?coral:navy,person));
-    const head=new T.Group();person.add(head);const cap=ball(.247,hair,head);cap.scale.set(1,.6,1);cap.position.y=.13;
-    const nose=ball(.068,skin,head);nose.position.set(0,-.01,.235);
-    for(const side of [-1,1]){const eye=ball(.035,navy,head);eye.position.set(side*.095,.045,.22);}
-    const scarf=bone(white,.105,person);
+    for(let i=0;i<12;i++)spheres.push(ball(i===3?.155:i===0?.21:i===1?.23:i===2?.16:i===5||i===7?.085:.11,i===3||i===5||i===7?skin:i<3?coral:i<8?coral:navy,person));
+    const head=new T.Group();person.add(head);const cap=ball(.158,hair,head);cap.scale.set(1,.6,1);cap.position.y=.083;
+    const nose=ball(.045,skin,head);nose.position.set(0,-.01,.153);
+    for(const side of [-1,1]){const eye=ball(.022,navy,head);eye.position.set(side*.064,.030,.143);}
+    const scarf=bone(white,.085,person);
     const boots=[];for(let i=0;i<2;i++){const b=new T.Group();person.add(b);box(.24,.22,.46,white,0,.04,.07,b);box(.035,.075,.60,metal,0,-.10,.05,b);for(let z of [-.03,.08,.19])box(.25,.025,.028,navy,0,.14,z,b);boots.push(b);}
     const shadowMat=new T.MeshBasicMaterial({color:0x31566b,transparent:true,opacity:.13,depthWrite:false});
     const shadows=[];for(let i=0;i<12;i++){const m=new T.Mesh(new T.CircleGeometry(i<4?.35:.17,20),shadowMat);m.rotation.x=-Math.PI/2;m.position.y=.025;scene.add(m);shadows.push(m);}
@@ -48,7 +48,7 @@
     const trackGeo=new T.BufferGeometry(),trackData=new Float32Array(720*6);trackGeo.setAttribute('position',new T.BufferAttribute(trackData,3));const tracks=new T.LineSegments(trackGeo,new T.LineBasicMaterial({color:'#f6ffff',transparent:true,opacity:.65}));scene.add(tracks);let trackIndex=0,lastZ=-99;
     let follow=0;
     function draw(s,w,h){
-      if(renderer.domElement.width!==w||renderer.domElement.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(Math.tan(27.5*Math.PI/180)*h/w)*180/Math.PI;camera.updateProjectionMatrix();}
+      if(renderer.domElement.width!==w||renderer.domElement.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(Math.tan(22*Math.PI/180)*h/w)*180/Math.PI;camera.updateProjectionMatrix();}
       const p=s.rag||window.SkatePhysics.pose(s);
       p.forEach((v,i)=>{spheres[i].position.set(v.x,v.y,v.z);shadows[i].position.x=v.x;shadows[i].position.z=v.z;});
       parts.forEach(o=>join(o.mesh,p[o.a],p[o.b]));
@@ -61,7 +61,7 @@
       particles.forEach((o,i)=>{const fall=s.state==='fall',phase=fall?s.fallTime-i*.009:(s.t*2+i*.19)%1;o.visible=(fall?phase>0&&phase<1.8:s.state==='play'&&Math.abs(s.roll)>.1);if(o.visible){const origin=p[fall?0:i%2?9:11],k=fall?3:.5;o.position.set(origin.x+Math.sin(i*23)*phase*k,Math.max(.025,(fall?2:.35)*phase-1.3*phase*phase),origin.z-phase*(fall?2:1));}});
       if(s.state==='intro'||s.z<.1)follow=s.z;else follow+=(s.z-follow)*.13;
       const shake=s.impact*.035;
-      camera.position.set(3.5+Math.sin(s.t*65)*shake,3.4,follow-6);camera.lookAt(0,1.0,follow+1.2);
+      camera.position.set(s.x*.8+3.5+Math.sin(s.t*65)*shake,3.4,follow-6);camera.lookAt(s.x*.8,.75,follow+1.0);
       renderer.render(scene,camera);return renderer.domElement;
     }
     return {draw};

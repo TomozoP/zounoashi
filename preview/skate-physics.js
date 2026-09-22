@@ -2,15 +2,15 @@
 (function(root){
   'use strict';
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-  const links=[[0,1],[1,2],[2,3],[1,4],[4,5],[1,6],[6,7],[0,8],[8,9],[0,10],[10,11],[4,6],[8,10],[0,2]];
+  const links=[[0,1],[1,2],[2,3],[2,4],[4,5],[2,6],[6,7],[0,8],[8,9],[0,10],[10,11],[4,6],[8,10],[0,2]];
   function pose(s){
-    const b=s.bend, a=b*1.48, hip=1.15-b*.38;
-    const p=[[0,hip,.13+b*.3],[0,hip+.43*Math.cos(a),.13+b*.3-.43*Math.sin(a)],
-      [0,hip+.86*Math.cos(a),.13+b*.3-.86*Math.sin(a)],
-      [0,hip+1.12*Math.cos(a),.13+b*.3-1.12*Math.sin(a)]];
+    const b=s.bend, a=b*1.48, hip=1.35-b*.55;
+    const p=[[0,hip,.13+b*.3],[0,hip+.34*Math.cos(a),.13+b*.3-.34*Math.sin(a)],
+      [0,hip+.68*Math.cos(a),.13+b*.3-.68*Math.sin(a)],
+      [0,hip+.91*Math.cos(a),.13+b*.3-.91*Math.sin(a)]];
     for(const side of [-1,1]){
-      p.push([side*(.43+b*.12),hip+.36*Math.cos(a),.05-b*.26]);
-      p.push([side*(.69+b*.13),hip+.08,.18-b*.35]);
+      p.push([side*(.43+b*.12),hip+.43*Math.cos(a),.05-b*.26]);
+      p.push([side*(.69+b*.13),hip+.16,.18-b*.35]);
     }
     for(const side of [-1,1]){
       const stride=Math.sin(s.t*3.8)*.12*(1-b);
@@ -45,7 +45,7 @@
       }
       for(let n=0;n<7;n++){
         links.forEach(([a,b],i)=>{const p=s.rag[a],q=s.rag[b],dx=q.x-p.x,dy=q.y-p.y,dz=q.z-p.z,d=Math.hypot(dx,dy,dz)||1,k=(d-s.lengths[i])/d*.5;p.x+=dx*k;p.y+=dy*k;p.z+=dz*k;q.x-=dx*k;q.y-=dy*k;q.z-=dz*k;});
-        s.rag.forEach((p,i)=>{const r=i===3?.24:.13;if(p.y<r){const vy=p.y-p.oy;if(vy<-.04)s.impact=Math.max(s.impact,Math.min(.7,-vy*5));p.y=r;p.oy=r+vy*.23;if(n===6){p.ox=p.x-(p.x-p.ox)*.97;p.oz=p.z-(p.z-p.oz)*.99;}}if(Math.abs(p.x)>3.7){p.x=clamp(p.x,-3.7,3.7);p.ox=p.x+(p.x-p.ox)*.3;}});
+        s.rag.forEach((p,i)=>{const r=i===3?.16:.13;if(p.y<r){const vy=p.y-p.oy;if(vy<-.04)s.impact=Math.max(s.impact,Math.min(.7,-vy*5));p.y=r;p.oy=r+vy*.23;if(n===6){p.ox=p.x-(p.x-p.ox)*.97;p.oz=p.z-(p.z-p.oz)*.99;}}if(Math.abs(p.x)>3.7){p.x=clamp(p.x,-3.7,3.7);p.ox=p.x+(p.x-p.ox)*.3;}});
       }
       s.z=s.rag[0].z;s.x=s.rag[0].x;
       if(s.fallTime>4.5)s.state='result';
@@ -62,7 +62,7 @@
     for(const g of s.gates){
       if(g.passed)continue;
       for(let i=0;i<p.length;i++){
-        const v=p[i],radius=i===3?.23:i<3?.2:.12;
+        const v=p[i],radius=i===3?.16:i<3?.2:.12;
         if(Math.abs(v.z-g.z)<radius+.07&&v.y+radius>g.height-.065&&v.y-radius<g.height+.065&&Math.abs(v.x)<2.5){fall(s,'bar',g);return;}
         if(Math.abs(v.z-g.z)<radius+.09&&Math.abs(v.x)>2.34){fall(s,'post',g);return;}
       }
@@ -70,7 +70,7 @@
       for(let i=0;i<11;i++){
         const a=p[links[i][0]],b=p[links[i][1]],dy=b.y-a.y,dz=b.z-a.z;
         const u=clamp(((g.height-a.y)*dy+(g.z-a.z)*dz)/(dy*dy+dz*dz||1),0,1);
-        if(Math.abs(a.x+(b.x-a.x)*u)<2.5&&Math.hypot(a.y+dy*u-g.height,a.z+dz*u-g.z)<(i<2?.27:i===2?.10:.13)+.065){fall(s,'bar',g);return;}
+        if(Math.abs(a.x+(b.x-a.x)*u)<2.5&&Math.hypot(a.y+dy*u-g.height,a.z+dz*u-g.z)<(i<2?.24:i===2?.075:.13)+.065){fall(s,'bar',g);return;}
       }
       if(s.z>g.z+1.5){g.passed=true;s.score++;s.flash=1;}
     }
