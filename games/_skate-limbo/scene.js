@@ -38,6 +38,14 @@
       box(5.15,.105,.105,coral,0,0,0,bar);for(let x=-2.4;x<2.5;x+=.45)box(.17,.11,.11,white,x,0,0,bar);
       gates.push({group:g,bar});
     }
+    // リンボー中だけ、リンクの外側に祭りの旗と紙吹雪が浮かぶ。
+    const carnival=new T.Group();scene.add(carnival);
+    const festivalMaterials=['#ed53a0','#f5ce49','#2ac79f'].map(color=>new T.MeshBasicMaterial({color,transparent:true,opacity:0,depthWrite:false}));
+    for(let z=4;z<250;z+=8)for(const side of [-1,1]){
+      const banner=new T.Mesh(new T.ConeGeometry(.32,.65,3),festivalMaterials[Math.abs(Math.round(z/8)+side)%3]);banner.position.set(side*4.65,ground(z)+2.7,z);banner.rotation.z=Math.PI;carnival.add(banner);
+    }
+    const confetti=[];for(let i=0;i<72;i++){const flake=new T.Mesh(new T.PlaneGeometry(.09,.16),festivalMaterials[i%3]);festivalMaterials[i%3].side=T.DoubleSide;carnival.add(flake);confetti.push(flake);}
+    const calmColor=new T.Color('#d7edef'),festivalColor=new T.Color('#eed4e9');let festivalFade=0,festivalTime=null;
     const person=new T.Group();scene.add(person);
     const parts=[],spheres=[];
     const segments=[[0,1,.21,coral],[1,2,.24,coral],[2,3,.075,skin],[2,4,.10,coral],[4,5,.085,skin],[2,6,.10,coral],[6,7,.085,skin],[0,8,.145,navy],[8,9,.10,navy],[0,10,.145,navy],[10,11,.10,navy]];
@@ -61,6 +69,12 @@
     let trackRound=null,trackSlot=-1,trackIndex=0,lastZ=-99,previousFeet=null;
     let follow=0;
     function draw(s,w,h){
+      const dt=festivalTime===null||s.t<festivalTime?0:Math.min(.05,s.t-festivalTime);festivalTime=s.t;
+      const target=s.state==='play'?window.SkatePhysics.clamp((s.bend-.04)/.55,0,1):0;
+      if(s.state==='intro'||s.t===0)festivalFade=0;else festivalFade+=(target-festivalFade)*(1-Math.exp(-dt*4));
+      scene.background.copy(calmColor).lerp(festivalColor,festivalFade);scene.fog.color.copy(scene.background);
+      carnival.visible=festivalFade>.005;festivalMaterials.forEach(m=>m.opacity=festivalFade*.8);
+      confetti.forEach((o,i)=>{const z=s.z-7+(i*3.71)%42;o.position.set((i%2?1:-1)*(4.35+(i%7)*.26),ground(z)+1.3+((i*.37+s.t*.6)%3.4),z);o.rotation.set(s.t+i,s.t*.7+i*.4,i*.8);});
       if(renderer.domElement.width!==w||renderer.domElement.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(Math.tan(22*Math.PI/180)*h/w)*180/Math.PI;camera.updateProjectionMatrix();}
       const p=s.rag||window.SkatePhysics.pose(s);
       p.forEach((v,i)=>{spheres[i].position.set(v.x,v.y,v.z);shadows[i].position.x=v.x;shadows[i].position.z=v.z;shadows[i].position.y=ground(v.z)+.025;});
