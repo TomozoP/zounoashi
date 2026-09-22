@@ -48,7 +48,7 @@
     const trackHistory=Array.from({length:5},()=>{
       const data=new Float32Array(3200*6),geometry=new T.BufferGeometry();
       geometry.setAttribute('position',new T.BufferAttribute(data,3));geometry.setDrawRange(0,0);
-      const material=new T.LineBasicMaterial({color:'#f6ffff',transparent:true,opacity:.65,depthWrite:false});
+      const material=new T.LineBasicMaterial({color:'#477f91',transparent:true,opacity:.85,depthWrite:false});
       const mesh=new T.LineSegments(geometry,material);mesh.frustumCulled=false;scene.add(mesh);
       return {data,geometry,material,count:0};
     });
@@ -67,7 +67,7 @@
         if(trackRound!==s){
           trackRound=s;trackSlot=(trackSlot+1)%trackHistory.length;trackIndex=0;lastZ=s.z;previousFeet=null;
           const current=trackHistory[trackSlot];current.count=0;current.geometry.setDrawRange(0,0);
-          trackHistory.forEach((v,i)=>{const age=(trackSlot-i+trackHistory.length)%trackHistory.length;v.material.opacity=[.65,.44,.30,.20,.12][age];});
+          trackHistory.forEach((v,i)=>{const age=(trackSlot-i+trackHistory.length)%trackHistory.length;v.material.opacity=[.85,.64,.48,.35,.25][age];});
         }
         const feet=[p[9],p[11]];
         if(!previousFeet)previousFeet=feet.map(v=>({x:v.x,z:v.z}));
