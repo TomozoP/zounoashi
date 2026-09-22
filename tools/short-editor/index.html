@@ -59,6 +59,8 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
 [hidden]{display:none!important}
 .sec{padding:12px;border-bottom:1px solid var(--line)}
 .sec h3{margin:0 0 8px;font-size:12px;color:var(--dim);font-weight:600;letter-spacing:.05em;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+.subgroup{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.subgroup h4{margin:0 0 8px;font-size:12px;color:var(--dim)}
 .sec h3:before{content:'▾';font-size:9px;opacity:.7}
 .sec.closed h3:before{content:'▸'}
 .sec.closed h3{margin:0}
@@ -225,11 +227,19 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
           </select></div>
         <div class="row"><label>共通の大きさ</label><input type="range" id="stSize" min="40" max="180" step="2" value="96"><span class="val" id="stSizeV"></span></div>
         <div class="row"><label>縦位置</label><input type="range" id="stY" min="0.1" max="0.92" step="0.01" value="0.74"><span class="val" id="stYV"></span></div>
-      </div>
-
-      <div class="sec" data-section="list">
-        <h3>字幕一覧</h3>
-        <div id="subList"></div>
+        <div class="subgroup">
+          <h4>文字起こし</h4>
+          <div class="row"><label>モデル</label>
+            <select id="wModel" style="flex:1">
+              <option value="onnx-community/whisper-base">base（速い）</option>
+              <option value="onnx-community/whisper-small" selected>small（正確）</option>
+            </select></div>
+          <div class="row"><label>1枚の文字数</label><input type="range" id="stMax" min="6" max="30" step="1" value="16"><span class="val" id="stMaxV"></span></div>
+          <button id="wBtn" style="width:100%">文字起こしして字幕を作る</button>
+          <div class="bar"><i id="wBar"></i></div>
+          <div class="status" id="wStatus"></div>
+        </div>
+        <div class="subgroup"><h4>字幕一覧</h4><div id="subList"></div></div>
       </div>
 
       <div class="sec" data-section="recording">
@@ -249,18 +259,6 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
         <div class="row"><label>BGM</label><input type="range" id="optBGMVol" min="0" max="2" step="0.05" value="0.5"><span class="val" id="optBGMVolV"></span></div>
       </div>
 
-      <div class="sec" data-section="transcription">
-        <h3>自動文字起こし（Whisper）</h3>
-        <div class="row"><label>モデル</label>
-          <select id="wModel" style="flex:1">
-            <option value="onnx-community/whisper-base">base（速い）</option>
-            <option value="onnx-community/whisper-small" selected>small（正確）</option>
-          </select></div>
-        <div class="row"><label>1枚の文字数</label><input type="range" id="stMax" min="6" max="30" step="1" value="16"><span class="val" id="stMaxV"></span></div>
-        <button id="wBtn" style="width:100%">文字起こしして字幕を作る</button>
-        <div class="bar"><i id="wBar"></i></div>
-        <div class="status" id="wStatus"></div>
-      </div>
     </aside>
   </div>
 
@@ -1066,10 +1064,10 @@ async function runWhisper() {
       .filter(s => s.text.trim() && !/^[\s(（\[].*[)）\]]\s*$/.test(s.text));
     commit();
     // 同じ範囲にある既存字幕は置き換える
-    subs = subs.filter(s => s.end <= offset || s.start >= offset + len);
+    subs = subs.filter(s => isHeader(s) || s.end <= offset || s.start >= offset + len);
     addSubsFromSegs(segs);
     changed(true);
-    st.textContent = segs.length ? `字幕を${subs.length}枚にしました。一覧で誤字を直せます` : '音声が見つかりませんでした';
+    st.textContent = segs.length ? `字幕を${subs.filter(s => !isHeader(s)).length}枚にしました。一覧で誤字を直せます` : '音声が見つかりませんでした';
   } catch (e) {
     console.error(e); st.textContent = '失敗しました：' + (e.message || e);
   } finally { btn.disabled = false; bar.style.width = '0'; }
@@ -1548,10 +1546,11 @@ function renderSubList(onlyCur) {
   if (onlyCur) { [...box.children].forEach(r => r.classList.toggle('cur', playhead >= +r.dataset.s && playhead < +r.dataset.e)); return; }
   if (box.contains(document.activeElement)) return;
   box.innerHTML = '';
-  if (!subs.length) { box.innerHTML = '<div class="status">まだありません</div>'; return; }
-  for (const s of subs) {
+  const subtitles = subs.filter(s => !isHeader(s));
+  if (!subtitles.length) { box.innerHTML = '<div class="status">まだありません</div>'; return; }
+  for (const s of subtitles) {
     const r = document.createElement('div'); r.className = 'it'; r.dataset.s = s.start; r.dataset.e = s.end;
-    const t = document.createElement('span'); t.className = 't'; t.textContent = (isHeader(s) ? '▲' : '') + fmt(s.start).slice(0, -1);
+    const t = document.createElement('span'); t.className = 't'; t.textContent = fmt(s.start).slice(0, -1);
     t.onclick = () => { select('s', s.id); seek(s.start + 0.01); };
     const i = document.createElement('textarea'); i.rows = 1; i.value = s.text;
     const grow = () => { i.style.height = 'auto'; i.style.height = i.scrollHeight + 'px'; };
