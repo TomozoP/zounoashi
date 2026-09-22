@@ -43,4 +43,7 @@ console.log('左右両向きの斜めバーの高さに沿った衝突を確認'
 // 最後のバー通過とゴールライン到達を別々に確かめる。
 const finish=running();finish.z=227;finish.distance=227;finish.bend=1;finish.score=12;finish.gates.forEach(g=>g.passed=true);drive(finish,1,1);assert.equal(finish.state,'play');drive(finish,1,180);assert.equal(finish.reason,'clear');assert.equal(finish.distance,231);
 const flat=running(),slopeRun=running();flat.z=100;slopeRun.z=180;for(const v of [flat,slopeRun])v.gates.forEach(g=>g.z+=1000);drive(flat,1,180);drive(slopeRun,1,180);assert(slopeRun.speed>flat.speed+1.8);assert(P.ground(200)<P.ground(170));
-const tumble=running();tumble.z=200;tumble.roll=.77;P.step(tumble,1/60);for(let i=0;i<240;i++)P.step(tumble,1/60);assert(tumble.rag.every(p=>p.y>=P.ground(p.z)+.12));console.log('下り坂の加速・坂での転倒・ゴールライン到達を確認');
+const tumble=running();tumble.z=200;tumble.roll=1.5;P.step(tumble,1/60);for(let i=0;i<240;i++)P.step(tumble,1/60);assert(tumble.rag.every(p=>p.y>=P.ground(p.z)+.12));console.log('下り坂の加速・坂での転倒・ゴールライン到達を確認');
+
+// 空中に余裕がある傾きでは転ばず、靴も氷へ潜らない。
+for(const z of [0,200])for(const bend of [0,1])for(const side of [-1,1]){const v=running();v.z=z;v.bend=bend;v.target=bend;v.roll=side*.78;P.step(v,1/60);assert.equal(v.state,'play');const pose=P.pose(v);for(const i of [9,11])assert(pose[i].y>=P.ground(pose[i].z)+.119);v.roll=side*1.55;P.step(v,1/60);assert.equal(v.reason,'balance');}console.log('左右の接地・空中での立て直し・坂の上の接触を確認');

@@ -24,7 +24,11 @@
     // 深く反ると上半身が小刻みに震える。足元は氷につけたまま。
     const tremble=clamp((b-.25)/.75,0,1);
     for(let i=1;i<8;i++){p[i][0]+=Math.sin(s.t*44+i*.35)*.009*tremble;p[i][1]+=Math.sin(s.t*51+i*.45)*.006*tremble;}
-    return p.map(v=>({x:s.x+v[0]*Math.cos(s.roll)-v[1]*Math.sin(s.roll),y:ground(s.z+v[2])+v[0]*Math.sin(s.roll)+v[1]*Math.cos(s.roll),z:s.z+v[2]}));
+    const world=p.map(v=>({x:s.x+v[0]*Math.cos(s.roll)-v[1]*Math.sin(s.roll),y:ground(s.z+v[2])+v[0]*Math.sin(s.roll)+v[1]*Math.cos(s.roll),z:s.z+v[2]}));
+    // 傾いても低い側の靴が氷へ潜らない位置を支点にする。
+    const lift=Math.max(...[9,11].map(i=>ground(world[i].z)+.12-world[i].y));
+    world.forEach(v=>v.y+=lift);
+    return world;
   }
   function create(){
     const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:4.9,roll:.015,rv:0,bend:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
@@ -66,8 +70,11 @@
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
     s.speed+=(6.45+s.score*.13-s.bend*3.05+downhill(s.z)*2.2-s.speed)*dt*.85;s.z+=s.speed*dt;
     s.distance=clamp(s.z,0,s.goal);
-    if(Math.abs(s.roll)>.76||Math.abs(s.x)>3.2){fall(s,'balance');return;}
     const p=pose(s);
+    // 靴の刃以外が氷へ触れたら転倒する。大きさは描画に合わせる。
+    const radii=[.21,.23,.16,.155,.11,.085,.11,.085,.11,0,.11,0];
+    const touchesIce=p.some((v,i)=>radii[i]>0&&v.y-radii[i]<=ground(v.z));
+    if(touchesIce||Math.abs(s.x)>3.2){fall(s,'balance');return;}
     for(const g of s.gates){
       if(g.passed)continue;
       const slope=g.slope||0,normal=Math.sqrt(1+slope*slope),height=g.height+ground(g.z);
