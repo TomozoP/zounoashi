@@ -38,6 +38,9 @@ header .title{font-weight:800;margin-right:auto;letter-spacing:.04em}
 #stageMain{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:0;height:100%}
 #viewWrap{position:relative;flex:0 0 auto;background:#000;border-radius:6px;overflow:hidden;box-shadow:0 0 0 1px var(--line)}
 #view{width:100%;height:100%;display:block}
+#simView{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#simView[hidden]{display:none}
+#simBar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:center}
 #drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:14px;pointer-events:none}
 #stage.dragover #viewWrap{box-shadow:0 0 0 3px var(--accent)}
 #count{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35);color:#fff;font-size:min(30vh,180px);font-weight:900;text-shadow:0 4px 18px rgba(0,0,0,.6);pointer-events:none}
@@ -152,8 +155,10 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
       <div id="script"><textarea id="scriptText" placeholder="台本" spellcheck="false"></textarea></div>
       <div class="split col" id="spScript"></div>
       <div id="stageMain">
+        <div id="simBar"><label for="simMode">表示確認</label><select id="simMode"><option value="off">編集画面</option><option value="pc">PCサムネ（目安）</option><option value="mobile">スマホサムネ（目安）</option><option value="play">スマホ再生（目安）</option></select></div>
         <div id="viewWrap">
           <canvas id="view" width="1080" height="1920"></canvas>
+          <canvas id="simView" hidden aria-label="サムネとスマホ再生の表示確認"></canvas>
           <div id="drop">動画をドロップ</div>
           <div id="count"></div>
         </div>
@@ -239,6 +244,15 @@ aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;
       <div class="sec">
         <h3>字幕一覧</h3>
         <div id="subList"></div>
+      </div>
+      <div class="sec">
+        <h3>表示のシミュレート</h3>
+        <div class="row"><label for="simRatio">サムネ比率</label><select id="simRatio"><option value="0.6666666667">2:3</option><option value="0.75">3:4</option><option value="0.5625">9:16</option><option value="1">1:1</option></select></div>
+        <div class="row"><label for="simPhone">スマホ画面</label><select id="simPhone"><option value="2.1666666667">9:19.5</option><option value="2.2222222222">9:20</option><option value="1.7777777778">9:16</option></select></div>
+        <div class="row"><label for="simFit">再生時の映像</label><select id="simFit"><option value="contain">全体を収める</option><option value="cover">画面いっぱい</option></select></div>
+        <div class="row"><label for="simBottom">説明欄の高さ</label><input id="simBottom" type="range" min="12" max="40" value="22"><span id="simBottomV" class="val">22%</span></div>
+        <label class="chk"><input id="simGuide" type="checkbox" checked>重なりの目安を表示</label>
+        <div class="status">端末・表示場所によって異なるため目安です。サムネは中央で切り抜きます。確認用の表示は書き出しに入りません。</div>
       </div>
     </aside>
   </div>
@@ -553,6 +567,50 @@ function drawVideoFrame(el) {
 function compose(t) {
   g.drawImage(base, 0, 0);
   drawSubs(g, t);
+  drawSimulation();
+}
+// 書き出し用の画面には触らず、別の画面に表示確認用の絵を重ねる。
+function simulationSize() {
+  const mode = $('simMode').value;
+  return mode === 'off' ? [W, H] : mode === 'play' ? [390, Math.round(390 * +$('simPhone').value)] : [390, Math.round(390 / +$('simRatio').value)];
+}
+function drawSimulation() {
+  const mode = $('simMode').value, canvas = $('simView');
+  canvas.hidden = mode === 'off';
+  if (canvas.hidden) return;
+  const [w, h] = simulationSize();
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+  const cover = mode !== 'play' || $('simFit').value === 'cover';
+  const scale = (cover ? Math.max : Math.min)(w / W, h / H);
+  ctx.drawImage(view, (w - W * scale) / 2, (h - H * scale) / 2, W * scale, H * scale);
+  if (mode !== 'play') return;
+  const bottom = h * +$('simBottom').value / 100;
+  if ($('simGuide').checked) {
+    ctx.fillStyle = '#ff604033';
+    ctx.fillRect(0, 0, w, 66); ctx.fillRect(w - 66, h * .38, 66, h * .62 - bottom);
+    ctx.fillRect(0, h - bottom, w, bottom);
+    ctx.strokeStyle = '#ffb08a'; ctx.setLineDash([5, 5]);
+    ctx.strokeRect(12, 70, w - 84, Math.max(0, h - bottom - 80)); ctx.setLineDash([]);
+  }
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 17px sans-serif';
+  ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+  ctx.fillText('‹', 18, 38); ctx.fillText('検索　⋮', w - 85, 38);
+  const controls = [['♡', '高評価'], ['▤', 'コメント'], ['↗', '共有'], ['⋯', 'その他']];
+  controls.forEach(([icon, label], i) => {
+    const y = h * .40 + i * (h * .60 - bottom - 25) / 4;
+    ctx.textAlign = 'center'; ctx.font = 'bold 28px sans-serif'; ctx.fillText(icon, w - 33, y);
+    ctx.font = '10px sans-serif'; ctx.fillText(label, w - 33, y + 18);
+  });
+  ctx.textAlign = 'left'; ctx.font = 'bold 14px sans-serif';
+  ctx.fillText('● チャンネル名　 登録', 14, h - bottom + 26);
+  ctx.font = '13px sans-serif'; ctx.fillText('動画のタイトル・説明', 14, h - bottom + 53);
+  ctx.fillText('♪ 音源名', 14, h - 65);
+  ctx.fillStyle = '#111'; ctx.fillRect(0, h - 44, w, 44);
+  ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif';
+  ctx.fillText('ホーム　　 ショート　　 ＋　　 登録　　 マイページ', 12, h - 17);
+  ctx.shadowBlur = 0;
 }
 function subFont(n, f, base) { const [fam, w] = (f || style.font).split('|'); return `${w} ${sz(n, base)}px ${fam}, "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif`; }
 function wrapLines(ctx, text, maxW) {
@@ -1520,10 +1578,23 @@ const lay = { ...LAY_DEF };
 try { Object.assign(lay, JSON.parse(localStorage.getItem(LAY_KEY) || '{}')); } catch (e) {}
 function fitView() {
   const m = $('stageMain'), vw = $('viewWrap');
-  let h = Math.max(80, m.clientHeight - 44), w = h * W / H;
-  if (w > m.clientWidth) { w = m.clientWidth; h = w * H / W; }
+  const [sw, sh] = simulationSize();
+  let h = Math.max(80, m.clientHeight - 52 - $('simBar').offsetHeight), w = h * sw / sh;
+  if (w > m.clientWidth) { w = m.clientWidth; h = w * sh / sw; }
   vw.style.width = w + 'px'; vw.style.height = h + 'px';
 }
+// 端末名は初期値の切り替えだけに使い、比率は実際の表示に合わせて変更できる。
+const simRatios = { pc: '0.6666666667', mobile: '0.75' };
+$('simMode').onchange = () => {
+  const ratio = simRatios[$('simMode').value]; if (ratio) $('simRatio').value = ratio;
+  fitView(); drawSimulation();
+};
+['simRatio', 'simPhone', 'simFit', 'simBottom', 'simGuide'].forEach(id => {
+  $(id).addEventListener('input', () => {
+    if (id === 'simRatio' && simRatios[$('simMode').value]) simRatios[$('simMode').value] = $(id).value;
+    $('simBottomV').textContent = $('simBottom').value + '%'; fitView(); drawSimulation();
+  });
+});
 function applyLayout() {
   const app = $('app');
   lay.sideW = clamp(lay.sideW, 220, Math.max(220, innerWidth * 0.6));
