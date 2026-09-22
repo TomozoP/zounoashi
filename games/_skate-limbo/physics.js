@@ -10,8 +10,8 @@
       [0,hip+.68*Math.cos(a),.13+b*.3-.68*Math.sin(a)],
       [0,hip+.91*Math.cos(a),.13+b*.3-.91*Math.sin(a)]];
     for(const side of [-1,1]){
-      p.push([side*(.43+b*.12),hip+.43*Math.cos(a),.05-b*.26-side*cycle*.13*skating]);
-      p.push([side*(.69+b*.13),hip+.16+Math.abs(cycle)*.045*skating,.18-b*.35-side*cycle*.32*skating]);
+      p.push([side*(.43+b*.12),hip+.43*Math.cos(a)+.025*b*b*b,.05-b*.26-side*cycle*.13*skating]);
+      p.push([side*(.69+b*.13),hip+.16+.035*b*b*b+Math.abs(cycle)*.045*skating,.18-b*.35-side*cycle*.32*skating]);
     }
     for(const side of [-1,1]){
       const stride=cycle*.26*skating,kick=Math.max(0,side*cycle)*skating;
