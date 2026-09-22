@@ -5,17 +5,18 @@
   const links=[[0,1],[1,2],[2,3],[2,4],[4,5],[2,6],[6,7],[0,8],[8,9],[0,10],[10,11],[4,6],[8,10],[0,2]];
   function pose(s){
     const b=s.bend, a=b*1.48, hip=1.35-b*.55-.12*clamp(Math.abs(s.roll)/.6,0,1);
+    const skating=(1-b)*(1-b),cycle=Math.sin(s.t*4.8);
     const p=[[0,hip,.13+b*.3],[0,hip+.34*Math.cos(a),.13+b*.3-.34*Math.sin(a)],
       [0,hip+.68*Math.cos(a),.13+b*.3-.68*Math.sin(a)],
       [0,hip+.91*Math.cos(a),.13+b*.3-.91*Math.sin(a)]];
     for(const side of [-1,1]){
-      p.push([side*(.43+b*.12),hip+.43*Math.cos(a),.05-b*.26]);
-      p.push([side*(.69+b*.13),hip+.16,.18-b*.35]);
+      p.push([side*(.43+b*.12),hip+.43*Math.cos(a),.05-b*.26-side*cycle*.13*skating]);
+      p.push([side*(.69+b*.13),hip+.16+Math.abs(cycle)*.045*skating,.18-b*.35-side*cycle*.32*skating]);
     }
     for(const side of [-1,1]){
-      const stride=Math.sin(s.t*3.8)*.12*(1-b);
-      p.push([side*.23,hip*.48,.28+b*.44+side*stride*.5]);
-      p.push([side*(.23+b*.12),.12,side*(.12+stride)]);
+      const stride=cycle*.26*skating,kick=Math.max(0,side*cycle)*skating;
+      p.push([side*(.23+kick*.10),hip*.48,.28+b*.44+side*stride*.5]);
+      p.push([side*(.23+b*.12+kick*.24),.12,side*.12-side*stride]);
     }
     // 深く反ると上半身が小刻みに震える。足元は氷につけたまま。
     const tremble=clamp((b-.25)/.75,0,1);
