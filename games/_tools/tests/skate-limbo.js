@@ -5,13 +5,13 @@ function game(){return load(file,{withScripts:true,quiet:true});}
 function running(){const s=P.create();s.state='play';return s;}
 function drive(s,bend,limit=4200){for(let i=0;i<limit&&s.state==='play';i++){s.target=bend===0?-1:bend;s.weight=P.clamp(s.roll*3+s.rv*1.7,-1,1);P.step(s,1/60);}return s;}
 let g=game();g.step(180);assert.equal(g.probe.now().state,'intro');assert.equal(g.probe.now().z,0);
-g.key(' ');g.step(20);assert.equal(g.probe.now().state,'intro');g.key(' ',true);assert.equal(g.probe.now().state,'play');g.step(1);assert.equal(g.probe.now().target,0,'開始を反る入力にしない');
+g.key(' ');g.step(20);assert.equal(g.probe.now().state,'intro');g.key(' ',true);assert.equal(g.probe.now().state,'play');g.step(1);assert.equal(g.probe.now().target,-1,'開始を反る入力にしない');
 g.key('ArrowDown');g.step(60);assert(g.probe.now().bend>.98);g.key('ArrowDown',true);g.step(60);assert(g.probe.now().bend<.02);
-g.probe.reset();const H=g.probe.now().H;g.down(270,H-46);g.step(30);assert(g.probe.now().bend>.9);g.wrap.fire('pointercancel',{pointerId:1});g.step(60);assert.equal(g.probe.now().target,0);assert.equal(g.probe.now().weight,0);
+g.probe.reset();const H=g.probe.now().H;g.down(270,H-46);g.step(30);assert(g.probe.now().bend>.9);g.wrap.fire('pointercancel',{pointerId:1});g.step(60);assert.equal(g.probe.now().target,-1);assert.equal(g.probe.now().weight,0);
 g.probe.reset();g.down(380,H-150);g.step(15);assert(g.probe.now().roll>0,'右入力の重心移動が以前と逆になる');g.win.fire('blur');g.step(1);assert.equal(g.probe.now().weight,0);
 g.probe.reset();g.key('ArrowRight');g.step(15);assert(g.probe.now().roll>0,'右キーも反転する');g.key('ArrowRight',true);g.probe.reset();g.down(25,H-25);g.step(1);assert(g.probe.now().weight>.9,'広げた左下の端も操作できる');g.up();
 g.probe.reset();g.down(50,100);g.step(2);assert.equal(g.probe.now().weight,0,'操作面の外を押しても力は加わらない');
-g=game();const e={pointerId:8,isPrimary:true,button:0,clientX:30,clientY:40,preventDefault(){},stopImmediatePropagation(){}};g.doc.fire('pointerdown',e);g.doc.fire('pointercancel',e);g.doc.fire('pointerup',e);assert.equal(g.probe.now().state,'intro');g.doc.fire('pointerdown',e);g.doc.fire('pointerup',e);assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().target,0);
+g=game();const e={pointerId:8,isPrimary:true,button:0,clientX:30,clientY:40,preventDefault(){},stopImmediatePropagation(){}};g.doc.fire('pointerdown',e);g.doc.fire('pointercancel',e);g.doc.fire('pointerup',e);assert.equal(g.probe.now().state,'intro');g.doc.fire('pointerdown',e);g.doc.fire('pointerup',e);assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().target,-1);
 for(const [w,h] of load.SHAPES){g.view(w,h);g.step(2);assert(Number.isFinite(g.probe.now().z));assert(g.probe.now().H>=780);}
 let s=drive(running(),0);assert.equal(s.reason,'bar');assert.equal(s.score,0);const collisionZ=s.z;assert(collisionZ>15&&collisionZ<17);
 let furthest=s.z,maxLift=0;for(let i=0;i<280;i++){P.step(s,1/60);furthest=Math.max(furthest,s.z);for(const p of s.rag){assert(Number.isFinite(p.x+p.y+p.z));assert(p.y>=.12);maxLift=Math.max(maxLift,p.y);}}
@@ -21,7 +21,7 @@ s=running();s.weight=1;for(let i=0;i<240&&s.state==='play';i++)P.step(s,1/60);as
 const stopped=drive(running(),1,240);assert.equal(stopped.speed,0);assert.equal(stopped.state,'play');const stopZ=stopped.z;drive(stopped,1,60);assert.equal(stopped.z,stopZ);drive(stopped,0,60);assert(stopped.speed>2&&stopped.z>stopZ,'起こすと再発進する');
 /* 指の左右調整だけで全バーを通れることを台で確認。内部状態は書き換えない。 */
 g=game();g.press(' ');let steps=0;g.down(270,g.probe.now().H-46);
-while(g.probe.now().state==='play'&&steps++<4200){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);const gate=n.gates.find(v=>!v.passed),brake=gate&&gate.z-n.z<4;g.moveTo(270-weight*220,n.H-(brake?46:246));g.step(1);}
+while(g.probe.now().state==='play'&&steps++<4200){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);const gate=n.gates.find(v=>!v.passed),brake=gate&&gate.z-n.z<4.8;g.moveTo(270-weight*220,n.H-(brake?46:246));g.step(1);}
 assert.equal(g.probe.now().score,12);assert.equal(g.probe.now().reason,'clear');g.press(' ');assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().score,0);assert.equal(g.probe.now().z,0);
 console.log('開始・取消・左右の向き・反り・画面6種・衝突・転倒後の関節・再挑戦：確認済み');
 console.log('反り90%まで約0.45秒。上で加速、中央で惰性、下で減速。');
@@ -50,5 +50,5 @@ for(const z of [0,200])for(const bend of [0,1])for(const side of [-1,1]){const v
 
 const downhillStop=running();downhillStop.z=180;downhillStop.gates.forEach(g=>g.z+=1000);drive(downhillStop,1,360);assert.equal(downhillStop.speed,0,'下り坂でもブレーキで止まれる');assert.equal(downhillStop.state,'play');console.log('平地と坂での停止、直立での再発進を確認');
 
-// 初期位置・指を離した位置は中央。上入力で反らずに加速する。
-g=game();g.press(' ');assert.equal(g.probe.now().target,0);const initialSpeed=g.probe.now().speed;g.key('ArrowUp');g.step(60);assert.equal(g.probe.now().target,-1);assert(g.probe.now().speed>initialSpeed);assert.equal(g.probe.now().bend,0);g.key('ArrowUp',true);g.step(1);assert.equal(g.probe.now().target,0);g.down(270,g.probe.now().H-146);g.step(1);assert.equal(g.probe.now().target,0);g.moveTo(270,g.probe.now().H-246);g.step(1);assert.equal(g.probe.now().target,-1);g.up();g.step(1);assert.equal(g.probe.now().target,0);console.log('中央待機・上への加速・指を離した中央復帰を確認');
+// 初期位置・指を離した位置は上。上入力で反らずに加速する。
+g=game();g.press(' ');assert.equal(g.probe.now().target,-1);const initialSpeed=g.probe.now().speed;g.key('ArrowUp');g.step(60);assert.equal(g.probe.now().target,-1);assert(g.probe.now().speed>initialSpeed);assert.equal(g.probe.now().bend,0);g.key('ArrowUp',true);g.step(1);assert.equal(g.probe.now().target,-1);g.down(270,g.probe.now().H-146);g.step(1);assert.equal(g.probe.now().target,0);g.moveTo(270,g.probe.now().H-246);g.step(1);assert.equal(g.probe.now().target,-1);g.up();g.step(1);assert.equal(g.probe.now().target,-1);console.log('上で待機・中央の惰性・指を離した加速復帰を確認');

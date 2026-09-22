@@ -69,7 +69,7 @@
     s.rv*=Math.exp(-1.3*dt);s.roll+=s.rv*dt;
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
     // 上入力で蹴って加速。中央は惰性で滑り、下入力で反って制動する。
-    const acceleration=(6.45+s.score*.13-s.speed)*.85*s.thrust+downhill(s.z)*1.3-s.bend*3.3-.03*(1-s.thrust);
+    const acceleration=(6.45+s.score*.13-s.speed)*.85*s.thrust+downhill(s.z)*1.3-s.bend*2.9-.03*(1-s.thrust);
     s.speed=Math.max(0,s.speed+acceleration*dt);s.z+=s.speed*dt;
     s.distance=clamp(s.z,0,s.goal);
     const p=pose(s);

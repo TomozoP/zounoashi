@@ -10,7 +10,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#d7edef;overscroll-beh
 (function(){
 'use strict';
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d'),wrap=document.getElementById('wrap'),startButton=document.getElementById('start'),shareButton=document.getElementById('share-button');
-const P=window.SkatePhysics;let s=P.create(),W=540,H=960,view3d=null,keys={},pointer=null,padX=0,padY=0,accum=0;
+const P=window.SkatePhysics;let s=P.create(),W=540,H=960,view3d=null,keys={},pointer=null,padX=0,padY=-1,accum=0;
 if(window.WebGLRenderingContext&&window.THREE)view3d=new window.SkateScene();
 function layout(){const v=window.zGameView.measure(wrap,W);H=v.gameHeight;window.zGameView.fit(canvas,wrap,ctx,W,H,v);startButton.style.width='38.889%';startButton.style.height=(64/H*100)+'%';}
 window.addEventListener('resize',layout);window.addEventListener('orientationchange',layout);
@@ -50,7 +50,8 @@ function updateMusic(){
   if(!AC)return;
   if(!musicBus){musicBus=AC.createGain();musicBus.gain.value=0;musicBus.connect(AC.destination);}
   const active=s.state==='play'&&!document.hidden;
-  musicBus.gain.setTargetAtTime(active?.8:0,AC.currentTime,.09);
+  const limbo=P.clamp((s.bend-.04)/.45,0,1);
+  musicBus.gain.setTargetAtTime(active?limbo*.8:0,AC.currentTime,.18);
   if(!active){musicNext=0;musicStep=0;return;}
   if(AC.state&&AC.state!=='running')return;
   if(musicNext===0||musicNext<AC.currentTime)musicNext=AC.currentTime+.025;
@@ -64,11 +65,14 @@ function updateMusic(){
       chords[bar].forEach((hz,i)=>musicNote(at+i*.006,hz,.22,.055,'triangle',hz*.997));
     }
     if(k===0||k===8)musicNote(at,[98,110,87.31,92.5][bar]*(k===8?1.5:1),.23,.09,'triangle');
-    musicStep++;musicNext+=60/112/4;
+    // 短い笛の呼びかけと返し。高い純音を少し滑らせて息の音を重ねる。
+    const whistles=bar%2===0?{0:1568,3:1760,6:1568,10:2093}:{2:1760,5:1568,8:1319,14:1568};
+    if(whistles[k]){const hz=whistles[k];musicNote(at,hz*.96,k===10?.21:.12,.065,'sine',hz);musicNote(at+.01,hz*2,.09,.009,'sine',hz*2.01);musicShake(at,.008,2800,.09);}
+    musicStep++;musicNext+=60/148/4;
   }
 }
 
-function stopInput(){keys={};pointer=null;padX=0;padY=0;s.weight=0;s.target=0;}
+function stopInput(){keys={};pointer=null;padX=0;padY=-1;s.weight=0;s.target=-1;}
 window.addEventListener('blur',stopInput);document.addEventListener('visibilitychange',function(){stopInput();if(AC){if(document.hidden)AC.suspend();else window.zAudioResume(AC);}});
 function reset(){s=P.create();s.state='play';accum=0;stopInput();startButton.hidden=true;shareButton.hidden=true;}
 function begin(){audioOn();reset();updateMusic();}
@@ -78,7 +82,7 @@ function controlY(){return H-146;}
 function setPointer(x,y){padX=P.clamp((x-270)/220,-1,1);padY=P.clamp((y-controlY())/100,-1,1);}
 wrap.addEventListener('pointerdown',function(e){if(s.state==='intro')return;e.preventDefault();if(s.state==='fall'||s.state==='result'){const p=window.zGameView.point(canvas,e,W,H);if(Math.hypot(p.x-150,p.y-(H-92))<40){audioOn();reset();}return;}if(s.state!=='play'||pointer!==null||e.button>0)return;const p=window.zGameView.point(canvas,e,W,H);if(p.x<16||p.x>524||Math.abs(p.y-controlY())>130)return;pointer=e.pointerId;audioOn();setPointer(p.x,p.y);if(wrap.setPointerCapture)wrap.setPointerCapture(pointer);});
 wrap.addEventListener('pointermove',function(e){if(pointer!==e.pointerId)return;const p=window.zGameView.point(canvas,e,W,H);setPointer(p.x,p.y);});
-function release(e){if(e.pointerId===pointer){pointer=null;padX=0;padY=0;}}
+function release(e){if(e.pointerId===pointer){pointer=null;padX=0;padY=-1;}}
 wrap.addEventListener('pointerup',release);wrap.addEventListener('pointercancel',release);
 window.addEventListener('keydown',function(e){if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' ','Enter','Escape'].includes(e.key))return;e.preventDefault();if(e.key==='Escape'){if(s.state!=='intro')reset();return;}if((s.state==='fall'||s.state==='result')&&(e.key===' '||e.key==='Enter')){if(!e.repeat){audioOn();reset();}return;}if(s.state!=='intro')keys[e.key]=true;});
 window.addEventListener('keyup',function(e){keys[e.key]=false;if(s.state==='intro'&&(e.key===' '||e.key==='Enter'))begin();});
@@ -86,7 +90,7 @@ function shareText(){return 'スケートリンクリンボーダンスで'+s.di
 window.zResultActions.bind(shareButton,()=>window.zResultActions.x({text:shareText()}));
 function update(dt){
   const previousBend=s.bend,previousWeight=s.weight;
-  if(s.state==='play'){s.weight=pointer!==null?-padX:(keys.ArrowLeft?1:0)-(keys.ArrowRight?1:0);s.target=pointer!==null?padY:keys.ArrowDown||keys[' ']?1:keys.ArrowUp?-1:0;}
+  if(s.state==='play'){s.weight=pointer!==null?-padX:(keys.ArrowLeft?1:0)-(keys.ArrowRight?1:0);s.target=pointer!==null?padY:keys.ArrowDown||keys[' ']?1:-1;}
   const prev=s.state,score=s.score;P.step(s,dt);
   if(prev==='play'&&s.state==='fall')sound(true);if(score<s.score)sound(false);
   updateMusic();
