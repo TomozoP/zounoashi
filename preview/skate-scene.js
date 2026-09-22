@@ -45,7 +45,15 @@
     const shadowMat=new T.MeshBasicMaterial({color:0x31566b,transparent:true,opacity:.13,depthWrite:false});
     const shadows=[];for(let i=0;i<12;i++){const m=new T.Mesh(new T.CircleGeometry(i<4?.35:.17,20),shadowMat);m.rotation.x=-Math.PI/2;m.position.y=.025;scene.add(m);shadows.push(m);}
     const particles=[];for(let i=0;i<48;i++){const p=ball(.025+(i%3)*.012,white);p.visible=false;particles.push(p);}
-    const trackGeo=new T.BufferGeometry(),trackData=new Float32Array(720*6);trackGeo.setAttribute('position',new T.BufferAttribute(trackData,3));const tracks=new T.LineSegments(trackGeo,new T.LineBasicMaterial({color:'#f6ffff',transparent:true,opacity:.65}));scene.add(tracks);let trackIndex=0,lastZ=-99;
+    /* 今回と過去4回ぶんを固定数の領域に残し、古い滑走ほど薄くする。 */
+    const trackHistory=Array.from({length:5},()=>{
+      const data=new Float32Array(3200*6),geometry=new T.BufferGeometry();
+      geometry.setAttribute('position',new T.BufferAttribute(data,3));geometry.setDrawRange(0,0);
+      const material=new T.LineBasicMaterial({color:'#f6ffff',transparent:true,opacity:.65,depthWrite:false});
+      const mesh=new T.LineSegments(geometry,material);mesh.frustumCulled=false;scene.add(mesh);
+      return {data,geometry,material,count:0};
+    });
+    let trackRound=null,trackSlot=-1,trackIndex=0,lastZ=-99,previousFeet=null;
     let follow=0;
     function draw(s,w,h){
       if(renderer.domElement.width!==w||renderer.domElement.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(Math.tan(22*Math.PI/180)*h/w)*180/Math.PI;camera.updateProjectionMatrix();}
@@ -56,8 +64,21 @@
       join(scarf,p[2],{x:p[2].x+.005,y:p[2].y+.10,z:p[2].z});
       boots.forEach((b,i)=>{const v=p[i?11:9],k=p[i?10:8];b.position.set(v.x,v.y,v.z);b.rotation.set(s.rag?Math.atan2(k.z-v.z,k.y-v.y):0,0,s.rag?-(k.x-v.x):s.roll*.3);});
       gates.forEach((g,i)=>{const v=s.gates[i];g.bar.position.y=v.hit?Math.max(.12,v.height-v.drop*v.drop*3):v.height;g.bar.rotation.z=v.hit?Math.min(.3,v.drop*.5):0;g.bar.position.z=v.hit?v.drop*1.4:0;});
-      if(s.state==='play'&&Math.abs(s.z-lastZ)>.08){for(let i of [9,11]){let o=trackIndex++%720*6;const v=p[i];trackData.set([v.x,.022,v.z,v.x,.022,v.z-.11],o);}trackGeo.attributes.position.needsUpdate=true;lastZ=s.z;}
-      if(s.z<1&&lastZ>2){trackData.fill(0);trackGeo.attributes.position.needsUpdate=true;lastZ=-99;}
+      if(s.state==='play'){
+        if(trackRound!==s){
+          trackRound=s;trackSlot=(trackSlot+1)%trackHistory.length;trackIndex=0;lastZ=s.z;previousFeet=null;
+          const current=trackHistory[trackSlot];current.count=0;current.geometry.setDrawRange(0,0);
+          trackHistory.forEach((v,i)=>{const age=(trackSlot-i+trackHistory.length)%trackHistory.length;v.material.opacity=[.65,.44,.30,.20,.12][age];});
+        }
+        const feet=[p[9],p[11]];
+        if(!previousFeet)previousFeet=feet.map(v=>({x:v.x,z:v.z}));
+        if(Math.abs(s.z-lastZ)>.08){
+          const current=trackHistory[trackSlot];
+          feet.forEach((v,i)=>{const prev=previousFeet[i],offset=trackIndex++%3200*6;current.data.set([prev.x,.022,prev.z,v.x,.022,v.z],offset);});
+          current.count=Math.min(trackIndex,3200);current.geometry.setDrawRange(0,current.count*2);current.geometry.attributes.position.needsUpdate=true;
+          previousFeet=feet.map(v=>({x:v.x,z:v.z}));lastZ=s.z;
+        }
+      }
       particles.forEach((o,i)=>{const fall=s.state==='fall',phase=fall?s.fallTime-i*.009:(s.t*2+i*.19)%1;o.visible=(fall?phase>0&&phase<1.8:s.state==='play'&&Math.abs(s.roll)>.1);if(o.visible){const origin=p[fall?0:i%2?9:11],k=fall?3:.5;o.position.set(origin.x+Math.sin(i*23)*phase*k,Math.max(.025,(fall?2:.35)*phase-1.3*phase*phase),origin.z-phase*(fall?2:1));}});
       if(s.state==='intro'||s.z<.1)follow=s.z;else follow+=(s.z-follow)*.13;
       const shake=s.impact*.035;
