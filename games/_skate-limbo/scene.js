@@ -1,6 +1,7 @@
 /* 自作の人物・リンク。球と円柱で関節の動きが分かる形に組む。 */
 (function(){
   'use strict';
+  const photoBase=document.currentScript&&document.currentScript.src?document.currentScript.src.replace(/[^/]*$/, 'img/'):'./img/';
   window.SkateScene=function(){
     const T=window.THREE,scene=new T.Scene();scene.background=new T.Color('#d7edef');scene.fog=new T.Fog('#d7edef',26,83);
     const ground=window.SkatePhysics.ground,course=window.SkatePhysics.create();
@@ -38,14 +39,12 @@
       box(5.15,.105,.105,coral,0,0,0,bar);for(let x=-2.4;x<2.5;x+=.45)box(.17,.11,.11,white,x,0,0,bar);
       gates.push({group:g,bar});
     }
-    // リンボー中だけ、リンクの外側に祭りの旗と紙吹雪が浮かぶ。
-    const carnival=new T.Group();scene.add(carnival);
-    const festivalMaterials=['#ed53a0','#f5ce49','#2ac79f'].map(color=>new T.MeshBasicMaterial({color,transparent:true,opacity:0,depthWrite:false}));
-    for(let z=4;z<250;z+=8)for(const side of [-1,1]){
-      const banner=new T.Mesh(new T.ConeGeometry(.32,.65,3),festivalMaterials[Math.abs(Math.round(z/8)+side)%3]);banner.position.set(side*4.65,ground(z)+2.7,z);banner.rotation.z=Math.PI;carnival.add(banner);
-    }
-    const confetti=[];for(let i=0;i<72;i++){const flake=new T.Mesh(new T.PlaneGeometry(.09,.16),festivalMaterials[i%3]);festivalMaterials[i%3].side=T.DoubleSide;carnival.add(flake);confetti.push(flake);}
-    const calmColor=new T.Color('#d7edef'),festivalColor=new T.Color('#eed4e9');let festivalFade=0,festivalTime=null;
+    // 写真を背景専用の画面に合成し、人物やバーの手前には重ねない。
+    const photoCanvas=document.createElement('canvas');photoCanvas.width=540;photoCanvas.height=960;
+    const photoContext=photoCanvas.getContext('2d'),photoTexture=new T.CanvasTexture(photoCanvas);photoTexture.colorSpace=T.SRGBColorSpace;
+    const photos=Array.from({length:5},(_,i)=>{const img=new Image();img.src=photoBase+'tropical-'+(i+1)+'.webp';return img;});
+    let festivalFade=0,festivalTime=null,photoClock=0;
+    function paintPhoto(img,opacity){if(!img.complete||!img.naturalWidth)return;const cw=photoCanvas.width,ch=photoCanvas.height,scale=Math.max(cw/img.naturalWidth,ch/img.naturalHeight);photoContext.globalAlpha=opacity;photoContext.drawImage(img,(cw-img.naturalWidth*scale)/2,(ch-img.naturalHeight*scale)/2,img.naturalWidth*scale,img.naturalHeight*scale);}
     const person=new T.Group();scene.add(person);
     const parts=[],spheres=[];
     const segments=[[0,1,.21,coral],[1,2,.24,coral],[2,3,.075,skin],[2,4,.10,coral],[4,5,.085,skin],[2,6,.10,coral],[6,7,.085,skin],[0,8,.145,navy],[8,9,.10,navy],[0,10,.145,navy],[10,11,.10,navy]];
@@ -72,9 +71,13 @@
       const dt=festivalTime===null||s.t<festivalTime?0:Math.min(.05,s.t-festivalTime);festivalTime=s.t;
       const target=s.state==='play'?window.SkatePhysics.clamp((s.bend-.04)/.55,0,1):0;
       if(s.state==='intro'||s.t===0)festivalFade=0;else festivalFade+=(target-festivalFade)*(1-Math.exp(-dt*4));
-      scene.background.copy(calmColor).lerp(festivalColor,festivalFade);scene.fog.color.copy(scene.background);
-      carnival.visible=festivalFade>.005;festivalMaterials.forEach(m=>m.opacity=festivalFade*.8);
-      confetti.forEach((o,i)=>{const z=s.z-7+(i*3.71)%42;o.position.set((i%2?1:-1)*(4.35+(i%7)*.26),ground(z)+1.3+((i*.37+s.t*.6)%3.4),z);o.rotation.set(s.t+i,s.t*.7+i*.4,i*.8);});
+      if(festivalFade>.01)photoClock+=dt;
+      const photoHeight=Math.round(540*h/w);if(photoCanvas.height!==photoHeight)photoCanvas.height=photoHeight;
+      photoContext.globalAlpha=1;photoContext.fillStyle='#d7edef';photoContext.fillRect(0,0,540,photoCanvas.height);
+      const photoIndex=Math.floor(photoClock/8)%5,blend=Math.max(0,(photoClock%8-7));
+      paintPhoto(photos[photoIndex],festivalFade);
+      if(blend>0)paintPhoto(photos[(photoIndex+1)%5],festivalFade*blend);
+      photoContext.globalAlpha=1;photoTexture.needsUpdate=true;scene.background=photoTexture;
       if(renderer.domElement.width!==w||renderer.domElement.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(Math.tan(22*Math.PI/180)*h/w)*180/Math.PI;camera.updateProjectionMatrix();}
       const p=s.rag||window.SkatePhysics.pose(s);
       p.forEach((v,i)=>{spheres[i].position.set(v.x,v.y,v.z);shadows[i].position.x=v.x;shadows[i].position.z=v.z;shadows[i].position.y=ground(v.z)+.025;});
