@@ -24,6 +24,9 @@
     // 深く反ると上半身が小刻みに震える。足元は氷につけたまま。
     const tremble=clamp((b-.25)/.75,0,1);
     for(let i=1;i<8;i++){p[i][0]+=Math.sin(s.t*44+i*.35)*.009*tremble;p[i][1]+=Math.sin(s.t*51+i*.45)*.006*tremble;}
+    // 腕は体の慣性を待たず、レバーの方向へ肩を中心に傾ける。
+    const armAngle=clamp(-s.weight*.32-s.roll,-.65,.65),ca=Math.cos(armAngle),sa=Math.sin(armAngle);
+    for(let i=4;i<8;i++){const dx=p[i][0]-p[2][0],dy=p[i][1]-p[2][1];p[i][0]=p[2][0]+dx*ca-dy*sa;p[i][1]=p[2][1]+dx*sa+dy*ca;}
     const world=p.map(v=>({x:s.x+v[0]*Math.cos(s.roll)-v[1]*Math.sin(s.roll),y:ground(s.z+v[2])+v[0]*Math.sin(s.roll)+v[1]*Math.cos(s.roll),z:s.z+v[2]}));
     // 傾いても低い側の靴が氷へ潜らない位置を支点にする。
     const lift=Math.max(...[9,11].map(i=>ground(world[i].z)+.12-world[i].y));

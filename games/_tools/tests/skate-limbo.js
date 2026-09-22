@@ -52,3 +52,6 @@ const downhillStop=running();downhillStop.z=180;downhillStop.gates.forEach(g=>g.
 
 // 初期位置・指を離した位置は上。上入力で反らずに加速する。
 g=game();g.press(' ');assert.equal(g.probe.now().target,-1);const initialSpeed=g.probe.now().speed;g.key('ArrowUp');g.step(60);assert.equal(g.probe.now().target,-1);assert(g.probe.now().speed>initialSpeed);assert.equal(g.probe.now().bend,0);g.key('ArrowUp',true);g.step(1);assert.equal(g.probe.now().target,-1);g.down(270,g.probe.now().H-146);g.step(1);assert.equal(g.probe.now().target,0);g.moveTo(270,g.probe.now().H-246);g.step(1);assert.equal(g.probe.now().target,-1);g.up();g.step(1);assert.equal(g.probe.now().target,-1);console.log('上で待機・中央の惰性・指を離した加速復帰を確認');
+
+// 体の角度と時刻が同じでも、切り返した瞬間に腕の傾きが変わる。
+const armState=running();armState.bend=1;armState.roll=.2;armState.weight=-1;const rightArms=P.pose(armState);armState.weight=1;const leftArms=P.pose(armState);assert(rightArms[7].y>rightArms[5].y);assert(leftArms[7].y<leftArms[5].y);assert.equal(rightArms[0].y,leftArms[0].y);console.log('レバーの左右切り返しへの腕の即時追従を確認');
