@@ -17,6 +17,9 @@
       p.push([side*.23,hip*.48,.28+b*.44+side*stride*.5]);
       p.push([side*(.23+b*.12),.12,side*(.12+stride)]);
     }
+    // 深く反ると上半身が小刻みに震える。足元は氷につけたまま。
+    const tremble=clamp((b-.25)/.75,0,1);
+    for(let i=1;i<8;i++){p[i][0]+=Math.sin(s.t*44+i*.35)*.009*tremble;p[i][1]+=Math.sin(s.t*51+i*.45)*.006*tremble;}
     return p.map(v=>({x:s.x+v[0]*Math.cos(s.roll)-v[1]*Math.sin(s.roll),y:v[0]*Math.sin(s.roll)+v[1]*Math.cos(s.roll),z:s.z+v[2]}));
   }
   function create(){
@@ -57,7 +60,7 @@
     s.rv+=(s.roll*(1.15+s.bend*2.15)-s.weight*3.35+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
     s.rv*=Math.exp(-1.3*dt);s.roll+=s.rv*dt;
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
-    s.speed+=(6.45+s.score*.13-s.bend*2.22-s.speed)*dt*.85;s.z+=s.speed*dt;
+    s.speed+=(6.45+s.score*.13-s.bend*3.05-s.speed)*dt*.85;s.z+=s.speed*dt;
     s.distance=clamp(s.z,0,s.goal);
     if(Math.abs(s.roll)>.76||Math.abs(s.x)>3.2){fall(s,'balance');return;}
     const p=pose(s);
