@@ -38,19 +38,15 @@
       box(5.15,.105,.105,coral,0,0,0,bar);for(let x=-2.4;x<2.5;x+=.45)box(.17,.11,.11,white,x,0,0,bar);
       gates.push({group:g,bar});
     }
-    const costume=mat('#17a879'),gold=mat('#f8d34c'),pink=mat('#e54c9b');
     const person=new T.Group();scene.add(person);
     const parts=[],spheres=[];
-    const segments=[[0,1,.21,costume],[1,2,.24,costume],[2,3,.075,skin],[2,4,.10,gold],[4,5,.085,skin],[2,6,.10,gold],[6,7,.085,skin],[0,8,.145,costume],[8,9,.10,costume],[0,10,.145,costume],[10,11,.10,costume]];
+    const segments=[[0,1,.21,coral],[1,2,.24,coral],[2,3,.075,skin],[2,4,.10,coral],[4,5,.085,skin],[2,6,.10,coral],[6,7,.085,skin],[0,8,.145,navy],[8,9,.10,navy],[0,10,.145,navy],[10,11,.10,navy]];
     segments.forEach(([a,b,r,m])=>parts.push({a,b,mesh:bone(m,r,person)}));
-    for(let i=0;i<12;i++)spheres.push(ball(i===3?.155:i===0?.21:i===1?.23:i===2?.16:i===5||i===7?.085:.11,i===3||i===5||i===7?skin:i<3?costume:i<8?gold:costume,person));
-    const head=new T.Group();person.add(head);const cap=ball(.158,gold,head);cap.scale.set(1,.6,1);cap.position.y=.083;
+    for(let i=0;i<12;i++)spheres.push(ball(i===3?.155:i===0?.21:i===1?.23:i===2?.16:i===5||i===7?.085:.11,i===3||i===5||i===7?skin:i<3?coral:i<8?coral:navy,person));
+    const head=new T.Group();person.add(head);const cap=ball(.158,hair,head);cap.scale.set(1,.6,1);cap.position.y=.083;
     const nose=ball(.045,skin,head);nose.scale.set(.8,.85,2.8);nose.position.set(0,-.01,.22);
-    const scarf=bone(gold,.10,person);
-    // 小さな羽飾りと金色の縁取り。人物と一緒に動く自作の形。
-    for(let i=-2;i<=2;i++){const feather=ball(1,i%2?pink:costume,head);feather.scale.set(.033,.14,.028);feather.position.set(i*.05,.20-Math.abs(i)*.022,-.02);feather.rotation.z=-i*.22;}
-    const trim=bone(gold,.025,person);
-    const boots=[];for(let i=0;i<2;i++){const b=new T.Group();person.add(b);const toe=ball(1,gold,b);toe.scale.set(.125,.105,.24);toe.position.set(0,.015,.09);const ankle=ball(1,pink,b);ankle.scale.set(.105,.16,.12);ankle.position.set(0,.09,-.055);const sole=ball(1,navy,b);sole.scale.set(.127,.035,.245);sole.position.set(0,-.06,.08);box(.035,.075,.60,metal,0,-.10,.05,b);for(let z of [-.03,.08,.19])box(.15,.015,.022,navy,0,.115,z,b);boots.push(b);}
+    const scarf=bone(white,.085,person);
+    const boots=[];for(let i=0;i<2;i++){const b=new T.Group();person.add(b);const toe=ball(1,white,b);toe.scale.set(.125,.105,.24);toe.position.set(0,.015,.09);const ankle=ball(1,white,b);ankle.scale.set(.105,.16,.12);ankle.position.set(0,.09,-.055);const sole=ball(1,navy,b);sole.scale.set(.127,.035,.245);sole.position.set(0,-.06,.08);box(.035,.075,.60,metal,0,-.10,.05,b);for(let z of [-.03,.08,.19])box(.15,.015,.022,navy,0,.115,z,b);boots.push(b);}
     const shadowMat=new T.MeshBasicMaterial({color:0x31566b,transparent:true,opacity:.13,depthWrite:false});
     const shadows=[];for(let i=0;i<12;i++){const m=new T.Mesh(new T.CircleGeometry(i<4?.35:.17,20),shadowMat);m.rotation.x=-Math.PI/2;m.position.y=.025;scene.add(m);shadows.push(m);}
     const particles=[];for(let i=0;i<48;i++){const p=ball(.025+(i%3)*.012,white);p.visible=false;particles.push(p);}
@@ -70,7 +66,6 @@
       p.forEach((v,i)=>{spheres[i].position.set(v.x,v.y,v.z);shadows[i].position.x=v.x;shadows[i].position.z=v.z;shadows[i].position.y=ground(v.z)+.025;});
       parts.forEach(o=>join(o.mesh,p[o.a],p[o.b]));
       head.position.copy(spheres[3].position);head.quaternion.setFromUnitVectors(axis,new T.Vector3(p[3].x-p[2].x,p[3].y-p[2].y,p[3].z-p[2].z).normalize());
-      join(trim,{x:p[0].x-.19,y:p[0].y,z:p[0].z-.17},{x:p[2].x+.15,y:p[2].y,z:p[2].z-.17});
       join(scarf,p[2],{x:p[2].x+.005,y:p[2].y+.10,z:p[2].z});
       boots.forEach((b,i)=>{const v=p[i?11:9],k=p[i?10:8];b.position.set(v.x,v.y,v.z);b.rotation.set(s.rag?Math.atan2(k.z-v.z,k.y-v.y):Math.atan(.072*window.SkatePhysics.downhill(s.z)),0,s.rag?-(k.x-v.x):s.roll*.3);});
       gates.forEach((g,i)=>{const v=s.gates[i];g.bar.position.y=v.hit?Math.max(.12,v.height-v.drop*v.drop*3):v.height;g.bar.rotation.z=Math.atan(v.slope||0)+(v.hit?Math.min(.3,v.drop*.5):0);g.bar.position.z=v.hit?v.drop*1.4:0;});
