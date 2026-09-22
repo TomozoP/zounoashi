@@ -13,20 +13,20 @@
     const cylinder=new T.CylinderGeometry(1,1,1,10),axis=new T.Vector3(0,1,0);
     function bone(m,r,parent=scene){const o=new T.Mesh(cylinder,m);o.userData.r=r;parent.add(o);return o;}
     function join(o,a,b){const av=new T.Vector3(a.x,a.y,a.z),bv=new T.Vector3(b.x,b.y,b.z),d=bv.clone().sub(av);o.position.copy(av).add(bv).multiplyScalar(.5);o.scale.set(o.userData.r,d.length(),o.userData.r);o.quaternion.setFromUnitVectors(axis,d.normalize());}
-    box(8,.15,180,ice,0,-.09,74);
+    box(8,.15,280,ice,0,-.09,124);
     for(let side of [-1,1]){
-      box(.19,.78,180,white,side*4,.36,74);box(.24,.10,180,teal,side*4,.8,74);box(.21,.15,180,coral,side*4,.12,74);
-      for(let z=-8;z<160;z+=5){box(.06,1.1,.08,metal,side*4,.98,z);}
-      for(let row=0;row<3;row++)box(1.15,.32,180,mat(row%2?'#9dbec5':'#769ba7'),side*(5+row*.85),.3+row*.43,74);
-      for(let z=-5;z<160;z+=12){box(.10,6,.10,white,side*7,3,z);box(2.6,.09,.22,white,side*6,6,z);}
+      box(.19,.78,280,white,side*4,.36,124);box(.24,.10,280,teal,side*4,.8,124);box(.21,.15,280,coral,side*4,.12,124);
+      for(let z=-8;z<260;z+=5){box(.06,1.1,.08,metal,side*4,.98,z);}
+      for(let row=0;row<3;row++)box(1.15,.32,280,mat(row%2?'#9dbec5':'#769ba7'),side*(5+row*.85),.3+row*.43,124);
+      for(let z=-5;z<260;z+=12){box(.10,6,.10,white,side*7,3,z);box(2.6,.09,.22,white,side*6,6,z);}
     }
     const lineMat=new T.MeshBasicMaterial({color:'#e8f6f5',transparent:true,opacity:.5});
-    for(let z=-8;z<165;z+=6)box(7.7,.012,.028,lineMat,0,.009,z);
-    for(let x of [-2.5,2.5])box(.025,.015,180,lineMat,x,.011,74);
+    for(let z=-8;z<265;z+=6)box(7.7,.012,.028,lineMat,0,.009,z);
+    for(let x of [-2.5,2.5])box(.025,.015,280,lineMat,x,.011,124);
     const circle=new T.Mesh(new T.RingGeometry(2.4,2.43,64),lineMat);circle.rotation.x=-Math.PI/2;circle.position.set(0,.018,7);scene.add(circle);
     const gates=[];
-    for(let i=0;i<7;i++){
-      const g=new T.Group();g.position.z=16+i*19;scene.add(g);const height=1.82-i*.085+.28*Math.max(0,1-i/3),slope=i<4?0:(i%2===0?.12:-.12);
+    for(let i=0;i<12;i++){
+      const g=new T.Group();g.position.z=16+i*19;scene.add(g);const height=Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3),slope=i<4?0:(i%2===0?.12:-.12);
       for(let side of [-1,1]){const endHeight=height+side*2.5*slope;box(.14,endHeight+.25,.14,navy,side*2.5,endHeight/2,0,g);box(.6,.07,.65,navy,side*2.5,.035,0,g);ball(.115,white,g).position.set(side*2.5,endHeight+.13,0);}
       const bar=new T.Group();bar.position.y=height;bar.rotation.z=Math.atan(slope);bar.scale.x=Math.sqrt(1+slope*slope);g.add(bar);
       box(5.15,.105,.105,coral,0,0,0,bar);for(let x=-2.4;x<2.5;x+=.45)box(.17,.11,.11,white,x,0,0,bar);

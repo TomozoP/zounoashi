@@ -21,7 +21,7 @@
   }
   function create(){
     const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:4.9,roll:.015,rv:0,bend:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
-    for(let i=0;i<7;i++)s.gates.push({z:16+i*19,height:1.82-i*.085+.28*Math.max(0,1-i/3),slope:i<4?0:(i%2===0?.12:-.12),passed:false,hit:false,drop:0});
+    for(let i=0;i<12;i++)s.gates.push({z:16+i*19,height:Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3),slope:i<4?0:(i%2===0?.12:-.12),passed:false,hit:false,drop:0});
     s.goal=s.gates[s.gates.length-1].z+1.5;
     return s;
   }
@@ -54,8 +54,8 @@
     }
     const old=s.bend;s.bend+=(s.target-s.bend)*Math.min(1,dt*5);
     /* 深く反るほど刃の上の重心が不安定。入力は重心への力で、姿勢を直接戻さない。 */
-    s.rv+=(s.roll*(1.0+s.bend*1.8)-s.weight*2.9+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
-    s.rv*=Math.exp(-1.55*dt);s.roll+=s.rv*dt;
+    s.rv+=(s.roll*(1.15+s.bend*2.15)-s.weight*3.35+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
+    s.rv*=Math.exp(-1.3*dt);s.roll+=s.rv*dt;
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
     s.speed+=(6.45+s.score*.13-s.bend*2.22-s.speed)*dt*.85;s.z+=s.speed*dt;
     s.distance=clamp(s.z,0,s.goal);
