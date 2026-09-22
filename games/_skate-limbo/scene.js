@@ -43,7 +43,7 @@
     const photoCanvas=document.createElement('canvas');photoCanvas.width=540;photoCanvas.height=960;
     const photoContext=photoCanvas.getContext('2d'),photoTexture=new T.CanvasTexture(photoCanvas);photoTexture.colorSpace=T.SRGBColorSpace;
     const photos=Array.from({length:5},(_,i)=>{const img=new Image();img.src=photoBase+'tropical-'+(i+1)+'.webp';return img;});
-    let festivalFade=0,festivalTime=null,photoClock=0;
+    let festivalFade=0,festivalTime=null,photoIndex=-1,limboActive=false;
     function paintPhoto(img,opacity){if(!img.complete||!img.naturalWidth)return;const cw=photoCanvas.width,ch=photoCanvas.height,scale=Math.max(cw/img.naturalWidth,ch/img.naturalHeight);photoContext.globalAlpha=opacity;photoContext.drawImage(img,(cw-img.naturalWidth*scale)/2,(ch-img.naturalHeight*scale)/2,img.naturalWidth*scale,img.naturalHeight*scale);}
     const person=new T.Group();scene.add(person);
     const parts=[],spheres=[];
@@ -71,12 +71,12 @@
       const dt=festivalTime===null||s.t<festivalTime?0:Math.min(.05,s.t-festivalTime);festivalTime=s.t;
       const target=s.state==='play'?window.SkatePhysics.clamp((s.bend-.04)/.55,0,1):0;
       if(s.state==='intro'||s.t===0)festivalFade=0;else festivalFade+=(target-festivalFade)*(1-Math.exp(-dt*4));
-      if(festivalFade>.01)photoClock+=dt;
+      // 小さな揺れでは切り替えず、起こしてから再び反るたびに次の写真へ。
+      if(s.state!=='play'||s.bend<.08)limboActive=false;
+      if(s.state==='play'&&s.bend>.18&&!limboActive){limboActive=true;photoIndex=(photoIndex+1)%photos.length;}
       const photoHeight=Math.round(540*h/w);if(photoCanvas.height!==photoHeight)photoCanvas.height=photoHeight;
       photoContext.globalAlpha=1;photoContext.fillStyle='#d7edef';photoContext.fillRect(0,0,540,photoCanvas.height);
-      const photoIndex=Math.floor(photoClock/8)%5,blend=Math.max(0,(photoClock%8-7));
-      paintPhoto(photos[photoIndex],festivalFade);
-      if(blend>0)paintPhoto(photos[(photoIndex+1)%5],festivalFade*blend);
+      if(photoIndex>=0)paintPhoto(photos[photoIndex],festivalFade);
       photoContext.globalAlpha=1;photoTexture.needsUpdate=true;scene.background=photoTexture;
       if(renderer.domElement.width!==w||renderer.domElement.height!==h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=2*Math.atan(Math.tan(22*Math.PI/180)*h/w)*180/Math.PI;camera.updateProjectionMatrix();}
       const p=s.rag||window.SkatePhysics.pose(s);
