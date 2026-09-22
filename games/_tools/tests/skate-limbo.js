@@ -1,6 +1,6 @@
 /* 開始・反り・重心・バー・転倒を、実際の入力と氷上の計算で確認する。 */
-const assert=require('assert'),load=require('../harness'),P=require('../../_skate-limbo/physics');
-const file='games/_skate-limbo/index.html';
+const assert=require('assert'),load=require('../harness'),P=require('../../skate-limbo/physics');
+const file='games/skate-limbo/index.html';
 function game(){return load(file,{withScripts:true,quiet:true});}
 function running(){const s=P.create();s.state='play';return s;}
 function drive(s,bend,limit=4200){for(let i=0;i<limit&&s.state==='play';i++){s.target=bend===0?-1:bend;s.weight=P.clamp(s.roll*3+s.rv*1.7,-1,1);P.step(s,1/60);}return s;}
