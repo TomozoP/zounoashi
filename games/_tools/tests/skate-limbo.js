@@ -7,8 +7,9 @@ function drive(s,bend,limit=3000){for(let i=0;i<limit&&s.state==='play';i++){s.t
 let g=game();g.step(180);assert.equal(g.probe.now().state,'intro');assert.equal(g.probe.now().z,0);
 g.key(' ');g.step(20);assert.equal(g.probe.now().state,'intro');g.key(' ',true);assert.equal(g.probe.now().state,'play');g.step(1);assert.equal(g.probe.now().target,0,'開始を反る入力にしない');
 g.key('ArrowDown');g.step(60);assert(g.probe.now().bend>.98);g.key('ArrowDown',true);g.step(60);assert(g.probe.now().bend<.02);
-g.probe.reset();const H=g.probe.now().H;g.down(270,H-88);g.step(30);assert(g.probe.now().bend>.9);g.wrap.fire('pointercancel',{pointerId:1});g.step(60);assert.equal(g.probe.now().target,0);assert.equal(g.probe.now().weight,0);
-g.probe.reset();g.down(380,H-150);g.step(15);assert(g.probe.now().roll<0,'右入力で重心が右へ移る');g.win.fire('blur');g.step(1);assert.equal(g.probe.now().weight,0);
+g.probe.reset();const H=g.probe.now().H;g.down(270,H-46);g.step(30);assert(g.probe.now().bend>.9);g.wrap.fire('pointercancel',{pointerId:1});g.step(60);assert.equal(g.probe.now().target,0);assert.equal(g.probe.now().weight,0);
+g.probe.reset();g.down(380,H-150);g.step(15);assert(g.probe.now().roll>0,'右入力の重心移動が以前と逆になる');g.win.fire('blur');g.step(1);assert.equal(g.probe.now().weight,0);
+g.probe.reset();g.key('ArrowRight');g.step(15);assert(g.probe.now().roll>0,'右キーも反転する');g.key('ArrowRight',true);g.probe.reset();g.down(25,H-25);g.step(1);assert(g.probe.now().weight>.9,'広げた左下の端も操作できる');g.up();
 g.probe.reset();g.down(50,100);g.step(2);assert.equal(g.probe.now().weight,0,'操作面の外を押しても力は加わらない');
 g=game();const e={pointerId:8,isPrimary:true,button:0,clientX:30,clientY:40,preventDefault(){},stopImmediatePropagation(){}};g.doc.fire('pointerdown',e);g.doc.fire('pointercancel',e);g.doc.fire('pointerup',e);assert.equal(g.probe.now().state,'intro');g.doc.fire('pointerdown',e);g.doc.fire('pointerup',e);assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().target,0);
 for(const [w,h] of load.SHAPES){g.view(w,h);g.step(2);assert(Number.isFinite(g.probe.now().z));assert(g.probe.now().H>=780);}
@@ -19,8 +20,8 @@ P.links.forEach(([a,b],i)=>{const p=s.rag[a],q=s.rag[b];assert(Math.abs(Math.hyp
 s=running();s.weight=1;for(let i=0;i<240&&s.state==='play';i++)P.step(s,1/60);assert.equal(s.reason,'balance');assert(s.z<13,'バーの前でも重心を崩すと転ぶ');
 const mid=drive(running(),.7),deep=drive(running(),1);assert(mid.score>=1&&mid.score<7);assert.equal(deep.score,7);assert.equal(deep.reason,'clear');assert.equal(deep.state,'result');
 /* 指の左右調整だけで全バーを通れることを台で確認。内部状態は書き換えない。 */
-g=game();g.press(' ');let steps=0;g.down(270,g.probe.now().H-88);
-while(g.probe.now().state==='play'&&steps++<2400){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);g.moveTo(270+weight*104,n.H-88);g.step(1);}
+g=game();g.press(' ');let steps=0;g.down(270,g.probe.now().H-46);
+while(g.probe.now().state==='play'&&steps++<2400){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);g.moveTo(270-weight*220,n.H-46);g.step(1);}
 assert.equal(g.probe.now().score,7);assert.equal(g.probe.now().reason,'clear');g.press(' ');assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().score,0);assert.equal(g.probe.now().z,0);
 console.log('開始・取消・左右の向き・反り・画面6種・衝突・転倒後の関節・再挑戦：確認済み');
 console.log('最初のバーまで約3.6秒、反り90%まで約0.45秒、全7本の通過まで約30秒。');
