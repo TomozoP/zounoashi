@@ -57,7 +57,7 @@
     s.rv+=(s.roll*(1.0+s.bend*1.8)-s.weight*2.9+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
     s.rv*=Math.exp(-1.55*dt);s.roll+=s.rv*dt;
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
-    s.speed+=(3.65+s.score*.10-s.bend*.32-s.speed)*dt*.55;s.z+=s.speed*dt;
+    s.speed+=(4.8+s.score*.10-s.bend*1.65-s.speed)*dt*.85;s.z+=s.speed*dt;
     s.distance=clamp(s.z,0,s.goal);
     if(Math.abs(s.roll)>.76||Math.abs(s.x)>3.2){fall(s,'balance');return;}
     const p=pose(s);

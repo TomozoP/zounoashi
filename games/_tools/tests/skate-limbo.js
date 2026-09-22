@@ -24,7 +24,7 @@ g=game();g.press(' ');let steps=0;g.down(270,g.probe.now().H-46);
 while(g.probe.now().state==='play'&&steps++<2400){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);g.moveTo(270-weight*220,n.H-46);g.step(1);}
 assert.equal(g.probe.now().score,7);assert.equal(g.probe.now().reason,'clear');g.press(' ');assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().score,0);assert.equal(g.probe.now().z,0);
 console.log('開始・取消・左右の向き・反り・画面6種・衝突・転倒後の関節・再挑戦：確認済み');
-console.log('最初のバーまで約3.6秒、反り90%まで約0.45秒、全7本の通過まで約30秒。');
+console.log('反り90%まで約0.45秒。立つと加速、反ると減速。');
 console.log('転倒後の移動 '+(furthest-collisionZ).toFixed(2)+'m、7本通過 '+(steps/60).toFixed(2)+'秒。');
 
 /* 転倒直後に距離を共有でき、転がった距離で記録が増えない。 */
@@ -32,3 +32,6 @@ g=game();assert.equal(g.probe.now().distance,0);assert.equal(g.probe.now().remai
 const record=g.probe.now().distance;assert(record>0);assert(g.probe.now().shareVisible);assert(g.probe.now().shareText.includes(record.toFixed(1)+'m'));
 g.step(180);assert.equal(g.probe.now().distance,record);assert(g.probe.now().z>record);g.tap(150,g.probe.now().H-92);g.step(1);assert.equal(g.probe.now().state,'play');assert(!g.probe.now().shareVisible);assert(g.probe.now().distance<.1);
 console.log('転倒直後の共有・距離の固定・残り距離・ゴール・再挑戦を確認');
+
+// バーのない区間で、姿勢だけによる速度差を確かめる。
+const upright=running(),bent=running();upright.gates.forEach(g=>g.z+=1000);bent.gates.forEach(g=>g.z+=1000);drive(upright,0,180);drive(bent,1,180);assert(upright.speed>bent.speed+1.2,'立った姿勢では十分に速くなる');assert(upright.speed<4.81&&bent.speed>3.1,'速度は急激に変えず範囲内に収める');console.log('3秒後の速度：直立 '+upright.speed.toFixed(2)+'m/s、反り '+bent.speed.toFixed(2)+'m/s');
