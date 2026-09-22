@@ -35,7 +35,7 @@
   }
   function create(){
     const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:4.9,roll:.015,rv:0,bend:0,thrust:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
-    for(let i=0;i<12;i++)s.gates.push({z:16+i*19,height:Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3),slope:i<4||i>7?0:(i%2===0?.08:-.08),passed:false,hit:false,drop:0});
+    for(let i=0;i<12;i++)s.gates.push({z:16+i*19,height:Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3)+(i>=4&&i<=7?.12:0),slope:i<4||i>7?0:(i%2===0?.08:-.08),passed:false,hit:false,drop:0});
     s.goal=s.gates[s.gates.length-1].z+6;
     return s;
   }

@@ -33,7 +33,7 @@
     for(let row=0;row<2;row++)for(let col=0;col<16;col++){const z=course.goal+row*.5+.25;const tile=box(.5,.012,.5,(row+col)%2?navy:white,-3.75+col*.5,ground(z)+.02,z);tile.rotation.x=Math.atan(.072);}
     const gates=[];
     for(let i=0;i<12;i++){
-      const g=new T.Group();g.position.z=16+i*19;g.position.y=ground(g.position.z);scene.add(g);const height=Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3),slope=i<4||i>7?0:(i%2===0?.08:-.08);
+      const g=new T.Group();g.position.z=16+i*19;g.position.y=ground(g.position.z);scene.add(g);const height=Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3)+(i>=4&&i<=7?.12:0),slope=i<4||i>7?0:(i%2===0?.08:-.08);
       for(let side of [-1,1]){const endHeight=height+side*2.5*slope;box(.14,endHeight+.25,.14,navy,side*2.5,endHeight/2,0,g);box(.6,.07,.65,navy,side*2.5,.035,0,g);ball(.115,white,g).position.set(side*2.5,endHeight+.13,0);}
       const bar=new T.Group();bar.position.y=height;bar.rotation.z=Math.atan(slope);bar.scale.x=Math.sqrt(1+slope*slope);g.add(bar);
       box(5.15,.105,.105,coral,0,0,0,bar);for(let x=-2.4;x<2.5;x+=.45)box(.17,.11,.11,white,x,0,0,bar);
