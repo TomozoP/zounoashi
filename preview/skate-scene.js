@@ -66,7 +66,7 @@
       return {data,geometry,material,count:0};
     });
     let trackRound=null,trackSlot=-1,trackIndex=0,lastZ=-99,previousFeet=null;
-    let follow=0;
+    let follow=0,cameraStopped=false;
     function draw(s,w,h){
       const dt=festivalTime===null||s.t<festivalTime?0:Math.min(.05,s.t-festivalTime);festivalTime=s.t;
       const target=s.state==='play'?window.SkatePhysics.clamp((s.bend-.04)/.55,0,1):0;
@@ -102,9 +102,13 @@
         }
       }
       particles.forEach((o,i)=>{const fall=s.state==='fall',phase=fall?s.fallTime-i*.009:(s.t*2+i*.19)%1;o.visible=(fall?phase>0&&phase<1.8:s.state==='play'&&Math.abs(s.roll)>.1);if(o.visible){const origin=p[fall?0:i%2?9:11],k=fall?3:.5;o.position.set(origin.x+Math.sin(i*23)*phase*k,ground(origin.z-phase*(fall?2:1))+Math.max(.025,(fall?2:.35)*phase-1.3*phase*phase),origin.z-phase*(fall?2:1));}});
+      if(s.state!=='result'||s.reason!=='clear')cameraStopped=false;
+      if(!cameraStopped){
       if(s.state==='intro'||s.z<.1)follow=s.z;else follow+=(s.z-follow)*.13;
       const shake=s.impact*.035;
       camera.position.set(s.x*.8+1.65+Math.sin(s.t*65)*shake,ground(follow)+3.2,follow-6.8);camera.lookAt(s.x*.8,ground(follow)+.75,follow+1.0);
+      if(s.state==='result'&&s.reason==='clear')cameraStopped=true;
+      }
       renderer.render(scene,camera);return renderer.domElement;
     }
     return {draw};

@@ -49,7 +49,8 @@
   }
   function step(s,dt){
     s.flash=Math.max(0,s.flash-dt*1.6);s.impact=Math.max(0,s.impact-dt*3);
-    if(s.state==='intro'||s.state==='result')return;
+    if(s.state==='intro')return;
+    if(s.state==='result'){if(s.reason==='clear'){s.t+=dt;s.bend*=Math.exp(-dt*4);s.roll*=Math.exp(-dt*3);s.weight=0;s.thrust+=(1-s.thrust)*Math.min(1,dt*4);s.speed+=(7-s.speed)*Math.min(1,dt);s.z+=s.speed*dt;}return;}
     s.t+=dt;
     if(s.state==='fall'){
       s.fallTime+=dt;

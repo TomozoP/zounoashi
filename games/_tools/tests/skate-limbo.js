@@ -58,3 +58,5 @@ const armState=running();armState.bend=1;armState.roll=.2;armState.weight=-1;con
 
 // ゴール前に勾配が滑らかにゼロへ戻り、ゴール後も平地が続く。
 for(const z of [158,170,210,228]){assert(Math.abs(P.ground(z-.001)-P.ground(z+.001))<.0002);const left=(P.ground(z)-P.ground(z-.001))/.001,right=(P.ground(z+.001)-P.ground(z))/.001;assert(Math.abs(left-right)<.00001);}assert(P.downhill(219)<P.downhill(210));assert.equal(P.downhill(228),0);assert.equal(P.ground(231),P.ground(260));console.log('坂から平地への連続した勾配と平らなゴールを確認');
+
+const afterGoal=running();afterGoal.state='result';afterGoal.reason='clear';afterGoal.z=afterGoal.goal;afterGoal.distance=afterGoal.goal;const goalTime=afterGoal.t;for(let i=0;i<180;i++)P.step(afterGoal,1/60);assert(afterGoal.z>afterGoal.goal+15);assert(afterGoal.t>goalTime+2.9);assert.equal(afterGoal.distance,afterGoal.goal);console.log('ゴール後の時間と滑走継続、記録の固定を確認');
