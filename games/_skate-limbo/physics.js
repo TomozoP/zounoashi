@@ -3,8 +3,8 @@
   'use strict';
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   // 9本目の手前から、緩やかに下り坂へ移る。
-  const ground=z=>{const d=Math.max(0,z-158);return d<12?-.003*d*d:-.432-(d-12)*.072;};
-  const downhill=z=>clamp((z-158)/12,0,1);
+  const ground=z=>{const d=Math.max(0,z-158);if(d<12)return -.003*d*d;if(z<210)return -.432-(z-170)*.072;const e=clamp(z-210,0,18);return -3.312-.072*e+.002*e*e;};
+  const downhill=z=>clamp((z-158)/12,0,1)*(1-clamp((z-210)/18,0,1));
   const links=[[0,1],[1,2],[2,3],[2,4],[4,5],[2,6],[6,7],[0,8],[8,9],[0,10],[10,11],[4,6],[8,10],[0,2]];
   function pose(s){
     const b=s.bend, a=b*1.48, hip=1.35-b*.55-.12*clamp(Math.abs(s.roll)/.6,0,1);

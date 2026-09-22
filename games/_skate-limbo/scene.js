@@ -30,7 +30,7 @@
     scene.updateMatrixWorld(true);
     scene.traverse(o=>{if(!o.isMesh)return;const a=o.geometry.attributes.position,v=new T.Vector3();for(let i=0;i<a.count;i++){v.fromBufferAttribute(a,i);o.localToWorld(v);v.y+=ground(v.z);o.worldToLocal(v);a.setXYZ(i,v.x,v.y,v.z);}a.needsUpdate=true;o.geometry.computeVertexNormals();});
     // 床に敷いた市松模様の先頭をゴール地点にする。
-    for(let row=0;row<2;row++)for(let col=0;col<16;col++){const z=course.goal+row*.5+.25;const tile=box(.5,.012,.5,(row+col)%2?navy:white,-3.75+col*.5,ground(z)+.02,z);tile.rotation.x=Math.atan(.072);}
+    for(let row=0;row<2;row++)for(let col=0;col<16;col++){const z=course.goal+row*.5+.25;const tile=box(.5,.012,.5,(row+col)%2?navy:white,-3.75+col*.5,ground(z)+.02,z);tile.rotation.x=Math.atan(.072*window.SkatePhysics.downhill(z));}
     const gates=[];
     for(let i=0;i<12;i++){
       const g=new T.Group();g.position.z=16+i*19;g.position.y=ground(g.position.z);scene.add(g);const height=Math.max(1.31,1.82-i*.085)+.28*Math.max(0,1-i/3)+(i>=4&&i<=7?.12:0),slope=i<4||i>7?0:(i%2===0?.08:-.08);
