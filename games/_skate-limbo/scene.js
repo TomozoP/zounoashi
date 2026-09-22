@@ -18,7 +18,6 @@
     box(8,.15,280,ice,0,-.09,124);
     for(let side of [-1,1]){
       box(.19,.78,280,white,side*4,.36,124);box(.24,.10,280,teal,side*4,.8,124);box(.21,.15,280,coral,side*4,.12,124);
-      for(let z=-8;z<260;z+=5){box(.06,1.1,.08,metal,side*4,.98,z);}
     }
     const lineMat=new T.MeshBasicMaterial({color:'#e8f6f5',transparent:true,opacity:.5});
     for(let z=-8;z<265;z+=6)box(7.7,.012,.028,lineMat,0,.009,z);
