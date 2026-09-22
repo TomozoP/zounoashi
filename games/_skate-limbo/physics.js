@@ -4,24 +4,24 @@
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const links=[[0,1],[1,2],[2,3],[2,4],[4,5],[2,6],[6,7],[0,8],[8,9],[0,10],[10,11],[4,6],[8,10],[0,2]];
   function pose(s){
-    const b=s.bend, a=b*1.48, hip=1.35-b*.55;
+    const n=s.narrow||0,b=s.bend, a=b*1.48, hip=1.35-b*.55;
     const p=[[0,hip,.13+b*.3],[0,hip+.34*Math.cos(a),.13+b*.3-.34*Math.sin(a)],
       [0,hip+.68*Math.cos(a),.13+b*.3-.68*Math.sin(a)],
       [0,hip+.91*Math.cos(a),.13+b*.3-.91*Math.sin(a)]];
     for(const side of [-1,1]){
-      p.push([side*(.43+b*.12),hip+.43*Math.cos(a),.05-b*.26]);
-      p.push([side*(.69+b*.13),hip+.16,.18-b*.35]);
+      p.push([side*((.43+b*.12)*(1-n)+.12*n),(hip+.43*Math.cos(a))*(1-n)+(hip+1.05)*n,(.05-b*.26)*(1-n)]);
+      p.push([side*((.69+b*.13)*(1-n)+.075*n),(hip+.16)*(1-n)+(hip+1.51)*n,(.18-b*.35)*(1-n)]);
     }
     for(const side of [-1,1]){
       const stride=Math.sin(s.t*3.8)*.12*(1-b);
-      p.push([side*.23,hip*.48,.28+b*.44+side*stride*.5]);
-      p.push([side*(.23+b*.12),.12,side*(.12+stride)]);
+      p.push([side*(.23-.10*n),hip*.48,.28+b*.44+side*stride*.5]);
+      p.push([side*(.23+b*.12-.11*n),.12,side*(.12+stride)]);
     }
     return p.map(v=>({x:s.x+v[0]*Math.cos(s.roll)-v[1]*Math.sin(s.roll),y:v[0]*Math.sin(s.roll)+v[1]*Math.cos(s.roll),z:s.z+v[2]}));
   }
   function create(){
-    const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:3.65,roll:.015,rv:0,bend:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
-    for(let i=0;i<7;i++)s.gates.push({z:13+i*15,height:1.82-i*.085+.28*Math.max(0,1-i/3),passed:false,hit:false,drop:0});
+    const s={state:'intro',t:0,x:0,z:0,distance:0,vx:0,speed:3.65,roll:.015,rv:0,bend:0,narrow:0,target:0,weight:0,score:0,fallTime:0,reason:'',rag:null,impact:0,flash:0,gates:[]};
+    for(let i=0;i<7;i++)s.gates.push({z:13+i*15,height:1.82-i*.085+.28*Math.max(0,1-i/3),type:i===2||i===4?'wall':'bar',gap:i===2?.86:.78,passed:false,hit:false,drop:0});
     s.goal=s.gates[s.gates.length-1].z+1.5;
     return s;
   }
@@ -52,9 +52,10 @@
       if(s.fallTime>4.5)s.state='result';
       return;
     }
-    const old=s.bend;s.bend+=(s.target-s.bend)*Math.min(1,dt*5);
+    const old=s.bend;s.bend+=(Math.max(0,s.target)-s.bend)*Math.min(1,dt*5);
+    s.narrow+=(Math.max(0,-s.target)-s.narrow)*Math.min(1,dt*5);
     /* 深く反るほど刃の上の重心が不安定。入力は重心への力で、姿勢を直接戻さない。 */
-    s.rv+=(s.roll*(1.0+s.bend*1.8)-s.weight*2.9+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
+    s.rv+=(s.roll*(1.0+s.bend*1.8+s.narrow*.6)-s.weight*2.9+Math.sin(s.t*2.3)*(.032+s.bend*.055)+(s.bend-old)*.7)*dt;
     s.rv*=Math.exp(-1.55*dt);s.roll+=s.rv*dt;
     s.vx+=(-s.roll*1.6-s.vx*.65)*dt;s.x+=s.vx*dt;
     s.speed+=(3.65+s.score*.10-s.bend*.32-s.speed)*dt*.55;s.z+=s.speed*dt;
@@ -63,6 +64,18 @@
     const p=pose(s);
     for(const g of s.gates){
       if(g.passed)continue;
+      if(g.type==='wall'){
+        for(let i=0;i<11;i++){
+          const a=p[links[i][0]],b=p[links[i][1]],r=i<2?.24:i===2?.16:.145,dz=b.z-a.z;
+          let lo=0,hi=1;
+          if(Math.abs(dz)<.00001){if(Math.abs(a.z-g.z)>.18+r)continue;}
+          else{const t0=(g.z-.18-r-a.z)/dz,t1=(g.z+.18+r-a.z)/dz;lo=Math.max(0,Math.min(t0,t1));hi=Math.min(1,Math.max(t0,t1));if(lo>hi)continue;}
+          const left=a.x+(b.x-a.x)*lo,right=a.x+(b.x-a.x)*hi;
+          if(Math.max(Math.abs(left),Math.abs(right))+r>g.gap/2){fall(s,'wall',g);return;}
+        }
+        if(s.z>g.z+1.5){g.passed=true;s.score++;s.flash=1;}
+        continue;
+      }
       for(let i=0;i<p.length;i++){
         const v=p[i],radius=i===3?.16:i<3?.2:.12;
         if(Math.abs(v.z-g.z)<radius+.07&&v.y+radius>g.height-.065&&v.y-radius<g.height+.065&&Math.abs(v.x)<2.5){fall(s,'bar',g);return;}
