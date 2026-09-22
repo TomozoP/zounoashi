@@ -21,7 +21,7 @@ s=running();s.weight=1;for(let i=0;i<240&&s.state==='play';i++)P.step(s,1/60);as
 const stopped=drive(running(),1,240);assert.equal(stopped.speed,0);assert.equal(stopped.state,'play');const stopZ=stopped.z;drive(stopped,1,60);assert.equal(stopped.z,stopZ);drive(stopped,0,60);assert(stopped.speed>2&&stopped.z>stopZ,'起こすと再発進する');
 /* 指の左右調整だけで全バーを通れることを台で確認。内部状態は書き換えない。 */
 g=game();g.press(' ');let steps=0;g.down(270,g.probe.now().H-46);
-while(g.probe.now().state==='play'&&steps++<4200){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);const gate=n.gates.find(v=>!v.passed),brake=gate&&gate.z-n.z<4.8;g.moveTo(270-weight*220,n.H-(brake?46:206));g.step(1);}
+while(g.probe.now().state==='play'&&steps++<4200){const n=g.probe.now(),weight=P.clamp(n.roll*3+n.rv*1.7,-1,1);const gate=n.gates.find(v=>!v.passed),brake=gate&&gate.z-n.z<4.8;g.moveTo(270-weight*220,n.H-(brake?46:246));g.step(1);}
 assert.equal(g.probe.now().score,12);assert.equal(g.probe.now().reason,'clear');g.press(' ');assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().score,0);assert.equal(g.probe.now().z,0);
 console.log('開始・取消・左右の向き・反り・画面6種・衝突・転倒後の関節・再挑戦：確認済み');
 console.log('反り90%まで約0.45秒。上で加速、中央で惰性、下で減速。');
@@ -51,7 +51,7 @@ for(const z of [0,200])for(const bend of [0,1])for(const side of [-1,1]){const v
 const downhillStop=running();downhillStop.z=180;downhillStop.gates.forEach(g=>g.z+=1000);drive(downhillStop,1,360);assert.equal(downhillStop.speed,0,'下り坂でもブレーキで止まれる');assert.equal(downhillStop.state,'play');console.log('平地と坂での停止、直立での再発進を確認');
 
 // 初期位置・指を離した位置は上。上入力で反らずに加速する。
-g=game();g.press(' ');assert.equal(g.probe.now().target,-1);const initialSpeed=g.probe.now().speed;g.key('ArrowUp');g.step(60);assert.equal(g.probe.now().target,-1);assert(g.probe.now().speed>initialSpeed);assert.equal(g.probe.now().bend,0);g.key('ArrowUp',true);g.step(1);assert.equal(g.probe.now().target,-1);g.down(270,g.probe.now().H-126);g.step(1);assert.equal(g.probe.now().target,0);g.moveTo(270,g.probe.now().H-206);g.step(1);assert.equal(g.probe.now().target,-1);g.up();g.step(1);assert.equal(g.probe.now().target,-1);console.log('上で待機・中央の惰性・指を離した加速復帰を確認');
+g=game();g.press(' ');assert.equal(g.probe.now().target,-1);const initialSpeed=g.probe.now().speed;g.key('ArrowUp');g.step(60);assert.equal(g.probe.now().target,-1);assert(g.probe.now().speed>initialSpeed);assert.equal(g.probe.now().bend,0);g.key('ArrowUp',true);g.step(1);assert.equal(g.probe.now().target,-1);g.down(270,g.probe.now().H-146);g.step(1);assert.equal(g.probe.now().target,0);g.moveTo(270,g.probe.now().H-246);g.step(1);assert.equal(g.probe.now().target,-1);g.up();g.step(1);assert.equal(g.probe.now().target,-1);console.log('上で待機・中央の惰性・指を離した加速復帰を確認');
 
 // 体の角度と時刻が同じでも、切り返した瞬間に腕の傾きが変わる。
 const armState=running();armState.bend=1;armState.roll=.2;armState.weight=-1;const rightArms=P.pose(armState);armState.weight=1;const leftArms=P.pose(armState);assert(rightArms[7].y>rightArms[5].y);assert(leftArms[7].y<leftArms[5].y);assert.equal(rightArms[0].y,leftArms[0].y);console.log('レバーの左右切り返しへの腕の即時追従を確認');
