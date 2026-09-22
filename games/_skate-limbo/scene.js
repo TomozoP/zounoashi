@@ -7,7 +7,7 @@
     const camera=new T.PerspectiveCamera(40,1,.1,130);
     scene.add(new T.HemisphereLight(0xffffff,0x547d8c,2.0));const sun=new T.DirectionalLight(0xfff1d9,2.2);sun.position.set(-4,12,7);scene.add(sun);
     const mat=c=>new T.MeshStandardMaterial({color:c,roughness:.65});
-    const ice=mat('#b9e0e5'),white=mat('#fffaf0'),navy=mat('#203e51'),coral=mat('#ee715b'),skin=mat('#edb28a'),teal=mat('#318c92'),metal=mat('#759baa'),hair=mat('#47362e');
+    const ice=mat('#b9e0e5'),white=mat('#fffaf0'),navy=mat('#203e51'),coral=mat('#ee715b'),skin=mat('#f5d447'),teal=mat('#318c92'),metal=mat('#759baa'),hair=mat('#47362e');
     function box(w,h,d,m,x,y,z,parent=scene){const o=new T.Mesh(new T.BoxGeometry(w,h,d),m);o.position.set(x,y,z);parent.add(o);return o;}
     function ball(r,m,parent=scene){const o=new T.Mesh(new T.SphereGeometry(r,12,8),m);parent.add(o);return o;}
     const cylinder=new T.CylinderGeometry(1,1,1,10),axis=new T.Vector3(0,1,0);
