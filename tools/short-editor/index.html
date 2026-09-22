@@ -75,13 +75,13 @@ aside .sec>h3:before{content:none}
 .row .val{flex:0 0 40px;text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
 .chk{display:flex;align-items:center;gap:6px;margin:6px 0;cursor:pointer}
 .presets{display:flex;gap:6px}
-.presets button{flex:1;padding:6px 0;font-weight:900}
+.presets button{flex:1;padding:6px 0;font-weight:900;font-size:24px;paint-order:stroke fill}
 .presets button.on{border-color:var(--accent)}
 #insp textarea{width:100%;min-height:64px;resize:vertical}
 #subList{display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto}
-#subList .it{display:flex;gap:6px;align-items:center}
+#subList .it{display:flex;flex-shrink:0;gap:6px;align-items:center}
 #subList .it .t{flex:0 0 52px;color:var(--dim);font-variant-numeric:tabular-nums;cursor:pointer;font-size:12px}
-#subList .it textarea{flex:1;min-width:0;resize:none;overflow:hidden;line-height:1.35}
+#subList .it textarea{flex:1;min-width:0;min-height:36px;resize:none;overflow:hidden;line-height:1.35}
 #subList .it.cur textarea{border-color:var(--s)}
 .status{color:var(--dim);font-size:12px;margin-top:6px;min-height:1em;white-space:pre-wrap}
 .bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:6px}
@@ -1460,7 +1460,7 @@ addEventListener('resize', applyLayout);
 function renderInspector() {
   const selectionKey = [...sel].sort().join(',');
   const sidebar = document.querySelector('aside');
-  if (selectionKey && sidebar.dataset.selectionKey !== selectionKey) showSidePanel('selection');
+  if (selectionKey && sidebar.dataset.selectionKey !== selectionKey && !$('subList').contains(document.activeElement)) showSidePanel('selection');
   sidebar.dataset.selectionKey = selectionKey;
   const el = $('insp');
   const many = selItems();
@@ -1528,6 +1528,16 @@ function textControls(el, items) {
   $('tBox').checked = !!o.box;
   $('tBox').onchange = e => { commit(); items.forEach(x => x.box = e.target.checked); changed(true); };
 }
+// 非表示中は高さを測らず、表示時と幅の変更時に改行を含めて測り直す。
+function growSubtitleInput(input) {
+  if (!input.getClientRects().length) return;
+  input.style.height = 'auto';
+  const css = getComputedStyle(input);
+  input.style.height = Math.ceil(input.scrollHeight + parseFloat(css.borderTopWidth) + parseFloat(css.borderBottomWidth)) + 'px';
+}
+function resizeSubtitleList() {
+  $('subList').querySelectorAll('textarea').forEach(growSubtitleInput);
+}
 function renderSubList(onlyCur) {
   const box = $('subList');
   if (onlyCur) { [...box.children].forEach(r => r.classList.toggle('cur', playhead >= +r.dataset.s && playhead < +r.dataset.e)); return; }
@@ -1540,7 +1550,7 @@ function renderSubList(onlyCur) {
     const t = document.createElement('span'); t.className = 't'; t.textContent = fmt(s.start).slice(0, -1);
     t.onclick = () => { select('s', s.id); seek(s.start + 0.01); };
     const i = document.createElement('textarea'); i.rows = 1; i.value = s.text;
-    const grow = () => { i.style.height = 'auto'; i.style.height = i.scrollHeight + 'px'; };
+    const grow = () => growSubtitleInput(i);
     let first = true;
     i.onfocus = () => { select('s', s.id); if (!playing) seek(s.start + 0.01); };
     i.oninput = () => { if (first) { undoStack.push(snap()); redoStack.length = 0; first = false; } s.text = i.value; grow(); renderTimeline(); loadFonts(); compose(playhead); const ta = document.querySelector('#insp textarea'); if (ta && selected && selected.id === s.id) ta.value = s.text; };
@@ -1581,7 +1591,7 @@ $('optEnhance').addEventListener('change', () => { if (playing && !recording) { 
 for (const [boxId, key] of [['presets', 'preset'], ['headPresets', 'headPreset']]) {
   PRESETS.forEach((pr, i) => {
     const b = document.createElement('button'); b.textContent = pr.name;
-    b.style.color = pr.fill; b.style.webkitTextStroke = `1.5px ${pr.stroke}`; b.style.fontSize = '18px';
+    b.style.color = pr.fill; b.style.webkitTextStroke = `3px ${pr.stroke}`;
     b.onclick = () => { style[key] = i; [...$(boxId).children].forEach((x, j) => x.classList.toggle('on', j === i)); compose(playhead); };
     if (i === 0) b.classList.add('on');
     $(boxId).appendChild(b);
@@ -1672,6 +1682,13 @@ splitter($('spScript'), 'scriptW', (dx, dy, st) => { lay.scriptW = st.scriptW + 
 splitter($('spSide'), 'sideW', (dx, dy, st) => { lay.sideW = st.sideW - dx; });
 splitter($('spTl'), 'tlH', (dx, dy, st) => { lay.tlH = st.tlH - dy; });
 new ResizeObserver(fitView).observe($('stageMain'));
+let subtitleListWidth = -1;
+new ResizeObserver(entries => {
+  const width = entries[0].contentRect.width;
+  if (width === subtitleListWidth) return;
+  subtitleListWidth = width;
+  resizeSubtitleList();
+}).observe($('subList'));
 applyLayout();
 
 // 設定は用途ごとに切り替え、同時にひとつだけ表示する。
@@ -1684,6 +1701,7 @@ function showSidePanel(name) {
     if (button.dataset.panel === 'simulation') button.disabled = $('simMode').value === 'off';
   });
   document.querySelector('aside').scrollTop = 0;
+  if (name === 'subtitles') resizeSubtitleList();
 }
 document.querySelectorAll('#sideNav button').forEach(button => {
   button.onclick = () => showSidePanel(button.dataset.panel);
