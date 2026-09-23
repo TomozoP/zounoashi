@@ -39,6 +39,7 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
   sets.forEach(s => {
     const fish = s.list;
     assert.ok(fish.length >= 32, s.mark + ' の字の数 ' + fish.length);
+    assert.ok(!fish.some(f => f.kanji === s.mark), s.mark + ' のカードに「' + s.mark + '」そのものが入っている');
     assert.equal(new Set(fish.map(f => f.kanji)).size, fish.length, s.mark + ' 字が重ならない');
     assert.equal(new Set(fish.map(f => f.reading)).size, fish.length, s.mark + ' 読みが重ならない');
     fish.forEach(f => {
