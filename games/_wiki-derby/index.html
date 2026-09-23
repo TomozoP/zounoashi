@@ -303,7 +303,7 @@
   function startRace() {
     if (state !== S.PLAY || phase !== "bet") return;
     if (!totalBet()) { wobble = 0.35; sndNo(); return; }
-    phase = "count"; pt = 0; raceT = 0; hoofT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
+    phase = "count"; pt = 0; raceT = 0; soloT = 0; ff = 1; hoofT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
     prog = []; finishT = []; stopped = [];
     var maxLen = horses[order[0]].len;
     for (var i = 0; i < N; i++) {
@@ -318,6 +318,7 @@
     }
     prefetch();
   }
+  var SOLO_WAIT = 2, FAST = 4, soloT = 0, ff = 1;   /* 独走になってから早送りまでの秒数と、その速さ */
   var START_X = 44, countN = 0;                  /* ゲートは画面の左端から START_X のところ */
   /* 位置（ピクセル）。出だしで加速し、あとは同じ速さ。前後に少しゆれるが、止まる手前でゆれを消す */
   function runX(i, t) {
@@ -356,7 +357,11 @@
       if (pt >= 3) { phase = "race"; pt = 0; countN = 0; sndGate(); }
     }
     if (phase === "race") {
-      raceT += dt;
+      var alive = 0;
+      for (var a = 0; a < N; a++) if (!stopped[a]) alive++;
+      soloT = alive === 1 ? soloT + dt : 0;
+      ff = alive === 1 && soloT > SOLO_WAIT ? FAST : 1;
+      raceT += dt * ff;
       var lead = -1e9, running = 0;
       for (var h = 0; h < N; h++) {
         if (!stopped[h] && raceT >= finishT[h]) { stopped[h] = true; sndStop(!!bets[h], rankOf[h]); }
@@ -364,7 +369,7 @@
       }
       if (!running) lead = runX(order[0], raceT);
       /* カメラ: 走っている馬の先頭が画面の右寄りに来るように */
-      cam += (Math.max(-START_X, lead - W * 0.66) - cam) * Math.min(1, dt * 3);   /* 先頭が右寄りに来るまでは動かさない */
+      cam += (Math.max(-START_X, lead - W * 0.66) - cam) * Math.min(1, dt * ff * 3);   /* 先頭が右寄りに来るまでは動かさない */
       var near = Math.max(0, 1 - running / N);                 /* 残りが少ないほど盛り上がる */
       hoofT -= dt; if (hoofT <= 0 && running) { hoofT = 0.07 + (1 - running / N) * 0.05; sndHoof(0.3 + (running / N) * 0.7); }
       crowdT -= dt; if (crowdT <= 0) { crowdT = 0.3; sndCrowd(0.2 + near * 0.8); }
@@ -693,18 +698,19 @@
         ctx.fillText(txt.charAt(k % (txt.length + 1)) || "／", sx, ty);
       }
     }
+    /* 馬の名前は各レーンの左上に固定（馬が画面の外にいても分かるように）。切らずに文字を小さくして収める */
+    for (var t = 0; t < N; t++) {
+      var ly = TRACK.top + t * LANE + 12;
+      drawNum(t, 16, ly, 8);
+      ctx.fillStyle = "rgba(255,255,255,.9)";
+      ctx.shadowColor = "rgba(0,0,0,.5)"; ctx.shadowBlur = 3;
+      drawFitted(horses[t].title, 30, ly, W - 30 - 12, 1, 14, 9, "700");
+      ctx.shadowBlur = 0;
+    }
     for (var j = 0; j < N; j++) {
       var x = worldX(j) - cam, y2 = laneY(j);
-      if (x < -40) { if (stopped[j]) drawRankBadge(rankOf[j], 16, y2); continue; }
+      if (x < -40) { if (stopped[j]) drawRankBadge(rankOf[j], 18, y2 + LANE * 0.12); continue; }
       if (x > W + 60) continue;
-      /* 題名は馬の上に。切らずに文字を小さくして収める */
-      ctx.fillStyle = "rgba(255,255,255,.88)";
-      var f = fitLines(horses[j].title, 200, 1, 13, 9, "700");
-      ctx.font = "700 " + f.size + "px sans-serif";
-      var lw = ctx.measureText(f.lines[0]).width;
-      var lx = Math.max(6 + lw / 2, Math.min(W - 6 - lw / 2, x));
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(f.lines[0], lx, y2 - LANE * 0.34);
       drawHorse(j, x, y2 + LANE * 0.02, stopped[j] ? finishT[j] : raceT, s, stopped[j]);
       if (stopped[j]) drawRankBadge(rankOf[j], Math.min(W - 16, x + 36 * s), y2);
     }
@@ -895,6 +901,7 @@
     /* レース中の馬の位置（ゴールまでの割合）。着順が長さどおりかの確認用 */
     positions: function () { return horses && phase === "race" ? horses.map(function (h, i) { return progressOf(i, raceT); }) : null; },
     stopped: function () { return stopped.slice(); },
+    fast: function () { return ff; },
     /* 文字を収める処理の確認用: 幅と行数に入ったか */
     fit: function (s, maxW, lines) {
       var f = fitLines(s, maxW, lines, 17, 11, "800");

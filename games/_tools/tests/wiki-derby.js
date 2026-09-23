@@ -45,9 +45,16 @@ function race(g) {
   assert.ok(lastLane < top, 'レース中の賭けたボタンは走路の下にある');
   assert.ok(g.probe.raceCtrl(7).y + 26 < H - 20, 'レース中の賭けたボタンが画面に収まる');
   const stopSeen = [], cams = [], stopX = {};
-  let frames = 0;
+  let frames = 0, fastFrames = 0, soloFrames = 0;
   while (g.probe.now().phase === 'race' && frames < 3000) {
     const st = g.probe.stopped(), p = g.probe.positions();
+    const alive = st.filter(v => !v).length;
+    if (alive === 1) soloFrames++; else soloFrames = 0;
+    if (g.probe.fast() > 1) {
+      fastFrames++;
+      assert.ok(alive <= 1, "早送りは走っているのが1頭だけのとき（止まった直後の1コマを除く）");
+      if (alive === 1) assert.ok(soloFrames > 115, "独走が2秒続いてから早送り: " + soloFrames);
+    }
     st.forEach((v, i) => { if (v && !stopSeen.includes(i)) { stopSeen.push(i); stopX[i] = p[i]; } });
     if (frames % 60 === 0) cams.push(g.probe.now().cam);
     g.step(1); frames++;
@@ -56,7 +63,7 @@ function race(g) {
   for (let k = 1; k < orderSeen.length; k++) assert.ok(stopX[orderSeen[k - 1]] > stopX[orderSeen[k]], '長い記事の馬ほど先で止まる');
   assert.ok(frames < 3000, '走り終わる');
   assert.equal(g.probe.now().phase, 'finish');
-  return { orderSeen, seconds: frames / 60, cams };
+  return { orderSeen, seconds: frames / 60, cams, fastFrames };
 }
 async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flush(); g.step(1); }
 
@@ -100,7 +107,9 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     const rest = g.probe.now().money;
     const r = race(g);
     assert.deepEqual(r.orderSeen, now0.order, '止まった順の逆が長さの順');
-    assert.ok(r.seconds > 29 && r.seconds < 34, '1レースは約30秒: ' + r.seconds.toFixed(1));
+    /* 2位の馬は長さ80000で約24.5秒、1位は120000で30秒走る。24.5秒からの独走は2秒待って4倍 */
+    assert.ok(r.fastFrames > 0, '独走で早送りになった');
+    assert.ok(r.seconds > 26 && r.seconds < 30, '早送りのぶん30秒より短い: ' + r.seconds.toFixed(1));
     assert.ok(r.cams[r.cams.length - 1] - r.cams[0] > 2000, 'カメラが馬群を追いかける');
     assert.equal(g.probe.now().won, Math.floor(200 * odds[1]));
     assert.equal(g.probe.now().money, rest + Math.floor(200 * odds[1]));
