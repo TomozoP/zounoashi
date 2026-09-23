@@ -105,6 +105,13 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
   while (now(g).phase === 'draw' && frames < 200) { g.step(1); frames++; }
   assert.equal(now(g).phase, 'call');
   assert.ok(frames >= 50 && frames <= 90, '玉が出て大きく映るまで1秒ほど ' + frames);
+  /* 正解の漢字（玉の裏）は、答えを出すまで描かない */
+  const g2 = open(); tapCell(g2, 12);
+  let seen = false;
+  for (let f = 0; f < 200 && now(g2).phase !== 'reveal'; f++) { g2.step(1); if (g2.probe.backShown() && now(g2).phase !== 'reveal') seen = true; if (f === 120) { const sk = g2.probe.skip(); g2.tap(sk.x, sk.y); } }
+  assert.ok(!seen, '答えの前に裏の漢字が見えている');
+  g2.step(10);
+  assert.ok(g2.probe.backShown(), '答えのときは見える');
 }
 
 /* 2. スペースでも始まる（離したとき） */
