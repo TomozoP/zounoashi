@@ -21,17 +21,43 @@ function waitFor(g, onCard) {
 }
 function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'); }
 
-/* 0. 字と読み: 魚へんで、字も読みも重ならない */
+/* 0. 字と読み: どのカードも、字も読みも重ならない。魚は魚へんの字 */
 {
   const g = open();
-  const fish = g.probe.fish();
-  assert.ok(fish.length >= 40, '字の数');
-  assert.equal(new Set(fish.map(f => f.kanji)).size, fish.length, '字が重ならない');
-  assert.equal(new Set(fish.map(f => f.reading)).size, fish.length, '読みが重ならない');
-  fish.forEach(f => {
-    assert.ok(/^[魚-鱿]$/.test(f.kanji), f.kanji + ' は魚へんの字');
-    assert.ok(/^[ぁ-ゖー]+$/.test(f.reading), f.reading + ' はひらがな');
+  const sets = g.probe.sets();
+  assert.deepEqual(sets.map(s => s.mark), ['魚', '木', '金', '鳥', '虫']);
+  sets.forEach(s => {
+    const fish = s.list;
+    assert.ok(fish.length >= 32, s.mark + ' の字の数 ' + fish.length);
+    assert.equal(new Set(fish.map(f => f.kanji)).size, fish.length, s.mark + ' 字が重ならない');
+    assert.equal(new Set(fish.map(f => f.reading)).size, fish.length, s.mark + ' 読みが重ならない');
+    fish.forEach(f => {
+      assert.ok(/^[一-鿿]$/.test(f.kanji), f.kanji + ' は漢字1字');
+      assert.ok(/^[ぁ-ゖー]+$/.test(f.reading), f.reading + ' はひらがな');
+    });
   });
+  sets[0].list.forEach(f => assert.ok(/^[魚-鱿]$/.test(f.kanji), f.kanji + ' は魚へんの字'));
+}
+
+/* 0b. 開始前に上の丸でカードを選ぶ。選ぶと配り直し、そのカードで始まる。左右キーでも選べる */
+{
+  const g = open();
+  assert.equal(now(g).set, '魚');
+  const b = g.probe.setButton(1); g.tap(b.x, b.y); g.step(30);
+  assert.equal(now(g).state, 'intro', '選んだだけでは始まらない');
+  assert.equal(now(g).set, '木');
+  const wood = g.probe.sets()[1].list.map(f => f.kanji);
+  assert.ok(now(g).card.filter(Boolean).every(k => wood.includes(k)), '木のカードに配り直す');
+  g.press('ArrowRight'); assert.equal(now(g).set, '金');
+  g.press('ArrowLeft'); g.press('ArrowLeft'); g.press('ArrowLeft'); assert.equal(now(g).set, '虫', '端から回る');
+  const card = now(g).card;
+  start(g);
+  assert.deepEqual(now(g).card, card);
+  const bug = g.probe.sets()[4].list.map(f => f.kanji);
+  assert.ok(bug.includes(now(g).call.kanji), '虫の読みが出る');
+  /* 丸の間隔もスマホで押せる */
+  const a0 = g.probe.setButton(0), a1 = g.probe.setButton(1);
+  assert.ok(a1.x - a0.x >= 63);
 }
 
 /* 1. 開始前は真ん中を押すまで始まらない。カードは24字＋真ん中 */
@@ -111,7 +137,8 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
 }
 
 /* 6. 全部取れば必ずビンゴになり、結果は出た読みの数。もう一度で最初から */
-function perfect(g) {
+function perfect(g, set) {
+  if (set) { const b = g.probe.setButton(set); g.tap(b.x, b.y); g.step(1); }
   start(g);
   for (let k = 0; k < 400 && now(g).state === 'play'; k++) {
     const n = now(g);
@@ -130,21 +157,35 @@ function perfect(g) {
   assert.equal(r.state, 'result');
   assert.ok(r.bingo && r.bingo.length === 5);
   assert.equal(r.score, r.calls);
+  /* 結果でもカードを選べる。選んでから「もう一度」でそのカードになる */
+  const sb = g.probe.setButton(3); g.tap(sb.x, sb.y); g.step(1);
+  assert.equal(now(g).state, 'result', '選んだだけでは始まらない');
+  assert.equal(now(g).set, '鳥');
   const p = g.probe.result().retry;
+  assert.ok(sb.y - p.y >= 63, '丸とボタンが離れている');
   g.tap(p.x, p.y); g.step(1);
   assert.equal(now(g).state, 'play');
   assert.equal(now(g).calls, 1);
+  const bird = g.probe.sets()[3].list.map(f => f.kanji);
+  assert.ok(now(g).card.filter(Boolean).every(k => bird.includes(k)), '鳥のカードで始まる');
+  /* 結果では左右キーで選んで、スペースでもう一度 */
+  const r2 = perfect(g);
+  assert.equal(r2.state, 'result');
+  g.press('ArrowRight'); assert.equal(now(g).set, '虫');
+  g.press(' '); g.step(1);
+  assert.equal(now(g).state, 'play');
+  assert.equal(now(g).set, '虫');
 }
 
 /* 7. 回数のばらつき（全部取れた場合） */
-{
+['魚', '木', '金', '鳥', '虫'].forEach((mark, set) => {
   const scores = [];
-  for (let k = 0; k < 60; k++) scores.push(perfect(open()).score);
+  for (let k = 0; k < 40; k++) scores.push(perfect(open(), set).score);
   scores.sort((a, b) => a - b);
   const q = f => scores[Math.floor((scores.length - 1) * f)];
-  console.log('全部取れた場合のビンゴまでの回数: 最小' + scores[0] + ' / 中央' + q(0.5) + ' / 9割' + q(0.9) + ' / 最大' + scores[scores.length - 1]);
+  console.log(mark + ' 全部取れた場合のビンゴまでの回数: 最小' + scores[0] + ' / 中央' + q(0.5) + ' / 9割' + q(0.9) + ' / 最大' + scores[scores.length - 1]);
   assert.ok(q(0.5) >= 8 && q(0.5) <= 40, '中央値が極端でない');
-}
+});
 
 /* 8. 画面の形を変えても、マス同士・箱が押せる大きさ */
 [[375, 667], [390, 844], [430, 932], [768, 1024]].forEach(v => {
