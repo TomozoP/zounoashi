@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>50音ルーレット</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #0e3f2b; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 50音ルーレット
+
+   50音表のマスにチップを置いて、上のルーレットを回す。
+   玉が落ちたかなにチップがあれば、置いた数の46倍が戻る。
+   10回まわし終えたとき（またはチップが尽きたとき）の枚数が結果。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null;
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q, delay) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random() * 1.5); s.stop(n + dur + 0.05);
+  }
+  /* チップどうしが当たる音 */
+  function sndChip(delay) {
+    noiseHit(0.05, 3200 + Math.random() * 600, 0.22, 3, delay);
+    tone(2400 + Math.random() * 300, 0.04, 0.03, "triangle", null, delay);
+  }
+  /* 玉がフレットに当たる音 */
+  function sndTick(v) {
+    noiseHit(0.03, 2600, 0.1 * v, 6);
+    tone(1800, 0.025, 0.025 * v, "square");
+  }
+  function sndRoll() { noiseHit(0.14, 700, 0.035, 0.8); }
+  function sndDrop() { noiseHit(0.09, 1500, 0.3, 2); tone(900, 0.06, 0.06, "triangle", 500); }
+  function sndWin() {
+    [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.22, 0.09, "triangle", null, i * 0.09); });
+  }
+  function sndLose() { tone(300, 0.25, 0.06, "sine", 180); }
+  function sndNo() { tone(160, 0.1, 0.05, "square"); }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 50音とルーレットの並び ============ */
+  var ROWS = ["あいうえお", "かきくけこ", "さしすせそ", "たちつてと", "なにぬねの",
+              "はひふへほ", "まみむめも", "や ゆ よ", "らりるれろ", "わ を ん"];
+  var KANA = [], CELL = [];                    /* CELL[k] = 表の行と列 */
+  ROWS.forEach(function (s, r) {
+    for (var c = 0; c < 5; c++) {
+      var ch = s.charAt(c);
+      if (ch && ch !== " ") { KANA.push(ch); CELL.push({ r: r, c: c }); }
+    }
+  });
+  var N = KANA.length;                         /* 46 */
+  var STEP = Math.PI * 2 / N;
+  var PAY = N;                                 /* 当たれば置いた数の46倍が戻る */
+  var START_CHIPS = 10, SPINS = 10;
+
+  /* 盤の並びは本物のルーレットのようにばらばら。毎回同じ並び（決まった種で混ぜる） */
+  var WHEEL = (function () {
+    var a = [], seed = 50;
+    for (var i = 0; i < N; i++) if (KANA[i] !== "ん") a.push(i);
+    for (var j = a.length - 1; j > 0; j--) {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      var r = seed % (j + 1), t = a[j]; a[j] = a[r]; a[r] = t;
+    }
+    a.unshift(KANA.indexOf("ん"));             /* ん は緑の0番 */
+    return a;
+  })();
+  var POCKET = [];                             /* POCKET[k] = 盤の何番目か */
+  WHEEL.forEach(function (k, p) { POCKET[k] = p; });
+  var COL = { red: "#b52731", black: "#1a1a1e", green: "#1b7c46" };
+  function colorOf(k) { var p = POCKET[k]; return p === 0 ? COL.green : (p % 2 ? COL.red : COL.black); }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  /* PLAY の中の段階: bet（チップを置く）→ zoom（盤が大きくなる）→ spin → hold（落ちた所を見る）
+     → back（盤が戻る）→ pay（チップが動く）→ bet */
+  var state, phase, pt, score, chips, shown, bets, spinsDone, last, spin, flyers, sel, keyMode = false, T, wobble;
+
+  var rh, TOP, CW = 100, TX = 20, small, big, pile;
+  function place() {
+    rh = Math.max(63, Math.min(76, Math.floor((H - 140) / 10)));
+    TOP = H - rh * 10 - 12;
+    var r = Math.max(40, Math.min(TOP / 2 - 10, 150));
+    small = { x: 24 + r, y: TOP / 2, r: r };
+    big = { x: W / 2, y: Math.max(H * 0.42, 262), r: 238 };
+    pile = { x: Math.max(300, (24 + 2 * r + W) / 2 - 46), y: TOP / 2 - 6 };
+  }
+  function cellRect(k) {
+    var c = CELL[k];
+    return { x: TX + c.c * CW, y: TOP + c.r * rh, w: CW, h: rh };
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    phase = "bet"; pt = 0; T = 0;
+    chips = START_CHIPS; shown = chips; score = chips;
+    bets = []; for (var i = 0; i < N; i++) bets.push(0);
+    spinsDone = 0; last = -1; spin = null; flyers = []; sel = 0; wobble = 0;
+  }
+
+  function totalBet() { var s = 0; for (var i = 0; i < N; i++) s += bets[i]; return s; }
+
+  /* ============ 進行 ============ */
+  function bet(k) {
+    if (state !== S.PLAY || phase !== "bet") return;
+    if (chips <= 0) { sndNo(); return; }
+    chips--; bets[k]++;
+    var c = cellRect(k);
+    flyers.push({ x0: pile.x, y0: pile.y, x1: c.x + c.w - 23, y1: c.y + c.h - 22, t: 0, d: 0.18, fade: false });
+    sndChip();
+  }
+  function takeBack() {
+    if (state !== S.PLAY || phase !== "bet") return;
+    var n = 0;
+    for (var k = 0; k < N; k++) {
+      if (!bets[k]) continue;
+      var c = cellRect(k);
+      flyers.push({ x0: c.x + c.w - 23, y0: c.y + c.h - 22, x1: pile.x, y1: pile.y, t: -n * 0.02, d: 0.22, fade: false });
+      chips += bets[k]; bets[k] = 0; n++;
+    }
+    for (var i = 0; i < Math.min(n, 5); i++) sndChip(i * 0.04);
+  }
+  function startSpin() {
+    if (state !== S.PLAY || phase !== "bet") return;
+    if (totalBet() === 0) { wobble = 0.35; sndNo(); return; }
+    var k = Math.floor(Math.random() * N);
+    var rot0 = spin ? spin.rot : Math.random() * Math.PI * 2;
+    spin = {
+      k: k, rot0: rot0, rot: rot0, t: 0,
+      land: 3.9 + Math.random() * 0.5,         /* 玉が落ちきるまで */
+      turns: 5 + Math.random(),                 /* 盤に対して玉が回る数 */
+      hop: (Math.random() < 0.5 ? -1 : 1) * (1 + Math.random() * 1.5),
+      rel: 0, br: 1, fret: null, rollT: 0, dropped: false
+    };
+    phase = "zoom"; pt = 0;
+    tone(220, 0.3, 0.05, "sine", 330);
+  }
+  var TRACK = 0.915, POCK = 0.655;              /* 玉の回る半径・落ちる半径（盤の半径に対する割合） */
+  function updateSpin(dt) {
+    var s = spin;
+    s.t += dt;
+    var t = s.t;
+    s.rot = s.rot0 + 2.4 * 3 * (1 - Math.exp(-t / 3));   /* 盤は右回りにだんだん遅く */
+    var relEnd = (POCKET[s.k] + 0.5) * STEP;
+    var u = Math.min(1, t / s.land);
+    var D = s.turns * Math.PI * 2;
+    var rel = relEnd + D * (1 - u) * (1 - u);            /* 玉は盤と逆に回って減速する */
+    var br = TRACK;
+    if (u > 0.62) {                                       /* 内側へ落ちながら、跳ねる */
+      var v = (u - 0.62) / 0.38;
+      br = TRACK - (TRACK - POCK) * v + 0.05 * Math.abs(Math.sin(v * 9)) * (1 - v);
+    }
+    if (u >= 1) {                                         /* 落ちたあと、隣のマスへ少し跳ねてから止まる */
+      var a = t - s.land;
+      var e = Math.exp(-a * 3.2);
+      rel = relEnd + s.hop * STEP * e * Math.cos(a * 7);
+      br = POCK + 0.07 * Math.abs(Math.sin(a * 7)) * e;
+      if (!s.dropped) { s.dropped = true; sndDrop(); }
+    }
+    s.rel = rel; s.br = br;
+    var fret = Math.floor(rel / STEP);
+    if (u > 0.62 && s.fret !== null && fret !== s.fret) sndTick(Math.max(0.3, 1 - (u - 0.62)));
+    s.fret = fret;
+    if (u < 0.62) { s.rollT -= dt; if (s.rollT <= 0) { s.rollT = 0.13; sndRoll(); } }
+    return t > s.land + 1.3;
+  }
+
+  function settle() {
+    var k = spin.k, won = bets[k] * PAY;
+    last = k; spinsDone++;
+    var n = 0;
+    for (var i = 0; i < N; i++) {
+      if (!bets[i]) continue;
+      var c = cellRect(i);
+      if (i === k) continue;
+      for (var j = 0; j < Math.min(bets[i], 3); j++) {  /* 外れたチップは盤へ持っていかれる */
+        flyers.push({ x0: c.x + c.w - 23, y0: c.y + c.h - 22 - j * 4, x1: small.x, y1: small.y, t: -n * 0.03, d: 0.35, fade: true });
+        n++;
+      }
+      bets[i] = 0;
+    }
+    if (won) {
+      var cc = cellRect(k), m = Math.min(24, won);
+      for (var q = 0; q < m; q++) {
+        flyers.push({ x0: cc.x + cc.w / 2 + (Math.random() - 0.5) * 40, y0: cc.y + cc.h / 2, x1: pile.x, y1: pile.y, t: -q * 0.035, d: 0.32, fade: false, snd: true });
+      }
+      chips += won; bets[k] = 0;
+      sndWin();
+    } else {
+      sndLose();
+    }
+    score = chips;
+  }
+
+  function update(dt) {
+    if (state !== S.PLAY) return;
+    T += dt; pt += dt;
+    if (wobble > 0) wobble = Math.max(0, wobble - dt);
+    for (var i = flyers.length - 1; i >= 0; i--) {
+      var f = flyers[i];
+      var before = f.t;
+      f.t += dt;
+      if (f.snd && before < f.d && f.t >= f.d) sndChip();
+      if (f.t > f.d + (f.fade ? 0.15 : 0)) flyers.splice(i, 1);
+    }
+    shown += (chips - shown) * Math.min(1, dt * 8);
+    if (Math.abs(chips - shown) < 0.5) shown = chips;
+
+    if (phase === "zoom") { updateSpin(dt); if (pt >= 0.45) { phase = "spin"; pt = 0; } }
+    else if (phase === "spin") { if (updateSpin(dt)) { phase = "back"; pt = 0; } }
+    else if (phase === "back") { if (pt >= 0.45) { settle(); phase = "pay"; pt = 0; } }
+    else if (phase === "pay") {
+      if (pt >= 1.1 && flyers.length === 0) {
+        if (spinsDone >= SPINS || (chips <= 0 && totalBet() === 0)) { state = S.RESULT; score = chips; shown = chips; }
+        else { phase = "bet"; pt = 0; }
+      }
+    }
+  }
+
+  /* 盤が大きくなっている度合い 0〜1 */
+  function zoomAmount() {
+    if (!spin || state === S.INTRO) return 0;
+    var e = function (x) { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+    if (phase === "zoom") return e(pt / 0.45);
+    if (phase === "spin") return 1;
+    if (phase === "back") return 1 - e(pt / 0.45);
+    return 0;
+  }
+
+  /* ============ 入力 ============ */
+  function hitAt(x, y) {
+    if (Math.hypot(x - small.x, y - small.y) < small.r + 14) return "wheel";
+    if (Math.abs(x - pile.x) < 44 && Math.abs(y - pile.y) < 40) return "pile";
+    for (var k = 0; k < N; k++) {
+      var c = cellRect(k);
+      if (x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h) return k;
+    }
+    return null;
+  }
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (phase !== "bet") return;
+    var h = x == null ? (sel < 0 ? "wheel" : sel) : hitAt(x, y);
+    if (h === "wheel") startSpin();
+    else if (h === "pile") takeBack();
+    else if (typeof h === "number") { if (x != null) sel = h; bet(h); }
+  }
+  function move() {}
+  function up() {}
+
+  /* 矢印キーで表の上を動く。表のいちばん上からさらに上は盤 */
+  function moveSel(dx, dy) {
+    if (sel < 0) { if (dy > 0 || dx) sel = 0; return; }
+    var c = CELL[sel];
+    if (dx) {
+      var n = sel + dx;
+      sel = n < 0 || n >= N ? -1 : n;
+      return;
+    }
+    var r = c.r + dy;
+    if (r < 0) { sel = -1; return; }
+    if (r > 9) return;
+    var best = -1, bd = 99;
+    for (var k = 0; k < N; k++) if (CELL[k].r === r && Math.abs(CELL[k].c - c.c) < bd) { bd = Math.abs(CELL[k].c - c.c); best = k; }
+    if (best >= 0) sel = best;
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  window.addEventListener("keydown", function (e) {
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    var upK = e.key === "ArrowUp" || e.key === "w" || e.key === "W";
+    var downK = e.key === "ArrowDown" || e.key === "s" || e.key === "S";
+    if (!esc && !go && !left && !right && !upK && !downK) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (left || right || upK || downK) {
+      if (state !== S.PLAY) return;
+      moveSel(left ? -1 : right ? 1 : 0, upK ? -1 : downK ? 1 : 0);
+      return;
+    }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function doShare() {
+    window.zResultActions.x({ text: score + "枚でした #50音ルーレット" });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawChip(x, y, r, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha == null ? 1 : alpha;
+    ctx.beginPath(); ctx.arc(x, y + 2, r, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = "#d9a431"; ctx.fill();
+    ctx.lineWidth = r * 0.28; ctx.setLineDash([r * 0.42, r * 0.36]); ctx.strokeStyle = "#fff5d8";
+    ctx.beginPath(); ctx.arc(x, y, r * 0.84, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(x, y, r * 0.52, 0, Math.PI * 2); ctx.fillStyle = "#f0c54e"; ctx.fill();
+    ctx.restore();
+  }
+  function drawStack(x, y, n, r, plain) {
+    var m = Math.min(n, 7);
+    for (var i = 0; i < m; i++) drawChip(x, y - i * 4, r);
+    if (n > 1 && !plain) {
+      ctx.fillStyle = "#3b2508";
+      ctx.font = "800 " + Math.round(r * 0.9) + "px sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(n), x, y - (m - 1) * 4 + 1);
+      ctx.textBaseline = "alphabetic";
+    }
+  }
+
+  function drawTable(dim) {
+    var hi = (phase === "pay" || phase === "back") ? spin && spin.k : -1;
+    for (var k = 0; k < N; k++) {
+      var c = cellRect(k), g = 4;
+      roundRect(c.x + g, c.y + g, c.w - g * 2, c.h - g * 2, 10);
+      ctx.fillStyle = colorOf(k); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(240,210,140,.45)"; ctx.stroke();
+      if (k === hi && phase === "pay") {
+        var p = 0.5 + 0.5 * Math.sin(pt * 14);
+        ctx.save();
+        ctx.shadowColor = "#ffe27a"; ctx.shadowBlur = 18;
+        ctx.lineWidth = 4 + p * 2; ctx.strokeStyle = "#ffe27a"; ctx.stroke();
+        ctx.restore();
+      }
+      ctx.fillStyle = "#fbf4e6";
+      ctx.font = "700 " + Math.round(rh * 0.5) + "px sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(KANA[k], c.x + c.w * 0.37, c.y + c.h / 2 + 2);
+      ctx.textBaseline = "alphabetic";
+      if (keyMode && state === S.PLAY && phase === "bet" && sel === k) {
+        roundRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2, 12);
+        ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
+      }
+    }
+    /* 置いたチップは、飛んでいる最中のものを除いて描く */
+    var inAir = {};
+    flyers.forEach(function (f) { if (!f.fade && f.t < f.d && f.x1 !== pile.x) { var h = hitAt(f.x1, f.y1); if (typeof h === "number") inAir[h] = (inAir[h] || 0) + 1; } });
+    for (var i = 0; i < N; i++) {
+      var n = bets[i] - (inAir[i] || 0);
+      if (n <= 0) continue;
+      var r = cellRect(i);
+      drawStack(r.x + r.w - 23, r.y + r.h - 22, n, 15);
+    }
+    if (dim > 0) { ctx.fillStyle = "rgba(4,16,10," + (0.72 * dim) + ")"; ctx.fillRect(0, TOP - 6, W, H - TOP + 6); }
+  }
+
+  function drawWheel(cx, cy, R, rot, withBall) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    /* 外枠（木） */
+    ctx.beginPath(); ctx.arc(0, 4, R * 1.03, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,.4)"; ctx.fill();
+    var wood = ctx.createRadialGradient(0, 0, R * 0.8, 0, 0, R * 1.02);
+    wood.addColorStop(0, "#4a2813"); wood.addColorStop(1, "#8a5429");
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fillStyle = wood; ctx.fill();
+    /* 玉の走る溝 */
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.96, 0, Math.PI * 2); ctx.fillStyle = "#2b180c"; ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.87, 0, Math.PI * 2); ctx.fillStyle = "#6e4221"; ctx.fill();
+
+    ctx.rotate(rot - Math.PI / 2);
+    /* かなの輪 */
+    for (var p = 0; p < N; p++) {
+      var k = WHEEL[p], a0 = p * STEP, a1 = a0 + STEP;
+      ctx.beginPath(); ctx.arc(0, 0, R * 0.86, a0, a1); ctx.arc(0, 0, R * 0.58, a1, a0, true); ctx.closePath();
+      ctx.fillStyle = colorOf(k); ctx.fill();
+    }
+    /* 玉の落ちるポケット（かなの内側、色を暗く） */
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.74, 0, Math.PI * 2); ctx.arc(0, 0, R * 0.58, 0, Math.PI * 2, true);
+    ctx.fillStyle = "rgba(0,0,0,.38)"; ctx.fill("evenodd");
+    /* フレット */
+    ctx.strokeStyle = "#e7c46c"; ctx.lineWidth = Math.max(1, R * 0.008);
+    ctx.beginPath();
+    for (var q = 0; q < N; q++) {
+      var a = q * STEP;
+      ctx.moveTo(Math.cos(a) * R * 0.58, Math.sin(a) * R * 0.58);
+      ctx.lineTo(Math.cos(a) * R * 0.86, Math.sin(a) * R * 0.86);
+    }
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.74, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.86, 0, Math.PI * 2); ctx.stroke();
+    if (R >= 80) {
+      ctx.fillStyle = "#fbf4e6";
+      ctx.font = "700 " + Math.round(R * 0.078) + "px sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      for (var j = 0; j < N; j++) {
+        ctx.save();
+        ctx.rotate((j + 0.5) * STEP);
+        ctx.translate(R * 0.8, 0);
+        ctx.rotate(Math.PI / 2);
+        ctx.fillText(KANA[WHEEL[j]], 0, 0);
+        ctx.restore();
+      }
+      ctx.textBaseline = "alphabetic";
+    }
+    /* まんなか */
+    var hub = ctx.createRadialGradient(-R * 0.12, -R * 0.12, R * 0.05, 0, 0, R * 0.58);
+    hub.addColorStop(0, "#9a6232"); hub.addColorStop(1, "#3c200e");
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.58, 0, Math.PI * 2); ctx.fillStyle = hub; ctx.fill();
+    ctx.strokeStyle = "#e7c46c"; ctx.lineWidth = Math.max(2, R * 0.03);
+    ctx.beginPath();
+    for (var s = 0; s < 4; s++) {
+      var b = s * Math.PI / 2;
+      ctx.moveTo(Math.cos(b) * R * 0.12, Math.sin(b) * R * 0.12);
+      ctx.lineTo(Math.cos(b) * R * 0.42, Math.sin(b) * R * 0.42);
+    }
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.12, 0, Math.PI * 2);
+    ctx.fillStyle = "#f0cf78"; ctx.fill();
+    ctx.restore();
+
+    /* 玉 */
+    if (withBall && spin) {
+      var ba = rot + spin.rel - Math.PI / 2;
+      var bx = cx + Math.cos(ba) * R * spin.br, by = cy + Math.sin(ba) * R * spin.br;
+      var br = Math.max(3, R * 0.034);
+      ctx.beginPath(); ctx.arc(bx + br * 0.25, by + br * 0.35, br, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.fill();
+      var ball = ctx.createRadialGradient(bx - br * 0.35, by - br * 0.35, br * 0.1, bx, by, br);
+      ball.addColorStop(0, "#fff"); ball.addColorStop(1, "#c9c9cf");
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fillStyle = ball; ctx.fill();
+    }
+  }
+
+  function drawTop() {
+    /* 手持ちのチップ */
+    var n = Math.round(shown);
+    drawStack(pile.x, pile.y + 8, Math.max(0, Math.min(n, 7)), 20, true);
+    if (n <= 0) { ctx.beginPath(); ctx.arc(pile.x, pile.y + 8, 20, 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 2; ctx.stroke(); }
+    ctx.fillStyle = "#fbf4e6";
+    ctx.font = "800 42px sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(String(n), pile.x + 34, pile.y + 4);
+    ctx.textBaseline = "alphabetic";
+    /* 残りの回数 */
+    var dotsY = Math.min(TOP - 16, pile.y + 44), dx = 16, x0 = pile.x - 20;
+    for (var i = 0; i < SPINS; i++) {
+      ctx.beginPath(); ctx.arc(x0 + i * dx, dotsY, 5, 0, Math.PI * 2);
+      ctx.fillStyle = i < spinsDone ? "rgba(255,255,255,.18)" : "#f0cf78";
+      ctx.fill();
+    }
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+
+    var felt = ctx.createRadialGradient(W / 2, H * 0.4, 40, W / 2, H * 0.5, H * 0.8);
+    felt.addColorStop(0, "#16603f"); felt.addColorStop(1, "#0a3322");
+    ctx.fillStyle = felt; ctx.fillRect(0, 0, W, H);
+
+    var z = zoomAmount();
+    var rot = spin ? spin.rot : 0.3;
+    drawTop();
+    drawTable(z);
+
+    var ww = wobble > 0 ? Math.sin(wobble * 60) * wobble * 16 : 0;
+    var cx = small.x + (big.x - small.x) * z + ww, cy = small.y + (big.y - small.y) * z;
+    var R = small.r + (big.r - small.r) * z;
+    drawWheel(cx, cy, R, rot, !!spin);
+    if (keyMode && state === S.PLAY && phase === "bet" && sel < 0) {
+      ctx.beginPath(); ctx.arc(cx, cy, R + 7, 0, Math.PI * 2); ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
+    }
+    /* 落ちたかなを盤のまんなかに */
+    if (spin && spin.dropped && (phase === "spin" || phase === "back")) {
+      var a = phase === "back" ? 1 - pt / 0.45 : Math.min(1, (spin.t - spin.land) / 0.3);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.beginPath(); ctx.arc(cx, cy, R * 0.4, 0, Math.PI * 2); ctx.fillStyle = colorOf(spin.k); ctx.fill();
+      ctx.lineWidth = 4; ctx.strokeStyle = "#e7c46c"; ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "800 " + Math.round(R * 0.46) + "px sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(KANA[spin.k], cx, cy + R * 0.03);
+      ctx.textBaseline = "alphabetic";
+      ctx.restore();
+    }
+
+    flyers.forEach(function (f) {
+      if (f.t < 0) return;
+      var u = Math.min(1, f.t / f.d), e = 1 - (1 - u) * (1 - u);
+      var x = f.x0 + (f.x1 - f.x0) * e, y = f.y0 + (f.y1 - f.y0) * e - Math.sin(u * Math.PI) * 30;
+      var al = f.fade ? Math.max(0, 1 - Math.max(0, f.t - f.d * 0.5) / (f.d * 0.5 + 0.15)) : 1;
+      drawChip(x, y, 15, al);
+    });
+
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(4,12,8,.7)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
+  window.__probe = {
+    now: function () {
+      return { state: state, phase: phase, score: score, chips: chips, bet: totalBet(), bets: bets.slice(),
+               spins: spinsDone, last: last, landed: spin ? spin.k : -1, sel: sel, W: W, H: H };
+    },
+    kana: function () { return KANA.slice(); },
+    cell: function (k) { var c = cellRect(k); return { x: c.x + c.w / 2, y: c.y + c.h / 2, w: c.w, h: c.h }; },
+    wheel: function () { return { x: small.x, y: small.y, r: small.r }; },
+    pile: function () { return { x: pile.x, y: pile.y }; },
+    /* 盤の上で玉が今どのかなの上にいるか（見た目と結果が一致するかの確認用） */
+    ballOver: function () {
+      if (!spin) return -1;
+      var p = Math.floor((((spin.rel % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) / STEP);
+      return WHEEL[p];
+    },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(600);
+      for (var round = 0; round < 3 && state === S.PLAY; round++) {
+        var picks = [];
+        while (picks.length < 3) { var k = Math.floor(Math.random() * N); if (picks.indexOf(k) < 0) picks.push(k); }
+        for (var i = 0; i < picks.length && chips > 0; i++) { sel = picks[i]; bet(picks[i]); await r.wait(260); }
+        await r.wait(400);
+        startSpin();
+        if (!await r.until(function () { return phase === "bet" || state === S.RESULT; }, 12)) throw Error("回り終わらない");
+        await r.wait(500);
+      }
+      await r.wait(800);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  layout();
+  var lastT = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - lastT) / 1000);
+    lastT = now;
+    if (!window.__recordManual) { update(dt); draw(); }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
