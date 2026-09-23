@@ -100,7 +100,7 @@ async function start(g) {
     }
   }
 
-  /* 1b. 1本で流すのは冒頭1200字まで。1本で3つ以上開けたら大当たり、数は記事ごと */
+  /* 1b. 1本で流すのは冒頭1200字まで。同じ記事で何個目の発見かで光り方が強くなり、記事ごとに数え直す */
   {
     const g = open();
     await start(g);
@@ -109,13 +109,17 @@ async function start(g) {
     setPlan(g, () => (++n === 1 ? "あ" + c[0] + "い" + c[1] + "う" + c[2] + "。" + "え".repeat(3000) : "お" + c[5] + "。"));
     g.press(" "); await flush(); g.step(1);
     assert.ok(g.probe.now().length <= 1200, "冒頭だけ: " + g.probe.now().length);
-    playOut(g);
-    assert.equal(g.probe.now().combo, 3);
-    assert.equal(g.probe.now().jackpot, true, "3つ開けた記事は大当たり");
-    g.until(() => g.probe.now().phase === "choose", 400); await flush(); g.step(1);
+    [0, 1, 2].forEach((cell, k) => {
+      toNextLight(g);
+      assert.deepEqual(litCells(g), [cell]);
+      assert.equal(g.probe.now().litLevel[cell], k + 1, (k + 1) + "つ目の発見は強さ" + (k + 1));
+      tapCell(g, cell);
+    });
+    assert.equal(g.probe.now().found, 3);
+    g.until(() => g.probe.now().phase === "choose", 3000); await flush(); g.step(1);
     g.press(" "); await flush(); g.step(1);
-    playOut(g);
-    assert.equal(g.probe.now().combo, 1, "次の記事では数え直す");
+    toNextLight(g);
+    assert.equal(g.probe.now().litLevel[5], 1, "次の記事では1つ目から数え直す");
   }
 
   /* 2. 出た単語のところで本文が止まって光る。開けると続きが流れる */
