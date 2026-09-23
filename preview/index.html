@@ -1,174 +1,951 @@
 <!DOCTYPE html>
 <html lang="ja">
-<head><meta name="robots" content="noindex,nofollow"><meta name="preview-version" content="skate-limbo-1790081736382"><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"><title>リンボー・オン・ザ・アイス</title>
+<head>
+<meta name="robots" content="noindex,nofollow">
+<meta name="preview-version" content="wiki-bingo-1790129784963">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Wikipediaビンゴ</title>
 <style>
-html,body{margin:0;height:100%;overflow:hidden;background:#000;overscroll-behavior:none}*{-webkit-tap-highlight-color:transparent}#stage{height:100%;display:flex;align-items:center;justify-content:center;touch-action:none}#wrap{position:relative;touch-action:none}canvas{display:block}#stage,#wrap,canvas{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}button{touch-action:manipulation}#start{position:absolute;left:50%;bottom:3%;transform:translateX(-50%);width:240px;height:68px;border:0;border-radius:34px;background:transparent;color:transparent;font:800 25px sans-serif}#start[hidden],#retry-button[hidden],#share-button[hidden]{display:none}#retry-button,#share-button{position:absolute;background:transparent;border:0;border-radius:35px}
-</style></head><body><div id="stage"><div id="wrap"><canvas id="c"></canvas><button id="start" type="button">START</button><button id="retry-button" type="button" aria-label="もう一度" hidden></button><button id="share-button" type="button" aria-label="Xでシェア" hidden></button></div></div>
-<script src="../games/start.js?v=skate-limbo-1790081736382"></script><script src="../games/view.js?v=skate-limbo-1790081736382"></script><script src="../games/audio.js?v=skate-limbo-1790081736382"></script><script src="../games/share.js?v=skate-limbo-1790081736382"></script><script src="../games/result-actions.js?v=skate-limbo-1790081736382"></script><script src="../games/action-icons.js?v=skate-limbo-1790081736382"></script><script src="../games/pad.js?v=skate-limbo-1790081736382"></script>
-<script src="../games/random-bowling/vendor/three.min.js?v=skate-limbo-1790081736382"></script><script src="skate-physics.js?v=skate-limbo-1790081736382"></script><script src="skate-scene.js?v=skate-limbo-1790081736382"></script>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1b2230; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+  /* 出典の表示は canvas に描き、その上に透明なリンクを重ねる（録画にも残るように） */
+  #credit { position:absolute; left:0; width:100%; display:block; color:transparent; text-decoration:none; touch-action:manipulation; }
+  #credit[hidden] { display:none; }
+  .article-link { position:absolute; display:block; color:transparent; overflow:hidden; text-decoration:none; border-radius:999px; touch-action:manipulation; }
+  .article-link[hidden] { display:none; }
+  .article-link:focus-visible { outline:3px solid #f7cc71; outline-offset:2px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+  <a id="credit" target="_blank" rel="noopener" hidden></a>
+</div></div>
+<script src="../games/start.js?v=wiki-bingo-1790129784963"></script>
+<script src="../games/view.js?v=wiki-bingo-1790129784963"></script>
+<script src="../games/audio.js?v=wiki-bingo-1790129784963"></script>
+<script src="../games/share.js?v=wiki-bingo-1790129784963"></script>
+<script src="../games/result-actions.js?v=wiki-bingo-1790129784963"></script>
+<script src="../games/action-icons.js?v=wiki-bingo-1790129784963"></script>
+<script src="../games/pad.js?v=wiki-bingo-1790129784963"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-(function(){
-'use strict';
-const canvas=document.getElementById('c'),ctx=canvas.getContext('2d'),wrap=document.getElementById('wrap'),startButton=document.getElementById('start'),shareButton=document.getElementById('share-button'),retryButton=document.getElementById('retry-button');
-const P=window.SkatePhysics;let s=P.create(),W=540,H=960,view3d=null,keys={},pointer=null,padX=0,padY=-1,accum=0;
-if(window.WebGLRenderingContext&&window.THREE)view3d=new window.SkateScene();
-function layout(){const v=window.zGameView.measure(wrap,W);H=v.gameHeight;window.zGameView.fit(canvas,wrap,ctx,W,H,v);startButton.style.width='44.444%';startButton.style.height=(68/H*100)+'%';}
-window.addEventListener('resize',layout);window.addEventListener('orientationchange',layout);
-let AC=null,noise=null,scrape=null,postureSound=null,edgeSound=null,limboVoice=null;
-function motionLayer(freq){const src=AC.createBufferSource(),filter=AC.createBiquadFilter(),gain=AC.createGain();src.buffer=noise;src.loop=true;filter.type='bandpass';filter.frequency.value=freq;filter.Q.value=1.4;gain.gain.value=0;src.connect(filter);filter.connect(gain);gain.connect(AC.destination);src.start();return {filter,gain};}
-/* 声帯の音に母音の響きを重ねた、自作の踏ん張り声。 */
-function makeLimboVoice(){
-  const source=AC.createOscillator(),gain=AC.createGain();
-  source.type='sawtooth';source.frequency.value=340;gain.gain.value=0;gain.connect(AC.destination);
-  const formants=[450,1250,2700].map((hz,i)=>{const f=AC.createBiquadFilter(),level=AC.createGain();f.type='bandpass';f.frequency.value=hz;f.Q.value=6;level.gain.value=[.7,.4,.12][i];source.connect(f);f.connect(level);level.connect(gain);return f;});
-  source.start();return {source,gain,formants};
-}
-function audioOn(){if(!AC){const C=window.AudioContext||window.webkitAudioContext;if(!C)return;try{AC=new C();}catch(e){return;}noise=AC.createBuffer(1,AC.sampleRate*2,AC.sampleRate);let d=noise.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;const src=AC.createBufferSource(),f=AC.createBiquadFilter();src.buffer=noise;src.loop=true;f.type='highpass';f.frequency.value=2100;scrape=AC.createGain();scrape.gain.value=0;src.connect(f);f.connect(scrape);scrape.connect(AC.destination);src.start();postureSound=motionLayer(900);edgeSound=motionLayer(1800);limboVoice=makeLimboVoice();}window.zAudioResume(AC);}
-function collisionVoice(){
-  const v=makeLimboVoice(),n=AC.currentTime;
-  v.source.frequency.setValueAtTime(600,n);v.source.frequency.exponentialRampToValueAtTime(280,n+.38);
-  v.formants[0].frequency.setValueAtTime(850,n);v.formants[0].frequency.exponentialRampToValueAtTime(600,n+.32);
-  v.formants[1].frequency.setValueAtTime(1250,n);
-  v.gain.gain.setValueAtTime(0,n);v.gain.gain.linearRampToValueAtTime(.48,n+.018);v.gain.gain.exponentialRampToValueAtTime(.001,n+.42);
-  v.source.stop(n+.45);v.source.onended=()=>{v.source.disconnect();v.formants.forEach(f=>f.disconnect());v.gain.disconnect();};
-}
-function sound(hit){if(!AC)return;const n=AC.currentTime,g=AC.createGain();g.connect(AC.destination);if(hit){collisionVoice();const src=AC.createBufferSource(),f=AC.createBiquadFilter();src.buffer=noise;f.type='lowpass';f.frequency.value=850;src.connect(f);f.connect(g);g.gain.setValueAtTime(.24,n);g.gain.exponentialRampToValueAtTime(.001,n+.35);src.start();src.stop(n+.4);}else{const o=AC.createOscillator();o.type='sine';o.frequency.setValueAtTime(540,n);o.frequency.exponentialRampToValueAtTime(810,n+.13);o.connect(g);g.gain.setValueAtTime(.09,n);g.gain.exponentialRampToValueAtTime(.001,n+.35);o.start();o.stop(n+.4);}}
+/* Wikipediaビンゴ
 
-/* このゲーム用のサンバ風伴奏。低い太鼓・シェーカー・乾いた打音と裏拍の和音。 */
-let musicBus=null,musicNext=0,musicStep=0;
-function musicNote(at,hz,duration,volume,type='sine',end=hz){
-  const o=AC.createOscillator(),g=AC.createGain();o.type=type;o.frequency.setValueAtTime(hz,at);o.frequency.exponentialRampToValueAtTime(end,at+duration);
-  g.gain.setValueAtTime(.0001,at);g.gain.exponentialRampToValueAtTime(volume,at+.006);g.gain.setValueAtTime(volume*.65,at+duration*.45);g.gain.exponentialRampToValueAtTime(.0001,at+duration);
-  o.connect(g);g.connect(musicBus);o.start(at);o.stop(at+duration+.01);o.onended=()=>{o.disconnect();g.disconnect();};
-}
-function musicShake(at,volume,frequency,duration){
-  const o=AC.createBufferSource(),f=AC.createBiquadFilter(),g=AC.createGain();o.buffer=noise;f.type='highpass';f.frequency.value=frequency;
-  g.gain.setValueAtTime(.0001,at);g.gain.exponentialRampToValueAtTime(volume,at+.004);g.gain.exponentialRampToValueAtTime(.0001,at+duration);
-  o.connect(f);f.connect(g);g.connect(musicBus);o.start(at);o.stop(at+duration+.01);o.onended=()=>{o.disconnect();f.disconnect();g.disconnect();};
-}
-// 明るい金管の合奏。二つの波を少しずらし、吹き始めだけ響きを開く。
-function musicBrass(at,hz,duration){
-  const filter=AC.createBiquadFilter(),gain=AC.createGain();filter.type='lowpass';filter.Q.value=.8;
-  filter.frequency.setValueAtTime(1000,at);filter.frequency.exponentialRampToValueAtTime(4200,at+.035);filter.frequency.exponentialRampToValueAtTime(1600,at+duration);
-  gain.gain.setValueAtTime(.0001,at);gain.gain.exponentialRampToValueAtTime(.065,at+.018);gain.gain.setValueAtTime(.045,at+duration*.65);gain.gain.exponentialRampToValueAtTime(.0001,at+duration);
-  filter.connect(gain);gain.connect(musicBus);
-  let remaining=2;for(const detune of [-7,7]){const o=AC.createOscillator();o.type='sawtooth';o.frequency.value=hz;o.detune.value=detune;o.connect(filter);o.start(at);o.stop(at+duration+.02);o.onended=()=>{o.disconnect();if(--remaining===0){filter.disconnect();gain.disconnect();}};}
-}
-function updateMusic(){
-  if(!AC)return;
-  if(!musicBus){musicBus=AC.createGain();musicBus.gain.value=0;musicBus.connect(AC.destination);}
-  const active=s.state==='play'&&!document.hidden;
-  const limbo=P.clamp((s.bend-.04)/.45,0,1);
-  musicBus.gain.setTargetAtTime(active?limbo*.8:0,AC.currentTime,.18);
-  if(!active){musicNext=0;musicStep=0;return;}
-  if(AC.state&&AC.state!=='running')return;
-  if(musicNext===0||musicNext<AC.currentTime)musicNext=AC.currentTime+.025;
-  while(musicNext<AC.currentTime+.10){
-    const at=musicNext,k=musicStep%16,bar=Math.floor(musicStep/16)%4;
-    // 二拍目の低い太鼓を強くし、細かい振り物と高い打音を掛け合わせる。
-    musicShake(at,[.025,.055,.036,.065][k%4],4200,k%2?.065:.04);
-    if(k===0||k===8)musicNote(at,k===8?82:106,.26,k===8?.28:.15,'sine',k===8?48:65);
-    if([3,7,10,14,15].includes(k)){musicNote(at,bar%2?210:245,.085,k===15?.07:.11,'sine',130);musicShake(at,.032,2300,.045);}
-    if([0,3,6,8,11,14].includes(k)){musicNote(at,1050,.075,.035,'sine',980);musicNote(at,1575,.055,.018,'sine',1490);}
-    if(k%4===0)musicNote(at,128,.16,.16,'sine',43);
-    if(k===4||k===12){musicShake(at,.065,1200,.075);musicShake(at+.018,.035,1800,.055);}
-    if([3,6,10,14].includes(k)){musicNote(at,820,.035,.055,'triangle',650);musicShake(at,.025,1700,.035);}
-    if([0,3,6,8,11,14].includes(k)){
-      const chords=[[392,494,587],[440,523,659],[349,440,587],[370,494,587]];
-      chords[bar].forEach((hz,i)=>musicNote(at+i*.006,hz,.22,.055,'triangle',hz*.997));
+   カードに単語が24個（真ん中は最初から開いている）。
+   ランダムに選ばれたWikipediaの記事の題名が3つ出るので、1つ選ぶと本文が流れる。
+   本文にカードの単語が出たらそこで止まってマスが光る。タップして穴を開けると続きが流れる。
+   1本で揃わなければ次の記事を選ぶ。
+   ビンゴまでに読んだ文字数が結果（少ないほどよい）。
+
+   記事は遊ぶたびにWikipediaから取りに行く。本文はリポジトリに入れない。
+   Wikipediaの文章は CC BY-SA 4.0 なので、出している間は記事名と利用条件を表示する。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  var creditLink = document.getElementById("credit");
+  window.zResultActions.bind(shareButton, doShare);
+  ["pointerdown", "pointerup"].forEach(function (n) { creditLink.addEventListener(n, function (e) { e.stopPropagation(); }); });
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q, delay) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random() * 1.5); s.stop(n + dur + 0.05);
+  }
+  function sndType() { noiseHit(0.018, 4200, 0.025, 4); }
+  /* 紙のミシン目を押し抜く音。ぷつっと切れて、ポコッと凹む */
+  function sndStamp() { noiseHit(0.03, 2600, 0.18, 2); noiseHit(0.06, 900, 0.22, 1.5, 0.02); tone(210, 0.08, 0.1, "sine", 110, 0.02); }
+  function sndLight() { tone(1568, 0.09, 0.05, "sine"); tone(2093, 0.14, 0.04, "sine", null, 0.05); }
+  function sndDud() { noiseHit(0.04, 400, 0.08, 1); }
+  /* リーチ: どきっと低く鳴ってから、上がっていく2音 */
+  function sndReach() {
+    tone(90, 0.18, 0.16, "sine", 60); noiseHit(0.12, 300, 0.14, 1);
+    tone(740, 0.14, 0.06, "triangle", null, 0.12); tone(988, 0.14, 0.06, "triangle", null, 0.24); tone(1319, 0.28, 0.07, "triangle", null, 0.36);
+  }
+  /* 待ちのマスの単語が出た: きらきらと駆け上がる */
+  function sndChance() { [1319, 1568, 1976, 2637].forEach(function (f, i) { tone(f, 0.16, 0.05, "sine", null, i * 0.05); }); }
+  function sndBingo() { [523, 659, 784, 1047, 1319].forEach(function (f, i) { tone(f, 0.3, 0.08, "triangle", null, i * 0.08); }); }
+  function sndPick() { tone(660, 0.06, 0.06, "square"); }
+  function sndNext() { tone(440, 0.12, 0.04, "sine", 330); }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 記事を取ってくる ============
+     テストでは window.__wikiSource に同じ形の偽物を置く（通信しないで回すため）。 */
+  var API = "https://ja.wikipedia.org/w/api.php?format=json&formatversion=2&origin=*&action=query";
+  var UA = "ZounoashiGames-WikiBingo/1.0 (https://www.zounoashi.com)";
+  function getJSON(url) {
+    if (typeof fetch !== "function") return Promise.reject(new Error("通信できない"));
+    /* Wikipediaの決まりに沿って、どこの何が問い合わせているかを名乗る（連絡先はサイトのURL） */
+    return fetch(url, { headers: { "Api-User-Agent": UA } }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+  }
+  var wikiSource = {
+    /* ランダムな記事を12本取り、そこそこ長いものから3本 */
+    choices: function () {
+      return getJSON(API + "&generator=random&grnnamespace=0&grnlimit=12&prop=info").then(function (j) {
+        var ps = ((j.query && j.query.pages) || []).filter(function (p) { return !p.missing && p.title; });
+        var good = ps.filter(function (p) { return p.length >= 2500; });
+        if (good.length < 3) good = ps.sort(function (a, b) { return b.length - a.length; });
+        good = shuffle(good.slice()).slice(0, 3);
+        if (good.length < 3) throw new Error("記事が足りない");
+        return good.map(function (p) { return { id: p.pageid, title: p.title }; });
+      });
+    },
+    text: function (id) {
+      return getJSON(API + "&prop=extracts&explaintext=1&exsectionformat=plain&pageids=" + id).then(function (j) {
+        var p = j.query && j.query.pages && j.query.pages[0];
+        return (p && p.extract) || "";
+      });
     }
-    if(k%4===2)musicNote(at,[98,110,87.31,92.5][bar],.17,.15,'triangle');
-    // 自作の短い金管フレーズを、四小節の呼びかけと返しで繰り返す。
-    const riffs=[[74,0,0,78,0,81,0,78,76,0,0,74,0,71,0,0],[73,0,76,0,0,79,0,0,78,0,76,0,73,0,0,0],[71,0,0,74,0,78,0,81,0,0,78,0,76,0,74,0],[73,0,0,76,78,0,0,73,0,71,0,0,69,0,0,0]];
-    const note=riffs[bar][k];if(note)musicBrass(at,440*Math.pow(2,(note-69)/12),k%4===0?.23:.14);
-    // 短い笛の呼びかけと返し。高い純音を少し滑らせて息の音を重ねる。
-    const whistles=bar%2===0?{0:1568,3:1760,6:1568,10:2093}:{2:1760,5:1568,8:1319,14:1568};
-    if((bar%2===1||k===10)&&whistles[k]){const hz=whistles[k];musicNote(at,hz*.96,k===10?.21:.12,.065,'sine',hz);musicNote(at+.01,hz*2,.09,.009,'sine',hz*2.01);musicShake(at,.008,2800,.09);}
-    musicStep++;musicNext+=60/148/4*(k%2===0?1.07:.93);
-  }
-}
+  };
+  function source() { return window.__wikiSource || wikiSource; }
 
-// ゴールを越えた瞬間に一度だけ鳴らす、自作の短い祝奏。
-function fanfare(){if(!AC)return;const start=AC.currentTime;const notes=[523.25,659.25,783.99,1046.5];notes.forEach((hz,i)=>{const o=AC.createOscillator(),g=AC.createGain();const at=start+i*.16,duration=i===3?.8:.22;o.type='triangle';o.frequency.value=hz;g.gain.setValueAtTime(.0001,at);g.gain.exponentialRampToValueAtTime(.16,at+.015);g.gain.setValueAtTime(.12,at+duration*.55);g.gain.exponentialRampToValueAtTime(.0001,at+duration);o.connect(g);g.connect(AC.destination);o.start(at);o.stop(at+duration+.02);o.onended=()=>{o.disconnect();g.disconnect();};});}
-function stopInput(){keys={};pointer=null;padX=0;padY=-1;s.weight=0;s.target=-1;}
-window.addEventListener('blur',stopInput);document.addEventListener('visibilitychange',function(){stopInput();if(AC){if(document.hidden)AC.suspend();else window.zAudioResume(AC);}});
-function reset(){s=P.create();s.state='play';accum=0;stopInput();startButton.hidden=true;shareButton.hidden=true;retryButton.hidden=true;}
-function begin(){audioOn();reset();updateMusic();}
-window.zStartTap(()=>s.state==='intro',begin);
-['pointerdown','pointerup'].forEach(n=>startButton.addEventListener(n,e=>e.stopPropagation()));startButton.addEventListener('click',e=>{e.stopPropagation();begin();});
-function controlY(){return H-146;}
-function setPointer(x,y){padX=P.clamp((x-270)/180,-1,1);padY=P.clamp((y-controlY())/100,-1,1);}
-wrap.addEventListener('pointerdown',function(e){if(s.state==='intro')return;e.preventDefault();if(s.state==='fall'||s.state==='result'){const p=window.zGameView.point(canvas,e,W,H);if(p.x>=65&&p.x<=235&&p.y>=H*.62&&p.y<=H*.62+63){audioOn();reset();}return;}if(s.state!=='play'||pointer!==null||e.button>0)return;const p=window.zGameView.point(canvas,e,W,H);if(p.x<56||p.x>484||Math.abs(p.y-controlY())>130)return;pointer=e.pointerId;audioOn();setPointer(p.x,p.y);if(wrap.setPointerCapture)wrap.setPointerCapture(pointer);});
-wrap.addEventListener('pointermove',function(e){if(pointer!==e.pointerId)return;const p=window.zGameView.point(canvas,e,W,H);setPointer(p.x,p.y);});
-function release(e){if(e.pointerId===pointer){pointer=null;padX=0;padY=-1;}}
-wrap.addEventListener('pointerup',release);wrap.addEventListener('pointercancel',release);
-window.addEventListener('keydown',function(e){if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' ','Enter','Escape'].includes(e.key))return;e.preventDefault();if(e.key==='Escape'){if(s.state!=='intro')reset();return;}if((s.state==='fall'||s.state==='result')&&(e.key===' '||e.key==='Enter')){if(!e.repeat){audioOn();reset();}return;}if(s.state!=='intro')keys[e.key]=true;});
-window.addEventListener('keyup',function(e){keys[e.key]=false;if(s.state==='intro'&&(e.key===' '||e.key==='Enter'))begin();});
-function shareText(){return 'リンボー・オン・ザ・アイスで'+s.distance.toFixed(1)+'m進みました #リンボーオンザアイス';}
-window.zResultActions.bind(retryButton,()=>{audioOn();reset();});
-window.zResultActions.bind(shareButton,()=>window.zResultActions.x({text:shareText()}));
-function update(dt){
-  const previousBend=s.bend,previousWeight=s.weight;
-  if(s.state==='play'){s.weight=pointer!==null?-padX:(keys.ArrowLeft?1:0)-(keys.ArrowRight?1:0);s.target=pointer!==null?padY:keys.ArrowDown||keys[' ']?1:-1;}
-  const prev=s.state,score=s.score;P.step(s,dt);
-  if(prev==='play'&&s.state==='fall')sound(true);if(s.state==='result'&&s.reason==='clear'&&prev==='play')fanfare();else if(score<s.score)sound(false);
-  updateMusic();
-  if(scrape&&AC){
-    const strain=Math.sqrt(P.clamp((s.bend-.015)/.985,0,1)),breath=.65+.35*Math.sin(s.t*5.5);
-    limboVoice.source.frequency.setTargetAtTime(340+strain*140+Math.sin(s.t*41)*strain*12,AC.currentTime,.07);
-    limboVoice.formants[0].frequency.setTargetAtTime(450+strain*400,AC.currentTime,.1);
-    limboVoice.formants[1].frequency.setTargetAtTime(1250,AC.currentTime,.1);
-    limboVoice.gain.gain.setTargetAtTime(s.state==='play'?strain*.3*breath:0,AC.currentTime,.08);
-    const playing=s.state==='play',bendRate=(s.bend-previousBend)/dt,edgeRate=Math.abs(s.weight-previousWeight)/dt;
-    scrape.gain.setTargetAtTime(playing?.016+Math.abs(s.roll)*.05:s.state==='fall'?.025*Math.max(0,1-s.fallTime/4):0,AC.currentTime,.06);
-    /* 姿勢の上下には短く柔らかい擦過音、刃の切り返しには高めの氷の音。 */
-    postureSound.filter.frequency.setTargetAtTime(bendRate>=0?720:1250,AC.currentTime,.09);
-    postureSound.gain.gain.setTargetAtTime(playing?Math.min(Math.abs(bendRate)*.036,.085):0,AC.currentTime,.045);
-    edgeSound.filter.frequency.setTargetAtTime(1500+Math.abs(s.weight)*650,AC.currentTime,.07);
-    edgeSound.gain.gain.setTargetAtTime(playing?Math.min(edgeRate*.006,.10):0,AC.currentTime,edgeRate>1?.018:.12);
+  /* ============ 単語 ============
+     記事によく出る言葉。1本の記事に出る割合が1〜5割くらいのものを混ぜている。 */
+  var WORDS = ("東京 大阪 大学 学校 高校 世界 選手 番組 放送 発売 設立 出身 駅 県 町 村 会社 研究 歴史 活動 " +
+               "開始 所属 登場 以降 現在 当時 一部 以上 アメリカ 中国 韓国 山 川 海 島 道 橋 車 鉄道 バス 船 " +
+               "野球 試合 優勝 王 家 父 賞 大会 記録 星 水 火 寺 城 明治 昭和 平成 時代 テレビ 通信 法 線 局 " +
+               "館 社長 女 男 犬 石 花 最初 最後 英語 光 事業 空 代表 地域 小学校 外国 鉄 開発 " +
+               "製造 経済 教育 技術 ドイツ 企業 自動車 航空 京都 アジア " +
+               /* 題名から予想しやすい言葉 */
+               "映画 監督 作品 音楽 公開 発表 文化 植物 新聞 公式").split(" ");
+  var MAX_CHARS = 2600;                         /* 1本の記事で流す上限 */
+  var SPEED = 45, FAST = 260;                   /* 1秒に流す文字数（ふつう・押している間） */
+
+  function shuffle(a) {
+    for (var i = a.length - 1; i > 0; i--) { var r = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[r]; a[r] = t; }
+    return a;
   }
-}
-function disk(x,y,r,color){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();}
-function line(points,color,width){ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();}
-function silhouette(x,y,bend,scale,color){ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);const a=bend*1.45,hx=-Math.sin(a)*29,hy=-18-Math.cos(a)*29;line([[-12,15],[-7,-2],[0,-18],[hx,hy]],color,5);line([[0,-18],[9,-2],[13,15]],color,5);disk(hx,hy-7,5,color);line([[-17,19],[-6,19]],color,2);line([[8,19],[19,19]],color,2);ctx.restore();}
-function draw(){
-  ctx.clearRect(0,0,W,H);if(view3d){ctx.drawImage(view3d.draw(s,Math.round(W*1.25),Math.round(H*1.25)),0,0,W,H);}else{ctx.fillStyle='#d7edef';ctx.fillRect(0,0,W,H);}
-  const fade=ctx.createLinearGradient(0,H-320,0,H);fade.addColorStop(0,'rgba(215,237,239,0)');fade.addColorStop(.45,'rgba(215,237,239,.9)');fade.addColorStop(1,'#d7edef');ctx.fillStyle=fade;ctx.fillRect(0,H-320,W,320);
-  if(s.state==='intro'){
-    ctx.fillStyle='#fff';ctx.beginPath();ctx.roundRect(150,H*.97-68,240,68,34);ctx.fill();ctx.fillStyle='#16202e';ctx.font='bold 28px sans-serif';ctx.textAlign='center';ctx.save();ctx.textBaseline='middle';ctx.fillText('START',270,H*.97-34);ctx.restore();
-  }else if(s.state==='play'){
-    const y=controlY();
-    ctx.fillStyle='rgba(255,250,240,.42)';ctx.beginPath();ctx.roundRect(56,y-130,428,260,32);ctx.fill();
-    line([[90,y],[450,y]],'rgba(32,62,81,.16)',2);line([[270,y-100],[270,y+100]],'rgba(32,62,81,.16)',2);
-    silhouette(270,y-95,0,.32,'#547582');silhouette(282,y+108,1,.32,'#547582');
-    line([[106,y-6],[98,y],[106,y+6]],'#547582',2);line([[434,y-6],[442,y],[434,y+6]],'#547582',2);
-    const kx=270-s.weight*180,ky=y+s.target*100;disk(kx,ky,21,'#203e51');disk(kx-4,ky-5,6,'#f9f5e9');
+  var LINES = (function () {
+    var L = [], i, j;
+    for (i = 0; i < 5; i++) {
+      var row = [], col = [];
+      for (j = 0; j < 5; j++) { row.push(i * 5 + j); col.push(j * 5 + i); }
+      L.push(row, col);
+    }
+    L.push([0, 6, 12, 18, 24], [4, 8, 12, 16, 20]);
+    return L;
+  })();
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  /* PLAY の中の段階: load（題名を取りに行く）→ choose（選ぶ）→ fetch（本文を取りに行く）
+     → stream（流れる）→ 次の記事の load/choose へ、または bingo → 結果。error は通信の失敗 */
+  var state, phase, pt, score, card, open, openT, bingoLine, choices, nextChoices, pick, article, articles,
+      text, pos, lines, hits, lit, readList = [], reachFx = [], shakeT = -9, held, keyMode = false, T, round, retry, typeT, reached;
+
+  var HEAD, BOX, BOXH, CARD, CELL, CREDIT, FRAME;
+  function place() {
+    var extra = Math.max(0, H - 780);
+    HEAD = 14 + Math.min(extra * 0.25, 60);
+    BOX = HEAD + 50;
+    BOXH = 240 + Math.min(extra * 0.35, 120);
+    /* 紙のカード: 外枠（FRAME）の上に色の帯、その下に5×5のマス */
+    var top = BOX + BOXH + 12, band = 26, pad = 10;
+    CELL = { w: 90, h: Math.min(90, Math.floor((H - top - 40 - band - pad * 2) / 5)) };
+    var fw = CELL.w * 5 + pad * 2;
+    FRAME = { x: (W - fw) / 2, y: top, w: fw, h: band + pad * 2 + CELL.h * 5, band: band };
+    CARD = { x: FRAME.x + pad, y: top + band + pad };
+    CREDIT = Math.min(H - 14, FRAME.y + FRAME.h + 22);
+    if (text) wrapText();
   }
-  if(s.state==='fall'||s.state==='result'){
-    ctx.fillStyle='rgba(10,8,6,.66)';ctx.fillRect(0,0,W,H);
-    ctx.save();ctx.fillStyle='#fff';ctx.shadowColor='rgba(0,0,0,.6)';ctx.shadowBlur=10;
-    ctx.font='800 88px sans-serif';ctx.textAlign='center';ctx.fillText(s.distance.toFixed(1)+' m',W/2,H*.45);ctx.restore();
-    [{x:65,w:170,label:'もう一度'},{x:251,w:224,label:'Xでシェア'}].forEach(b=>{
-      ctx.save();ctx.translate(b.x+b.w/2,H*.62+31.5);
-      ctx.beginPath();ctx.roundRect(-b.w/2,-31.5,b.w,63,31.5);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#16202e';ctx.stroke();
-      ctx.fillStyle='#16202e';window.zActionIcon(ctx,b.label,0,1,30);ctx.restore();
+
+  function newRound(keepCard) {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    round = (round || 0) + 1;
+    T = 0; pt = 0; score = 0; held = false; typeT = 0;
+    if (!keepCard) { card = shuffle(WORDS.slice()).slice(0, 25); card[12] = null; }   /* 真ん中は最初から開いている */
+    open = []; openT = []; lit = [];
+    for (var i = 0; i < 25; i++) { open.push(i === 12); openT.push(i === 12 ? 9 : -1); lit.push(-1); }
+    bingoLine = null; reached = {}; reachFx = []; shakeT = -9;
+    choices = null; nextChoices = null; pick = 0; article = null; articles = 0;
+    text = ""; pos = 0; lines = []; hits = []; readBefore = 0; counted = false; readList = [];
+    loadChoices();
+  }
+
+  function fail(again) { phase = "error"; pt = 0; retry = again; }
+  function loadChoices() {
+    var r = round;
+    phase = "load"; pt = 0;
+    if (nextChoices) { var c = nextChoices; nextChoices = null; gotChoices(c); return; }
+    Promise.resolve().then(function () { return source().choices(); }).then(function (c) {
+      if (r === round && phase === "load") gotChoices(c);
+    }, function () { if (r === round && phase === "load") fail(loadChoices); });
+  }
+  function gotChoices(c) { choices = c; pick = 0; phase = "choose"; pt = 0; }
+  function prefetchChoices() {
+    var r = round;
+    Promise.resolve().then(function () { return source().choices(); }).then(function (c) {
+      if (r !== round) return;
+      if (phase === "load") gotChoices(c); else nextChoices = c;
+    }, function () {});
+  }
+  function choose(i) {
+    if (phase !== "choose" || !choices || !choices[i]) return;
+    var a = choices[i], r = round;
+    sndPick();
+    article = a; phase = "fetch"; pt = 0;
+    Promise.resolve().then(function () { return source().text(a.id); }).then(function (t) {
+      if (r === round && phase === "fetch") startStream(t);
+    }, function () { if (r === round && phase === "fetch") fail(function () { phase = "choose"; choose(i); }); });
+  }
+
+  function cleanText(t) {
+    t = String(t || "").replace(/\r/g, "").replace(/[ \t　]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+    if (t.length > MAX_CHARS) {
+      var cut = t.lastIndexOf("。", MAX_CHARS);
+      t = t.slice(0, cut > MAX_CHARS * 0.6 ? cut + 1 : MAX_CHARS);
+    }
+    return t;
+  }
+  /* カードの単語が本文のどこで出るか（まだ開いていないものの最初の1回） */
+  function findHits() {
+    hits = [];
+    for (var i = 0; i < 25; i++) {
+      if (open[i] || !card[i]) continue;
+      var at = text.indexOf(card[i]);
+      if (at >= 0) hits.push({ cell: i, start: at, end: at + card[i].length, done: false });
+    }
+    hits.sort(function (a, b) { return a.end - b.end; });
+  }
+  function startStream(t) {
+    text = cleanText(t);
+    if (!text) { loadChoices(); return; }
+    articles++;
+    readList.push(article);
+    pos = 0; counted = false;
+    findHits();
+    wrapText();
+    phase = "stream"; pt = 0;
+    prefetchChoices();
+  }
+
+  /* 本文を箱の幅で折り返す。1文字ずつの位置を覚えておき、流れた分だけ描く */
+  var FONT = 22, LH = 31;
+  function wrapText() {
+    lines = [];
+    ctx.font = "500 " + FONT + "px sans-serif";
+    var maxW = W - 32 - 28, x = 0, start = 0, xs = [];
+    for (var i = 0; i < text.length; i++) {
+      var ch = text.charAt(i);
+      if (ch === "\n") { lines.push({ s: start, e: i, xs: xs }); start = i + 1; x = 0; xs = []; continue; }
+      var w = ctx.measureText(ch).width;
+      if (x + w > maxW) { lines.push({ s: start, e: i, xs: xs }); start = i; x = 0; xs = []; }
+      xs.push(x); x += w;
+    }
+    lines.push({ s: start, e: text.length, xs: xs });
+  }
+
+  function stamp(i) {
+    if (open[i]) return;
+    open[i] = true; openT[i] = 0;
+    sndStamp();
+    for (var l = 0; l < LINES.length; l++) {
+      var n = 0;
+      LINES[l].forEach(function (q) { if (open[q]) n++; });
+      if (n === 5) { bingoLine = LINES[l]; phase = "bingo"; pt = 0; score = countRead(); sndBingo(); return; }
+      if (n === 4 && !reached[l]) { reached[l] = true; reachFx.push({ line: LINES[l], t: T }); shakeT = T; sndReach(); }
+    }
+  }
+  /* リーチの待ち: 4つ開いた列の、残り1つのマス */
+  function waiting() {
+    var w = [];
+    for (var l = 0; l < LINES.length; l++) {
+      var miss = -1, n = 0;
+      LINES[l].forEach(function (q) { if (open[q]) n++; else miss = q; });
+      if (n === 4 && w.indexOf(miss) < 0) w.push(miss);
+    }
+    return w;
+  }
+  var readBefore = 0, counted = false;          /* 前の記事までに読んだ文字数。counted = 今の記事も足し終えた */
+  function countRead() { return readBefore + (counted ? 0 : countChars(text.slice(0, pos))); }
+  /* 本文に出たマスを光らせる。光ったマスはタップするまで光ったまま（その間、本文は止まる） */
+  function light(i) {
+    if (open[i] || lit[i] >= 0) return;
+    lit[i] = T;
+    if (waiting().indexOf(i) >= 0) sndChance(); else sndLight();
+  }
+  function punch(i) {
+    if (open[i] || lit[i] < 0 || phase === "bingo") return false;
+    lit[i] = -1;
+    stamp(i);                                   /* 開けた瞬間の文字数で数える */
+    return true;
+  }
+  function oldestLit() {
+    var best = -1;
+    for (var i = 0; i < 25; i++) if (lit[i] >= 0 && !open[i] && (best < 0 || lit[i] < lit[best])) best = i;
+    return best;
+  }
+  function cellAt(x, y) {
+    for (var i = 0; i < 25; i++) { var r = cellRect(i); if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return i; }
+    return -1;
+  }
+  function countChars(s) { return s.replace(/\s/g, "").length; }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    if (state !== S.PLAY) return;
+    T += dt; pt += dt;
+    for (var i = 0; i < 25; i++) if (openT[i] >= 0) openT[i] += dt;
+    if (phase === "stream") {
+      /* 開けられる単語が出たら、光ったマスを全部開けるまで本文は止まる */
+      if (oldestLit() >= 0) { held = false; return; }
+      var before = Math.floor(pos);
+      pos = Math.min(text.length, pos + (held ? FAST : SPEED) * dt);
+      var now = Math.floor(pos), stop = -1;
+      for (var h = 0; h < hits.length; h++) {
+        var hit = hits[h];
+        if (hit.done || hit.end > now) continue;
+        if (stop >= 0 && hit.end > stop) break;   /* 止めた位置より先の単語は、まだ出ていない */
+        hit.done = true; hit.t = T;
+        stop = hit.end;
+        light(hit.cell);                          /* 光るだけ。開けるのは自分でタップ */
+      }
+      if (stop >= 0) { pos = stop; now = stop; held = false; }
+      typeT -= dt;
+      if (now > before && typeT <= 0 && stop < 0) { typeT = held ? 0.03 : 0.055; sndType(); }
+      score = countRead();
+      if (pos >= text.length) { phase = "after"; pt = 0; }
+    } else if (phase === "after") {
+      if (pt >= 0.7) {
+        readBefore += countChars(text); counted = true;
+        sndNext();
+        loadChoices();
+      }
+    } else if (phase === "bingo") {
+      if (pt >= 2.2) { state = S.RESULT; held = false; }
+    }
+  }
+
+  /* ============ 入力 ============ */
+  function choiceRects() {
+    var h = 56, gap = 9, y = BOX + (BOXH - (h * 3 + gap * 2)) / 2;
+    return [0, 1, 2].map(function (i) { return { x: 32, y: y + i * (h + gap), w: W - 64, h: h }; });
+  }
+  function retryRect() { return { x: W / 2 - 50, y: BOX + BOXH / 2 - 30, w: 100, h: 60 }; }
+  function inside(r, x, y) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
+
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (phase !== "bingo" && phase !== "error") {
+      if (x == null) { var o = phase === "choose" ? -1 : oldestLit(); if (o >= 0) { punch(o); return; } }   /* 題名を選ぶ間のスペースは選ぶほう */
+      else {
+        var ci = cellAt(x, y);
+        if (ci >= 0) { if (!punch(ci) && !open[ci]) sndDud(); return; }
+      }
+    }
+    if (phase === "choose") {
+      if (x == null) { choose(pick); return; }
+      var cr = choiceRects();
+      for (var i = 0; i < 3; i++) if (inside(cr[i], x, y)) { pick = i; choose(i); return; }
+      return;
+    }
+    if (phase === "error") {
+      if (x == null || inside(retryRect(), x, y)) { var f = retry; retry = null; if (f) f(); }
+      return;
+    }
+    if (phase === "stream") held = true;      /* カード以外を押している間は速く流れる */
+  }
+  function move() {}
+  function up() { held = false; }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) { var p = atCanvas(e); move(p.x, p.y); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  window.addEventListener("keydown", function (e) {
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var upK = e.key === "ArrowUp" || e.key === "w" || e.key === "W" || e.key === "ArrowLeft";
+    var downK = e.key === "ArrowDown" || e.key === "s" || e.key === "S" || e.key === "ArrowRight";
+    if (!esc && !go && !upK && !downK) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (upK || downK) {
+      if (state === S.PLAY && phase === "choose") pick = (pick + (downK ? 1 : 2)) % 3;
+      return;
+    }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function doShare() {
+    window.zResultActions.x({ text: score + "文字でビンゴ #Wikipediaビンゴ" });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  /* 長い文字列を幅に収める（はみ出す分は … にする） */
+  function fitText(s, maxW) {
+    if (ctx.measureText(s).width <= maxW) return s;
+    while (s.length > 1 && ctx.measureText(s + "…").width > maxW) s = s.slice(0, -1);
+    return s + "…";
+  }
+  function cellRect(i) {
+    return { x: CARD.x + (i % 5) * CELL.w, y: CARD.y + Math.floor(i / 5) * CELL.h, w: CELL.w, h: CELL.h };
+  }
+
+  function drawHead() {
+    if (article && (phase === "stream" || phase === "after" || phase === "bingo" || state === S.RESULT || phase === "fetch")) {
+      ctx.fillStyle = "#f4efe6";
+      ctx.font = "800 26px sans-serif";
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(fitText(article.title, W - 32 - 110), 16, HEAD + 18);
+    }
+    ctx.fillStyle = "#f7cc71";
+    ctx.font = "800 30px sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText(String(score), W - 16, HEAD + 18);
+    ctx.textBaseline = "alphabetic";
+  }
+
+  function drawBox() {
+    roundRect(16, BOX, W - 32, BOXH, 14);
+    ctx.fillStyle = "#0f141d"; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,.08)"; ctx.stroke();
+
+    if (phase === "choose" && choices) { drawChoices(); return; }
+    if (phase === "load" || phase === "fetch") { drawSpinner(W / 2, BOX + BOXH / 2); return; }
+    if (phase === "error") { drawRetry(); return; }
+    if (!text) return;
+
+    /* 流れた分の最後の数行 */
+    var now = Math.floor(pos), last = 0;
+    for (var i = 0; i < lines.length; i++) if (lines[i].s <= now) last = i;
+    var rows = Math.floor((BOXH - 20) / LH);
+    var first = Math.max(0, last - rows + 1);
+    ctx.save();
+    roundRect(16, BOX, W - 32, BOXH, 14); ctx.clip();
+    ctx.font = "500 " + FONT + "px sans-serif";
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    for (var r = first; r <= last; r++) {
+      var L = lines[r], y = BOX + 14 + (r - first) * LH + LH / 2, x0 = 30;
+      var end = Math.min(L.e, now);
+      /* 当たった単語の下地 */
+      hits.forEach(function (h) {
+        if (!h.done) return;
+        var a = Math.max(h.start, L.s), b = Math.min(h.end, end);
+        if (a >= b) return;
+        var xa = L.xs[a - L.s], xb = (b - L.s < L.xs.length) ? L.xs[b - L.s] : lineEndX(L, b);
+        var fresh = Math.max(0, 1 - (T - h.t) / 0.6);
+        ctx.fillStyle = "rgba(247,204,113," + (0.55 + fresh * 0.45) + ")";
+        roundRect(x0 + xa - 2, y - 15, xb - xa + 4, 30, 6); ctx.fill();
+      });
+      ctx.fillStyle = "#d9dde6";
+      ctx.fillText(text.slice(L.s, end), x0, y + 1);
+    }
+    ctx.restore();
+    ctx.textBaseline = "alphabetic";
+  }
+  function lineEndX(L, b) {
+    ctx.font = "500 " + FONT + "px sans-serif";
+    var i = b - 1 - L.s;
+    return L.xs[i] + ctx.measureText(text.charAt(b - 1)).width;
+  }
+  function drawChoices() {
+    var cr = choiceRects();
+    for (var i = 0; i < 3; i++) {
+      var r = cr[i], c = choices[i];
+      var appear = Math.min(1, Math.max(0, (pt - i * 0.08) / 0.25));
+      ctx.save();
+      ctx.globalAlpha = appear;
+      ctx.translate(0, (1 - appear) * 12);
+      roundRect(r.x, r.y, r.w, r.h, r.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      if (keyMode && pick === i) { ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71"; ctx.stroke(); }
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 23px sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(fitText(c.title, r.w - 44), r.x + r.w / 2, r.y + r.h / 2 + 1);
+      ctx.restore();
+    }
+    ctx.textBaseline = "alphabetic";
+  }
+  function drawSpinner(x, y) {
+    for (var i = 0; i < 8; i++) {
+      var a = T * 6 + i * Math.PI / 4;
+      ctx.beginPath(); ctx.arc(x + Math.cos(a) * 20, y + Math.sin(a) * 20, 4, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(244,239,230," + (0.15 + i / 10) + ")"; ctx.fill();
+    }
+  }
+  function drawRetry() {
+    var r = retryRect();
+    roundRect(r.x, r.y, r.w, r.h, r.h / 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.fillStyle = "#16202e";
+    if (window.zActionIcon) window.zActionIcon(ctx, "もう一度", r.x + r.w / 2, r.y + r.h / 2, 30);
+  }
+
+  /* 紙のビンゴカード。単語はミシン目の丸の上に刷ってあり、出たらその丸を押し抜いて穴にする */
+  var PAPER = "#fbf5e6", INK = "#1d2a44", RIM = "#d8433b";
+  function holeR() { return Math.min(CELL.w, CELL.h) * 0.4; }
+  function drawCard() {
+    var F = FRAME;
+    var sk = T - shakeT, shake = sk >= 0 && sk < 0.4 ? Math.sin(sk * 70) * 6 * (1 - sk / 0.4) : 0;
+    ctx.save();
+    ctx.translate(shake, 0);
+    /* 影と外枠 */
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
+    roundRect(F.x, F.y, F.w, F.h, 16); ctx.fillStyle = RIM; ctx.fill();
+    ctx.restore();
+    /* 帯の飾り（小さな星を並べる） */
+    for (var k = 0; k < 9; k++) drawStar(F.x + F.w * (k + 1) / 10, F.y + F.band / 2 + 4, 6, k % 2 ? "#ffd86b" : "#fff3dc");
+    /* 紙の面 */
+    var gx = CARD.x, gy = CARD.y, gw = CELL.w * 5, gh = CELL.h * 5;
+    roundRect(gx - 4, gy - 4, gw + 8, gh + 8, 8); ctx.fillStyle = PAPER; ctx.fill();
+    /* 罫線 */
+    ctx.strokeStyle = "rgba(29,42,68,.28)"; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (var i = 1; i < 5; i++) {
+      ctx.moveTo(gx + i * CELL.w, gy + 2); ctx.lineTo(gx + i * CELL.w, gy + gh - 2);
+      ctx.moveTo(gx + 2, gy + i * CELL.h); ctx.lineTo(gx + gw - 2, gy + i * CELL.h);
+    }
+    ctx.stroke();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = "rgba(29,42,68,.55)";
+    roundRect(gx - 4, gy - 4, gw + 8, gh + 8, 8); ctx.stroke();
+
+    var R = holeR();
+    for (var c = 0; c < 25; c++) {
+      var r = cellRect(c), cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+      if (open[c]) drawHole(cx, cy, R, openT[c], card[c]);
+      else { if (lit[c] >= 0) drawLit(cx, cy, R, T - lit[c]); drawFlap(cx, cy, R, card[c]); }
+    }
+    if (!bingoLine) waiting().forEach(function (i) { var r = cellRect(i); drawWait(r.x + r.w / 2, r.y + r.h / 2, R, lit[i] >= 0); });
+    reachFx.forEach(function (f) { drawReachFx(f, R); });
+    if (bingoLine) drawBingo(R);
+    ctx.restore();
+  }
+  /* 待ちのマス: 赤い点線の輪が回って脈打つ。単語が出て光っているときは強く */
+  function drawWait(cx, cy, R, hot) {
+    var p = 0.5 + 0.5 * Math.sin(T * (hot ? 14 : 6));
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(T * (hot ? 3 : 1.2));
+    ctx.shadowColor = "#ff3b47"; ctx.shadowBlur = 8 + p * (hot ? 18 : 8);
+    ctx.setLineDash([9, 6]); ctx.lineWidth = hot ? 5 : 3.5;
+    ctx.strokeStyle = "rgba(230,40,52," + (0.65 + p * 0.35) + ")";
+    ctx.beginPath(); ctx.arc(0, 0, R + 7 + p * 2, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+  /* リーチになった瞬間: 揃いかけた4つが順に赤く光り、線が走る */
+  function drawReachFx(f, R) {
+    var t = T - f.t;
+    if (t < 0 || t > 1.1) return;
+    var fade = t < 0.8 ? 1 : 1 - (t - 0.8) / 0.3;
+    var pts = f.line.map(function (i) { var r = cellRect(i); return { x: r.x + r.w / 2, y: r.y + r.h / 2, open: open[i] }; });
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, fade);
+    ctx.shadowColor = "#ff3b47"; ctx.shadowBlur = 16;
+    ctx.strokeStyle = "rgba(255,70,80,.9)"; ctx.lineCap = "round";
+    var u = Math.min(1, t / 0.45);
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(pts[0].x + (pts[4].x - pts[0].x) * u, pts[0].y + (pts[4].y - pts[0].y) * u); ctx.stroke();
+    ctx.lineWidth = 4;
+    pts.forEach(function (p, k) {
+      var tk = t - k * 0.09;
+      if (tk < 0 || !p.open) return;
+      var s = 1 + Math.max(0, 0.2 - tk) * 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, (R + 4) * s, 0, Math.PI * 2); ctx.stroke();
+    });
+    ctx.restore();
+  }
+  /* 本文に出たマス: 丸が金色に光って脈打つ */
+  function drawLit(cx, cy, R, t) {
+    var p = 0.5 + 0.5 * Math.sin(t * 9);
+    var pop = Math.max(0, 1 - t / 0.3);
+    ctx.save();
+    ctx.shadowColor = "#ffcf3f"; ctx.shadowBlur = 14 + p * 12;
+    ctx.beginPath(); ctx.arc(cx, cy, R * (1 + pop * 0.25), 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,207,63," + (0.55 + p * 0.3) + ")"; ctx.fill();
+    ctx.restore();
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(214,120,0,.9)";
+    ctx.beginPath(); ctx.arc(cx, cy, R + 3, 0, Math.PI * 2); ctx.stroke();
+  }
+  function drawStar(x, y, r, color) {
+    ctx.beginPath();
+    for (var k = 0; k < 10; k++) {
+      var a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? r * 0.45 : r;
+      ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+  }
+  /* まだ開いていない丸: ミシン目と単語 */
+  function drawFlap(cx, cy, R, word) {
+    ctx.save();
+    ctx.setLineDash([4, 4]); ctx.lineWidth = 1.6; ctx.strokeStyle = "rgba(29,42,68,.45)";
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    if (!word) return;
+    ctx.fillStyle = INK;
+    ctx.font = "900 " + Math.min(30, Math.floor(R * 1.72 / word.length)) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(word, cx, cy + 1);
+    ctx.textBaseline = "alphabetic";
+  }
+  /* 押し抜いた穴。押した直後は丸がへこみながら奥へ倒れ、そのあと上のふちに倒れた紙がのぞく */
+  function drawHole(cx, cy, R, t, word) {
+    var PUSH = 0.09, FALL = 0.22;
+    if (t < PUSH) {                                         /* 押されてへこむ */
+      var u = t / PUSH;
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(29,42,68," + (0.08 + u * 0.18) + ")"; ctx.fill();
+      ctx.translate(cx, cy); ctx.scale(1 - u * 0.08, 1 - u * 0.08); ctx.translate(-cx, -cy);
+      drawFlap(cx, cy, R, word);
+      ctx.restore();
+      return;
+    }
+    /* 穴の底（下の机の色）と、切り口の影 */
+    var g = ctx.createRadialGradient(cx, cy + R * 0.25, R * 0.2, cx, cy, R);
+    g.addColorStop(0, "#141a26"); g.addColorStop(1, "#0a0e16");
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.clip();
+    ctx.lineWidth = 7; ctx.strokeStyle = "rgba(0,0,0,.5)";
+    ctx.beginPath(); ctx.arc(cx, cy + 3, R + 2, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+    /* 奥へ倒れた紙（上のふちでつながっている） */
+    var f = Math.min(1, (t - PUSH) / (FALL - PUSH));
+    var fall = f < 1 ? 1 - f * f * 0.72 : 0.28 + Math.sin(Math.min(1, (t - FALL) / 0.18) * Math.PI) * 0.05;
+    ctx.translate(cx, cy - R);
+    ctx.scale(1, fall);
+    ctx.beginPath(); ctx.arc(0, R, R, 0, Math.PI * 2);
+    ctx.fillStyle = f < 1 ? "#e8e0cd" : "#b9ae96"; ctx.fill();
+    if (word && f < 1) {
+      ctx.fillStyle = "rgba(29,42,68," + (1 - f) + ")";
+      ctx.font = "900 " + Math.min(30, Math.floor(R * 1.72 / word.length)) + "px sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(word, 0, R + 1);
+      ctx.textBaseline = "alphabetic";
+    }
+    ctx.restore();
+    /* 切り口のふち（紙の厚み） */
+    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(160,145,115,.9)";
+    ctx.beginPath(); ctx.arc(cx, cy, R, Math.PI * 0.05, Math.PI * 0.95); ctx.stroke();
+    ctx.strokeStyle = "rgba(29,42,68,.55)";
+    ctx.beginPath(); ctx.arc(cx, cy, R, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+  }
+  /* 揃った列: 穴を順に金色で囲み、線でつなぐ */
+  function drawBingo(R) {
+    ctx.save();
+    ctx.shadowColor = "#ffd86b"; ctx.shadowBlur = 14;
+    var pts = bingoLine.map(function (i) { var r = cellRect(i); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; });
+    var u = Math.min(1, pt / 0.6);
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(255,216,107,.85)"; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(pts[0].x + (pts[4].x - pts[0].x) * u, pts[0].y + (pts[4].y - pts[0].y) * u); ctx.stroke();
+    ctx.lineWidth = 5;
+    pts.forEach(function (p, i) {
+      if (pt < i * 0.1) return;
+      var s = 1 + Math.max(0, 0.25 - (pt - i * 0.1)) * 1.6;
+      ctx.beginPath(); ctx.arc(p.x, p.y, (R + 5) * s, 0, Math.PI * 2); ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  /* 出典。本文を出している間と結果で表示する */
+  var creditKey = "";
+  function drawCredit() {
+    var showing = article && text && (phase === "stream" || phase === "after" || phase === "bingo" || state === S.RESULT);
+    var many = state === S.RESULT && readList.length > 1;
+    var label = many ? "出典：Wikipedia（上の記事） CC BY-SA 4.0" : "出典：Wikipedia「" + (article && article.title) + "」 CC BY-SA 4.0";
+    var key = showing ? article.id + ":" + H + ":" + many : "";
+    if (key !== creditKey) {
+      creditKey = key;
+      creditLink.hidden = !showing;
+      if (showing) {
+        creditLink.href = many ? "https://creativecommons.org/licenses/by-sa/4.0/deed.ja" : articleUrl(article);
+        creditLink.textContent = label;
+        creditLink.style.top = ((CREDIT - 14) / H * 100) + "%";
+        creditLink.style.height = (28 / H * 100) + "%";
+      }
+    }
+    if (!showing) return;
+    ctx.fillStyle = "rgba(244,239,230,.62)";
+    ctx.font = "500 15px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(fitText(label, W - 32), W / 2, CREDIT);
+    ctx.textBaseline = "alphabetic";
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#1b2230"; ctx.fillRect(0, 0, W, H);
+    if (state !== S.INTRO) { if (state !== S.RESULT) drawHead(); drawBox(); }   /* 結果では上の記事名と数字を消す（大きい数字と重なるので） */
+    drawCard();
+    drawCredit();
+    if (state === S.RESULT) drawResult();
+    placeLinks();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」、その下に読んだ記事の一覧（押すとその記事が開く）。
+     一覧を置くため、数字とボタンは画面の上のほうに寄せる */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = HEAD + 136;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  /* 記事の行。入りきらないときは最後に読んだ（ビンゴした）ほうから */
+  function listRows() {
+    var top = HEAD + 136 + 54 + 26, rowH = 64, h = 54;
+    var fit = Math.max(1, Math.floor((CREDIT - 20 - top) / rowH));
+    var from = Math.max(0, readList.length - fit);
+    return readList.slice(from).map(function (a, k) {
+      return { a: a, last: from + k === readList.length - 1, x: 24, y: top + k * rowH, w: W - 48, h: h };
     });
   }
-  window.zResultActions.place(retryButton,{x:65,y:H*.62,w:170,h:63},W,H,s.state==='fall'||s.state==='result');
-  window.zResultActions.place(shareButton,{x:251,y:H*.62,w:224,h:63},W,H,s.state==='fall'||s.state==='result');
-}
-window.__probe={now:()=>({state:s.state,score:s.score,distance:s.distance,goal:s.goal,remaining:s.goal-s.distance,shareText:shareText(),shareVisible:!shareButton.hidden,W,H,z:s.z,x:s.x,roll:s.roll,rv:s.rv,bend:s.bend,target:s.target,weight:s.weight,speed:s.speed,reason:s.reason,fallTime:s.fallTime,positions:(s.rag||P.pose(s)).map(p=>({x:p.x,y:p.y,z:p.z})),gates:s.gates.map(g=>({...g})),renderer:!!view3d}),step:n=>{for(let i=0;i<(n||1);i++){update(1/60);draw();}},reset};
-// サムネイルには操作表示を重ねず、実際の模型と反り姿勢を撮る。
-window.__thumbnail=options=>{
-  if(options.scene!=='limbo'||Object.keys(options).some(k=>k!=='scene'))throw Error('未対応の撮影条件');
-  if(!view3d)throw Error('3D描画を開始できません');
-  window.__recordManual=true;reset();s.z=54;s.bend=.9;s.target=.9;s.roll=0;s.weight=0;s.thrust=0;s.t=0;
-  canvas.width=canvas.height=540;ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(view3d.draw(s,1080,1080,true),0,0,540,540);
-};
-window.__recording={sound:()=>{audioOn();return AC;},frame:()=>canvas,run:async r=>{await r.wait(900);r.key();await r.until(()=>s.state==='result',15);await r.wait(1200);}};
-layout();draw();let last=performance.now();function loop(now){const dt=Math.min(.05,(now-last)/1000);last=now;if(!window.__recordManual){accum+=dt;while(accum>=1/60){update(1/60);accum-=1/60;}draw();}requestAnimationFrame(loop);}requestAnimationFrame(loop);
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(8,10,16,.78)";
+    ctx.fillRect(0, 0, W, CREDIT - 18);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 96px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, HEAD + 112);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+    listRows().forEach(function (r) {
+      roundRect(r.x, r.y, r.w, r.h, r.h / 2);
+      ctx.fillStyle = "#f6f1e7"; ctx.fill();
+      if (r.last) { ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71"; ctx.stroke(); }
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 22px sans-serif";
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(fitText(r.a.title, r.w - 90), r.x + 26, r.y + r.h / 2 + 1);
+      drawOutIcon(r.x + r.w - 34, r.y + r.h / 2);
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+  /* 外へ開く印（四角から右上へ矢印） */
+  function drawOutIcon(x, y) {
+    ctx.save();
+    ctx.strokeStyle = "#16202e"; ctx.lineWidth = 2.4; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(x - 1, y - 8); ctx.lineTo(x - 9, y - 8); ctx.lineTo(x - 9, y + 9); ctx.lineTo(x + 8, y + 9); ctx.lineTo(x + 8, y + 1);
+    ctx.moveTo(x + 2, y - 10); ctx.lineTo(x + 10, y - 10); ctx.lineTo(x + 10, y - 2);
+    ctx.moveTo(x + 10, y - 10); ctx.lineTo(x - 1, y + 1);
+    ctx.stroke();
+    ctx.restore();
+  }
+  /* 一覧の行に、押すと開く透明なリンクを重ねる（絵は canvas に描いてあるので録画にも残る） */
+  var linkEls = [], linkKey = "";
+  function articleUrl(a) { return "https://ja.wikipedia.org/?curid=" + encodeURIComponent(a.id); }
+  function placeLinks() {
+    var rows = state === S.RESULT ? listRows() : [];
+    var key = rows.map(function (r) { return r.a.id + "@" + r.y; }).join(",") + ":" + H;
+    if (key === linkKey) return;
+    linkKey = key;
+    while (linkEls.length < rows.length) {
+      var el = document.createElement("a");
+      el.className = "article-link"; el.target = "_blank"; el.rel = "noopener";
+      ["pointerdown", "pointerup"].forEach(function (n) { el.addEventListener(n, function (e) { e.stopPropagation(); }); });
+      wrap.appendChild(el);
+      linkEls.push(el);
+    }
+    linkEls.forEach(function (el, k) {
+      var r = rows[k];
+      el.hidden = !r;
+      if (!r) return;
+      el.href = articleUrl(r.a);
+      el.textContent = r.a.title;
+      el.setAttribute("aria-label", r.a.title + "（Wikipedia）");
+      el.style.left = (r.x / W * 100) + "%"; el.style.width = (r.w / W * 100) + "%";
+      el.style.top = (r.y / H * 100) + "%"; el.style.height = (r.h / H * 100) + "%";
+    });
+  }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
+  window.__probe = {
+    now: function () {
+      return { state: state, phase: phase, score: score, card: card && card.slice(), open: open && open.slice(),
+               bingo: bingoLine && bingoLine.slice(), waiting: waiting(), reaches: reachFx.length, lit: lit && lit.map(function (v) { return v >= 0; }), articles: articles, pos: pos, length: text.length,
+               title: article && article.title, choices: choices && choices.map(function (c) { return c.title; }),
+               pick: pick, held: held, W: W, H: H };
+    },
+    choice: function (i) { var r = choiceRects()[i]; return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; },
+    retryButton: function () { var r = retryRect(); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; },
+    result: function () { var b = resultButtons(); return { retry: { x: b[0].x + b[0].w / 2, y: b[0].y + b[0].h / 2 }, share: { x: b[1].x + b[1].w / 2, y: b[1].y + b[1].h / 2 } }; },
+    list: function () { return listRows().map(function (r) { return { title: r.a.title, url: articleUrl(r.a), last: r.last, y: r.y + r.h / 2 }; }); },
+    links: function () { return linkEls.filter(function (e) { return !e.hidden; }).map(function (e) { return e.href; }); },
+    cell: function (i) { var c = cellRect(i); return { x: c.x + c.w / 2, y: c.y + c.h / 2 }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      for (var n = 0; n < 8 && state === S.PLAY; n++) {
+        if (!await r.until(function () { return phase === "choose" || phase === "bingo" || phase === "error"; }, 15)) throw Error("記事が来ない");
+        if (phase !== "choose") break;
+        await r.wait(900);
+        choose(Math.floor(Math.random() * 3));
+        var guard = Date.now() + 60000;
+        while ((phase === "fetch" || phase === "stream") && Date.now() < guard) {
+          var o = oldestLit();
+          if (o >= 0 && T - lit[o] > 0.35) punch(o);
+          await r.wait(50);
+        }
+        while (oldestLit() >= 0 && phase !== "bingo") { punch(oldestLit()); await r.wait(300); }
+      }
+      await r.until(function () { return state === S.RESULT; }, 5);
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(true); });
+
+  /* 開始前はカードだけ見せる（通信はSTARTを押してから） */
+  state = S.INTRO; phase = "intro"; round = 0; score = 0; text = ""; hits = []; lines = []; article = null; pt = 0; T = 0;
+  card = shuffle(WORDS.slice()).slice(0, 25); card[12] = null;
+  open = []; openT = []; lit = []; for (var i0 = 0; i0 < 25; i0++) { open.push(i0 === 12); openT.push(i0 === 12 ? 9 : -1); lit.push(-1); }
+  startButton.hidden = false;
+  layout();
+  var lastT = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - lastT) / 1000);
+    lastT = now;
+    if (!window.__recordManual) { update(dt); draw(); }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
 })();
 </script>
 <script>
-if(document.head&&/^(localhost|127\.0\.0\.1)$/.test(location.hostname)&&!/[?&]recorder-cli=1(?:&|$)/.test(location.search)){var recorderScript=document.createElement('script');recorderScript.src='../games/_tools/recorder-ui.js?v=skate-limbo-1790081736382';document.head.appendChild(recorderScript);}
-</script><script src="./auto-reload.js?v=skate-limbo-1790081736382"></script></body></html>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../games/_tools/recorder-ui.js?v=wiki-bingo-1790129784963";
+  document.head.appendChild(recorderScript);
+}
+</script>
+<script src="./auto-reload.js?v=wiki-bingo-1790129784963"></script>
+</body>
+</html>
