@@ -11,7 +11,7 @@ function open(plan, shape) {
     choices: function () {
       var f = globalThis.__wikiFake; f.calls++;
       if (f.failNext > 0) { f.failNext--; return Promise.reject(new Error("x")); }
-      return Promise.resolve([0, 1, 2].map(function (i) { return { id: f.calls * 10 + i, title: "記事" + f.calls + "-" + i }; }));
+      return Promise.resolve([0,1,2,3,4,5,6,7,8,9,10,11].map(function (i) { return { id: f.calls * 100 + i, title: "記事" + f.calls + "-" + i }; }));
     },
     text: function (id) { globalThis.__wikiFake.texts++; return Promise.resolve(globalThis.__wikiFake.plan(id, card.slice(), open.slice())); }
   };`;
@@ -54,8 +54,8 @@ async function start(g) {
   assert.equal(g.probe.now().state, 'play');
   assert.deepEqual(g.probe.now().card, introCard, 'STARTの前に見えていたカードのまま始まる');
   await flush(); g.step(1);
-  assert.equal(g.probe.now().phase, 'choose', '題名が3つ出る');
-  assert.equal(g.probe.now().choices.length, 3);
+  assert.equal(g.probe.now().phase, 'choose', '題名が出る');
+  assert.equal(g.probe.now().choices.length, 12, "題名が12本出る");
 }
 
 (async () => {
@@ -194,10 +194,12 @@ async function start(g) {
     await flush(); g.step(1);
     assert.equal(g.probe.now().phase, "choose", "次の題名");
     assert.ok(g.probe.now().open[0] && g.probe.now().open[1], "前の記事で開けた穴は残る");
-    g.press("ArrowDown"); g.press("ArrowDown");
-    assert.equal(g.probe.now().pick, 2, "矢印で選ぶ");
+    g.press("ArrowRight"); g.press("ArrowDown");
+    assert.equal(g.probe.now().pick, 3, "→で右の列、↓で次の段（2列×6段の4つ目）");
+    g.press("ArrowLeft"); g.press("ArrowRight");
+    assert.equal(g.probe.now().pick, 3);
     g.press(" "); await flush(); g.step(1);
-    assert.ok(/-2$/.test(g.probe.now().title));
+    assert.ok(/-3$/.test(g.probe.now().title));
     playOut(g);
     assert.equal(g.probe.now().phase, "bingo");
     assert.deepEqual(g.probe.now().bingo, [0, 1, 2, 3, 4]);
@@ -206,11 +208,11 @@ async function start(g) {
     g.until(() => g.probe.now().state === "result", 400);
     const list = g.probe.list();
     assert.equal(list.length, 2);
-    assert.ok(/-0$/.test(list[0].title) && /-2$/.test(list[1].title), "結果に読んだ記事が順に並ぶ（1本目は1つ目、2本目は3つ目を選んだ）");
+    assert.ok(/-0$/.test(list[0].title) && /-3$/.test(list[1].title), "結果に読んだ記事が順に並ぶ（1本目は1つ目、2本目は4つ目を選んだ）");
     assert.deepEqual(list.map(r => r.last), [false, true], "ビンゴした記事に印");
     const links = g.probe.links();
     assert.equal(links.length, 2);
-    assert.ok(/^https:\/\/ja\.wikipedia\.org\/\?curid=\d*0$/.test(links[0]) && /curid=\d*2$/.test(links[1]), "押すとその記事が開くリンク: " + links);
+    assert.ok(/^https:\/\/ja\.wikipedia\.org\/\?curid=\d*00$/.test(links[0]) && /curid=\d*03$/.test(links[1]), "押すとその記事が開くリンク: " + links);
     const btn = g.probe.result();
     assert.ok(list[0].y - btn.retry.y >= 63 && list[1].y - list[0].y >= 63, "ボタンと記事の行の間隔");
     g.tap(270, list[0].y); g.step(1);
@@ -270,9 +272,17 @@ async function start(g) {
     const g = open(null, shape);
     await start(g);
     const H = g.probe.now().H;
-    const ys = [0, 1, 2].map(i => g.probe.choice(i).y);
-    assert.ok(ys[1] - ys[0] >= 63 && ys[2] - ys[1] >= 63, shape.join('x') + ' 題名の間隔 ' + (ys[1] - ys[0]));
+    assert.equal(g.probe.choiceCount(), 12);
+    const ps = [...Array(12)].map((_, i) => g.probe.choice(i));
+    let min = 1e9;
+    for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) min = Math.min(min, Math.hypot(ps[i].x - ps[j].x, ps[i].y - ps[j].y));
+    assert.ok(min >= 63, shape.join('x') + ' 題名12本の間隔 ' + min);
+    ps.forEach(p => assert.ok(p.x > 0 && p.x < 540 && p.y > 0 && p.y < H, "題名が画面の中"));
+    g.step(30);
+    assert.ok(g.probe.cardScale() <= 1, "選ぶ間のカードは元の大きさ以下（入りきらない画面だけ縮む）");
     assert.ok(g.probe.cell(24).y + 40 < H - 20, shape.join('x') + ' カードが画面に収まる');
+    g.press(" "); await flush(); g.step(30);
+    assert.equal(g.probe.cardScale(), 1, "選んだらカードは元の大きさ");
   }
 
   console.log('ok wiki-bingo');
