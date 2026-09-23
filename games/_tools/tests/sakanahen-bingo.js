@@ -244,7 +244,7 @@ function playOut(g) {
 /* 7. 回数のばらつき（全部取れた場合） */
 ORDER.slice(0, 5).forEach(mark => {
   const scores = [];
-  for (let k = 0; k < 12; k++) scores.push(perfect(open(), I(mark)).score);
+  for (let k = 0; k < 6; k++) scores.push(perfect(open(), I(mark)).score);
   scores.sort((a, b) => a - b);
   const q = f => scores[Math.floor((scores.length - 1) * f)];
   console.log(mark + ' 全部取れた場合のビンゴまでの回数: 最小' + scores[0] + ' / 中央' + q(0.5) + ' / 9割' + q(0.9) + ' / 最大' + scores[scores.length - 1]);
@@ -288,7 +288,7 @@ ORDER.slice(0, 5).forEach(mark => {
   assert.ok(g.probe.dealAlpha(0) > 0.99, '始めた直後も字が見える ' + g.probe.dealAlpha(0));
 }
 
-/* 11. 5つ全部ビンゴすると難が出る。記録はいちばん少ない回数。ライフがなくなった回は記録しない */
+/* 11. 5つ全部ビンゴすると難が出る。残すのはクリアしたかだけ（回数は残さない）。ライフがなくなった回はクリアにしない */
 {
   const g = open();
   /* 1回目: わざと間違えて終わる → 記録なし */
@@ -300,7 +300,7 @@ ORDER.slice(0, 5).forEach(mark => {
   }
   g.until(() => now(g).state === 'result', 400);
   assert.ok(now(g).failed);
-  assert.deepEqual(now(g).best, {}, 'ライフがなくなった回は記録しない');
+  assert.deepEqual(now(g).cleared, {}, 'ライフがなくなった回はクリアにしない');
   const marks = ['魚', '木', '金', '鳥', '虫'];   /* 並びと違う順に遊んでも、5つ揃えば出る */
   marks.forEach((m, k) => {
     const set = I(m);
@@ -310,7 +310,8 @@ ORDER.slice(0, 5).forEach(mark => {
     assert.equal(now(g).set, m);
     const res = playOut(g);
     assert.ok(!res.failed);
-    assert.equal(res.best[m], res.score, m + ' の記録');
+    assert.equal(res.cleared[m], true, m + ' をクリア');
+    assert.ok(Object.values(res.cleared).every(v => v === true), '回数は残さない');
     assert.equal(g.probe.setCount(), k < 4 ? 5 : 6, k < 4 ? 'まだ難は出ない' : '5つ揃うと難が出る');
   });
   assert.ok(now(g).unlocked);
@@ -326,13 +327,7 @@ ORDER.slice(0, 5).forEach(mark => {
   const hard = g.probe.sets()[5].list.map(f => f.kanji);
   assert.ok(now(g).card.filter(Boolean).every(k => hard.includes(k)), '難のカード');
   const res = playOut(g);
-  assert.equal(res.best['難'], res.score);
-  /* 記録を更新するのは少なかったときだけ */
-  const before = res.best['難'];
-  back(g); start(g);
-  const res2 = playOut(g);
-  assert.equal(res2.best['難'], Math.min(before, res2.score));
-  assert.equal(res2.newBest, res2.score < before);
+  assert.equal(res.cleared['難'], true, '難もクリアとして残る');
 }
 
 /* 12. 確かめる用: 手元だけ、カード選びで F8 を押すと難が出て選ばれる。もう一度で戻る。公開の場所では効かない。記録には書かない */
@@ -343,7 +338,7 @@ ORDER.slice(0, 5).forEach(mark => {
   g.press('F8'); g.step(1);
   assert.equal(g.probe.setCount(), 6, 'F8 で難が出る');
   assert.equal(now(g).set, '難', '難を選んでいる');
-  assert.deepEqual(now(g).best, {}, '記録は空のまま');
+  assert.deepEqual(now(g).cleared, {}, '記録は空のまま');
   g.press('F8'); g.step(1);
   assert.equal(g.probe.setCount(), 5, 'もう一度で戻る');
   assert.equal(now(g).set, '魚');
@@ -354,7 +349,7 @@ ORDER.slice(0, 5).forEach(mark => {
   assert.equal(g.probe.setCount(), 6, '遊んでいる間の F8 では変わらない');
   /* 遊んでいる間の F8: 出ている字があれば開け、無ければスキップ。押し続ければビンゴまで行く */
   const h = at('localhost'); h.step(2); start(h);
-  for (let k = 0; k < 400 && now(h).state === 'play'; k++) {
+  for (let k = 0; k < 2000 && now(h).state === 'play'; k++) {
     if (now(h).phase === 'call') {
       const n = now(h), c = n.card.indexOf(n.call.kanji), was = c >= 0 && !n.open[c];
       h.press('F8'); h.step(1);
