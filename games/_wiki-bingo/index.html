@@ -20,6 +20,9 @@
   /* 出典の表示は canvas に描き、その上に透明なリンクを重ねる（録画にも残るように） */
   #credit { position:absolute; left:0; width:100%; display:block; color:transparent; text-decoration:none; touch-action:manipulation; }
   #credit[hidden] { display:none; }
+  .article-link { position:absolute; display:block; color:transparent; overflow:hidden; text-decoration:none; border-radius:999px; touch-action:manipulation; }
+  .article-link[hidden] { display:none; }
+  .article-link:focus-visible { outline:3px solid #f7cc71; outline-offset:2px; }
 </style>
 </head>
 <body>
@@ -187,7 +190,7 @@
   /* PLAY の中の段階: load（題名を取りに行く）→ choose（選ぶ）→ fetch（本文を取りに行く）
      → stream（流れる）→ 次の記事の load/choose へ、または bingo → 結果。error は通信の失敗 */
   var state, phase, pt, score, card, open, openT, bingoLine, choices, nextChoices, pick, article, articles,
-      text, pos, lines, hits, lit, held, keyMode = false, T, round, retry, typeT, reached;
+      text, pos, lines, hits, lit, readList = [], held, keyMode = false, T, round, retry, typeT, reached;
 
   var HEAD, BOX, BOXH, CARD, CELL, CREDIT, FRAME;
   function place() {
@@ -215,7 +218,7 @@
     for (var i = 0; i < 25; i++) { open.push(i === 12); openT.push(i === 12 ? 9 : -1); lit.push(-1); }
     bingoLine = null; reached = {};
     choices = null; nextChoices = null; pick = 0; article = null; articles = 0;
-    text = ""; pos = 0; lines = []; hits = []; readBefore = 0; counted = false;
+    text = ""; pos = 0; lines = []; hits = []; readBefore = 0; counted = false; readList = [];
     loadChoices();
   }
 
@@ -268,6 +271,7 @@
     text = cleanText(t);
     if (!text) { loadChoices(); return; }
     articles++;
+    readList.push(article);
     pos = 0; counted = false;
     findHits();
     wrapText();
@@ -677,13 +681,15 @@
   var creditKey = "";
   function drawCredit() {
     var showing = article && text && (phase === "stream" || phase === "after" || phase === "bingo" || state === S.RESULT);
-    var key = showing ? article.id + ":" + H : "";
+    var many = state === S.RESULT && readList.length > 1;
+    var label = many ? "出典：Wikipedia（上の記事） CC BY-SA 4.0" : "出典：Wikipedia「" + (article && article.title) + "」 CC BY-SA 4.0";
+    var key = showing ? article.id + ":" + H + ":" + many : "";
     if (key !== creditKey) {
       creditKey = key;
       creditLink.hidden = !showing;
       if (showing) {
-        creditLink.href = "https://ja.wikipedia.org/?curid=" + encodeURIComponent(article.id);
-        creditLink.textContent = "出典：Wikipedia「" + article.title + "」 CC BY-SA 4.0";
+        creditLink.href = many ? "https://creativecommons.org/licenses/by-sa/4.0/deed.ja" : articleUrl(article);
+        creditLink.textContent = label;
         creditLink.style.top = ((CREDIT - 14) / H * 100) + "%";
         creditLink.style.height = (28 / H * 100) + "%";
       }
@@ -692,7 +698,7 @@
     ctx.fillStyle = "rgba(244,239,230,.62)";
     ctx.font = "500 15px sans-serif";
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(fitText("出典：Wikipedia「" + article.title + "」 CC BY-SA 4.0", W - 32), W / 2, CREDIT);
+    ctx.fillText(fitText(label, W - 32), W / 2, CREDIT);
     ctx.textBaseline = "alphabetic";
   }
 
@@ -700,20 +706,31 @@
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "#1b2230"; ctx.fillRect(0, 0, W, H);
-    if (state !== S.INTRO) { drawHead(); drawBox(); }
+    if (state !== S.INTRO) { if (state !== S.RESULT) drawHead(); drawBox(); }   /* 結果では上の記事名と数字を消す（大きい数字と重なるので） */
     drawCard();
     drawCredit();
     if (state === S.RESULT) drawResult();
+    placeLinks();
   }
 
-  /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
+  /* 結果画面。数字と「もう一度」「Xでシェア」、その下に読んだ記事の一覧（押すとその記事が開く）。
+     一覧を置くため、数字とボタンは画面の上のほうに寄せる */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = HEAD + 136;
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
     ];
+  }
+  /* 記事の行。入りきらないときは最後に読んだ（ビンゴした）ほうから */
+  function listRows() {
+    var top = HEAD + 136 + 54 + 26, rowH = 64, h = 54;
+    var fit = Math.max(1, Math.floor((CREDIT - 20 - top) / rowH));
+    var from = Math.max(0, readList.length - fit);
+    return readList.slice(from).map(function (a, k) {
+      return { a: a, last: from + k === readList.length - 1, x: 24, y: top + k * rowH, w: W - 48, h: h };
+    });
   }
   function hitButton(x, y) {
     var bs = resultButtons();
@@ -724,15 +741,15 @@
     return null;
   }
   function drawResult() {
-    ctx.fillStyle = "rgba(8,10,16,.68)";
+    ctx.fillStyle = "rgba(8,10,16,.78)";
     ctx.fillRect(0, 0, W, CREDIT - 18);
     ctx.save();
     ctx.fillStyle = "#fff";
     ctx.shadowColor = "rgba(0,0,0,.6)";
     ctx.shadowBlur = 10;
-    ctx.font = "800 108px sans-serif";
+    ctx.font = "800 96px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.fillText(String(score), W / 2, HEAD + 112);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
@@ -748,6 +765,54 @@
       ctx.restore();
       ctx.textBaseline = "alphabetic";
     });
+    listRows().forEach(function (r) {
+      roundRect(r.x, r.y, r.w, r.h, r.h / 2);
+      ctx.fillStyle = "#f6f1e7"; ctx.fill();
+      if (r.last) { ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71"; ctx.stroke(); }
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 22px sans-serif";
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(fitText(r.a.title, r.w - 90), r.x + 26, r.y + r.h / 2 + 1);
+      drawOutIcon(r.x + r.w - 34, r.y + r.h / 2);
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+  /* 外へ開く印（四角から右上へ矢印） */
+  function drawOutIcon(x, y) {
+    ctx.save();
+    ctx.strokeStyle = "#16202e"; ctx.lineWidth = 2.4; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(x - 1, y - 8); ctx.lineTo(x - 9, y - 8); ctx.lineTo(x - 9, y + 9); ctx.lineTo(x + 8, y + 9); ctx.lineTo(x + 8, y + 1);
+    ctx.moveTo(x + 2, y - 10); ctx.lineTo(x + 10, y - 10); ctx.lineTo(x + 10, y - 2);
+    ctx.moveTo(x + 10, y - 10); ctx.lineTo(x - 1, y + 1);
+    ctx.stroke();
+    ctx.restore();
+  }
+  /* 一覧の行に、押すと開く透明なリンクを重ねる（絵は canvas に描いてあるので録画にも残る） */
+  var linkEls = [], linkKey = "";
+  function articleUrl(a) { return "https://ja.wikipedia.org/?curid=" + encodeURIComponent(a.id); }
+  function placeLinks() {
+    var rows = state === S.RESULT ? listRows() : [];
+    var key = rows.map(function (r) { return r.a.id + "@" + r.y; }).join(",") + ":" + H;
+    if (key === linkKey) return;
+    linkKey = key;
+    while (linkEls.length < rows.length) {
+      var el = document.createElement("a");
+      el.className = "article-link"; el.target = "_blank"; el.rel = "noopener";
+      ["pointerdown", "pointerup"].forEach(function (n) { el.addEventListener(n, function (e) { e.stopPropagation(); }); });
+      wrap.appendChild(el);
+      linkEls.push(el);
+    }
+    linkEls.forEach(function (el, k) {
+      var r = rows[k];
+      el.hidden = !r;
+      if (!r) return;
+      el.href = articleUrl(r.a);
+      el.textContent = r.a.title;
+      el.setAttribute("aria-label", r.a.title + "（Wikipedia）");
+      el.style.left = (r.x / W * 100) + "%"; el.style.width = (r.w / W * 100) + "%";
+      el.style.top = (r.y / H * 100) + "%"; el.style.height = (r.h / H * 100) + "%";
+    });
   }
 
   /* ============ 覗き穴 ============
@@ -761,6 +826,9 @@
     },
     choice: function (i) { var r = choiceRects()[i]; return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; },
     retryButton: function () { var r = retryRect(); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; },
+    result: function () { var b = resultButtons(); return { retry: { x: b[0].x + b[0].w / 2, y: b[0].y + b[0].h / 2 }, share: { x: b[1].x + b[1].w / 2, y: b[1].y + b[1].h / 2 } }; },
+    list: function () { return listRows().map(function (r) { return { title: r.a.title, url: articleUrl(r.a), last: r.last, y: r.y + r.h / 2 }; }); },
+    links: function () { return linkEls.filter(function (e) { return !e.hidden; }).map(function (e) { return e.href; }); },
     cell: function (i) { var c = cellRect(i); return { x: c.x + c.w / 2, y: c.y + c.h / 2 }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }

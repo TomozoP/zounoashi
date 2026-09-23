@@ -132,6 +132,15 @@ async function start(g) {
     assert.deepEqual(g.probe.now().bingo, [0, 1, 2, 3, 4]);
     assert.equal(g.probe.now().score, t1.length + t2.length, "読み終えた記事の文字数の合計");
     assert.equal(g.probe.now().articles, 2);
+    g.until(() => g.probe.now().state === "result", 400);
+    const list = g.probe.list();
+    assert.deepEqual(list.map(r => r.title), ["記事1-0", "記事2-2"], "結果に読んだ記事が順に並ぶ");
+    assert.deepEqual(list.map(r => r.last), [false, true], "ビンゴした記事に印");
+    assert.deepEqual(g.probe.links(), ["https://ja.wikipedia.org/?curid=10", "https://ja.wikipedia.org/?curid=22"], "押すとその記事が開くリンク");
+    const btn = g.probe.result();
+    assert.ok(list[0].y - btn.retry.y >= 63 && list[1].y - list[0].y >= 63, "ボタンと記事の行の間隔");
+    g.tap(270, list[0].y); g.step(1);
+    assert.equal(g.probe.now().state, "result", "記事の行を押しても最初からにはならない");
   }
 
   /* 4. 押している間は速く流れる */
@@ -169,8 +178,10 @@ async function start(g) {
     g.press(' '); await flush(); g.step(1);
     playOut(g);
     g.until(() => g.probe.now().state === "result", 3000);
-    const H = g.probe.now().H;
-    g.tap(270 - 107, H * 0.62 + 27); g.step(1); await flush(); g.step(1);
+    assert.equal(g.probe.list().length, 1);
+    const b = g.probe.result().retry;
+    g.tap(b.x, b.y); g.step(1); await flush(); g.step(1);
+    assert.equal(g.probe.links().length, 0, "遊び始めたら記事のリンクは消える");
     assert.equal(g.probe.now().state, 'play');
     assert.equal(g.probe.now().score, 0);
     assert.equal(g.probe.now().open.filter(Boolean).length, 1);
