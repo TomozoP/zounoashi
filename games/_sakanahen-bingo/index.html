@@ -351,7 +351,7 @@
     } else if (phase === "call") {
       if (pt >= CALL_TIME) endCall("time");
     } else if (phase === "reveal") {
-      if (pt >= (outcome === "ok" ? 0.55 : 1.0)) nextCall();
+      if (pt >= (outcome === "ok" ? 0.8 : 1.1)) nextCall();   /* 玉が回って裏の漢字が見えるまで */
     } else if (phase === "bingo") {
       if (pt >= 2.2) state = S.RESULT;
     } else if (phase === "over") {
@@ -464,7 +464,7 @@
     return { x: CARD.x + (i % 5) * CELL.w, y: CARD.y + Math.floor(i / 5) * CELL.h, w: CELL.w, h: CELL.h };
   }
 
-  /* 上の箱: 左に抽選機、右に読みと残り時間の帯。読みが終わると答えの漢字が横に出る */
+  /* 上の箱: 抽選機から出た玉が真ん中に大きく映り、読みが見える。答えのときは玉が回って裏の漢字が見える */
   var BALL_COLORS = ["#e8453c", "#f2b84b", "#3fa7ff", "#6fae3e", "#b77dff", "#ff8fb3"];
   function drumGeom() {
     var DR = Math.min(84, BOXH / 2 - 36);          /* 箱が高いほど大きく。台の上に立つように、床から測って置く */
@@ -472,11 +472,11 @@
     var k = drumOut * drumOut * (3 - 2 * drumOut);
     return { DR: DR, DX: hidden + (shown - hidden) * k, DY: BOX + BOXH - 14 - DR * 1.55 };
   }
-  /* 読みの玉を大きく映す場所（箱の真ん中）。答えを出すときは少し左に縮んで、右に漢字の丸 */
+  /* 読みの玉を大きく映す場所（箱の真ん中） */
   function bigBall() {
     var top = BOX + 44, bottom = BOX + BOXH - 34;
     var cy = (top + bottom) / 2, r = Math.min(125, (bottom - top) / 2);
-    return { x: W / 2, y: cy, r: r, sx: W / 2 - 74, sr: Math.min(r, 84), KX: W / 2 + 100, KR: 58 };
+    return { x: W / 2, y: cy, r: r };
   }
   function drawBox() {
     roundRect(16, BOX, W - 32, BOXH, 14);
@@ -488,25 +488,6 @@
     drawDrum(G);
     ctx.restore();
     drawOutBall(G);
-    if (cur && phase !== "draw") {
-      var B = bigBall();
-      var rv = phase === "reveal" || phase === "bingo" || phase === "over" ? Math.min(1, pt / 0.18) : 0;
-      if (rv > 0) {                                 /* 答えの漢字 */
-        var ok = outcome === "ok" || phase === "bingo";
-        var pop = 1 + Math.max(0, 0.25 - pt) * 1.2;
-        ctx.save();
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.globalAlpha = rv;
-        ctx.translate(B.KX, B.y); ctx.scale(pop, pop);
-        ctx.beginPath(); ctx.arc(0, 0, B.KR, 0, Math.PI * 2);
-        ctx.fillStyle = ok ? "#fbf5e6" : "rgba(251,245,230,.18)"; ctx.fill();
-        ctx.fillStyle = ok ? INK : "#f4efe6";
-        ctx.font = "700 74px " + KANJI_FONT;
-        ctx.fillText(cur.k, 0, 3);
-        ctx.restore();
-        ctx.textBaseline = "alphabetic";
-      }
-    }
     drawTimer(G, phase === "call" ? Math.max(0, 1 - pt / CALL_TIME) : 0);
     drawLives();
   }
@@ -615,7 +596,7 @@
   function drawOutBall(G) {
     if (!cur) return;
     var rest = outRest(G), hole = drumPoint(G, 0.25, -0.35, 0.93), B = bigBall();
-    var x, y, r, lon = 0, a = 1;
+    var x, y, r, lon = 0, a = 1, rv = 0, q = 0;
     if (phase === "draw") {
       if (pt < DRAW_SPIN) return;
       if (pt < DRAW_ROLL) {                         /* 出口から受け皿へ転がる */
@@ -629,19 +610,21 @@
         y = rest.y + (B.y - rest.y) * k - Math.sin(u * Math.PI) * 30;
         r = rest.r + (B.r - rest.r) * k; lon = -1.8 * (1 - k);
       }
-    } else {                                        /* 読みを出している間。答えを出すときは左に縮む */
-      var rv = phase === "reveal" || phase === "bingo" || phase === "over" ? Math.min(1, pt / 0.18) : 0;
+    } else {                                        /* 読みを出している間。答えを出すときは玉が半回転して、裏の漢字が見える */
+      var rv = phase === "reveal" || phase === "bingo" || phase === "over" ? Math.min(1, pt / 0.35) : 0;
       var q = rv * rv * (3 - 2 * rv);
-      x = B.x + (B.sx - B.x) * q; y = B.y; r = B.r + (B.sr - B.r) * q;
+      x = B.x; y = B.y - Math.sin(rv * Math.PI) * 10; r = B.r;
+      lon = Math.PI * q;
       if (phase === "call") lon = Math.sin(T * 1.3) * 0.05;   /* ゆっくり揺れて、玉らしく */
     }
+    var dim = rv > 0 && !(outcome === "ok" || phase === "bingo");   /* 開けられなかったときは玉が少し暗い */
     ctx.save(); ctx.globalAlpha = a;
-    drawReadingBall(x, y, r, ballColor, cur.r, lon);
+    drawReadingBall(x, y, r, ballColor, cur.r, lon, cur.k, dim ? q : 0);
     ctx.restore();
   }
-  /* 読みの玉: 色の玉の表面に、ひらがなをそのまま貼る（白い字に濃い縁取り）。
-     lon は玉の回り具合。字は玉の丸みに沿って並び、端の字ほど細く見える */
-  function drawReadingBall(x, y, r, color, text, lon) {
+  /* 読みの玉: 色の玉の表面に、ひらがなをそのまま貼る（白い字に濃い縁取り）。裏には正解の漢字。
+     lon は玉の回り具合（π で裏が正面）。字は玉の丸みに沿って並び、端の字ほど細く見える。dim は暗さ */
+  function drawReadingBall(x, y, r, color, text, lon, back, dim) {
     var g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r);
     g.addColorStop(0, "#ffffff"); g.addColorStop(0.22, color); g.addColorStop(1, shade(color, 0.45));
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
@@ -664,6 +647,19 @@
       ctx.fillText(text.charAt(i), 0, 0);
       ctx.restore();
     }
+    var cb = back ? Math.cos(Math.PI + lon) : 0;    /* 裏の漢字 */
+    if (cb > 0.08) {
+      var ks = r * 1.05;
+      ctx.save();
+      ctx.translate(x + Rt * Math.sin(Math.PI + lon), y + ks * 0.03); ctx.scale(cb, 1);
+      ctx.globalAlpha = Math.min(1, cb * 2);
+      ctx.font = "700 " + Math.round(ks) + "px " + KANJI_FONT;
+      ctx.lineWidth = Math.max(2, ks * 0.1);
+      ctx.strokeText(back, 0, 0);
+      ctx.fillText(back, 0, 0);
+      ctx.restore();
+    }
+    if (dim > 0) { ctx.fillStyle = "rgba(10,12,20," + (0.4 * dim) + ")"; ctx.fillRect(x - r, y - r, r * 2, r * 2); }
     ctx.restore();
     /* つや */
     ctx.save();
