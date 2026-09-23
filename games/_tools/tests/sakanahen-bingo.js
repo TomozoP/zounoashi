@@ -290,6 +290,28 @@ ORDER.slice(0, 5).forEach(mark => {
   assert.equal(res2.newBest, res2.score < before);
 }
 
+/* 12. 確かめる用: 手元だけ、カード選びで F8 を押すと難が出て選ばれる。もう一度で戻る。公開の場所では効かない。記録には書かない */
+{
+  const at = host => load(file, { quiet: true, inject: 'window.location.hostname = ' + JSON.stringify(host) + ';' });
+  const g = at('localhost'); g.step(2);
+  assert.equal(g.probe.setCount(), 5);
+  g.press('F8'); g.step(1);
+  assert.equal(g.probe.setCount(), 6, 'F8 で難が出る');
+  assert.equal(now(g).set, '難', '難を選んでいる');
+  assert.deepEqual(now(g).best, {}, '記録は空のまま');
+  g.press('F8'); g.step(1);
+  assert.equal(g.probe.setCount(), 5, 'もう一度で戻る');
+  assert.equal(now(g).set, '魚');
+  g.press('F8'); g.step(1);
+  start(g);
+  assert.ok(g.probe.sets()[I('難')].list.some(f => f.kanji === now(g).call.kanji), '難で遊べる');
+  g.press('F8'); g.step(1);
+  assert.equal(g.probe.setCount(), 6, '遊んでいる間の F8 では変わらない');
+  const pub = at('www.zounoashi.com'); pub.step(2);
+  pub.press('F8'); pub.step(1);
+  assert.equal(pub.probe.setCount(), 5, '公開の場所では効かない');
+}
+
 /* 8. 画面の形を変えても、マス同士・箱が押せる大きさ */
 [[375, 667], [390, 844], [430, 932], [768, 1024]].forEach(v => {
   const g = open(v);
