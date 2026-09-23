@@ -20,6 +20,8 @@ function waitFor(g, onCard) {
   }
   throw new Error('読みが来ない');
 }
+/* 結果から「もう一度」でカード選びへ戻る */
+function back(g) { const r = g.probe.result().retry; g.tap(r.x, r.y); g.step(1); assert.equal(now(g).state, 'intro'); }
 function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'); }
 
 /* 0. 字と読み: どのカードも、字も読みも重ならない。魚は魚へんの字 */
@@ -165,24 +167,29 @@ function playOut(g) {
   assert.equal(r.state, 'result');
   assert.ok(r.bingo && r.bingo.length === 5);
   assert.equal(r.score, r.calls);
-  /* 結果でもカードを選べる。選んでから「もう一度」でそのカードになる */
+  /* 結果では左右キーでカードは変わらない */
+  g.press('ArrowRight'); assert.equal(now(g).set, '魚');
+  /* もう一度でカード選びへ。前と同じカード（魚）で、新しく配られ、真ん中は閉じている */
+  const oldCard = now(g).card;
+  back(g);
+  assert.equal(now(g).set, '魚');
+  assert.ok(!now(g).open[12], '真ん中は閉じている');
+  assert.ok(now(g).open.every(o => !o), 'どこも開いていない');
+  assert.notDeepEqual(now(g).card, oldCard, '配り直す');
+  /* 選び直して始める */
   const sb = g.probe.setButton(3); g.tap(sb.x, sb.y); g.step(1);
-  assert.equal(now(g).state, 'result', '選んだだけでは始まらない');
   assert.equal(now(g).set, '鳥');
-  const p = g.probe.result().retry;
-  assert.ok(sb.y - p.y >= 63, '丸とボタンが離れている');
-  g.tap(p.x, p.y); g.step(1);
-  assert.equal(now(g).state, 'play');
+  start(g);
   assert.equal(now(g).calls, 1);
+  assert.equal(now(g).lives, 3);
   const bird = g.probe.sets()[3].list.map(f => f.kanji);
   assert.ok(now(g).card.filter(Boolean).every(k => bird.includes(k)), '鳥のカードで始まる');
-  /* 結果では左右キーで選んで、スペースでもう一度 */
-  const r2 = perfect(g);
+  /* 結果ではスペースでももう一度（カード選びへ） */
+  const r2 = playOut(g);
   assert.equal(r2.state, 'result');
-  g.press('ArrowRight'); assert.equal(now(g).set, '虫');
   g.press(' '); g.step(1);
-  assert.equal(now(g).state, 'play');
-  assert.equal(now(g).set, '虫');
+  assert.equal(now(g).state, 'intro');
+  assert.equal(now(g).set, '鳥');
 }
 
 /* 7. 回数のばらつき（全部取れた場合） */
@@ -218,7 +225,7 @@ function playOut(g) {
   assert.equal(now(g).phase, 'over');
   g.until(() => now(g).state === 'result', 400);
   assert.ok(now(g).failed);
-  const p = g.probe.result().retry; g.tap(p.x, p.y); g.step(1);
+  back(g); start(g);
   assert.equal(now(g).lives, 3, 'もう一度で戻る');
   assert.ok(!now(g).failed);
 }
@@ -247,8 +254,9 @@ function playOut(g) {
   assert.deepEqual(now(g).best, {}, 'ライフがなくなった回は記録しない');
   const marks = ['魚', '木', '金', '鳥', '虫'];
   marks.forEach((m, set) => {
+    back(g);
     const b = g.probe.setButton(set); g.tap(b.x, b.y); g.step(1);
-    const r = g.probe.result().retry; g.tap(r.x, r.y); g.step(1);
+    start(g);
     assert.equal(now(g).set, m);
     const res = playOut(g);
     assert.ok(!res.failed);
@@ -256,6 +264,7 @@ function playOut(g) {
     assert.equal(g.probe.setCount(), set < 4 ? 5 : 6, set < 4 ? 'まだ難は出ない' : '5つ揃うと難が出る');
   });
   assert.ok(now(g).unlocked);
+  back(g);
   g.step(120);
   /* 難を選んで遊ぶ */
   const nb = g.probe.setButton(5); g.tap(nb.x, nb.y); g.step(1);
@@ -263,14 +272,14 @@ function playOut(g) {
   const a0 = g.probe.setButton(0), a1 = g.probe.setButton(1);
   assert.ok(a1.x - a0.x >= 63, '6つ並べても丸同士が離れている');
   assert.ok(g.probe.setButton(5).x + 34 <= now(g).W && a0.x - 34 >= 0, '画面に収まる');
-  const r = g.probe.result().retry; g.tap(r.x, r.y); g.step(1);
+  start(g);
   const hard = g.probe.sets()[5].list.map(f => f.kanji);
   assert.ok(now(g).card.filter(Boolean).every(k => hard.includes(k)), '難のカード');
   const res = playOut(g);
   assert.equal(res.best['難'], res.score);
   /* 記録を更新するのは少なかったときだけ */
   const before = res.best['難'];
-  const r2 = g.probe.result().retry; g.tap(r2.x, r2.y); g.step(1);
+  back(g); start(g);
   const res2 = playOut(g);
   assert.equal(res2.best['難'], Math.min(before, res2.score));
   assert.equal(res2.newBest, res2.score < before);

@@ -275,7 +275,7 @@
     var m = SETS[setNo].mark, was = unlocked();
     newBest = !best[m] || score < best[m];
     if (newBest) { best[m] = score; saveBest(); }
-    if (!was && unlocked()) unlockT = -1;       /* 結果の画面に出た時に、丸が出てくる */
+    if (!was && unlocked()) unlockT = -1;       /* カード選びに戻った時に、丸が出てくる */
   }
   /* リーチの待ち: 4つ開いた列の、残り1つのマス */
   function waiting() {
@@ -316,7 +316,7 @@
     } else if (phase === "reveal") {
       if (pt >= (outcome === "ok" ? 0.55 : 1.0)) nextCall();
     } else if (phase === "bingo") {
-      if (pt >= 2.2) { state = S.RESULT; if (unlockT === -1) { unlockT = T; sndUnlock(); } }
+      if (pt >= 2.2) state = S.RESULT;
     } else if (phase === "over") {
       if (pt >= 1.8) { failed = true; state = S.RESULT; }
     }
@@ -325,9 +325,9 @@
   /* ============ 入力 ============ */
   function inBox(x, y) { return x >= 16 && x <= W - 16 && y >= BOX && y <= BOX + BOXH; }
 
-  /* カードを選ぶ丸。開始前は上の箱の場所、結果ではボタンの下に並ぶ */
+  /* カードを選ぶ丸。開始前に、上の箱の場所に並ぶ */
   function setRects() {
-    var n = setCount(), y = state === S.RESULT ? resultButtons()[0].y + 54 + 80 : BOX + BOXH / 2 - 10;
+    var n = setCount(), y = BOX + BOXH / 2 - 10;
     var r = 34, pitch = n > 5 ? 84 : 96, out = [];
     for (var i = 0; i < n; i++) out.push({ x: W / 2 + (i - (n - 1) / 2) * pitch, y: y, r: r });
     return out;
@@ -337,13 +337,13 @@
     for (var i = 0; i < rs.length; i++) { var dx = x - rs[i].x, dy = y - rs[i].y; if (dx * dx + dy * dy <= (rs[i].r + 10) * (rs[i].r + 10)) return i; }
     return -1;
   }
-  /* カードを選ぶ。開始前はその場で配り直す。結果では次の「もう一度」から */
+  /* カードを選ぶ。その場で配り直す */
   function chooseSet(i) {
     i = (i + setCount()) % setCount();
     if (i === setNo) return;
     setNo = i;
     sndPick();
-    if (state === S.INTRO) { card = dealCard(); dealT = T; }
+    card = dealCard(); dealT = T;
   }
 
   function down(x, y) {
@@ -356,9 +356,8 @@
     }
     audioOn();
     if (state === S.RESULT) {
-      if (x != null) { var sr = setAt(x, y); if (sr >= 0) { chooseSet(sr); return; } }
       var hit = x == null ? "retry" : hitButton(x, y);
-      if (hit === "retry") newRound();
+      if (hit === "retry") goIntro();           /* もう一度はカード選びへ戻る */
       return;
     }
     if (x == null) { pickCell(cursor); return; }   /* キー・ジョイパッドは選んでいるマス */
@@ -385,7 +384,7 @@
     e.preventDefault();
     if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }   /* 開始前は真ん中を開けるまで始めない */
     if (upK || downK || leftK || rightK) {
-      if (state !== S.PLAY) { if (leftK || rightK) chooseSet(setNo + (rightK ? 1 : -1)); return; }   /* 開始前と結果では、左右でカードを選ぶ */
+      if (state !== S.PLAY) { if (state === S.INTRO && (leftK || rightK)) chooseSet(setNo + (rightK ? 1 : -1)); return; }   /* 開始前は、左右でカードを選ぶ */
       {
         if (!keyMode) { keyMode = true; return; }   /* 最初の1回は、選んでいる枠を見せるだけ */
         var c = cursor % 5, r = Math.floor(cursor / 5);
@@ -395,12 +394,17 @@
       }
       return;
     }
-    if (e.repeat || state === S.INTRO) return;
+    if (state === S.INTRO) { if (!e.repeat) introKey = true; return; }
+    if (e.repeat) return;
     keyMode = true;
     down();
   });
+  /* 開始はカード選びの画面で押して離したとき。結果で押した「もう一度」を離しただけでは始めない */
+  var introKey = false;
   window.addEventListener("keyup", function (e) {
-    if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startGame();
+    if (!(e.code === "Space" || e.key === " " || e.key === "Enter")) return;
+    if (state === S.INTRO && introKey) startGame();
+    introKey = false;
   });
 
   function doShare() {
@@ -491,26 +495,20 @@
   /* 紙のビンゴカード。漢字はミシン目の丸の上に刷ってあり、当たったらその丸を押し抜いて穴にする */
   var PAPER = "#fbf5e6", INK = "#1d2a44";
   /* カードごとの見た目。SETS と同じ並び。
-     bg: 背景 / rim: 外枠 / chip: 選ぶ丸の色 / sparks: 開けたときの火花 / band: 帯の飾り / icon: 真ん中のマスの絵 */
+     bg: 背景 / rim: 外枠 / chip: 選ぶ丸の色 / sparks: 開けたときの火花 / mark: 真ん中の漢字の色（無ければ chip） / band: 帯の飾り */
   var THEMES = [
     { bg: "#1b2230", rim: "#2f6f8f", chip: "#2f6f8f", sparks: ["#ffd86b", "#fff3dc", "#8fd3ff", "#ffe9a8"],     /* 魚: 海の青と小魚 */
-      band: function (x, y, k) { drawFish(x, y, 7, k % 2 ? "#bfe6f2" : "#fff3dc", k % 2 ? -1 : 1); },
-      icon: function (x, y, R) { drawFish(x + 3, y + 1, R * 0.5, INK, 1); } },
+      band: function (x, y, k) { drawFish(x, y, 7, k % 2 ? "#bfe6f2" : "#fff3dc", k % 2 ? -1 : 1); } },
     { bg: "#1d231b", rim: "#7a5230", chip: "#7a5230", grain: true, sparks: ["#9ccc5a", "#e2f0a8", "#f2b84b", "#6fae3e"],   /* 木: 木目の枠と葉 */
-      band: function (x, y, k) { drawLeaf(x, y, 8, k % 2 ? "#e7c46a" : "#9ccc5a", k % 2 ? 0.5 : -0.5); },
-      icon: function (x, y, R) { drawLeaf(x, y, R * 0.62, INK, -0.6); } },
-    { bg: "#1f1e22", rim: "metal", chip: "#b8862b", sparks: ["#ffe08a", "#fff6cf", "#d9a441", "#f5f5f5"],     /* 金: 金色の枠と穴あき銭 */
-      band: function (x, y) { drawCoin(x, y, 8, "#6b4a10", "#f6dc8c"); },
-      icon: function (x, y, R) { drawCoin(x, y, R * 0.55, INK, PAPER); } },
+      band: function (x, y, k) { drawLeaf(x, y, 8, k % 2 ? "#e7c46a" : "#9ccc5a", k % 2 ? 0.5 : -0.5); } },
+    { bg: "#1f1e22", rim: "metal", chip: "#b8862b", mark: "#6b4a10", sparks: ["#ffe08a", "#fff6cf", "#d9a441", "#f5f5f5"],     /* 金: 金色の枠と穴あき銭 */
+      band: function (x, y) { drawCoin(x, y, 8, "#6b4a10", "#f6dc8c"); } },
     { bg: "#1a1b2c", rim: "#b8483a", chip: "#b8483a", sparks: ["#ffffff", "#ffd1c4", "#ffe9a8", "#f28b74"],   /* 鳥: 朱色の枠と小鳥 */
-      band: function (x, y, k) { drawBird(x, y + 1, 7, "#fff3dc", k % 2 ? -1 : 1); },
-      icon: function (x, y, R) { drawBird(x - 2, y + 2, R * 0.5, INK, 1); } },
+      band: function (x, y, k) { drawBird(x, y + 1, 7, "#fff3dc", k % 2 ? -1 : 1); } },
     { bg: "#172019", rim: "#4f7a2a", chip: "#4f7a2a", sparks: ["#e8453c", "#ffd86b", "#b5e27a", "#fff3dc"],   /* 虫: 草色の枠とてんとう虫 */
-      band: function (x, y) { drawBug(x, y, 7, "#e8453c", "#1d1d1d", "#1d1d1d"); },
-      icon: function (x, y, R) { drawBug(x, y + 2, R * 0.48, INK, PAPER, INK); } },
+      band: function (x, y) { drawBug(x, y, 7, "#e8453c", "#1d1d1d", "#1d1d1d"); } },
     { bg: "#16121d", rim: "lacquer", chip: "#3a2748", sparks: ["#ffe08a", "#fff6cf", "#c9a0ff", "#ff9ad5"],    /* 難: 金ぶちの黒漆と星 */
-      band: function (x, y, k) { drawStar(x, y, k % 2 ? 6 : 8, k % 2 ? "#c9a0ff" : "#ffe08a"); },
-      icon: function (x, y, R) { drawStar(x, y + 1, R * 0.62, INK); } }
+      band: function (x, y, k) { drawStar(x, y, k % 2 ? 6 : 8, k % 2 ? "#c9a0ff" : "#ffe08a"); } }
   ];
   function TH() { return THEMES[setNo]; }
   function rimFill(F) {
@@ -570,10 +568,12 @@
     var R = holeR();
     for (var c = 0; c < 25; c++) {
       var r = cellRect(c), cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-      if (open[c]) drawHole(cx, cy, R, openT[c], card[c]);
+      /* 真ん中はそのカードの漢字（魚・木…）をカードの色で */
+      var word = card[c] || SETS[setNo].mark, color = card[c] ? INK : THEMES[setNo].mark || THEMES[setNo].chip;
+      if (open[c]) drawHole(cx, cy, R, openT[c], word, color);
       else {
         if (state === S.INTRO && c === 12) drawLit(cx, cy, R, T);   /* 開始前は真ん中が光っていて、押すと始まる */
-        ctx.save(); ctx.globalAlpha = dealAlpha(c); drawFlap(cx, cy, R, card[c]); ctx.restore();
+        ctx.save(); ctx.globalAlpha = dealAlpha(c); drawFlap(cx, cy, R, word, color); ctx.restore();
         drawMiss(cx, cy, R, T - missT[c]);
         drawWrong(cx, cy, R, T - wrongT[c]);
       }
@@ -735,20 +735,19 @@
     ctx.restore();
   }
   /* まだ開いていない丸: ミシン目と漢字 */
-  function drawFlap(cx, cy, R, word) {
+  function drawFlap(cx, cy, R, word, color) {
     ctx.save();
     ctx.setLineDash([4, 4]); ctx.lineWidth = 1.6; ctx.strokeStyle = "rgba(29,42,68,.45)";
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
-    if (!word) { TH().icon(cx, cy, R); return; }
-    ctx.fillStyle = INK;
+    ctx.fillStyle = color || INK;
     ctx.font = "700 " + Math.round(R * 1.25) + "px " + KANJI_FONT;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(word, cx, cy + 2);
     ctx.textBaseline = "alphabetic";
   }
   /* 押し抜いた穴。押した直後は丸がへこみながら奥へ倒れ、そのあと上のふちに倒れた紙がのぞく */
-  function drawHole(cx, cy, R, t, word) {
+  function drawHole(cx, cy, R, t, word, color) {
     var PUSH = 0.09, FALL = 0.22;
     if (t < PUSH) {                                         /* 押されてへこむ */
       var u = t / PUSH;
@@ -756,7 +755,7 @@
       ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
       ctx.fillStyle = "rgba(29,42,68," + (0.08 + u * 0.18) + ")"; ctx.fill();
       ctx.translate(cx, cy); ctx.scale(1 - u * 0.08, 1 - u * 0.08); ctx.translate(-cx, -cy);
-      drawFlap(cx, cy, R, word);
+      drawFlap(cx, cy, R, word, color);
       ctx.restore();
       return;
     }
@@ -776,7 +775,7 @@
     ctx.beginPath(); ctx.arc(0, R, R, 0, Math.PI * 2);
     ctx.fillStyle = f < 1 ? "#e8e0cd" : "#b9ae96"; ctx.fill();
     if (word && f < 1) {
-      ctx.fillStyle = "rgba(29,42,68," + (1 - f) + ")";
+      ctx.fillStyle = color || INK; ctx.globalAlpha = 1 - f;
       ctx.font = "700 " + Math.round(R * 1.25) + "px " + KANJI_FONT;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(word, 0, R + 2);
@@ -815,7 +814,7 @@
     if (state !== S.INTRO) drawBox(); else drawSets();
     drawCard();
     drawSparks();
-    if (state === S.RESULT) { drawResult(); drawSets(); }
+    if (state === S.RESULT) drawResult();
   }
 
   /* カードを選ぶ丸。選んでいるものは紙の色 */
@@ -958,10 +957,18 @@
     var cr = cellRect(12);
     burst(cr.x + cr.w / 2, cr.y + cr.h / 2, 16, 1);
   }
-  state = S.INTRO; phase = "intro"; score = 0; calls = 0; cur = null; pt = 0; T = 0;
-  card = dealCard();
-  open = []; openT = []; missT = []; wrongT = [];
-  for (var i0 = 0; i0 < 25; i0++) { open.push(false); openT.push(-1); missT.push(-9); wrongT.push(-9); }
+  /* カード選び（開始前）の画面。選んでいたカードのまま、新しく配る */
+  function goIntro() {
+    shareButton.hidden = true;
+    state = S.INTRO; phase = "intro"; score = 0; calls = 0; cur = null; pt = 0;
+    bingoLine = null; reachFx = []; sparks = []; failed = false;
+    card = dealCard(); dealT = T;
+    open = []; openT = []; missT = []; wrongT = [];
+    for (var i0 = 0; i0 < 25; i0++) { open.push(false); openT.push(-1); missT.push(-9); wrongT.push(-9); }
+    if (unlockT === -1) { unlockT = T + 0.3; sndUnlock(); }   /* 難が出た直後: 少し待ってから丸がはじけて出てくる */
+  }
+  T = 0; dealT = -9;
+  goIntro();
   layout();
   var lastT = performance.now();
   function loop(now) {
