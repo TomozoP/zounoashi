@@ -35,6 +35,18 @@ function playOut(g) {
     if (g.probe.now().phase === "bingo") break;
   }
 }
+/* 指定したマスの単語が、カードのほかの単語を含まない（1か所で2マス同時に光らない）ように配り直す */
+async function cleanCard(g, cells) {
+  for (let k = 0; k < 200; k++) {
+    const c = g.probe.now().card;
+    const bad = cells.some(i => c.some((w, j) => w && j !== i && c[i].includes(w)));
+    const joined = cells.map(i => c[i]).join("");
+    const cross = c.some((w, j) => w && !cells.includes(j) && joined.includes(w));
+    if (!bad && !cross) return c;
+    g.esc(); g.step(1); await flush(); g.step(1);
+  }
+  throw new Error("配り直しても揃わない");
+}
 async function start(g) {
   assert.equal(g.probe.now().state, 'intro');
   const introCard = g.probe.now().card;
@@ -61,7 +73,7 @@ async function start(g) {
   {
     const g = open();
     await start(g);
-    const c = g.probe.now().card;
+    const c = await cleanCard(g, [10, 11, 13, 14]);
     const row = [10, 11, 13, 14].map(i => c[i]);            /* 真ん中の段 */
     const filler = "ああああああああああ";
     const body = filler + row.join("いいい") + filler.repeat(20);
@@ -83,6 +95,12 @@ async function start(g) {
       if (k === 0) { tapCell(g, 0); assert.equal(g.probe.now().open[0], false, "光っていないマスは開かない"); }
       tapCell(g, cell);
       assert.ok(g.probe.now().open[cell], "タップで開く");
+      if (k < 2) assert.deepEqual(g.probe.now().waiting, [], "3つまではリーチでない");
+      if (k === 2) {
+        assert.deepEqual(g.probe.now().waiting, [14], "真ん中を入れて4つでリーチ。待ちは残りの1マス");
+        assert.equal(g.probe.now().reaches, 1, "リーチの演出が1回");
+        tapCell(g, 0); assert.equal(g.probe.now().reaches, 1);
+      }
       if (k < 3) { g.step(2); assert.ok(g.probe.now().pos > end, "開けると続きが流れる"); }
     });
     const now = g.probe.now();
@@ -97,7 +115,7 @@ async function start(g) {
   {
     const g = open();
     await start(g);
-    const c = g.probe.now().card;
+    const c = await cleanCard(g, [0,1]);
     setPlan(g, () => "あ" + c[0] + c[1] + "いいいいいいいいいい");
     g.press(" "); await flush(); g.step(1);
     toNextLight(g);
@@ -113,7 +131,7 @@ async function start(g) {
   {
     const g = open();
     await start(g);
-    const c = g.probe.now().card;
+    const c = await cleanCard(g, [0,1,2,3,4]);
     let n = 0;
     const t1 = "あ" + c[0] + "あ" + c[1] + "あ", t2 = c[2] + "う" + c[3] + "う" + c[4];
     setPlan(g, () => (++n === 1 ? t1 : t2));
@@ -173,7 +191,7 @@ async function start(g) {
   {
     const g = open();
     await start(g);
-    const c = g.probe.now().card;
+    const c = await cleanCard(g, [0,6,18,24]);
     setPlan(g, () => [0, 6, 18, 24].map(i => c[i]).join('。'));
     g.press(' '); await flush(); g.step(1);
     playOut(g);
