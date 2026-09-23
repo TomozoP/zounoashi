@@ -45,27 +45,39 @@ function race(g) {
   assert.ok(lastLane < top, 'レース中の賭けたボタンは走路の下にある');
   assert.ok(g.probe.raceCtrl(7).y + 26 < H - 20, 'レース中の賭けたボタンが画面に収まる');
   const stopSeen = [], cams = [], stopX = {};
-  let frames = 0, soloFrames = 0, secondStop = null, lastX = null, dashSteps = [];
+  let frames = 0, soloFrames = 0, secondStop = null, lastX = null, dashSteps = [], lastCam = null, lastLead = null, camJump = 0, confettiMax = 0;
   while (g.probe.now().phase === 'race' && frames < 3000) {
     const st = g.probe.stopped(), p = g.probe.positions();
     const alive = st.filter(v => !v).length;
     if (alive === 1) { soloFrames++; if (secondStop === null) secondStop = frames; }
     const gl = g.probe.goal();
+    confettiMax = Math.max(confettiMax, gl.confetti);
+    /* カメラは1コマで、いちばん進んだ馬が動いたぶんより大きく動かない（飛ばない） */
+    const camNow = g.probe.now().cam;
+    const world = [0,1,2,3,4,5,6,7].map(i => g.probe.screenX(i) + camNow);
+    if (gl.crossT === null && lastCam !== null) {
+      const most = Math.max(0, ...world.map((x, i) => x - lastLead[i]));
+      camJump = Math.max(camJump, (camNow - lastCam) - most - 1);
+    }
+    lastCam = camNow; lastLead = world;
     if (gl.crossT !== null && alive === 1) {                /* ゴール後の1着: 画面の上で1コマごとに同じだけ進む */
       const x = g.probe.screenX(g.probe.now().order[0]);
       if (lastX !== null) dashSteps.push(x - lastX);
       lastX = x;
     }
-    st.forEach((v, i) => { if (v && !stopSeen.includes(i)) { stopSeen.push(i); stopX[i] = p[i]; } });
+    const newly = [];
+    st.forEach((v, i) => { if (v && !stopSeen.includes(i)) { newly.push(i); stopX[i] = p[i]; } });
+    newly.sort((a, b) => stopX[a] - stopX[b]).forEach(i => stopSeen.push(i));   /* 同じコマで止まった馬は、止まった位置の手前から順に */
     if (frames % 60 === 0) cams.push(g.probe.now().cam);
     g.step(1); frames++;
   }
   const orderSeen = stopSeen.slice().reverse();              /* 最後まで走った馬が1着 */
-  for (let k = 1; k < orderSeen.length; k++) assert.ok(stopX[orderSeen[k - 1]] > stopX[orderSeen[k]], '長い記事の馬ほど先で止まる');
+  for (let k = 1; k < orderSeen.length; k++) assert.ok(stopX[orderSeen[k - 1]] > stopX[orderSeen[k]], '長い記事の馬ほど先で止まる: ' + k + '着 ' + JSON.stringify(orderSeen.map(i => [i, g.probe.now().horses[i].len, +stopX[i].toFixed(4)])));
   assert.ok(frames < 3000, '走り終わる');
   assert.equal(g.probe.now().phase, 'finish');
   const dashSteady = dashSteps.length < 2 || dashSteps.every(d => Math.abs(d - dashSteps[0]) < 0.5 && d > 5);
-  return { orderSeen, seconds: frames / 60, cams, soloSeconds: soloFrames / 60, secondStop: secondStop / 60, dashSteady };
+  assert.ok(camJump <= 0, 'カメラが飛ばない: ' + camJump.toFixed(1));
+  return { orderSeen, seconds: frames / 60, cams, soloSeconds: soloFrames / 60, secondStop: secondStop / 60, dashSteady, confettiMax };
 }
 async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flush(); g.step(1); }
 
@@ -116,7 +128,9 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.ok(Math.abs(goal.crossT - r.secondStop - 0.5) < 0.1, '1着がゴールを越えるのは決着の0.5秒後: ' + (goal.crossT - r.secondStop).toFixed(2));
     assert.ok(goal.out > goal.crossT && goal.out - goal.crossT < 0.6, 'ゴールのあと画面の外へ駆け抜ける: ' + (goal.out - goal.crossT).toFixed(2));
     assert.ok(r.soloSeconds > 0.5 && r.soloSeconds < 1.2, '決着から走り去るまで: ' + r.soloSeconds.toFixed(2));
-    assert.ok(r.seconds > 28.5 && r.seconds < 31, 'レースは約30秒: ' + r.seconds.toFixed(1));
+    assert.ok(r.seconds > 30.5 && r.seconds < 33, 'レースはゴールから3秒ほどおいて終わる: ' + r.seconds.toFixed(1));
+    assert.ok(r.confettiMax > 100, 'ゴールで紙吹雪');
+    assert.ok(r.seconds - goal.crossT >= 3.1, 'ゴールから結果まで間を置く: ' + (r.seconds - goal.crossT).toFixed(2));
     assert.ok(r.dashSteady, 'ゴール後の1着は速さを落とさない');
     assert.ok(g.probe.written(1) < 120000, '1着の馬は書き切らずに終わる');
     for (let i = 0; i < 8; i++) if (i !== 1) assert.equal(g.probe.written(i), now0.horses[i].len, (i + 1) + '番は全部書き切って止まった');

@@ -58,6 +58,8 @@
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
+    /* 幅0の枠で読み込まれると高さが数値でなくなり、背景のグラデーションで止まって固まるので、仮の高さにしておく */
+    if (!isFinite(H)) H = 960;
     place();
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
   }
@@ -126,7 +128,8 @@
 
   /* ダービーらしい行進曲ふうのBGM（ここで作った旋律）。ゲートが開いたら流し、ゴールしたら消す。
      先の音を少しずつ予約していく。旋律は金管っぽい音、ほかにベースと太鼓 */
-  var BPM = 150, BEAT = 60 / BPM;
+  var BPM = 140, BPM_TOP = 200, BEAT = 60 / BPM;              /* テンポは始め140、終盤200まで上がる */
+  function musicTempo(u) { BEAT = 60 / (BPM + (BPM_TOP - BPM) * Math.max(0, Math.min(1, u)) * Math.max(0, Math.min(1, u))); }
   /* 旋律: [音の高さ（C4=60のMIDI番号。0は休み）, 拍数] */
   var MELODY = [
     [67, 1], [72, 1], [76, 1], [79, 1],        [76, 1], [72, 0.5], [76, 0.5], [79, 2],
@@ -208,8 +211,25 @@
   function sndCheer() { for (var i = 0; i < 4; i++) noiseHit(0.9, 1100 + i * 300, 0.12, 0.5, i * 0.05); }
   function sndStop(mine, rank) {
     if (rank === 0) return;
-    tone(mine ? 220 : 330, 0.25, mine ? 0.07 : 0.035, "sine", mine ? 150 : 260);
-    if (mine) noiseHit(0.9, 500, 0.08, 0.6);
+    var f0 = 1568 * Math.pow(2, -(rank - 1) * 2 / 12);           /* 2着がいちばん高く、下の着順ほど低い */
+    tone(f0, 0.9, 0.07, "sine"); tone(f0 * 2.76, 0.5, 0.025, "sine"); tone(f0 * 5.4, 0.25, 0.012, "sine");
+    if (mine) { tone(260, 0.5, 0.06, "sine", 170, 0.05); noiseHit(1.0, 500, 0.09, 0.6, 0.05); }
+  }
+  /* ゴールのファンファーレ（ここで作った短い節）。金管っぽい音で */
+  function sndFanfare() {
+    if (!AC) return;
+    var at = AC.currentTime + 0.05, b = 0.16;
+    [[72, 0, 1], [72, 1, 1], [72, 2, 1], [76, 3, 3], [74, 6, 1], [76, 7, 1], [79, 8, 6], [84, 8, 6]].forEach(function (n) {
+      [["sawtooth", 0.06, 2600, 0], ["square", 0.03, 1600, -12]].forEach(function (v) {
+        var o = AC.createOscillator(), g = AC.createGain(), lp = AC.createBiquadFilter(), t0 = at + n[1] * b, d = n[2] * b * 0.95;
+        o.type = v[0]; o.frequency.value = 440 * Math.pow(2, (n[0] + v[3] - 69) / 12);
+        lp.type = "lowpass"; lp.frequency.value = v[2];
+        g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(v[1], t0 + 0.02);
+        g.gain.setValueAtTime(v[1] * 0.85, t0 + Math.max(0.03, d - 0.08)); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+        o.connect(lp); lp.connect(g); g.connect(AC.destination); o.start(t0); o.stop(t0 + d + 0.05);
+      });
+    });
+    for (var i = 0; i < 3; i++) noiseHit(0.5, 5200, 0.05, 2, 1.28 + i * 0.02);    /* シンバル */
   }
   function sndWin() { [784, 988, 1175, 1568].forEach(function (f, i) { tone(f, 0.22, 0.08, "triangle", null, i * 0.09); }); }
   function sndLose() { tone(300, 0.3, 0.06, "sine", 170); }
@@ -465,12 +485,21 @@
   }
   var WIN_RUN = 2, winStop = null;                             /* 速さを合わせるときに見込む、1着が決まってから終わるまでの秒数 */
   var GOAL_AHEAD = 0.5, goalX = 0, crossT = null, crossX = 0, camV = 0, outT = null;
-  var DASH = 800;                                              /* ゴール後、カメラが止まった画面の上を1着が走り去る速さ（1秒あたり） */   /* ゴールは、2着が止まる時刻に1着がいる位置から、GOAL_AHEAD 秒ぶん先 */
+  var DASH = 800, FINISH_WAIT = 3.2;                           /* ゴールから結果の画面までの間 */
+  var confetti = [];
+  function confettiBurst() {
+    var cols = ["#f2d23a", "#d63a3a", "#2f6fd6", "#2e9a4f", "#f59ac0", "#ffffff", "#f08a24"];
+    for (var i = 0; i < 160; i++) {
+      confetti.push({ x: Math.random() * W, y: -20 - Math.random() * H * 0.4, vx: (Math.random() - 0.5) * 80, vy: 90 + Math.random() * 120,
+                      r: Math.random() * 6.3, vr: (Math.random() - 0.5) * 10, w: 6 + Math.random() * 6, h: 3 + Math.random() * 4,
+                      c: cols[i % cols.length], sw: Math.random() * 6.3 });
+    }
+  }                                              /* ゴール後、カメラが止まった画面の上を1着が走り去る速さ（1秒あたり） */   /* ゴールは、2着が止まる時刻に1着がいる位置から、GOAL_AHEAD 秒ぶん先 */
   var plan = [], battle = 0;
   function startRace() {
     if (state !== S.PLAY || phase !== "bet") return;
     if (!totalBet()) { wobble = 0.35; sndNo(); return; }
-    phase = "count"; pt = 0; raceT = 0; gallopT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
+    phase = "count"; pt = 0; raceT = 0; confetti = []; gallopT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
     prog = []; finishT = []; stopped = [];
     K = solveK(horses[order[1]].len, RUN - WIN_RUN);
     plan = []; battle = 0; winStop = null; camV = 0; outT = null; crossT = null; crossX = 0;
@@ -528,6 +557,11 @@
       if (n !== countN && n > 0) { countN = n; sndCount(n); }
       if (pt >= 3) { phase = "race"; pt = 0; countN = 0; sndGate(); startMusic(); gallopT = 0; }
     }
+    for (var cf = confetti.length - 1; cf >= 0; cf--) {
+      var q = confetti[cf];
+      q.sw += dt * 3; q.x += (q.vx + Math.sin(q.sw) * 40) * dt; q.y += q.vy * dt; q.r += q.vr * dt;
+      if (q.y > H + 20) confetti.splice(cf, 1);
+    }
     if (phase === "race") {
       raceT += dt;
       var lead = -1e9, running = 0;
@@ -545,13 +579,19 @@
       battle += ((running >= 2 && running <= 3 ? 1 : 0) - battle) * Math.min(1, dt * 1.2);
       /* カメラ: 走っている馬の先頭が画面の右寄りに来るように。
          1着がゴールを越えたらカメラはすっと止まり、1着は画面の外へ駆け抜ける */
+      /* 1着の決まり方やゆれの大きさがこのコマで変わっているので、先頭の位置はここで測り直す */
+      lead = -1e9;
+      for (var lh = 0; lh < N; lh++) if (!stopped[lh]) lead = Math.max(lead, runX(lh, raceT));
+      if (lead < -1e8) lead = runX(order[0], raceT);
       var want = Math.max(-START_X, lead - W * 0.66);            /* 先頭が右寄りに来るまでは動かさない */
       if (crossT === null && runX(order[0], raceT) >= goalX) {
         /* 1コマで大きく飛び越えることがあるので、越えた瞬間は馬をゴールの線の上に置き、カメラもそこに合わせて止める */
         crossX = goalX; crossT = raceT; cam = goalX - W * 0.66;
         if (!cheered) { cheered = true; sndCheer(); }
+        stopMusic(); sndFanfare(); confettiBurst();
       }
-      if (crossT === null) cam = raceT < 3 ? cam + (want - cam) * Math.min(1, dt * 3) : want;   /* 越えたらカメラはそこで止まる */
+      /* 越えたらカメラはそこで止まる。前へはぴったり追い、後ろへ戻るとき（先頭の入れ替わり）だけなめらかに */
+      if (crossT === null) cam = want >= cam ? want : cam + (want - cam) * Math.min(1, dt * 4);
       if (crossT !== null && outT === null && runX(order[0], raceT) - cam > W + 70) {   /* 画面の外に出た */
         outT = raceT; stopped[order[0]] = true;
       }
@@ -563,10 +603,11 @@
         var herds = Math.min(3, running);
         for (var hh = 0; hh < herds; hh++) (function (d) { setTimeout(function () { gallop(0.35 + 0.65 * running / N); }, d); })(hh * 110 + Math.random() * 40);
       }
+      musicTempo(raceT / Math.max(1, finishT[order[1]]));
       musicTick();
       crowdT -= dt; if (crowdT <= 0) { crowdT = 0.3; sndCrowd(0.2 + near * 0.8); }
       if (!cheered && !running) { cheered = true; sndCheer(); }
-      if (outT !== null && raceT > outT + 0.8) { phase = "finish"; pt = 0; stopMusic(); settle(); }
+      if (crossT !== null && outT !== null && raceT > crossT + FINISH_WAIT) { phase = "finish"; pt = 0; stopMusic(); settle(); }
     }
   }
 
@@ -913,6 +954,11 @@
     }
     ctx.textBaseline = "alphabetic";
     for (var q = 0; q < N; q++) drawBetCell(q, raceCtrlRect(q), bets[q], true, false, stopped[q] ? rankOf[q] : -1);
+    confetti.forEach(function (p) {
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r);
+      ctx.fillStyle = p.c; ctx.fillRect(-p.w / 2, -p.h / 2 * Math.abs(Math.cos(p.sw)), p.w, p.h * Math.max(0.2, Math.abs(Math.cos(p.sw))));
+      ctx.restore();
+    });
     drawCredit();
   }
   /* 上の細い帯に、コース全体での位置 */
@@ -1102,7 +1148,7 @@
     plain: function (w) { return plainText(w); },
     written: function (i) { return horses && prog ? Math.min(horses[i].len, Math.floor(charsOf(i, Math.min(raceT, finishT[i])) + 1e-6)) : 0; },
     speed: function (i) { return horses && plan[i] ? (posChars(i, raceT + 0.01) - posChars(i, raceT)) / 0.01 : 0; },
-    goal: function () { return { x: goalX, crossT: crossT, out: outT }; },
+    goal: function () { return { x: goalX, crossT: crossT, out: outT, confetti: confetti.length }; },
     screenX: function (i) { return horses && prog[i] ? runX(i, raceT) - cam : 0; },
     battle: function () { return battle; },
     /* 文字を収める処理の確認用: 幅と行数に入ったか */
