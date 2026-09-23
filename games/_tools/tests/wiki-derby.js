@@ -312,6 +312,24 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.ok(g.probe.now().reveal > 1, '交代では出し直さない');
   }
 
+  /* 1d. 賭ける画面ではロビーの曲。スタートで止まる。次のレースの賭ける画面でまた流れる */
+  {
+    const g = open();
+    assert.equal(g.probe.now().lobby, false, '開始画面では流さない');
+    await start(g);
+    assert.equal(g.probe.now().lobby, true, '賭ける画面で流れる');
+    g.step(120);
+    assert.equal(g.probe.now().lobby, true, '流れ続ける');
+    at(g, g.probe.plus(0)); at(g, g.probe.startButton()); g.step(1);
+    assert.equal(g.probe.now().lobby, false, 'スタートで止まる');
+    g.until(() => g.probe.now().phase === 'race', 400);
+    g.until(() => g.probe.now().phase === 'finish', 3000);
+    assert.equal(g.probe.now().lobby, false, 'ゴールの後は流さない');
+    await next(g);
+    assert.equal(g.probe.now().phase, 'bet');
+    assert.equal(g.probe.now().lobby, true, '次のレースの賭ける画面でまた流れる');
+  }
+
   /* 1c. 長押しで続けて賭ける。離す・ボタンから外れると止まり、手持ちが尽きたら止まる */
   {
     const g = open();

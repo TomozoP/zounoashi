@@ -215,6 +215,70 @@
       music.next += BEAT / 2;
     }
   }
+  /* 賭ける画面のBGM（ここで作ったゆったりした曲）。Dm7→G7→Cmaj7→A7 を回す、エレピとビブラフォンっぽい音 */
+  var LOBBY_BEAT = 60 / 96;
+  var LOBBY_CHORDS = [[50, [62, 65, 69, 72]], [43, [59, 65, 67, 71]], [48, [60, 64, 67, 71]], [45, [61, 64, 67, 69]]];   /* [根音, 和音] */
+  var LOBBY_MELODY = [
+    [77, 1], [76, 0.5], [74, 0.5], [72, 1], [69, 1],   [71, 1.5], [74, 0.5], [77, 2],
+    [76, 1], [72, 1], [67, 1], [71, 1],                 [73, 2], [0, 1], [76, 1],
+    [74, 1], [77, 1], [81, 1], [79, 0.5], [77, 0.5],   [76, 1], [74, 1], [71, 2],
+    [72, 1], [76, 1], [79, 1], [76, 1],                 [73, 3], [0, 1]
+  ];
+  var LOBBY_AT = {};                                          /* 8分音符の位置 → 旋律の音 */
+  (function () { var b = 0; LOBBY_MELODY.forEach(function (n) { LOBBY_AT[Math.round(b * 2)] = n; b += n[1]; }); })();
+  var lobby = null, lobbyOn = false;                         /* lobbyOn: 流すべきか。音の用意がまだなら、できしだい流す */
+  function lnote(midi, at, dur, vol, type, cut, decay) {
+    if (!AC || !lobby) return;
+    var o = AC.createOscillator(), g = AC.createGain(), lp = AC.createBiquadFilter();
+    o.type = type; o.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
+    lp.type = "lowpass"; lp.frequency.value = cut;
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(vol, at + 0.015);
+    if (decay) g.gain.exponentialRampToValueAtTime(0.0001, at + dur);          /* 打って消える音 */
+    else { g.gain.setValueAtTime(vol * 0.7, at + Math.max(0.03, dur - 0.1)); g.gain.exponentialRampToValueAtTime(0.0001, at + dur); }
+    o.connect(lp); lp.connect(g); g.connect(lobby.out);
+    o.start(at); o.stop(at + dur + 0.05);
+  }
+  function startLobby() { lobbyOn = true; }
+  function makeLobby() {
+    var out = AC.createGain();
+    out.gain.setValueAtTime(0.0001, AC.currentTime); out.gain.exponentialRampToValueAtTime(0.5, AC.currentTime + 0.6);
+    out.connect(AC.destination);
+    lobby = { out: out, next: AC.currentTime + 0.05, step: 0 };
+  }
+  function stopLobby() {
+    lobbyOn = false;
+    if (!lobby) return;
+    var m = lobby; lobby = null;
+    try { m.out.gain.setTargetAtTime(0.0001, AC.currentTime, 0.25); setTimeout(function () { try { m.out.disconnect(); } catch (e) {} }, 2000); } catch (e) {}
+  }
+  function lobbyTick() {
+    if (lobbyOn && !lobby && AC) makeLobby();
+    if (!AC || !lobby) return;
+    var B = LOBBY_BEAT, total = 32 * 2;                       /* 8小節 = 64 の8分音符 */
+    while (lobby.next < AC.currentTime + 0.25) {
+      var at = lobby.next, st = lobby.step % total, inBar = st % 8, ch = LOBBY_CHORDS[Math.floor(st / 8) % 4];
+      if (inBar === 0) ch[1].forEach(function (m) { lnote(m, at, B * 1.4, 0.022, "triangle", 1800, true); });      /* 和音: 1拍目と2拍目の裏（ボサノバっぽく） */
+      if (inBar === 3 || inBar === 6) ch[1].forEach(function (m) { lnote(m, at, B * 0.7, 0.016, "triangle", 1600, true); });
+      if (inBar === 0) lnote(ch[0], at, B * 1.8, 0.1, "sine", 700);                                                   /* ベース: 根音と5度 */
+      if (inBar === 4) lnote(ch[0] + 7, at, B * 1.6, 0.08, "sine", 700);
+      if (inBar === 7) lnote(ch[0] + 5, at, B * 0.45, 0.06, "sine", 700);
+      if (NOISE) {                                                                                                     /* ハイハットはそっと */
+        var src = AC.createBufferSource(), fl = AC.createBiquadFilter(), gn = AC.createGain();
+        src.buffer = NOISE; fl.type = "highpass"; fl.frequency.value = 7000;
+        var v = inBar % 2 ? 0.012 : 0.02;
+        gn.gain.setValueAtTime(v, at); gn.gain.exponentialRampToValueAtTime(0.0001, at + 0.04);
+        src.connect(fl); fl.connect(gn); gn.connect(lobby.out); src.start(at, Math.random()); src.stop(at + 0.06);
+      }
+      var nt = LOBBY_AT[st];                                                                                           /* 旋律: ビブラフォンっぽく */
+      if (nt && nt[0]) {
+        lnote(nt[0], at, Math.min(1.6, nt[1] * B + 0.4), 0.05, "sine", 5000, true);
+        lnote(nt[0] + 12, at, 0.25, 0.008, "sine", 6000, true);
+      }
+      lobby.step++;
+      lobby.next += B / 2;
+    }
+  }
   function sndCrowd(v) { noiseHit(0.5, 900 + Math.random() * 400, 0.015 + 0.045 * v, 0.6); }
   function sndCheer() { for (var i = 0; i < 4; i++) noiseHit(0.9, 1100 + i * 300, 0.12, 0.5, i * 0.05); }
   function sndStop(mine, rank) {
@@ -388,7 +452,7 @@
   function anyBet(i) { for (var k = 0; k < P.length; k++) if (P[k].bets[i]) return true; return false; }
   function betters(i) { var out = []; for (var k = 0; k < P.length; k++) if (P[k].bets[i]) out.push(k); return out; }
   function newRound() {
-    stopMusic();
+    stopMusic(); stopLobby();
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY; round++;
@@ -436,6 +500,7 @@
     if (first >= 0) switchTo(first);
     phase = "bet"; pt = 0; sel = 0;
     revealT = 0; revealN = 0;
+    startLobby();
   }
   /* 出走馬が届いたら、馬名を上から1頭ずつ出す（プレイヤーの交代では出し直さない） */
   var revealT = 99, revealN = N, REVEAL_GAP = 0.5, REVEAL_IN = 0.22;
@@ -562,6 +627,7 @@
     var nx = nextActive(cur + 1);
     if (nx >= 0) { switchTo(nx); pt = 0; sndTurn(); return; }         /* 次の人の番 */
     saveCur();
+    stopLobby();
     phase = "count"; pt = 0; raceT = 0; confetti = []; gallopT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
     prog = []; finishT = []; stopped = [];
     K = solveK(horses[order[1]].len, RUN - WIN_RUN);
@@ -622,6 +688,7 @@
       q.sw += dt * 3; q.x += (q.vx + Math.sin(q.sw) * 40) * dt; q.y += q.vy * dt; q.r += q.vr * dt;
       if (q.y > H + 20) confetti.splice(cf, 1);
     }
+    lobbyTick();
     if (state !== S.PLAY) return;
     holdStep(dt);
     revealT += dt;
@@ -1367,7 +1434,7 @@
     now: function () {
       return { state: state, phase: phase, score: score, money: money, players: players, cur: cur,
                monies: P.map(function (p) { return p.money; }), allBets: P.map(function (p) { return p.bets.slice(); }), wonBy: wonBy.slice(), race: raceNo, sel: sel,
-               bets: bets && bets.slice(), speedFx: speedFx, camSpd: camSpd, reveal: revealT, revealed: revealN, buttons: btnsIn(), bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
+               bets: bets && bets.slice(), speedFx: speedFx, camSpd: camSpd, reveal: revealT, revealed: revealN, buttons: btnsIn(), lobby: lobbyOn, bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
                horses: horses && horses.map(function (h) { return { title: h.title, len: h.len, pv: h.pv }; }),
                order: order.slice(), won: won, raceT: raceT, cam: cam, W: W, H: H };
     },
