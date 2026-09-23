@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="wiki-bingo-1790134785201">
+<meta name="preview-version" content="wiki-bingo-1790136495701">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Wikipediaビンゴ</title>
@@ -31,12 +31,12 @@
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
   <a id="credit" target="_blank" rel="noopener" hidden></a>
 </div></div>
-<script src="../games/view.js?v=wiki-bingo-1790134785201"></script>
-<script src="../games/audio.js?v=wiki-bingo-1790134785201"></script>
-<script src="../games/share.js?v=wiki-bingo-1790134785201"></script>
-<script src="../games/result-actions.js?v=wiki-bingo-1790134785201"></script>
-<script src="../games/action-icons.js?v=wiki-bingo-1790134785201"></script>
-<script src="../games/pad.js?v=wiki-bingo-1790134785201"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/view.js?v=wiki-bingo-1790136495701"></script>
+<script src="../games/audio.js?v=wiki-bingo-1790136495701"></script>
+<script src="../games/share.js?v=wiki-bingo-1790136495701"></script>
+<script src="../games/result-actions.js?v=wiki-bingo-1790136495701"></script>
+<script src="../games/action-icons.js?v=wiki-bingo-1790136495701"></script>
+<script src="../games/pad.js?v=wiki-bingo-1790136495701"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* Wikipediaビンゴ
 
@@ -151,26 +151,21 @@
     return fetch(url, { headers: { "Api-User-Agent": UA } }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
   }
   /* 流す本文: "intro" は記事の導入部（最初の見出しの前まで）だけ、"full" は冒頭から MAX_CHARS まで */
+  var CHOICES = 12;                             /* 1回に並べる題名の数 */
   var TEXT_MODE = "full";                       /* 導入部だけだとカードの言葉がほぼ出ない（要約57本で1つ以上出るのは4%）ので、冒頭1200字 */
   var introCache = {};
   var wikiSource = {
-    /* ランダムな記事を取り、そこそこ長いものから3本。
-       導入部だけのときは、題名と一緒に導入部も1回で取れる（1回に20本まで） */
+    /* ランダムな記事を12本取り、そのまま全部を選択肢にする（長さでしぼらない）。
+       導入部だけのときは、題名と一緒に導入部も1回で取れる */
     choices: function () {
-      var q = TEXT_MODE === "intro"
-        ? "&generator=random&grnnamespace=0&grnlimit=20&prop=info|extracts&exintro=1&explaintext=1&exlimit=20"
-        : "&generator=random&grnnamespace=0&grnlimit=12&prop=info";
+      var q = "&generator=random&grnnamespace=0&grnlimit=" + CHOICES + "&prop=info" +
+              (TEXT_MODE === "intro" ? "|extracts&exintro=1&explaintext=1&exlimit=" + CHOICES : "");
       return getJSON(API + q).then(function (j) {
         var ps = ((j.query && j.query.pages) || []).filter(function (p) { return !p.missing && p.title; });
-        var size = TEXT_MODE === "intro"
-          ? function (p) { return (p.extract || "").length; }
-          : function (p) { return p.length; };
-        var good = ps.filter(function (p) { return size(p) >= (TEXT_MODE === "intro" ? 100 : 2500); });
-        if (good.length < 3) good = ps.sort(function (x, y) { return size(y) - size(x); });
-        good = shuffle(good.slice()).slice(0, 3);
-        if (good.length < 3) throw new Error("記事が足りない");
-        good.forEach(function (p) { if (p.extract) introCache[p.pageid] = p.extract; });
-        return good.map(function (p) { return { id: p.pageid, title: p.title }; });
+        if (ps.length < 3) throw new Error("記事が足りない");
+        ps = shuffle(ps.slice()).slice(0, CHOICES);
+        ps.forEach(function (p) { if (p.extract) introCache[p.pageid] = p.extract; });
+        return ps.map(function (p) { return { id: p.pageid, title: p.title }; });
       });
     },
     text: function (id) {
@@ -390,6 +385,7 @@
   /* ============ 進行 ============ */
   function update(dt) {
     if (state === S.INTRO) T += dt;
+    chooseK = Math.max(0, Math.min(1, chooseK + (state === S.PLAY && phase === "choose" ? 1 : -1) * dt / 0.28));
     if (state !== S.PLAY) return;
     T += dt; pt += dt;
     for (var i = 0; i < 25; i++) if (openT[i] >= 0) openT[i] += dt;
@@ -427,9 +423,23 @@
   }
 
   /* ============ 入力 ============ */
+  var CH = { cols: 2, pitch: 64, h: 58, gap: 10 };
+  function choiceRows() { return Math.ceil(((choices && choices.length) || CHOICES) / CH.cols); }
+  function chooseBoxH() { return Math.max(BOXH, choiceRows() * CH.pitch + 18); }
   function choiceRects() {
-    var h = 56, gap = 9, y = BOX + (BOXH - (h * 3 + gap * 2)) / 2;
-    return [0, 1, 2].map(function (i) { return { x: 32, y: y + i * (h + gap), w: W - 64, h: h }; });
+    var n = (choices && choices.length) || CHOICES;
+    var cw = (W - 32 - 20 - CH.gap) / CH.cols, out = [];
+    for (var i = 0; i < n; i++) {
+      out.push({ x: 26 + (i % CH.cols) * (cw + CH.gap), y: BOX + 12 + Math.floor(i / CH.cols) * CH.pitch, w: cw, h: CH.h });
+    }
+    return out;
+  }
+  /* 選ぶ間のカードの縮み具合と位置（0 = ふだん、1 = 選ぶ間） */
+  var chooseK = 0;
+  function cardTransform() {
+    var top = BOX + chooseBoxH() + 12, avail = H - 30 - top;
+    var s = Math.min(1, avail / FRAME.h), k = chooseK * chooseK * (3 - 2 * chooseK);
+    return { s: 1 + (s - 1) * k, top: FRAME.y + (top - FRAME.y) * k };
   }
   function retryRect() { return { x: W / 2 - 50, y: BOX + BOXH / 2 - 30, w: 100, h: 60 }; }
   function inside(r, x, y) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
@@ -442,7 +452,7 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (phase !== "bingo" && phase !== "error") {
+    if (phase !== "bingo" && phase !== "error" && phase !== "choose") {   /* 選ぶ間は、カードの場所に題名が重なるので題名を優先 */
       if (x == null) { var o = phase === "choose" ? -1 : oldestLit(); if (o >= 0) { punch(o); return; } }   /* 題名を選ぶ間のスペースは選ぶほう */
       else {
         var ci = cellAt(x, y);
@@ -452,7 +462,7 @@
     if (phase === "choose") {
       if (x == null) { choose(pick); return; }
       var cr = choiceRects();
-      for (var i = 0; i < 3; i++) if (inside(cr[i], x, y)) { pick = i; choose(i); return; }
+      for (var i = 0; i < cr.length; i++) if (inside(cr[i], x, y)) { pick = i; choose(i); return; }
       return;
     }
     if (phase === "error") {
@@ -477,14 +487,21 @@
   window.addEventListener("keydown", function (e) {
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    var upK = e.key === "ArrowUp" || e.key === "w" || e.key === "W" || e.key === "ArrowLeft";
-    var downK = e.key === "ArrowDown" || e.key === "s" || e.key === "S" || e.key === "ArrowRight";
-    if (!esc && !go && !upK && !downK) return;
+    var upK = e.key === "ArrowUp" || e.key === "w" || e.key === "W";
+    var downK = e.key === "ArrowDown" || e.key === "s" || e.key === "S";
+    var leftK = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var rightK = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (!esc && !go && !upK && !downK && !leftK && !rightK) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }   /* 開始前は真ん中を開けるまで始めない */
-    if (upK || downK) {
-      if (state === S.PLAY && phase === "choose") pick = (pick + (downK ? 1 : 2)) % 3;
+    if (upK || downK || leftK || rightK) {
+      if (state === S.PLAY && phase === "choose" && choices) {
+        var n = choices.length, c = pick % CH.cols, r = Math.floor(pick / CH.cols), rows = choiceRows();
+        if (leftK || rightK) c = (c + (rightK ? 1 : CH.cols - 1)) % CH.cols;
+        else r = (r + (downK ? 1 : rows - 1)) % rows;
+        pick = Math.min(n - 1, r * CH.cols + c);
+      }
       return;
     }
     if (e.repeat) return;
@@ -529,7 +546,8 @@
   }
 
   function drawBox() {
-    roundRect(16, BOX, W - 32, BOXH, 14);
+    var bh = BOXH + (chooseBoxH() - BOXH) * (chooseK * chooseK * (3 - 2 * chooseK));
+    roundRect(16, BOX, W - 32, bh, 14);
     ctx.fillStyle = "#0f141d"; ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,.08)"; ctx.stroke();
 
@@ -573,22 +591,30 @@
   }
   function drawChoices() {
     var cr = choiceRects();
-    for (var i = 0; i < 3; i++) {
+    for (var i = 0; i < cr.length; i++) {
       var r = cr[i], c = choices[i];
-      var appear = Math.min(1, Math.max(0, (pt - i * 0.08) / 0.25));
+      var appear = Math.min(1, Math.max(0, (pt - 0.12 - i * 0.03) / 0.22));
       ctx.save();
       ctx.globalAlpha = appear;
-      ctx.translate(0, (1 - appear) * 12);
-      roundRect(r.x, r.y, r.w, r.h, r.h / 2);
+      ctx.translate(0, (1 - appear) * 10);
+      roundRect(r.x, r.y, r.w, r.h, 16);
       ctx.fillStyle = "#fff"; ctx.fill();
       if (keyMode && pick === i) { ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71"; ctx.stroke(); }
       ctx.fillStyle = "#16202e";
-      ctx.font = "800 23px sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(fitText(c.title, r.w - 44), r.x + r.w / 2, r.y + r.h / 2 + 1);
+      ctx.font = "800 18px sans-serif";
+      var ls = twoLines(c.title, r.w - 20);
+      ls.forEach(function (l, k) { ctx.fillText(l, r.x + r.w / 2, r.y + r.h / 2 + 1 + (k - (ls.length - 1) / 2) * 21); });
       ctx.restore();
     }
     ctx.textBaseline = "alphabetic";
+  }
+  /* 題名を2行までに折り返す。入りきらない分は … */
+  function twoLines(s, maxW) {
+    if (ctx.measureText(s).width <= maxW) return [s];
+    var i = 1;
+    while (i < s.length && ctx.measureText(s.slice(0, i + 1)).width <= maxW) i++;
+    return [s.slice(0, i), fitText(s.slice(i), maxW)];
   }
   function drawSpinner(x, y) {
     for (var i = 0; i < 8; i++) {
@@ -836,9 +862,13 @@
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "#1b2230"; ctx.fillRect(0, 0, W, H);
     if (state !== S.INTRO) { if (state !== S.RESULT) drawHead(); drawBox(); }   /* 結果では上の記事名と数字を消す（大きい数字と重なるので） */
+    var tf = cardTransform();
+    ctx.save();
+    ctx.translate(W / 2, tf.top); ctx.scale(tf.s, tf.s); ctx.translate(-W / 2, -FRAME.y);
     drawCard();
+    ctx.restore();
     drawSparks();
-    drawCredit();
+    if (chooseK < 0.01) drawCredit();
     if (state === S.RESULT) drawResult();
     placeLinks();
   }
@@ -955,6 +985,8 @@
                title: article && article.title, choices: choices && choices.map(function (c) { return c.title; }),
                pick: pick, held: held, W: W, H: H };
     },
+    choiceCount: function () { return choiceRects().length; },
+    cardScale: function () { return cardTransform().s; },
     choice: function (i) { var r = choiceRects()[i]; return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; },
     retryButton: function () { var r = retryRect(); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; },
     result: function () { var b = resultButtons(); return { retry: { x: b[0].x + b[0].w / 2, y: b[0].y + b[0].h / 2 }, share: { x: b[1].x + b[1].w / 2, y: b[1].y + b[1].h / 2 } }; },
@@ -1018,10 +1050,10 @@
 <script>
 if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = "../games/_tools/recorder-ui.js?v=wiki-bingo-1790134785201";
+  recorderScript.src = "../games/_tools/recorder-ui.js?v=wiki-bingo-1790136495701";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=wiki-bingo-1790134785201"></script>
+<script src="./auto-reload.js?v=wiki-bingo-1790136495701"></script>
 </body>
 </html>
