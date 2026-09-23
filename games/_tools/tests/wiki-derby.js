@@ -34,7 +34,13 @@ async function start(g) {
 /* スタートして、着順と払い戻しが出るまで進める */
 function race(g) {
   at(g, g.probe.startButton()); g.step(1);
-  assert.equal(g.probe.now().phase, 'race', 'スタートで走る');
+  assert.equal(g.probe.now().phase, 'count', 'スタートで3つ数える');
+  g.step(170);
+  assert.equal(g.probe.now().phase, 'count', '3秒たつまでは走らない');
+  assert.ok(g.probe.positions() === null || g.probe.positions().every(v => v === 0));
+  g.until(() => g.probe.now().phase === 'race', 30);
+  assert.equal(g.probe.now().phase, 'race', '3秒たったら走る');
+  assert.ok(Math.abs(g.probe.now().cam + 44) < 1, 'ゲートは画面の左端');
   const stopSeen = [], cams = [], stopX = {};
   let frames = 0;
   while (g.probe.now().phase === 'race' && frames < 3000) {
@@ -69,7 +75,9 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     at(g, g.probe.minus(5)); g.step(10);
     assert.equal(g.probe.now().money, 800, '賭けていない馬の−では何も起きない');
     at(g, g.probe.card(4)); g.step(10);
-    assert.equal(g.probe.now().bets[4], 0, '枠そのものを押しても賭けない');
+    assert.equal(g.probe.now().bets[4], 0, '馬名の一覧を押しても賭けない');
+    at(g, g.probe.ctrl(4)); g.step(10);
+    assert.equal(g.probe.now().bets[4], 0, 'ボタンの枠の真ん中（賭けた額）を押しても賭けない');
     at(g, g.probe.pile()); g.step(30);
     now = g.probe.now();
     assert.equal(now.money, 1000, '手元を押すと全部戻る');
@@ -111,6 +119,7 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
       await start(g);
       at(g, g.probe.plus(0));
       at(g, g.probe.startButton()); g.step(1);
+      g.until(() => g.probe.now().phase === 'race', 400);
       const winner = g.probe.now().order[0];
       const leaders = new Set();
       for (let f = 0; f < 600; f++) {
@@ -168,13 +177,13 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     g.press('ArrowRight'); g.press(' ');
     assert.equal(g.probe.now().bets[1], 100, '→で2番');
     g.press('ArrowDown'); g.press(' '); g.press(' ');
-    assert.equal(g.probe.now().bets[3], 200, '↓で4番');
+    assert.equal(g.probe.now().bets[4], 200, '↓で5番（3列なので2番の下は5番）');
     g.press('Backspace');
-    assert.equal(g.probe.now().bets[3], 100, 'Backspaceで−');
+    assert.equal(g.probe.now().bets[4], 100, 'Backspaceで−');
     for (let i = 0; i < 6; i++) g.press('ArrowDown');
     assert.equal(g.probe.now().sel, 12, 'いちばん下からさらに下はスタート');
     g.press(' '); g.step(1);
-    assert.equal(g.probe.now().phase, 'race');
+    assert.equal(g.probe.now().phase, 'count');
     g.until(() => g.probe.now().phase === 'finish', 3000); g.step(40);
     g.press(' '); g.step(1); await flush(); g.step(1);
     assert.equal(g.probe.now().phase, 'bet', 'スペースで次のレース');
