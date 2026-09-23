@@ -21,7 +21,7 @@ function waitFor(g, onCard) {
     const n = now(g), at = n.card.indexOf(n.call.kanji);
     if (n.phase === 'call' && (onCard ? at >= 0 && !n.open[at] : at < 0)) return at;
     /* 待っていない読みは、ライフを減らさないように片づける（カードにあれば開け、無ければ飛ばす） */
-    if (n.phase === 'call') { if (at >= 0 && !n.open[at]) tapCell(g, at); else { const b = g.probe.box(); g.tap(b.x, b.y); } }
+    if (n.phase === 'call') { if (at >= 0 && !n.open[at]) tapCell(g, at); else { const b = g.probe.skip(); g.tap(b.x, b.y); } }
     toCall(g);
   }
   throw new Error('読みが来ない');
@@ -144,10 +144,29 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
   assert.ok(!now(g).open[at]);
   toCall(g);
   waitFor(g, false);
-  const c = now(g).calls, b = g.probe.box();
+  const c = now(g).calls, b = g.probe.skip();
   g.tap(b.x, b.y); g.step(1);
   assert.equal(now(g).outcome, 'pass');
   toCall(g);
+  assert.equal(now(g).calls, c + 1);
+}
+
+/* 4b. 飛ばすのはスキップボタンと X キーだけ。箱のほかの場所（玉）を押しても飛ばない。抽選中は効かない */
+{
+  const g = open(); start(g);
+  waitFor(g, false);
+  const ball = g.probe.box(); g.tap(ball.x, ball.y); g.step(1);
+  assert.equal(now(g).phase, 'call', '玉を押しても飛ばない');
+  const sk = g.probe.skip();
+  const c0 = g.probe.cell(0);
+  assert.ok(c0.y - sk.y >= 63, 'ボタンとカードのマスが離れている');
+  assert.ok(sk.x + 42 <= now(g).W - 16, 'ボタンが箱に収まる');
+  g.press('x'); g.step(1);
+  assert.equal(now(g).outcome, 'pass', 'X で飛ばせる');
+  const c = now(g).calls;
+  g.until(() => now(g).phase === 'draw', 200);
+  g.tap(sk.x, sk.y); g.step(1);
+  assert.equal(now(g).phase, 'draw', '抽選中にボタンを押しても何も起きない');
   assert.equal(now(g).calls, c + 1);
 }
 
@@ -177,7 +196,7 @@ function playOut(g) {
     const n = now(g);
     if (n.phase === 'call') {
       const at = cellOf(g);
-      if (at >= 0 && !n.open[at]) tapCell(g, at); else { const b = g.probe.box(); g.tap(b.x, b.y); }
+      if (at >= 0 && !n.open[at]) tapCell(g, at); else { const b = g.probe.skip(); g.tap(b.x, b.y); }
     }
     g.step(10);
   }
@@ -230,7 +249,7 @@ ORDER.slice(0, 5).forEach(mark => {
   const g = open(); start(g);
   assert.equal(now(g).lives, 3);
   waitFor(g, false);
-  const b = g.probe.box(); g.tap(b.x, b.y); g.step(1);
+  const b = g.probe.skip(); g.tap(b.x, b.y); g.step(1);
   assert.equal(now(g).lives, 3, 'カードに無い字を飛ばしても減らない');
   toCall(g);
   const at = waitFor(g, true);
@@ -243,7 +262,7 @@ ORDER.slice(0, 5).forEach(mark => {
   assert.equal(now(g).lives, 1, '時間切れで1つ減る');
   toCall(g);
   waitFor(g, true);
-  const bb = g.probe.box(); g.tap(bb.x, bb.y); g.step(1);
+  const bb = g.probe.skip(); g.tap(bb.x, bb.y); g.step(1);
   assert.equal(now(g).lives, 0, 'カードにある字を飛ばすと1つ減る');
   assert.equal(now(g).phase, 'over');
   g.until(() => now(g).state === 'result', 400);

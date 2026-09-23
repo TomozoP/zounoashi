@@ -33,7 +33,7 @@
 
    カードに魚へんの漢字が24個（真ん中は最初から開いている）。
    上に読みが1つずつ出る。その漢字がカードにあれば、時間内にタップして穴を開ける。
-   違う漢字を押すと、その読みは流れてしまう。カードに無いと思ったら上の箱を押すと次へ進む。
+   違う漢字を押すと、その読みは流れてしまう。カードに無いと思ったらタイマーの右のスキップボタン（キーは X）で次へ進む。
    ビンゴまでに出た読みの数が結果（少ないほどよい）。
    魚・木・金・鳥・虫を全部ビンゴすると「難」（難読漢字）のカードが出る。
    カードごとの最高記録（いちばん少ない回数）はブラウザに残し、選ぶ丸の下に出す。
@@ -228,7 +228,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   /* PLAY の中の段階: call（読みが出ている）→ reveal（答えの漢字を見せる）→ 次の call、または bingo → 結果 */
   var state, phase, pt, score, card, open, openT, bingoLine, calls, cur, recent, outcome,
-      missT = [], wrongT = [], dealT = -9, drumA = 0, spin = 0, drumOut = 0, ballColor = "#e8453c", lives = LIVES, lifeT = -9, failed = false, reachFx = [], shakeT = -9, sparks = [], cursor = 0, keyMode = false, T, reached;
+      missT = [], wrongT = [], dealT = -9, drumA = 0, spin = 0, drumOut = 0, skipT = -9, ballColor = "#e8453c", lives = LIVES, lifeT = -9, failed = false, reachFx = [], shakeT = -9, sparks = [], cursor = 0, keyMode = false, T, reached;
 
   var BOX, BOXH, CARD, CELL, FRAME;
   function place() {
@@ -360,7 +360,9 @@
   }
 
   /* ============ 入力 ============ */
-  function inBox(x, y) { return x >= 16 && x <= W - 16 && y >= BOX && y <= BOX + BOXH; }
+  /* スキップボタン（タイマーの右）。カードに無いと思ったら押して次へ */
+  function skipRect() { return { x: W / 2 + 118, y: BOX + BOXH - 44, w: 84, h: 38 }; }
+  function inSkip(x, y) { var r = skipRect(); return x >= r.x - 6 && x <= r.x + r.w + 6 && y >= r.y - 6 && y <= r.y + r.h + 6; }
 
   /* カードを選ぶ丸。開始前に、上の箱の場所に並ぶ */
   function setRects() {
@@ -400,7 +402,7 @@
     if (x == null) { pickCell(cursor); return; }   /* キー・ジョイパッドは選んでいるマス */
     var ci = cellAt(x, y);
     if (ci >= 0) { pickCell(ci); return; }
-    if (phase === "call" && inBox(x, y)) endCall("pass");
+    if (phase === "call" && inSkip(x, y)) { skipT = T; endCall("pass"); }
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -413,6 +415,11 @@
   window.addEventListener("keydown", function (e) {
     if (e.key === "F8" && isLocal()) { e.preventDefault(); if (state === S.INTRO && !e.repeat) toggleDebugNan(); return; }
     var esc = e.key === "Escape";
+    if ((e.key === "x" || e.key === "X") && state === S.PLAY) {   /* X でスキップ */
+      e.preventDefault();
+      if (!e.repeat && phase === "call") { skipT = T; endCall("pass"); }
+      return;
+    }
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
     var upK = e.key === "ArrowUp" || e.key === "w" || e.key === "W";
     var downK = e.key === "ArrowDown" || e.key === "s" || e.key === "S";
@@ -474,7 +481,7 @@
   }
   /* 読みの玉を大きく映す場所（箱の真ん中） */
   function bigBall() {
-    var top = BOX + 44, bottom = BOX + BOXH - 34;
+    var top = BOX + 44, bottom = BOX + BOXH - 50;
     var cy = (top + bottom) / 2, r = Math.min(125, (bottom - top) / 2);
     return { x: W / 2, y: cy, r: r };
   }
@@ -491,14 +498,32 @@
     drawTimer(G, phase === "call" ? Math.max(0, 1 - pt / CALL_TIME) : 0);
     drawLives();
   }
-  /* 残り時間の帯（読みの玉の下、真ん中） */
+  /* 残り時間の帯（読みの玉の下）と、その右のスキップボタン */
   function drawTimer(G, left) {
-    var bw = 300, bx = W / 2 - bw / 2, by = BOX + BOXH - 26;
+    var sk = skipRect();
+    var bx = W / 2 - 150, bw = sk.x - 18 - bx, by = sk.y + sk.h / 2 - 5;
     roundRect(bx, by, bw, 10, 5); ctx.fillStyle = "rgba(255,255,255,.08)"; ctx.fill();
     if (left > 0) {
       roundRect(bx, by, Math.max(10, bw * left), 10, 5);
       ctx.fillStyle = left > 0.3 ? "#f7cc71" : "#ff5a5f"; ctx.fill();
     }
+    drawSkip(sk, phase === "call");
+  }
+  /* スキップボタン: 白い横長の丸に、次へ飛ばす印（三角2つと縦棒）。押せないときは薄い。押した瞬間は沈む */
+  function drawSkip(r, on) {
+    var st = T - skipT, press = st >= 0 && st < 0.15 ? 1 - st / 0.15 : 0;
+    ctx.save();
+    ctx.globalAlpha = on ? 1 : 0.3;
+    ctx.translate(r.x + r.w / 2, r.y + r.h / 2 + press * 2); ctx.scale(1 - press * 0.06, 1 - press * 0.06);
+    roundRect(-r.w / 2, -r.h / 2, r.w, r.h, r.h / 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.fillStyle = "#16202e";
+    var s = 9;
+    [-s * 1.1, -s * 0.05].forEach(function (dx) {
+      ctx.beginPath(); ctx.moveTo(dx - s * 0.2, -s); ctx.lineTo(dx + s * 0.95, 0); ctx.lineTo(dx - s * 0.2, s); ctx.closePath(); ctx.fill();
+    });
+    ctx.fillRect(s * 1.05, -s, s * 0.32, s * 2);
+    ctx.restore();
   }
 
   /* 抽選機（ガラガラ）。針金の球のかごが、斜めに向いた横の軸で回る。中の玉は、
@@ -1126,6 +1151,7 @@
     setCount: function () { return setCount(); },
     callTime: CALL_TIME,
     box: function () { return { x: W / 2, y: BOX + BOXH / 2 }; },
+    skip: function () { var r = skipRect(); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; },
     result: function () { var b = resultButtons(); return { retry: { x: b[0].x + b[0].w / 2, y: b[0].y + b[0].h / 2 }, share: { x: b[1].x + b[1].w / 2, y: b[1].y + b[1].h / 2 } }; },
     dealAlpha: function (i) { return dealAlpha(i); },
     cell: function (i) { var c = cellRect(i); return { x: c.x + c.w / 2, y: c.y + c.h / 2 }; },
