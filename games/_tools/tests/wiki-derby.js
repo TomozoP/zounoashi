@@ -285,16 +285,16 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.equal(g.probe.now().phase, 'bet');
   }
 
-  /* 1b. 出走馬が届いたら、馬名を1頭ずつ出す。1秒ほどで出そろい、プレイヤーの交代では出し直さない */
+  /* 1b. 出走馬が届いたら、馬名を0.5秒ごとに1頭ずつ出す。4秒ほどで出そろい、プレイヤーの交代では出し直さない */
   {
     const g = open();
     g.press('ArrowRight');
     g.press(' '); g.step(1); await flush();
     const seen = [];
-    for (let k = 0; k < 90; k++) { g.step(1); seen.push(g.probe.now().revealed); }
+    for (let k = 0; k < 300; k++) { g.step(1); seen.push(g.probe.now().revealed); }
     assert.equal(seen[0], 1, 'はじめは1頭');
-    assert.ok(seen[20] > 1 && seen[20] < 8, '少しずつ増える: ' + seen[20]);
-    assert.equal(seen.indexOf(8) <= 60, true, '1秒ほどで出そろう');
+    assert.equal(seen[20], 1, '0.5秒までは1頭'); assert.equal(seen[35], 2, '0.5秒で2頭目'); assert.equal(seen[125], 5, '2秒で5頭');
+    assert.ok(seen.indexOf(8) > 200 && seen.indexOf(8) <= 215, '3.5秒で出そろう: ' + seen.indexOf(8));
     for (let k = 1; k < seen.length; k++) assert.ok(seen[k] - seen[k - 1] <= 1, '1頭ずつ');
     at(g, g.probe.plus(0)); at(g, g.probe.startButton()); g.step(1);
     assert.equal(g.probe.now().cur, 1);
