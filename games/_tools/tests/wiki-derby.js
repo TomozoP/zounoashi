@@ -403,6 +403,20 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.equal(now.state, 'result');
     assert.equal(now.share, plan.want(titles[1], odds[1]));
     assert.equal(now.shareShown, true, '1人のときはシェアのボタンを出す');
+    assert.equal(now.fetches, 3, '出走馬を取るのは3レースぶんだけ（最後のレースでは次を先取りしない）: ' + now.fetches);
+  }
+
+  /* 7e. 次のレースの先取りに失敗しても、次のレースの読み込みで取り直して続けられる */
+  {
+    const g = open();
+    await start(g);
+    at(g, g.probe.plus(1));
+    globalThis.__derbyFake.failNext = 1;                     /* 先取りを失敗させる */
+    at(g, g.probe.startButton()); g.step(1);
+    g.until(() => g.probe.now().phase === 'finish', 3000);
+    await next(g); await flush(); g.step(1); ready(g);
+    assert.equal(g.probe.now().phase, 'bet', '取り直して次のレースへ');
+    assert.equal(g.probe.now().horses.length, 8);
   }
 
   /* 7b. 2人以上: 開始画面で人数を選び、レースごとに順番に賭ける。手持ちがなくなった人は飛ばす */

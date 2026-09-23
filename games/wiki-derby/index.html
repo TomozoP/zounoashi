@@ -489,7 +489,7 @@
     hist = [];
     P = []; for (var k = 0; k < players; k++) P.push({ money: START_MONEY, bets: zeros() });
     cur = 0; money = START_MONEY; bets = P[0].bets; shown = money; score = money; raceNo = 0; wonBy = [];
-    sel = 0; flyers = []; wobble = 0; nextField = null;
+    sel = 0; flyers = []; wobble = 0; nextField = null; prefetching = false;
     horses = null; order = []; rankOf = []; odds = []; popRank = [];
     clearBets();
     loadField();
@@ -502,18 +502,23 @@
   function totalBet() { var s = 0; for (var i = 0; i < N; i++) s += bets[i]; return s; }
 
   function fail(again) { phase = "error"; pt = 0; retry = again; }
-  function fetchField() { return Promise.resolve().then(function () { return source().field(); }); }
+  var fetches = 0;                                            /* 出走馬を取りにいった回数（確認用） */
+  function fetchField() { fetches++; return Promise.resolve().then(function () { return source().field(); }); }
   function loadField() {
     var r = round;
     phase = "load"; pt = 0;
     startLobby();                                             /* ロビーの曲は読み込みの間から */
     if (nextField) { var f = nextField; nextField = null; gotField(f); return; }
+    if (prefetching) return;                                  /* 先取りがまだ届いていなければ、取り直さずに待つ */
     fetchField().then(function (f) { if (r === round && phase === "load") gotField(f); },
                       function () { if (r === round && phase === "load") fail(loadField); });
   }
+  var prefetching = false;
   function prefetch() {
     var r = round;
-    fetchField().then(function (f) { if (r !== round) return; if (phase === "load") gotField(f); else nextField = f; }, function () {});
+    prefetching = true;
+    fetchField().then(function (f) { if (r !== round) return; prefetching = false; if (phase === "load") gotField(f); else nextField = f; },
+                      function () { if (r !== round) return; prefetching = false; if (phase === "load") loadField(); });   /* 先取りに失敗して待っていたら、ここで取り直す */
   }
   function gotField(f) {
     horses = f.slice(0, N).map(function (h) {
@@ -673,7 +678,7 @@
     }
     var t2 = finishT[order[1]], w0 = order[0];
     goalX = (charsOf(w0, t2) + rateOf(w0, t2) * GOAL_AHEAD) * CHAR;
-    prefetch();
+    if (raceNo < RACES - 1) prefetch();                      /* 次のレースの出走馬を先に取る。最後のレースでは取らない */
   }
   function rateOf(i, t) { return (charsOf(i, t + 0.01) - charsOf(i, t)) / 0.01; }
   var START_X = 44, countN = 0;                  /* ゲートは画面の左端から START_X のところ */
@@ -1483,7 +1488,7 @@
     now: function () {
       return { state: state, phase: phase, score: score, money: money, players: players, cur: cur,
                monies: P.map(function (p) { return p.money; }), allBets: P.map(function (p) { return p.bets.slice(); }), wonBy: wonBy.slice(), race: raceNo, sel: sel,
-               bets: bets && bets.slice(), speedFx: speedFx, camSpd: camSpd, reveal: revealT, revealed: revealN, buttons: btnsIn(), lobby: lobbyOn, share: players > 1 ? null : shareText(), shareShown: !shareButton.hidden, bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
+               bets: bets && bets.slice(), speedFx: speedFx, camSpd: camSpd, reveal: revealT, revealed: revealN, buttons: btnsIn(), lobby: lobbyOn, fetches: fetches, share: players > 1 ? null : shareText(), shareShown: !shareButton.hidden, bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
                horses: horses && horses.map(function (h) { return { title: h.title, len: h.len, pv: h.pv }; }),
                order: order.slice(), won: won, raceT: raceT, cam: cam, W: W, H: H };
     },
