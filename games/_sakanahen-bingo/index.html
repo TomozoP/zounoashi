@@ -228,7 +228,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   /* PLAY の中の段階: call（読みが出ている）→ reveal（答えの漢字を見せる）→ 次の call、または bingo → 結果 */
   var state, phase, pt, score, card, open, openT, bingoLine, calls, cur, recent, outcome,
-      missT = [], wrongT = [], dealT = -9, drumA = 0, spin = 0, ballColor = "#e8453c", lives = LIVES, lifeT = -9, failed = false, reachFx = [], shakeT = -9, sparks = [], cursor = 0, keyMode = false, T, reached;
+      missT = [], wrongT = [], dealT = -9, drumA = 0, spin = 0, drumOut = 0, ballColor = "#e8453c", lives = LIVES, lifeT = -9, failed = false, reachFx = [], shakeT = -9, sparks = [], cursor = 0, keyMode = false, T, reached;
 
   var BOX, BOXH, CARD, CELL, FRAME;
   function place() {
@@ -344,6 +344,8 @@
     var spinGoal = phase === "draw" && pt < DRAW_SPIN ? 1 : 0;
     spin += (spinGoal - spin) * Math.min(1, dt * (spinGoal ? 10 : 3));
     drumA += dt * (0.5 + spin * 9);
+    var outGoal = phase === "draw" && pt < DRAW_ROLL ? 1 : 0;       /* 抽選機は玉を出し終わるまで出ていて、そのあと引っ込む */
+    drumOut += (outGoal - drumOut) * Math.min(1, dt * (outGoal ? 9 : 5));
     if (phase === "draw") {
       if (pt >= DRAW_TIME) showCall();
     } else if (phase === "call") {
@@ -466,24 +468,28 @@
   var BALL_COLORS = ["#e8453c", "#f2b84b", "#3fa7ff", "#6fae3e", "#b77dff", "#ff8fb3"];
   function drumGeom() {
     var DR = Math.min(84, BOXH / 2 - 36);          /* 箱が高いほど大きく。台の上に立つように、床から測って置く */
-    return { DR: DR, DX: 30 + DR, DY: BOX + BOXH - 14 - DR * 1.55, AX: 30 + DR * 2 + 56 };
+    var shown = 30 + DR, hidden = 16 - DR * 0.35;  /* 抽選のときは左から全部出て、ふだんは左端から半分ほどのぞく */
+    var k = drumOut * drumOut * (3 - 2 * drumOut);
+    return { DR: DR, DX: hidden + (shown - hidden) * k, DY: BOX + BOXH - 14 - DR * 1.55 };
   }
-  /* 読みの玉を大きく映す場所。答えを出すときは左に縮んで、右に漢字の丸 */
-  function bigBall(G) {
-    var AX = G.AX, AR = W - 20, top = BOX + 44, bottom = BOX + BOXH - 34;
-    var cy = (top + bottom) / 2, r = Math.min((AR - AX) / 2 - 6, (bottom - top) / 2);
-    var KX = AR - 58, KR = 54, right = KX - KR - 8;
-    return { x: (AX + AR) / 2, y: cy, r: r, sx: (AX + right) / 2, sr: Math.min(r, (right - AX) / 2), KX: KX, KR: KR };
+  /* 読みの玉を大きく映す場所（箱の真ん中）。答えを出すときは少し左に縮んで、右に漢字の丸 */
+  function bigBall() {
+    var top = BOX + 44, bottom = BOX + BOXH - 34;
+    var cy = (top + bottom) / 2, r = Math.min(125, (bottom - top) / 2);
+    return { x: W / 2, y: cy, r: r, sx: W / 2 - 74, sr: Math.min(r, 84), KX: W / 2 + 100, KR: 58 };
   }
   function drawBox() {
     roundRect(16, BOX, W - 32, BOXH, 14);
     ctx.fillStyle = "#0f141d"; ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,.08)"; ctx.stroke();
     var G = drumGeom();
+    ctx.save();                                     /* 抽選機は箱からはみ出た分を見切る */
+    roundRect(16, BOX, W - 32, BOXH, 14); ctx.clip();
     drawDrum(G);
+    ctx.restore();
     drawOutBall(G);
     if (cur && phase !== "draw") {
-      var B = bigBall(G);
+      var B = bigBall();
       var rv = phase === "reveal" || phase === "bingo" || phase === "over" ? Math.min(1, pt / 0.18) : 0;
       if (rv > 0) {                                 /* 答えの漢字 */
         var ok = outcome === "ok" || phase === "bingo";
@@ -504,9 +510,9 @@
     drawTimer(G, phase === "call" ? Math.max(0, 1 - pt / CALL_TIME) : 0);
     drawLives();
   }
-  /* 残り時間の帯（読みの下） */
+  /* 残り時間の帯（読みの玉の下、真ん中） */
   function drawTimer(G, left) {
-    var bx = G.AX, bw = W - 36 - bx, by = BOX + BOXH - 26;
+    var bw = 300, bx = W / 2 - bw / 2, by = BOX + BOXH - 26;
     roundRect(bx, by, bw, 10, 5); ctx.fillStyle = "rgba(255,255,255,.08)"; ctx.fill();
     if (left > 0) {
       roundRect(bx, by, Math.max(10, bw * left), 10, 5);
@@ -604,11 +610,11 @@
     ctx.restore();
   }
   function outRest(G) { return { x: G.DX + G.DR + 28, y: BOX + BOXH - 38, r: 22 }; }
-  /* 出てきた玉。回り終わると出口から転がって、そのまま右へ大きく寄ってくる。
+  /* 出てきた玉。回り終わると出口から転がって、そのまま真ん中へ大きく寄ってくる。
      読みは玉に巻いた帯に書いてあり、寄ってくる間に回って正面を向く */
   function drawOutBall(G) {
     if (!cur) return;
-    var rest = outRest(G), hole = drumPoint(G, 0.25, -0.35, 0.93), B = bigBall(G);
+    var rest = outRest(G), hole = drumPoint(G, 0.25, -0.35, 0.93), B = bigBall();
     var x, y, r, lon = 0, a = 1;
     if (phase === "draw") {
       if (pt < DRAW_SPIN) return;
@@ -617,7 +623,7 @@
         x = hole.x + (rest.x - hole.x) * e;
         y = hole.y + (rest.y - hole.y) * e - Math.sin(t * Math.PI) * 6 * (1 - t);
         r = rest.r; lon = -3 + e * 1.2; a = Math.min(1, t * 4);
-      } else {                                      /* 右へ大きく寄ってくる */
+      } else {                                      /* 真ん中へ大きく寄ってくる */
         var u = (pt - DRAW_ROLL) / (DRAW_TIME - DRAW_ROLL), k = u * u * (3 - 2 * u);
         x = rest.x + (B.x - rest.x) * k;
         y = rest.y + (B.y - rest.y) * k - Math.sin(u * Math.PI) * 30;
