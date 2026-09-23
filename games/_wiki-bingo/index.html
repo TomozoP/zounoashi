@@ -115,7 +115,16 @@
   }
   function sndType() { noiseHit(0.018, 4200, 0.025, 4); }
   /* 紙のミシン目を押し抜く音。ぷつっと切れて、ポコッと凹む */
-  function sndStamp() { noiseHit(0.03, 2600, 0.18, 2); noiseHit(0.06, 900, 0.22, 1.5, 0.02); tone(210, 0.08, 0.1, "sine", 110, 0.02); }
+  function sndStamp(n) {
+    noiseHit(0.03, 2600, 0.18, 2); noiseHit(0.06, 900, 0.22, 1.5, 0.02); tone(210, 0.08, 0.1, "sine", 110, 0.02);
+    /* 同じ記事で2つ目からは、開けるたびに1段ずつ上がる鈴の音を重ねる */
+    if (n >= 2) { var f = 660 * Math.pow(2, Math.min(n - 2, 7) * 2 / 12); tone(f, 0.18, 0.06, "triangle", null, 0.04); tone(f * 1.5, 0.22, 0.035, "sine", null, 0.09); }
+  }
+  /* 大当たり: ファンファーレと、じゃらじゃら */
+  function sndJackpot() {
+    [784, 988, 1175, 1568, 1976].forEach(function (f, i) { tone(f, 0.22, 0.07, "square", null, i * 0.07); });
+    for (var i = 0; i < 12; i++) noiseHit(0.05, 5000 + (i % 3) * 900, 0.06, 6, 0.3 + i * 0.05);
+  }
   function sndLight() { tone(1568, 0.09, 0.05, "sine"); tone(2093, 0.14, 0.04, "sine", null, 0.05); }
   function sndDud() { noiseHit(0.04, 400, 0.08, 1); }
   /* リーチ: どきっと低く鳴ってから、上がっていく2音 */
@@ -156,7 +165,7 @@
       });
     },
     text: function (id) {
-      return getJSON(API + "&prop=extracts&explaintext=1&exsectionformat=plain&pageids=" + id).then(function (j) {
+      return getJSON(API + "&prop=extracts&explaintext=1&exsectionformat=plain&exchars=1500&pageids=" + id).then(function (j) {
         var p = j.query && j.query.pages && j.query.pages[0];
         return (p && p.extract) || "";
       });
@@ -165,15 +174,33 @@
   function source() { return window.__wikiSource || wikiSource; }
 
   /* ============ 単語 ============
-     記事によく出る言葉。1本の記事に出る割合が1〜5割くらいのものを混ぜている。 */
-  var WORDS = ("東京 大阪 大学 学校 高校 世界 選手 番組 放送 発売 設立 出身 駅 県 町 村 会社 研究 歴史 活動 " +
-               "開始 所属 登場 以降 現在 当時 一部 以上 アメリカ 中国 韓国 山 川 海 島 道 橋 車 鉄道 バス 船 " +
-               "野球 試合 優勝 王 家 父 賞 大会 記録 星 水 火 寺 城 明治 昭和 平成 時代 テレビ 通信 法 線 局 " +
-               "館 社長 女 男 犬 石 花 最初 最後 英語 光 事業 空 代表 地域 小学校 外国 鉄 開発 " +
-               "製造 経済 教育 技術 ドイツ 企業 自動車 航空 京都 アジア " +
-               /* 題名から予想しやすい言葉 */
-               "映画 監督 作品 音楽 公開 発表 文化 植物 新聞 公式").split(" ");
-  var MAX_CHARS = 2600;                         /* 1本の記事で流す上限 */
+     分野ごとの言葉。その分野の記事には出やすく、ほかの記事には出にくいものを選んでいる。
+     カードは4分野から5語ずつ（20語）と、どの記事にも出やすい言葉4語で作る（題名を見て分野を狙うと当たる）。
+     色はミシン目の丸の色。同じ分野は同じ色。 */
+  var GENRES = [
+    { color: "#d8433b", words: "駅 ホーム 開業 路線 運行 停車 電車 列車 乗車 車両" },            /* 鉄道 */
+    { color: "#2f6fd6", words: "卒業 中学校 高等学校 小学校 学区 生徒 校舎 創立 部活 教育" },    /* 学校 */
+    { color: "#8a4bd1", words: "出身 経歴 生まれ 父 デビュー 所属 死去 引退 家族 本名 俳優" },  /* 人物 */
+    { color: "#1c9a5a", words: "代表 優勝 大会 選手 リーグ シーズン サッカー 試合 得点 移籍 選手権" }, /* スポーツ */
+    { color: "#e0527f", words: "作品 曲 監督 映画 発売 アニメ 出演 漫画 公開 原作 アルバム シングル ゲーム 主演" }, /* 作品 */
+    { color: "#b9832b", words: "位置 地名 人口 地区 世帯 郵便番号 町 面積" },                    /* 地理 */
+    { color: "#5f9a1c", words: "学名 分布 植物 花 葉 生息 昆虫" },                              /* 生き物 */
+    { color: "#7a5230", words: "時代 城 明治 江戸 王国 藩 天皇 皇帝 王" },                        /* 歴史 */
+    { color: "#3b8c9a", words: "会社 設立 事業 株式会社 販売 本社 企業" },                      /* 会社 */
+    { color: "#c26a1a", words: "寺 創建 神社 祭神 本尊 境内" },                                /* 寺社 */
+    { color: "#d6a21c", words: "テレビ ラジオ 番組 放送 放送局 開局 中継局" }                  /* 放送 */
+  ].map(function (g) { return { color: g.color, words: g.words.split(" ") }; });
+  var COMMON = "大学 研究 昭和 平成 アメリカ 東京 世界 中国 現在".split(" ");   /* どの記事にも出やすい */
+  var GENRE_OF = {};
+  GENRES.forEach(function (g, k) { g.words.forEach(function (w) { GENRE_OF[w] = k; }); });
+  function dealCard() {
+    var pool = [];
+    shuffle(GENRES.slice()).slice(0, 4).forEach(function (g) { pool = pool.concat(shuffle(g.words.slice()).slice(0, 5)); });   /* 4分野から5語ずつ */
+    var c = shuffle(pool.concat(shuffle(COMMON.slice()).slice(0, 4)));
+    c.splice(12, 0, null);                                  /* 真ん中は最初から開いている */
+    return c;
+  }
+  var MAX_CHARS = 1200;                         /* 1本の記事で流すのは冒頭のここまで */
   var SPEED = 45, FAST = 260;                   /* 1秒に流す文字数（ふつう・押している間） */
 
   function shuffle(a) {
@@ -196,7 +223,7 @@
   /* PLAY の中の段階: load（題名を取りに行く）→ choose（選ぶ）→ fetch（本文を取りに行く）
      → stream（流れる）→ 次の記事の load/choose へ、または bingo → 結果。error は通信の失敗 */
   var state, phase, pt, score, card, open, openT, bingoLine, choices, nextChoices, pick, article, articles,
-      text, pos, lines, hits, lit, readList = [], reachFx = [], shakeT = -9, held, keyMode = false, T, round, retry, typeT, reached;
+      text, pos, lines, hits, lit, readList = [], reachFx = [], shakeT = -9, combo = 0, jackT = -9, sparks = [], held, keyMode = false, T, round, retry, typeT, reached;
 
   var HEAD, BOX, BOXH, CARD, CELL, CREDIT, FRAME;
   function place() {
@@ -220,10 +247,10 @@
     state = S.PLAY;
     round = (round || 0) + 1;
     T = 0; pt = 0; score = 0; held = false; typeT = 0;
-    if (!keepCard) { card = shuffle(WORDS.slice()).slice(0, 25); card[12] = null; }   /* 真ん中は最初から開いている */
+    if (!keepCard) card = dealCard();
     open = []; openT = []; lit = [];
     for (var i = 0; i < 25; i++) { open.push(i === 12); openT.push(i === 12 ? 9 : -1); lit.push(-1); }
-    bingoLine = null; reached = {}; reachFx = []; shakeT = -9;
+    bingoLine = null; reached = {}; reachFx = []; shakeT = -9; combo = 0; jackT = -9; sparks = [];
     choices = null; nextChoices = null; pick = 0; article = null; articles = 0;
     text = ""; pos = 0; lines = []; hits = []; readBefore = 0; counted = false; readList = [];
     loadChoices();
@@ -279,7 +306,7 @@
     if (!text) { loadChoices(); return; }
     articles++;
     readList.push(article);
-    pos = 0; counted = false;
+    pos = 0; counted = false; combo = 0;
     findHits();
     wrapText();
     phase = "stream"; pt = 0;
@@ -305,7 +332,10 @@
   function stamp(i) {
     if (open[i]) return;
     open[i] = true; openT[i] = 0;
-    sndStamp();
+    combo++;                                    /* 同じ記事で何個目か。多いほど音が上がり、火花が増える */
+    sndStamp(combo);
+    var cr = cellRect(i);
+    burst(cr.x + cr.w / 2, cr.y + cr.h / 2, 6 + combo * 5, combo >= 3 ? 1.4 : 1);
     for (var l = 0; l < LINES.length; l++) {
       var n = 0;
       LINES[l].forEach(function (q) { if (open[q]) n++; });
@@ -353,6 +383,11 @@
     if (state !== S.PLAY) return;
     T += dt; pt += dt;
     for (var i = 0; i < 25; i++) if (openT[i] >= 0) openT[i] += dt;
+    for (var sp = sparks.length - 1; sp >= 0; sp--) {
+      var k = sparks[sp];
+      k.life -= dt; k.x += k.vx * dt; k.y += k.vy * dt; k.vy += 700 * dt; k.vx *= 0.985;
+      if (k.life <= 0) sparks.splice(sp, 1);
+    }
     if (phase === "stream") {
       /* 開けられる単語が出たら、光ったマスを全部開けるまで本文は止まる */
       if (oldestLit() >= 0) { held = false; return; }
@@ -371,9 +406,15 @@
       typeT -= dt;
       if (now > before && typeT <= 0 && stop < 0) { typeT = held ? 0.03 : 0.055; sndType(); }
       score = countRead();
-      if (pos >= text.length) { phase = "after"; pt = 0; }
+      if (pos >= text.length) {
+        phase = "after"; pt = 0;
+        if (combo >= 3) {                       /* 1本で3つ以上開けた記事は大当たり */
+          jackT = T; sndJackpot();
+          for (var q = 0; q < 5; q++) burst(FRAME.x + FRAME.w * (q + 0.5) / 5, FRAME.y + 6, 14, 1.8);
+        }
+      }
     } else if (phase === "after") {
-      if (pt >= 0.7) {
+      if (pt >= (T - jackT < 3 ? 1.8 : 0.7)) {
         readBefore += countChars(text); counted = true;
         sndNext();
         loadChoices();
@@ -578,6 +619,14 @@
     ctx.save();
     ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
     roundRect(F.x, F.y, F.w, F.h, 16); ctx.fillStyle = RIM; ctx.fill();
+    var jt = T - jackT;
+    if (jt >= 0 && jt < 1.6) {                              /* 大当たり: 外枠が金色に明滅する */
+      ctx.save();
+      ctx.globalAlpha = (0.5 + 0.5 * Math.sin(jt * 22)) * (1 - jt / 1.6);
+      ctx.shadowColor = "#ffd86b"; ctx.shadowBlur = 30;
+      roundRect(F.x, F.y, F.w, F.h, 16); ctx.fillStyle = "#ffd86b"; ctx.fill();
+      ctx.restore();
+    }
     ctx.restore();
     /* 帯の飾り（小さな星を並べる） */
     for (var k = 0; k < 9; k++) drawStar(F.x + F.w * (k + 1) / 10, F.y + F.band / 2 + 4, 6, k % 2 ? "#ffd86b" : "#fff3dc");
@@ -652,6 +701,21 @@
     ctx.lineWidth = 3; ctx.strokeStyle = "rgba(214,120,0,.9)";
     ctx.beginPath(); ctx.arc(cx, cy, R + 3, 0, Math.PI * 2); ctx.stroke();
   }
+  /* 火花。開けた場所から散って落ちる */
+  function burst(x, y, n, power) {
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * Math.PI * 2, v = (160 + Math.random() * 260) * power;
+      sparks.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 180 * power, life: 0.5 + Math.random() * 0.5,
+                    c: ["#ffd86b", "#fff3dc", "#ff8f5a", "#ffe9a8"][i % 4], r: 2 + Math.random() * 3 });
+    }
+  }
+  function drawSparks() {
+    sparks.forEach(function (k) {
+      ctx.globalAlpha = Math.min(1, k.life * 2.5);
+      drawStar(k.x, k.y, k.r * 1.6, k.c);
+    });
+    ctx.globalAlpha = 1;
+  }
   function drawStar(x, y, r, color) {
     ctx.beginPath();
     for (var k = 0; k < 10; k++) {
@@ -663,7 +727,11 @@
   /* まだ開いていない丸: ミシン目と単語 */
   function drawFlap(cx, cy, R, word) {
     ctx.save();
-    ctx.setLineDash([4, 4]); ctx.lineWidth = 1.6; ctx.strokeStyle = "rgba(29,42,68,.45)";
+    var g = word != null && GENRE_OF[word] != null ? GENRES[GENRE_OF[word]].color : null;
+    if (g) {                                                /* 分野の色をうすく敷き、ミシン目もその色 */
+      ctx.globalAlpha = 0.13; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill(); ctx.globalAlpha = 1;
+    }
+    ctx.setLineDash([4, 4]); ctx.lineWidth = g ? 2.4 : 1.6; ctx.strokeStyle = g || "rgba(29,42,68,.45)";
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
     if (!word) return;
@@ -765,6 +833,7 @@
     ctx.fillStyle = "#1b2230"; ctx.fillRect(0, 0, W, H);
     if (state !== S.INTRO) { if (state !== S.RESULT) drawHead(); drawBox(); }   /* 結果では上の記事名と数字を消す（大きい数字と重なるので） */
     drawCard();
+    drawSparks();
     drawCredit();
     if (state === S.RESULT) drawResult();
     placeLinks();
@@ -877,7 +946,8 @@
   window.__probe = {
     now: function () {
       return { state: state, phase: phase, score: score, card: card && card.slice(), open: open && open.slice(),
-               bingo: bingoLine && bingoLine.slice(), waiting: waiting(), reaches: reachFx.length, lit: lit && lit.map(function (v) { return v >= 0; }), articles: articles, pos: pos, length: text.length,
+               bingo: bingoLine && bingoLine.slice(), waiting: waiting(), reaches: reachFx.length, combo: combo, jackpot: jackT >= 0,
+               genres: card && card.map(function (w) { return w == null ? null : (GENRE_OF[w] != null ? GENRE_OF[w] : -1); }), lit: lit && lit.map(function (v) { return v >= 0; }), articles: articles, pos: pos, length: text.length,
                title: article && article.title, choices: choices && choices.map(function (c) { return c.title; }),
                pick: pick, held: held, W: W, H: H };
     },
@@ -923,7 +993,7 @@
 
   /* 開始前はカードだけ見せる（通信はSTARTを押してから） */
   state = S.INTRO; phase = "intro"; round = 0; score = 0; text = ""; hits = []; lines = []; article = null; pt = 0; T = 0;
-  card = shuffle(WORDS.slice()).slice(0, 25); card[12] = null;
+  card = dealCard();
   open = []; openT = []; lit = []; for (var i0 = 0; i0 < 25; i0++) { open.push(i0 === 12); openT.push(i0 === 12 ? 9 : -1); lit.push(-1); }
   startButton.hidden = false;
   layout();

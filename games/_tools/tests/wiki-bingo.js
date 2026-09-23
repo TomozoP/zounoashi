@@ -66,7 +66,35 @@ async function start(g) {
     assert.equal(c.length, 25);
     assert.equal(c[12], null, '真ん中は空き');
     assert.equal(new Set(c.filter(Boolean)).size, 24, '単語は重ならない');
-    assert.ok(g.probe.now().open[12], '真ん中は最初から開いている');
+    assert.ok(g.probe.now().open[12], "真ん中は最初から開いている");
+    for (let n = 0; n < 200; n++) {
+      g.esc(); g.step(1);
+      const gs = g.probe.now().genres.filter(x => x != null);
+      assert.equal(gs.length, 24);
+      assert.equal(gs.filter(x => x === -1).length, 4, "どの記事にも出やすい言葉は4つ");
+      const count = {};
+      gs.filter(x => x >= 0).forEach(x => count[x] = (count[x] || 0) + 1);
+      assert.deepEqual(Object.values(count), [5, 5, 5, 5], "4分野から5語ずつ");
+      assert.equal(new Set(g.probe.now().card.filter(Boolean)).size, 24);
+    }
+  }
+
+  /* 1b. 1本で流すのは冒頭1200字まで。1本で3つ以上開けたら大当たり、数は記事ごと */
+  {
+    const g = open();
+    await start(g);
+    const c = await cleanCard(g, [0, 1, 2, 5]);
+    let n = 0;
+    setPlan(g, () => (++n === 1 ? "あ" + c[0] + "い" + c[1] + "う" + c[2] + "。" + "え".repeat(3000) : "お" + c[5] + "。"));
+    g.press(" "); await flush(); g.step(1);
+    assert.ok(g.probe.now().length <= 1200, "冒頭だけ: " + g.probe.now().length);
+    playOut(g);
+    assert.equal(g.probe.now().combo, 3);
+    assert.equal(g.probe.now().jackpot, true, "3つ開けた記事は大当たり");
+    g.until(() => g.probe.now().phase === "choose", 400); await flush(); g.step(1);
+    g.press(" "); await flush(); g.step(1);
+    playOut(g);
+    assert.equal(g.probe.now().combo, 1, "次の記事では数え直す");
   }
 
   /* 2. 出た単語のところで本文が止まって光る。開けると続きが流れる。文字数は開けた位置まで */
@@ -81,7 +109,7 @@ async function start(g) {
     g.tap(g.probe.choice(1).x, g.probe.choice(1).y);
     await flush(); g.step(1);
     assert.equal(g.probe.now().phase, "stream");
-    assert.equal(g.probe.now().title, "記事1-1", "選んだ記事が流れる");
+    assert.ok(/-1$/.test(g.probe.now().title), "選んだ記事（2つ目）が流れる");
     let end = filler.length;
     [10, 11, 13, 14].forEach((cell, k) => {
       end += c[cell].length + (k ? 3 : 0);
@@ -152,9 +180,12 @@ async function start(g) {
     assert.equal(g.probe.now().articles, 2);
     g.until(() => g.probe.now().state === "result", 400);
     const list = g.probe.list();
-    assert.deepEqual(list.map(r => r.title), ["記事1-0", "記事2-2"], "結果に読んだ記事が順に並ぶ");
+    assert.equal(list.length, 2);
+    assert.ok(/-0$/.test(list[0].title) && /-2$/.test(list[1].title), "結果に読んだ記事が順に並ぶ（1本目は1つ目、2本目は3つ目を選んだ）");
     assert.deepEqual(list.map(r => r.last), [false, true], "ビンゴした記事に印");
-    assert.deepEqual(g.probe.links(), ["https://ja.wikipedia.org/?curid=10", "https://ja.wikipedia.org/?curid=22"], "押すとその記事が開くリンク");
+    const links = g.probe.links();
+    assert.equal(links.length, 2);
+    assert.ok(/^https:\/\/ja\.wikipedia\.org\/\?curid=\d*0$/.test(links[0]) && /curid=\d*2$/.test(links[1]), "押すとその記事が開くリンク: " + links);
     const btn = g.probe.result();
     assert.ok(list[0].y - btn.retry.y >= 63 && list[1].y - list[0].y >= 63, "ボタンと記事の行の間隔");
     g.tap(270, list[0].y); g.step(1);
