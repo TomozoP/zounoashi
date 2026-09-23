@@ -327,7 +327,51 @@
      1回目で題名・閲覧数（の一部）・記事の原稿（記号入りの文章）がそろう。閲覧数は1回で返りきらないので続きを数回取る。
      原稿の記号（枠・表・脚注・リンクの書式など）はゲーム側で取り除いて本文にする。
      テストでは window.__wikiSource に同じ形の偽物を置く。 */
-  var API = "https://ja.wikipedia.org/w/api.php?format=json&formatversion=2&origin=*&action=query";
+  /* ============ ことば（日本語・英語） ============
+     開始画面で選ぶ。はじめはブラウザの言語に合わせ、選んだものはこの端末に覚えておく */
+  var lang = "ja";
+  (function () {
+    try { var saved = localStorage.getItem("wiki-derby-lang"); if (saved === "ja" || saved === "en") { lang = saved; return; } } catch (e) {}
+    lang = /^ja/i.test((window.navigator && navigator.language) || "ja") ? "ja" : "en";
+  })();
+  var WORDS = {
+    ja: {
+      name: "情報量ダービー",
+      left: function (n) { return "あと" + n + "レース"; },
+      oddsNote: "倍率はWikipediaの閲覧数（過去30日）から算出",
+      credit: "出典：Wikipedia（出走馬の記事） CC BY-SA 4.0",
+      won: function (t, p) { return "「" + t + "」にベットして、" + p + "ポイントかせぎました #情報量ダービー"; },
+      lost: function (t) { return "「" + t + "」にベットしましたが勝てませんでした #情報量ダービー"; },
+      score: function (p) { return p + "でした #情報量ダービー"; },
+      article: function (t) { return t + "（Wikipedia）"; }
+    },
+    en: {
+      name: "Info Derby",
+      left: function (n) { return n === 1 ? "1 race left" : n + " races left"; },
+      oddsNote: "Odds are based on Wikipedia page views (last 30 days)",
+      credit: "Source: Wikipedia (the horses' articles), CC BY-SA 4.0",
+      won: function (t, p) { return "I bet on \u201c" + t + "\u201d and won " + p + " points #InfoDerby"; },
+      lost: function (t) { return "I bet on \u201c" + t + "\u201d but didn't win #InfoDerby"; },
+      score: function (p) { return p + " points #InfoDerby"; },
+      article: function (t) { return t + " (Wikipedia)"; }
+    }
+  };
+  function tr() { return WORDS[lang]; }
+  /* 走路の文字: 日本語は1文字ずつ広めに、英語は等幅の字体で詰める */
+  var RUN_FONT = "sans-serif";
+  function applyLang() {
+    CHAR = lang === "en" ? 13 : 22;
+    RUN_FONT = lang === "en" ? "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" : "sans-serif";
+    try { document.documentElement.lang = lang; document.title = tr().name; } catch (e) {}
+  }
+  function setLang(l) {
+    lang = l === "en" ? "en" : "ja";
+    applyLang();
+    try { localStorage.setItem("wiki-derby-lang", lang); } catch (e) {}
+  }
+  function runFontSize(lane) { return Math.min(20, Math.floor(lane * 0.36)); }
+  function wikiHost() { return "https://" + lang + ".wikipedia.org"; }
+  function api() { return wikiHost() + "/w/api.php?format=json&formatversion=2&origin=*&action=query"; }
   var UA = "ZounoashiGames-WikiDerby/1.0 (https://www.zounoashi.com)";
   var N = 8;                                    /* 8頭立て。1頭ずつ別の枠（色）になる */
   function getJSON(url) {
@@ -337,9 +381,10 @@
   }
   /* 出走させない記事: 存命の人物や、事件・事故・災害などを賭けの対象にしないよう、原稿に書かれた分類（カテゴリ）で除く */
   var BANNED = /存命人物|事件|事故|災害|震災|地震|津波|噴火|テロ|殺人|虐殺|自殺|死刑|犯罪|誘拐|暴動|戦争|紛争|空襲|遭難|墜落|沈没|爆発|火災|疫病|パンデミック/;
+  var BANNED_EN = /\bliving people\b|murder|\bkillings?\b|massacre|genocide|assassinat|disasters?\b|accidents?\b|incidents?\b|earthquakes?\b|tsunami|eruptions?\b|terroris|suicides?\b|executions?\b|\bexecuted\b|crimes?\b|criminals?\b|kidnapp|\briots?\b|\bwars?\b|conflicts?\b|bombings?\b|shipwrecks?\b|explosions?\b|\bfires?\b|epidemics?\b|pandemics?\b|\battacks?\b/i;
   function banned(src) {
     var re = /\[\[\s*(?:Category|カテゴリ)\s*:\s*([^\]|]+)/gi, m;
-    while ((m = re.exec(src))) if (BANNED.test(m[1])) return true;
+    while ((m = re.exec(src))) if (BANNED.test(m[1]) || BANNED_EN.test(m[1])) return true;
     return false;
   }
   var PICK = N + 6;                                           /* 除く分を見込んで、少し多めに取る */
@@ -348,7 +393,7 @@
     field: function () {
       var got = [];
       function draw(tries) {                                  /* 足りなければもう1回だけ取り直す */
-        return getJSON(API + "&generator=random&grnnamespace=0&grnlimit=" + PICK +
+        return getJSON(api() + "&generator=random&grnnamespace=0&grnlimit=" + PICK +
                        "&prop=info|pageviews|revisions&rvprop=content&rvslots=main&pvipdays=30").then(function (j) {
           ((j.query && j.query.pages) || []).forEach(function (p) {
             var rv = p.revisions && p.revisions[0], src = rv && rv.slots && rv.slots.main ? rv.slots.main.content : "";
@@ -371,7 +416,7 @@
         var ids = field.map(function (h) { return h.id; }).join("|");
         function more(cont, n) {
           if (n >= 4 || (n > 0 && !cont) || field.every(function (h) { return h.pv != null; })) return field;
-          return getJSON(API + "&prop=pageviews&pvipdays=30&pageids=" + ids + (cont ? "&pvipcontinue=" + encodeURIComponent(cont) : "")).then(function (v) {
+          return getJSON(api() + "&prop=pageviews&pvipdays=30&pageids=" + ids + (cont ? "&pvipcontinue=" + encodeURIComponent(cont) : "")).then(function (v) {
             ((v.query && v.query.pages) || []).forEach(function (p) { if (p.pageviews && byId[p.pageid]) byId[p.pageid].pv = sumViews(p.pageviews); });
             return more(v.continue && v.continue.pvipcontinue, n + 1);
           }, function () { return field; });
@@ -867,6 +912,7 @@
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
     if (minusK) { if (state === S.PLAY && phase === "bet" && btnsIn() > 0) takeBack(); return; }
+    if ((upK || downK) && state === S.INTRO) { setLang(lang === "ja" ? "en" : "ja"); sndPick(); return; }
     if ((left || right) && state === S.INTRO) { players = Math.max(1, Math.min(4, players + (right ? 1 : -1))); sndPick(); return; }
     if (left || right || upK || downK) {
       if (state === S.PLAY && phase === "bet") moveSel(left ? -1 : right ? 1 : 0, upK ? -1 : downK ? 1 : 0);
@@ -886,9 +932,9 @@
       if (h.pay > 0 && (!best || h.pay > best.pay)) best = h;
       if (!big || h.bet > big.bet) big = h;
     });
-    if (best) return "「" + best.title + "」にベットして、" + comma(best.pay) + "ポイントかせぎました #情報量ダービー";   /* そのベットの払い戻し */
-    if (big) return "「" + big.title + "」にベットしましたが勝てませんでした #情報量ダービー";
-    return comma(score) + "でした #情報量ダービー";
+    if (best) return tr().won(best.title, comma(best.pay));   /* そのベットの払い戻し */
+    if (big) return tr().lost(big.title);
+    return tr().score(comma(score));
   }
   function doShare() {
     if (players > 1) return;
@@ -997,7 +1043,7 @@
     if (left > 0) {
       ctx.fillStyle = "#f0cf78";
       ctx.font = "800 22px sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-      ctx.fillText("あと" + left + "レース", W - 16, BAR + 26);
+      ctx.fillText(tr().left(left), W - 16, BAR + 26);
       ctx.textBaseline = "alphabetic";
     }
   }
@@ -1008,7 +1054,7 @@
     drawCredit();                                             /* 馬の名前も倍率もWikipediaのデータなので、ここにも出典 */
     ctx.fillStyle = "rgba(244,239,230,.6)";
     ctx.font = "500 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("倍率はWikipediaの閲覧数（過去30日）から算出", W / 2, H - 38);
+    ctx.fillText(tr().oddsNote, W / 2, H - 38);
     ctx.textBaseline = "alphabetic";
     var inAir = {};
     flyers.forEach(function (f) { if (f.to != null && f.t < f.d) inAir[f.to] = (inAir[f.to] || 0) + 1; });
@@ -1169,8 +1215,8 @@
       }
     }
     /* 走った後の走路に、その記事の本文が頭から1文字ずつ書かれていく（全部書き切ったら止まる） */
-    var fz = Math.min(20, Math.floor(LANE * 0.36));
-    ctx.font = "600 " + fz + "px sans-serif";
+    var fz = runFontSize(LANE);
+    ctx.font = "600 " + fz + "px " + RUN_FONT;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (var h = 0; h < N; h++) {
       /* 文字の下の端を、馬の蹄が着く高さ（影の位置）にそろえる */
@@ -1222,7 +1268,7 @@
   function drawCredit() {
     ctx.fillStyle = "rgba(244,239,230,.6)";
     ctx.font = "500 13px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("出典：Wikipedia（出走馬の記事） CC BY-SA 4.0", W / 2, H - 18);
+    ctx.fillText(tr().credit, W / 2, H - 18);
     ctx.textBaseline = "alphabetic";
   }
   function drawRankBadge(r, x, y, onLight) {
@@ -1243,7 +1289,7 @@
     var w = Math.max(40, ctx.measureText(fit.lines[0]).width);
     return { x: 54, y: y + 3, w: w + 12, h: fr.rh - 6, textW: w };
   }
-  function articleUrl(h) { return "https://ja.wikipedia.org/?curid=" + encodeURIComponent(h.id); }
+  function articleUrl(h) { return wikiHost() + "/?curid=" + encodeURIComponent(h.id); }
   var linkEls = [], linkKey = "";
   function placeLinks() {
     var show = state === S.PLAY && phase === "finish" && horses && pt > 0.35;
@@ -1263,7 +1309,7 @@
       var h = horses[order[r]], t = titleRect(r);
       el.href = articleUrl(h);
       el.textContent = h.title;
-      el.setAttribute("aria-label", h.title + "（Wikipedia）");
+      el.setAttribute("aria-label", tr().article(h.title));
       el.style.left = (t.x / W * 100) + "%"; el.style.width = (t.w / W * 100) + "%";
       el.style.top = (t.y / H * 100) + "%"; el.style.height = (t.h / H * 100) + "%";
     });
@@ -1366,6 +1412,24 @@
     var w = 96, gap = 14, x0 = (W - (w * 4 + gap * 3)) / 2, y = H * 0.97 - 68 - 36 - 64;
     return { x: x0 + (n - 1) * (w + gap), y: y, w: w, h: 64 };
   }
+  /* 言語のボタン（人数のボタンの上） */
+  function langRect(k) {
+    var w = 150, gap = 16, x0 = (W - (w * 2 + gap)) / 2, y = playerRect(1).y - 20 - 52;
+    return { x: x0 + k * (w + gap), y: y, w: w, h: 52 };
+  }
+  var LANGS = ["ja", "en"], LANG_LABEL = { ja: "日本語", en: "English" };
+  function hitLang(x, y) { for (var k = 0; k < 2; k++) if (inside(langRect(k), x, y)) return LANGS[k]; return null; }
+  function drawLangPick() {
+    for (var k = 0; k < 2; k++) {
+      var r = langRect(k), on = lang === LANGS[k];
+      roundRect(r.x, r.y, r.w, r.h, r.h / 2);
+      ctx.fillStyle = on ? "#ffffff" : "rgba(255,255,255,.16)"; ctx.fill();
+      if (on) { ctx.lineWidth = 3; ctx.strokeStyle = "#f0c54e"; ctx.stroke(); }
+      ctx.fillStyle = on ? "#16202e" : "rgba(255,255,255,.85)"; ctx.font = "800 20px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(LANG_LABEL[LANGS[k]], r.x + r.w / 2, r.y + r.h / 2 + 1);
+      ctx.textBaseline = "alphabetic";
+    }
+  }
   function hitPlayers(x, y) { for (var n = 1; n <= 4; n++) if (inside(playerRect(n), x, y)) return n; return 0; }
   function drawPerson(x, y, s, col) {
     ctx.fillStyle = col;
@@ -1386,6 +1450,16 @@
     }
   }
   /* 開始画面: 8頭が本文を書きながら、抜きつ抜かれつ走り続ける（記事はまだ取ってこないので、走路に書く文は決まったもの） */
+  var INTRO_TEXT_EN = [
+    "Horse racing is a sport in which jockeys ride horses to see which is fastest.",
+    "The Derby is widely known as the name of a race for three-year-old horses.",
+    "The Thoroughbred is a horse breed developed over time for racing.",
+    "An encyclopedia is a work that explains knowledge from many fields, entry by entry.",
+    "Wikipedia is an online encyclopedia that anyone can edit.",
+    "A word count is the number of words contained in a piece of writing.",
+    "Information content measures how much information an event carries.",
+    "Horses have lived alongside people for ages, used for travel and carrying loads."
+  ];
   var INTRO_TEXT = [
     "競馬は、騎手が乗った馬の速さを競う競技である。",
     "ダービーは、3歳の馬が争う競走の名前として広く知られる。",
@@ -1403,16 +1477,16 @@
   var thumbIntro = false;                                     /* サムネ撮影: 人数とSTARTを出さず、走路だけ */
   function drawIntro() {
     /* サムネは上の540四方に8頭を収める */
-    var top = thumbIntro ? 8 : 20, bot = thumbIntro ? 532 : playerRect(1).y - 28, ln = (bot - top) / N, s = Math.min(1.3, ln / 44);
+    var top = thumbIntro ? 8 : 20, bot = thumbIntro ? 532 : langRect(0).y - 24, ln = (bot - top) / N, s = Math.min(1.3, ln / 44);
     var cam = INTRO_SPEED * T;
-    var fz = Math.min(20, Math.floor(ln * 0.36));
-    ctx.font = "600 " + fz + "px sans-serif";
+    var fz = runFontSize(ln);
+    ctx.font = "600 " + fz + "px " + RUN_FONT;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (var i = 0; i < N; i++) {
       var y0 = top + i * ln, ty = y0 + ln / 2 + ln * 0.02 + 15 * s - fz * 0.5;   /* 文字の下の端は蹄の高さ */
       ctx.fillStyle = i % 2 ? "rgba(255,255,255,.035)" : "rgba(0,0,0,.06)";
       ctx.fillRect(0, y0, W, ln);
-      var txt = INTRO_TEXT[i] + "　　", hx = introX(i, T);
+      var txt = lang === "en" ? INTRO_TEXT_EN[i] + "   " : INTRO_TEXT[i] + "　　", hx = introX(i, T);
       var end = Math.floor((cam + hx - 30) / CHAR);           /* 馬の少し後ろまで書いてある */
       for (var k = Math.max(0, Math.floor(cam / CHAR) - 1); k <= end; k++) {
         var fresh = Math.max(0, Math.min(1, (end - k) / 4));
@@ -1422,7 +1496,7 @@
     }
     ctx.textBaseline = "alphabetic";
     for (var j = 0; j < N; j++) drawHorse(j, introX(j, T), top + j * ln + ln / 2 + ln * 0.02, T, s);
-    if (!thumbIntro) drawPlayerPick();
+    if (!thumbIntro) { drawLangPick(); drawPlayerPick(); }
   }
 
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（2人以上のときは「もう一度」だけ） */
@@ -1488,11 +1562,13 @@
     now: function () {
       return { state: state, phase: phase, score: score, money: money, players: players, cur: cur,
                monies: P.map(function (p) { return p.money; }), allBets: P.map(function (p) { return p.bets.slice(); }), wonBy: wonBy.slice(), race: raceNo, sel: sel,
-               bets: bets && bets.slice(), speedFx: speedFx, camSpd: camSpd, reveal: revealT, revealed: revealN, buttons: btnsIn(), lobby: lobbyOn, fetches: fetches, share: players > 1 ? null : shareText(), shareShown: !shareButton.hidden, bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
+               bets: bets && bets.slice(), speedFx: speedFx, camSpd: camSpd, reveal: revealT, revealed: revealN, buttons: btnsIn(), lobby: lobbyOn, fetches: fetches, lang: lang, share: players > 1 ? null : shareText(), shareShown: !shareButton.hidden, bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
                horses: horses && horses.map(function (h) { return { title: h.title, len: h.len, pv: h.pv }; }),
                order: order.slice(), won: won, raceT: raceT, cam: cam, W: W, H: H };
     },
     playerButton: function (n) { return center(playerRect(n)); },
+    langButton: function (l) { return center(langRect(LANGS.indexOf(l))); },
+    words: function () { return { left3: tr().left(3), left1: tr().left(1), note: tr().oddsNote, credit: tr().credit, host: wikiHost(), api: api(), char: CHAR, font: RUN_FONT, url: horses && horses[0] ? articleUrl(horses[0]) : null, title: document.title }; },
     card: function (i) { return center(cardRect(i)); },
     plus: function (i) { return center(ctrlRect(i)); },
     ctrl: function (i) { return center(ctrlRect(i)); },
@@ -1555,13 +1631,15 @@
   };
   window.zStartTap(function () { return state === S.INTRO; }, function (e) {
     if (e && e.clientX != null) {
-      var p = atCanvas(e), n = hitPlayers(p.x, p.y);
+      var p = atCanvas(e), n = hitPlayers(p.x, p.y), lg = hitLang(p.x, p.y);
+      if (lg) { if (lang !== lg) { setLang(lg); audioOn(); sndPick(); } return; }         /* 言語を選ぶだけで、始めない */
       if (n) { if (players !== n) { players = n; audioOn(); sndPick(); } return; }   /* 人数を選ぶだけで、始めない */
     }
     startButton.click();
   });
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
   startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  applyLang();
   state = S.INTRO; phase = "intro"; T = 0; pt = 0; money = START_MONEY; shown = money; score = 0; raceNo = 0;
   order = []; odds = []; popRank = []; flyers = []; clearBets();
   startButton.hidden = false;

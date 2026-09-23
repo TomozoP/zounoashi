@@ -419,6 +419,47 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.equal(g.probe.now().horses.length, 8);
   }
 
+  /* 7f. 開始画面で日本語・英語を選べる。英語は英語版Wikipediaから取り、画面の文字・シェア文・記事のリンクも英語 */
+  {
+    const g = open();
+    assert.equal(g.probe.now().lang, 'ja', 'はじめは日本語（ブラウザの言語が分からないとき）');
+    assert.equal(g.probe.words().host, 'https://ja.wikipedia.org');
+    g.press('ArrowDown'); g.step(2);                          /* 画面のタップは台では届かないので、キーで選ぶ（タップはブラウザで確認） */
+    assert.equal(g.probe.now().state, 'intro', '言語を選んでも始まらない');
+    let w = g.probe.words();
+    assert.equal(g.probe.now().lang, 'en');
+    assert.equal(w.host, 'https://en.wikipedia.org', '英語版Wikipediaから取る');
+    assert.ok(w.api.startsWith('https://en.wikipedia.org/w/api.php?'));
+    assert.equal(w.title, 'Info Derby');
+    assert.equal(w.left3, '3 races left'); assert.equal(w.left1, '1 race left');
+    assert.ok(w.char < 22, '英語は文字の間隔を詰める');
+    assert.ok(/monospace/.test(w.font), '英語は等幅の字体');
+    g.press('ArrowDown');
+    assert.equal(g.probe.now().lang, 'ja', 'キーでも切り替えられる');
+    g.press('ArrowUp');
+    assert.equal(g.probe.now().lang, 'en');
+    globalThis.__derbyFake.lens = [1000, 9000, 2000, 3000, 4000, 5000, 6000, 7000];
+    globalThis.__derbyFake.pvs = [100, 100, 100, 100, 100, 100, 100, 100];
+    await start(g);
+    const title = g.probe.now().horses[1].title, odd = g.probe.now().odds[1];
+    for (let k = 0; k < 2; k++) at(g, g.probe.plus(1));
+    at(g, g.probe.startButton()); g.step(1);
+    g.until(() => g.probe.now().phase === 'finish', 3000);
+    assert.ok(g.probe.words().url.startsWith('https://en.wikipedia.org/?curid='), '記事のリンクも英語版');
+    for (let r = 0; r < 2; r++) { await next(g); at(g, g.probe.plus(0)); at(g, g.probe.startButton()); g.step(1); g.until(() => g.probe.now().phase === 'finish', 3000); }
+    await next(g);
+    const pay = Math.floor(200 * odd).toLocaleString('en-US');
+    assert.equal(g.probe.now().share, 'I bet on \u201c' + title + '\u201d and won ' + pay + ' points #InfoDerby');
+    at(g, g.probe.result().retry); g.step(1); await flush(); g.step(1); ready(g);
+    assert.equal(g.probe.now().lang, 'en', 'もう一度も英語のまま');
+    const b = g.probe.banned;
+    assert.equal(b('[[Category:Living people]]'), true, 'Living people');
+    assert.equal(b('[[Category:2011 disasters in Japan]]'), true, 'disasters');
+    assert.equal(b('[[Category:Aviation accidents and incidents in 1985]]'), true, 'accidents');
+    assert.equal(b('[[Category:Wars involving France]]'), true, 'wars');
+    assert.equal(b('[[Category:Software companies]]\n[[Category:Awards established in 1990]]'), false, 'war などを語の一部では拾わない');
+  }
+
   /* 7b. 2人以上: 開始画面で人数を選び、レースごとに順番に賭ける。手持ちがなくなった人は飛ばす */
   {
     const g = open();
@@ -496,10 +537,10 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
   for (const shape of load.SHAPES) {
     const g = open(shape);
     {
-      const Hi = g.probe.now().H, pb = [1, 2, 3, 4].map(n => g.probe.playerButton(n)), startC = { x: 270, y: Hi * 0.97 - 34 };
+      const Hi = g.probe.now().H, pb = [1, 2, 3, 4].map(n => g.probe.playerButton(n)).concat(['ja', 'en'].map(l => g.probe.langButton(l))), startC = { x: 270, y: Hi * 0.97 - 34 };
       const all = pb.concat([startC]);
       for (let a = 0; a < all.length; a++) for (let b = a + 1; b < all.length; b++)
-        assert.ok(Math.hypot(all[a].x - all[b].x, all[a].y - all[b].y) >= 63, shape.join('x') + ' 人数ボタンとSTARTの間隔');
+        assert.ok(Math.hypot(all[a].x - all[b].x, all[a].y - all[b].y) >= 63, shape.join('x') + ' 言語・人数ボタンとSTARTの間隔');
     }
     await start(g);
     const H = g.probe.now().H;
