@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="sakanahen-bingo-1790204666665">
+<meta name="preview-version" content="sakanahen-bingo-1790206258591">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>魚へんビンゴ</title>
@@ -24,12 +24,12 @@
   <canvas id="c"></canvas>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/view.js?v=sakanahen-bingo-1790204666665"></script>
-<script src="../games/audio.js?v=sakanahen-bingo-1790204666665"></script>
-<script src="../games/share.js?v=sakanahen-bingo-1790204666665"></script>
-<script src="../games/result-actions.js?v=sakanahen-bingo-1790204666665"></script>
-<script src="../games/action-icons.js?v=sakanahen-bingo-1790204666665"></script>
-<script src="../games/pad.js?v=sakanahen-bingo-1790204666665"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/view.js?v=sakanahen-bingo-1790206258591"></script>
+<script src="../games/audio.js?v=sakanahen-bingo-1790206258591"></script>
+<script src="../games/share.js?v=sakanahen-bingo-1790206258591"></script>
+<script src="../games/result-actions.js?v=sakanahen-bingo-1790206258591"></script>
+<script src="../games/action-icons.js?v=sakanahen-bingo-1790206258591"></script>
+<script src="../games/pad.js?v=sakanahen-bingo-1790206258591"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* 魚へんビンゴ
 
@@ -38,7 +38,7 @@
    違う漢字を押すと、その読みは流れてしまう。カードに無いと思ったらタイマーの右のスキップボタン（キーは X）で次へ進む。
    ビンゴまでに出た読みの数が結果（少ないほどよい）。
    魚・木・金・鳥・虫を全部ビンゴすると「難」（難読漢字）のカードが出る。
-   カードごとの最高記録（いちばん少ない回数）はブラウザに残し、選ぶ丸の下に出す。
+   クリアしたカードはブラウザに残し、選ぶ丸にチェックの印を付ける（回数は残さない）。
    ライフは3つ。違う字を押す・カードにある字を開けられずに流す、で1つ減り、なくなると終わり。
 
    Wikipediaビンゴ（games/_wiki-bingo）のカードと演出を流用している。 */
@@ -175,17 +175,28 @@
   var BASE = 5;                                 /* 最初から選べるカードの数。全部ビンゴすると次（難）が出る */
 
   /* ============ 記録 ============
-     カードごとの最高記録（ビンゴまでのいちばん少ない回数）。ブラウザに残す。
+     クリアしたカード（ビンゴできたか）だけをブラウザに残す。回数は残さない。
      保存できない環境（プライベートモードなど）でも、その場では覚えておく。 */
-  var SAVE_KEY = "sakanahen-bingo-best";
-  var best = {};
-  try { best = JSON.parse(window.localStorage.getItem(SAVE_KEY) || "{}") || {}; } catch (e) { best = {}; }
-  function saveBest() { try { window.localStorage.setItem(SAVE_KEY, JSON.stringify(best)); } catch (e) {} }
-  /* 確かめる用: 手元（localhost）だけ、カードを選ぶ画面で F8 を押すと難が出る（もう一度で戻る）。
-     記録には何も書かない */
+  var SAVE_KEY = "sakanahen-bingo-clear", OLD_KEY = "sakanahen-bingo-best";
+  var cleared = {};                             /* クリアしたカード { 魚: true, … } */
+  try {
+    cleared = JSON.parse(window.localStorage.getItem(SAVE_KEY) || "{}") || {};
+    var old = JSON.parse(window.localStorage.getItem(OLD_KEY) || "{}") || {};   /* 前の回数の記録は、クリア済みとして引き継ぐ */
+    for (var om in old) if (old[om]) cleared[om] = true;
+  } catch (e) { cleared = {}; }
+  function saveCleared() { try { window.localStorage.setItem(SAVE_KEY, JSON.stringify(cleared)); } catch (e) {} }
+  /* 確かめる用（手元 localhost だけの F8）。
+     カードを選ぶ画面では、難を出す／戻す（記録には何も書かない）。
+     遊んでいる間は、出ている読みの字がカードにあれば開け、無ければスキップする */
   var debugNan = false;
   function isLocal() {
     try { return /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname); } catch (e) { return false; }
+  }
+  function debugAnswer() {
+    if (phase !== "call") return;
+    var at = card.indexOf(cur.k);
+    if (at >= 0 && !open[at]) pickCell(at);
+    else { skipT = T; endCall("pass"); }
   }
   function toggleDebugNan() {
     debugNan = !debugNan;
@@ -194,12 +205,11 @@
   }
   function unlocked() {
     if (debugNan) return true;
-    for (var i = 0; i < BASE; i++) if (!best[SETS[i].mark]) return false;
+    for (var i = 0; i < BASE; i++) if (!cleared[SETS[i].mark]) return false;
     return true;
   }
   function setCount() { return unlocked() ? SETS.length : BASE; }
   var unlockT = -9;                             /* 難が出た瞬間（丸がはじけて出てくる） */
-  var newBest = false;                          /* 今回が最高記録か */
   function FISH() { return SETS[setNo].list; }
   var DRAW_SPIN = 0.55, DRAW_ROLL = 0.87, DRAW_TIME = 1.2;   /* 抽選機が回る → 玉が転がり出る → 玉が大きく寄ってくる、の区切り（秒） */
   var CALL_TIME = 10;                           /* 1つの読みを出しておく秒数 */
@@ -255,7 +265,7 @@
     for (var i = 0; i < 25; i++) { open.push(i === 12); openT.push(i === 12 ? 9 : -1); missT.push(-9); wrongT.push(-9); }
     bingoLine = null; reached = {}; reachFx = []; shakeT = -9; sparks = [];
     calls = 0; cur = null; recent = []; outcome = null;
-    lives = LIVES; lifeT = -9; failed = false; newBest = false;
+    lives = LIVES; lifeT = -9; failed = false;
     nextCall();
   }
 
@@ -300,13 +310,13 @@
       if (n === 4 && !reached[l]) { reached[l] = true; reachFx.push({ line: LINES[l], t: T }); shakeT = T; sndReach(); }
     }
   }
-  /* ビンゴした回数を記録する。これで5つ揃ったら難が出る */
+  /* ビンゴしたらクリアとして残す。5つ揃ったら難が出る */
   function record() {
     var m = SETS[setNo].mark, was = unlocked();
-    newBest = !best[m] || score < best[m];
-    if (newBest) { best[m] = score; saveBest(); }
+    if (!cleared[m]) { cleared[m] = true; saveCleared(); }
     if (!was && unlocked()) unlockT = -1;       /* カード選びに戻った時に、丸が出てくる */
   }
+
   /* リーチの待ち: 4つ開いた列の、残り1つのマス */
   function waiting() {
     var w = [];
@@ -414,7 +424,12 @@
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); });
 
   window.addEventListener("keydown", function (e) {
-    if (e.key === "F8" && isLocal()) { e.preventDefault(); if (state === S.INTRO && !e.repeat) toggleDebugNan(); return; }
+    if (e.key === "F8" && isLocal()) {
+      e.preventDefault();
+      if (state === S.INTRO && !e.repeat) toggleDebugNan();
+      else if (state === S.PLAY) debugAnswer();
+      return;
+    }
     var esc = e.key === "Escape";
     if ((e.key === "x" || e.key === "X") && state === S.PLAY) {   /* X でスキップ */
       e.preventDefault();
@@ -593,10 +608,10 @@
       a += (drumA * 1.15 + b.off - a) * spin;                          /* 回っている間は振り回される */
       var lim = Math.sqrt(Math.max(0, (1 - br) * (1 - br) - b.u * b.u));
       var rr = lim * (1 - spin * (1 - b.rr));                           /* 回っている間は内側にも散る */
-      return { q: drumPoint(G, b.u, rr * Math.cos(a), rr * Math.sin(a)) };
+      return { q: drumPoint(G, b.u, rr * Math.cos(a), rr * Math.sin(a)), c: ballColorAt(b.u * 10 + b.rest * 7) };
     });
     bs.sort(function (p1, p2) { return p2.q.z - p1.q.z; });
-    bs.forEach(function (b) { drawBall(b.q.x, b.q.y, DR * br * b.q.k, TH().ball); });
+    bs.forEach(function (b) { drawBall(b.q.x, b.q.y, DR * br * b.q.k, b.c); });
     wires(true);
     /* 軸と取っ手（かごと一緒に回る） */
     var hub = drumPoint(G, 1.14, 0, 0);
@@ -647,7 +662,7 @@
     ctx.save(); ctx.globalAlpha = a;
     var back = rv > 0 ? cur.k : null;              /* 裏の漢字は答えを出すときだけ（転がる途中や読みの間に見えないように） */
     backShown = !!back;
-    drawReadingBall(x, y, r, TH().ball, cur.r, lon, back, dim ? q : 0);
+    drawReadingBall(x, y, r, ballColorAt(0), cur.r, lon, back, dim ? q : 0);
     ctx.restore();
   }
   /* 読みの玉: 色の玉の表面に、ひらがなをそのまま貼る（白い字に濃い縁取り）。裏には正解の漢字。
@@ -733,7 +748,7 @@
   /* 紙のビンゴカード。漢字はミシン目の丸の上に刷ってあり、当たったらその丸を押し抜いて穴にする */
   var PAPER = "#fbf5e6", INK = "#1d2a44";
   /* カードごとの見た目。SETS と同じ並び。
-     bg: 背景 / rim: 外枠 / chip: 選ぶ丸の色 / sparks: 開けたときの火花 / ball: 抽選の玉の色 / mark: 真ん中の漢字の色（無ければ chip） / band: 帯の飾り */
+     bg: 背景 / rim: 外枠 / chip: 選ぶ丸の色 / sparks: 開けたときの火花 / ball: 抽選の玉の色 / rainbow: 虹色（枠・選ぶ丸・玉が虹色になり、ゆっくり色が流れる） / mark: 真ん中の漢字の色（無ければ chip） / band: 帯の飾り */
   var THEMES = [
     { bg: "#1d231b", rim: "#7a5230", chip: "#7a5230", ball: "#9a6a3c", grain: true, sparks: ["#9ccc5a", "#e2f0a8", "#f2b84b", "#6fae3e"],   /* 木: 木目の枠と葉 */
       band: function (x, y, k) { drawLeaf(x, y, 8, k % 2 ? "#e7c46a" : "#9ccc5a", k % 2 ? 0.5 : -0.5); } },
@@ -745,16 +760,27 @@
       band: function (x, y, k) { drawFish(x, y, 7, k % 2 ? "#bfe6f2" : "#fff3dc", k % 2 ? -1 : 1); } },
     { bg: "#1a1b2c", rim: "#b8483a", chip: "#b8483a", ball: "#d0574a", sparks: ["#ffffff", "#ffd1c4", "#ffe9a8", "#f28b74"],   /* 鳥: 朱色の枠と小鳥 */
       band: function (x, y, k) { drawBird(x, y + 1, 7, "#fff3dc", k % 2 ? -1 : 1); } },
-    { bg: "#16121d", rim: "lacquer", chip: "#3a2748", ball: "#6b4a8c", sparks: ["#ffe08a", "#fff6cf", "#c9a0ff", "#ff9ad5"],    /* 難: 金ぶちの黒漆と星 */
-      band: function (x, y, k) { drawStar(x, y, k % 2 ? 6 : 8, k % 2 ? "#c9a0ff" : "#ffe08a"); } }
+    { bg: "#16121d", rim: "rainbow", chip: "#8a5cc0", ball: "#8a5cc0", mark: "#5b3a7a", rainbow: true,
+      sparks: ["#ff5a5f", "#ffd24a", "#5ad07a", "#4aa8ff"],                                                     /* 難: 虹色 */
+      band: function (x, y, k) { drawStar(x, y, k % 2 ? 6 : 8, hueHex(k * 40 + T * 60, 80, 70)); } }
   ];
   function TH() { return THEMES[setNo]; }
+  /* 色相（度）から色。虹色に使う */
+  function hueHex(h, s, l) {
+    h = ((h % 360) + 360) % 360; s /= 100; l /= 100;
+    var a = s * Math.min(l, 1 - l);
+    function f(n) { var k = (n + h / 30) % 12, c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return ("0" + Math.round(c * 255).toString(16)).slice(-2); }
+    return "#" + f(0) + f(8) + f(4);
+  }
+  function rainbowFill(x0, y0, x1, y1, shift) {
+    var g = ctx.createLinearGradient(x0, y0, x1, y1);
+    for (var i = 0; i <= 6; i++) g.addColorStop(i / 6, hueHex(i * 60 + shift, 75, 58));
+    return g;
+  }
+  /* 玉の色。虹色のカードでは玉ごとに色がずれて、ゆっくり流れる */
+  function ballColorAt(i) { return TH().rainbow ? hueHex(i * 26 + T * 40, 70, 56) : TH().ball; }
   function rimFill(F) {
-    if (TH().rim === "lacquer") {               /* 黒漆: 深い紫から黒へ */
-      var l = ctx.createLinearGradient(F.x, F.y, F.x, F.y + F.h);
-      l.addColorStop(0, "#3a2748"); l.addColorStop(1, "#0e0a14");
-      return l;
-    }
+    if (TH().rim === "rainbow") return rainbowFill(F.x, F.y, F.x + F.w, F.y + F.h, T * 30);
     if (TH().rim !== "metal") return TH().rim;
     var g = ctx.createLinearGradient(F.x, F.y, F.x + F.w, F.y + F.h);
     g.addColorStop(0, "#8a5f17"); g.addColorStop(0.3, "#e9c46a"); g.addColorStop(0.5, "#fff0b8");
@@ -772,8 +798,8 @@
     ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
     roundRect(F.x, F.y, F.w, F.h, 16); ctx.fillStyle = rimFill(F); ctx.fill();
     ctx.restore();
-    if (TH().rim === "lacquer") {               /* 金のふち */
-      ctx.lineWidth = 3; ctx.strokeStyle = "#e9c46a";
+    if (TH().rim === "rainbow") {               /* 白いふち */
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,.7)";
       roundRect(F.x + 1.5, F.y + 1.5, F.w - 3, F.h - 3, 15); ctx.stroke();
     }
     if (TH().grain) {                                       /* 木目 */
@@ -1046,23 +1072,33 @@
         ctx.restore();
         ctx.translate(r.x, r.y); ctx.scale(pop, pop); ctx.translate(-r.x, -r.y);
       }
+      var chip = THEMES[i].rainbow ? rainbowFill(r.x - r.r, r.y - r.r, r.x + r.r, r.y + r.r, T * 60) : THEMES[i].chip;
       ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
-      ctx.fillStyle = on ? PAPER : THEMES[i].chip; ctx.fill();
-      ctx.lineWidth = on ? 6 : 2; ctx.strokeStyle = on ? THEMES[i].chip : "rgba(255,255,255,.25)"; ctx.stroke();
-      ctx.fillStyle = on ? INK : "rgba(255,248,235,.92)";
+      ctx.fillStyle = on ? PAPER : chip; ctx.fill();
+      ctx.lineWidth = on ? 6 : 2; ctx.strokeStyle = on ? chip : "rgba(255,255,255,.25)"; ctx.stroke();
       ctx.font = "700 40px " + KANJI_FONT;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      if (THEMES[i].rainbow && !on) {           /* 虹の上では字に縁取り */
+        ctx.lineWidth = 4; ctx.lineJoin = "round"; ctx.strokeStyle = "rgba(20,24,36,.7)";
+        ctx.strokeText(SETS[i].mark, r.x, r.y + 2);
+      }
+      ctx.fillStyle = on ? INK : "rgba(255,248,235,.95)";
       ctx.fillText(SETS[i].mark, r.x, r.y + 2);
       ctx.restore();
-      var b = best[SETS[i].mark];               /* 最高記録 */
-      if (b) {
-        ctx.fillStyle = "rgba(255,248,235,.85)";
-        ctx.font = "800 20px sans-serif";
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(String(b), r.x, r.y + r.r + 20);
-      }
+      if (cleared[SETS[i].mark]) drawCheck(r.x + r.r * 0.74, r.y - r.r * 0.74);   /* クリアした印 */
       ctx.textBaseline = "alphabetic";
     });
+  }
+
+  /* クリアした印: 緑の丸に白いチェック */
+  function drawCheck(x, y) {
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2);
+    ctx.fillStyle = "#4caf50"; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = "#0f141d"; ctx.stroke();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath(); ctx.moveTo(x - 5, y + 0.5); ctx.lineTo(x - 1.5, y + 4); ctx.lineTo(x + 5.5, y - 4); ctx.stroke();
+    ctx.restore();
   }
 
   /* 結果画面。場面を暗くして、中央に数字と「もう一度」「Xでシェア」 */
@@ -1121,7 +1157,7 @@
     now: function () {
       return { state: state, phase: phase, score: score, calls: calls, card: card && card.slice(), open: open && open.slice(),
                call: cur && { kanji: cur.k, reading: cur.r }, outcome: outcome, bingo: bingoLine && bingoLine.slice(),
-               set: SETS[setNo].mark, best: JSON.parse(JSON.stringify(best)), unlocked: unlocked(), newBest: newBest, lives: lives, failed: failed, waiting: waiting(), reaches: reachFx.length, cursor: cursor, keyMode: keyMode, W: W, H: H };
+               set: SETS[setNo].mark, cleared: JSON.parse(JSON.stringify(cleared)), unlocked: unlocked(), lives: lives, failed: failed, waiting: waiting(), reaches: reachFx.length, cursor: cursor, keyMode: keyMode, W: W, H: H };
     },
     fish: function () { return FISH().map(function (f) { return { kanji: f.k, reading: f.r }; }); },
     sets: function () { return SETS.map(function (s) { return { mark: s.mark, list: s.list.map(function (f) { return { kanji: f.k, reading: f.r }; }) }; }); },
@@ -1198,10 +1234,10 @@
 <script>
 if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = "../games/_tools/recorder-ui.js?v=sakanahen-bingo-1790204666665";
+  recorderScript.src = "../games/_tools/recorder-ui.js?v=sakanahen-bingo-1790206258591";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=sakanahen-bingo-1790204666665"></script>
+<script src="./auto-reload.js?v=sakanahen-bingo-1790206258591"></script>
 </body>
 </html>
