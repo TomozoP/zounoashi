@@ -201,7 +201,7 @@
   var state, phase, pt, T, score, money, shown, raceNo, horses, order, rankOf, odds, popRank, bets, sel, keyMode = false,
       flyers, raceT, prog, finishT, nextField, round = 0, retry, wobble, won, hoofT, crowdT, cheered, cam;
 
-  var BAR, LIST, CTRL, STARTB, TRACK, LANE;
+  var BAR, LIST, CTRL, STARTB, RESETB, TRACK, LANE;
   function place() {
     BAR = 14;
     var rowH = Math.max(22, Math.min(38, Math.floor((H - 76 - 4 * 64 - 12 - 90 - 14) / 12)));
@@ -210,16 +210,15 @@
     var pitch = Math.max(64, Math.min(84, Math.floor((H - cy - 90 - 14) / 4)));
     CTRL = { x: 16, y: cy, cols: 3, cw: (W - 32 - 16) / 3, pitch: pitch, h: pitch - 8 };
     STARTB = { x: W / 2 - 110, y: cy + 4 * pitch + 10, w: 220, h: 64 };
+    RESETB = { x: W - 16 - 72, y: STARTB.y, w: 72, h: 64 };
     TRACK = { top: 92, bottom: H - 40 };
     LANE = Math.floor((TRACK.bottom - TRACK.top) / N);
   }
   /* 馬名の一覧の1行（押しても何も起きない） */
   function cardRect(i) { return { x: LIST.x, y: LIST.y + i * LIST.rh, w: LIST.w, h: LIST.rh }; }
-  /* 賭けるボタンの枠。馬番の丸・−・賭けた額・＋（− と ＋ の中心は85、隣の枠の − とは87離れる） */
+  /* 賭けるボタン。1頭に1つで、押すたびに100賭ける。馬番・倍率・賭けた額を出す */
   function ctrlRect(i) { var c = i % CTRL.cols, r = Math.floor(i / CTRL.cols); return { x: CTRL.x + c * (CTRL.cw + 8), y: CTRL.y + r * CTRL.pitch, w: CTRL.cw, h: CTRL.h }; }
   function rowY(i) { var b = ctrlRect(i); return b.y + b.h / 2; }
-  function minusRect(i) { var c = ctrlRect(i); return { x: c.x + 32, y: rowY(i) - 18, w: 44, h: 36 }; }
-  function plusRect(i) { var c = ctrlRect(i); return { x: c.x + c.w - 46, y: rowY(i) - 18, w: 42, h: 36 }; }
   function pileRect() { return { x: 16, y: BAR, w: 190, h: 50 }; }
   function nextRect() { return { x: W / 2 - 100, y: H - 96, w: 200, h: 60 }; }
   function retryRect() { return { x: W / 2 - 50, y: H * 0.42 - 30, w: 100, h: 60 }; }
@@ -268,8 +267,7 @@
 
   /* ============ 賭ける ============ */
   /* 下の段の −・＋ ボタン（中心どうしは111離れる。隣の枠のボタンとも63以上離れる） */
-  function chipAt(i) { var c = ctrlRect(i); return { x: c.x + 97, y: rowY(i) }; }
-  function grow(r, p) { return { x: r.x - p, y: r.y - p, w: r.w + p * 2, h: r.h + p * 2 }; }
+  function chipAt(i) { var c = ctrlRect(i); return { x: c.x + c.w - 26, y: rowY(i) }; }
   function pileAt() { return { x: 40, y: BAR + 26 }; }
   function bet(i) {
     if (state !== S.PLAY || phase !== "bet") return;
@@ -277,14 +275,6 @@
     money -= UNIT; bets[i] += UNIT;
     var p = pileAt(), c = chipAt(i);
     flyers.push({ x0: p.x, y0: p.y, x1: c.x, y1: c.y, t: 0, d: 0.18, to: i });
-    sndChip();
-  }
-  function unbet(i) {
-    if (state !== S.PLAY || phase !== "bet") return;
-    if (bets[i] < UNIT) { sndNo(); return; }
-    bets[i] -= UNIT; money += UNIT;
-    var p = pileAt(), c = chipAt(i);
-    flyers.push({ x0: c.x, y0: c.y, x1: p.x, y1: p.y, t: 0, d: 0.2 });
     sndChip();
   }
   function takeBack() {
@@ -391,12 +381,12 @@
     if (phase === "error") { if (x == null || inside(retryRect(), x, y)) { var f = retry; retry = null; if (f) f(); } return; }
     if (phase === "finish") { nextRace(); return; }
     if (phase !== "bet") return;
-    if (x == null) { if (sel === N) startRace(); else bet(sel); return; }
+    if (x == null) { if (sel === N) startRace(); else if (sel === N + 1) takeBack(); else bet(sel); return; }
     if (inside(pileRect(), x, y)) { takeBack(); return; }
     if (inside(STARTB, x, y)) { startRace(); return; }
+    if (inside(RESETB, x, y)) { takeBack(); return; }
     for (var k = 0; k < N; k++) {
-      if (inside(grow(plusRect(k), 4), x, y)) { sel = k; bet(k); return; }
-      if (inside(grow(minusRect(k), 4), x, y)) { sel = k; unbet(k); return; }
+      if (inside(ctrlRect(k), x, y)) { sel = k; bet(k); return; }
     }
   }
   function move() {}
@@ -405,7 +395,8 @@
   /* 矢印キー: 12頭は2列×6段。いちばん下からさらに下はスタート */
   function moveSel(dx, dy) {
     var cols = CTRL.cols, rows = Math.ceil(N / cols);
-    if (sel === N) { if (dy < 0) sel = N - cols; return; }
+    if (sel === N + 1) { if (dx < 0) sel = N; else if (dy < 0) sel = N - 1; return; }   /* リセット */
+    if (sel === N) { if (dy < 0) sel = N - cols; else if (dx > 0) sel = N + 1; return; }
     var c = sel % cols, r = Math.floor(sel / cols);
     if (dx) { sel = r * cols + (c + dx + cols) % cols; return; }
     r += dy;
@@ -430,12 +421,12 @@
     var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
     var upK = e.key === "ArrowUp" || e.key === "w" || e.key === "W";
     var downK = e.key === "ArrowDown" || e.key === "s" || e.key === "S";
-    var minusK = e.key === "Backspace" || e.key === "Delete" || e.key === "-" || e.key === "x" || e.key === "X";
+    var minusK = e.key === "Backspace" || e.key === "Delete";   /* リセット */
     if (!esc && !go && !left && !right && !upK && !downK && !minusK) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
-    if (minusK) { if (state === S.PLAY && phase === "bet" && sel < N) unbet(sel); return; }
+    if (minusK) { if (state === S.PLAY && phase === "bet") takeBack(); return; }
     if (left || right || upK || downK) {
       if (state === S.PLAY && phase === "bet") moveSel(left ? -1 : right ? 1 : 0, upK ? -1 : downK ? 1 : 0);
       return;
@@ -573,24 +564,34 @@
       var b2 = ctrlRect(j), ry = rowY(j), ap = Math.min(1, Math.max(0, (pt - 0.2 - j * 0.02) / 0.2));
       ctx.save();
       ctx.globalAlpha = ap;
+      var can = money >= UNIT;
       roundRect(b2.x, b2.y, b2.w, b2.h, 12);
-      ctx.fillStyle = "rgba(6,20,12,.55)"; ctx.fill();
-      ctx.lineWidth = bets[j] ? 3 : 1.5; ctx.strokeStyle = bets[j] ? "#f0c54e" : "rgba(255,255,255,.14)"; ctx.stroke();
+      ctx.fillStyle = bets[j] ? "#fff6d8" : "#f7f3ea"; ctx.fill();
+      if (bets[j]) { ctx.lineWidth = 3; ctx.strokeStyle = "#e0a82a"; ctx.stroke(); }
       if (keyMode && sel === j) { ctx.lineWidth = 4; ctx.strokeStyle = "#ffffff"; ctx.stroke(); }
-      drawNum(j, b2.x + 16, ry, 11);
-      drawPM(minusRect(j), false, bets[j] >= UNIT);
-      drawPM(plusRect(j), true, money >= UNIT);
+      if (!can && !bets[j]) { ctx.fillStyle = "rgba(0,0,0,.28)"; ctx.fill(); }
+      drawNum(j, b2.x + 18, ry, 12);
+      ctx.fillStyle = "#16202e";
+      ctx.font = "900 " + (odds[j] >= 100 ? 14 : 16) + "px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(oddsText(odds[j]), b2.x + 36, ry + 1);
       var shownBet = bets[j] - (inAir[j] || 0) * UNIT;
-      ctx.textBaseline = "middle";
-      if (shownBet > 0) {
-        ctx.fillStyle = "#f7cc71"; ctx.font = "900 " + (shownBet >= 1000 ? 13 : 15) + "px sans-serif"; ctx.textAlign = "center";
-        ctx.fillText(comma(shownBet), chipAt(j).x, ry + 1);
-      } else {
-        ctx.fillStyle = "rgba(255,255,255,.25)"; ctx.fillRect(chipAt(j).x - 7, ry, 14, 2);
+      if (shownBet > 0) {                                     /* 賭けた額 */
+        ctx.fillStyle = "#a8690c"; ctx.font = "900 15px sans-serif"; ctx.textAlign = "right";
+        ctx.fillText(comma(shownBet), b2.x + b2.w - 10, ry + 1);
       }
       ctx.textBaseline = "alphabetic";
       ctx.restore();
     }
+    /* リセット: 賭けた分を全部戻す（丸い戻り矢印） */
+    var rb = RESETB;
+    ctx.save();
+    ctx.globalAlpha = totalBet() ? 1 : 0.4;
+    roundRect(rb.x, rb.y, rb.w, rb.h, rb.h / 2);
+    ctx.fillStyle = "rgba(255,255,255,.22)"; ctx.fill();
+    if (keyMode && sel === N + 1) { ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71"; ctx.stroke(); }
+    ctx.fillStyle = "#ffffff";
+    if (window.zActionIcon) window.zActionIcon(ctx, "もう一度", rb.x + rb.w / 2, rb.y + rb.h / 2, 30);
+    ctx.restore();
     /* スタート: 市松模様の旗 */
     var b = STARTB, ww = wobble > 0 ? Math.sin(wobble * 60) * wobble * 14 : 0;
     ctx.save();
@@ -600,19 +601,6 @@
     ctx.fillStyle = "#fff"; ctx.fill();
     if (keyMode && sel === N) { ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71"; ctx.stroke(); }
     drawFlag(b.x + b.w / 2, b.y + b.h / 2);
-    ctx.restore();
-  }
-  /* −・＋ ボタン。押せないときは薄く */
-  function drawPM(r, plus, on) {
-    ctx.save();
-    ctx.globalAlpha = on ? 1 : 0.3;
-    roundRect(r.x, r.y, r.w, r.h, 12);
-    ctx.fillStyle = plus ? "#ffffff" : "rgba(255,255,255,.2)"; ctx.fill();
-    ctx.strokeStyle = plus ? "#16202e" : "#ffffff"; ctx.lineWidth = 3.4; ctx.lineCap = "round";
-    var cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-    ctx.beginPath(); ctx.moveTo(cx - 9, cy); ctx.lineTo(cx + 9, cy);
-    if (plus) { ctx.moveTo(cx, cy - 9); ctx.lineTo(cx, cy + 9); }
-    ctx.stroke();
     ctx.restore();
   }
   function drawFlag(x, y) {
@@ -882,9 +870,9 @@
                order: order.slice(), won: won, raceT: raceT, cam: cam, W: W, H: H };
     },
     card: function (i) { return center(cardRect(i)); },
-    plus: function (i) { return center(plusRect(i)); },
+    plus: function (i) { return center(ctrlRect(i)); },
     ctrl: function (i) { return center(ctrlRect(i)); },
-    minus: function (i) { return center(minusRect(i)); },
+    resetButton: function () { return center(RESETB); },
     startButton: function () { return center(STARTB); },
     pile: function () { return center(pileRect()); },
     next: function () { return center(nextRect()); },

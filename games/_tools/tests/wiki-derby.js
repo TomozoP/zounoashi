@@ -1,4 +1,4 @@
-/* ウィキペディアダービー: 通信の代わりに偽の出走馬を差し込み、＋−で賭ける・戻す・倍率・文字を出し切って止まるレース・着順・払い戻し・3レース・キー・間隔・通信失敗を確かめる。 */
+/* ウィキペディアダービー: 通信の代わりに偽の出走馬を差し込み、1頭1ボタンで賭ける・リセット・倍率・文字を出し切って止まるレース・着順・払い戻し・3レース・キー・間隔・通信失敗を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
 const file = 'games/_wiki-derby/index.html';
@@ -69,18 +69,11 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.equal(now.money, 700);
     assert.equal(now.bets[3], 200);
     assert.equal(now.bets[7], 100);
-    at(g, g.probe.minus(3)); g.step(10);
-    assert.equal(g.probe.now().bets[3], 100, '−で100減る');
-    assert.equal(g.probe.now().money, 800);
-    at(g, g.probe.minus(5)); g.step(10);
-    assert.equal(g.probe.now().money, 800, '賭けていない馬の−では何も起きない');
     at(g, g.probe.card(4)); g.step(10);
     assert.equal(g.probe.now().bets[4], 0, '馬名の一覧を押しても賭けない');
-    at(g, g.probe.ctrl(4)); g.step(10);
-    assert.equal(g.probe.now().bets[4], 0, 'ボタンの枠の真ん中（賭けた額）を押しても賭けない');
-    at(g, g.probe.pile()); g.step(30);
+    at(g, g.probe.resetButton()); g.step(30);
     now = g.probe.now();
-    assert.equal(now.money, 1000, '手元を押すと全部戻る');
+    assert.equal(now.money, 1000, 'リセットで全部戻る');
     assert.equal(now.bet, 0);
     for (let i = 0; i < 13; i++) at(g, g.probe.plus(i % 12));
     assert.equal(g.probe.now().money, 0, '手持ちより多くは賭けられない');
@@ -179,9 +172,14 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     g.press('ArrowDown'); g.press(' '); g.press(' ');
     assert.equal(g.probe.now().bets[4], 200, '↓で5番（3列なので2番の下は5番）');
     g.press('Backspace');
-    assert.equal(g.probe.now().bets[4], 100, 'Backspaceで−');
+    assert.equal(g.probe.now().bet, 0, 'Backspaceでリセット');
+    g.press(' ');
+    assert.equal(g.probe.now().bets[4], 100);
     for (let i = 0; i < 6; i++) g.press('ArrowDown');
     assert.equal(g.probe.now().sel, 12, 'いちばん下からさらに下はスタート');
+    g.press('ArrowRight');
+    assert.equal(g.probe.now().sel, 13, 'スタートの右はリセット');
+    g.press('ArrowLeft');
     g.press(' '); g.step(1);
     assert.equal(g.probe.now().phase, 'count');
     g.until(() => g.probe.now().phase === 'finish', 3000); g.step(40);
@@ -208,8 +206,8 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     const g = open(shape);
     await start(g);
     const H = g.probe.now().H;
-    const pts = [g.probe.pile(), g.probe.startButton()];
-    for (let i = 0; i < 12; i++) pts.push(g.probe.plus(i), g.probe.minus(i));
+    const pts = [g.probe.pile(), g.probe.startButton(), g.probe.resetButton()];
+    for (let i = 0; i < 12; i++) pts.push(g.probe.plus(i));
     let min = 1e9;
     for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) min = Math.min(min, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
     assert.ok(min >= 63, shape.join('x') + ' 押しどころの間隔 ' + min.toFixed(1));
