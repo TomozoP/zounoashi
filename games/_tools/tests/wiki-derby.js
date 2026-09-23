@@ -73,7 +73,7 @@ function race(g) {
   }
   const orderSeen = stopSeen.slice().reverse();              /* 最後まで走った馬が1着 */
   for (let k = 1; k < orderSeen.length; k++) assert.ok(stopX[orderSeen[k - 1]] > stopX[orderSeen[k]], '長い記事の馬ほど先で止まる: ' + k + '着 ' + JSON.stringify(orderSeen.map(i => [i, g.probe.now().horses[i].len, +stopX[i].toFixed(4)])));
-  assert.ok(frames < 3000, '走り終わる');
+  assert.ok(frames < 3000, '走り終わる ' + JSON.stringify({ goal: g.probe.goal(), stopped: g.probe.stopped(), lens: g.probe.now().horses.map(h => h.len), W: g.probe.now().W, H: g.probe.now().H }));
   assert.equal(g.probe.now().phase, 'finish');
   const dashSteady = dashSteps.length < 2 || dashSteps.every(d => Math.abs(d - dashSteps[0]) < 0.5 && d > 5);
   assert.ok(camJump <= 0, 'カメラが飛ばない: ' + camJump.toFixed(1));
@@ -279,9 +279,123 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.equal(g.probe.now().phase, 'bet');
   }
 
+  /* 1c. 長押しで続けて賭ける。離す・ボタンから外れると止まり、手持ちが尽きたら止まる */
+  {
+    const g = open();
+    await start(g);
+    const b = g.probe.plus(2);
+    g.down(b.x, b.y); g.step(1);
+    assert.equal(g.probe.now().bets[2], 100, '押した瞬間に1枚');
+    g.step(15);
+    assert.equal(g.probe.now().bets[2], 100, 'すぐには続けない');
+    g.step(45);
+    const mid = g.probe.now().bets[2];
+    assert.ok(mid >= 400, '押したままだと続けて賭ける: ' + mid);
+    g.up(); g.step(60);
+    assert.equal(g.probe.now().bets[2], mid, '離したら止まる');
+    g.down(b.x, b.y); g.step(30);
+    const c = g.probe.plus(5);
+    g.moveTo(c.x, c.y); const off = g.probe.now().bets[2]; g.step(60);
+    assert.equal(g.probe.now().bets[2], off, 'ボタンから外れたら止まる');
+    assert.equal(g.probe.now().bets[5], 0, '外れた先のボタンには賭けない');
+    g.up();
+    const p = g.probe.plus(4);
+    g.down(p.x, p.y); g.step(600); g.up();
+    const now = g.probe.now();
+    assert.equal(now.money, 0, '手持ちが尽きるまで賭ける');
+    assert.equal(now.bets.reduce((a, v) => a + v, 0), 1000, '持っている分より多くは賭けない');
+  }
+
+  /* 7a. 1着と2着の記事の長さが近く、同じコマで止まりかけても、1着はゴールを駆け抜けて終わる */
+  {
+    const g = open();
+    globalThis.__derbyFake.lens = [71743, 8881, 61453, 67710, 9453, 29411, 38032, 71622];
+    await start(g);
+    at(g, g.probe.plus(0));
+    race(g);
+    assert.equal(g.probe.now().phase, 'finish');
+  }
+
+  /* 7b. 2人以上: 開始画面で人数を選び、レースごとに順番に賭ける。手持ちがなくなった人は飛ばす */
+  {
+    const g = open();
+    assert.equal(g.probe.now().players, 1, 'はじめは1人');
+    g.press('ArrowRight'); g.press('ArrowRight');
+    assert.equal(g.probe.now().players, 3, '→で人数が増える');
+    g.press('ArrowLeft');
+    assert.equal(g.probe.now().players, 2, '←で減る');
+    for (let i = 0; i < 5; i++) g.press('ArrowLeft');
+    assert.equal(g.probe.now().players, 1, '1人より減らない');
+    g.press('ArrowRight');
+    globalThis.__derbyFake.lens = [1000, 9000, 2000, 3000, 4000, 5000, 6000, 7000];   /* 2番が勝つ */
+    g.press(' '); g.step(1); await flush(); g.step(1);
+    let now = g.probe.now();
+    assert.equal(now.phase, 'bet');
+    assert.equal(now.players, 2);
+    assert.deepEqual(now.monies, [1000, 1000]);
+    assert.equal(now.cur, 0, '1Pから');
+    for (let i = 0; i < 10; i++) at(g, g.probe.plus(0));     /* 1Pは全部を1番（最下位）に */
+    at(g, g.probe.startButton()); g.step(1);
+    now = g.probe.now();
+    assert.equal(now.phase, 'bet', '1Pが旗を押すと、まだ走らない');
+    assert.equal(now.cur, 1, '2Pの番');
+    assert.equal(now.money, 1000, '2Pの手持ちに切り替わる');
+    assert.equal(now.bet, 0, '2Pの賭けは空（1Pの賭けは見えない）');
+    at(g, g.probe.startButton()); g.step(10);
+    assert.equal(g.probe.now().cur, 1, '賭けずには進めない');
+    at(g, g.probe.plus(1)); at(g, g.probe.plus(1));          /* 2Pは2番に200 */
+    at(g, g.probe.resetButton()); g.step(5);
+    assert.equal(g.probe.now().money, 1000, 'リセットは2Pの分だけ戻す');
+    assert.deepEqual(g.probe.now().allBets[0][0], 1000, '1Pの賭けはそのまま');
+    at(g, g.probe.plus(1)); at(g, g.probe.plus(1));
+    const odds1 = g.probe.now().odds[1];
+    race(g);
+    now = g.probe.now();
+    assert.deepEqual(now.wonBy, [0, Math.floor(200 * odds1)], '払い戻しは人ごと');
+    assert.deepEqual(now.monies, [0, 800 + Math.floor(200 * odds1)]);
+    await next(g);
+    now = g.probe.now();
+    assert.equal(now.phase, 'bet');
+    assert.equal(now.cur, 1, '手持ちのない1Pは飛ばして2Pから');
+    at(g, g.probe.plus(1));
+    at(g, g.probe.startButton()); g.step(1);
+    assert.equal(g.probe.now().phase, 'count', '賭けられるのが2Pだけなら、2Pが押したら走る');
+    g.until(() => g.probe.now().phase === 'finish', 3000);
+    await next(g);
+    at(g, g.probe.plus(1)); at(g, g.probe.startButton()); g.step(1);
+    g.until(() => g.probe.now().phase === 'finish', 3000);
+    await next(g);
+    now = g.probe.now();
+    assert.equal(now.state, 'result', '3レースで結果');
+    assert.equal(now.score, Math.max(...now.monies), '結果はいちばん多い人の手持ち');
+    at(g, g.probe.result().retry); g.step(1); await flush(); g.step(1);
+    assert.deepEqual(g.probe.now().monies, [1000, 1000], 'もう一度は同じ人数で最初から');
+  }
+
+  /* 7c. 全員の手持ちがなくなったら終わる */
+  {
+    const g = open();
+    g.press('ArrowRight');
+    globalThis.__derbyFake.lens = [1000, 9000, 2000, 3000, 4000, 5000, 6000, 7000];
+    g.press(' '); g.step(1); await flush(); g.step(1);
+    for (let i = 0; i < 10; i++) at(g, g.probe.plus(0));
+    at(g, g.probe.startButton()); g.step(1);
+    for (let i = 0; i < 10; i++) at(g, g.probe.plus(2));
+    at(g, g.probe.startButton()); g.step(1);
+    race(g);
+    await next(g);
+    assert.equal(g.probe.now().state, 'result', '全員尽きたら結果');
+  }
+
   /* 8. 押しどころの間隔（画面の形ごと） */
   for (const shape of load.SHAPES) {
     const g = open(shape);
+    {
+      const Hi = g.probe.now().H, pb = [1, 2, 3, 4].map(n => g.probe.playerButton(n)), startC = { x: 270, y: Hi * 0.97 - 34 };
+      const all = pb.concat([startC]);
+      for (let a = 0; a < all.length; a++) for (let b = a + 1; b < all.length; b++)
+        assert.ok(Math.hypot(all[a].x - all[b].x, all[a].y - all[b].y) >= 63, shape.join('x') + ' 人数ボタンとSTARTの間隔');
+    }
     await start(g);
     const H = g.probe.now().H;
     const pts = [g.probe.pile(), g.probe.startButton(), g.probe.resetButton()];
