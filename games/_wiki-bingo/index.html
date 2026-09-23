@@ -41,7 +41,8 @@
 
    カードに単語が24個（真ん中は最初から開いている）。
    ランダムに選ばれたWikipediaの記事の題名が3つ出るので、1つ選ぶと本文が流れる。
-   本文にカードの単語が出たら穴が開く。1本で揃わなければ次の記事を選ぶ。
+   本文にカードの単語が出たらそこで止まってマスが光る。タップして穴を開けると続きが流れる。
+   1本で揃わなければ次の記事を選ぶ。
    ビンゴまでに読んだ文字数が結果（少ないほどよい）。
 
    記事は遊ぶたびにWikipediaから取りに行く。本文はリポジトリに入れない。
@@ -298,7 +299,7 @@
   }
   var readBefore = 0, counted = false;          /* 前の記事までに読んだ文字数。counted = 今の記事も足し終えた */
   function countRead() { return readBefore + (counted ? 0 : countChars(text.slice(0, pos))); }
-  /* 本文に出たマスを光らせる。光ったマスはタップするまで光ったまま（次の記事に移っても） */
+  /* 本文に出たマスを光らせる。光ったマスはタップするまで光ったまま（その間、本文は止まる） */
   function light(i) {
     if (open[i] || lit[i] >= 0) return;
     lit[i] = T;
@@ -327,17 +328,22 @@
     T += dt; pt += dt;
     for (var i = 0; i < 25; i++) if (openT[i] >= 0) openT[i] += dt;
     if (phase === "stream") {
+      /* 開けられる単語が出たら、光ったマスを全部開けるまで本文は止まる */
+      if (oldestLit() >= 0) { held = false; return; }
       var before = Math.floor(pos);
       pos = Math.min(text.length, pos + (held ? FAST : SPEED) * dt);
-      var now = Math.floor(pos);
-      typeT -= dt;
-      if (now > before && typeT <= 0) { typeT = held ? 0.03 : 0.055; sndType(); }
+      var now = Math.floor(pos), stop = -1;
       for (var h = 0; h < hits.length; h++) {
         var hit = hits[h];
         if (hit.done || hit.end > now) continue;
+        if (stop >= 0 && hit.end > stop) break;   /* 止めた位置より先の単語は、まだ出ていない */
         hit.done = true; hit.t = T;
-        light(hit.cell);                        /* 光るだけ。開けるのは自分でタップ */
+        stop = hit.end;
+        light(hit.cell);                          /* 光るだけ。開けるのは自分でタップ */
       }
+      if (stop >= 0) { pos = stop; now = stop; held = false; }
+      typeT -= dt;
+      if (now > before && typeT <= 0 && stop < 0) { typeT = held ? 0.03 : 0.055; sndType(); }
       score = countRead();
       if (pos >= text.length) { phase = "after"; pt = 0; }
     } else if (phase === "after") {

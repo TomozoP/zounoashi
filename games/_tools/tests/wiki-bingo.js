@@ -23,6 +23,18 @@ function open(plan, shape) {
 }
 const tapCell = (g, i) => { const p = g.probe.cell(i); g.tap(p.x, p.y); };
 const litCount = g => g.probe.now().lit.filter(Boolean).length;
+const litCells = g => g.probe.now().lit.map((v, i) => v ? i : -1).filter(i => i >= 0);
+/* 光るか、記事が終わるまで進める */
+const toNextLight = g => g.until(() => litCount(g) > 0 || g.probe.now().phase !== "stream", 3000);
+/* 記事の終わりかビンゴまで、光ったらすぐ開けながら進める */
+function playOut(g) {
+  for (let k = 0; k < 40; k++) {
+    toNextLight(g);
+    if (!litCount(g)) break;
+    litCells(g).forEach(i => tapCell(g, i));
+    if (g.probe.now().phase === "bingo") break;
+  }
+}
 async function start(g) {
   assert.equal(g.probe.now().state, 'intro');
   const introCard = g.probe.now().card;
@@ -45,65 +57,80 @@ async function start(g) {
     assert.ok(g.probe.now().open[12], '真ん中は最初から開いている');
   }
 
-  /* 2. 出た単語は光るだけ。自分でタップすると開き、開けた時点の文字数で結果 */
+  /* 2. 出た単語のところで本文が止まって光る。開けると続きが流れる。文字数は開けた位置まで */
   {
     const g = open();
     await start(g);
     const c = g.probe.now().card;
     const row = [10, 11, 13, 14].map(i => c[i]);            /* 真ん中の段 */
-    const filler = 'ああああああああああ';
-    const body = filler + row.join('いいい') + filler.repeat(20);
-    g.probe.step(0);
+    const filler = "ああああああああああ";
+    const body = filler + row.join("いいい") + filler.repeat(20);
     setPlan(g, () => body);
     g.tap(g.probe.choice(1).x, g.probe.choice(1).y);
     await flush(); g.step(1);
-    assert.equal(g.probe.now().phase, 'stream');
-    assert.equal(g.probe.now().title, '記事1-1', '選んだ記事が流れる');
-    g.until(() => litCount(g) === 4, 2000);
-    const expect = (filler + row.join("いいい")).length;
-    assert.ok(Math.abs(g.probe.now().pos - expect) <= 2, "4つ目が出たところで光る");
-    assert.equal(g.probe.now().open.filter(Boolean).length, 1, "光っても勝手には開かない");
-    tapCell(g, 0);
-    assert.equal(g.probe.now().open[0], false, "光っていないマスは開かない");
-    [10, 11, 13].forEach(i => tapCell(g, i));
-    assert.equal(g.probe.now().phase, "stream", "4列目が揃うまでは続く");
-    g.step(30);
-    tapCell(g, 14);
+    assert.equal(g.probe.now().phase, "stream");
+    assert.equal(g.probe.now().title, "記事1-1", "選んだ記事が流れる");
+    let end = filler.length;
+    [10, 11, 13, 14].forEach((cell, k) => {
+      end += c[cell].length + (k ? 3 : 0);
+      toNextLight(g);
+      assert.deepEqual(litCells(g), [cell], (k + 1) + "つ目の単語で光る");
+      assert.equal(g.probe.now().pos, end, "単語の終わりで止まる");
+      g.step(90);
+      g.down(270, g.probe.choice(1).y); g.step(30); g.up();
+      assert.equal(g.probe.now().pos, end, "光っている間は、押しても本文は進まない");
+      assert.equal(g.probe.now().open[cell], false, "勝手には開かない");
+      if (k === 0) { tapCell(g, 0); assert.equal(g.probe.now().open[0], false, "光っていないマスは開かない"); }
+      tapCell(g, cell);
+      assert.ok(g.probe.now().open[cell], "タップで開く");
+      if (k < 3) { g.step(2); assert.ok(g.probe.now().pos > end, "開けると続きが流れる"); }
+    });
     const now = g.probe.now();
     assert.equal(now.phase, "bingo");
     assert.deepEqual(now.bingo, [10, 11, 12, 13, 14]);
-    assert.ok(now.score > expect + 25 && now.score <= expect + 40, "遅れて開けたぶん文字数が増える: " + now.score);
-    g.until(() => g.probe.now().state === 'result', 400);
-    assert.equal(g.probe.now().score, now.score);
+    assert.equal(now.score, end, "ビンゴの単語の終わりまでの文字数");
+    g.until(() => g.probe.now().state === "result", 400);
+    assert.equal(g.probe.now().score, end);
   }
 
-  /* 3. 1本で揃わない → 次の3つが出て、文字数は足し算。単語は記事をまたいで積み上がる */
+  /* 2b. 続けて出る単語は1つずつ止まって光る。スペースでも開けられる */
+  {
+    const g = open();
+    await start(g);
+    const c = g.probe.now().card;
+    setPlan(g, () => "あ" + c[0] + c[1] + "いいいいいいいいいい");
+    g.press(" "); await flush(); g.step(1);
+    toNextLight(g);
+    assert.deepEqual(litCells(g), [0]);
+    tapCell(g, 0);
+    toNextLight(g);
+    assert.deepEqual(litCells(g), [1]);
+    g.press(" ");
+    assert.ok(g.probe.now().open[1], "スペースでも開けられる");
+  }
+
+  /* 3. 1本で揃わない → 次の3つが出て、文字数は足し算。穴は記事をまたいで積み上がる */
   {
     const g = open();
     await start(g);
     const c = g.probe.now().card;
     let n = 0;
-    setPlan(g, () => { n++; return n === 1 ? 'あ' + c[0] + 'あ' + c[1] + 'あ' : c[2] + 'う' + c[3] + 'う' + c[4]; });
-    g.press(' '); await flush(); g.step(1);
-    g.until(() => g.probe.now().phase !== "stream", 2000);
-    assert.equal(litCount(g), 2);
-    const first = ('あ' + c[0] + 'あ' + c[1] + 'あ').length;
-    g.until(() => g.probe.now().phase === 'choose', 200);
+    const t1 = "あ" + c[0] + "あ" + c[1] + "あ", t2 = c[2] + "う" + c[3] + "う" + c[4];
+    setPlan(g, () => (++n === 1 ? t1 : t2));
+    g.press(" "); await flush(); g.step(1);
+    playOut(g);
+    g.until(() => g.probe.now().phase === "choose", 200);
     await flush(); g.step(1);
-    assert.equal(g.probe.now().phase, 'choose', '次の題名');
-    assert.ok(g.probe.now().lit[0] && g.probe.now().lit[1], "開けないまま次の記事へ移っても光ったまま");
-    tapCell(g, 0);
-    assert.ok(g.probe.now().open[0], "題名を選ぶ間にも開けられる");
-    assert.equal(g.probe.now().phase, "choose");
-    g.press('ArrowDown'); g.press('ArrowDown');
-    assert.equal(g.probe.now().pick, 2, '矢印で選ぶ');
-    g.press(' '); await flush(); g.step(1);
+    assert.equal(g.probe.now().phase, "choose", "次の題名");
+    assert.ok(g.probe.now().open[0] && g.probe.now().open[1], "前の記事で開けた穴は残る");
+    g.press("ArrowDown"); g.press("ArrowDown");
+    assert.equal(g.probe.now().pick, 2, "矢印で選ぶ");
+    g.press(" "); await flush(); g.step(1);
     assert.ok(/-2$/.test(g.probe.now().title));
-    g.until(() => g.probe.now().phase !== "stream", 2000);
-    for (let i = 0; i < 4; i++) g.press(" ");               /* 前の記事の1と、今の2・3・4 */
-    assert.equal(g.probe.now().phase, "bingo", "スペースでも光った順に開けられる");
+    playOut(g);
+    assert.equal(g.probe.now().phase, "bingo");
     assert.deepEqual(g.probe.now().bingo, [0, 1, 2, 3, 4]);
-    assert.equal(g.probe.now().score, first + (c[2] + "う" + c[3] + "う" + c[4]).length, "読み終えた記事の文字数の合計");
+    assert.equal(g.probe.now().score, t1.length + t2.length, "読み終えた記事の文字数の合計");
     assert.equal(g.probe.now().articles, 2);
   }
 
@@ -140,8 +167,7 @@ async function start(g) {
     const c = g.probe.now().card;
     setPlan(g, () => [0, 6, 18, 24].map(i => c[i]).join('。'));
     g.press(' '); await flush(); g.step(1);
-    g.until(() => litCount(g) === 4, 3000);
-    [0, 6, 18, 24].forEach(i => tapCell(g, i));
+    playOut(g);
     g.until(() => g.probe.now().state === "result", 3000);
     const H = g.probe.now().H;
     g.tap(270 - 107, H * 0.62 + 27); g.step(1); await flush(); g.step(1);
