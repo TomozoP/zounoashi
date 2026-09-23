@@ -45,11 +45,17 @@ function race(g) {
   assert.ok(lastLane < top, 'レース中の賭けたボタンは走路の下にある');
   assert.ok(g.probe.raceCtrl(7).y + 26 < H - 20, 'レース中の賭けたボタンが画面に収まる');
   const stopSeen = [], cams = [], stopX = {};
-  let frames = 0, soloFrames = 0, secondStop = null;
+  let frames = 0, soloFrames = 0, secondStop = null, lastX = null, dashSteps = [];
   while (g.probe.now().phase === 'race' && frames < 3000) {
     const st = g.probe.stopped(), p = g.probe.positions();
     const alive = st.filter(v => !v).length;
     if (alive === 1) { soloFrames++; if (secondStop === null) secondStop = frames; }
+    const gl = g.probe.goal();
+    if (gl.crossT !== null && alive === 1) {                /* ゴール後の1着: 画面の上で1コマごとに同じだけ進む */
+      const x = g.probe.screenX(g.probe.now().order[0]);
+      if (lastX !== null) dashSteps.push(x - lastX);
+      lastX = x;
+    }
     st.forEach((v, i) => { if (v && !stopSeen.includes(i)) { stopSeen.push(i); stopX[i] = p[i]; } });
     if (frames % 60 === 0) cams.push(g.probe.now().cam);
     g.step(1); frames++;
@@ -58,7 +64,8 @@ function race(g) {
   for (let k = 1; k < orderSeen.length; k++) assert.ok(stopX[orderSeen[k - 1]] > stopX[orderSeen[k]], '長い記事の馬ほど先で止まる');
   assert.ok(frames < 3000, '走り終わる');
   assert.equal(g.probe.now().phase, 'finish');
-  return { orderSeen, seconds: frames / 60, cams, soloSeconds: soloFrames / 60, secondStop: secondStop / 60 };
+  const dashSteady = dashSteps.length < 2 || dashSteps.every(d => Math.abs(d - dashSteps[0]) < 0.5 && d > 5);
+  return { orderSeen, seconds: frames / 60, cams, soloSeconds: soloFrames / 60, secondStop: secondStop / 60, dashSteady };
 }
 async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flush(); g.step(1); }
 
@@ -103,10 +110,14 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     const rest = g.probe.now().money;
     const r = race(g);
     assert.deepEqual(r.orderSeen, now0.order, '止まった順の逆が長さの順');
-    /* 2着（8000字）がちょうど28秒で書き終えて1着が決まる。1着はそこから2秒走り抜けて止まり、1秒おいて終わり */
+    /* 2着（8000字）がちょうど28秒で書き終えて1着が決まる。1着は0.5秒後にゴールを越え、画面の外へ駆け抜けて、0.8秒おいて終わり */
     assert.ok(Math.abs(r.secondStop - 28) < 0.3, '2着が止まるのは約28秒: ' + r.secondStop.toFixed(2));
-    assert.ok(Math.abs(r.soloSeconds - 2) < 0.15, '1着は2秒走り抜ける: ' + r.soloSeconds.toFixed(2));
-    assert.ok(r.seconds > 30 && r.seconds < 32, 'レースは約31秒: ' + r.seconds.toFixed(1));
+    const goal = g.probe.goal();
+    assert.ok(Math.abs(goal.crossT - r.secondStop - 0.5) < 0.1, '1着がゴールを越えるのは決着の0.5秒後: ' + (goal.crossT - r.secondStop).toFixed(2));
+    assert.ok(goal.out > goal.crossT && goal.out - goal.crossT < 0.6, 'ゴールのあと画面の外へ駆け抜ける: ' + (goal.out - goal.crossT).toFixed(2));
+    assert.ok(r.soloSeconds > 0.5 && r.soloSeconds < 1.2, '決着から走り去るまで: ' + r.soloSeconds.toFixed(2));
+    assert.ok(r.seconds > 28.5 && r.seconds < 31, 'レースは約30秒: ' + r.seconds.toFixed(1));
+    assert.ok(r.dashSteady, 'ゴール後の1着は速さを落とさない');
     assert.ok(g.probe.written(1) < 120000, '1着の馬は書き切らずに終わる');
     for (let i = 0; i < 8; i++) if (i !== 1) assert.equal(g.probe.written(i), now0.horses[i].len, (i + 1) + '番は全部書き切って止まった');
     assert.ok(r.cams[r.cams.length - 1] - r.cams[0] > 2000, 'カメラが馬群を追いかける');
@@ -162,11 +173,11 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
       }
       g.step(1);
     }
-    for (let i = 0; i < 8; i++) assert.ok(lastSpeed[i] < peak[i] * 0.1, (i + 1) + '番は止まる直前に遅くなる: ' + lastSpeed[i].toFixed(0) + ' / ' + peak[i].toFixed(0));
+    const winner = g.probe.now().order[0];                  /* 1着は減速せずに駆け抜けるので除く */
+    for (let i = 0; i < 8; i++) if (i !== winner) assert.ok(lastSpeed[i] < peak[i] * 0.1, (i + 1) + '番は止まる直前に遅くなる: ' + lastSpeed[i].toFixed(0) + ' / ' + peak[i].toFixed(0));
     assert.ok(battleMax > 0.9, '残り3頭以下で抜きつ抜かれつ');
     assert.ok(leaders.size >= 2, '終盤に先頭が入れ替わる: ' + [...leaders]);
-    const win = g.probe.now().order[0];
-    for (let i = 0; i < 8; i++) if (i !== win) assert.equal(g.probe.written(i), g.probe.now().horses[i].len, '減速しても全部書き切る');
+    for (let i = 0; i < 8; i++) if (i !== winner) assert.equal(g.probe.written(i), g.probe.now().horses[i].len, '減速しても全部書き切る');
   }
 
   /* 4. 3レースで終わる。結果は手持ち */

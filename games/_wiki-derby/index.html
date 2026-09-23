@@ -39,7 +39,8 @@
    人気（倍率）は記事の閲覧数で決まる。架空の観客が、よく読まれている記事ほど多く賭ける。
    各馬は自分の記事の本文を走路に書きながら走り、全部書き切ったところで止まる。
    最後まで書き続けた馬（本文の文字数＝情報量がいちばん多い記事）が1着。
-   2着の馬が止まって1着が決まったら、1着の馬は少し走り抜けて止まり、レースは終わる（1着だけは書き切らない）。
+   1着と2着の決着がついた直後の地点がゴール。1着の馬はゴールを越えても速さを落とさずに画面の外へ駆け抜け、レースは終わる
+   （1着だけは書き切らない）。
    単勝（1着）に100ずつ賭けて、3レース後の手持ちが結果。
 
    遊ぶたびにWikipediaから取りに行く。文章を出すので、出典と利用条件を表示する。 */
@@ -113,8 +114,97 @@
     [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.16, 0.05, "square", null, 0.12 + i * 0.08); });
   }
   function sndCount(n) { tone(n > 0 ? 880 : 1320, 0.18, 0.08, "square"); }
-  function sndHoof(v) { noiseHit(0.05, 180 + Math.random() * 80, 0.05 + 0.1 * v, 1.4); }
-  function sndCrowd(v) { noiseHit(0.5, 900 + Math.random() * 400, 0.02 + 0.07 * v, 0.6); }
+  /* 足音。1歩ごとに「パ・カ・ラッ」と3つ打つ。乾いた木の音と、低い土の音を重ねる */
+  function clop(at, vol, pitch) {
+    noiseHit(0.035, 1150 * pitch + Math.random() * 250, vol, 5, at);
+    tone(240 * pitch, 0.06, vol * 0.45, "triangle", 150 * pitch, at);
+  }
+  function gallop(v) {
+    var p = 0.9 + Math.random() * 0.2;
+    clop(0, 0.14 * v, p); clop(0.065, 0.11 * v, p * 0.94); clop(0.13, 0.17 * v, p * 0.88);
+  }
+
+  /* ダービーらしい行進曲ふうのBGM（ここで作った旋律）。ゲートが開いたら流し、ゴールしたら消す。
+     先の音を少しずつ予約していく。旋律は金管っぽい音、ほかにベースと太鼓 */
+  var BPM = 150, BEAT = 60 / BPM;
+  /* 旋律: [音の高さ（C4=60のMIDI番号。0は休み）, 拍数] */
+  var MELODY = [
+    [67, 1], [72, 1], [76, 1], [79, 1],        [76, 1], [72, 0.5], [76, 0.5], [79, 2],
+    [81, 1], [79, 1], [77, 1], [76, 1],        [74, 2], [67, 2],
+    [65, 1], [69, 1], [72, 1], [77, 1],        [76, 1], [74, 0.5], [76, 0.5], [72, 2],
+    [74, 1], [76, 1], [77, 1], [74, 1],        [72, 3], [0, 1]
+  ];
+  var BASS = [48, 48, 53, 55, 53, 48, 55, 48];  /* 1小節ごとの根音 */
+  var music = null;
+  function mnote(midi, at, dur, vol, type, cut) {
+    if (!AC || !music) return;
+    var o = AC.createOscillator(), g = AC.createGain(), lp = AC.createBiquadFilter();
+    o.type = type; o.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
+    lp.type = "lowpass"; lp.frequency.value = cut || 2400;
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(vol, at + 0.02);
+    g.gain.setValueAtTime(vol * 0.8, at + Math.max(0.03, dur - 0.06));
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(lp); lp.connect(g); g.connect(music.out);
+    o.start(at); o.stop(at + dur + 0.05);
+  }
+  function mdrum(at, kind) {
+    if (!AC || !NOISE || !music) return;
+    if (kind === "kick") {
+      var o = AC.createOscillator(), g = AC.createGain();
+      o.frequency.setValueAtTime(120, at); o.frequency.exponentialRampToValueAtTime(45, at + 0.12);
+      g.gain.setValueAtTime(0.25, at); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.16);
+      o.connect(g); g.connect(music.out); o.start(at); o.stop(at + 0.2);
+      return;
+    }
+    var src = AC.createBufferSource(), fl = AC.createBiquadFilter(), gn = AC.createGain();
+    src.buffer = NOISE;
+    fl.type = kind === "hat" ? "highpass" : "bandpass"; fl.frequency.value = kind === "hat" ? 7000 : 1800;
+    var v = kind === "hat" ? 0.035 : 0.14, d = kind === "hat" ? 0.03 : 0.12;
+    gn.gain.setValueAtTime(v, at); gn.gain.exponentialRampToValueAtTime(0.0001, at + d);
+    src.connect(fl); fl.connect(gn); gn.connect(music.out);
+    src.start(at, Math.random() * 1.5); src.stop(at + d + 0.02);
+  }
+  function startMusic() {
+    if (!AC || music) return;
+    var out = AC.createGain();
+    out.gain.value = 0.55;
+    out.connect(AC.destination);
+    music = { out: out, next: AC.currentTime + 0.05, beat: 0, mi: 0, mt: 0 };
+  }
+  function stopMusic() {
+    if (!music) return;
+    var m = music; music = null;
+    try { m.out.gain.setTargetAtTime(0.0001, AC.currentTime, 0.4); setTimeout(function () { try { m.out.disconnect(); } catch (e) {} }, 2500); } catch (e) {}
+  }
+  /* 先0.25秒ぶんの音を予約する。8分音符ずつ進める */
+  function musicTick() {
+    if (!AC || !music) return;
+    var total = MELODY.reduce(function (a, n) { return a + n[1]; }, 0);
+    while (music.next < AC.currentTime + 0.25) {
+      var at = music.next, b = music.beat, inBar = b % 4;
+      if (inBar === 0 || inBar === 2) mdrum(at, "kick");
+      if (inBar === 1 || inBar === 3) mdrum(at, "snare");
+      mdrum(at, "hat");
+      if (Math.abs(b - Math.round(b)) < 1e-6) {                     /* ベース: 1拍ごとに根音と5度 */
+        var root = BASS[Math.floor(b / 4) % BASS.length];
+        mnote(root + (Math.round(b) % 2 ? 7 : 0) - 12, at, BEAT * 0.9, 0.12, "triangle", 900);
+      }
+      var pos = b % total;                                           /* 旋律 */
+      while (music.mi < MELODY.length && music.mt + 1e-6 < pos) { music.mt += MELODY[music.mi][1]; music.mi++; }
+      if (pos < 1e-6) { music.mi = 0; music.mt = 0; }
+      if (music.mi < MELODY.length && Math.abs(music.mt - pos) < 1e-6) {
+        var nt = MELODY[music.mi];
+        if (nt[0]) {
+          mnote(nt[0], at, nt[1] * BEAT * 0.92, 0.06, "sawtooth", 2600);
+          mnote(nt[0] - 12, at, nt[1] * BEAT * 0.92, 0.035, "square", 1600);
+        }
+      }
+      music.beat += 0.5;
+      music.next += BEAT / 2;
+    }
+  }
+  function sndCrowd(v) { noiseHit(0.5, 900 + Math.random() * 400, 0.015 + 0.045 * v, 0.6); }
   function sndCheer() { for (var i = 0; i < 4; i++) noiseHit(0.9, 1100 + i * 300, 0.12, 0.5, i * 0.05); }
   function sndStop(mine, rank) {
     if (rank === 0) return;
@@ -229,7 +319,7 @@
   /* PLAY の中: load（出走馬を取りに行く）→ bet（賭ける）→ race（走る）→ finish（着順と払い戻し）→ 次の load。
      error は通信の失敗 */
   var state, phase, pt, T, score, money, shown, raceNo, horses, order, rankOf, odds, popRank, bets, sel, keyMode = false,
-      flyers, raceT, prog, finishT, nextField, round = 0, retry, wobble, won, hoofT, crowdT, cheered, cam;
+      flyers, raceT, prog, finishT, nextField, round = 0, retry, wobble, won, gallopT = 0, crowdT, cheered, cam;
 
   var BAR, LIST, CTRL, STARTB, RESETB, TRACK, LANE, RP;
   function place() {
@@ -260,6 +350,7 @@
   function inside(r, x, y) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
 
   function newRound() {
+    stopMusic();
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY; round++;
@@ -347,11 +438,13 @@
     if (ts <= 0) { ts = 0; d = 2 * c / R0; }                /* とても短い記事は、出だしから減速 */
     return { c: c, ts: ts, d: Math.max(0.2, d), c0: charsAt(ts), v0: rateAt(ts) };
   }
+  /* 位置の元になる文字数。1着は決まった時点の速さのまま、本文が尽きても同じ速さで進む */
+  function posChars(i, t) {
+    if (winStop && i === winStop.i && t > winStop.t0) return winStop.c0 + winStop.v0 * (t - winStop.t0);
+    return charsOf(i, t);
+  }
   function charsOf(i, t) {
-    if (winStop && i === winStop.i && t > winStop.t0) {
-      var w = Math.min(t - winStop.t0, WIN_RUN);
-      return Math.min(plan[i].c, winStop.c0 + winStop.v0 * (w - w * w / (2 * WIN_RUN)));
-    }
+    if (winStop && i === winStop.i && t > winStop.t0) return Math.min(plan[i].c, winStop.c0 + winStop.v0 * (t - winStop.t0));
     var p = plan[i];
     if (t <= p.ts) return Math.min(p.c, charsAt(t));
     var u = Math.min(t - p.ts, p.d);
@@ -370,15 +463,17 @@
     }
     return (lo + hi) / 2;
   }
-  var WIN_RUN = 2, winStop = null;                             /* 1着が決まってから走り抜けて止まるまでの秒数 */
+  var WIN_RUN = 2, winStop = null;                             /* 速さを合わせるときに見込む、1着が決まってから終わるまでの秒数 */
+  var GOAL_AHEAD = 0.5, goalX = 0, crossT = null, crossX = 0, camV = 0, outT = null;
+  var DASH = 800;                                              /* ゴール後、カメラが止まった画面の上を1着が走り去る速さ（1秒あたり） */   /* ゴールは、2着が止まる時刻に1着がいる位置から、GOAL_AHEAD 秒ぶん先 */
   var plan = [], battle = 0;
   function startRace() {
     if (state !== S.PLAY || phase !== "bet") return;
     if (!totalBet()) { wobble = 0.35; sndNo(); return; }
-    phase = "count"; pt = 0; raceT = 0; hoofT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
+    phase = "count"; pt = 0; raceT = 0; gallopT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
     prog = []; finishT = []; stopped = [];
     K = solveK(horses[order[1]].len, RUN - WIN_RUN);
-    plan = []; battle = 0; winStop = null;
+    plan = []; battle = 0; winStop = null; camV = 0; outT = null; crossT = null; crossX = 0;
     for (var i = 0; i < N; i++) {
       plan.push(planFor(horses[i].len));
       finishT[i] = plan[i].ts + plan[i].d;
@@ -387,23 +482,27 @@
                   p1: Math.random() * 6.3, p2: Math.random() * 6.3, p3: Math.random() * 6.3,
                   a: 10 + Math.random() * 8, b: 38 + Math.random() * 22 });
     }
+    var t2 = finishT[order[1]], w0 = order[0];
+    goalX = (charsOf(w0, t2) + rateOf(w0, t2) * GOAL_AHEAD) * CHAR;
     prefetch();
   }
+  function rateOf(i, t) { return (charsOf(i, t + 0.01) - charsOf(i, t)) / 0.01; }
   var START_X = 44, countN = 0;                  /* ゲートは画面の左端から START_X のところ */
   /* 位置（ピクセル）: 書いた文字数 × 1文字の幅。前後に少しゆれる。
      残りが3頭以下になったら（battle）ゆれを大きくして、抜きつ抜かれつに見せる。止まる手前ではゆれを消す */
   function runX(i, t) {
+    if (crossT !== null && i === order[0] && t >= crossT) return crossX + DASH * (t - crossT);
     var Tr = finishT[i], tt = Math.min(t, Tr);
     var q = prog[i], fade = Math.min(1, Math.max(0, (Tr - tt) / 1.5)) * Math.min(1, tt / 2);
     var wob = q.a * (Math.sin(tt * q.w1 + q.p1) * 0.7 + Math.sin(tt * q.w2 + q.p2) * 0.3) + battle * q.b * Math.sin(tt * q.w3 + q.p3);
-    return charsOf(i, tt) * CHAR + wob * fade;
+    return posChars(i, tt) * CHAR + wob * fade;
   }
   var stopped = [];
   function maxRun() { return Math.max(1, horses[order[0]].len * CHAR); }
   /* テスト用: いちばん長い馬が止まる位置を1とした割合 */
   function progressOf(i, t) { return runX(i, t) / maxRun(); }
   /* 上の帯用: 時間で見た進み具合（文字数で見ると終盤に一気に進むので） */
-  function timeProgress(i, t) { return Math.min(t, finishT[i]) / Math.max(0.01, finishT[order[0]]); }
+  function timeProgress(i, t) { return Math.min(t, finishT[i]) / Math.max(0.01, plan[order[1]] ? plan[order[1]].ts + plan[order[1]].d + WIN_RUN : finishT[order[0]]); }
   function settle() {
     won = 0;
     for (var i = 0; i < N; i++) if (bets[i] && rankOf[i] === 0) won += Math.floor(bets[i] * odds[i]);
@@ -427,7 +526,7 @@
     if (phase === "count") {                    /* 3・2・1 と数えてからゲートが開く */
       var n = 3 - Math.floor(pt);
       if (n !== countN && n > 0) { countN = n; sndCount(n); }
-      if (pt >= 3) { phase = "race"; pt = 0; countN = 0; sndGate(); }
+      if (pt >= 3) { phase = "race"; pt = 0; countN = 0; sndGate(); startMusic(); gallopT = 0; }
     }
     if (phase === "race") {
       raceT += dt;
@@ -436,23 +535,38 @@
         if (!stopped[h] && raceT >= finishT[h]) { stopped[h] = true; sndStop(!!bets[h], rankOf[h]); }
         if (!stopped[h]) { running++; lead = Math.max(lead, runX(h, raceT)); }
       }
-      /* 2着が止まって1着が決まったら、1着の馬はそこから少し走り抜けて止まる */
+      /* 2着が止まって1着が決まったら、1着の馬は速さを落とさずに走り続ける（止まらない） */
       if (running === 1 && !winStop) {
         var w1 = order[0];
         winStop = { i: w1, t0: raceT, c0: charsOf(w1, raceT), v0: (charsOf(w1, raceT + 0.01) - charsOf(w1, raceT)) / 0.01 };
-        finishT[w1] = Math.min(finishT[w1], raceT + WIN_RUN);
-        if (!cheered) { cheered = true; sndCheer(); }
+        finishT[w1] = 1e9;
       }
       if (!running) lead = runX(order[0], raceT);
       battle += ((running >= 2 && running <= 3 ? 1 : 0) - battle) * Math.min(1, dt * 1.2);
-      /* カメラ: 走っている馬の先頭が画面の右寄りに来るように */
+      /* カメラ: 走っている馬の先頭が画面の右寄りに来るように。
+         1着がゴールを越えたらカメラはすっと止まり、1着は画面の外へ駆け抜ける */
       var want = Math.max(-START_X, lead - W * 0.66);            /* 先頭が右寄りに来るまでは動かさない */
-      cam = raceT < 3 ? cam + (want - cam) * Math.min(1, dt * 3) : want;
+      if (crossT === null && runX(order[0], raceT) >= goalX) {
+        /* 1コマで大きく飛び越えることがあるので、越えた瞬間は馬をゴールの線の上に置き、カメラもそこに合わせて止める */
+        crossX = goalX; crossT = raceT; cam = goalX - W * 0.66;
+        if (!cheered) { cheered = true; sndCheer(); }
+      }
+      if (crossT === null) cam = raceT < 3 ? cam + (want - cam) * Math.min(1, dt * 3) : want;   /* 越えたらカメラはそこで止まる */
+      if (crossT !== null && outT === null && runX(order[0], raceT) - cam > W + 70) {   /* 画面の外に出た */
+        outT = raceT; stopped[order[0]] = true;
+      }
       var near = Math.max(0, 1 - running / N);                 /* 残りが少ないほど盛り上がる */
-      hoofT -= dt; if (hoofT <= 0 && running) { hoofT = 0.07 + (1 - running / N) * 0.05; sndHoof(0.3 + (running / N) * 0.7); }
+      /* 足音: 走っている頭数ぶん、少しずつずらした「パカラッ」を重ねる（多いときは3組まで） */
+      gallopT -= dt;
+      if (gallopT <= 0 && running) {
+        gallopT = 0.36;
+        var herds = Math.min(3, running);
+        for (var hh = 0; hh < herds; hh++) (function (d) { setTimeout(function () { gallop(0.35 + 0.65 * running / N); }, d); })(hh * 110 + Math.random() * 40);
+      }
+      musicTick();
       crowdT -= dt; if (crowdT <= 0) { crowdT = 0.3; sndCrowd(0.2 + near * 0.8); }
       if (!cheered && !running) { cheered = true; sndCheer(); }
-      if (!running && raceT > finishT[order[0]] + 1.0) { phase = "finish"; pt = 0; settle(); }
+      if (outT !== null && raceT > outT + 0.8) { phase = "finish"; pt = 0; stopMusic(); settle(); }
     }
   }
 
@@ -757,13 +871,19 @@
     }
     var step = Math.max(400, Math.pow(10, Math.floor(Math.log(Math.max(1, W)) / Math.LN10)) * 4);
     for (var m = Math.floor(cam / step) * step; m <= cam + W + step; m += step) {
-      if (m < 0) continue;
+      if (m <= 0) continue;                                   /* スタート位置の線は出さない（名前と重なるので） */
       var mx = m - cam;
       if (mx < -10 || mx > W + 10) continue;
       ctx.fillStyle = "rgba(255,255,255,.5)"; ctx.fillRect(mx - 1, TRACK.top - 6, 3, N * LANE + 6);
     }
-    var gx = -30 - cam;                                     /* スタートのゲート（馬の少し後ろ） */
-    if (gx > -20 && gx < W) { ctx.fillStyle = "rgba(200,210,220,.8)"; ctx.fillRect(gx - 4, TRACK.top - 8, 8, N * LANE + 8); }
+    var gx = goalX - cam;                                     /* ゴール（市松の線） */
+    if (gx > -20 && gx < W + 20) {
+      var sq = 8;
+      for (var r = 0; r * sq < N * LANE; r++) for (var c2 = 0; c2 < 2; c2++) {
+        ctx.fillStyle = (r + c2) % 2 ? "#fff" : "#1a1a1a";
+        ctx.fillRect(gx + c2 * sq - sq, TRACK.top + r * sq, sq, sq);
+      }
+    }
     /* 走った後の走路に、その記事の本文が頭から1文字ずつ書かれていく（全部書き切ったら止まる） */
     ctx.font = "600 " + Math.min(15, Math.floor(LANE * 0.28)) + "px sans-serif";
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -787,10 +907,9 @@
     }
     for (var j = 0; j < N; j++) {
       var x = worldX(j) - cam, y2 = laneY(j);
-      if (x < -40) { if (stopped[j]) drawRankBadge(rankOf[j], 18, y2 + LANE * 0.12); continue; }
+      if (x < -40) continue;
       if (x > W + 60) continue;
       drawHorse(j, x, y2 + LANE * 0.02, stopped[j] ? finishT[j] : raceT, s, stopped[j]);
-      if (stopped[j]) drawRankBadge(rankOf[j], Math.min(W - 16, x + 36 * s), y2);
     }
     ctx.textBaseline = "alphabetic";
     for (var q = 0; q < N; q++) drawBetCell(q, raceCtrlRect(q), bets[q], true, false, stopped[q] ? rankOf[q] : -1);
@@ -982,7 +1101,9 @@
     /* その馬が走路に書いた文字数（止まった馬は本文の文字数と同じになる） */
     plain: function (w) { return plainText(w); },
     written: function (i) { return horses && prog ? Math.min(horses[i].len, Math.floor(charsOf(i, Math.min(raceT, finishT[i])) + 1e-6)) : 0; },
-    speed: function (i) { return horses && plan[i] ? (charsOf(i, raceT + 0.01) - charsOf(i, raceT)) / 0.01 : 0; },
+    speed: function (i) { return horses && plan[i] ? (posChars(i, raceT + 0.01) - posChars(i, raceT)) / 0.01 : 0; },
+    goal: function () { return { x: goalX, crossT: crossT, out: outT }; },
+    screenX: function (i) { return horses && prog[i] ? runX(i, raceT) - cam : 0; },
     battle: function () { return battle; },
     /* 文字を収める処理の確認用: 幅と行数に入ったか */
     fit: function (s, maxW, lines) {
