@@ -11,10 +11,13 @@ const ORDER = ['木', '金', '虫', '魚', '鳥', '難'];
 const I = m => ORDER.indexOf(m);
 const cellOf = g => { const n = now(g); return n.card.indexOf(n.call.kanji); };
 /* 次の読みが出るまで進める */
-const toCall = g => { const c = now(g).calls; g.until(() => now(g).calls !== c || now(g).state !== 'play', 400); };
+/* 抽選機から玉が出きるまで（読みが出るまで）進める */
+const toShown = g => g.until(() => now(g).phase !== 'draw' || now(g).state !== 'play', 200);
+const toCall = g => { const c = now(g).calls; g.until(() => (now(g).calls !== c && now(g).phase !== 'draw') || now(g).state !== 'play', 400); };
 /* カードにある（まだ開いていない）読み／無い読みが出るまで進める */
 function waitFor(g, onCard) {
   for (let k = 0; k < 200; k++) {
+    if (now(g).phase === 'draw') toShown(g);
     const n = now(g), at = n.card.indexOf(n.call.kanji);
     if (n.phase === 'call' && (onCard ? at >= 0 && !n.open[at] : at < 0)) return at;
     /* 待っていない読みは、ライフを減らさないように片づける（カードにあれば開け、無ければ飛ばす） */
@@ -25,7 +28,7 @@ function waitFor(g, onCard) {
 }
 /* 結果から「もう一度」でカード選びへ戻る */
 function back(g) { const r = g.probe.result().retry; g.tap(r.x, r.y); g.step(1); assert.equal(now(g).state, 'intro'); }
-function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'); }
+function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'); toShown(g); }
 
 /* 0. 字と読み: どのカードも、字も読みも重ならない。魚は魚へんの字 */
 {
@@ -86,6 +89,22 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
   assert.ok(now(g).open[12]);
   assert.equal(now(g).phase, 'call');
   assert.equal(now(g).calls, 1);
+}
+
+/* 1b. 読みごとに、まず抽選機が回って玉が出る（その間は押しても開かず、ライフも減らない）。そのあと読みが出る */
+{
+  const g = open();
+  tapCell(g, 12); g.step(1);
+  assert.equal(now(g).phase, 'draw', 'まず抽選');
+  const n = now(g), at = n.card.indexOf(n.call.kanji);
+  const other = n.card.findIndex((k, i) => k && i !== at);
+  tapCell(g, other); g.step(1);
+  assert.equal(now(g).lives, 3, '抽選中に押してもライフは減らない');
+  assert.equal(now(g).phase, 'draw');
+  let frames = 0;
+  while (now(g).phase === 'draw' && frames < 200) { g.step(1); frames++; }
+  assert.equal(now(g).phase, 'call');
+  assert.ok(frames >= 40 && frames <= 70, '玉が出るまで1秒ほど ' + frames);
 }
 
 /* 2. スペースでも始まる（離したとき） */
@@ -154,7 +173,7 @@ function perfect(g, set) {
   return playOut(g);
 }
 function playOut(g) {
-  for (let k = 0; k < 400 && now(g).state === 'play'; k++) {
+  for (let k = 0; k < 1500 && now(g).state === 'play'; k++) {
     const n = now(g);
     if (n.phase === 'call') {
       const at = cellOf(g);
@@ -199,7 +218,7 @@ function playOut(g) {
 /* 7. 回数のばらつき（全部取れた場合） */
 ORDER.slice(0, 5).forEach(mark => {
   const scores = [];
-  for (let k = 0; k < 40; k++) scores.push(perfect(open(), I(mark)).score);
+  for (let k = 0; k < 12; k++) scores.push(perfect(open(), I(mark)).score);
   scores.sort((a, b) => a - b);
   const q = f => scores[Math.floor((scores.length - 1) * f)];
   console.log(mark + ' 全部取れた場合のビンゴまでの回数: 最小' + scores[0] + ' / 中央' + q(0.5) + ' / 9割' + q(0.9) + ' / 最大' + scores[scores.length - 1]);
