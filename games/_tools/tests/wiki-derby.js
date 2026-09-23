@@ -41,6 +41,9 @@ function race(g) {
   g.until(() => g.probe.now().phase === 'race', 30);
   assert.equal(g.probe.now().phase, 'race', '3秒たったら走る');
   assert.ok(Math.abs(g.probe.now().cam + 44) < 1, 'ゲートは画面の左端');
+  const H = g.probe.now().H, lastLane = g.probe.lane(7), top = g.probe.raceCtrl(0).y - 26;
+  assert.ok(lastLane < top, 'レース中の賭けたボタンは走路の下にある');
+  assert.ok(g.probe.raceCtrl(7).y + 26 < H - 20, 'レース中の賭けたボタンが画面に収まる');
   const stopSeen = [], cams = [], stopX = {};
   let frames = 0;
   while (g.probe.now().phase === 'race' && frames < 3000) {
@@ -170,11 +173,11 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     g.press('ArrowRight'); g.press(' ');
     assert.equal(g.probe.now().bets[1], 100, '→で2番');
     g.press('ArrowDown'); g.press(' '); g.press(' ');
-    assert.equal(g.probe.now().bets[3], 200, '↓で4番（2列なので2番の下は4番）');
+    assert.equal(g.probe.now().bets[5], 200, '↓で6番（4列なので2番の下は6番）');
     g.press('Backspace');
     assert.equal(g.probe.now().bet, 0, 'Backspaceでリセット');
     g.press(' ');
-    assert.equal(g.probe.now().bets[3], 100);
+    assert.equal(g.probe.now().bets[5], 100);
     for (let i = 0; i < 6; i++) g.press('ArrowDown');
     assert.equal(g.probe.now().sel, 8, 'いちばん下からさらに下はスタート');
     g.press('ArrowRight');
