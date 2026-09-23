@@ -10,7 +10,7 @@ function open(shape) {
     field: function () {
       var f = globalThis.__derbyFake; f.calls++;
       if (f.failNext > 0) { f.failNext--; return Promise.reject(new Error("x")); }
-      var lens = f.lens ? f.lens.slice() : [0,1,2,3,4,5,6,7,8,9,10,11].map(function () { return 1000 + Math.floor(Math.random() * 90000); });
+      var lens = f.lens ? f.lens.slice() : [0,1,2,3,4,5,6,7].map(function () { return 1000 + Math.floor(Math.random() * 90000); });
       var pvs = f.pvs ? f.pvs.slice() : lens.map(function () { return Math.floor(Math.random() * 2000); });
       return Promise.resolve(lens.map(function (len, i) {
         return { id: f.calls * 100 + i, title: "記事" + f.calls + "-" + i, len: len, pv: pvs[i], text: "これは" + i + "番の記事の冒頭の文章です。" };
@@ -29,7 +29,7 @@ async function start(g) {
   g.press(' '); g.step(1); await flush(); g.step(1);
   assert.equal(g.probe.now().state, 'play');
   assert.equal(g.probe.now().phase, 'bet', '出走馬が出る');
-  assert.equal(g.probe.now().horses.length, 12);
+  assert.equal(g.probe.now().horses.length, 8, '8頭立て');
 }
 /* スタートして、着順と払い戻しが出るまで進める */
 function race(g) {
@@ -75,7 +75,7 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     now = g.probe.now();
     assert.equal(now.money, 1000, 'リセットで全部戻る');
     assert.equal(now.bet, 0);
-    for (let i = 0; i < 13; i++) at(g, g.probe.plus(i % 12));
+    for (let i = 0; i < 13; i++) at(g, g.probe.plus(i % 8));
     assert.equal(g.probe.now().money, 0, '手持ちより多くは賭けられない');
     assert.equal(g.probe.now().bet, 1000);
   }
@@ -83,17 +83,17 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
   /* 2. 倍率は閲覧数で、着順は長さで決まる。払い戻しは賭け金×倍率 */
   {
     const g = open();
-    globalThis.__derbyFake.lens = [5000, 120000, 3000, 80000, 700, 45000, 9000, 60000, 1500, 100000, 20000, 30000];
-    globalThis.__derbyFake.pvs = [3000, 50, 10, 900, 0, 200, 40, 5, 1, 400, 70, 20];
+    globalThis.__derbyFake.lens = [5000, 120000, 3000, 80000, 700, 45000, 9000, 60000];
+    globalThis.__derbyFake.pvs = [3000, 50, 10, 900, 0, 200, 40, 5];
     await start(g);
     const now0 = g.probe.now();
-    assert.deepEqual(now0.order, [1, 9, 3, 7, 5, 11, 10, 6, 0, 2, 8, 4], '着順は長い順');
+    assert.deepEqual(now0.order, [1, 3, 7, 5, 6, 0, 2, 4], '着順は長い順');
     const odds = now0.odds;
     assert.equal(now0.popRank[0], 0, 'いちばん読まれている記事が1番人気');
-    assert.ok(odds[0] < odds[3] && odds[3] < odds[9] && odds[9] < odds[5] && odds[5] < odds[4], '閲覧数が多いほど倍率が低い: ' + odds);
+    assert.ok(odds[0] < odds[3] && odds[3] < odds[5] && odds[5] < odds[1] && odds[1] < odds[4], '閲覧数が多いほど倍率が低い: ' + odds);
     assert.ok(odds.every(o => o >= 1.1 && o <= 999.9));
     at(g, g.probe.plus(1)); at(g, g.probe.plus(1));          /* 1着の馬に200 */
-    at(g, g.probe.plus(0));                                  /* 1番人気（9着）に100 */
+    at(g, g.probe.plus(0));                                  /* 1番人気（6着）に100 */
     const rest = g.probe.now().money;
     const r = race(g);
     assert.deepEqual(r.orderSeen, now0.order, '止まった順の逆が長さの順');
@@ -153,7 +153,7 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
   /* 5. 手持ちが100を切ったら終わる */
   {
     const g = open();
-    globalThis.__derbyFake.lens = [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000];
+    globalThis.__derbyFake.lens = [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000];
     await start(g);
     for (let i = 0; i < 10; i++) at(g, g.probe.plus(0));     /* いちばん短い馬に全部 */
     race(g);
@@ -170,15 +170,15 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     g.press('ArrowRight'); g.press(' ');
     assert.equal(g.probe.now().bets[1], 100, '→で2番');
     g.press('ArrowDown'); g.press(' '); g.press(' ');
-    assert.equal(g.probe.now().bets[4], 200, '↓で5番（3列なので2番の下は5番）');
+    assert.equal(g.probe.now().bets[3], 200, '↓で4番（2列なので2番の下は4番）');
     g.press('Backspace');
     assert.equal(g.probe.now().bet, 0, 'Backspaceでリセット');
     g.press(' ');
-    assert.equal(g.probe.now().bets[4], 100);
+    assert.equal(g.probe.now().bets[3], 100);
     for (let i = 0; i < 6; i++) g.press('ArrowDown');
-    assert.equal(g.probe.now().sel, 12, 'いちばん下からさらに下はスタート');
+    assert.equal(g.probe.now().sel, 8, 'いちばん下からさらに下はスタート');
     g.press('ArrowRight');
-    assert.equal(g.probe.now().sel, 13, 'スタートの右はリセット');
+    assert.equal(g.probe.now().sel, 9, 'スタートの右はリセット');
     g.press('ArrowLeft');
     g.press(' '); g.step(1);
     assert.equal(g.probe.now().phase, 'count');
@@ -207,7 +207,7 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     await start(g);
     const H = g.probe.now().H;
     const pts = [g.probe.pile(), g.probe.startButton(), g.probe.resetButton()];
-    for (let i = 0; i < 12; i++) pts.push(g.probe.plus(i));
+    for (let i = 0; i < 8; i++) pts.push(g.probe.plus(i));
     let min = 1e9;
     for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) min = Math.min(min, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
     assert.ok(min >= 63, shape.join('x') + ' 押しどころの間隔 ' + min.toFixed(1));
