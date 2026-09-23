@@ -148,19 +148,31 @@
     /* Wikipediaの決まりに沿って、どこの何が問い合わせているかを名乗る（連絡先はサイトのURL） */
     return fetch(url, { headers: { "Api-User-Agent": UA } }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
   }
+  /* 流す本文: "intro" は記事の導入部（最初の見出しの前まで）だけ、"full" は冒頭から MAX_CHARS まで */
+  var TEXT_MODE = "full";                       /* 導入部だけだとカードの言葉がほぼ出ない（要約57本で1つ以上出るのは4%）ので、冒頭1200字 */
+  var introCache = {};
   var wikiSource = {
-    /* ランダムな記事を12本取り、そこそこ長いものから3本 */
+    /* ランダムな記事を取り、そこそこ長いものから3本。
+       導入部だけのときは、題名と一緒に導入部も1回で取れる（1回に20本まで） */
     choices: function () {
-      return getJSON(API + "&generator=random&grnnamespace=0&grnlimit=12&prop=info").then(function (j) {
+      var q = TEXT_MODE === "intro"
+        ? "&generator=random&grnnamespace=0&grnlimit=20&prop=info|extracts&exintro=1&explaintext=1&exlimit=20"
+        : "&generator=random&grnnamespace=0&grnlimit=12&prop=info";
+      return getJSON(API + q).then(function (j) {
         var ps = ((j.query && j.query.pages) || []).filter(function (p) { return !p.missing && p.title; });
-        var good = ps.filter(function (p) { return p.length >= 2500; });
-        if (good.length < 3) good = ps.sort(function (a, b) { return b.length - a.length; });
+        var size = TEXT_MODE === "intro"
+          ? function (p) { return (p.extract || "").length; }
+          : function (p) { return p.length; };
+        var good = ps.filter(function (p) { return size(p) >= (TEXT_MODE === "intro" ? 100 : 2500); });
+        if (good.length < 3) good = ps.sort(function (x, y) { return size(y) - size(x); });
         good = shuffle(good.slice()).slice(0, 3);
         if (good.length < 3) throw new Error("記事が足りない");
+        good.forEach(function (p) { if (p.extract) introCache[p.pageid] = p.extract; });
         return good.map(function (p) { return { id: p.pageid, title: p.title }; });
       });
     },
     text: function (id) {
+      if (TEXT_MODE === "intro" && introCache[id] != null) return Promise.resolve(introCache[id]);
       return getJSON(API + "&prop=extracts&explaintext=1&exsectionformat=plain&exchars=1500&pageids=" + id).then(function (j) {
         var p = j.query && j.query.pages && j.query.pages[0];
         return (p && p.extract) || "";
