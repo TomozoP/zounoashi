@@ -114,6 +114,7 @@
     s.start(n, Math.random() * 1.5); s.stop(n + dur + 0.05);
   }
   function sndChip(delay) { noiseHit(0.05, 3200 + Math.random() * 600, 0.2, 3, delay); tone(2400 + Math.random() * 300, 0.04, 0.03, "triangle", null, delay); }
+  function sndReveal(i) { tone(520 + i * 70, 0.06, 0.035, "triangle"); }   /* 馬名が1頭ずつ出るとき。だんだん高く */
   function sndPick() { tone(660, 0.05, 0.05, "square"); }
   function sndTurn() { tone(784, 0.1, 0.06, "triangle"); tone(1047, 0.16, 0.06, "triangle", null, 0.1); }
   function sndNo() { tone(160, 0.1, 0.05, "square"); }
@@ -434,7 +435,11 @@
     var first = nextActive(0);
     if (first >= 0) switchTo(first);
     phase = "bet"; pt = 0; sel = 0;
+    revealT = 0; revealN = 0;
   }
+  /* 出走馬が届いたら、馬名を上から1頭ずつ出す（プレイヤーの交代では出し直さない） */
+  var revealT = 99, revealN = N, REVEAL_GAP = 0.11, REVEAL_IN = 0.22;
+  function revealOf(i, lag) { var u = Math.min(1, Math.max(0, (revealT - i * REVEAL_GAP - (lag || 0)) / REVEAL_IN)); return 1 - (1 - u) * (1 - u); }
 
   /* ============ 賭ける ============ */
   /* 下の段の −・＋ ボタン（中心どうしは111離れる。隣の枠のボタンとも63以上離れる） */
@@ -508,6 +513,34 @@
     return (lo + hi) / 2;
   }
   var WIN_RUN = 2, winStop = null;                             /* 速さを合わせるときに見込む、1着が決まってから終わるまでの秒数 */
+  /* 加速線: カメラの流れる速さ（px/秒）が上がってきたら、走路に右から左へ流れる線を出す */
+  var streaks = [], camSpd = 0, speedFx = 0, lastCamX = null, FX_FROM = 0.45, FX_FULL = 0.75;   /* 速さは指数で上がるので対数で見る。そのレースの最高の速さに対して、どこまで来たか */
+  function stepStreaks(dt) {
+    if (lastCamX !== null && dt > 0) camSpd += ((cam - lastCamX) / dt - camSpd) * Math.min(1, dt * 5);
+    lastCamX = cam;
+    var want = crossT !== null ? 0 : Math.max(0, Math.min(1, (Math.log(Math.max(1, camSpd) / (R0 * CHAR)) / Math.max(0.1, K * finishT[order[1]]) - FX_FROM) / (FX_FULL - FX_FROM)));
+    speedFx += (want - speedFx) * Math.min(1, dt * (want > speedFx ? 2 : 4));
+    var n = Math.round(speedFx * 34);
+    while (streaks.length < n) streaks.push(newStreak(W + Math.random() * W));
+    for (var i = streaks.length - 1; i >= 0; i--) {
+      var q = streaks[i];
+      q.x -= (900 + speedFx * 2600) * q.f * dt;
+      if (q.x + q.len < 0) { if (streaks.length > n) streaks.splice(i, 1); else streaks[i] = newStreak(W + Math.random() * 120); }
+    }
+  }
+  function newStreak(x) { return { x: x, y: TRACK.top + Math.random() * N * LANE, len: 50 + Math.random() * 130, f: 0.7 + Math.random() * 0.6, w: Math.random() < 0.3 ? 2.5 : 1.5 }; }
+  function drawStreaks() {
+    if (speedFx < 0.01) return;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, TRACK.top, W, N * LANE); ctx.clip();
+    streaks.forEach(function (q) {
+      var len = q.len * (0.5 + speedFx * 0.8);
+      var gr = ctx.createLinearGradient(q.x, 0, q.x + len, 0);
+      gr.addColorStop(0, "rgba(255,255,255,0)"); gr.addColorStop(0.35, "rgba(255,255,255," + (0.45 * speedFx) + ")"); gr.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = gr; ctx.fillRect(q.x, q.y, len, q.w);
+    });
+    ctx.restore();
+  }
   var GOAL_AHEAD = 0.5, goalX = 0, crossT = null, crossX = 0, camV = 0, outT = null;
   var DASH = 800, FINISH_WAIT = 3.2;                           /* ゴールから結果の画面までの間 */
   var confetti = [];
@@ -529,6 +562,7 @@
     phase = "count"; pt = 0; raceT = 0; confetti = []; gallopT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
     prog = []; finishT = []; stopped = [];
     K = solveK(horses[order[1]].len, RUN - WIN_RUN);
+    streaks = []; camSpd = 0; speedFx = 0; lastCamX = null;
     plan = []; battle = 0; winStop = null; camV = 0; outT = null; crossT = null; crossX = 0;
     for (var i = 0; i < N; i++) {
       plan.push(planFor(horses[i].len));
@@ -589,6 +623,8 @@
     }
     if (state !== S.PLAY) return;
     holdStep(dt);
+    revealT += dt;
+    if (phase === "bet") while (revealN < N && revealT >= revealN * REVEAL_GAP) sndReveal(revealN++);
     T += dt; pt += dt;
     if (wobble > 0) wobble = Math.max(0, wobble - dt);
     for (var i = flyers.length - 1; i >= 0; i--) { flyers[i].t += dt; if (flyers[i].t > flyers[i].d) flyers.splice(i, 1); }
@@ -634,6 +670,7 @@
       if (crossT !== null && outT === null && runX(order[0], raceT) - cam > W + 70) {   /* 画面の外に出た */
         outT = raceT; stopped[order[0]] = true;
       }
+      stepStreaks(dt);
       var near = Math.max(0, 1 - running / N);                 /* 残りが少ないほど盛り上がる */
       /* 足音: 走っている頭数ぶん、少しずつずらした「パカラッ」を重ねる（多いときは3組まで） */
       gallopT -= dt;
@@ -860,9 +897,10 @@
     var inAir = {};
     flyers.forEach(function (f) { if (f.to != null && f.t < f.d) inAir[f.to] = (inAir[f.to] || 0) + 1; });
     for (var i = 0; i < N; i++) {                             /* 上: 馬名の一覧 */
-      var c = cardRect(i), appear = Math.min(1, Math.max(0, (pt - i * 0.025) / 0.2));
+      var c = cardRect(i), appear = revealOf(i);
       ctx.save();
       ctx.globalAlpha = appear;
+      ctx.translate((1 - appear) * -28, 0);                    /* 左から滑り込む */
       ctx.fillStyle = bets[i] ? "rgba(240,197,78,.22)" : (i % 2 ? "rgba(255,255,255,.07)" : "rgba(255,255,255,.12)");
       roundRect(c.x, c.y + 1, c.w, c.h - 2, 8); ctx.fill();
       var cy = c.y + c.h / 2;
@@ -875,7 +913,7 @@
       ctx.restore();
     }
     for (var j = 0; j < N; j++) {                             /* 下: 賭けるボタン */
-      var ap = Math.min(1, Math.max(0, (pt - 0.2 - j * 0.02) / 0.2));
+      var ap = revealOf(j, 0.05);                              /* 馬名と同じ順に、少し遅れて */
       ctx.save();
       ctx.globalAlpha = ap;
       drawBetCell(j, ctrlRect(j), bets[j] - (inAir[j] || 0) * UNIT, money >= UNIT, keyMode && sel === j, -1, true);
@@ -1030,6 +1068,7 @@
         ctx.fillText(txt.charAt(k), sx, ty);
       }
     }
+    drawStreaks();
     /* 馬の名前は各レーンの左上に固定（馬が画面の外にいても分かるように）。半透明の小さい字で、切らずに収める */
     for (var t = 0; t < N; t++) {
       var ly = TRACK.top + t * LANE + 10;
@@ -1305,7 +1344,7 @@
     now: function () {
       return { state: state, phase: phase, score: score, money: money, players: players, cur: cur,
                monies: P.map(function (p) { return p.money; }), allBets: P.map(function (p) { return p.bets.slice(); }), wonBy: wonBy.slice(), race: raceNo, sel: sel,
-               bets: bets && bets.slice(), bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
+               bets: bets && bets.slice(), speedFx: speedFx, camSpd: camSpd, reveal: revealT, revealed: revealN, bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
                horses: horses && horses.map(function (h) { return { title: h.title, len: h.len, pv: h.pv }; }),
                order: order.slice(), won: won, raceT: raceT, cam: cam, W: W, H: H };
     },

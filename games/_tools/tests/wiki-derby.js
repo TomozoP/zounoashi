@@ -45,13 +45,16 @@ function race(g) {
   assert.ok(lastLane < top, 'レース中の賭けたボタンは走路の下にある');
   assert.ok(g.probe.raceCtrl(7).y + 26 < H - 20, 'レース中の賭けたボタンが画面に収まる');
   const stopSeen = [], cams = [], stopX = {};
-  let frames = 0, soloFrames = 0, secondStop = null, lastX = null, dashSteps = [], lastCam = null, lastLead = null, camJump = 0, confettiMax = 0;
+  let frames = 0, soloFrames = 0, secondStop = null, lastX = null, dashSteps = [], lastCam = null, lastLead = null, camJump = 0, confettiMax = 0, fxEarly = 0, fxMax = 0;
   while (g.probe.now().phase === 'race' && frames < 3000) {
     const st = g.probe.stopped(), p = g.probe.positions();
     const alive = st.filter(v => !v).length;
     if (alive === 1) { soloFrames++; if (secondStop === null) secondStop = frames; }
     const gl = g.probe.goal();
     confettiMax = Math.max(confettiMax, gl.confetti);
+    const fx = g.probe.now().speedFx;                        /* 加速線は後半から */
+    if (frames < 600) fxEarly = Math.max(fxEarly, fx);
+    fxMax = Math.max(fxMax, fx);
     /* カメラは1コマで、いちばん進んだ馬が動いたぶんより大きく動かない（飛ばない） */
     const camNow = g.probe.now().cam;
     const world = [0,1,2,3,4,5,6,7].map(i => g.probe.screenX(i) + camNow);
@@ -73,6 +76,9 @@ function race(g) {
   }
   const orderSeen = stopSeen.slice().reverse();              /* 最後まで走った馬が1着 */
   for (let k = 1; k < orderSeen.length; k++) assert.ok(stopX[orderSeen[k - 1]] > stopX[orderSeen[k]], '長い記事の馬ほど先で止まる: ' + k + '着 ' + JSON.stringify(orderSeen.map(i => [i, g.probe.now().horses[i].len, +stopX[i].toFixed(4)])));
+  assert.equal(fxEarly, 0, '前半は加速線を出さない');
+  assert.ok(fxMax > 0.8, '後半は加速線が出る: ' + fxMax);
+  assert.ok(g.probe.now().speedFx < 0.1, 'ゴールしたら消える');
   assert.ok(frames < 3000, '走り終わる ' + JSON.stringify({ goal: g.probe.goal(), stopped: g.probe.stopped(), lens: g.probe.now().horses.map(h => h.len), W: g.probe.now().W, H: g.probe.now().H }));
   assert.equal(g.probe.now().phase, 'finish');
   const dashSteady = dashSteps.length < 2 || dashSteps.every(d => Math.abs(d - dashSteps[0]) < 0.5 && d > 5);
@@ -277,6 +283,22 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.equal(g.probe.now().phase, 'error', '勝手に進まない');
     at(g, g.probe.retryButton()); await flush(); g.step(1);
     assert.equal(g.probe.now().phase, 'bet');
+  }
+
+  /* 1b. 出走馬が届いたら、馬名を1頭ずつ出す。1秒ほどで出そろい、プレイヤーの交代では出し直さない */
+  {
+    const g = open();
+    g.press('ArrowRight');
+    g.press(' '); g.step(1); await flush();
+    const seen = [];
+    for (let k = 0; k < 90; k++) { g.step(1); seen.push(g.probe.now().revealed); }
+    assert.equal(seen[0], 1, 'はじめは1頭');
+    assert.ok(seen[20] > 1 && seen[20] < 8, '少しずつ増える: ' + seen[20]);
+    assert.equal(seen.indexOf(8) <= 60, true, '1秒ほどで出そろう');
+    for (let k = 1; k < seen.length; k++) assert.ok(seen[k] - seen[k - 1] <= 1, '1頭ずつ');
+    at(g, g.probe.plus(0)); at(g, g.probe.startButton()); g.step(1);
+    assert.equal(g.probe.now().cur, 1);
+    assert.ok(g.probe.now().reveal > 1, '交代では出し直さない');
   }
 
   /* 1c. 長押しで続けて賭ける。離す・ボタンから外れると止まり、手持ちが尽きたら止まる */
