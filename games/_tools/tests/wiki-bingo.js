@@ -1,4 +1,4 @@
-/* Wikipediaビンゴ: 通信の代わりに偽の記事を差し込み、選ぶ・流れる・穴が開く・次の記事・ビンゴ・通信失敗を確かめる。 */
+/* Wikipediaビンゴ: 通信の代わりに偽の記事を差し込み、選ぶ・流れる・光る・タップで開ける・次の記事・ビンゴ・通信失敗を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
 const file = 'games/_wiki-bingo/index.html';
@@ -21,6 +21,8 @@ function open(plan, shape) {
   g.step(2);
   return g;
 }
+const tapCell = (g, i) => { const p = g.probe.cell(i); g.tap(p.x, p.y); };
+const litCount = g => g.probe.now().lit.filter(Boolean).length;
 async function start(g) {
   assert.equal(g.probe.now().state, 'intro');
   const introCard = g.probe.now().card;
@@ -43,7 +45,7 @@ async function start(g) {
     assert.ok(g.probe.now().open[12], '真ん中は最初から開いている');
   }
 
-  /* 2. 1本目で横1列が揃う記事 → その単語の最後の文字の時点の文字数で結果 */
+  /* 2. 出た単語は光るだけ。自分でタップすると開き、開けた時点の文字数で結果 */
   {
     const g = open();
     await start(g);
@@ -57,14 +59,22 @@ async function start(g) {
     await flush(); g.step(1);
     assert.equal(g.probe.now().phase, 'stream');
     assert.equal(g.probe.now().title, '記事1-1', '選んだ記事が流れる');
-    g.until(() => g.probe.now().phase !== 'stream', 2000);
+    g.until(() => litCount(g) === 4, 2000);
+    const expect = (filler + row.join("いいい")).length;
+    assert.ok(Math.abs(g.probe.now().pos - expect) <= 2, "4つ目が出たところで光る");
+    assert.equal(g.probe.now().open.filter(Boolean).length, 1, "光っても勝手には開かない");
+    tapCell(g, 0);
+    assert.equal(g.probe.now().open[0], false, "光っていないマスは開かない");
+    [10, 11, 13].forEach(i => tapCell(g, i));
+    assert.equal(g.probe.now().phase, "stream", "4列目が揃うまでは続く");
+    g.step(30);
+    tapCell(g, 14);
     const now = g.probe.now();
-    assert.equal(now.phase, 'bingo');
+    assert.equal(now.phase, "bingo");
     assert.deepEqual(now.bingo, [10, 11, 12, 13, 14]);
-    const expect = (filler + row.join('いいい')).length;
-    assert.equal(now.score, expect, 'ビンゴの瞬間までの文字数');
+    assert.ok(now.score > expect + 25 && now.score <= expect + 40, "遅れて開けたぶん文字数が増える: " + now.score);
     g.until(() => g.probe.now().state === 'result', 400);
-    assert.equal(g.probe.now().score, expect);
+    assert.equal(g.probe.now().score, now.score);
   }
 
   /* 3. 1本で揃わない → 次の3つが出て、文字数は足し算。単語は記事をまたいで積み上がる */
@@ -75,20 +85,25 @@ async function start(g) {
     let n = 0;
     setPlan(g, () => { n++; return n === 1 ? 'あ' + c[0] + 'あ' + c[1] + 'あ' : c[2] + 'う' + c[3] + 'う' + c[4]; });
     g.press(' '); await flush(); g.step(1);
-    g.until(() => g.probe.now().phase !== 'stream', 2000);
-    assert.notEqual(g.probe.now().phase, 'bingo');
+    g.until(() => g.probe.now().phase !== "stream", 2000);
+    assert.equal(litCount(g), 2);
     const first = ('あ' + c[0] + 'あ' + c[1] + 'あ').length;
     g.until(() => g.probe.now().phase === 'choose', 200);
     await flush(); g.step(1);
     assert.equal(g.probe.now().phase, 'choose', '次の題名');
-    assert.ok(g.probe.now().open[0] && g.probe.now().open[1], '前の記事で開いた穴は残る');
+    assert.ok(g.probe.now().lit[0] && g.probe.now().lit[1], "開けないまま次の記事へ移っても光ったまま");
+    tapCell(g, 0);
+    assert.ok(g.probe.now().open[0], "題名を選ぶ間にも開けられる");
+    assert.equal(g.probe.now().phase, "choose");
     g.press('ArrowDown'); g.press('ArrowDown');
     assert.equal(g.probe.now().pick, 2, '矢印で選ぶ');
     g.press(' '); await flush(); g.step(1);
     assert.ok(/-2$/.test(g.probe.now().title));
-    g.until(() => g.probe.now().phase === 'bingo', 2000);
+    g.until(() => g.probe.now().phase !== "stream", 2000);
+    for (let i = 0; i < 4; i++) g.press(" ");               /* 前の記事の1と、今の2・3・4 */
+    assert.equal(g.probe.now().phase, "bingo", "スペースでも光った順に開けられる");
     assert.deepEqual(g.probe.now().bingo, [0, 1, 2, 3, 4]);
-    assert.equal(g.probe.now().score, first + (c[2] + 'う' + c[3] + 'う' + c[4]).length);
+    assert.equal(g.probe.now().score, first + (c[2] + "う" + c[3] + "う" + c[4]).length, "読み終えた記事の文字数の合計");
     assert.equal(g.probe.now().articles, 2);
   }
 
@@ -99,7 +114,7 @@ async function start(g) {
     setPlan(g, () => 'あ'.repeat(2000));
     g.press(' '); await flush(); g.step(1);
     g.step(60); const slow = g.probe.now().pos;
-    g.down(270, g.probe.cell(0).y); g.step(60); g.up();
+    g.down(270, g.probe.choice(1).y); g.step(60); g.up();   /* 本文の枠を押す（カードを押すと開けるほうになる） */
     const fast = g.probe.now().pos - slow;
     assert.ok(slow > 50 && slow < 90, '1秒でふつう70文字ほど: ' + slow);
     assert.ok(fast > slow * 3, '押している間は速い: ' + fast);
@@ -125,7 +140,9 @@ async function start(g) {
     const c = g.probe.now().card;
     setPlan(g, () => [0, 6, 18, 24].map(i => c[i]).join('。'));
     g.press(' '); await flush(); g.step(1);
-    g.until(() => g.probe.now().state === 'result', 3000);
+    g.until(() => litCount(g) === 4, 3000);
+    [0, 6, 18, 24].forEach(i => tapCell(g, i));
+    g.until(() => g.probe.now().state === "result", 3000);
     const H = g.probe.now().H;
     g.tap(270 - 107, H * 0.62 + 27); g.step(1); await flush(); g.step(1);
     assert.equal(g.probe.now().state, 'play');

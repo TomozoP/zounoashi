@@ -110,7 +110,10 @@
     s.start(n, Math.random() * 1.5); s.stop(n + dur + 0.05);
   }
   function sndType() { noiseHit(0.018, 4200, 0.025, 4); }
-  function sndStamp() { noiseHit(0.08, 500, 0.35, 1.2); tone(180, 0.09, 0.08, "sine", 90); }
+  /* 紙のミシン目を押し抜く音。ぷつっと切れて、ポコッと凹む */
+  function sndStamp() { noiseHit(0.03, 2600, 0.18, 2); noiseHit(0.06, 900, 0.22, 1.5, 0.02); tone(210, 0.08, 0.1, "sine", 110, 0.02); }
+  function sndLight() { tone(1568, 0.09, 0.05, "sine"); tone(2093, 0.14, 0.04, "sine", null, 0.05); }
+  function sndDud() { noiseHit(0.04, 400, 0.08, 1); }
   function sndReach() { tone(880, 0.12, 0.06, "triangle"); tone(1175, 0.16, 0.06, "triangle", null, 0.1); }
   function sndBingo() { [523, 659, 784, 1047, 1319].forEach(function (f, i) { tone(f, 0.3, 0.08, "triangle", null, i * 0.08); }); }
   function sndPick() { tone(660, 0.06, 0.06, "square"); }
@@ -178,17 +181,20 @@
   /* PLAY の中の段階: load（題名を取りに行く）→ choose（選ぶ）→ fetch（本文を取りに行く）
      → stream（流れる）→ 次の記事の load/choose へ、または bingo → 結果。error は通信の失敗 */
   var state, phase, pt, score, card, open, openT, bingoLine, choices, nextChoices, pick, article, articles,
-      text, pos, lines, hits, held, keyMode = false, T, round, retry, typeT, reached;
+      text, pos, lines, hits, lit, held, keyMode = false, T, round, retry, typeT, reached;
 
-  var HEAD, BOX, BOXH, CARD, CELL, CREDIT;
+  var HEAD, BOX, BOXH, CARD, CELL, CREDIT, FRAME;
   function place() {
     var extra = Math.max(0, H - 780);
     HEAD = 14 + Math.min(extra * 0.25, 60);
     BOX = HEAD + 50;
     BOXH = 186 + Math.min(extra * 0.3, 90);
-    CELL = { w: 101, h: Math.min(104, Math.floor((H - BOX - BOXH - 16 - 44) / 5)) };
-    CARD = { x: 16, y: BOX + BOXH + 16 };
-    CREDIT = Math.min(H - 16, CARD.y + CELL.h * 5 + 26);
+    /* 紙のカード: 外枠（FRAME）の上に色の帯、その下に5×5のマス */
+    var top = BOX + BOXH + 12, band = 26, pad = 10;
+    CELL = { w: 100, h: Math.min(100, Math.floor((H - top - 40 - band - pad * 2) / 5)) };
+    FRAME = { x: 10, y: top, w: 520, h: band + pad * 2 + CELL.h * 5, band: band };
+    CARD = { x: 20, y: top + band + pad };
+    CREDIT = Math.min(H - 14, FRAME.y + FRAME.h + 22);
     if (text) wrapText();
   }
 
@@ -199,11 +205,11 @@
     round = (round || 0) + 1;
     T = 0; pt = 0; score = 0; held = false; typeT = 0;
     if (!keepCard) { card = shuffle(WORDS.slice()).slice(0, 25); card[12] = null; }   /* 真ん中は最初から開いている */
-    open = []; openT = [];
-    for (var i = 0; i < 25; i++) { open.push(i === 12); openT.push(i === 12 ? 9 : -1); }
+    open = []; openT = []; lit = [];
+    for (var i = 0; i < 25; i++) { open.push(i === 12); openT.push(i === 12 ? 9 : -1); lit.push(-1); }
     bingoLine = null; reached = {};
     choices = null; nextChoices = null; pick = 0; article = null; articles = 0;
-    text = ""; pos = 0; lines = []; hits = []; readBefore = 0;
+    text = ""; pos = 0; lines = []; hits = []; readBefore = 0; counted = false;
     loadChoices();
   }
 
@@ -256,7 +262,7 @@
     text = cleanText(t);
     if (!text) { loadChoices(); return; }
     articles++;
-    pos = 0;
+    pos = 0; counted = false;
     findHits();
     wrapText();
     phase = "stream"; pt = 0;
@@ -290,8 +296,29 @@
       if (n === 4 && !reached[l]) { reached[l] = true; sndReach(); }
     }
   }
-  var readBefore = 0;                           /* 前の記事までに読んだ文字数 */
-  function countRead() { return readBefore + countChars(text.slice(0, pos)); }
+  var readBefore = 0, counted = false;          /* 前の記事までに読んだ文字数。counted = 今の記事も足し終えた */
+  function countRead() { return readBefore + (counted ? 0 : countChars(text.slice(0, pos))); }
+  /* 本文に出たマスを光らせる。光ったマスはタップするまで光ったまま（次の記事に移っても） */
+  function light(i) {
+    if (open[i] || lit[i] >= 0) return;
+    lit[i] = T;
+    sndLight();
+  }
+  function punch(i) {
+    if (open[i] || lit[i] < 0 || phase === "bingo") return false;
+    lit[i] = -1;
+    stamp(i);                                   /* 開けた瞬間の文字数で数える */
+    return true;
+  }
+  function oldestLit() {
+    var best = -1;
+    for (var i = 0; i < 25; i++) if (lit[i] >= 0 && !open[i] && (best < 0 || lit[i] < lit[best])) best = i;
+    return best;
+  }
+  function cellAt(x, y) {
+    for (var i = 0; i < 25; i++) { var r = cellRect(i); if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return i; }
+    return -1;
+  }
   function countChars(s) { return s.replace(/\s/g, "").length; }
 
   /* ============ 進行 ============ */
@@ -309,15 +336,13 @@
         var hit = hits[h];
         if (hit.done || hit.end > now) continue;
         hit.done = true; hit.t = T;
-        pos = hit.end;                          /* 開いた瞬間で数える */
-        stamp(hit.cell);
-        if (phase === "bingo") return;
+        light(hit.cell);                        /* 光るだけ。開けるのは自分でタップ */
       }
       score = countRead();
       if (pos >= text.length) { phase = "after"; pt = 0; }
     } else if (phase === "after") {
       if (pt >= 0.7) {
-        readBefore += countChars(text);
+        readBefore += countChars(text); counted = true;
         sndNext();
         loadChoices();
       }
@@ -342,6 +367,13 @@
       if (hit === "retry") newRound();
       return;
     }
+    if (phase !== "bingo" && phase !== "error") {
+      if (x == null) { var o = phase === "choose" ? -1 : oldestLit(); if (o >= 0) { punch(o); return; } }   /* 題名を選ぶ間のスペースは選ぶほう */
+      else {
+        var ci = cellAt(x, y);
+        if (ci >= 0) { if (!punch(ci) && !open[ci]) sndDud(); return; }
+      }
+    }
     if (phase === "choose") {
       if (x == null) { choose(pick); return; }
       var cr = choiceRects();
@@ -352,7 +384,7 @@
       if (x == null || inside(retryRect(), x, y)) { var f = retry; retry = null; if (f) f(); }
       return;
     }
-    if (phase === "stream") held = true;      /* 押している間は速く流れる */
+    if (phase === "stream") held = true;      /* カード以外を押している間は速く流れる */
   }
   function move() {}
   function up() { held = false; }
@@ -502,54 +534,131 @@
     if (window.zActionIcon) window.zActionIcon(ctx, "もう一度", r.x + r.w / 2, r.y + r.h / 2, 30);
   }
 
+  /* 紙のビンゴカード。単語はミシン目の丸の上に刷ってあり、出たらその丸を押し抜いて穴にする */
+  var PAPER = "#fbf5e6", INK = "#1d2a44", RIM = "#d8433b";
+  function holeR() { return Math.min(CELL.w, CELL.h) * 0.4; }
   function drawCard() {
-    var bg = { x: CARD.x - 6, y: CARD.y - 6, w: CELL.w * 5 + 12, h: CELL.h * 5 + 12 };
-    roundRect(bg.x, bg.y, bg.w, bg.h, 14);
-    ctx.fillStyle = "#2c3a52"; ctx.fill();
-    for (var i = 0; i < 25; i++) {
-      var c = cellRect(i), g = 3;
-      roundRect(c.x + g, c.y + g, c.w - g * 2, c.h - g * 2, 9);
-      ctx.fillStyle = "#f6f1e7"; ctx.fill();
-      var cx = c.x + c.w / 2, cy = c.y + c.h / 2;
-      if (card[i]) {
-        var w = card[i];
-        ctx.fillStyle = "#16202e";
-        ctx.font = "800 " + Math.min(32, Math.floor(84 / w.length)) + "px sans-serif";
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(w, cx, cy + 1);
-        ctx.textBaseline = "alphabetic";
-      }
-      if (open[i]) drawStampMark(cx, cy, Math.min(c.w, c.h) * 0.4, openT[i], !card[i]);
-    }
-    if (bingoLine) {
-      var a = cellRect(bingoLine[0]), b = cellRect(bingoLine[4]);
-      var u = Math.min(1, pt / 0.5);
-      var x0 = a.x + a.w / 2, y0 = a.y + a.h / 2, x1 = b.x + b.w / 2, y1 = b.y + b.h / 2;
-      ctx.save();
-      ctx.lineCap = "round";
-      ctx.shadowColor = "#f7cc71"; ctx.shadowBlur = 16;
-      ctx.strokeStyle = "rgba(247,204,113,.92)"; ctx.lineWidth = 14;
-      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u); ctx.stroke();
-      ctx.restore();
-    }
-  }
-  /* スタンプ。押した瞬間に大きく、少し戻って落ち着く */
-  function drawStampMark(x, y, r, t, star) {
-    var s = t < 0.12 ? 1.5 - t / 0.12 * 0.6 : (t < 0.25 ? 0.9 + (t - 0.12) / 0.13 * 0.1 : 1);
+    var F = FRAME;
+    /* 影と外枠 */
     ctx.save();
-    ctx.translate(x, y); ctx.scale(s, s);
-    ctx.globalAlpha = Math.min(1, 0.4 + t * 6);
-    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(214,48,58,.42)"; ctx.fill();
-    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(170,24,34,.85)"; ctx.stroke();
-    if (star) {
-      ctx.beginPath();
-      for (var k = 0; k < 10; k++) {
-        var a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? r * 0.3 : r * 0.7;
-        ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
-      }
-      ctx.closePath(); ctx.fillStyle = "#fff4d6"; ctx.fill();
+    ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
+    roundRect(F.x, F.y, F.w, F.h, 16); ctx.fillStyle = RIM; ctx.fill();
+    ctx.restore();
+    /* 帯の飾り（小さな星を並べる） */
+    for (var k = 0; k < 9; k++) drawStar(F.x + 38 + k * 55.5, F.y + F.band / 2 + 4, 6, k % 2 ? "#ffd86b" : "#fff3dc");
+    /* 紙の面 */
+    var gx = CARD.x, gy = CARD.y, gw = CELL.w * 5, gh = CELL.h * 5;
+    roundRect(gx - 4, gy - 4, gw + 8, gh + 8, 8); ctx.fillStyle = PAPER; ctx.fill();
+    /* 罫線 */
+    ctx.strokeStyle = "rgba(29,42,68,.28)"; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (var i = 1; i < 5; i++) {
+      ctx.moveTo(gx + i * CELL.w, gy + 2); ctx.lineTo(gx + i * CELL.w, gy + gh - 2);
+      ctx.moveTo(gx + 2, gy + i * CELL.h); ctx.lineTo(gx + gw - 2, gy + i * CELL.h);
     }
+    ctx.stroke();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = "rgba(29,42,68,.55)";
+    roundRect(gx - 4, gy - 4, gw + 8, gh + 8, 8); ctx.stroke();
+
+    var R = holeR();
+    for (var c = 0; c < 25; c++) {
+      var r = cellRect(c), cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+      if (open[c]) drawHole(cx, cy, R, openT[c], card[c]);
+      else { if (lit[c] >= 0) drawLit(cx, cy, R, T - lit[c]); drawFlap(cx, cy, R, card[c]); }
+    }
+    if (bingoLine) drawBingo(R);
+  }
+  /* 本文に出たマス: 丸が金色に光って脈打つ */
+  function drawLit(cx, cy, R, t) {
+    var p = 0.5 + 0.5 * Math.sin(t * 9);
+    var pop = Math.max(0, 1 - t / 0.3);
+    ctx.save();
+    ctx.shadowColor = "#ffcf3f"; ctx.shadowBlur = 14 + p * 12;
+    ctx.beginPath(); ctx.arc(cx, cy, R * (1 + pop * 0.25), 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,207,63," + (0.55 + p * 0.3) + ")"; ctx.fill();
+    ctx.restore();
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(214,120,0,.9)";
+    ctx.beginPath(); ctx.arc(cx, cy, R + 3, 0, Math.PI * 2); ctx.stroke();
+  }
+  function drawStar(x, y, r, color) {
+    ctx.beginPath();
+    for (var k = 0; k < 10; k++) {
+      var a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? r * 0.45 : r;
+      ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+  }
+  /* まだ開いていない丸: ミシン目と単語 */
+  function drawFlap(cx, cy, R, word) {
+    ctx.save();
+    ctx.setLineDash([4, 4]); ctx.lineWidth = 1.6; ctx.strokeStyle = "rgba(29,42,68,.45)";
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    if (!word) return;
+    ctx.fillStyle = INK;
+    ctx.font = "900 " + Math.min(30, Math.floor(R * 1.72 / word.length)) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(word, cx, cy + 1);
+    ctx.textBaseline = "alphabetic";
+  }
+  /* 押し抜いた穴。押した直後は丸がへこみながら奥へ倒れ、そのあと上のふちに倒れた紙がのぞく */
+  function drawHole(cx, cy, R, t, word) {
+    var PUSH = 0.09, FALL = 0.22;
+    if (t < PUSH) {                                         /* 押されてへこむ */
+      var u = t / PUSH;
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(29,42,68," + (0.08 + u * 0.18) + ")"; ctx.fill();
+      ctx.translate(cx, cy); ctx.scale(1 - u * 0.08, 1 - u * 0.08); ctx.translate(-cx, -cy);
+      drawFlap(cx, cy, R, word);
+      ctx.restore();
+      return;
+    }
+    /* 穴の底（下の机の色）と、切り口の影 */
+    var g = ctx.createRadialGradient(cx, cy + R * 0.25, R * 0.2, cx, cy, R);
+    g.addColorStop(0, "#141a26"); g.addColorStop(1, "#0a0e16");
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.clip();
+    ctx.lineWidth = 7; ctx.strokeStyle = "rgba(0,0,0,.5)";
+    ctx.beginPath(); ctx.arc(cx, cy + 3, R + 2, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+    /* 奥へ倒れた紙（上のふちでつながっている） */
+    var f = Math.min(1, (t - PUSH) / (FALL - PUSH));
+    var fall = f < 1 ? 1 - f * f * 0.72 : 0.28 + Math.sin(Math.min(1, (t - FALL) / 0.18) * Math.PI) * 0.05;
+    ctx.translate(cx, cy - R);
+    ctx.scale(1, fall);
+    ctx.beginPath(); ctx.arc(0, R, R, 0, Math.PI * 2);
+    ctx.fillStyle = f < 1 ? "#e8e0cd" : "#b9ae96"; ctx.fill();
+    if (word && f < 1) {
+      ctx.fillStyle = "rgba(29,42,68," + (1 - f) + ")";
+      ctx.font = "900 " + Math.min(30, Math.floor(R * 1.72 / word.length)) + "px sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(word, 0, R + 1);
+      ctx.textBaseline = "alphabetic";
+    }
+    ctx.restore();
+    /* 切り口のふち（紙の厚み） */
+    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(160,145,115,.9)";
+    ctx.beginPath(); ctx.arc(cx, cy, R, Math.PI * 0.05, Math.PI * 0.95); ctx.stroke();
+    ctx.strokeStyle = "rgba(29,42,68,.55)";
+    ctx.beginPath(); ctx.arc(cx, cy, R, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+  }
+  /* 揃った列: 穴を順に金色で囲み、線でつなぐ */
+  function drawBingo(R) {
+    ctx.save();
+    ctx.shadowColor = "#ffd86b"; ctx.shadowBlur = 14;
+    var pts = bingoLine.map(function (i) { var r = cellRect(i); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; });
+    var u = Math.min(1, pt / 0.6);
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(255,216,107,.85)"; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(pts[0].x + (pts[4].x - pts[0].x) * u, pts[0].y + (pts[4].y - pts[0].y) * u); ctx.stroke();
+    ctx.lineWidth = 5;
+    pts.forEach(function (p, i) {
+      if (pt < i * 0.1) return;
+      var s = 1 + Math.max(0, 0.25 - (pt - i * 0.1)) * 1.6;
+      ctx.beginPath(); ctx.arc(p.x, p.y, (R + 5) * s, 0, Math.PI * 2); ctx.stroke();
+    });
     ctx.restore();
   }
 
@@ -635,7 +744,7 @@
   window.__probe = {
     now: function () {
       return { state: state, phase: phase, score: score, card: card && card.slice(), open: open && open.slice(),
-               bingo: bingoLine && bingoLine.slice(), articles: articles, pos: pos, length: text.length,
+               bingo: bingoLine && bingoLine.slice(), lit: lit && lit.map(function (v) { return v >= 0; }), articles: articles, pos: pos, length: text.length,
                title: article && article.title, choices: choices && choices.map(function (c) { return c.title; }),
                pick: pick, held: held, W: W, H: H };
     },
@@ -657,7 +766,13 @@
         if (phase !== "choose") break;
         await r.wait(900);
         choose(Math.floor(Math.random() * 3));
-        if (!await r.until(function () { return phase !== "fetch" && phase !== "stream"; }, 60)) throw Error("流れ終わらない");
+        var guard = Date.now() + 60000;
+        while ((phase === "fetch" || phase === "stream") && Date.now() < guard) {
+          var o = oldestLit();
+          if (o >= 0 && T - lit[o] > 0.35) punch(o);
+          await r.wait(50);
+        }
+        while (oldestLit() >= 0 && phase !== "bingo") { punch(oldestLit()); await r.wait(300); }
       }
       await r.until(function () { return state === S.RESULT; }, 5);
       await r.wait(1500);
@@ -673,7 +788,7 @@
   /* 開始前はカードだけ見せる（通信はSTARTを押してから） */
   state = S.INTRO; phase = "intro"; round = 0; score = 0; text = ""; hits = []; lines = []; article = null; pt = 0; T = 0;
   card = shuffle(WORDS.slice()).slice(0, 25); card[12] = null;
-  open = []; openT = []; for (var i0 = 0; i0 < 25; i0++) { open.push(i0 === 12); openT.push(i0 === 12 ? 9 : -1); }
+  open = []; openT = []; lit = []; for (var i0 = 0; i0 < 25; i0++) { open.push(i0 === 12); openT.push(i0 === 12 ? 9 : -1); lit.push(-1); }
   startButton.hidden = false;
   layout();
   var lastT = performance.now();
