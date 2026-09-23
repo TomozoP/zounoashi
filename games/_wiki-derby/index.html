@@ -36,11 +36,12 @@
 /* ウィキペディアダービー
 
    ランダムなWikipediaの記事12本が、12頭の出走馬。馬の名前は記事の題名。
-   手持ちのチップを「1着（単勝）」か「3着以内（複勝）」に賭けて走らせる。
-   記事のページが長いほど速く、長い順にゴールする。
-   10レース走り終えたとき（またはチップが尽きたとき）の枚数が結果。
+   人気（倍率）は記事の閲覧数で決まる。架空の観客が、よく読まれている記事ほど多く賭ける。
+   着順はページの長さで決まる。長い記事ほど強い。
+   単勝（1着）に100ずつ賭けて、3レース後の手持ちが結果。
+   レースは約30秒。走った後の走路に、その記事の冒頭の文章が浮かび上がる。
 
-   使うのは記事の題名とページの長さだけ（本文は使わない）。遊ぶたびにWikipediaから取りに行く。 */
+   遊ぶたびにWikipediaから取りに行く。文章を出すので、出典と利用条件を表示する。 */
 (function () {
   "use strict";
 
@@ -105,15 +106,14 @@
   }
   function sndChip(delay) { noiseHit(0.05, 3200 + Math.random() * 600, 0.2, 3, delay); tone(2400 + Math.random() * 300, 0.04, 0.03, "triangle", null, delay); }
   function sndNo() { tone(160, 0.1, 0.05, "square"); }
-  function sndPick() { tone(660, 0.05, 0.05, "square"); }
-  /* ゲートが開く: 金属の音と、ファンファーレのかわりの短い上昇音 */
+  /* ゲートが開く: 金属の音と、短いファンファーレ */
   function sndGate() {
     noiseHit(0.12, 1800, 0.25, 3); tone(1318, 0.5, 0.06, "triangle", null, 0.02); tone(1760, 0.6, 0.05, "triangle", null, 0.02);
     [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.16, 0.05, "square", null, 0.12 + i * 0.08); });
   }
   function sndHoof(v) { noiseHit(0.05, 180 + Math.random() * 80, 0.05 + 0.1 * v, 1.4); }
-  function sndCrowd(v) { noiseHit(0.5, 900 + Math.random() * 400, 0.02 + 0.06 * v, 0.6); }
-  function sndCheer() { for (var i = 0; i < 4; i++) noiseHit(0.8, 1100 + i * 300, 0.1, 0.5, i * 0.05); }
+  function sndCrowd(v) { noiseHit(0.5, 900 + Math.random() * 400, 0.02 + 0.07 * v, 0.6); }
+  function sndCheer() { for (var i = 0; i < 4; i++) noiseHit(0.9, 1100 + i * 300, 0.12, 0.5, i * 0.05); }
   function sndWin() { [784, 988, 1175, 1568].forEach(function (f, i) { tone(f, 0.22, 0.08, "triangle", null, i * 0.09); }); }
   function sndLose() { tone(300, 0.3, 0.06, "sine", 170); }
   document.addEventListener("visibilitychange", function () {
@@ -123,7 +123,8 @@
   });
 
   /* ============ 出走馬を取ってくる ============
-     ランダムな記事12本と、そのページの長さ（バイト数）。1レースにつき1回だけ問い合わせる。
+     ランダムな記事12本の、題名・ページの長さ・冒頭の文章・30日の閲覧数。
+     1回目で題名・長さ・文章はそろう。閲覧数は1回で返りきらないので、続きを数回取る。
      テストでは window.__wikiSource に同じ形の偽物を置く。 */
   var API = "https://ja.wikipedia.org/w/api.php?format=json&formatversion=2&origin=*&action=query";
   var UA = "ZounoashiGames-WikiDerby/1.0 (https://www.zounoashi.com)";
@@ -133,20 +134,40 @@
     /* Wikipediaの決まりに沿って、どこの何が問い合わせているかを名乗る（連絡先はサイトのURL） */
     return fetch(url, { headers: { "Api-User-Agent": UA } }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
   }
+  function sumViews(pv) { var s = 0; for (var k in pv) s += pv[k] || 0; return s; }
   var wikiSource = {
     field: function () {
-      return getJSON(API + "&generator=random&grnnamespace=0&grnlimit=" + N + "&prop=info").then(function (j) {
-        var ps = ((j.query && j.query.pages) || []).filter(function (p) { return !p.missing && p.title && p.length > 0; });
+      return getJSON(API + "&generator=random&grnnamespace=0&grnlimit=" + N +
+                     "&prop=info|extracts|pageviews&exintro=1&explaintext=1&exlimit=" + N + "&pvipdays=30").then(function (j) {
+        var ps = ((j.query && j.query.pages) || []).filter(function (p) { return !p.missing && p.title && p.length > 0; }).slice(0, N);
         if (ps.length < N) throw new Error("頭数が足りない");
-        return ps.slice(0, N).map(function (p) { return { id: p.pageid, title: p.title, len: p.length }; });
+        var byId = {};
+        var field = ps.map(function (p) {
+          var h = { id: p.pageid, title: p.title, len: p.length, text: p.extract || "", pv: p.pageviews ? sumViews(p.pageviews) : null };
+          byId[p.pageid] = h;
+          return h;
+        });
+        /* 閲覧数の続き（最大4回）。取れなかった記事は0回扱い */
+        var ids = field.map(function (h) { return h.id; }).join("|");
+        function more(cont, n) {
+          if (!cont || n >= 4) return field;
+          return getJSON(API + "&prop=pageviews&pvipdays=30&pageids=" + ids + "&pvipcontinue=" + encodeURIComponent(cont)).then(function (v) {
+            ((v.query && v.query.pages) || []).forEach(function (p) { if (p.pageviews && byId[p.pageid]) byId[p.pageid].pv = sumViews(p.pageviews); });
+            return more(v.continue && v.continue.pvipcontinue, n + 1);
+          }, function () { return field; });
+        }
+        return Promise.resolve(more(j.continue && j.continue.pvipcontinue, 0)).then(function (f) {
+          f.forEach(function (h) { if (h.pv == null) h.pv = 0; });
+          return f;
+        });
       });
     }
   };
   function source() { return window.__wikiSource || wikiSource; }
 
   /* ============ 決まりごと ============ */
-  var START_CHIPS = 10, RACES = 10;
-  var PAY = { win: 8, place: 3 };               /* 1着を当てたら8倍、3着以内を当てたら3倍が戻る */
+  var START_MONEY = 1000, UNIT = 100, RACES = 3;
+  var TAKE = 0.8;                               /* 賭け金のうち払い戻しに回る割合（胴元の取り分2割） */
   /* 枠の色（12頭立て: 1〜4枠は1頭ずつ、5〜8枠は2頭ずつ） */
   var FRAME_OF = [1, 2, 3, 4, 5, 5, 6, 6, 7, 7, 8, 8];
   var FRAME_COL = [null,
@@ -159,29 +180,34 @@
     return a;
   }
   function comma(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+  /* 倍率。観客は閲覧数に応じて賭ける（閲覧数0でも少しは賭ける人がいる） */
+  function makeOdds(field) {
+    var w = field.map(function (h) { return Math.pow(h.pv + 20, 0.45); });   /* 差をゆるめに: 1番人気が2倍前後、大穴が30倍前後 */
+    var sum = w.reduce(function (a, b) { return a + b; }, 0);
+    return w.map(function (x) { return Math.max(1.1, Math.min(999.9, Math.floor(TAKE / (x / sum) * 10) / 10)); });
+  }
+  function oddsText(o) { return o >= 100 ? String(Math.floor(o)) : o.toFixed(1); }
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   /* PLAY の中: load（出走馬を取りに行く）→ bet（賭ける）→ race（走る）→ finish（着順と払い戻し）→ 次の load。
      error は通信の失敗 */
-  var state, phase, pt, T, score, chips, shown, raceNo, horses, order, rankOf, bets, betType, sel, keyMode = false,
-      flyers, raceT, prog, finishT, nextField, round = 0, retry, wobble, won, hoofT, crowdT, cheered;
+  var state, phase, pt, T, score, money, shown, raceNo, horses, order, rankOf, odds, popRank, bets, sel, keyMode = false,
+      flyers, raceT, prog, finishT, nextField, round = 0, retry, wobble, won, hoofT, crowdT, cheered, cam;
 
-  var BAR, TG, GRID, PY, CW, CARDH, STARTB, TRACK, LANE;
+  var BAR, GRID, PY, CW, CARDH, STARTB, TRACK, LANE;
   function place() {
     BAR = 14;
-    TG = { y: 82, h: 58, w: 150 };
-    GRID = { x: 16, y: 156 };
-    PY = Math.max(64, Math.min(84, Math.floor((H - GRID.y - 112) / 6)));
+    GRID = { x: 16, y: 84 };
+    PY = Math.max(64, Math.min(92, Math.floor((H - GRID.y - 112) / 6)));
     CW = (W - 32 - 10) / 2;
     CARDH = PY - 8;
     STARTB = { x: W / 2 - 110, y: GRID.y + 6 * PY + 14, w: 220, h: 64 };
-    TRACK = { top: 76, sx: 34, fx: W - 46 };
-    LANE = Math.floor((H - TRACK.top - 24) / N);
+    TRACK = { top: 92, bottom: H - 40 };
+    LANE = Math.floor((TRACK.bottom - TRACK.top) / N);
   }
   function cardRect(i) { return { x: GRID.x + (i % 2) * (CW + 10), y: GRID.y + Math.floor(i / 2) * PY, w: CW, h: CARDH }; }
-  function toggleRect(k) { return { x: k === "win" ? W / 2 - TG.w - 12 : W / 2 + 12, y: TG.y, w: TG.w, h: TG.h }; }
-  function pileRect() { return { x: 16, y: BAR, w: 150, h: 52 }; }
+  function pileRect() { return { x: 16, y: BAR, w: 190, h: 52 }; }
   function nextRect() { return { x: W / 2 - 100, y: H - 96, w: 200, h: 60 }; }
   function retryRect() { return { x: W / 2 - 50, y: H * 0.42 - 30, w: 100, h: 60 }; }
   function inside(r, x, y) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
@@ -191,14 +217,14 @@
     document.getElementById("start").hidden = true;
     state = S.PLAY; round++;
     T = 0; pt = 0;
-    chips = START_CHIPS; shown = chips; score = chips; raceNo = 0;
-    betType = "win"; sel = 0; flyers = []; wobble = 0; nextField = null;
-    horses = null; order = []; rankOf = [];
+    money = START_MONEY; shown = money; score = money; raceNo = 0;
+    sel = 0; flyers = []; wobble = 0; nextField = null;
+    horses = null; order = []; rankOf = []; odds = []; popRank = [];
     clearBets();
     loadField();
   }
-  function clearBets() { bets = { win: [], place: [] }; for (var i = 0; i < N; i++) { bets.win.push(0); bets.place.push(0); } }
-  function totalBet() { var s = 0; for (var i = 0; i < N; i++) s += bets.win[i] + bets.place[i]; return s; }
+  function clearBets() { bets = []; for (var i = 0; i < N; i++) bets.push(0); }
+  function totalBet() { var s = 0; for (var i = 0; i < N; i++) s += bets[i]; return s; }
 
   function fail(again) { phase = "error"; pt = 0; retry = again; }
   function fetchField() { return Promise.resolve().then(function () { return source().field(); }); }
@@ -214,76 +240,78 @@
     fetchField().then(function (f) { if (r !== round) return; if (phase === "load") gotField(f); else nextField = f; }, function () {});
   }
   function gotField(f) {
-    horses = f.slice(0, N);
+    horses = f.slice(0, N).map(function (h) {
+      return { id: h.id, title: h.title, len: h.len, pv: h.pv || 0, text: String(h.text || "").replace(/\s+/g, " ").trim() };
+    });
     /* 着順はページの長い順。同じ長さなら先に並んだほう */
     order = horses.map(function (h, i) { return i; }).sort(function (a, b) { return horses[b].len - horses[a].len || a - b; });
     rankOf = []; order.forEach(function (h, r) { rankOf[h] = r; });
+    odds = makeOdds(horses);
+    popRank = []; horses.map(function (h, i) { return i; }).sort(function (a, b) { return odds[a] - odds[b] || a - b; })
+                        .forEach(function (h, r) { popRank[h] = r; });
     clearBets();
     phase = "bet"; pt = 0; sel = 0;
   }
 
   /* ============ 賭ける ============ */
-  function chipAt(i, type) { var c = cardRect(i); return { x: c.x + c.w - 22, y: c.y + (type === "win" ? c.h * 0.32 : c.h * 0.72) }; }
+  function chipAt(i) { var c = cardRect(i); return { x: c.x + c.w - 20, y: c.y + c.h * 0.7 }; }
   function pileAt() { return { x: 40, y: BAR + 26 }; }
   function bet(i) {
     if (state !== S.PLAY || phase !== "bet") return;
-    if (chips <= 0) { sndNo(); return; }
-    chips--; bets[betType][i]++;
-    var p = pileAt(), c = chipAt(i, betType);
-    flyers.push({ x0: p.x, y0: p.y, x1: c.x, y1: c.y, t: 0, d: 0.18, type: betType, to: i });
+    if (money < UNIT) { sndNo(); return; }
+    money -= UNIT; bets[i] += UNIT;
+    var p = pileAt(), c = chipAt(i);
+    flyers.push({ x0: p.x, y0: p.y, x1: c.x, y1: c.y, t: 0, d: 0.18, to: i });
     sndChip();
   }
   function takeBack() {
     if (state !== S.PLAY || phase !== "bet" || !totalBet()) return;
     var n = 0, p = pileAt();
-    ["win", "place"].forEach(function (type) {
-      for (var i = 0; i < N; i++) {
-        if (!bets[type][i]) continue;
-        var c = chipAt(i, type);
-        flyers.push({ x0: c.x, y0: c.y, x1: p.x, y1: p.y, t: -n * 0.02, d: 0.22, type: type });
-        chips += bets[type][i]; bets[type][i] = 0; n++;
-      }
-    });
+    for (var i = 0; i < N; i++) {
+      if (!bets[i]) continue;
+      var c = chipAt(i);
+      flyers.push({ x0: c.x, y0: c.y, x1: p.x, y1: p.y, t: -n * 0.02, d: 0.22 });
+      money += bets[i]; bets[i] = 0; n++;
+    }
     for (var k = 0; k < Math.min(n, 5); k++) sndChip(k * 0.04);
   }
-  function setType(t) { if (betType !== t) { betType = t; sndPick(); } }
 
   /* ============ レース ============
-     着順 r の馬は、ゲートから T_r 秒でゴールする。途中は抜きつ抜かれつに見えるよう揺らし、
-     ゴール前でその揺れを消して、着順どおりに入線させる。 */
-  var BASE = 5.6, GAP = 0.32;
+     コースの長さは COURSE（画面の外まで続く）。着順 r の馬は T_r 秒でゴールする。
+     途中は抜きつ抜かれつに見えるよう揺らし、ゴール前で揺れを消して着順どおりに入線させる。
+     カメラは先頭の少し後ろを追いかける。 */
+  var COURSE = 3200, BASE = 27, GAP = 0.45, CHAR = 17;
   function startRace() {
     if (state !== S.PLAY || phase !== "bet") return;
     if (!totalBet()) { wobble = 0.35; sndNo(); return; }
-    phase = "race"; pt = 0; raceT = 0; hoofT = 0; crowdT = 0; cheered = false;
+    phase = "race"; pt = 0; raceT = 0; hoofT = 0; crowdT = 0; cheered = false; cam = -60;
     prog = []; finishT = [];
     for (var i = 0; i < N; i++) {
       finishT[i] = BASE + rankOf[i] * GAP;
-      prog.push({ w1: 1.3 + Math.random() * 1.2, w2: 2.6 + Math.random() * 1.8, p1: Math.random() * 6.3, p2: Math.random() * 6.3, a: 0.05 + Math.random() * 0.035 });
+      prog.push({ w1: 0.35 + Math.random() * 0.3, w2: 0.8 + Math.random() * 0.6, w3: 1.7 + Math.random() * 1.2,
+                  p1: Math.random() * 6.3, p2: Math.random() * 6.3, p3: Math.random() * 6.3, a: 0.05 + Math.random() * 0.04 });
     }
     sndGate();
     prefetch();
   }
   function progressOf(i, t) {
     var Tr = finishT[i], u = t / Tr;
-    if (u >= 1) return 1 + 0.07 * (1 - Math.exp(-(t - Tr) * 1.6));   /* ゴールを駆け抜けてゆっくり止まる */
-    var base = u < 0.12 ? u * u / 0.24 : (u - 0.06) / 0.94;            /* 出だしは加速、あとはほぼ一定 */
+    if (u >= 1) return 1 + 0.035 * (1 - Math.exp(-(t - Tr) * 1.4));   /* ゴールを駆け抜けてゆっくり止まる */
+    var base = u < 0.06 ? u * u / 0.12 : (u - 0.03) / 0.97;            /* 出だしは加速、あとはほぼ一定 */
     var q = prog[i];
-    var wob = q.a * (Math.sin(t * q.w1 + q.p1) * 0.7 + Math.sin(t * q.w2 + q.p2) * 0.3) * Math.sin(Math.PI * Math.min(1, u * 1.15));
-    return Math.max(0, Math.min(0.985, base + wob));
+    var wob = q.a * (Math.sin(t * q.w1 + q.p1) * 0.55 + Math.sin(t * q.w2 + q.p2) * 0.3 + Math.sin(t * q.w3 + q.p3) * 0.15);
+    wob *= Math.sin(Math.PI * Math.min(1, u * 1.08));                   /* スタートとゴールの手前では揺らさない */
+    return Math.max(0, Math.min(0.992, base + wob));
   }
   function settle() {
     won = 0;
-    for (var i = 0; i < N; i++) {
-      if (bets.win[i] && rankOf[i] === 0) won += bets.win[i] * PAY.win;
-      if (bets.place[i] && rankOf[i] <= 2) won += bets.place[i] * PAY.place;
-    }
-    chips += won; score = chips; raceNo++;
+    for (var i = 0; i < N; i++) if (bets[i] && rankOf[i] === 0) won += Math.floor(bets[i] * odds[i]);
+    money += won; score = money; raceNo++;
     if (won) sndWin(); else sndLose();
   }
   function nextRace() {
     if (phase !== "finish" || pt < 0.5) return;
-    if (raceNo >= RACES || chips <= 0) { state = S.RESULT; score = chips; shown = chips; return; }
+    if (raceNo >= RACES || money < UNIT) { state = S.RESULT; score = money; shown = money; return; }
     horses = null;
     loadField();
   }
@@ -293,16 +321,20 @@
     T += dt; pt += dt;
     if (wobble > 0) wobble = Math.max(0, wobble - dt);
     for (var i = flyers.length - 1; i >= 0; i--) { flyers[i].t += dt; if (flyers[i].t > flyers[i].d) flyers.splice(i, 1); }
-    shown += (chips - shown) * Math.min(1, dt * 6);
-    if (Math.abs(chips - shown) < 0.5) shown = chips;
+    shown += (money - shown) * Math.min(1, dt * 5);
+    if (Math.abs(money - shown) < 1) shown = money;
     if (phase === "race") {
       raceT += dt;
       var lead = 0;
-      for (var h = 0; h < N; h++) lead = Math.max(lead, progressOf(h, raceT));
-      hoofT -= dt; if (hoofT <= 0 && lead < 1.02) { hoofT = 0.07; sndHoof(Math.min(1, lead)); }
-      crowdT -= dt; if (crowdT <= 0) { crowdT = 0.3; sndCrowd(Math.min(1, lead)); }
+      for (var h = 0; h < N; h++) lead = Math.max(lead, Math.min(1, progressOf(h, raceT)));
+      /* カメラ: 先頭が画面の右寄りに来るように。ゴールが見えたらそこで止める */
+      var want = Math.min(lead * COURSE - W * 0.68, COURSE - W * 0.78);
+      cam += (want - cam) * Math.min(1, dt * 3);
+      var near = Math.max(0, (lead - 0.75) / 0.25);
+      hoofT -= dt; if (hoofT <= 0 && raceT < BASE + GAP * N) { hoofT = 0.07; sndHoof(0.4 + near * 0.6); }
+      crowdT -= dt; if (crowdT <= 0) { crowdT = 0.3; sndCrowd(0.2 + near * 0.8); }
       if (!cheered && raceT >= BASE) { cheered = true; sndCheer(); }
-      if (raceT > BASE + GAP * (N - 1) + 0.9) { phase = "finish"; pt = 0; settle(); }
+      if (raceT > BASE + GAP * (N - 1) + 1.2) { phase = "finish"; pt = 0; settle(); }
     }
   }
 
@@ -319,13 +351,7 @@
     if (phase === "error") { if (x == null || inside(retryRect(), x, y)) { var f = retry; retry = null; if (f) f(); } return; }
     if (phase === "finish") { nextRace(); return; }
     if (phase !== "bet") return;
-    if (x == null) {                            /* キー: 選んでいるところを押す */
-      if (sel === -1) setType("win"); else if (sel === -2) setType("place");
-      else if (sel === N) startRace(); else bet(sel);
-      return;
-    }
-    if (inside(toggleRect("win"), x, y)) { setType("win"); return; }
-    if (inside(toggleRect("place"), x, y)) { setType("place"); return; }
+    if (x == null) { if (sel === N) startRace(); else bet(sel); return; }
     if (inside(pileRect(), x, y)) { takeBack(); return; }
     if (inside(STARTB, x, y)) { startRace(); return; }
     var c = hitCard(x, y);
@@ -334,20 +360,14 @@
   function move() {}
   function up() {}
 
-  /* 矢印キー: 12枚は2列×6段。いちばん上の段からさらに上は賭け方の切り替え、いちばん下からさらに下はスタート */
+  /* 矢印キー: 12頭は2列×6段。いちばん下からさらに下はスタート */
   function moveSel(dx, dy) {
-    if (sel < 0) {
-      if (dx) sel = sel === -1 ? -2 : -1;
-      else if (dy > 0) sel = sel === -1 ? 0 : 1;
-      return;
-    }
     if (sel === N) { if (dy < 0) sel = N - 2; return; }
     var c = sel % 2, r = Math.floor(sel / 2);
     if (dx) { sel = r * 2 + (1 - c); return; }
     r += dy;
-    if (r < 0) sel = c === 0 ? -1 : -2;
-    else if (r > 5) sel = N;
-    else sel = r * 2 + c;
+    if (r < 0) return;
+    sel = r > 5 ? N : r * 2 + c;
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -383,7 +403,7 @@
   });
 
   function doShare() {
-    window.zResultActions.x({ text: score + "枚でした #ウィキペディアダービー" });
+    window.zResultActions.x({ text: comma(score) + "でした #ウィキペディアダービー" });
   }
 
   /* ============ 描画 ============ */
@@ -401,35 +421,49 @@
     while (s.length > 1 && ctx.measureText(s + "…").width > maxW) s = s.slice(0, -1);
     return s + "…";
   }
-  function twoLines(s, maxW) {
-    if (ctx.measureText(s).width <= maxW) return [s];
-    var i = 1;
-    while (i < s.length && ctx.measureText(s.slice(0, i + 1)).width <= maxW) i++;
-    return [s.slice(0, i), fitText(s.slice(i), maxW)];
+  /* 文字を切らずに収める。大きい字から順に試して、lines 行以内に入る大きさにする。
+     いちばん小さい字でも入らないときだけ、最後の行を … で切る */
+  function fitLines(s, maxW, lines, big, small, weight) {
+    for (var size = big; size >= small; size--) {
+      ctx.font = weight + " " + size + "px sans-serif";
+      var out = wrapLines(s, maxW);
+      if (out.length <= lines) return { size: size, lines: out };
+    }
+    ctx.font = weight + " " + small + "px sans-serif";
+    var all = wrapLines(s, maxW), keep = all.slice(0, lines);
+    keep[lines - 1] = fitText(all.slice(lines - 1).join(""), maxW);
+    return { size: small, lines: keep };
   }
-  function drawChip(x, y, r, type, alpha) {
+  function wrapLines(s, maxW) {
+    var out = [], cur = "";
+    for (var i = 0; i < s.length; i++) {
+      var ch = s.charAt(i);
+      if (cur && ctx.measureText(cur + ch).width > maxW) { out.push(cur); cur = ch === " " ? "" : ch; }
+      else cur += ch;
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+  function drawFitted(s, x, y, maxW, lines, big, small, weight, align) {
+    var f = fitLines(s, maxW, lines, big, small, weight);
+    ctx.font = weight + " " + f.size + "px sans-serif";
+    ctx.textAlign = align || "left"; ctx.textBaseline = "middle";
+    var lh = f.size * 1.18;
+    f.lines.forEach(function (l, k) { ctx.fillText(l, x, y + (k - (f.lines.length - 1) / 2) * lh + 1); });
+    ctx.textBaseline = "alphabetic";
+  }
+  function drawChip(x, y, r, alpha) {
     ctx.save();
     ctx.globalAlpha = alpha == null ? 1 : alpha;
-    var body = type === "place" ? "#9aa7b8" : "#d9a431", rim = type === "place" ? "#eef3f8" : "#fff5d8", mid = type === "place" ? "#c4cfdc" : "#f0c54e";
     ctx.beginPath(); ctx.arc(x, y + 2, r, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.fill();
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = body; ctx.fill();
-    ctx.lineWidth = r * 0.28; ctx.setLineDash([r * 0.42, r * 0.36]); ctx.strokeStyle = rim;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = "#d9a431"; ctx.fill();
+    ctx.lineWidth = r * 0.28; ctx.setLineDash([r * 0.42, r * 0.36]); ctx.strokeStyle = "#fff5d8";
     ctx.beginPath(); ctx.arc(x, y, r * 0.84, 0, Math.PI * 2); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(x, y, r * 0.52, 0, Math.PI * 2); ctx.fillStyle = mid; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, r * 0.52, 0, Math.PI * 2); ctx.fillStyle = "#f0c54e"; ctx.fill();
     ctx.restore();
   }
-  function drawStack(x, y, n, r, type, plain) {
-    var m = Math.min(n, 4);
-    for (var i = 0; i < m; i++) drawChip(x, y - i * 3, r, type);
-    if (n > 1 && !plain) {
-      ctx.fillStyle = "#2a1c08";
-      ctx.font = "800 " + Math.round(r * 0.95) + "px sans-serif";
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(String(n), x, y - (m - 1) * 3 + 1);
-      ctx.textBaseline = "alphabetic";
-    }
-  }
+  function drawStack(x, y, n, r) { for (var i = 0; i < Math.min(n, 4); i++) drawChip(x, y - i * 3, r); }
   /* 馬番の丸（枠の色） */
   function drawNum(i, x, y, r) {
     var c = frameCol(i);
@@ -441,60 +475,33 @@
     ctx.fillText(String(i + 1), x, y + 1);
     ctx.textBaseline = "alphabetic";
   }
-  /* 賭け方の印。1着は金のメダルに1、3着以内は銀のメダルに3 */
-  function drawMedal(type, x, y, r, on) {
-    ctx.save();
-    ctx.globalAlpha = on ? 1 : 0.45;
-    ctx.fillStyle = type === "win" ? "#d23a3a" : "#2f6fd6";
-    ctx.beginPath(); ctx.moveTo(x - r * 0.55, y - r * 1.5); ctx.lineTo(x - r * 0.05, y - r * 0.4); ctx.lineTo(x - r * 0.75, y - r * 0.4); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(x + r * 0.55, y - r * 1.5); ctx.lineTo(x + r * 0.05, y - r * 0.4); ctx.lineTo(x + r * 0.75, y - r * 0.4); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = type === "win" ? "#e8b52e" : "#b8c2cf"; ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = type === "win" ? "#a8780c" : "#7c8898"; ctx.stroke();
-    ctx.fillStyle = type === "win" ? "#6b4700" : "#3f4a58";
-    ctx.font = "900 " + Math.round(r * 1.2) + "px sans-serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(type === "win" ? "1" : "3", x, y + 1);
-    ctx.textBaseline = "alphabetic";
-    ctx.restore();
-  }
 
   function drawTurf() {
     var g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, "#1c5231"); g.addColorStop(1, "#153f26");
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = "rgba(255,255,255,.03)";
-    for (var x = 0; x < W; x += 60) ctx.fillRect(x, 0, 30, H);
   }
   function drawBar() {
     var p = pileAt(), n = Math.round(shown);
-    drawStack(p.x, p.y + 6, Math.max(0, Math.min(n, 4)), 17, "win", true);
-    if (n <= 0) { ctx.beginPath(); ctx.arc(p.x, p.y + 6, 17, 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 2; ctx.stroke(); }
+    drawStack(p.x, p.y + 6, n >= UNIT ? Math.min(4, Math.ceil(n / 500)) : 0, 17);
+    if (n < UNIT) { ctx.beginPath(); ctx.arc(p.x, p.y + 6, 17, 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 2; ctx.stroke(); }
     ctx.fillStyle = "#fbf4e6";
-    ctx.font = "800 36px sans-serif";
+    ctx.font = "800 32px sans-serif";
     ctx.textAlign = "left"; ctx.textBaseline = "middle";
-    ctx.fillText(String(n), p.x + 28, p.y + 2);
+    ctx.fillText(comma(n), p.x + 28, p.y + 2);
     ctx.textBaseline = "alphabetic";
     /* 残りのレース（右上の点） */
     for (var i = 0; i < RACES; i++) {
-      ctx.beginPath(); ctx.arc(W - 24 - (RACES - 1 - i) * 17, BAR + 26, 5, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(W - 26 - (RACES - 1 - i) * 22, BAR + 26, 7, 0, Math.PI * 2);
       ctx.fillStyle = i < raceNo ? "rgba(255,255,255,.18)" : "#f0cf78"; ctx.fill();
     }
   }
 
   function drawBet() {
     drawBar();
-    ["win", "place"].forEach(function (t, k) {
-      var r = toggleRect(t), on = betType === t;
-      roundRect(r.x, r.y, r.w, r.h, r.h / 2);
-      ctx.fillStyle = on ? "#fff" : "rgba(255,255,255,.14)"; ctx.fill();
-      if (keyMode && sel === (k ? -2 : -1)) { ctx.lineWidth = 4; ctx.strokeStyle = "#f7cc71"; ctx.stroke(); }
-      drawMedal(t, r.x + r.w / 2 - 22, r.y + r.h / 2 + 4, 14, on);
-      drawChip(r.x + r.w / 2 + 26, r.y + r.h / 2, 13, t, on ? 1 : 0.5);
-    });
     if (!horses) return;
-    var inAir = { win: {}, place: {} };
-    flyers.forEach(function (f) { if (f.to != null && f.t < f.d) inAir[f.type][f.to] = (inAir[f.type][f.to] || 0) + 1; });
+    var inAir = {};
+    flyers.forEach(function (f) { if (f.to != null && f.t < f.d) inAir[f.to] = (inAir[f.to] || 0) + 1; });
     for (var i = 0; i < N; i++) {
       var c = cardRect(i), appear = Math.min(1, Math.max(0, (pt - i * 0.03) / 0.2));
       ctx.save();
@@ -502,19 +509,27 @@
       ctx.translate(0, (1 - appear) * 10);
       roundRect(c.x, c.y, c.w, c.h, 14);
       ctx.fillStyle = "#f7f3ea"; ctx.fill();
-      if (bets.win[i] || bets.place[i]) { ctx.lineWidth = 3; ctx.strokeStyle = "#f0c54e"; ctx.stroke(); }
+      if (bets[i]) { ctx.lineWidth = 3; ctx.strokeStyle = "#f0c54e"; ctx.stroke(); }
       if (keyMode && sel === i) { ctx.lineWidth = 4; ctx.strokeStyle = "#ffffff"; ctx.stroke(); }
-      drawNum(i, c.x + 22, c.y + c.h / 2, 14);
+      drawNum(i, c.x + 21, c.y + c.h / 2, 13);
       ctx.fillStyle = "#16202e";
-      ctx.font = "800 17px sans-serif";
-      ctx.textAlign = "left"; ctx.textBaseline = "middle";
-      var ls = twoLines(horses[i].title, c.w - 44 - 48);
-      ls.forEach(function (l, k) { ctx.fillText(l, c.x + 42, c.y + c.h / 2 + 1 + (k - (ls.length - 1) / 2) * 20); });
+      drawFitted(horses[i].title, c.x + 40, c.y + c.h / 2, c.w - 40 - 62, 2, 17, 11, "800");
+      /* 倍率。1〜3番人気は赤 */
+      ctx.fillStyle = popRank[i] < 3 ? "#c8322e" : "#16202e";
+      ctx.font = "900 " + (odds[i] >= 100 ? 15 : 17) + "px sans-serif";
+      ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      ctx.fillText(oddsText(odds[i]), c.x + c.w - 8, c.y + c.h * 0.3);
       ctx.textBaseline = "alphabetic";
-      ["win", "place"].forEach(function (t) {
-        var n = bets[t][i] - (inAir[t][i] || 0);
-        if (n > 0) { var p = chipAt(i, t); drawStack(p.x, p.y, n, 11, t); }
-      });
+      var n = Math.round((bets[i] - (inAir[i] || 0) * UNIT) / UNIT);
+      if (n > 0) {
+        var p = chipAt(i);
+        drawStack(p.x, p.y, n, 10);
+        if (n > 1) {
+          ctx.fillStyle = "#2a1c08"; ctx.font = "800 10px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText(String(n), p.x, p.y - (Math.min(n, 4) - 1) * 3 + 1);
+          ctx.textBaseline = "alphabetic";
+        }
+      }
       ctx.restore();
     }
     /* スタート: 市松模様の旗 */
@@ -574,96 +589,133 @@
   }
 
   function laneY(i) { return TRACK.top + i * LANE + LANE / 2; }
-  function horseX(i) { return TRACK.sx + (TRACK.fx - TRACK.sx) * progressOf(i, raceT); }
+  function worldX(i) { return COURSE * progressOf(i, raceT); }
   function drawRace() {
     drawBar();
-    /* 走路 */
+    drawMiniMap();
+    var s = Math.min(1.2, LANE / 44);
+    /* 走路と、目印の柱（400ごと） */
     for (var i = 0; i < N; i++) {
       var y = TRACK.top + i * LANE;
-      ctx.fillStyle = i % 2 ? "rgba(255,255,255,.035)" : "rgba(0,0,0,.05)";
+      ctx.fillStyle = i % 2 ? "rgba(255,255,255,.035)" : "rgba(0,0,0,.06)";
       ctx.fillRect(0, y, W, LANE);
-      if (bets.win[i] || bets.place[i]) { ctx.fillStyle = "rgba(240,197,78,.16)"; ctx.fillRect(0, y, W, LANE); }
+      if (bets[i]) { ctx.fillStyle = "rgba(240,197,78,.15)"; ctx.fillRect(0, y, W, LANE); }
     }
-    ctx.strokeStyle = "rgba(255,255,255,.6)"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(TRACK.sx, TRACK.top); ctx.lineTo(TRACK.sx, TRACK.top + N * LANE); ctx.stroke();
-    var sq = 8;                                             /* ゴールの市松 */
-    for (var r = 0; r * sq < N * LANE; r++) for (var c2 = 0; c2 < 2; c2++) {
-      ctx.fillStyle = (r + c2) % 2 ? "#fff" : "#1a1a1a";
-      ctx.fillRect(TRACK.fx + c2 * sq - sq, TRACK.top + r * sq, sq, sq);
+    for (var m = 0; m <= COURSE; m += 400) {
+      var mx = m - cam;
+      if (mx < -10 || mx > W + 10) continue;
+      ctx.fillStyle = "rgba(255,255,255,.5)"; ctx.fillRect(mx - 1, TRACK.top - 6, 3, N * LANE + 6);
     }
-    var s = Math.min(1.25, LANE / 42);
-    for (var h = 0; h < N; h++) {
-      var x = horseX(h), y2 = laneY(h);
-      /* 題名は馬の上に小さく（画面からはみ出さない位置で） */
-      ctx.font = "700 12px sans-serif";
-      var label = fitText(horses[h].title, 170), lw = ctx.measureText(label).width;
-      var lx = Math.max(6 + lw / 2, Math.min(W - 6 - lw / 2, x));
-      ctx.fillStyle = "rgba(255,255,255,.82)";
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(label, lx, y2 - LANE * 0.36);
-      drawHorse(h, x, y2 + LANE * 0.08, raceT, s);
-      if (raceT >= finishT[h]) {                           /* 着順 */
-        drawRankBadge(rankOf[h], TRACK.fx + 24, y2);
+    var gx = 0 - cam;                                       /* スタートのゲート */
+    if (gx > -20 && gx < W) { ctx.fillStyle = "rgba(200,210,220,.8)"; ctx.fillRect(gx - 4, TRACK.top - 8, 8, N * LANE + 8); }
+    var fx = COURSE - cam;                                  /* ゴールの市松 */
+    if (fx < W + 20) {
+      var sq = 8;
+      for (var r = 0; r * sq < N * LANE; r++) for (var c2 = 0; c2 < 2; c2++) {
+        ctx.fillStyle = (r + c2) % 2 ? "#fff" : "#1a1a1a";
+        ctx.fillRect(fx + c2 * sq - sq, TRACK.top + r * sq, sq, sq);
       }
     }
+    /* 走った後の走路に、その記事の冒頭の文章が1文字ずつ浮かび上がる */
+    ctx.font = "600 " + Math.min(15, Math.floor(LANE * 0.28)) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (var h = 0; h < N; h++) {
+      var txt = horses[h].text, hx = worldX(h), ty = TRACK.top + h * LANE + LANE * 0.8;
+      if (!txt) continue;
+      var k0 = Math.max(0, Math.floor((cam - 40) / CHAR)), k1 = Math.min(txt.length - 1, Math.floor((Math.min(hx - 26, cam + W)) / CHAR));
+      for (var k = k0; k <= k1; k++) {
+        var wx = 40 + k * CHAR, sx = wx - cam;
+        var fresh = Math.max(0, Math.min(1, (hx - 26 - wx) / 60));
+        ctx.fillStyle = "rgba(255,248,225," + (0.25 + 0.5 * fresh) + ")";
+        ctx.fillText(txt.charAt(k), sx, ty);
+      }
+    }
+    for (var j = 0; j < N; j++) {
+      var x = worldX(j) - cam, y2 = laneY(j);
+      if (x < -60 || x > W + 60) continue;
+      /* 題名は馬の上に。切らずに文字を小さくして収める */
+      ctx.fillStyle = "rgba(255,255,255,.88)";
+      var f = fitLines(horses[j].title, 200, 1, 13, 9, "700");
+      ctx.font = "700 " + f.size + "px sans-serif";
+      var lw = ctx.measureText(f.lines[0]).width;
+      var lx = Math.max(6 + lw / 2, Math.min(W - 6 - lw / 2, x));
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(f.lines[0], lx, y2 - LANE * 0.34);
+      drawHorse(j, x, y2 + LANE * 0.02, raceT, s);
+      if (raceT >= finishT[j]) drawRankBadge(rankOf[j], Math.min(W - 16, x + 36 * s), y2);
+    }
+    ctx.textBaseline = "alphabetic";
+    drawCredit();
+  }
+  /* 上の細い帯に、コース全体での位置 */
+  function drawMiniMap() {
+    var y = 74, x0 = 24, x1 = W - 24;
+    ctx.fillStyle = "rgba(255,255,255,.18)"; ctx.fillRect(x0, y - 1, x1 - x0, 2);
+    ctx.fillStyle = "#fff"; ctx.fillRect(x1 - 2, y - 6, 4, 12);
+    for (var i = 0; i < N; i++) {
+      var p = Math.min(1, progressOf(i, raceT)), c = frameCol(i);
+      ctx.beginPath(); ctx.arc(x0 + (x1 - x0) * p, y, bets[i] ? 6 : 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = c.bg; ctx.fill();
+      if (bets[i]) { ctx.lineWidth = 2; ctx.strokeStyle = "#f0c54e"; ctx.stroke(); }
+    }
+  }
+  function drawCredit() {
+    ctx.fillStyle = "rgba(244,239,230,.6)";
+    ctx.font = "500 13px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("出典：Wikipedia（出走馬の記事） CC BY-SA 4.0", W / 2, H - 18);
     ctx.textBaseline = "alphabetic";
   }
   function drawRankBadge(r, x, y) {
-    var col = r === 0 ? "#e8b52e" : r === 1 ? "#c4cfdc" : r === 2 ? "#cf8a4a" : "rgba(255,255,255,.2)";
+    var col = r === 0 ? "#e8b52e" : r === 1 ? "#c4cfdc" : r === 2 ? "#cf8a4a" : "rgba(255,255,255,.25)";
     ctx.beginPath(); ctx.arc(x, y, 11, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
     ctx.fillStyle = r < 3 ? "#1a1a1a" : "#fff";
     ctx.font = "900 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(String(r + 1), x, y + 1);
   }
 
-  /* 着順と長さの一覧、払い戻し */
+  /* 着順・長さ・倍率の一覧と、払い戻し */
   function drawFinish() {
     var a = Math.min(1, pt / 0.35);
     ctx.fillStyle = "rgba(6,14,9," + (0.92 * a) + ")"; ctx.fillRect(0, 0, W, H);
     drawBar();
     ctx.globalAlpha = a;
-    var top = TRACK.top + 6, rh = Math.min(46, Math.floor((H - top - 130) / N));
+    var top = 76, rh = Math.min(48, Math.floor((H - top - 140) / N));
     var maxLen = horses[order[0]].len;
     for (var r = 0; r < N; r++) {
-      var i = order[r], y = top + r * rh, mine = bets.win[i] || bets.place[i];
-      var hitWin = bets.win[i] && r === 0, hitPlace = bets.place[i] && r <= 2;
+      var i = order[r], y = top + r * rh, hit = bets[i] && r === 0;
       roundRect(18, y + 3, W - 36, rh - 6, 10);
       ctx.fillStyle = r < 3 ? "rgba(255,255,255,.14)" : "rgba(255,255,255,.06)"; ctx.fill();
-      if (hitWin || hitPlace) { ctx.lineWidth = 3; ctx.strokeStyle = "#f7cc71"; ctx.stroke(); }
-      /* 長さの棒 */
-      ctx.fillStyle = r === 0 ? "rgba(232,181,46,.35)" : "rgba(255,255,255,.12)";
-      ctx.fillRect(84, y + rh - 9, (W - 84 - 30) * Math.max(0.01, horses[i].len / maxLen), 3);
+      if (hit) { ctx.lineWidth = 3; ctx.strokeStyle = "#f7cc71"; ctx.stroke(); }
+      ctx.fillStyle = r === 0 ? "rgba(232,181,46,.4)" : "rgba(255,255,255,.12)";
+      ctx.fillRect(84, y + rh - 9, (W - 84 - 30) * Math.max(0.01, horses[i].len / maxLen), 3);   /* 長さの棒 */
       drawRankBadge(r, 36, y + rh / 2);
       drawNum(i, 64, y + rh / 2, 11);
       ctx.fillStyle = "#fbf4e6";
-      ctx.font = (r < 3 ? "800 " : "600 ") + "16px sans-serif";
-      ctx.textAlign = "left"; ctx.textBaseline = "middle";
-      ctx.fillText(fitText(horses[i].title, W - 84 - 150), 84, y + rh / 2 - 1);
+      drawFitted(horses[i].title, 84, y + rh / 2 - 1, W - 84 - 170, 1, r < 3 ? 16 : 15, 10, r < 3 ? "800" : "600");
       ctx.fillStyle = "rgba(251,244,230,.75)";
-      ctx.font = "600 14px sans-serif"; ctx.textAlign = "right";
+      ctx.font = "600 13px sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
       ctx.fillText(comma(horses[i].len), W - 30, y + rh / 2 - 1);
-      if (mine) {
-        if (bets.win[i]) drawChip(W - 30 - 104, y + rh / 2, 8, "win", hitWin ? 1 : 0.4);
-        if (bets.place[i]) drawChip(W - 30 - 86, y + rh / 2, 8, "place", hitPlace ? 1 : 0.4);
-      }
+      ctx.fillStyle = popRank[i] < 3 ? "#ff8a80" : "rgba(251,244,230,.9)";
+      ctx.font = "800 13px sans-serif";
+      ctx.fillText(oddsText(odds[i]), W - 30 - 64, y + rh / 2 - 1);
+      if (bets[i]) drawChip(W - 30 - 112, y + rh / 2, 8, hit ? 1 : 0.4);
     }
     ctx.textBaseline = "alphabetic";
-    /* 払い戻し */
-    var py = top + N * rh + 34;
+    var py = top + N * rh + 34;                               /* 払い戻し */
     if (won) {
-      drawStack(W / 2 - 54, py + 4, Math.min(won, 4), 15, "win", true);
+      drawStack(W / 2 - 70, py + 4, 3, 15);
       ctx.fillStyle = "#f7cc71"; ctx.font = "900 34px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-      ctx.fillText("+" + won, W / 2 - 30, py + 2);
+      ctx.fillText("+" + comma(won), W / 2 - 46, py + 2);
       ctx.textBaseline = "alphabetic";
     }
-    /* 次へ（右向きの矢印） */
-    var b = nextRect();
+    var b = nextRect();                                       /* 次へ（右向きの矢印） */
     roundRect(b.x, b.y, b.w, b.h, b.h / 2);
     ctx.fillStyle = "#fff"; ctx.fill();
     ctx.strokeStyle = "#16202e"; ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.lineJoin = "round";
     var cx = b.x + b.w / 2, cy = b.y + b.h / 2;
     ctx.beginPath(); ctx.moveTo(cx - 16, cy); ctx.lineTo(cx + 14, cy); ctx.moveTo(cx + 4, cy - 10); ctx.lineTo(cx + 15, cy); ctx.lineTo(cx + 4, cy + 10); ctx.stroke();
     ctx.globalAlpha = 1;
+    drawCredit();
   }
 
   function drawSpinner(x, y) {
@@ -693,14 +745,13 @@
     flyers.forEach(function (f) {
       if (f.t < 0) return;
       var u = Math.min(1, f.t / f.d), e = 1 - (1 - u) * (1 - u);
-      drawChip(f.x0 + (f.x1 - f.x0) * e, f.y0 + (f.y1 - f.y0) * e - Math.sin(u * Math.PI) * 24, 11, f.type);
+      drawChip(f.x0 + (f.x1 - f.x0) * e, f.y0 + (f.y1 - f.y0) * e - Math.sin(u * Math.PI) * 24, 11);
     });
     if (state === S.RESULT) drawResult();
   }
   /* 開始前: ゲート前に並ぶ12頭 */
   function drawIntro() {
-    var s = 1.3;
-    for (var i = 0; i < N; i++) drawHorse(i, 90 + (i % 2) * 36 + Math.floor(i / 2) * 60, H * 0.3 + (i % 2) * 44, T * 0.15, s);
+    for (var i = 0; i < N; i++) drawHorse(i, 90 + (i % 2) * 36 + Math.floor(i / 2) * 60, H * 0.3 + (i % 2) * 44, T * 0.15, 1.3);
   }
 
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
@@ -724,9 +775,9 @@
     ctx.fillStyle = "#fff";
     ctx.shadowColor = "rgba(0,0,0,.6)";
     ctx.shadowBlur = 10;
-    ctx.font = "800 108px sans-serif";
+    ctx.font = "800 " + (score >= 100000 ? 84 : 100) + "px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.fillText(comma(score), W / 2, H * 0.45);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
@@ -749,13 +800,12 @@
   function center(r) { return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; }
   window.__probe = {
     now: function () {
-      return { state: state, phase: phase, score: score, chips: chips, race: raceNo, betType: betType, sel: sel,
-               win: bets && bets.win.slice(), place: bets && bets.place.slice(), bet: bets ? totalBet() : 0,
-               horses: horses && horses.map(function (h) { return { title: h.title, len: h.len }; }),
-               order: order.slice(), won: won, W: W, H: H };
+      return { state: state, phase: phase, score: score, money: money, race: raceNo, sel: sel,
+               bets: bets && bets.slice(), bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
+               horses: horses && horses.map(function (h) { return { title: h.title, len: h.len, pv: h.pv }; }),
+               order: order.slice(), won: won, raceT: raceT, cam: cam, W: W, H: H };
     },
     card: function (i) { return center(cardRect(i)); },
-    toggle: function (t) { return center(toggleRect(t)); },
     startButton: function () { return center(STARTB); },
     pile: function () { return center(pileRect()); },
     next: function () { return center(nextRect()); },
@@ -763,6 +813,12 @@
     result: function () { return { retry: center(resultButtons()[0]) }; },
     /* レース中の馬の位置（ゴールまでの割合）。着順が長さどおりかの確認用 */
     positions: function () { return horses && phase === "race" ? horses.map(function (h, i) { return progressOf(i, raceT); }) : null; },
+    /* 文字を収める処理の確認用: 幅と行数に入ったか */
+    fit: function (s, maxW, lines) {
+      var f = fitLines(s, maxW, lines, 17, 11, "800");
+      ctx.font = "800 " + f.size + "px sans-serif";
+      return { size: f.size, lines: f.lines, widths: f.lines.map(function (l) { return ctx.measureText(l).width; }) };
+    },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
@@ -773,19 +829,14 @@
     run: async function (r) {
       await r.wait(1000);
       r.key();
-      for (var n = 0; n < 3 && state === S.PLAY; n++) {
-        if (!await r.until(function () { return phase === "bet" || phase === "error"; }, 15)) throw Error("出走馬が来ない");
-        if (phase !== "bet") break;
-        await r.wait(700);
-        var picks = shuffle([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]).slice(0, 3);
-        setType("win"); bet(picks[0]); await r.wait(250); bet(picks[1]); await r.wait(250);
-        setType("place"); bet(picks[2]); await r.wait(500);
-        startRace();
-        if (!await r.until(function () { return phase === "finish"; }, 15)) throw Error("ゴールしない");
-        await r.wait(2200);
-        pt = 9; nextRace();
-      }
-      await r.wait(800);
+      if (!await r.until(function () { return phase === "bet" || phase === "error"; }, 15)) throw Error("出走馬が来ない");
+      if (phase !== "bet") return;
+      await r.wait(700);
+      var picks = shuffle([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]).slice(0, 2);
+      bet(picks[0]); await r.wait(250); bet(picks[0]); await r.wait(250); bet(picks[1]); await r.wait(500);
+      startRace();
+      if (!await r.until(function () { return phase === "finish"; }, 45)) throw Error("ゴールしない");
+      await r.wait(2500);
     }
   };
 
@@ -794,7 +845,8 @@
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
   startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
-  state = S.INTRO; phase = "intro"; T = 0; pt = 0; chips = START_CHIPS; shown = chips; score = 0; raceNo = 0; order = []; flyers = []; clearBets();
+  state = S.INTRO; phase = "intro"; T = 0; pt = 0; money = START_MONEY; shown = money; score = 0; raceNo = 0;
+  order = []; odds = []; popRank = []; flyers = []; clearBets();
   startButton.hidden = false;
   layout();
   var lastT = performance.now();
