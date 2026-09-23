@@ -97,7 +97,7 @@ async function start(g) {
     assert.equal(g.probe.now().combo, 1, "次の記事では数え直す");
   }
 
-  /* 2. 出た単語のところで本文が止まって光る。開けると続きが流れる。文字数は開けた位置まで */
+  /* 2. 出た単語のところで本文が止まって光る。開けると続きが流れる */
   {
     const g = open();
     await start(g);
@@ -134,9 +134,9 @@ async function start(g) {
     const now = g.probe.now();
     assert.equal(now.phase, "bingo");
     assert.deepEqual(now.bingo, [10, 11, 12, 13, 14]);
-    assert.equal(now.score, end, "ビンゴの単語の終わりまでの文字数");
+    assert.equal(now.score, 1, "結果は選んだ記事の本数（1本でビンゴ）");
     g.until(() => g.probe.now().state === "result", 400);
-    assert.equal(g.probe.now().score, end);
+    assert.equal(g.probe.now().score, 1);
   }
 
   /* 2b. 続けて出る単語は1つずつ止まって光る。スペースでも開けられる */
@@ -155,7 +155,7 @@ async function start(g) {
     assert.ok(g.probe.now().open[1], "スペースでも開けられる");
   }
 
-  /* 3. 1本で揃わない → 次の3つが出て、文字数は足し算。穴は記事をまたいで積み上がる */
+  /* 3. 1本で揃わない → 次の3つが出る。穴は記事をまたいで積み上がり、結果は本数 */
   {
     const g = open();
     await start(g);
@@ -176,7 +176,7 @@ async function start(g) {
     playOut(g);
     assert.equal(g.probe.now().phase, "bingo");
     assert.deepEqual(g.probe.now().bingo, [0, 1, 2, 3, 4]);
-    assert.equal(g.probe.now().score, t1.length + t2.length, "読み終えた記事の文字数の合計");
+    assert.equal(g.probe.now().score, 2, "2本目でビンゴなら2");
     assert.equal(g.probe.now().articles, 2);
     g.until(() => g.probe.now().state === "result", 400);
     const list = g.probe.list();
