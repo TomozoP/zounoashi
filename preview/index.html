@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="wiki-bingo-1790132599250">
+<meta name="preview-version" content="wiki-bingo-1790134785201">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Wikipediaビンゴ</title>
@@ -31,12 +31,12 @@
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
   <a id="credit" target="_blank" rel="noopener" hidden></a>
 </div></div>
-<script src="../games/view.js?v=wiki-bingo-1790132599250"></script>
-<script src="../games/audio.js?v=wiki-bingo-1790132599250"></script>
-<script src="../games/share.js?v=wiki-bingo-1790132599250"></script>
-<script src="../games/result-actions.js?v=wiki-bingo-1790132599250"></script>
-<script src="../games/action-icons.js?v=wiki-bingo-1790132599250"></script>
-<script src="../games/pad.js?v=wiki-bingo-1790132599250"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/view.js?v=wiki-bingo-1790134785201"></script>
+<script src="../games/audio.js?v=wiki-bingo-1790134785201"></script>
+<script src="../games/share.js?v=wiki-bingo-1790134785201"></script>
+<script src="../games/result-actions.js?v=wiki-bingo-1790134785201"></script>
+<script src="../games/action-icons.js?v=wiki-bingo-1790134785201"></script>
+<script src="../games/pad.js?v=wiki-bingo-1790134785201"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* Wikipediaビンゴ
 
@@ -113,17 +113,17 @@
   }
   function sndType() { noiseHit(0.018, 4200, 0.025, 4); }
   /* 紙のミシン目を押し抜く音。ぷつっと切れて、ポコッと凹む */
-  function sndStamp(n) {
-    noiseHit(0.03, 2600, 0.18, 2); noiseHit(0.06, 900, 0.22, 1.5, 0.02); tone(210, 0.08, 0.1, "sine", 110, 0.02);
-    /* 同じ記事で2つ目からは、開けるたびに1段ずつ上がる鈴の音を重ねる */
-    if (n >= 2) { var f = 660 * Math.pow(2, Math.min(n - 2, 7) * 2 / 12); tone(f, 0.18, 0.06, "triangle", null, 0.04); tone(f * 1.5, 0.22, 0.035, "sine", null, 0.09); }
+  function sndStamp() { noiseHit(0.03, 2600, 0.18, 2); noiseHit(0.06, 900, 0.22, 1.5, 0.02); tone(210, 0.08, 0.1, "sine", 110, 0.02); }
+  /* 見つけた音。同じ記事で2つ目、3つ目…と1段ずつ高く、音数も増える */
+  function sndLight(n) {
+    var up = Math.pow(2, Math.min(n - 1, 6) * 2 / 12);
+    tone(1568 * up, 0.09, 0.05, "sine"); tone(2093 * up, 0.14, 0.04, "sine", null, 0.05);
+    if (n >= 2) tone(2637 * up, 0.18, 0.035, "triangle", null, 0.1);
+    if (n >= 3) {
+      [1, 1.26, 1.5, 2].forEach(function (k, i) { tone(1319 * up * k, 0.16, 0.04, "triangle", null, 0.14 + i * 0.05); });
+      for (var i = 0; i < 6; i++) noiseHit(0.04, 6000 + i * 400, 0.04, 6, 0.12 + i * 0.04);
+    }
   }
-  /* 大当たり: ファンファーレと、じゃらじゃら */
-  function sndJackpot() {
-    [784, 988, 1175, 1568, 1976].forEach(function (f, i) { tone(f, 0.22, 0.07, "square", null, i * 0.07); });
-    for (var i = 0; i < 12; i++) noiseHit(0.05, 5000 + (i % 3) * 900, 0.06, 6, 0.3 + i * 0.05);
-  }
-  function sndLight() { tone(1568, 0.09, 0.05, "sine"); tone(2093, 0.14, 0.04, "sine", null, 0.05); }
   function sndDud() { noiseHit(0.04, 400, 0.08, 1); }
   /* リーチ: どきっと低く鳴ってから、上がっていく2音 */
   function sndReach() {
@@ -150,19 +150,31 @@
     /* Wikipediaの決まりに沿って、どこの何が問い合わせているかを名乗る（連絡先はサイトのURL） */
     return fetch(url, { headers: { "Api-User-Agent": UA } }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
   }
+  /* 流す本文: "intro" は記事の導入部（最初の見出しの前まで）だけ、"full" は冒頭から MAX_CHARS まで */
+  var TEXT_MODE = "full";                       /* 導入部だけだとカードの言葉がほぼ出ない（要約57本で1つ以上出るのは4%）ので、冒頭1200字 */
+  var introCache = {};
   var wikiSource = {
-    /* ランダムな記事を12本取り、そこそこ長いものから3本 */
+    /* ランダムな記事を取り、そこそこ長いものから3本。
+       導入部だけのときは、題名と一緒に導入部も1回で取れる（1回に20本まで） */
     choices: function () {
-      return getJSON(API + "&generator=random&grnnamespace=0&grnlimit=12&prop=info").then(function (j) {
+      var q = TEXT_MODE === "intro"
+        ? "&generator=random&grnnamespace=0&grnlimit=20&prop=info|extracts&exintro=1&explaintext=1&exlimit=20"
+        : "&generator=random&grnnamespace=0&grnlimit=12&prop=info";
+      return getJSON(API + q).then(function (j) {
         var ps = ((j.query && j.query.pages) || []).filter(function (p) { return !p.missing && p.title; });
-        var good = ps.filter(function (p) { return p.length >= 2500; });
-        if (good.length < 3) good = ps.sort(function (a, b) { return b.length - a.length; });
+        var size = TEXT_MODE === "intro"
+          ? function (p) { return (p.extract || "").length; }
+          : function (p) { return p.length; };
+        var good = ps.filter(function (p) { return size(p) >= (TEXT_MODE === "intro" ? 100 : 2500); });
+        if (good.length < 3) good = ps.sort(function (x, y) { return size(y) - size(x); });
         good = shuffle(good.slice()).slice(0, 3);
         if (good.length < 3) throw new Error("記事が足りない");
+        good.forEach(function (p) { if (p.extract) introCache[p.pageid] = p.extract; });
         return good.map(function (p) { return { id: p.pageid, title: p.title }; });
       });
     },
     text: function (id) {
+      if (TEXT_MODE === "intro" && introCache[id] != null) return Promise.resolve(introCache[id]);
       return getJSON(API + "&prop=extracts&explaintext=1&exsectionformat=plain&exchars=1500&pageids=" + id).then(function (j) {
         var p = j.query && j.query.pages && j.query.pages[0];
         return (p && p.extract) || "";
@@ -220,7 +232,7 @@
   /* PLAY の中の段階: load（題名を取りに行く）→ choose（選ぶ）→ fetch（本文を取りに行く）
      → stream（流れる）→ 次の記事の load/choose へ、または bingo → 結果。error は通信の失敗 */
   var state, phase, pt, score, card, open, openT, bingoLine, choices, nextChoices, pick, article, articles,
-      text, pos, lines, hits, lit, readList = [], reachFx = [], shakeT = -9, combo = 0, jackT = -9, sparks = [], held, keyMode = false, T, round, retry, typeT, reached;
+      text, pos, lines, hits, lit, readList = [], reachFx = [], shakeT = -9, found = 0, litLevel = [], sparks = [], held, keyMode = false, T, round, retry, typeT, reached;
 
   var HEAD, BOX, BOXH, CARD, CELL, CREDIT, FRAME;
   function place() {
@@ -246,7 +258,7 @@
     if (!keepCard) card = dealCard();
     open = []; openT = []; lit = [];
     for (var i = 0; i < 25; i++) { open.push(i === 12); openT.push(i === 12 ? 9 : -1); lit.push(-1); }
-    bingoLine = null; reached = {}; reachFx = []; shakeT = -9; combo = 0; jackT = -9; sparks = [];
+    bingoLine = null; reached = {}; reachFx = []; shakeT = -9; found = 0; litLevel = []; sparks = [];
     choices = null; nextChoices = null; pick = 0; article = null; articles = 0;
     text = ""; pos = 0; lines = []; hits = []; readList = [];
     loadChoices();
@@ -302,7 +314,7 @@
     if (!text) { loadChoices(); return; }
     articles++;
     readList.push(article);
-    pos = 0; combo = 0;
+    pos = 0; found = 0;
     findHits();
     wrapText();
     phase = "stream"; pt = 0;
@@ -328,10 +340,9 @@
   function stamp(i) {
     if (open[i]) return;
     open[i] = true; openT[i] = 0;
-    combo++;                                    /* 同じ記事で何個目か。多いほど音が上がり、火花が増える */
-    sndStamp(combo);
+    sndStamp();
     var cr = cellRect(i);
-    burst(cr.x + cr.w / 2, cr.y + cr.h / 2, 6 + combo * 5, combo >= 3 ? 1.4 : 1);
+    burst(cr.x + cr.w / 2, cr.y + cr.h / 2, 8, 1);
     for (var l = 0; l < LINES.length; l++) {
       var n = 0;
       LINES[l].forEach(function (q) { if (open[q]) n++; });
@@ -353,7 +364,12 @@
   function light(i) {
     if (open[i] || lit[i] >= 0) return;
     lit[i] = T;
-    if (waiting().indexOf(i) >= 0) sndChance(); else sndLight();
+    found++;                                    /* 同じ記事で何個目の発見か。多いほど見つけた演出が強い */
+    litLevel[i] = found;
+    if (waiting().indexOf(i) >= 0) sndChance(); else sndLight(found);
+    var cr = cellRect(i);
+    if (found >= 2) burst(cr.x + cr.w / 2, cr.y + cr.h / 2, 4 + found * 6, 0.8 + Math.min(found, 5) * 0.2);
+    if (found >= 3) shakeT = T;
   }
   function punch(i) {
     if (open[i] || lit[i] < 0 || phase === "bingo") return false;
@@ -399,15 +415,9 @@
       if (stop >= 0) { pos = stop; now = stop; held = false; }
       typeT -= dt;
       if (now > before && typeT <= 0 && stop < 0) { typeT = held ? 0.03 : 0.055; sndType(); }
-      if (pos >= text.length) {
-        phase = "after"; pt = 0;
-        if (combo >= 3) {                       /* 1本で3つ以上開けた記事は大当たり */
-          jackT = T; sndJackpot();
-          for (var q = 0; q < 5; q++) burst(FRAME.x + FRAME.w * (q + 0.5) / 5, FRAME.y + 6, 14, 1.8);
-        }
-      }
+      if (pos >= text.length) { phase = "after"; pt = 0; }
     } else if (phase === "after") {
-      if (pt >= (T - jackT < 3 ? 1.8 : 0.7)) {
+      if (pt >= 0.7) {
         sndNext();
         loadChoices();
       }
@@ -607,14 +617,6 @@
     ctx.save();
     ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
     roundRect(F.x, F.y, F.w, F.h, 16); ctx.fillStyle = RIM; ctx.fill();
-    var jt = T - jackT;
-    if (jt >= 0 && jt < 1.6) {                              /* 大当たり: 外枠が金色に明滅する */
-      ctx.save();
-      ctx.globalAlpha = (0.5 + 0.5 * Math.sin(jt * 22)) * (1 - jt / 1.6);
-      ctx.shadowColor = "#ffd86b"; ctx.shadowBlur = 30;
-      roundRect(F.x, F.y, F.w, F.h, 16); ctx.fillStyle = "#ffd86b"; ctx.fill();
-      ctx.restore();
-    }
     ctx.restore();
     /* 帯の飾り（小さな星を並べる） */
     for (var k = 0; k < 9; k++) drawStar(F.x + F.w * (k + 1) / 10, F.y + F.band / 2 + 4, 6, k % 2 ? "#ffd86b" : "#fff3dc");
@@ -636,7 +638,7 @@
     for (var c = 0; c < 25; c++) {
       var r = cellRect(c), cx = r.x + r.w / 2, cy = r.y + r.h / 2;
       if (open[c]) drawHole(cx, cy, R, openT[c], card[c]);
-      else { if (lit[c] >= 0) drawLit(cx, cy, R, T - lit[c]); drawFlap(cx, cy, R, card[c]); }
+      else { if (lit[c] >= 0) drawLit(cx, cy, R, T - lit[c], litLevel[c] || 1); drawFlap(cx, cy, R, card[c]); }
     }
     if (!bingoLine) waiting().forEach(function (i) { var r = cellRect(i); drawWait(r.x + r.w / 2, r.y + r.h / 2, R, lit[i] >= 0); });
     reachFx.forEach(function (f) { drawReachFx(f, R); });
@@ -678,13 +680,31 @@
     ctx.restore();
   }
   /* 本文に出たマス: 丸が金色に光って脈打つ */
-  function drawLit(cx, cy, R, t) {
-    var p = 0.5 + 0.5 * Math.sin(t * 9);
-    var pop = Math.max(0, 1 - t / 0.3);
+  function drawLit(cx, cy, R, t, level) {
+    var lv = Math.min(level, 5);
+    var p = 0.5 + 0.5 * Math.sin(t * (9 + lv * 2));
+    var pop = Math.max(0, 1 - t / (0.3 + lv * 0.06));
+    if (lv >= 3) {                                          /* 3つ目から: 後ろで光の筋が回る */
+      ctx.save();
+      ctx.translate(cx, cy); ctx.rotate(t * 1.5);
+      ctx.globalAlpha = 0.35 + 0.25 * p;
+      ctx.fillStyle = lv >= 4 ? "#fff1a8" : "#ffd86b";
+      var rays = 8 + (lv - 3) * 4, len = R * (1.9 + pop * 0.8 + (lv - 3) * 0.2);
+      for (var k = 0; k < rays; k++) {
+        ctx.rotate(Math.PI * 2 / rays);
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len, -R * 0.16); ctx.lineTo(len, R * 0.16); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    }
     ctx.save();
-    ctx.shadowColor = "#ffcf3f"; ctx.shadowBlur = 14 + p * 12;
-    ctx.beginPath(); ctx.arc(cx, cy, R * (1 + pop * 0.25), 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,207,63," + (0.55 + p * 0.3) + ")"; ctx.fill();
+    ctx.shadowColor = "#ffcf3f"; ctx.shadowBlur = 14 + p * 12 + (lv - 1) * 10;
+    ctx.beginPath(); ctx.arc(cx, cy, R * (1 + pop * (0.25 + (lv - 1) * 0.14)), 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255," + (207 + (lv - 1) * 10) + "," + (63 + (lv - 1) * 30) + "," + (0.55 + p * 0.3) + ")"; ctx.fill();
+    if (pop > 0 && lv >= 2) {                               /* 見つけた瞬間の輪が広がる */
+      ctx.globalAlpha = pop; ctx.lineWidth = 3 + lv;
+      ctx.strokeStyle = "#fff4c2";
+      ctx.beginPath(); ctx.arc(cx, cy, R * (1.2 + (1 - pop) * (0.6 + lv * 0.25)), 0, Math.PI * 2); ctx.stroke();
+    }
     ctx.restore();
     ctx.lineWidth = 3; ctx.strokeStyle = "rgba(214,120,0,.9)";
     ctx.beginPath(); ctx.arc(cx, cy, R + 3, 0, Math.PI * 2); ctx.stroke();
@@ -930,7 +950,7 @@
   window.__probe = {
     now: function () {
       return { state: state, phase: phase, score: score, card: card && card.slice(), open: open && open.slice(),
-               bingo: bingoLine && bingoLine.slice(), waiting: waiting(), reaches: reachFx.length, combo: combo, jackpot: jackT >= 0,
+               bingo: bingoLine && bingoLine.slice(), waiting: waiting(), reaches: reachFx.length, found: found, litLevel: lit && lit.map(function (v, i) { return v >= 0 ? litLevel[i] : 0; }),
                genres: card && card.map(function (w) { return w == null ? null : (GENRE_OF[w] != null ? GENRE_OF[w] : -1); }), lit: lit && lit.map(function (v) { return v >= 0; }), articles: articles, pos: pos, length: text.length,
                title: article && article.title, choices: choices && choices.map(function (c) { return c.title; }),
                pick: pick, held: held, W: W, H: H };
@@ -998,10 +1018,10 @@
 <script>
 if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = "../games/_tools/recorder-ui.js?v=wiki-bingo-1790132599250";
+  recorderScript.src = "../games/_tools/recorder-ui.js?v=wiki-bingo-1790134785201";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=wiki-bingo-1790132599250"></script>
+<script src="./auto-reload.js?v=wiki-bingo-1790134785201"></script>
 </body>
 </html>
