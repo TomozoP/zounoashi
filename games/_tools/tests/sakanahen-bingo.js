@@ -26,7 +26,11 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
 {
   const g = open();
   const sets = g.probe.sets();
-  assert.deepEqual(sets.map(s => s.mark), ['魚', '木', '金', '鳥', '虫']);
+  assert.deepEqual(sets.map(s => s.mark), ['魚', '木', '金', '鳥', '虫', '難']);
+  assert.equal(g.probe.setCount(), 5, '難は最初は出ていない');
+  /* 難は、ほかのカードに入っていない字だけ */
+  const others = new Set(sets.slice(0, 5).flatMap(s => s.list.map(f => f.kanji)));
+  sets[5].list.forEach(f => assert.ok(!others.has(f.kanji), f.kanji + ' はほかのカードにもある'));
   sets.forEach(s => {
     const fish = s.list;
     assert.ok(fish.length >= 32, s.mark + ' の字の数 ' + fish.length);
@@ -141,6 +145,9 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
 function perfect(g, set) {
   if (set) { const b = g.probe.setButton(set); g.tap(b.x, b.y); g.step(1); }
   start(g);
+  return playOut(g);
+}
+function playOut(g) {
   for (let k = 0; k < 400 && now(g).state === 'play'; k++) {
     const n = now(g);
     if (n.phase === 'call') {
@@ -223,6 +230,50 @@ function perfect(g, set) {
   const b = g.probe.setButton(2); g.tap(b.x, b.y); g.step(120);
   start(g);
   assert.ok(g.probe.dealAlpha(0) > 0.99, '始めた直後も字が見える ' + g.probe.dealAlpha(0));
+}
+
+/* 11. 5つ全部ビンゴすると難が出る。記録はいちばん少ない回数。ライフがなくなった回は記録しない */
+{
+  const g = open();
+  /* 1回目: わざと間違えて終わる → 記録なし */
+  start(g);
+  for (let k = 0; k < 300 && now(g).state === 'play'; k++) {
+    const n = now(g);
+    if (n.phase === 'call') tapCell(g, n.card.findIndex((q, i) => q && q !== n.call.kanji && !n.open[i]));
+    g.step(10);
+  }
+  g.until(() => now(g).state === 'result', 400);
+  assert.ok(now(g).failed);
+  assert.deepEqual(now(g).best, {}, 'ライフがなくなった回は記録しない');
+  const marks = ['魚', '木', '金', '鳥', '虫'];
+  marks.forEach((m, set) => {
+    const b = g.probe.setButton(set); g.tap(b.x, b.y); g.step(1);
+    const r = g.probe.result().retry; g.tap(r.x, r.y); g.step(1);
+    assert.equal(now(g).set, m);
+    const res = playOut(g);
+    assert.ok(!res.failed);
+    assert.equal(res.best[m], res.score, m + ' の記録');
+    assert.equal(g.probe.setCount(), set < 4 ? 5 : 6, set < 4 ? 'まだ難は出ない' : '5つ揃うと難が出る');
+  });
+  assert.ok(now(g).unlocked);
+  g.step(120);
+  /* 難を選んで遊ぶ */
+  const nb = g.probe.setButton(5); g.tap(nb.x, nb.y); g.step(1);
+  assert.equal(now(g).set, '難');
+  const a0 = g.probe.setButton(0), a1 = g.probe.setButton(1);
+  assert.ok(a1.x - a0.x >= 63, '6つ並べても丸同士が離れている');
+  assert.ok(g.probe.setButton(5).x + 34 <= now(g).W && a0.x - 34 >= 0, '画面に収まる');
+  const r = g.probe.result().retry; g.tap(r.x, r.y); g.step(1);
+  const hard = g.probe.sets()[5].list.map(f => f.kanji);
+  assert.ok(now(g).card.filter(Boolean).every(k => hard.includes(k)), '難のカード');
+  const res = playOut(g);
+  assert.equal(res.best['難'], res.score);
+  /* 記録を更新するのは少なかったときだけ */
+  const before = res.best['難'];
+  const r2 = g.probe.result().retry; g.tap(r2.x, r2.y); g.step(1);
+  const res2 = playOut(g);
+  assert.equal(res2.best['難'], Math.min(before, res2.score));
+  assert.equal(res2.newBest, res2.score < before);
 }
 
 /* 8. 画面の形を変えても、マス同士・箱が押せる大きさ */

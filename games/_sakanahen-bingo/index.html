@@ -35,6 +35,8 @@
    上に読みが1つずつ出る。その漢字がカードにあれば、時間内にタップして穴を開ける。
    違う漢字を押すと、その読みは流れてしまう。カードに無いと思ったら上の箱を押すと次へ進む。
    ビンゴまでに出た読みの数が結果（少ないほどよい）。
+   魚・木・金・鳥・虫を全部ビンゴすると「難」（難読漢字）のカードが出る。
+   カードごとの最高記録（いちばん少ない回数）はブラウザに残し、選ぶ丸の下に出す。
    ライフは3つ。違う字を押す・カードにある字を開けられずに流す、で1つ減り、なくなると終わり。
 
    Wikipediaビンゴ（games/_wiki-bingo）のカードと演出を流用している。 */
@@ -111,6 +113,8 @@
   function sndPick() { tone(660, 0.06, 0.06, "square"); }
   /* ライフがなくなった: 下がっていく3音 */
   function sndOver() { [392, 330, 262].forEach(function (f, i) { tone(f, 0.28, 0.07, "triangle", f * 0.94, i * 0.16); }); }
+  /* 難が出た: 高く駆け上がって、きらっと */
+  function sndUnlock() { [784, 988, 1175, 1568, 1976, 2349].forEach(function (f, i) { tone(f, 0.22, 0.06, "triangle", null, 0.15 + i * 0.07); }); }
   function sndDud() { noiseHit(0.04, 400, 0.08, 1); }
   /* リーチ: どきっと低く鳴ってから、上がっていく2音 */
   function sndReach() {
@@ -149,11 +153,29 @@
                         "鷭ばん 鶸ひわ 鵐しとど 鵤いかる 鶲ひたき 鳰にお 鵺ぬえ 鴈がん" },
     { mark: "虫", list: "虫むし 蛙かえる 蛇へび 蜂はち 蝶ちょう 蛍ほたる 蚊か 蟻あり 蝉せみ 蛸たこ 蟹かに 蜆しじみ " +
                         "蛤はまぐり 蚕かいこ 蛭ひる 蚤のみ 虱しらみ 蝿はえ 蛾が 蝗いなご 虻あぶ 蝮まむし 蟒うわばみ 蛎かき " +
-                        "蝦えび 蛆うじ 蜷にな 虹にじ 蟇がま 蝋ろう 蜜みつ 蛹さなぎ 蠍さそり 蚋ぶよ 蜩ひぐらし" }
+                        "蝦えび 蛆うじ 蜷にな 虹にじ 蟇がま 蝋ろう 蜜みつ 蛹さなぎ 蠍さそり 蚋ぶよ 蜩ひぐらし" },
+    /* 難: 5つ全部ビンゴすると出る。ほかのカードに入れていない、読みにくい字 */
+    { mark: "難", list: "鯑かずのこ 鱪しいら 鰙わかさぎ 鱮たなご 鯎うぐい 鱲からすみ 鰘むろあじ 鮴ごり 鯢さんしょううお 鰥やもめ " +
+                        "鰾うきぶくろ 樗おうち 椚くぬぎ 楸ひさぎ 櫟いちい 橅ぶな 榁むろ 楪ゆずりは 樒しきみ 椥なぎ " +
+                        "榧かや 櫨はぜ 柞ははそ 鑓やり 鐙あぶみ 錻ぶりき 鎹かすがい 鑷けぬき 鏝こて 鶍いすか " +
+                        "鵟のすり 鸛こうのとり 鷚ひばり 螻けら 蟎だに 螽いなご 蜑あま 鴲しめ 蠓まくなぎ" }
   ].map(function (s) {
     return { mark: s.mark, list: s.list.split(" ").map(function (w) { return { k: w.charAt(0), r: w.slice(1) }; }) };
   });
   var setNo = 0;                                /* 選んでいるカード */
+  var BASE = 5;                                 /* 最初から選べるカードの数。全部ビンゴすると次（難）が出る */
+
+  /* ============ 記録 ============
+     カードごとの最高記録（ビンゴまでのいちばん少ない回数）。ブラウザに残す。
+     保存できない環境（プライベートモードなど）でも、その場では覚えておく。 */
+  var SAVE_KEY = "sakanahen-bingo-best";
+  var best = {};
+  try { best = JSON.parse(window.localStorage.getItem(SAVE_KEY) || "{}") || {}; } catch (e) { best = {}; }
+  function saveBest() { try { window.localStorage.setItem(SAVE_KEY, JSON.stringify(best)); } catch (e) {} }
+  function unlocked() { for (var i = 0; i < BASE; i++) if (!best[SETS[i].mark]) return false; return true; }
+  function setCount() { return unlocked() ? SETS.length : BASE; }
+  var unlockT = -9;                             /* 難が出た瞬間（丸がはじけて出てくる） */
+  var newBest = false;                          /* 今回が最高記録か */
   function FISH() { return SETS[setNo].list; }
   var CALL_TIME = 10;                           /* 1つの読みを出しておく秒数 */
   var LIVES = 3;                                /* ライフの数 */
@@ -208,7 +230,7 @@
     for (var i = 0; i < 25; i++) { open.push(i === 12); openT.push(i === 12 ? 9 : -1); missT.push(-9); wrongT.push(-9); }
     bingoLine = null; reached = {}; reachFx = []; shakeT = -9; sparks = [];
     calls = 0; cur = null; recent = []; outcome = null;
-    lives = LIVES; lifeT = -9; failed = false;
+    lives = LIVES; lifeT = -9; failed = false; newBest = false;
     nextCall();
   }
 
@@ -244,9 +266,16 @@
     for (var l = 0; l < LINES.length; l++) {
       var n = 0;
       LINES[l].forEach(function (q) { if (open[q]) n++; });
-      if (n === 5) { bingoLine = LINES[l]; phase = "bingo"; pt = 0; score = calls; sndBingo();   /* 結果は、ビンゴまでに出た読みの数 */ return; }
+      if (n === 5) { bingoLine = LINES[l]; phase = "bingo"; pt = 0; score = calls; sndBingo(); record(); /* 結果は、ビンゴまでに出た読みの数 */ return; }
       if (n === 4 && !reached[l]) { reached[l] = true; reachFx.push({ line: LINES[l], t: T }); shakeT = T; sndReach(); }
     }
+  }
+  /* ビンゴした回数を記録する。これで5つ揃ったら難が出る */
+  function record() {
+    var m = SETS[setNo].mark, was = unlocked();
+    newBest = !best[m] || score < best[m];
+    if (newBest) { best[m] = score; saveBest(); }
+    if (!was && unlocked()) unlockT = -1;       /* 結果の画面に出た時に、丸が出てくる */
   }
   /* リーチの待ち: 4つ開いた列の、残り1つのマス */
   function waiting() {
@@ -287,7 +316,7 @@
     } else if (phase === "reveal") {
       if (pt >= (outcome === "ok" ? 0.55 : 1.0)) nextCall();
     } else if (phase === "bingo") {
-      if (pt >= 2.2) state = S.RESULT;
+      if (pt >= 2.2) { state = S.RESULT; if (unlockT === -1) { unlockT = T; sndUnlock(); } }
     } else if (phase === "over") {
       if (pt >= 1.8) { failed = true; state = S.RESULT; }
     }
@@ -298,8 +327,10 @@
 
   /* カードを選ぶ丸。開始前は上の箱の場所、結果ではボタンの下に並ぶ */
   function setRects() {
-    var y = state === S.RESULT ? resultButtons()[0].y + 54 + 86 : BOX + BOXH / 2, r = 36, pitch = 96;
-    return SETS.map(function (s, i) { return { x: W / 2 + (i - (SETS.length - 1) / 2) * pitch, y: y, r: r }; });
+    var n = setCount(), y = state === S.RESULT ? resultButtons()[0].y + 54 + 80 : BOX + BOXH / 2 - 10;
+    var r = 34, pitch = n > 5 ? 84 : 96, out = [];
+    for (var i = 0; i < n; i++) out.push({ x: W / 2 + (i - (n - 1) / 2) * pitch, y: y, r: r });
+    return out;
   }
   function setAt(x, y) {
     var rs = setRects();
@@ -308,7 +339,7 @@
   }
   /* カードを選ぶ。開始前はその場で配り直す。結果では次の「もう一度」から */
   function chooseSet(i) {
-    i = (i + SETS.length) % SETS.length;
+    i = (i + setCount()) % setCount();
     if (i === setNo) return;
     setNo = i;
     sndPick();
@@ -405,7 +436,7 @@
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     /* 読み */
     var size = Math.min(84, Math.floor((W - 90) / (cur.r.length + 0.4)));
-    size = size + (Math.min(64, size) - size) * ease;
+    size = size + (Math.min(64, Math.floor(290 / (cur.r.length + 0.2)), size) - size) * ease;   /* 答えを出すときは左に寄せて、漢字と重ならない大きさに */
     ctx.globalAlpha = appear;
     ctx.fillStyle = "#f4efe6";
     ctx.font = "900 " + Math.round(size) + "px sans-serif";
@@ -476,10 +507,18 @@
       icon: function (x, y, R) { drawBird(x - 2, y + 2, R * 0.5, INK, 1); } },
     { bg: "#172019", rim: "#4f7a2a", chip: "#4f7a2a", sparks: ["#e8453c", "#ffd86b", "#b5e27a", "#fff3dc"],   /* 虫: 草色の枠とてんとう虫 */
       band: function (x, y) { drawBug(x, y, 7, "#e8453c", "#1d1d1d", "#1d1d1d"); },
-      icon: function (x, y, R) { drawBug(x, y + 2, R * 0.48, INK, PAPER, INK); } }
+      icon: function (x, y, R) { drawBug(x, y + 2, R * 0.48, INK, PAPER, INK); } },
+    { bg: "#16121d", rim: "lacquer", chip: "#3a2748", sparks: ["#ffe08a", "#fff6cf", "#c9a0ff", "#ff9ad5"],    /* 難: 金ぶちの黒漆と星 */
+      band: function (x, y, k) { drawStar(x, y, k % 2 ? 6 : 8, k % 2 ? "#c9a0ff" : "#ffe08a"); },
+      icon: function (x, y, R) { drawStar(x, y + 1, R * 0.62, INK); } }
   ];
   function TH() { return THEMES[setNo]; }
   function rimFill(F) {
+    if (TH().rim === "lacquer") {               /* 黒漆: 深い紫から黒へ */
+      var l = ctx.createLinearGradient(F.x, F.y, F.x, F.y + F.h);
+      l.addColorStop(0, "#3a2748"); l.addColorStop(1, "#0e0a14");
+      return l;
+    }
     if (TH().rim !== "metal") return TH().rim;
     var g = ctx.createLinearGradient(F.x, F.y, F.x + F.w, F.y + F.h);
     g.addColorStop(0, "#8a5f17"); g.addColorStop(0.3, "#e9c46a"); g.addColorStop(0.5, "#fff0b8");
@@ -497,6 +536,10 @@
     ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
     roundRect(F.x, F.y, F.w, F.h, 16); ctx.fillStyle = rimFill(F); ctx.fill();
     ctx.restore();
+    if (TH().rim === "lacquer") {               /* 金のふち */
+      ctx.lineWidth = 3; ctx.strokeStyle = "#e9c46a";
+      roundRect(F.x + 1.5, F.y + 1.5, F.w - 3, F.h - 3, 15); ctx.stroke();
+    }
     if (TH().grain) {                                       /* 木目 */
       ctx.save();
       roundRect(F.x, F.y, F.w, F.h, 16); ctx.clip();
@@ -779,6 +822,18 @@
   function drawSets() {
     setRects().forEach(function (r, i) {
       var on = i === setNo;
+      var ut = i >= BASE ? T - unlockT : 9;
+      if (ut < 0) return;                       /* 出てくる前（難が出る瞬間は、ほかの丸が描けてから） */
+      ctx.save();
+      if (ut < 1.2) {                           /* 出てきたところ: 光の筋が回り、丸が弾んで大きくなる */
+        var pop = ut < 0.35 ? ut / 0.35 * 1.3 : 1 + 0.3 * Math.max(0, 1 - (ut - 0.35) / 0.4);
+        ctx.save();
+        ctx.translate(r.x, r.y); ctx.rotate(ut * 2);
+        ctx.globalAlpha = Math.max(0, 1 - ut / 1.2) * 0.8; ctx.fillStyle = "#ffe08a";
+        for (var k = 0; k < 12; k++) { ctx.rotate(Math.PI / 6); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(r.r * 2.4, -5); ctx.lineTo(r.r * 2.4, 5); ctx.closePath(); ctx.fill(); }
+        ctx.restore();
+        ctx.translate(r.x, r.y); ctx.scale(pop, pop); ctx.translate(-r.x, -r.y);
+      }
       ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
       ctx.fillStyle = on ? PAPER : THEMES[i].chip; ctx.fill();
       ctx.lineWidth = on ? 6 : 2; ctx.strokeStyle = on ? THEMES[i].chip : "rgba(255,255,255,.25)"; ctx.stroke();
@@ -786,6 +841,14 @@
       ctx.font = "700 40px " + KANJI_FONT;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(SETS[i].mark, r.x, r.y + 2);
+      ctx.restore();
+      var b = best[SETS[i].mark];               /* 最高記録 */
+      if (b) {
+        ctx.fillStyle = "rgba(255,248,235,.85)";
+        ctx.font = "800 20px sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(String(b), r.x, r.y + r.r + 20);
+      }
       ctx.textBaseline = "alphabetic";
     });
   }
@@ -846,11 +909,12 @@
     now: function () {
       return { state: state, phase: phase, score: score, calls: calls, card: card && card.slice(), open: open && open.slice(),
                call: cur && { kanji: cur.k, reading: cur.r }, outcome: outcome, bingo: bingoLine && bingoLine.slice(),
-               set: SETS[setNo].mark, lives: lives, failed: failed, waiting: waiting(), reaches: reachFx.length, cursor: cursor, keyMode: keyMode, W: W, H: H };
+               set: SETS[setNo].mark, best: JSON.parse(JSON.stringify(best)), unlocked: unlocked(), newBest: newBest, lives: lives, failed: failed, waiting: waiting(), reaches: reachFx.length, cursor: cursor, keyMode: keyMode, W: W, H: H };
     },
     fish: function () { return FISH().map(function (f) { return { kanji: f.k, reading: f.r }; }); },
     sets: function () { return SETS.map(function (s) { return { mark: s.mark, list: s.list.map(function (f) { return { kanji: f.k, reading: f.r }; }) }; }); },
-    setButton: function (i) { var r = setRects()[i]; return { x: r.x, y: r.y }; },
+    setButton: function (i) { var r = setRects()[i]; return r && { x: r.x, y: r.y }; },
+    setCount: function () { return setCount(); },
     callTime: CALL_TIME,
     box: function () { return { x: W / 2, y: BOX + BOXH / 2 }; },
     result: function () { var b = resultButtons(); return { retry: { x: b[0].x + b[0].w / 2, y: b[0].y + b[0].h / 2 }, share: { x: b[1].x + b[1].w / 2, y: b[1].y + b[1].h / 2 } }; },
