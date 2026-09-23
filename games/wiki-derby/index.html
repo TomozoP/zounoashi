@@ -22,6 +22,17 @@
   .article-link[hidden] { display:none; }
   .article-link:focus-visible { outline:3px solid #f7cc71; outline-offset:2px; }
 </style>
+<!-- ゲームのOGP：道具で更新 -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ゾウノアシゲームズ">
+<meta property="og:title" content="情報量ダービー">
+<meta property="og:url" content="https://www.zounoashi.com/share/wiki-derby/">
+<meta property="og:image" content="https://www.zounoashi.com/games/wiki-derby/img/thumb.webp">
+<meta property="og:image:alt" content="情報量ダービー">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="情報量ダービー">
+<meta name="twitter:image" content="https://www.zounoashi.com/games/wiki-derby/img/thumb.webp">
+<!-- ゲームのOGPここまで -->
 </head>
 <body>
 <div id="stage"><div id="wrap">
@@ -324,12 +335,30 @@
     /* Wikipediaの決まりに沿って、どこの何が問い合わせているかを名乗る（連絡先はサイトのURL） */
     return fetch(url, { headers: { "Api-User-Agent": UA } }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
   }
+  /* 出走させない記事: 存命の人物や、事件・事故・災害などを賭けの対象にしないよう、原稿に書かれた分類（カテゴリ）で除く */
+  var BANNED = /存命人物|事件|事故|災害|震災|地震|津波|噴火|テロ|殺人|虐殺|自殺|死刑|犯罪|誘拐|暴動|戦争|紛争|空襲|遭難|墜落|沈没|爆発|火災|疫病|パンデミック/;
+  function banned(src) {
+    var re = /\[\[\s*(?:Category|カテゴリ)\s*:\s*([^\]|]+)/gi, m;
+    while ((m = re.exec(src))) if (BANNED.test(m[1])) return true;
+    return false;
+  }
+  var PICK = N + 6;                                           /* 除く分を見込んで、少し多めに取る */
   function sumViews(pv) { var s = 0; for (var k in pv) s += pv[k] || 0; return s; }
   var wikiSource = {
     field: function () {
-      return getJSON(API + "&generator=random&grnnamespace=0&grnlimit=" + N +
-                     "&prop=info|pageviews|revisions&rvprop=content&rvslots=main&pvipdays=30").then(function (j) {
-        var ps = ((j.query && j.query.pages) || []).filter(function (p) { return !p.missing && p.title && p.length > 0; }).slice(0, N);
+      var got = [];
+      function draw(tries) {                                  /* 足りなければもう1回だけ取り直す */
+        return getJSON(API + "&generator=random&grnnamespace=0&grnlimit=" + PICK +
+                       "&prop=info|pageviews|revisions&rvprop=content&rvslots=main&pvipdays=30").then(function (j) {
+          ((j.query && j.query.pages) || []).forEach(function (p) {
+            var rv = p.revisions && p.revisions[0], src = rv && rv.slots && rv.slots.main ? rv.slots.main.content : "";
+            if (!p.missing && p.title && p.length > 0 && !banned(src || "") && got.length < N) got.push(p);
+          });
+          if (got.length < N && tries < 1) return draw(tries + 1);
+        });
+      }
+      return draw(0).then(function () {
+        var ps = got;
         if (ps.length < N) throw new Error("頭数が足りない");
         var byId = {};
         var field = ps.map(function (p) {
@@ -338,16 +367,16 @@
           byId[p.pageid] = h;
           return h;
         });
-        /* 閲覧数の続き（最大4回）。取れなかった記事は0回扱い */
+        /* 閲覧数の足りない分（最大4回）。選んだ8本だけを問い合わせ直す。取れなかった記事は0回扱い */
         var ids = field.map(function (h) { return h.id; }).join("|");
         function more(cont, n) {
-          if (!cont || n >= 4) return field;
-          return getJSON(API + "&prop=pageviews&pvipdays=30&pageids=" + ids + "&pvipcontinue=" + encodeURIComponent(cont)).then(function (v) {
+          if (n >= 4 || (n > 0 && !cont) || field.every(function (h) { return h.pv != null; })) return field;
+          return getJSON(API + "&prop=pageviews&pvipdays=30&pageids=" + ids + (cont ? "&pvipcontinue=" + encodeURIComponent(cont) : "")).then(function (v) {
             ((v.query && v.query.pages) || []).forEach(function (p) { if (p.pageviews && byId[p.pageid]) byId[p.pageid].pv = sumViews(p.pageviews); });
             return more(v.continue && v.continue.pvipcontinue, n + 1);
           }, function () { return field; });
         }
-        return Promise.resolve(more(j.continue && j.continue.pvipcontinue, 0)).then(function (f) {
+        return Promise.resolve(more(null, 0)).then(function (f) {
           f.forEach(function (h) { if (h.pv == null) h.pv = 0; });
           return f;
         });
@@ -1364,8 +1393,10 @@
   function introX(i, t) {                                     /* 画面の上での馬の位置。ゆっくり前後して先頭が入れ替わる */
     return W * 0.6 + W * 0.13 * (0.6 * Math.sin(t * 0.5 + i * 1.7) + 0.4 * Math.sin(t * 0.83 + i * 2.9));
   }
+  var thumbIntro = false;                                     /* サムネ撮影: 人数とSTARTを出さず、走路だけ */
   function drawIntro() {
-    var top = 20, bot = playerRect(1).y - 28, ln = (bot - top) / N, s = Math.min(1.3, ln / 44);
+    /* サムネは上の540四方に8頭を収める */
+    var top = thumbIntro ? 8 : 20, bot = thumbIntro ? 532 : playerRect(1).y - 28, ln = (bot - top) / N, s = Math.min(1.3, ln / 44);
     var cam = INTRO_SPEED * T;
     ctx.font = "600 " + Math.min(15, Math.floor(ln * 0.28)) + "px sans-serif";
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -1383,7 +1414,7 @@
     }
     ctx.textBaseline = "alphabetic";
     for (var j = 0; j < N; j++) drawHorse(j, introX(j, T), top + j * ln + ln / 2 + ln * 0.02, T, s);
-    drawPlayerPick();
+    if (!thumbIntro) drawPlayerPick();
   }
 
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（2人以上のときは「もう一度」だけ） */
@@ -1471,6 +1502,7 @@
     winnerStop: function () { return winStop ? winStop.t0 : null; },
     /* その馬が走路に書いた文字数（止まった馬は本文の文字数と同じになる） */
     plain: function (w) { return plainText(w); },
+    banned: function (src) { return banned(src); },
     written: function (i) { return horses && prog ? Math.min(horses[i].len, Math.floor(charsOf(i, Math.min(raceT, finishT[i])) + 1e-6)) : 0; },
     speed: function (i) { return horses && plan[i] ? (posChars(i, raceT + 0.01) - posChars(i, raceT)) / 0.01 : 0; },
     links: function () { return linkEls.filter(function (e) { return !e.hidden; }).map(function (e) { return e.href; }); },
@@ -1507,6 +1539,12 @@
 
   /* ============ ループ ============ */
   var startButton = document.getElementById("start");
+  /* サムネ専用。開始画面の走りだけを撮る（{ scene: "intro" } のほかは受けない） */
+  window.__thumbnail = function (o) {
+    if (!o || o.scene !== "intro" || Object.keys(o).some(function (k) { return k !== "scene"; })) throw Error("未対応の撮影条件");
+    thumbIntro = true;
+    document.getElementById("start").hidden = true;
+  };
   window.zStartTap(function () { return state === S.INTRO; }, function (e) {
     if (e && e.clientX != null) {
       var p = atCanvas(e), n = hitPlayers(p.x, p.y);

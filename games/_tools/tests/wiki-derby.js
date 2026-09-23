@@ -1,7 +1,7 @@
 /* 情報量ダービー: 通信の代わりに偽の出走馬を差し込み、1頭1ボタンで賭ける・リセット・倍率・本文を書き切って止まるレース（1着は決まったら走り抜けて終わり）・着順・払い戻し・3レース・キー・間隔・通信失敗を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
-const file = 'games/_wiki-derby/index.html';
+const file = 'games/wiki-derby/index.html';
 const flush = () => new Promise(r => setImmediate(r));
 
 function open(shape) {
@@ -285,6 +285,18 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.equal(g.probe.now().phase, 'error', '勝手に進まない');
     at(g, g.probe.retryButton()); await flush(); g.step(1); ready(g);
     assert.equal(g.probe.now().phase, 'bet');
+  }
+
+  /* 1a. 存命の人物や事件・事故・災害などの分類がついた記事は出走させない */
+  {
+    const g = open();
+    const b = g.probe.banned;
+    assert.equal(b('本文。\n[[Category:日本の俳優]]\n[[Category:存命人物]]'), true, '存命人物');
+    assert.equal(b('[[カテゴリ:2011年の事故]]'), true, '事故（カテゴリの書き方）');
+    assert.equal(b('[[Category:日本の殺人事件|あいう]]'), true, '並べ替え用の読みつき');
+    assert.equal(b('[[category : 平成の地震]]'), true, '小文字・空白');
+    assert.equal(b('[[Category:日本の駅]]\n[[Category:1920年開業の鉄道駅]]'), false, 'ふつうの記事は出す');
+    assert.equal(b('本文に事件という言葉があるだけ'), false, '本文の言葉では除かない');
   }
 
   /* 1b. 出走馬が届いたら、馬名を0.5秒ごとに1頭ずつ出す。4秒ほどで出そろい、プレイヤーの交代では出し直さない */
