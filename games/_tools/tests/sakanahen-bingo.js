@@ -9,12 +9,13 @@ const now = g => g.probe.now();
 const cellOf = g => { const n = now(g); return n.card.indexOf(n.call.kanji); };
 /* 次の読みが出るまで進める */
 const toCall = g => { const c = now(g).calls; g.until(() => now(g).calls !== c || now(g).state !== 'play', 400); };
-/* カードにある（まだ開いていない）読み／無い読みが出るまで、箱で飛ばす */
+/* カードにある（まだ開いていない）読み／無い読みが出るまで進める */
 function waitFor(g, onCard) {
   for (let k = 0; k < 200; k++) {
     const n = now(g), at = n.card.indexOf(n.call.kanji);
     if (n.phase === 'call' && (onCard ? at >= 0 && !n.open[at] : at < 0)) return at;
-    if (n.phase === 'call') { const b = g.probe.box(); g.tap(b.x, b.y); }
+    /* 待っていない読みは、ライフを減らさないように片づける（カードにあれば開け、無ければ飛ばす） */
+    if (n.phase === 'call') { if (at >= 0 && !n.open[at]) tapCell(g, at); else { const b = g.probe.box(); g.tap(b.x, b.y); } }
     toCall(g);
   }
   throw new Error('読みが来ない');
@@ -186,6 +187,43 @@ function perfect(g, set) {
   console.log(mark + ' 全部取れた場合のビンゴまでの回数: 最小' + scores[0] + ' / 中央' + q(0.5) + ' / 9割' + q(0.9) + ' / 最大' + scores[scores.length - 1]);
   assert.ok(q(0.5) >= 8 && q(0.5) <= 40, '中央値が極端でない');
 });
+
+/* 9. ライフは3つ。違う字・カードにある字を流すと1つ減り、なくなると終わる。カードに無い字を飛ばしても減らない */
+{
+  const g = open(); start(g);
+  assert.equal(now(g).lives, 3);
+  waitFor(g, false);
+  const b = g.probe.box(); g.tap(b.x, b.y); g.step(1);
+  assert.equal(now(g).lives, 3, 'カードに無い字を飛ばしても減らない');
+  toCall(g);
+  const at = waitFor(g, true);
+  const wrong = now(g).card.findIndex((k, i) => k && i !== at && !now(g).open[i]);
+  tapCell(g, wrong); g.step(1);
+  assert.equal(now(g).lives, 2, '違う字で1つ減る（カードにあった字を流しても、1回で減るのは1つ）');
+  toCall(g);
+  waitFor(g, true);
+  g.step(Math.ceil(g.probe.callTime * 60) + 2);
+  assert.equal(now(g).lives, 1, '時間切れで1つ減る');
+  toCall(g);
+  waitFor(g, true);
+  const bb = g.probe.box(); g.tap(bb.x, bb.y); g.step(1);
+  assert.equal(now(g).lives, 0, 'カードにある字を飛ばすと1つ減る');
+  assert.equal(now(g).phase, 'over');
+  g.until(() => now(g).state === 'result', 400);
+  assert.ok(now(g).failed);
+  const p = g.probe.result().retry; g.tap(p.x, p.y); g.step(1);
+  assert.equal(now(g).lives, 3, 'もう一度で戻る');
+  assert.ok(!now(g).failed);
+}
+
+/* 10. 開始前に選び直して時間が経ってから始めても、カードの字が見えている（配り直しの演出の時刻） */
+{
+  const g = open();
+  g.step(300);
+  const b = g.probe.setButton(2); g.tap(b.x, b.y); g.step(120);
+  start(g);
+  assert.ok(g.probe.dealAlpha(0) > 0.99, '始めた直後も字が見える ' + g.probe.dealAlpha(0));
+}
 
 /* 8. 画面の形を変えても、マス同士・箱が押せる大きさ */
 [[375, 667], [390, 844], [430, 932], [768, 1024]].forEach(v => {

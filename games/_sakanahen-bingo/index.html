@@ -35,6 +35,7 @@
    上に読みが1つずつ出る。その漢字がカードにあれば、時間内にタップして穴を開ける。
    違う漢字を押すと、その読みは流れてしまう。カードに無いと思ったら上の箱を押すと次へ進む。
    ビンゴまでに出た読みの数が結果（少ないほどよい）。
+   ライフは3つ。違う字を押す・カードにある字を開けられずに流す、で1つ減り、なくなると終わり。
 
    Wikipediaビンゴ（games/_wiki-bingo）のカードと演出を流用している。 */
 (function () {
@@ -108,6 +109,8 @@
   function sndMiss() { tone(330, 0.2, 0.05, "triangle", 220); }
   function sndPass() { tone(440, 0.1, 0.035, "sine", 330); }
   function sndPick() { tone(660, 0.06, 0.06, "square"); }
+  /* ライフがなくなった: 下がっていく3音 */
+  function sndOver() { [392, 330, 262].forEach(function (f, i) { tone(f, 0.28, 0.07, "triangle", f * 0.94, i * 0.16); }); }
   function sndDud() { noiseHit(0.04, 400, 0.08, 1); }
   /* リーチ: どきっと低く鳴ってから、上がっていく2音 */
   function sndReach() {
@@ -153,6 +156,7 @@
   var setNo = 0;                                /* 選んでいるカード */
   function FISH() { return SETS[setNo].list; }
   var CALL_TIME = 10;                           /* 1つの読みを出しておく秒数 */
+  var LIVES = 3;                                /* ライフの数 */
   var RECENT = 16;                              /* 直近に出た読みは、この数だけ出さない */
 
   function dealCard() {
@@ -179,7 +183,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   /* PLAY の中の段階: call（読みが出ている）→ reveal（答えの漢字を見せる）→ 次の call、または bingo → 結果 */
   var state, phase, pt, score, card, open, openT, bingoLine, calls, cur, recent, outcome,
-      missT = [], wrongT = [], dealT = -9, reachFx = [], shakeT = -9, sparks = [], cursor = 0, keyMode = false, T, reached;
+      missT = [], wrongT = [], dealT = -9, lives = LIVES, lifeT = -9, failed = false, reachFx = [], shakeT = -9, sparks = [], cursor = 0, keyMode = false, T, reached;
 
   var BOX, BOXH, CARD, CELL, FRAME;
   function place() {
@@ -199,10 +203,12 @@
     state = S.PLAY;
     T = 0; pt = 0; score = 0;
     if (!keepCard) card = dealCard();
+    dealT = keepCard ? -9 : 0;                  /* 時計(T)を0に戻すので、配り直しの演出の時刻も合わせる（残すと字が消えたままになる） */
     open = []; openT = []; missT = []; wrongT = [];
     for (var i = 0; i < 25; i++) { open.push(i === 12); openT.push(i === 12 ? 9 : -1); missT.push(-9); wrongT.push(-9); }
     bingoLine = null; reached = {}; reachFx = []; shakeT = -9; sparks = [];
     calls = 0; cur = null; recent = []; outcome = null;
+    lives = LIVES; lifeT = -9; failed = false;
     nextCall();
   }
 
@@ -220,9 +226,13 @@
   function endCall(how) {
     outcome = how;
     phase = "reveal"; pt = 0;
-    var at = card.indexOf(cur.k);
-    if (how !== "ok" && at >= 0 && !open[at]) { missT[at] = T; sndMiss(); }   /* カードにあったのに開けられなかった */
+    var at = card.indexOf(cur.k), missed = how !== "ok" && at >= 0 && !open[at];
+    if (missed) { missT[at] = T; sndMiss(); }   /* カードにあったのに開けられなかった */
     else if (how === "pass") sndPass();
+    if (how === "wrong" || missed) {            /* 1つの読みで減るのは1つまで */
+      lives--; lifeT = T;
+      if (lives <= 0) { phase = "over"; pt = 0; sndOver(); }
+    }
   }
 
   function stamp(i) {
@@ -278,6 +288,8 @@
       if (pt >= (outcome === "ok" ? 0.55 : 1.0)) nextCall();
     } else if (phase === "bingo") {
       if (pt >= 2.2) state = S.RESULT;
+    } else if (phase === "over") {
+      if (pt >= 1.8) { failed = true; state = S.RESULT; }
     }
   }
 
@@ -361,7 +373,7 @@
   });
 
   function doShare() {
-    window.zResultActions.x({ text: score + "回でビンゴ #魚へんビンゴ" });
+    window.zResultActions.x({ text: (failed ? "ビンゴならず" : score + "回でビンゴ") + " #魚へんビンゴ" });
   }
 
   /* ============ 描画 ============ */
@@ -387,7 +399,7 @@
     if (!cur) return;
     var cy = BOX + BOXH / 2 - 8;
     var appear = phase === "call" ? Math.min(1, pt / 0.16) : 1;
-    var rv = phase === "reveal" || phase === "bingo" ? Math.min(1, pt / 0.18) : 0;
+    var rv = phase === "reveal" || phase === "bingo" || phase === "over" ? Math.min(1, pt / 0.18) : 0;
     var ease = rv * rv * (3 - 2 * rv);
     ctx.save();
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -420,6 +432,29 @@
       ctx.fillStyle = left > 0.3 ? "#f7cc71" : "#ff5a5f"; ctx.fill();
     }
     ctx.textBaseline = "alphabetic";
+    drawLives();
+  }
+  /* ライフ: 箱の右上にハート。減った直後は、そのハートがはじけて揺れる */
+  function drawLives() {
+    var lt = T - lifeT;
+    for (var i = 0; i < LIVES; i++) {
+      var x = W - 44 - (LIVES - 1 - i) * 34, y = BOX + 26, has = i < lives;
+      var justLost = i === lives && lt >= 0 && lt < 0.5;
+      ctx.save();
+      ctx.translate(x + (justLost ? Math.sin(lt * 60) * 4 * (1 - lt / 0.5) : 0), y);
+      if (justLost) { var k = 1 + (1 - lt / 0.5) * 0.5; ctx.scale(k, k); }
+      heartPath(11);
+      if (has || justLost) { ctx.fillStyle = justLost ? "rgba(255,90,95," + (1 - lt / 0.5) + ")" : "#ff5a5f"; ctx.fill(); }
+      ctx.lineWidth = 2; ctx.strokeStyle = has ? "#ff5a5f" : "rgba(255,255,255,.22)"; ctx.stroke();
+      ctx.restore();
+    }
+  }
+  function heartPath(r) {
+    ctx.beginPath();
+    ctx.moveTo(0, r * 0.9);
+    ctx.bezierCurveTo(-r * 1.3, -r * 0.1, -r * 0.7, -r * 1.1, 0, -r * 0.45);
+    ctx.bezierCurveTo(r * 0.7, -r * 1.1, r * 1.3, -r * 0.1, 0, r * 0.9);
+    ctx.closePath();
   }
 
   /* 紙のビンゴカード。漢字はミシン目の丸の上に刷ってあり、当たったらその丸を押し抜いて穴にする */
@@ -495,8 +530,7 @@
       if (open[c]) drawHole(cx, cy, R, openT[c], card[c]);
       else {
         if (state === S.INTRO && c === 12) drawLit(cx, cy, R, T);   /* 開始前は真ん中が光っていて、押すと始まる */
-        var dk = Math.min(1, Math.max(0, (T - dealT - (c % 5 + Math.floor(c / 5)) * 0.025) / 0.12));   /* 配り直した字は順に浮かぶ */
-        ctx.save(); ctx.globalAlpha = dk; drawFlap(cx, cy, R, card[c]); ctx.restore();
+        ctx.save(); ctx.globalAlpha = dealAlpha(c); drawFlap(cx, cy, R, card[c]); ctx.restore();
         drawMiss(cx, cy, R, T - missT[c]);
         drawWrong(cx, cy, R, T - wrongT[c]);
       }
@@ -511,6 +545,8 @@
     }
     ctx.restore();
   }
+  /* 配り直した字は左上から順に浮かぶ。0〜1 */
+  function dealAlpha(c) { return Math.min(1, Math.max(0, (T - dealT - (c % 5 + Math.floor(c / 5)) * 0.025) / 0.12)); }
   /* 待ちのマス: 赤い点線の輪が回って脈打つ */
   function drawWait(cx, cy, R) {
     var p = 0.5 + 0.5 * Math.sin(T * 6);
@@ -778,9 +814,15 @@
     ctx.fillStyle = "#fff";
     ctx.shadowColor = "rgba(0,0,0,.6)";
     ctx.shadowBlur = 10;
-    ctx.font = "800 120px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(String(score), W / 2, H / 2 - 30);
+    if (failed) {                               /* ライフがなくなったときは数字の代わりに大きなばつ印 */
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 18; ctx.lineCap = "round";
+      var cx = W / 2, cy = H / 2 - 72, d = 44;
+      ctx.beginPath(); ctx.moveTo(cx - d, cy - d); ctx.lineTo(cx + d, cy + d); ctx.moveTo(cx + d, cy - d); ctx.lineTo(cx - d, cy + d); ctx.stroke();
+    } else {
+      ctx.font = "800 120px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(String(score), W / 2, H / 2 - 30);
+    }
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
@@ -804,7 +846,7 @@
     now: function () {
       return { state: state, phase: phase, score: score, calls: calls, card: card && card.slice(), open: open && open.slice(),
                call: cur && { kanji: cur.k, reading: cur.r }, outcome: outcome, bingo: bingoLine && bingoLine.slice(),
-               set: SETS[setNo].mark, waiting: waiting(), reaches: reachFx.length, cursor: cursor, keyMode: keyMode, W: W, H: H };
+               set: SETS[setNo].mark, lives: lives, failed: failed, waiting: waiting(), reaches: reachFx.length, cursor: cursor, keyMode: keyMode, W: W, H: H };
     },
     fish: function () { return FISH().map(function (f) { return { kanji: f.k, reading: f.r }; }); },
     sets: function () { return SETS.map(function (s) { return { mark: s.mark, list: s.list.map(function (f) { return { kanji: f.k, reading: f.r }; }) }; }); },
@@ -812,6 +854,7 @@
     callTime: CALL_TIME,
     box: function () { return { x: W / 2, y: BOX + BOXH / 2 }; },
     result: function () { var b = resultButtons(); return { retry: { x: b[0].x + b[0].w / 2, y: b[0].y + b[0].h / 2 }, share: { x: b[1].x + b[1].w / 2, y: b[1].y + b[1].h / 2 } }; },
+    dealAlpha: function (i) { return dealAlpha(i); },
     cell: function (i) { var c = cellRect(i); return { x: c.x + c.w / 2, y: c.y + c.h / 2 }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
