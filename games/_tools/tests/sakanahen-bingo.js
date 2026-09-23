@@ -104,7 +104,7 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
   let frames = 0;
   while (now(g).phase === 'draw' && frames < 200) { g.step(1); frames++; }
   assert.equal(now(g).phase, 'call');
-  assert.ok(frames >= 40 && frames <= 70, '玉が出るまで1秒ほど ' + frames);
+  assert.ok(frames >= 50 && frames <= 90, '玉が出て大きく映るまで1秒ほど ' + frames);
 }
 
 /* 2. スペースでも始まる（離したとき） */
