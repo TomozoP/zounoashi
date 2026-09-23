@@ -1,0 +1,153 @@
+/* Wikipediaビンゴ: 通信の代わりに偽の記事を差し込み、選ぶ・流れる・穴が開く・次の記事・ビンゴ・通信失敗を確かめる。 */
+const assert = require('assert');
+const load = require('../harness');
+const file = 'games/_wiki-bingo/index.html';
+const flush = () => new Promise(r => setImmediate(r));
+
+/* 偽のWikipedia。記事の本文は、そのときのカードを見て作る（どの単語を入れるかを決められるように） */
+function open(plan, shape) {
+  const inject = `
+  window.__wikiSource = {
+    choices: function () {
+      var f = globalThis.__wikiFake; f.calls++;
+      if (f.failNext > 0) { f.failNext--; return Promise.reject(new Error("x")); }
+      return Promise.resolve([0, 1, 2].map(function (i) { return { id: f.calls * 10 + i, title: "記事" + f.calls + "-" + i }; }));
+    },
+    text: function (id) { globalThis.__wikiFake.texts++; return Promise.resolve(globalThis.__wikiFake.plan(id, card.slice(), open.slice())); }
+  };`;
+  globalThis.__wikiFake = { plan: null, calls: 0, texts: 0, failNext: 0 };
+  const g = load(file, { quiet: true, inject });
+  if (shape) g.view(...shape);
+  g.step(2);
+  return g;
+}
+async function start(g) {
+  assert.equal(g.probe.now().state, 'intro');
+  const introCard = g.probe.now().card;
+  g.press(' '); g.step(1);
+  assert.equal(g.probe.now().state, 'play');
+  assert.deepEqual(g.probe.now().card, introCard, 'STARTの前に見えていたカードのまま始まる');
+  await flush(); g.step(1);
+  assert.equal(g.probe.now().phase, 'choose', '題名が3つ出る');
+  assert.equal(g.probe.now().choices.length, 3);
+}
+
+(async () => {
+  /* 1. カードの作り */
+  {
+    const g = open();
+    const c = g.probe.now().card;
+    assert.equal(c.length, 25);
+    assert.equal(c[12], null, '真ん中は空き');
+    assert.equal(new Set(c.filter(Boolean)).size, 24, '単語は重ならない');
+    assert.ok(g.probe.now().open[12], '真ん中は最初から開いている');
+  }
+
+  /* 2. 1本目で横1列が揃う記事 → その単語の最後の文字の時点の文字数で結果 */
+  {
+    const g = open();
+    await start(g);
+    const c = g.probe.now().card;
+    const row = [10, 11, 13, 14].map(i => c[i]);            /* 真ん中の段 */
+    const filler = 'ああああああああああ';
+    const body = filler + row.join('いいい') + filler.repeat(20);
+    g.probe.step(0);
+    setPlan(g, () => body);
+    g.tap(g.probe.choice(1).x, g.probe.choice(1).y);
+    await flush(); g.step(1);
+    assert.equal(g.probe.now().phase, 'stream');
+    assert.equal(g.probe.now().title, '記事1-1', '選んだ記事が流れる');
+    g.until(() => g.probe.now().phase !== 'stream', 2000);
+    const now = g.probe.now();
+    assert.equal(now.phase, 'bingo');
+    assert.deepEqual(now.bingo, [10, 11, 12, 13, 14]);
+    const expect = (filler + row.join('いいい')).length;
+    assert.equal(now.score, expect, 'ビンゴの瞬間までの文字数');
+    g.until(() => g.probe.now().state === 'result', 400);
+    assert.equal(g.probe.now().score, expect);
+  }
+
+  /* 3. 1本で揃わない → 次の3つが出て、文字数は足し算。単語は記事をまたいで積み上がる */
+  {
+    const g = open();
+    await start(g);
+    const c = g.probe.now().card;
+    let n = 0;
+    setPlan(g, () => { n++; return n === 1 ? 'あ' + c[0] + 'あ' + c[1] + 'あ' : c[2] + 'う' + c[3] + 'う' + c[4]; });
+    g.press(' '); await flush(); g.step(1);
+    g.until(() => g.probe.now().phase !== 'stream', 2000);
+    assert.notEqual(g.probe.now().phase, 'bingo');
+    const first = ('あ' + c[0] + 'あ' + c[1] + 'あ').length;
+    g.until(() => g.probe.now().phase === 'choose', 200);
+    await flush(); g.step(1);
+    assert.equal(g.probe.now().phase, 'choose', '次の題名');
+    assert.ok(g.probe.now().open[0] && g.probe.now().open[1], '前の記事で開いた穴は残る');
+    g.press('ArrowDown'); g.press('ArrowDown');
+    assert.equal(g.probe.now().pick, 2, '矢印で選ぶ');
+    g.press(' '); await flush(); g.step(1);
+    assert.ok(/-2$/.test(g.probe.now().title));
+    g.until(() => g.probe.now().phase === 'bingo', 2000);
+    assert.deepEqual(g.probe.now().bingo, [0, 1, 2, 3, 4]);
+    assert.equal(g.probe.now().score, first + (c[2] + 'う' + c[3] + 'う' + c[4]).length);
+    assert.equal(g.probe.now().articles, 2);
+  }
+
+  /* 4. 押している間は速く流れる */
+  {
+    const g = open();
+    await start(g);
+    setPlan(g, () => 'あ'.repeat(2000));
+    g.press(' '); await flush(); g.step(1);
+    g.step(60); const slow = g.probe.now().pos;
+    g.down(270, g.probe.cell(0).y); g.step(60); g.up();
+    const fast = g.probe.now().pos - slow;
+    assert.ok(slow > 50 && slow < 90, '1秒でふつう70文字ほど: ' + slow);
+    assert.ok(fast > slow * 3, '押している間は速い: ' + fast);
+  }
+
+  /* 5. 通信の失敗 → 押し直すと取り直す */
+  {
+    const g = open();
+    globalThis.__wikiFake.failNext = 1;
+    g.press(' '); g.step(1); await flush(); g.step(1);
+    assert.equal(g.probe.now().phase, 'error', '失敗したら止まる');
+    g.step(120);
+    assert.equal(g.probe.now().phase, 'error', '勝手に進まない');
+    const r = g.probe.retryButton();
+    g.tap(r.x, r.y); await flush(); g.step(1);
+    assert.equal(g.probe.now().phase, 'choose', '押し直すと取れる');
+  }
+
+  /* 6. 結果からもう一度 → 新しいカードで最初から。Escでも最初から */
+  {
+    const g = open();
+    await start(g);
+    const c = g.probe.now().card;
+    setPlan(g, () => [0, 6, 18, 24].map(i => c[i]).join('。'));
+    g.press(' '); await flush(); g.step(1);
+    g.until(() => g.probe.now().state === 'result', 3000);
+    const H = g.probe.now().H;
+    g.tap(270 - 107, H * 0.62 + 27); g.step(1); await flush(); g.step(1);
+    assert.equal(g.probe.now().state, 'play');
+    assert.equal(g.probe.now().score, 0);
+    assert.equal(g.probe.now().open.filter(Boolean).length, 1);
+    assert.equal(g.probe.now().phase, 'choose');
+    g.esc(); g.step(1); await flush(); g.step(1);
+    assert.equal(g.probe.now().phase, 'choose');
+    assert.equal(g.probe.now().articles, 0);
+  }
+
+  /* 7. 押しどころ（題名3つ）の間隔と、画面に収まるか */
+  for (const shape of load.SHAPES) {
+    const g = open(null, shape);
+    await start(g);
+    const H = g.probe.now().H;
+    const ys = [0, 1, 2].map(i => g.probe.choice(i).y);
+    assert.ok(ys[1] - ys[0] >= 63 && ys[2] - ys[1] >= 63, shape.join('x') + ' 題名の間隔 ' + (ys[1] - ys[0]));
+    assert.ok(g.probe.cell(24).y + 40 < H - 20, shape.join('x') + ' カードが画面に収まる');
+  }
+
+  console.log('ok wiki-bingo');
+})().catch(e => { console.error(e); process.exit(1); });
+
+function setPlan(g, f) { globalThis.__wikiFake.plan = f; }
