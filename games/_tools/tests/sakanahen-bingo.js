@@ -6,6 +6,9 @@ const file = 'games/_sakanahen-bingo/index.html';
 const open = shape => { const g = load(file, { quiet: true }); if (shape) g.view(...shape); g.step(2); return g; };
 const tapCell = (g, i) => { const p = g.probe.cell(i); g.tap(p.x, p.y); };
 const now = g => g.probe.now();
+/* カードの並び（やさしい順に左から）。位置ではなく字で選ぶ */
+const ORDER = ['木', '金', '虫', '魚', '鳥', '難'];
+const I = m => ORDER.indexOf(m);
 const cellOf = g => { const n = now(g); return n.card.indexOf(n.call.kanji); };
 /* 次の読みが出るまで進める */
 const toCall = g => { const c = now(g).calls; g.until(() => now(g).calls !== c || now(g).state !== 'play', 400); };
@@ -28,7 +31,7 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
 {
   const g = open();
   const sets = g.probe.sets();
-  assert.deepEqual(sets.map(s => s.mark), ['魚', '木', '金', '鳥', '虫', '難']);
+  assert.deepEqual(sets.map(s => s.mark), ORDER, 'やさしい順に左から');
   assert.equal(g.probe.setCount(), 5, '難は最初は出ていない');
   /* 難は、ほかのカードに入っていない字だけ */
   const others = new Set(sets.slice(0, 5).flatMap(s => s.list.map(f => f.kanji)));
@@ -43,25 +46,25 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
       assert.ok(/^[ぁ-ゖー]+$/.test(f.reading), f.reading + ' はひらがな');
     });
   });
-  sets[0].list.forEach(f => assert.ok(/^[魚-鱿]$/.test(f.kanji), f.kanji + ' は魚へんの字'));
+  sets[I('魚')].list.forEach(f => assert.ok(/^[魚-鱿]$/.test(f.kanji), f.kanji + ' は魚へんの字'));
 }
 
 /* 0b. 開始前に上の丸でカードを選ぶ。選ぶと配り直し、そのカードで始まる。左右キーでも選べる */
 {
   const g = open();
-  assert.equal(now(g).set, '魚');
-  const b = g.probe.setButton(1); g.tap(b.x, b.y); g.step(30);
+  assert.equal(now(g).set, '魚', '最初は魚');
+  const b = g.probe.setButton(I('木')); g.tap(b.x, b.y); g.step(30);
   assert.equal(now(g).state, 'intro', '選んだだけでは始まらない');
   assert.equal(now(g).set, '木');
-  const wood = g.probe.sets()[1].list.map(f => f.kanji);
+  const wood = g.probe.sets()[I('木')].list.map(f => f.kanji);
   assert.ok(now(g).card.filter(Boolean).every(k => wood.includes(k)), '木のカードに配り直す');
   g.press('ArrowRight'); assert.equal(now(g).set, '金');
-  g.press('ArrowLeft'); g.press('ArrowLeft'); g.press('ArrowLeft'); assert.equal(now(g).set, '虫', '端から回る');
+  g.press('ArrowLeft'); g.press('ArrowLeft'); assert.equal(now(g).set, '鳥', '端から回る');
   const card = now(g).card;
   start(g);
   assert.deepEqual(now(g).card, card);
-  const bug = g.probe.sets()[4].list.map(f => f.kanji);
-  assert.ok(bug.includes(now(g).call.kanji), '虫の読みが出る');
+  const bird0 = g.probe.sets()[I('鳥')].list.map(f => f.kanji);
+  assert.ok(bird0.includes(now(g).call.kanji), '鳥の読みが出る');
   /* 丸の間隔もスマホで押せる */
   const a0 = g.probe.setButton(0), a1 = g.probe.setButton(1);
   assert.ok(a1.x - a0.x >= 63);
@@ -145,7 +148,7 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
 
 /* 6. 全部取れば必ずビンゴになり、結果は出た読みの数。もう一度で最初から */
 function perfect(g, set) {
-  if (set) { const b = g.probe.setButton(set); g.tap(b.x, b.y); g.step(1); }
+  if (set != null) { const b = g.probe.setButton(set); g.tap(b.x, b.y); g.step(1); }
   start(g);
   return playOut(g);
 }
@@ -177,12 +180,12 @@ function playOut(g) {
   assert.ok(now(g).open.every(o => !o), 'どこも開いていない');
   assert.notDeepEqual(now(g).card, oldCard, '配り直す');
   /* 選び直して始める */
-  const sb = g.probe.setButton(3); g.tap(sb.x, sb.y); g.step(1);
+  const sb = g.probe.setButton(I('鳥')); g.tap(sb.x, sb.y); g.step(1);
   assert.equal(now(g).set, '鳥');
   start(g);
   assert.equal(now(g).calls, 1);
   assert.equal(now(g).lives, 3);
-  const bird = g.probe.sets()[3].list.map(f => f.kanji);
+  const bird = g.probe.sets()[I('鳥')].list.map(f => f.kanji);
   assert.ok(now(g).card.filter(Boolean).every(k => bird.includes(k)), '鳥のカードで始まる');
   /* 結果ではスペースでももう一度（カード選びへ） */
   const r2 = playOut(g);
@@ -193,9 +196,9 @@ function playOut(g) {
 }
 
 /* 7. 回数のばらつき（全部取れた場合） */
-['魚', '木', '金', '鳥', '虫'].forEach((mark, set) => {
+ORDER.slice(0, 5).forEach(mark => {
   const scores = [];
-  for (let k = 0; k < 40; k++) scores.push(perfect(open(), set).score);
+  for (let k = 0; k < 40; k++) scores.push(perfect(open(), I(mark)).score);
   scores.sort((a, b) => a - b);
   const q = f => scores[Math.floor((scores.length - 1) * f)];
   console.log(mark + ' 全部取れた場合のビンゴまでの回数: 最小' + scores[0] + ' / 中央' + q(0.5) + ' / 9割' + q(0.9) + ' / 最大' + scores[scores.length - 1]);
@@ -252,8 +255,9 @@ function playOut(g) {
   g.until(() => now(g).state === 'result', 400);
   assert.ok(now(g).failed);
   assert.deepEqual(now(g).best, {}, 'ライフがなくなった回は記録しない');
-  const marks = ['魚', '木', '金', '鳥', '虫'];
-  marks.forEach((m, set) => {
+  const marks = ['魚', '木', '金', '鳥', '虫'];   /* 並びと違う順に遊んでも、5つ揃えば出る */
+  marks.forEach((m, k) => {
+    const set = I(m);
     back(g);
     const b = g.probe.setButton(set); g.tap(b.x, b.y); g.step(1);
     start(g);
@@ -261,7 +265,7 @@ function playOut(g) {
     const res = playOut(g);
     assert.ok(!res.failed);
     assert.equal(res.best[m], res.score, m + ' の記録');
-    assert.equal(g.probe.setCount(), set < 4 ? 5 : 6, set < 4 ? 'まだ難は出ない' : '5つ揃うと難が出る');
+    assert.equal(g.probe.setCount(), k < 4 ? 5 : 6, k < 4 ? 'まだ難は出ない' : '5つ揃うと難が出る');
   });
   assert.ok(now(g).unlocked);
   back(g);
