@@ -59,6 +59,26 @@ async function start(g) {
 }
 
 (async () => {
+  /* 0. 開始前は真ん中が閉じて光っている。真ん中を押し抜くと始まる（ほかを押しても、Escでも始まらない） */
+  {
+    const g = open();
+    let now = g.probe.now();
+    assert.equal(now.state, "intro");
+    assert.equal(now.open[12], false, "開始前の真ん中は閉じている");
+    assert.equal(now.lit[12], true, "真ん中が光っている");
+    const card = now.card;
+    [0, 11, 13, 24].forEach(i => tapCell(g, i));
+    g.tap(270, 40); g.esc(); g.step(30);
+    assert.equal(g.probe.now().state, "intro", "真ん中以外やEscでは始まらない");
+    tapCell(g, 12); g.step(1);
+    now = g.probe.now();
+    assert.equal(now.state, "play", "真ん中を押すと始まる");
+    assert.ok(now.open[12], "真ん中に穴が開く");
+    assert.deepEqual(now.card, card, "見えていたカードのまま");
+    await flush(); g.step(1);
+    assert.equal(g.probe.now().phase, "choose");
+  }
+
   /* 1. カードの作り */
   {
     const g = open();
@@ -66,7 +86,8 @@ async function start(g) {
     assert.equal(c.length, 25);
     assert.equal(c[12], null, '真ん中は空き');
     assert.equal(new Set(c.filter(Boolean)).size, 24, '単語は重ならない');
-    assert.ok(g.probe.now().open[12], "真ん中は最初から開いている");
+    await start(g);
+    assert.ok(g.probe.now().open[12], "始めたら真ん中は開いている");
     for (let n = 0; n < 200; n++) {
       g.esc(); g.step(1);
       const gs = g.probe.now().genres.filter(x => x != null);

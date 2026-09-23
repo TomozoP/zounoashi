@@ -12,8 +12,6 @@
   canvas { display: block; background: #1b2230; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
-  #start[hidden] { display:none; }
   #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #share-button[hidden] { display:none; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
@@ -28,11 +26,9 @@
 <body>
 <div id="stage"><div id="wrap">
   <canvas id="c"></canvas>
-  <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
   <a id="credit" target="_blank" rel="noopener" hidden></a>
 </div></div>
-<script src="../start.js"></script>
 <script src="../view.js"></script>
 <script src="../audio.js"></script>
 <script src="../share.js"></script>
@@ -242,7 +238,6 @@
 
   function newRound(keepCard) {
     shareButton.hidden = true;
-    document.getElementById("start").hidden = true;
     state = S.PLAY;
     round = (round || 0) + 1;
     T = 0; pt = 0; score = 0; held = false; typeT = 0;
@@ -376,6 +371,7 @@
 
   /* ============ 進行 ============ */
   function update(dt) {
+    if (state === S.INTRO) T += dt;
     if (state !== S.PLAY) return;
     T += dt; pt += dt;
     for (var i = 0; i < 25; i++) if (openT[i] >= 0) openT[i] += dt;
@@ -427,7 +423,7 @@
   function inside(r, x, y) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
 
   function down(x, y) {
-    if (state === S.INTRO) return;
+    if (state === S.INTRO) { if (x != null && cellAt(x, y) === 12) startGame(); return; }
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
@@ -474,7 +470,7 @@
     if (!esc && !go && !upK && !downK) return;
     e.preventDefault();
     if (!esc) keyMode = true;
-    if (esc) { if (!e.repeat) newRound(); return; }
+    if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }   /* 開始前は真ん中を開けるまで始めない */
     if (upK || downK) {
       if (state === S.PLAY && phase === "choose") pick = (pick + (downK ? 1 : 2)) % 3;
       return;
@@ -483,7 +479,7 @@
     down();
   });
   window.addEventListener("keyup", function (e) {
-    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startGame(); else up(); }
   });
 
   function doShare() {
@@ -720,7 +716,7 @@
     ctx.setLineDash([4, 4]); ctx.lineWidth = 1.6; ctx.strokeStyle = "rgba(29,42,68,.45)";
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
-    if (!word) return;
+    if (!word) { drawStar(cx, cy + 1, R * 0.55, INK); return; }
     ctx.fillStyle = INK;
     ctx.font = "900 " + Math.min(30, Math.floor(R * 1.72 / word.length)) + "px sans-serif";
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -972,16 +968,20 @@
   };
 
   /* ============ ループ ============ */
-  var startButton = document.getElementById("start");
-  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
-  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(true); });
-
-  /* 開始前はカードだけ見せる（通信はSTARTを押してから） */
+  /* 開始前: STARTボタンの代わりに、カードの真ん中がまだ閉じていて光っている。
+     そこを押し抜くと始まる（通信もそこから）。キーとジョイパッドはスペースを離したとき */
+  function startGame() {
+    if (state !== S.INTRO) return;
+    audioOn(); resumeAudio();
+    newRound(true);
+    openT[12] = 0;                              /* 真ん中の穴が開く動きから始める */
+    sndStamp(1);
+    var cr = cellRect(12);
+    burst(cr.x + cr.w / 2, cr.y + cr.h / 2, 16, 1);
+  }
   state = S.INTRO; phase = "intro"; round = 0; score = 0; text = ""; hits = []; lines = []; article = null; pt = 0; T = 0;
   card = dealCard();
-  open = []; openT = []; lit = []; for (var i0 = 0; i0 < 25; i0++) { open.push(i0 === 12); openT.push(i0 === 12 ? 9 : -1); lit.push(-1); }
-  startButton.hidden = false;
+  open = []; openT = []; lit = []; for (var i0 = 0; i0 < 25; i0++) { open.push(false); openT.push(-1); lit.push(i0 === 12 ? 0 : -1); }
   layout();
   var lastT = performance.now();
   function loop(now) {
