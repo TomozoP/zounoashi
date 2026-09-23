@@ -372,16 +372,16 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
 
   /* 7d. シェアの文（1人のとき）: いちばん払い戻しの多かった記事。1度も勝てなければ、いちばん多く賭けた記事 */
   for (const plan of [
-    { picks: [[0, 1], [1, 5], [1, 1]], want: t => '「' + t + '」にベットしてレースに勝利しました #情報量ダービー' },   /* 2レース目の2番がいちばん稼ぐ */
+    { picks: [[0, 1], [1, 5], [1, 1]], want: (t, o) => '「' + t + '」にベットして、' + Math.floor(500 * o).toLocaleString('en-US') + 'ポイントかせぎました #情報量ダービー' },   /* 2レース目の2番がいちばん稼ぐ */
     { picks: [[0, 1], [0, 3], [0, 1]], want: t => '「' + t + '」にベットしましたが勝てませんでした #情報量ダービー' }     /* 2レース目の1番がいちばん多く賭けた */
   ]) {
     const g = open();
     globalThis.__derbyFake.lens = [1000, 9000, 2000, 3000, 4000, 5000, 6000, 7000];   /* いつも2番が勝つ */
     globalThis.__derbyFake.pvs = [100, 100, 100, 100, 100, 100, 100, 100];             /* 倍率もいつも同じ */
     await start(g);
-    const titles = [];
+    const titles = [], odds = [];
     for (const [i, n] of plan.picks) {
-      titles.push(g.probe.now().horses[i].title);
+      titles.push(g.probe.now().horses[i].title); odds.push(g.probe.now().odds[i]);
       for (let k = 0; k < n; k++) at(g, g.probe.plus(i));
       at(g, g.probe.startButton()); g.step(1);
       g.until(() => g.probe.now().phase === 'finish', 3000);
@@ -389,7 +389,7 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     }
     const now = g.probe.now();
     assert.equal(now.state, 'result');
-    assert.equal(now.share, plan.want(titles[1]));
+    assert.equal(now.share, plan.want(titles[1], odds[1]));
     assert.equal(now.shareShown, true, '1人のときはシェアのボタンを出す');
   }
 
