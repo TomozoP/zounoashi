@@ -1,4 +1,4 @@
-/* 50音ルーレット: 置く・戻す・回す・払い戻し・10回で終わり・押しどころの距離を確かめる。 */
+/* 50音ルーレット: 置く・戻す・回す・払い戻し（かな・行・赤黒）・赤黒の交互・10回で終わり・押しどころの距離を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
 const file = 'games/_gojuon-roulette/index.html';
@@ -14,6 +14,22 @@ function open(shape) {
   return g;
 }
 const at = (g, p) => g.tap(p.x, p.y);
+/* 賭け先の当たり判定と倍率を、ゲームとは別に書いておく */
+const ROWS = ["あいうえお", "かきくけこ", "さしすせそ", "たちつてと", "なにぬねの", "はひふへほ", "まみむめも", "やゆよ", "らりるれろ", "わをん"];
+const ORDER = ROWS.join("");
+const rowOf = ch => ROWS.findIndex(r => r.includes(ch));
+const red = k => ORDER[k] !== "ん" && k % 2 === 0, black = k => ORDER[k] !== "ん" && k % 2 === 1;
+function payout(bets, k) {
+  let sum = 0;
+  bets.forEach((n, i) => {
+    if (!n) return;
+    if (i < 46) { if (i === k) sum += n * 46; }
+    else if (i < 56) { const r = i - 46; if (rowOf(ORDER[k]) === r) sum += n * Math.floor(46 / ROWS[r].length); }
+    else if (i === 56) { if (red(k)) sum += n * 2; }
+    else if (black(k)) sum += n * 2;
+  });
+  return sum;
+}
 /* 回して、次に置けるようになる（か結果になる）まで進める。何コマかかったかを返す */
 function spinOut(g) {
   let n = 0;
@@ -39,6 +55,13 @@ function spinOut(g) {
   const K = g.probe.kana();
   assert.equal(K.length, 46);
   assert.equal(new Set(K).size, 46, '46文字すべて別');
+  assert.equal(K.join(""), ORDER, "50音の順");
+  const wo = g.probe.wheelOrder();
+  assert.equal(new Set(wo).size, 46, "盤に全部ある");
+  assert.equal(ORDER[wo[0]], "ん");
+  for (let p = 1; p < 46; p++) assert.equal(red(wo[p]), p % 2 === 1, "盤の赤黒が交互");
+  const sp = g.probe.spots();
+  assert.equal(sp.count, 58);
   at(g, g.probe.wheel()); g.step(30);
   assert.equal(g.probe.now().phase, 'bet', '何も置かずに盤を押しても回らない');
   at(g, g.probe.cell(0)); at(g, g.probe.cell(0)); at(g, g.probe.cell(45));
@@ -65,7 +88,7 @@ function spinOut(g) {
       const before = g.probe.now();
       const n = Math.min(before.chips, 10);
       const picks = [];
-      while (picks.length < n) { const k = Math.floor(Math.random() * 46); if (!picks.includes(k)) picks.push(k); }
+      while (picks.length < n) picks.push(Math.floor(Math.random() * 58));   /* かな・行・赤黒をまぜて、重ねても置く */
       picks.forEach(k => at(g, g.probe.cell(k)));
       const placed = g.probe.now().bets.slice();
       const rest = g.probe.now().chips;
@@ -73,10 +96,10 @@ function spinOut(g) {
       maxFrames = Math.max(maxFrames, f); minFrames = Math.min(minFrames, f);
       spins++;
       const after = g.probe.now();
-      const expect = rest + placed[after.last] * 46;
+      const expect = rest + payout(placed, after.last);
       assert.equal(after.chips, expect, '当たったマスの枚数×46が戻り、ほかは消える');
       assert.equal(after.bet, 0, '回したあと表は空');
-      if (placed[after.last]) wins++; else losses++;
+      if (payout(placed, after.last)) wins++; else losses++;
       if (after.chips === 0) { assert.equal(after.state, 'result', 'チップが尽きたら終わり'); break; }
       assert.ok(spins <= 10);
     }
@@ -90,6 +113,20 @@ function spinOut(g) {
   assert.ok(maxFrames / 60 < 9, '1回が長すぎない');
 }
 
+/* 2b. 行・赤・黒だけに置いたときの払い戻し */
+{
+  const g = open();
+  const sp = g.probe.spots();
+  for (let s = 0; s < 10 && g.probe.now().state === "play"; s++) {
+    at(g, g.probe.cell(sp.row0 + (s % 10)));
+    at(g, g.probe.cell(s % 2 ? sp.black : sp.red));
+    const placed = g.probe.now().bets.slice(), rest = g.probe.now().chips;
+    spinOut(g);
+    const k = g.probe.now().last;
+    assert.equal(g.probe.now().chips, rest + payout(placed, k));
+  }
+}
+
 /* 3. キーだけで遊べる */
 {
   const g = open();
@@ -100,7 +137,16 @@ function spinOut(g) {
   assert.equal(now.bets[6], 1, '↓で き');
   g.press('ArrowUp'); g.press('ArrowUp');
   assert.equal(g.probe.now().sel, -1, 'いちばん上からさらに上は盤');
-  g.press(' '); g.step(2);
+  g.press("ArrowDown");
+  for (let i = 0; i < 6; i++) g.press("ArrowRight");
+  assert.equal(g.probe.now().sel, 46, "かなの右端のさらに右は行（右へ押し続けても止まる）");
+  g.press("ArrowUp");
+  assert.equal(g.probe.now().sel, 57, "表の右上からさらに上は黒");
+  g.press("ArrowLeft");
+  assert.equal(g.probe.now().sel, 56, "黒の左は赤");
+  g.press("ArrowLeft");
+  assert.equal(g.probe.now().sel, -1, "赤の左は盤");
+  g.press(" "); g.step(2);
   assert.notEqual(g.probe.now().phase, 'bet', 'スペースで回る');
   g.until(() => g.probe.now().phase === 'bet', 1200);
   g.esc(); g.step(1);
@@ -125,7 +171,7 @@ load.SHAPES.forEach(shape => {
   const g = open(shape);
   const H = g.probe.now().H;
   const pts = [g.probe.wheel(), g.probe.pile()];
-  for (let k = 0; k < 46; k++) pts.push(g.probe.cell(k));
+  for (let k = 0; k < 58; k++) pts.push(g.probe.cell(k));
   let min = 1e9;
   for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
     min = Math.min(min, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));

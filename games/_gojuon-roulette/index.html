@@ -36,7 +36,7 @@
 /* 50音ルーレット
 
    50音表のマスにチップを置いて、上のルーレットを回す。
-   玉が落ちたかなにチップがあれば、置いた数の46倍が戻る。
+   かな1文字は46倍、行は9倍（3文字の行は15倍）、赤・黒は2倍が戻る。
    10回まわし終えたとき（またはチップが尽きたとき）の枚数が結果。 */
 (function () {
   "use strict";
@@ -136,24 +136,52 @@
   });
   var N = KANA.length;                         /* 46 */
   var STEP = Math.PI * 2 / N;
-  var PAY = N;                                 /* 当たれば置いた数の46倍が戻る */
+  var NK = KANA.indexOf("ん");
   var START_CHIPS = 10, SPINS = 10;
 
-  /* 盤の並びは本物のルーレットのようにばらばら。毎回同じ並び（決まった種で混ぜる） */
+  /* 色は50音の順に赤・黒の交互（あ=赤、い=黒…）。ん だけ緑 */
+  var COL = { red: "#b52731", black: "#1a1a1e", green: "#1b7c46" };
+  function isRed(k) { return k !== NK && k % 2 === 0; }
+  function isBlack(k) { return k !== NK && k % 2 === 1; }
+  function colorOf(k) { return k === NK ? COL.green : isRed(k) ? COL.red : COL.black; }
+
+  /* 盤の並びは本物のルーレットのようにばらばら。ただし赤・黒は交互。
+     毎回同じ並び（決まった種で混ぜる）。ん は緑の0番 */
   var WHEEL = (function () {
-    var a = [], seed = 50;
-    for (var i = 0; i < N; i++) if (KANA[i] !== "ん") a.push(i);
-    for (var j = a.length - 1; j > 0; j--) {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      var r = seed % (j + 1), t = a[j]; a[j] = a[r]; a[r] = t;
+    var seed = 50;
+    function mix(a) {
+      for (var j = a.length - 1; j > 0; j--) {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        var r = seed % (j + 1), t = a[j]; a[j] = a[r]; a[r] = t;
+      }
+      return a;
     }
-    a.unshift(KANA.indexOf("ん"));             /* ん は緑の0番 */
+    var reds = [], blacks = [];
+    for (var i = 0; i < N; i++) { if (isRed(i)) reds.push(i); else if (isBlack(i)) blacks.push(i); }
+    mix(reds); mix(blacks);
+    var a = [NK];
+    for (var p = 0; p < reds.length; p++) { a.push(reds[p]); if (p < blacks.length) a.push(blacks[p]); }
     return a;
   })();
   var POCKET = [];                             /* POCKET[k] = 盤の何番目か */
   WHEEL.forEach(function (k, p) { POCKET[k] = p; });
-  var COL = { red: "#b52731", black: "#1a1a1e", green: "#1b7c46" };
-  function colorOf(k) { var p = POCKET[k]; return p === 0 ? COL.green : (p % 2 ? COL.red : COL.black); }
+
+  /* 賭ける場所。0〜45 = かな1文字、46〜55 = 行（あ行〜わ行）、56 = 赤、57 = 黒 */
+  var ROW0 = N, RED = N + 10, BLACK = N + 11, NB = N + 12;
+  var ROWLEN = []; for (var rr = 0; rr < 10; rr++) ROWLEN.push(0);
+  CELL.forEach(function (c) { ROWLEN[c.r]++; });
+  /* 当たったとき、置いた数の何倍が戻るか。落ちたかなが k のとき当たりか */
+  function mult(i) {
+    if (i < N) return N;                       /* 46倍 */
+    if (i < RED) return Math.floor(N / ROWLEN[i - ROW0]);   /* 5文字の行は9倍、3文字の行は15倍 */
+    return 2;
+  }
+  function wins(i, k) {
+    if (i < N) return i === k;
+    if (i < RED) return CELL[k].r === i - ROW0;
+    if (i === RED) return isRed(k);
+    return isBlack(k);
+  }
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
@@ -161,19 +189,25 @@
      → back（盤が戻る）→ pay（チップが動く）→ bet */
   var state, phase, pt, score, chips, shown, bets, spinsDone, last, spin, flyers, sel, keyMode = false, T, wobble;
 
-  var rh, TOP, CW = 100, TX = 20, small, big, pile;
+  /* 表はかな5列（幅84）＋右端に行の列（幅88）。上の帯の右側に手持ち・残り回数・赤・黒 */
+  var rh, TOP, CW = 84, TX = 16, RX = 330, small, big, pile, dotsY, rbY, rbH;
   function place() {
     rh = Math.max(63, Math.min(76, Math.floor((H - 140) / 10)));
     TOP = H - rh * 10 - 12;
-    var r = Math.max(40, Math.min(TOP / 2 - 10, 150));
-    small = { x: 24 + r, y: TOP / 2, r: r };
+    var r = Math.max(40, Math.min(TOP / 2 - 10, 140));
+    small = { x: 20 + r, y: TOP / 2, r: r };
     big = { x: W / 2, y: Math.max(H * 0.42, 262), r: 238 };
-    pile = { x: Math.max(300, (24 + 2 * r + W) / 2 - 46), y: TOP / 2 - 6 };
+    pile = { x: RX + 22, y: Math.max(29, Math.round(TOP * 0.22)) };
+    dotsY = pile.y + 27;
+    rbY = Math.max(64, Math.round(TOP * 0.5 - 6));
+    rbH = Math.min(70, TOP - rbY - 8);
   }
-  function cellRect(k) {
-    var c = CELL[k];
-    return { x: TX + c.c * CW, y: TOP + c.r * rh, w: CW, h: rh };
+  function cellRect(i) {
+    if (i < N) { var c = CELL[i]; return { x: TX + c.c * CW, y: TOP + c.r * rh, w: CW, h: rh }; }
+    if (i < RED) return { x: TX + 5 * CW, y: TOP + (i - ROW0) * rh, w: 88, h: rh };
+    return { x: RX + (i === RED ? 0 : 102), y: rbY, w: 92, h: rbH };
   }
+  function chipAt(i, j) { var c = cellRect(i); return { x: c.x + c.w - 22, y: c.y + c.h - 21 - (j || 0) * 4 }; }
 
   function newRound() {
     shareButton.hidden = true;
@@ -181,28 +215,28 @@
     state = S.PLAY;
     phase = "bet"; pt = 0; T = 0;
     chips = START_CHIPS; shown = chips; score = chips;
-    bets = []; for (var i = 0; i < N; i++) bets.push(0);
+    bets = []; for (var i = 0; i < NB; i++) bets.push(0);
     spinsDone = 0; last = -1; spin = null; flyers = []; sel = 0; wobble = 0;
   }
 
-  function totalBet() { var s = 0; for (var i = 0; i < N; i++) s += bets[i]; return s; }
+  function totalBet() { var s = 0; for (var i = 0; i < NB; i++) s += bets[i]; return s; }
 
   /* ============ 進行 ============ */
   function bet(k) {
     if (state !== S.PLAY || phase !== "bet") return;
     if (chips <= 0) { sndNo(); return; }
     chips--; bets[k]++;
-    var c = cellRect(k);
-    flyers.push({ x0: pile.x, y0: pile.y, x1: c.x + c.w - 23, y1: c.y + c.h - 22, t: 0, d: 0.18, fade: false });
+    var c = chipAt(k);
+    flyers.push({ x0: pile.x, y0: pile.y, x1: c.x, y1: c.y, t: 0, d: 0.18, fade: false, to: k });
     sndChip();
   }
   function takeBack() {
     if (state !== S.PLAY || phase !== "bet") return;
     var n = 0;
-    for (var k = 0; k < N; k++) {
+    for (var k = 0; k < NB; k++) {
       if (!bets[k]) continue;
-      var c = cellRect(k);
-      flyers.push({ x0: c.x + c.w - 23, y0: c.y + c.h - 22, x1: pile.x, y1: pile.y, t: -n * 0.02, d: 0.22, fade: false });
+      var c = chipAt(k);
+      flyers.push({ x0: c.x, y0: c.y, x1: pile.x, y1: pile.y, t: -n * 0.02, d: 0.22, fade: false });
       chips += bets[k]; bets[k] = 0; n++;
     }
     for (var i = 0; i < Math.min(n, 5); i++) sndChip(i * 0.04);
@@ -253,29 +287,26 @@
   }
 
   function settle() {
-    var k = spin.k, won = bets[k] * PAY;
+    var k = spin.k, won = 0, n = 0, q = 0;
     last = k; spinsDone++;
-    var n = 0;
-    for (var i = 0; i < N; i++) {
+    for (var i = 0; i < NB; i++) {
       if (!bets[i]) continue;
-      var c = cellRect(i);
-      if (i === k) continue;
-      for (var j = 0; j < Math.min(bets[i], 3); j++) {  /* 外れたチップは盤へ持っていかれる */
-        flyers.push({ x0: c.x + c.w - 23, y0: c.y + c.h - 22 - j * 4, x1: small.x, y1: small.y, t: -n * 0.03, d: 0.35, fade: true });
-        n++;
+      if (wins(i, k)) {                                 /* 当たった場所からチップが手元へ */
+        var got = bets[i] * mult(i), cc = cellRect(i);
+        won += got;
+        for (var m = 0; m < Math.min(16, got); m++, q++) {
+          flyers.push({ x0: cc.x + cc.w / 2 + (Math.random() - 0.5) * 36, y0: cc.y + cc.h / 2, x1: pile.x, y1: pile.y, t: -q * 0.035, d: 0.32, fade: false, snd: true });
+        }
+      } else {
+        for (var j = 0; j < Math.min(bets[i], 3); j++, n++) {  /* 外れたチップは盤へ持っていかれる */
+          var c = chipAt(i, j);
+          flyers.push({ x0: c.x, y0: c.y, x1: small.x, y1: small.y, t: -n * 0.03, d: 0.35, fade: true });
+        }
       }
       bets[i] = 0;
     }
-    if (won) {
-      var cc = cellRect(k), m = Math.min(24, won);
-      for (var q = 0; q < m; q++) {
-        flyers.push({ x0: cc.x + cc.w / 2 + (Math.random() - 0.5) * 40, y0: cc.y + cc.h / 2, x1: pile.x, y1: pile.y, t: -q * 0.035, d: 0.32, fade: false, snd: true });
-      }
-      chips += won; bets[k] = 0;
-      sndWin();
-    } else {
-      sndLose();
-    }
+    chips += won;
+    if (won) sndWin(); else sndLose();
     score = chips;
   }
 
@@ -317,8 +348,8 @@
   /* ============ 入力 ============ */
   function hitAt(x, y) {
     if (Math.hypot(x - small.x, y - small.y) < small.r + 14) return "wheel";
-    if (Math.abs(x - pile.x) < 44 && Math.abs(y - pile.y) < 40) return "pile";
-    for (var k = 0; k < N; k++) {
+    if (Math.abs(x - pile.x - 30) < 60 && Math.abs(y - pile.y) < 26) return "pile";
+    for (var k = 0; k < NB; k++) {
       var c = cellRect(k);
       if (x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h) return k;
     }
@@ -341,21 +372,24 @@
   function move() {}
   function up() {}
 
-  /* 矢印キーで表の上を動く。表のいちばん上からさらに上は盤 */
+  /* 矢印キーで動く。上の帯（盤・赤・黒）を0段目、表の行を1〜10段目として、
+     同じ段の左右、または上下の段のいちばん近い列へ移る。sel = -1 は盤 */
+  function gridOf(i) {
+    if (i < 0) return { r: 0, c: 1 };
+    if (i < N) return { r: CELL[i].r + 1, c: CELL[i].c };
+    if (i < RED) return { r: i - ROW0 + 1, c: 5 };
+    return { r: 0, c: i === RED ? 3 : 4.5 };
+  }
   function moveSel(dx, dy) {
-    if (sel < 0) { if (dy > 0 || dx) sel = 0; return; }
-    var c = CELL[sel];
-    if (dx) {
-      var n = sel + dx;
-      sel = n < 0 || n >= N ? -1 : n;
-      return;
+    var cur = gridOf(sel), best = null, bd = 99;
+    for (var i = -1; i < NB; i++) {
+      if (i === sel) continue;
+      var g = gridOf(i), d;
+      if (dx) { if (g.r !== cur.r || (g.c - cur.c) * dx <= 0) continue; d = Math.abs(g.c - cur.c); }
+      else { if (g.r !== cur.r + dy) continue; d = Math.abs(g.c - cur.c) + g.c * 0.001; }
+      if (d < bd) { bd = d; best = i; }
     }
-    var r = c.r + dy;
-    if (r < 0) { sel = -1; return; }
-    if (r > 9) return;
-    var best = -1, bd = 99;
-    for (var k = 0; k < N; k++) if (CELL[k].r === r && Math.abs(CELL[k].c - c.c) < bd) { bd = Math.abs(CELL[k].c - c.c); best = k; }
-    if (best >= 0) sel = best;
+    if (best !== null) sel = best;
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -431,40 +465,66 @@
     }
   }
 
-  function drawTable(dim) {
-    var hi = (phase === "pay" || phase === "back") ? spin && spin.k : -1;
-    for (var k = 0; k < N; k++) {
-      var c = cellRect(k), g = 4;
-      roundRect(c.x + g, c.y + g, c.w - g * 2, c.h - g * 2, 10);
-      ctx.fillStyle = colorOf(k); ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(240,210,140,.45)"; ctx.stroke();
-      if (k === hi && phase === "pay") {
-        var p = 0.5 + 0.5 * Math.sin(pt * 14);
-        ctx.save();
-        ctx.shadowColor = "#ffe27a"; ctx.shadowBlur = 18;
-        ctx.lineWidth = 4 + p * 2; ctx.strokeStyle = "#ffe27a"; ctx.stroke();
-        ctx.restore();
-      }
+  function spotBase(i, c) {
+    var g = 4;
+    roundRect(c.x + g, c.y + g, c.w - g * 2, c.h - g * 2, 10);
+    ctx.fillStyle = i < N ? colorOf(i) : "rgba(0,0,0,.22)"; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = i < N ? "rgba(240,210,140,.45)" : "rgba(240,210,140,.7)"; ctx.stroke();
+  }
+  function drawSpot(i) {
+    var c = cellRect(i);
+    spotBase(i, c);
+    if (phase === "pay" && spin && wins(i, spin.k)) {        /* 当たった場所を光らせる */
+      var p = 0.5 + 0.5 * Math.sin(pt * 14);
+      ctx.save();
+      ctx.shadowColor = "#ffe27a"; ctx.shadowBlur = 18;
+      ctx.lineWidth = 4 + p * 2; ctx.strokeStyle = "#ffe27a"; ctx.stroke();
+      ctx.restore();
+    }
+    var cy = c.y + c.h / 2;
+    if (i < N) {
       ctx.fillStyle = "#fbf4e6";
       ctx.font = "700 " + Math.round(rh * 0.5) + "px sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(KANA[k], c.x + c.w * 0.37, c.y + c.h / 2 + 2);
+      ctx.fillText(KANA[i], c.x + c.w * 0.34, cy + 2);
       ctx.textBaseline = "alphabetic";
-      if (keyMode && state === S.PLAY && phase === "bet" && sel === k) {
-        roundRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2, 12);
-        ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
-      }
+    } else if (i < RED) {
+      /* 行: 左のかなたちを指す山形 */
+      var x = c.x + 22, s = Math.min(11, c.h * 0.17);
+      ctx.strokeStyle = "rgba(240,210,140,.85)"; ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(x + s * 0.8, cy - s); ctx.lineTo(x - s * 0.2, cy); ctx.lineTo(x + s * 0.8, cy + s);
+      ctx.moveTo(x + s * 1.8, cy - s); ctx.lineTo(x + s * 0.8, cy); ctx.lineTo(x + s * 1.8, cy + s);
+      ctx.stroke();
+      ctx.lineCap = "butt"; ctx.lineJoin = "miter";
+    } else {
+      /* 赤・黒: 色のひし形 */
+      var dx = c.x + 34, d = Math.min(20, c.h * 0.34);
+      ctx.beginPath(); ctx.moveTo(dx, cy - d); ctx.lineTo(dx + d * 1.25, cy); ctx.lineTo(dx, cy + d); ctx.lineTo(dx - d * 1.25, cy); ctx.closePath();
+      ctx.fillStyle = i === RED ? COL.red : COL.black; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(240,210,140,.8)"; ctx.stroke();
     }
+    if (keyMode && state === S.PLAY && phase === "bet" && sel === i) {
+      roundRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2, 12);
+      ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
+    }
+  }
+  function drawTable(dim) {
+    for (var i = 0; i < NB; i++) drawSpot(i);
     /* 置いたチップは、飛んでいる最中のものを除いて描く */
     var inAir = {};
-    flyers.forEach(function (f) { if (!f.fade && f.t < f.d && f.x1 !== pile.x) { var h = hitAt(f.x1, f.y1); if (typeof h === "number") inAir[h] = (inAir[h] || 0) + 1; } });
-    for (var i = 0; i < N; i++) {
-      var n = bets[i] - (inAir[i] || 0);
+    flyers.forEach(function (f) { if (f.to != null && f.t < f.d) inAir[f.to] = (inAir[f.to] || 0) + 1; });
+    for (var j = 0; j < NB; j++) {
+      var n = bets[j] - (inAir[j] || 0);
       if (n <= 0) continue;
-      var r = cellRect(i);
-      drawStack(r.x + r.w - 23, r.y + r.h - 22, n, 15);
+      var p = chipAt(j);
+      drawStack(p.x, p.y, n, 14);
     }
-    if (dim > 0) { ctx.fillStyle = "rgba(4,16,10," + (0.72 * dim) + ")"; ctx.fillRect(0, TOP - 6, W, H - TOP + 6); }
+    if (dim > 0) {
+      ctx.fillStyle = "rgba(4,16,10," + (0.72 * dim) + ")";
+      ctx.fillRect(0, TOP - 6, W, H - TOP + 6);
+      ctx.fillRect(RX - 4, rbY - 2, W - RX + 4, rbH + 4);
+    }
   }
 
   function drawWheel(cx, cy, R, rot, withBall) {
@@ -545,17 +605,16 @@
   function drawTop() {
     /* 手持ちのチップ */
     var n = Math.round(shown);
-    drawStack(pile.x, pile.y + 8, Math.max(0, Math.min(n, 7)), 20, true);
-    if (n <= 0) { ctx.beginPath(); ctx.arc(pile.x, pile.y + 8, 20, 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 2; ctx.stroke(); }
+    drawStack(pile.x, pile.y + 4, Math.max(0, Math.min(n, 3)), 16, true);
+    if (n <= 0) { ctx.beginPath(); ctx.arc(pile.x, pile.y + 4, 16, 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 2; ctx.stroke(); }
     ctx.fillStyle = "#fbf4e6";
-    ctx.font = "800 42px sans-serif";
+    ctx.font = "800 36px sans-serif";
     ctx.textAlign = "left"; ctx.textBaseline = "middle";
-    ctx.fillText(String(n), pile.x + 34, pile.y + 4);
+    ctx.fillText(String(n), pile.x + 28, pile.y + 2);
     ctx.textBaseline = "alphabetic";
     /* 残りの回数 */
-    var dotsY = Math.min(TOP - 16, pile.y + 44), dx = 16, x0 = pile.x - 20;
     for (var i = 0; i < SPINS; i++) {
-      ctx.beginPath(); ctx.arc(x0 + i * dx, dotsY, 5, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(RX + 6 + i * 14, dotsY, 4, 0, Math.PI * 2);
       ctx.fillStyle = i < spinsDone ? "rgba(255,255,255,.18)" : "#f0cf78";
       ctx.fill();
     }
@@ -659,6 +718,8 @@
                spins: spinsDone, last: last, landed: spin ? spin.k : -1, sel: sel, W: W, H: H };
     },
     kana: function () { return KANA.slice(); },
+    spots: function () { return { row0: ROW0, red: RED, black: BLACK, count: NB }; },
+    wheelOrder: function () { return WHEEL.slice(); },
     cell: function (k) { var c = cellRect(k); return { x: c.x + c.w / 2, y: c.y + c.h / 2, w: c.w, h: c.h }; },
     wheel: function () { return { x: small.x, y: small.y, r: small.r }; },
     pile: function () { return { x: pile.x, y: pile.y }; },
@@ -682,6 +743,7 @@
       for (var round = 0; round < 3 && state === S.PLAY; round++) {
         var picks = [];
         while (picks.length < 3) { var k = Math.floor(Math.random() * N); if (picks.indexOf(k) < 0) picks.push(k); }
+        picks[0] = ROW0 + round * 2; if (round === 1) picks[1] = RED;
         for (var i = 0; i < picks.length && chips > 0; i++) { sel = picks[i]; bet(picks[i]); await r.wait(260); }
         await r.wait(400);
         startSpin();
