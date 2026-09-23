@@ -1,4 +1,4 @@
-/* 情報量ダービー: 通信の代わりに偽の出走馬を差し込み、1頭1ボタンで賭ける・リセット・倍率・本文を書き切って止まるレース・着順・払い戻し・3レース・キー・間隔・通信失敗を確かめる。 */
+/* 情報量ダービー: 通信の代わりに偽の出走馬を差し込み、1頭1ボタンで賭ける・リセット・倍率・本文を書き切って止まるレース（1着は決まったら走り抜けて終わり）・着順・払い戻し・3レース・キー・間隔・通信失敗を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
 const file = 'games/_wiki-derby/index.html';
@@ -45,16 +45,11 @@ function race(g) {
   assert.ok(lastLane < top, 'レース中の賭けたボタンは走路の下にある');
   assert.ok(g.probe.raceCtrl(7).y + 26 < H - 20, 'レース中の賭けたボタンが画面に収まる');
   const stopSeen = [], cams = [], stopX = {};
-  let frames = 0, fastFrames = 0, soloFrames = 0;
+  let frames = 0, soloFrames = 0, secondStop = null;
   while (g.probe.now().phase === 'race' && frames < 3000) {
     const st = g.probe.stopped(), p = g.probe.positions();
     const alive = st.filter(v => !v).length;
-    if (alive === 1) soloFrames++; else soloFrames = 0;
-    if (g.probe.fast() > 1) {
-      fastFrames++;
-      assert.ok(alive <= 1, "早送りは走っているのが1頭だけのとき（止まった直後の1コマを除く）");
-      if (alive === 1) assert.ok(soloFrames > 115, "独走が2秒続いてから早送り: " + soloFrames);
-    }
+    if (alive === 1) { soloFrames++; if (secondStop === null) secondStop = frames; }
     st.forEach((v, i) => { if (v && !stopSeen.includes(i)) { stopSeen.push(i); stopX[i] = p[i]; } });
     if (frames % 60 === 0) cams.push(g.probe.now().cam);
     g.step(1); frames++;
@@ -63,7 +58,7 @@ function race(g) {
   for (let k = 1; k < orderSeen.length; k++) assert.ok(stopX[orderSeen[k - 1]] > stopX[orderSeen[k]], '長い記事の馬ほど先で止まる');
   assert.ok(frames < 3000, '走り終わる');
   assert.equal(g.probe.now().phase, 'finish');
-  return { orderSeen, seconds: frames / 60, cams, fastFrames };
+  return { orderSeen, seconds: frames / 60, cams, soloSeconds: soloFrames / 60, secondStop: secondStop / 60 };
 }
 async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flush(); g.step(1); }
 
@@ -108,11 +103,12 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     const rest = g.probe.now().money;
     const r = race(g);
     assert.deepEqual(r.orderSeen, now0.order, '止まった順の逆が長さの順');
-    /* 1位（120000字）はちょうど30秒で書き終える。2位（8000字）は約19秒で止まり、そこから独走、2秒待って4倍 */
-    assert.ok(r.fastFrames > 0, '独走で早送りになった');
-    assert.ok(r.seconds > 20 && r.seconds < 30, '早送りのぶん30秒より短い: ' + r.seconds.toFixed(1));
-    assert.ok(Math.abs(g.probe.written(1) - 120000) < 1, '1位の馬は本文を全部書き切った');
-    for (let i = 0; i < 8; i++) assert.equal(g.probe.written(i), now0.horses[i].len, (i + 1) + '番も全部書き切って止まった');
+    /* 2着（8000字）がちょうど28秒で書き終えて1着が決まる。1着はそこから2秒走り抜けて止まり、1秒おいて終わり */
+    assert.ok(Math.abs(r.secondStop - 28) < 0.3, '2着が止まるのは約28秒: ' + r.secondStop.toFixed(2));
+    assert.ok(Math.abs(r.soloSeconds - 2) < 0.15, '1着は2秒走り抜ける: ' + r.soloSeconds.toFixed(2));
+    assert.ok(r.seconds > 30 && r.seconds < 32, 'レースは約31秒: ' + r.seconds.toFixed(1));
+    assert.ok(g.probe.written(1) < 120000, '1着の馬は書き切らずに終わる');
+    for (let i = 0; i < 8; i++) if (i !== 1) assert.equal(g.probe.written(i), now0.horses[i].len, (i + 1) + '番は全部書き切って止まった');
     assert.ok(r.cams[r.cams.length - 1] - r.cams[0] > 2000, 'カメラが馬群を追いかける');
     assert.equal(g.probe.now().won, Math.floor(200 * odds[1]));
     assert.equal(g.probe.now().money, rest + Math.floor(200 * odds[1]));
@@ -139,6 +135,38 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
       if (leaders.size > 1 || !leaders.has(winner)) changed++;
     }
     assert.ok(changed >= 4, '先頭が入れ替わる: ' + changed + '/6');
+  }
+
+  /* 3b. 止まる馬はゆるやかに遅くなる。残りが少なくなると抜きつ抜かれつ */
+  {
+    const g = open();
+    globalThis.__derbyFake.lens = [5000, 120000, 3000, 110000, 700, 4500, 900, 100000];
+    await start(g);
+    at(g, g.probe.plus(1));
+    at(g, g.probe.startButton()); g.step(1);
+    g.until(() => g.probe.now().phase === 'race', 400);
+    let peak = {}, lastSpeed = {}, battleMax = 0, leaders = new Set();
+    for (let fr = 0; fr < 2400 && g.probe.now().phase === 'race'; fr++) {
+      const st = g.probe.stopped();
+      for (let i = 0; i < 8; i++) {
+        if (st[i]) continue;
+        const v = g.probe.speed(i);
+        peak[i] = Math.max(peak[i] || 0, v);
+        lastSpeed[i] = v;
+      }
+      const alive = st.filter(v => !v).length;
+      battleMax = Math.max(battleMax, g.probe.battle());
+      if (alive >= 2 && alive <= 3 && g.probe.battle() > 0.8 && fr % 5 === 0) {
+        const p = g.probe.positions().map((v, i) => st[i] ? -1 : v);
+        leaders.add(p.indexOf(Math.max(...p)));
+      }
+      g.step(1);
+    }
+    for (let i = 0; i < 8; i++) assert.ok(lastSpeed[i] < peak[i] * 0.1, (i + 1) + '番は止まる直前に遅くなる: ' + lastSpeed[i].toFixed(0) + ' / ' + peak[i].toFixed(0));
+    assert.ok(battleMax > 0.9, '残り3頭以下で抜きつ抜かれつ');
+    assert.ok(leaders.size >= 2, '終盤に先頭が入れ替わる: ' + [...leaders]);
+    const win = g.probe.now().order[0];
+    for (let i = 0; i < 8; i++) if (i !== win) assert.equal(g.probe.written(i), g.probe.now().horses[i].len, '減速しても全部書き切る');
   }
 
   /* 4. 3レースで終わる。結果は手持ち */

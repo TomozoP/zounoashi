@@ -39,6 +39,7 @@
    人気（倍率）は記事の閲覧数で決まる。架空の観客が、よく読まれている記事ほど多く賭ける。
    各馬は自分の記事の本文を走路に書きながら走り、全部書き切ったところで止まる。
    最後まで書き続けた馬（本文の文字数＝情報量がいちばん多い記事）が1着。
+   2着の馬が止まって1着が決まったら、1着の馬は少し走り抜けて止まり、レースは終わる（1着だけは書き切らない）。
    単勝（1着）に100ずつ賭けて、3レース後の手持ちが結果。
 
    遊ぶたびにWikipediaから取りに行く。文章を出すので、出典と利用条件を表示する。 */
@@ -333,40 +334,69 @@
      t 秒で書いた文字数は R0 / K × (e^{Kt} − 1)。C 文字書き終えるのは ln(1 + C K / R0) / K 秒。
      K はレースごとに、いちばん長い記事がちょうど RUN 秒で書き終わるように決める。
      この速さだと、文字数が10倍になっても書き終える時間は数秒しか延びないので、短い記事もすぐには止まらない。 */
-  var RUN = 30, R0 = 15, CHAR = 17, K = 0.2;
-  function charsAt(t) { return K > 1e-6 ? R0 / K * (Math.exp(K * t) - 1) : R0 * t; }
-  function timeFor(c) { return K > 1e-6 ? Math.log(1 + c * K / R0) / K : c / R0; }
-  function solveK(cmax) {
-    if (cmax <= R0 * RUN) return 1e-7;                     /* 短い記事ばかりなら、速さは上げない */
+  var RUN = 30, R0 = 15, CHAR = 17, K = 0.2, DECEL = 1.5;
+  function linear() { return K <= 1e-6; }
+  function charsAt(t) { return linear() ? R0 * t : R0 / K * (Math.exp(K * t) - 1); }
+  function rateAt(t) { return linear() ? R0 : R0 * Math.exp(K * t); }
+  /* 止まり方: 残りが少なくなったら DECEL 秒かけて速さを0まで落とし、ちょうど書き終えたところで止まる。
+     減速を始める時刻 ts は「残りの文字数 ＝ そのときの速さ × DECEL ÷ 2」になるところ */
+  function planFor(c) {
+    var ts, d = DECEL;
+    if (linear()) ts = c / R0 - d / 2;
+    else ts = Math.log((c + R0 / K) / (R0 / K + R0 * d / 2)) / K;
+    if (ts <= 0) { ts = 0; d = 2 * c / R0; }                /* とても短い記事は、出だしから減速 */
+    return { c: c, ts: ts, d: Math.max(0.2, d), c0: charsAt(ts), v0: rateAt(ts) };
+  }
+  function charsOf(i, t) {
+    if (winStop && i === winStop.i && t > winStop.t0) {
+      var w = Math.min(t - winStop.t0, WIN_RUN);
+      return Math.min(plan[i].c, winStop.c0 + winStop.v0 * (w - w * w / (2 * WIN_RUN)));
+    }
+    var p = plan[i];
+    if (t <= p.ts) return Math.min(p.c, charsAt(t));
+    var u = Math.min(t - p.ts, p.d);
+    return Math.min(p.c, p.c0 + p.v0 * (u - u * u / (2 * p.d)));
+  }
+  /* 2着の記事がちょうど target 秒で書き終わる加速の具合 K を探す（1着はそのあと少し走り抜けて終わり） */
+  function solveK(c, target) {
+    K = 1e-7;
+    var p0 = planFor(c);
+    if (p0.ts + p0.d <= target) return K;                    /* 短い記事ばかりなら、速さは上げない */
     var lo = 1e-6, hi = 3;
-    for (var n = 0; n < 60; n++) { var mid = (lo + hi) / 2; if (Math.log(1 + cmax * mid / R0) / mid > RUN) lo = mid; else hi = mid; }
+    for (var n = 0; n < 60; n++) {
+      K = (lo + hi) / 2;
+      var p = planFor(c);
+      if (p.ts + p.d > target) lo = K; else hi = K;
+    }
     return (lo + hi) / 2;
   }
+  var WIN_RUN = 2, winStop = null;                             /* 1着が決まってから走り抜けて止まるまでの秒数 */
+  var plan = [], battle = 0;
   function startRace() {
     if (state !== S.PLAY || phase !== "bet") return;
     if (!totalBet()) { wobble = 0.35; sndNo(); return; }
-    phase = "count"; pt = 0; raceT = 0; soloT = 0; ff = 1; hoofT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
+    phase = "count"; pt = 0; raceT = 0; hoofT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
     prog = []; finishT = []; stopped = [];
-    K = solveK(horses[order[0]].len);
+    K = solveK(horses[order[1]].len, RUN - WIN_RUN);
+    plan = []; battle = 0; winStop = null;
     for (var i = 0; i < N; i++) {
-      finishT[i] = timeFor(horses[i].len);
+      plan.push(planFor(horses[i].len));
+      finishT[i] = plan[i].ts + plan[i].d;
       stopped.push(false);
-      prog.push({ w1: 0.5 + Math.random() * 0.4, w2: 1.2 + Math.random() * 0.8, p1: Math.random() * 6.3, p2: Math.random() * 6.3, a: 10 + Math.random() * 8 });
-    }
-    /* 長さが近くて止まる時間が同じになった馬は、着順どおりに少しずらす */
-    for (var r = 1; r < N; r++) {
-      var a = order[r - 1], b = order[r];
-      if (finishT[b] > finishT[a] - 0.2) finishT[b] = Math.max(0.5, finishT[a] - 0.2);
+      prog.push({ w1: 0.5 + Math.random() * 0.4, w2: 1.2 + Math.random() * 0.8, w3: 0.9 + Math.random() * 0.9,
+                  p1: Math.random() * 6.3, p2: Math.random() * 6.3, p3: Math.random() * 6.3,
+                  a: 10 + Math.random() * 8, b: 38 + Math.random() * 22 });
     }
     prefetch();
   }
-  var SOLO_WAIT = 2, FAST = 4, soloT = 0, ff = 1;   /* 独走になってから早送りまでの秒数と、その速さ */
   var START_X = 44, countN = 0;                  /* ゲートは画面の左端から START_X のところ */
-  /* 位置（ピクセル）: 書いた文字数 × 1文字の幅。前後に少しゆれるが、止まる手前でゆれを消す */
+  /* 位置（ピクセル）: 書いた文字数 × 1文字の幅。前後に少しゆれる。
+     残りが3頭以下になったら（battle）ゆれを大きくして、抜きつ抜かれつに見せる。止まる手前ではゆれを消す */
   function runX(i, t) {
     var Tr = finishT[i], tt = Math.min(t, Tr);
     var q = prog[i], fade = Math.min(1, Math.max(0, (Tr - tt) / 1.5)) * Math.min(1, tt / 2);
-    return Math.min(charsAt(tt), horses[i].len) * CHAR + q.a * (Math.sin(tt * q.w1 + q.p1) * 0.7 + Math.sin(tt * q.w2 + q.p2) * 0.3) * fade;
+    var wob = q.a * (Math.sin(tt * q.w1 + q.p1) * 0.7 + Math.sin(tt * q.w2 + q.p2) * 0.3) + battle * q.b * Math.sin(tt * q.w3 + q.p3);
+    return charsOf(i, tt) * CHAR + wob * fade;
   }
   var stopped = [];
   function maxRun() { return Math.max(1, horses[order[0]].len * CHAR); }
@@ -400,17 +430,21 @@
       if (pt >= 3) { phase = "race"; pt = 0; countN = 0; sndGate(); }
     }
     if (phase === "race") {
-      var alive = 0;
-      for (var a = 0; a < N; a++) if (!stopped[a]) alive++;
-      soloT = alive === 1 ? soloT + dt : 0;
-      ff = alive === 1 && soloT > SOLO_WAIT ? FAST : 1;
-      raceT += dt * ff;
+      raceT += dt;
       var lead = -1e9, running = 0;
       for (var h = 0; h < N; h++) {
         if (!stopped[h] && raceT >= finishT[h]) { stopped[h] = true; sndStop(!!bets[h], rankOf[h]); }
         if (!stopped[h]) { running++; lead = Math.max(lead, runX(h, raceT)); }
       }
+      /* 2着が止まって1着が決まったら、1着の馬はそこから少し走り抜けて止まる */
+      if (running === 1 && !winStop) {
+        var w1 = order[0];
+        winStop = { i: w1, t0: raceT, c0: charsOf(w1, raceT), v0: (charsOf(w1, raceT + 0.01) - charsOf(w1, raceT)) / 0.01 };
+        finishT[w1] = Math.min(finishT[w1], raceT + WIN_RUN);
+        if (!cheered) { cheered = true; sndCheer(); }
+      }
       if (!running) lead = runX(order[0], raceT);
+      battle += ((running >= 2 && running <= 3 ? 1 : 0) - battle) * Math.min(1, dt * 1.2);
       /* カメラ: 走っている馬の先頭が画面の右寄りに来るように */
       var want = Math.max(-START_X, lead - W * 0.66);            /* 先頭が右寄りに来るまでは動かさない */
       cam = raceT < 3 ? cam + (want - cam) * Math.min(1, dt * 3) : want;
@@ -418,7 +452,7 @@
       hoofT -= dt; if (hoofT <= 0 && running) { hoofT = 0.07 + (1 - running / N) * 0.05; sndHoof(0.3 + (running / N) * 0.7); }
       crowdT -= dt; if (crowdT <= 0) { crowdT = 0.3; sndCrowd(0.2 + near * 0.8); }
       if (!cheered && !running) { cheered = true; sndCheer(); }
-      if (!running && raceT > finishT[order[0]] + 1.4) { phase = "finish"; pt = 0; settle(); }
+      if (!running && raceT > finishT[order[0]] + 1.0) { phase = "finish"; pt = 0; settle(); }
     }
   }
 
@@ -736,7 +770,7 @@
     for (var h = 0; h < N; h++) {
       var txt = horses[h].text, hx = worldX(h), ty = TRACK.top + h * LANE + LANE * 0.8;
       if (!txt) continue;
-      var written = Math.min(txt.length, Math.floor(stopped[h] ? txt.length : charsAt(raceT)));
+      var written = Math.min(txt.length, Math.floor(charsOf(h, Math.min(raceT, finishT[h])) + 1e-6));   /* 1着は書き切らずに止まる */
       var k0 = Math.max(0, Math.floor((cam + 30) / CHAR)), k1 = Math.min(written - 1, Math.floor((cam + W + 30) / CHAR));
       for (var k = k0; k <= k1; k++) {
         var wx = k * CHAR - 30, sx = wx - cam;
@@ -944,10 +978,12 @@
     /* レース中の馬の位置（ゴールまでの割合）。着順が長さどおりかの確認用 */
     positions: function () { return horses && phase === "race" ? horses.map(function (h, i) { return progressOf(i, raceT); }) : null; },
     stopped: function () { return stopped.slice(); },
-    fast: function () { return ff; },
+    winnerStop: function () { return winStop ? winStop.t0 : null; },
     /* その馬が走路に書いた文字数（止まった馬は本文の文字数と同じになる） */
     plain: function (w) { return plainText(w); },
-    written: function (i) { return horses && prog ? Math.min(horses[i].len, Math.floor(stopped[i] ? horses[i].len : charsAt(Math.min(raceT, finishT[i])))) : 0; },
+    written: function (i) { return horses && prog ? Math.min(horses[i].len, Math.floor(charsOf(i, Math.min(raceT, finishT[i])) + 1e-6)) : 0; },
+    speed: function (i) { return horses && plan[i] ? (charsOf(i, raceT + 0.01) - charsOf(i, raceT)) / 0.01 : 0; },
+    battle: function () { return battle; },
     /* 文字を収める処理の確認用: 幅と行数に入ったか */
     fit: function (s, maxW, lines) {
       var f = fitLines(s, maxW, lines, 17, 11, "800");
