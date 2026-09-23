@@ -352,9 +352,28 @@ ORDER.slice(0, 5).forEach(mark => {
   assert.ok(g.probe.sets()[I('難')].list.some(f => f.kanji === now(g).call.kanji), '難で遊べる');
   g.press('F8'); g.step(1);
   assert.equal(g.probe.setCount(), 6, '遊んでいる間の F8 では変わらない');
+  /* 遊んでいる間の F8: 出ている字があれば開け、無ければスキップ。押し続ければビンゴまで行く */
+  const h = at('localhost'); h.step(2); start(h);
+  for (let k = 0; k < 400 && now(h).state === 'play'; k++) {
+    if (now(h).phase === 'call') {
+      const n = now(h), c = n.card.indexOf(n.call.kanji), was = c >= 0 && !n.open[c];
+      h.press('F8'); h.step(1);
+      if (now(h).phase !== 'bingo') assert.equal(now(h).outcome, was ? 'ok' : 'pass', was ? 'F8 で開く' : 'F8 でスキップ');   /* 開けてビンゴになったときは答えの判定を通らない */
+      if (was) assert.ok(now(h).open[c]);
+    }
+    h.step(10);
+  }
+  h.until(() => now(h).state === 'result', 400);
+  assert.ok(!now(h).failed && now(h).bingo, 'F8 だけでビンゴまで');
+  assert.equal(now(h).lives, 3, 'ライフは減らない');
   const pub = at('www.zounoashi.com'); pub.step(2);
   pub.press('F8'); pub.step(1);
   assert.equal(pub.probe.setCount(), 5, '公開の場所では効かない');
+  start(pub);
+  const c0 = now(pub).calls;
+  pub.press('F8'); pub.step(1);
+  assert.equal(now(pub).outcome, null, '公開の場所では遊んでいる間も効かない');
+  assert.equal(now(pub).calls, c0);
 }
 
 /* 8. 画面の形を変えても、マス同士・箱が押せる大きさ */
