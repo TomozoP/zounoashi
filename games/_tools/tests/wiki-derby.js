@@ -1,4 +1,4 @@
-/* 情報量ダービー: 通信の代わりに偽の出走馬を差し込み、1頭1ボタンで賭ける・リセット・倍率・文字を出し切って止まるレース・着順・払い戻し・3レース・キー・間隔・通信失敗を確かめる。 */
+/* 情報量ダービー: 通信の代わりに偽の出走馬を差し込み、1頭1ボタンで賭ける・リセット・倍率・本文を書き切って止まるレース・着順・払い戻し・3レース・キー・間隔・通信失敗を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
 const file = 'games/_wiki-derby/index.html';
@@ -13,7 +13,7 @@ function open(shape) {
       var lens = f.lens ? f.lens.slice() : [0,1,2,3,4,5,6,7].map(function () { return 1000 + Math.floor(Math.random() * 90000); });
       var pvs = f.pvs ? f.pvs.slice() : lens.map(function () { return Math.floor(Math.random() * 2000); });
       return Promise.resolve(lens.map(function (len, i) {
-        return { id: f.calls * 100 + i, title: "記事" + f.calls + "-" + i, len: len, pv: pvs[i], text: "これは" + i + "番の記事の冒頭の文章です。" };
+        return { id: f.calls * 100 + i, title: "記事" + f.calls + "-" + i, pv: pvs[i], text: "あいうえお".repeat(Math.ceil(len / 5)).slice(0, len) };   /* 本文の文字数が len */
       }));
     }
   };`;
@@ -93,23 +93,26 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
   /* 2. 倍率は閲覧数で、着順は長さで決まる。払い戻しは賭け金×倍率 */
   {
     const g = open();
-    globalThis.__derbyFake.lens = [5000, 120000, 3000, 80000, 700, 45000, 9000, 60000];
+    globalThis.__derbyFake.lens = [5000, 120000, 3000, 8000, 700, 4500, 900, 6000];
     globalThis.__derbyFake.pvs = [3000, 50, 10, 900, 0, 200, 40, 5];
     await start(g);
     const now0 = g.probe.now();
-    assert.deepEqual(now0.order, [1, 3, 7, 5, 6, 0, 2, 4], '着順は長い順');
+    assert.deepEqual(now0.order, [1, 3, 7, 0, 5, 2, 6, 4], '着順は本文の文字数の多い順');
+    assert.deepEqual(now0.horses.map(h => h.len), [5000, 120000, 3000, 8000, 700, 4500, 900, 6000], '文字数');
     const odds = now0.odds;
     assert.equal(now0.popRank[0], 0, 'いちばん読まれている記事が1番人気');
     assert.ok(odds[0] < odds[3] && odds[3] < odds[5] && odds[5] < odds[1] && odds[1] < odds[4], '閲覧数が多いほど倍率が低い: ' + odds);
     assert.ok(odds.every(o => o >= 1.1 && o <= 999.9));
     at(g, g.probe.plus(1)); at(g, g.probe.plus(1));          /* 1着の馬に200 */
-    at(g, g.probe.plus(0));                                  /* 1番人気（6着）に100 */
+    at(g, g.probe.plus(0));                                  /* 1番人気（4着）に100 */
     const rest = g.probe.now().money;
     const r = race(g);
     assert.deepEqual(r.orderSeen, now0.order, '止まった順の逆が長さの順');
-    /* 2位の馬は長さ80000で約24.5秒、1位は120000で30秒走る。24.5秒からの独走は2秒待って4倍 */
+    /* 1位（120000字）はちょうど30秒で書き終える。2位（8000字）は約19秒で止まり、そこから独走、2秒待って4倍 */
     assert.ok(r.fastFrames > 0, '独走で早送りになった');
-    assert.ok(r.seconds > 26 && r.seconds < 30, '早送りのぶん30秒より短い: ' + r.seconds.toFixed(1));
+    assert.ok(r.seconds > 20 && r.seconds < 30, '早送りのぶん30秒より短い: ' + r.seconds.toFixed(1));
+    assert.ok(Math.abs(g.probe.written(1) - 120000) < 1, '1位の馬は本文を全部書き切った');
+    for (let i = 0; i < 8; i++) assert.equal(g.probe.written(i), now0.horses[i].len, (i + 1) + '番も全部書き切って止まった');
     assert.ok(r.cams[r.cams.length - 1] - r.cams[0] > 2000, 'カメラが馬群を追いかける');
     assert.equal(g.probe.now().won, Math.floor(200 * odds[1]));
     assert.equal(g.probe.now().money, rest + Math.floor(200 * odds[1]));

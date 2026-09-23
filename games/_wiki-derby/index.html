@@ -37,9 +37,9 @@
 
    ランダムなWikipediaの記事8本が、8頭の出走馬。馬の名前は記事の題名。
    人気（倍率）は記事の閲覧数で決まる。架空の観客が、よく読まれている記事ほど多く賭ける。
-   着順はページの長さで決まる。長い記事ほど強い。
+   各馬は自分の記事の本文を走路に書きながら走り、全部書き切ったところで止まる。
+   最後まで書き続けた馬（本文の文字数＝情報量がいちばん多い記事）が1着。
    単勝（1着）に100ずつ賭けて、3レース後の手持ちが結果。
-   レースは約30秒。走った後の走路に、その記事の冒頭の文章が浮かび上がる。
 
    遊ぶたびにWikipediaから取りに行く。文章を出すので、出典と利用条件を表示する。 */
 (function () {
@@ -129,8 +129,9 @@
   });
 
   /* ============ 出走馬を取ってくる ============
-     ランダムな記事8本の、題名・ページの長さ・冒頭の文章・30日の閲覧数。
-     1回目で題名・長さ・文章はそろう。閲覧数は1回で返りきらないので、続きを数回取る。
+     ランダムな記事8本の、題名・30日の閲覧数・本文。
+     1回目で題名・閲覧数（の一部）・記事の原稿（記号入りの文章）がそろう。閲覧数は1回で返りきらないので続きを数回取る。
+     原稿の記号（枠・表・脚注・リンクの書式など）はゲーム側で取り除いて本文にする。
      テストでは window.__wikiSource に同じ形の偽物を置く。 */
   var API = "https://ja.wikipedia.org/w/api.php?format=json&formatversion=2&origin=*&action=query";
   var UA = "ZounoashiGames-WikiDerby/1.0 (https://www.zounoashi.com)";
@@ -144,12 +145,13 @@
   var wikiSource = {
     field: function () {
       return getJSON(API + "&generator=random&grnnamespace=0&grnlimit=" + N +
-                     "&prop=info|extracts|pageviews&exintro=1&explaintext=1&exlimit=" + N + "&pvipdays=30").then(function (j) {
+                     "&prop=info|pageviews|revisions&rvprop=content&rvslots=main&pvipdays=30").then(function (j) {
         var ps = ((j.query && j.query.pages) || []).filter(function (p) { return !p.missing && p.title && p.length > 0; }).slice(0, N);
         if (ps.length < N) throw new Error("頭数が足りない");
         var byId = {};
         var field = ps.map(function (p) {
-          var h = { id: p.pageid, title: p.title, len: p.length, text: p.extract || "", pv: p.pageviews ? sumViews(p.pageviews) : null };
+          var rv = p.revisions && p.revisions[0], src = rv && rv.slots && rv.slots.main ? rv.slots.main.content : "";
+          var h = { id: p.pageid, title: p.title, text: plainText(src || ""), pv: p.pageviews ? sumViews(p.pageviews) : null };
           byId[p.pageid] = h;
           return h;
         });
@@ -170,6 +172,33 @@
     }
   };
   function source() { return window.__wikiSource || wikiSource; }
+
+  /* 記事の原稿から記号を取り除いて、読める本文だけにする（おおまかでよい） */
+  function plainText(w) {
+    var s = String(w), prev;
+    s = s.replace(/<!--[\s\S]*?-->/g, "");
+    s = s.replace(/<ref[^>]*\/>/gi, "").replace(/<ref[\s\S]*?<\/ref>/gi, "");
+    s = s.replace(/<(gallery|math|syntaxhighlight|source|timeline|score|graph|mapframe)[\s\S]*?<\/\1>/gi, "");
+    do { prev = s; s = s.replace(/\{\{[^{}]*\}\}/g, ""); } while (s !== prev);          /* 枠（入れ子も内側から） */
+    do { prev = s; s = s.replace(/\{\|[\s\S]*?\|\}/g, ""); } while (s !== prev);       /* 表 */
+    do {                                                                                  /* リンク（内側から） */
+      prev = s;
+      s = s.replace(/\[\[([^\[\]]*)\]\]/g, function (m, inner) {
+        if (/^\s*(ファイル|画像|File|Image|Category|カテゴリ|Media):/i.test(inner)) return "";
+        var parts = inner.split("|");
+        return parts[parts.length - 1];
+      });
+    } while (s !== prev);
+    s = s.replace(/\[https?:\/\/[^\s\]]+\s+([^\]]*)\]/g, "$1").replace(/\[https?:\/\/[^\]]*\]/g, "");
+    s = s.replace(/<[^>]+>/g, "");
+    s = s.replace(/__[A-Z]+__/g, "");
+    s = s.replace(/'{2,}/g, "");
+    s = s.replace(/^=+\s*(.*?)\s*=+\s*$/gm, "$1");
+    s = s.replace(/^[*#:;]+\s*/gm, "");
+    s = s.replace(/^-{4,}\s*$/gm, "");                                              /* 区切り線 */
+    s = s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+    return s.replace(/\s+/g, " ").trim();
+  }
 
   /* ============ 決まりごと ============ */
   var START_MONEY = 1000, UNIT = 100, RACES = 3;
@@ -258,9 +287,10 @@
   }
   function gotField(f) {
     horses = f.slice(0, N).map(function (h) {
-      return { id: h.id, title: h.title, len: h.len, pv: h.pv || 0, text: String(h.text || "").replace(/\s+/g, " ").trim() };
+      var text = String(h.text || "").replace(/\s+/g, " ").trim();
+      return { id: h.id, title: h.title, pv: h.pv || 0, text: text, len: text.length };
     });
-    /* 着順はページの長い順。同じ長さなら先に並んだほう */
+    /* 着順は本文の文字数の多い順。同じなら先に並んだほう */
     order = horses.map(function (h, i) { return i; }).sort(function (a, b) { return horses[b].len - horses[a].len || a - b; });
     rankOf = []; order.forEach(function (h, r) { rankOf[h] = r; });
     odds = makeOdds(horses);
@@ -299,15 +329,27 @@
      最後まで走り続けた馬（いちばん長い記事）が1着。止まった順に12着、11着…と決まる。
      走る時間は記事の長さの平方根で決める（いちばん長い馬が RUN 秒。差が大きすぎると短い馬がすぐ止まるため）。
      カメラはまだ走っている馬の先頭を追いかける。 */
-  var RUN = 30, SPEED = 110, CHAR = 17, MIN_RUN = 3;
+  /* 書く速さ（1秒あたりの文字数）は R0 から始まって、e の K 倍ずつ上がっていく。
+     t 秒で書いた文字数は R0 / K × (e^{Kt} − 1)。C 文字書き終えるのは ln(1 + C K / R0) / K 秒。
+     K はレースごとに、いちばん長い記事がちょうど RUN 秒で書き終わるように決める。
+     この速さだと、文字数が10倍になっても書き終える時間は数秒しか延びないので、短い記事もすぐには止まらない。 */
+  var RUN = 30, R0 = 15, CHAR = 17, K = 0.2;
+  function charsAt(t) { return K > 1e-6 ? R0 / K * (Math.exp(K * t) - 1) : R0 * t; }
+  function timeFor(c) { return K > 1e-6 ? Math.log(1 + c * K / R0) / K : c / R0; }
+  function solveK(cmax) {
+    if (cmax <= R0 * RUN) return 1e-7;                     /* 短い記事ばかりなら、速さは上げない */
+    var lo = 1e-6, hi = 3;
+    for (var n = 0; n < 60; n++) { var mid = (lo + hi) / 2; if (Math.log(1 + cmax * mid / R0) / mid > RUN) lo = mid; else hi = mid; }
+    return (lo + hi) / 2;
+  }
   function startRace() {
     if (state !== S.PLAY || phase !== "bet") return;
     if (!totalBet()) { wobble = 0.35; sndNo(); return; }
     phase = "count"; pt = 0; raceT = 0; soloT = 0; ff = 1; hoofT = 0; crowdT = 0; cheered = false; cam = -START_X; countN = 3; sndCount(3);
     prog = []; finishT = []; stopped = [];
-    var maxLen = horses[order[0]].len;
+    K = solveK(horses[order[0]].len);
     for (var i = 0; i < N; i++) {
-      finishT[i] = Math.max(MIN_RUN, RUN * Math.sqrt(horses[i].len / maxLen));
+      finishT[i] = timeFor(horses[i].len);
       stopped.push(false);
       prog.push({ w1: 0.5 + Math.random() * 0.4, w2: 1.2 + Math.random() * 0.8, p1: Math.random() * 6.3, p2: Math.random() * 6.3, a: 10 + Math.random() * 8 });
     }
@@ -320,17 +362,18 @@
   }
   var SOLO_WAIT = 2, FAST = 4, soloT = 0, ff = 1;   /* 独走になってから早送りまでの秒数と、その速さ */
   var START_X = 44, countN = 0;                  /* ゲートは画面の左端から START_X のところ */
-  /* 位置（ピクセル）。出だしで加速し、あとは同じ速さ。前後に少しゆれるが、止まる手前でゆれを消す */
+  /* 位置（ピクセル）: 書いた文字数 × 1文字の幅。前後に少しゆれるが、止まる手前でゆれを消す */
   function runX(i, t) {
     var Tr = finishT[i], tt = Math.min(t, Tr);
-    var base = tt < 1 ? SPEED * tt * tt / 2 : SPEED * (tt - 0.5);
     var q = prog[i], fade = Math.min(1, Math.max(0, (Tr - tt) / 1.5)) * Math.min(1, tt / 2);
-    return base + q.a * (Math.sin(tt * q.w1 + q.p1) * 0.7 + Math.sin(tt * q.w2 + q.p2) * 0.3) * fade;
+    return Math.min(charsAt(tt), horses[i].len) * CHAR + q.a * (Math.sin(tt * q.w1 + q.p1) * 0.7 + Math.sin(tt * q.w2 + q.p2) * 0.3) * fade;
   }
   var stopped = [];
-  function maxRun() { return SPEED * (RUN - 0.5); }
-  /* テストと上の帯用: いちばん長い馬が止まる位置を1とした割合 */
+  function maxRun() { return Math.max(1, horses[order[0]].len * CHAR); }
+  /* テスト用: いちばん長い馬が止まる位置を1とした割合 */
   function progressOf(i, t) { return runX(i, t) / maxRun(); }
+  /* 上の帯用: 時間で見た進み具合（文字数で見ると終盤に一気に進むので） */
+  function timeProgress(i, t) { return Math.min(t, finishT[i]) / Math.max(0.01, finishT[order[0]]); }
   function settle() {
     won = 0;
     for (var i = 0; i < N; i++) if (bets[i] && rankOf[i] === 0) won += Math.floor(bets[i] * odds[i]);
@@ -369,7 +412,8 @@
       }
       if (!running) lead = runX(order[0], raceT);
       /* カメラ: 走っている馬の先頭が画面の右寄りに来るように */
-      cam += (Math.max(-START_X, lead - W * 0.66) - cam) * Math.min(1, dt * ff * 3);   /* 先頭が右寄りに来るまでは動かさない */
+      var want = Math.max(-START_X, lead - W * 0.66);            /* 先頭が右寄りに来るまでは動かさない */
+      cam = raceT < 3 ? cam + (want - cam) * Math.min(1, dt * 3) : want;
       var near = Math.max(0, 1 - running / N);                 /* 残りが少ないほど盛り上がる */
       hoofT -= dt; if (hoofT <= 0 && running) { hoofT = 0.07 + (1 - running / N) * 0.05; sndHoof(0.3 + (running / N) * 0.7); }
       crowdT -= dt; if (crowdT <= 0) { crowdT = 0.3; sndCrowd(0.2 + near * 0.8); }
@@ -677,25 +721,28 @@
       ctx.fillRect(0, y, W, LANE);
       if (bets[i]) { ctx.fillStyle = "rgba(240,197,78,.15)"; ctx.fillRect(0, y, W, LANE); }
     }
-    for (var m = 0; m <= maxRun() + 800; m += 400) {
+    var step = Math.max(400, Math.pow(10, Math.floor(Math.log(Math.max(1, W)) / Math.LN10)) * 4);
+    for (var m = Math.floor(cam / step) * step; m <= cam + W + step; m += step) {
+      if (m < 0) continue;
       var mx = m - cam;
       if (mx < -10 || mx > W + 10) continue;
       ctx.fillStyle = "rgba(255,255,255,.5)"; ctx.fillRect(mx - 1, TRACK.top - 6, 3, N * LANE + 6);
     }
     var gx = -30 - cam;                                     /* スタートのゲート（馬の少し後ろ） */
     if (gx > -20 && gx < W) { ctx.fillStyle = "rgba(200,210,220,.8)"; ctx.fillRect(gx - 4, TRACK.top - 8, 8, N * LANE + 8); }
-    /* 走った後の走路に、その記事の冒頭の文章が1文字ずつ浮かび上がる（最後まで出したら、また頭から） */
+    /* 走った後の走路に、その記事の本文が頭から1文字ずつ書かれていく（全部書き切ったら止まる） */
     ctx.font = "600 " + Math.min(15, Math.floor(LANE * 0.28)) + "px sans-serif";
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (var h = 0; h < N; h++) {
       var txt = horses[h].text, hx = worldX(h), ty = TRACK.top + h * LANE + LANE * 0.8;
       if (!txt) continue;
-      var k0 = Math.max(0, Math.floor((cam - 40) / CHAR)), k1 = Math.floor((Math.min(hx - 26, cam + W) - 40) / CHAR);
+      var written = Math.min(txt.length, Math.floor(stopped[h] ? txt.length : charsAt(raceT)));
+      var k0 = Math.max(0, Math.floor((cam + 30) / CHAR)), k1 = Math.min(written - 1, Math.floor((cam + W + 30) / CHAR));
       for (var k = k0; k <= k1; k++) {
-        var wx = 40 + k * CHAR, sx = wx - cam;
-        var fresh = stopped[h] ? 0.3 : Math.max(0, Math.min(1, (hx - 26 - wx) / 60));
-        ctx.fillStyle = "rgba(255,248,225," + (0.25 + 0.5 * fresh) + ")";
-        ctx.fillText(txt.charAt(k % (txt.length + 1)) || "／", sx, ty);
+        var wx = k * CHAR - 30, sx = wx - cam;
+        var fresh = stopped[h] ? 0.3 : Math.max(0, Math.min(1, (written - k) / 4));
+        ctx.fillStyle = "rgba(255,248,225," + (0.25 + 0.5 * (1 - fresh * 0.4)) + ")";
+        ctx.fillText(txt.charAt(k), sx, ty);
       }
     }
     /* 馬の名前は各レーンの左上に固定（馬が画面の外にいても分かるように）。半透明の小さい字で、切らずに収める */
@@ -731,7 +778,7 @@
     var y = 22, x0 = 24, x1 = W - 24;
     ctx.fillStyle = "rgba(255,255,255,.18)"; ctx.fillRect(x0, y - 1, x1 - x0, 2);
     for (var i = 0; i < N; i++) {
-      var p = Math.max(0, Math.min(1, progressOf(i, raceT))), c = frameCol(i);
+      var p = Math.max(0, Math.min(1, timeProgress(i, raceT))), c = frameCol(i);
       ctx.beginPath(); ctx.arc(x0 + (x1 - x0) * p, y, bets[i] ? 6 : 4.5, 0, Math.PI * 2);
       ctx.fillStyle = c.bg; ctx.fill();
       if (bets[i]) { ctx.lineWidth = 2; ctx.strokeStyle = "#f0c54e"; ctx.stroke(); }
@@ -765,18 +812,17 @@
       ctx.fillStyle = r < 3 ? "rgba(255,255,255,.14)" : "rgba(255,255,255,.06)"; ctx.fill();
       if (hit) { ctx.lineWidth = 3; ctx.strokeStyle = "#f7cc71"; ctx.stroke(); }
       ctx.fillStyle = r === 0 ? "rgba(232,181,46,.4)" : "rgba(255,255,255,.12)";
-      ctx.fillRect(84, y + rh - 9, (W - 84 - 30) * Math.max(0.01, horses[i].len / maxLen), 3);   /* 長さの棒 */
-      drawRankBadge(r, 36, y + rh / 2);
-      drawNum(i, 64, y + rh / 2, 11);
+      ctx.fillRect(60, y + rh - 9, (W - 60 - 30) * Math.max(0.01, horses[i].len / maxLen), 3);   /* 文字数の棒 */
+      drawNum(i, 40, y + rh / 2, 11);
       ctx.fillStyle = "#fbf4e6";
-      drawFitted(horses[i].title, 84, y + rh / 2 - 1, W - 84 - 170, 1, r < 3 ? 16 : 15, 10, r < 3 ? "800" : "600");
+      drawFitted(horses[i].title, 60, y + rh / 2 - 1, W - 60 - 190, 1, r < 3 ? 16 : 15, 10, r < 3 ? "800" : "600");
       ctx.fillStyle = "rgba(251,244,230,.75)";
       ctx.font = "600 13px sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
       ctx.fillText(comma(horses[i].len), W - 30, y + rh / 2 - 1);
       ctx.fillStyle = "rgba(251,244,230,.9)";
       ctx.font = "800 13px sans-serif";
       ctx.fillText(oddsText(odds[i]), W - 30 - 64, y + rh / 2 - 1);
-      if (bets[i]) drawChip(W - 30 - 112, y + rh / 2, 8, hit ? 1 : 0.4);
+      if (bets[i]) drawChip(W - 30 - 138, y + rh / 2, 8, hit ? 1 : 0.4);
     }
     ctx.textBaseline = "alphabetic";
     var py = top + N * rh + 34;                               /* 払い戻し */
@@ -899,6 +945,9 @@
     positions: function () { return horses && phase === "race" ? horses.map(function (h, i) { return progressOf(i, raceT); }) : null; },
     stopped: function () { return stopped.slice(); },
     fast: function () { return ff; },
+    /* その馬が走路に書いた文字数（止まった馬は本文の文字数と同じになる） */
+    plain: function (w) { return plainText(w); },
+    written: function (i) { return horses && prog ? Math.min(horses[i].len, Math.floor(stopped[i] ? horses[i].len : charsAt(Math.min(raceT, finishT[i])))) : 0; },
     /* 文字を収める処理の確認用: 幅と行数に入ったか */
     fit: function (s, maxW, lines) {
       var f = fitLines(s, maxW, lines, 17, 11, "800");
