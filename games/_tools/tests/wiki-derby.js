@@ -295,7 +295,10 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     const seen = [], btn = [];
     for (let k = 0; k < 300; k++) {
       g.step(1); seen.push(g.probe.now().revealed); btn.push(g.probe.now().buttons);
-      if (k === 100) { at(g, g.probe.plus(0)); assert.equal(g.probe.now().bets[0], 0, '倍率のボタンは出るまで押せない'); }
+      if (k === 100) {
+        at(g, g.probe.plus(0)); assert.equal(g.probe.now().bets[0], 0, '倍率のボタンは出るまで押せない');
+        at(g, g.probe.startButton()); g.step(1); assert.equal(g.probe.now().phase, 'bet', 'スタートのボタンも出るまで押せない');
+      }
     }
     const allIn = seen.indexOf(8), b0 = btn.findIndex(v => v > 0), b1 = btn.indexOf(1);
     assert.ok(b0 > allIn, '倍率のボタンは馬名が出そろってから: ' + b0 + ' ' + allIn);
