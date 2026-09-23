@@ -370,6 +370,29 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.equal(g.probe.now().phase, 'finish');
   }
 
+  /* 7d. シェアの文（1人のとき）: いちばん払い戻しの多かった記事。1度も勝てなければ、いちばん多く賭けた記事 */
+  for (const plan of [
+    { picks: [[0, 1], [1, 5], [1, 1]], want: t => '「' + t + '」にベットしてレースに勝利しました #情報量ダービー' },   /* 2レース目の2番がいちばん稼ぐ */
+    { picks: [[0, 1], [0, 3], [0, 1]], want: t => '「' + t + '」にベットしましたが勝てませんでした #情報量ダービー' }     /* 2レース目の1番がいちばん多く賭けた */
+  ]) {
+    const g = open();
+    globalThis.__derbyFake.lens = [1000, 9000, 2000, 3000, 4000, 5000, 6000, 7000];   /* いつも2番が勝つ */
+    globalThis.__derbyFake.pvs = [100, 100, 100, 100, 100, 100, 100, 100];             /* 倍率もいつも同じ */
+    await start(g);
+    const titles = [];
+    for (const [i, n] of plan.picks) {
+      titles.push(g.probe.now().horses[i].title);
+      for (let k = 0; k < n; k++) at(g, g.probe.plus(i));
+      at(g, g.probe.startButton()); g.step(1);
+      g.until(() => g.probe.now().phase === 'finish', 3000);
+      await next(g);
+    }
+    const now = g.probe.now();
+    assert.equal(now.state, 'result');
+    assert.equal(now.share, plan.want(titles[1]));
+    assert.equal(now.shareShown, true, '1人のときはシェアのボタンを出す');
+  }
+
   /* 7b. 2人以上: 開始画面で人数を選び、レースごとに順番に賭ける。手持ちがなくなった人は飛ばす */
   {
     const g = open();
@@ -422,6 +445,8 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     now = g.probe.now();
     assert.equal(now.state, 'result', '3レースで結果');
     assert.equal(now.score, Math.max(...now.monies), '結果はいちばん多い人の手持ち');
+    assert.equal(now.shareShown, false, '2人以上のときはシェアのボタンを出さない');
+    assert.ok(Math.abs(g.probe.result().retry.x - now.W / 2) < 1, '2人以上のときは「もう一度」だけを真ん中に');
     at(g, g.probe.result().retry); g.step(1); await flush(); g.step(1); ready(g);
     assert.deepEqual(g.probe.now().monies, [1000, 1000], 'もう一度は同じ人数で最初から');
   }

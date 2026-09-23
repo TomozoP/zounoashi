@@ -457,6 +457,7 @@
     document.getElementById("start").hidden = true;
     state = S.PLAY; round++;
     T = 0; pt = 0;
+    hist = [];
     P = []; for (var k = 0; k < players; k++) P.push({ money: START_MONEY, bets: zeros() });
     cur = 0; money = START_MONEY; bets = P[0].bets; shown = money; score = money; raceNo = 0; wonBy = [];
     sel = 0; flyers = []; wobble = 0; nextField = null;
@@ -660,6 +661,7 @@
   function maxRun() { return Math.max(1, horses[order[0]].len * CHAR); }
   /* テスト用: いちばん長い馬が止まる位置を1とした割合 */
   function progressOf(i, t) { return runX(i, t) / maxRun(); }
+  var hist = [];                                              /* 1人のとき: レースごとの賭けた記事と払い戻し */
   function settle() {
     saveCur();
     wonBy = P.map(function (p) {
@@ -669,6 +671,9 @@
       return w;
     });
     won = wonBy[0] || 0;
+    if (players === 1) for (var hi = 0; hi < N; hi++) if (P[0].bets[hi]) {   /* シェアの文に使う */
+      hist.push({ title: horses[hi].title, bet: P[0].bets[hi], pay: rankOf[hi] === 0 ? Math.floor(P[0].bets[hi] * odds[hi]) : 0 });
+    }
     money = P[cur].money; shown = money;
     score = P[0].money; raceNo++;
     if (wonBy.some(function (w) { return w > 0; })) sndWin(); else sndLose();
@@ -840,12 +845,20 @@
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
   });
 
+  /* シェアは1人のときだけ。いちばん払い戻しの多かった記事、1度も勝てなければいちばん多く賭けた記事の名前を入れる */
+  function shareText() {
+    var best = null, big = null;
+    hist.forEach(function (h) {
+      if (h.pay > 0 && (!best || h.pay > best.pay)) best = h;
+      if (!big || h.bet > big.bet) big = h;
+    });
+    if (best) return "「" + best.title + "」にベットしてレースに勝利しました #情報量ダービー";
+    if (big) return "「" + big.title + "」にベットしましたが勝てませんでした #情報量ダービー";
+    return comma(score) + "でした #情報量ダービー";
+  }
   function doShare() {
-    if (players > 1) {
-      window.zResultActions.x({ text: P.map(function (p, k) { return pName(k) + " " + comma(p.money); }).join("・") + " #情報量ダービー" });
-      return;
-    }
-    window.zResultActions.x({ text: comma(score) + "でした #情報量ダービー" });
+    if (players > 1) return;
+    window.zResultActions.x({ text: shareText() });
   }
 
   /* ============ 描画 ============ */
@@ -1293,7 +1306,8 @@
   }
 
   function draw() {
-    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    var sb = resultButtons()[1];
+    window.zResultActions.place(shareButton, sb || resultButtons()[0], W, H, state === S.RESULT && !!sb);
     placeLinks();
     ctx.clearRect(0, 0, W, H);
     drawTurf();
@@ -1372,10 +1386,11 @@
     drawPlayerPick();
   }
 
-  /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（2人以上のときは「もう一度」だけ） */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
     var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    if (players > 1) return [{ id: "retry", x: W / 2 - wr / 2, y: y, w: wr, h: h, label: "もう一度" }];
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -1434,7 +1449,7 @@
     now: function () {
       return { state: state, phase: phase, score: score, money: money, players: players, cur: cur,
                monies: P.map(function (p) { return p.money; }), allBets: P.map(function (p) { return p.bets.slice(); }), wonBy: wonBy.slice(), race: raceNo, sel: sel,
-               bets: bets && bets.slice(), speedFx: speedFx, camSpd: camSpd, reveal: revealT, revealed: revealN, buttons: btnsIn(), lobby: lobbyOn, bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
+               bets: bets && bets.slice(), speedFx: speedFx, camSpd: camSpd, reveal: revealT, revealed: revealN, buttons: btnsIn(), lobby: lobbyOn, share: players > 1 ? null : shareText(), shareShown: !shareButton.hidden, bet: bets ? totalBet() : 0, odds: odds.slice(), popRank: popRank.slice(),
                horses: horses && horses.map(function (h) { return { title: h.title, len: h.len, pv: h.pv }; }),
                order: order.slice(), won: won, raceT: raceT, cam: cam, W: W, H: H };
     },
