@@ -135,6 +135,15 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     assert.ok(g.probe.written(1) < 120000, '1着の馬は書き切らずに終わる');
     for (let i = 0; i < 8; i++) if (i !== 1) assert.equal(g.probe.written(i), now0.horses[i].len, (i + 1) + '番は全部書き切って止まった');
     assert.ok(r.cams[r.cams.length - 1] - r.cams[0] > 2000, 'カメラが馬群を追いかける');
+    /* 着順の一覧: 題名を押すとその記事が開くリンク。着順どおりに8本 */
+    g.step(30);
+    const links = g.probe.links();
+    assert.equal(links.length, 8, '着順の一覧に記事のリンクが8本');
+    now0.order.forEach((h, r) => assert.ok(links[r].endsWith('curid=' + (100 + h)), (r + 1) + '着の行はその記事: ' + links[r]));
+    const H2 = g.probe.now().H, pts = [0,1,2,3,4,5,6,7].map(r => g.probe.titleAt(r)).concat([g.probe.next()]);
+    for (let a = 0; a < pts.length; a++) for (let b = a + 1; b < pts.length; b++)
+      assert.ok(Math.hypot(pts[a].x - pts[b].x, pts[a].y - pts[b].y) >= 63, '題名と次へのボタンの間隔');
+    assert.ok(g.probe.titleAt(7).y < H2 - 20);
     assert.equal(g.probe.now().won, Math.floor(200 * odds[1]));
     assert.equal(g.probe.now().money, rest + Math.floor(200 * odds[1]));
     assert.equal(g.probe.now().race, 1);
@@ -227,6 +236,7 @@ async function next(g) { g.step(40); at(g, g.probe.next()); g.step(1); await flu
     race(g);
     assert.equal(g.probe.now().money, 0);
     await next(g);
+    assert.equal(g.probe.links().length, 0, '一覧を離れたらリンクは消える');
     assert.equal(g.probe.now().state, 'result', '尽きたら結果');
     assert.equal(g.probe.now().score, 0);
   }

@@ -17,6 +17,10 @@
   #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #share-button[hidden] { display:none; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+  /* 着順の一覧の題名に重ねる透明なリンク（絵は canvas に描いてある） */
+  .article-link { position:absolute; display:block; color:transparent; overflow:hidden; text-decoration:none; touch-action:manipulation; }
+  .article-link[hidden] { display:none; }
+  .article-link:focus-visible { outline:3px solid #f7cc71; outline-offset:2px; }
 </style>
 </head>
 <body>
@@ -787,6 +791,10 @@
     drawBar();
     if (!horses) return;
     drawCredit();                                             /* 馬の名前も倍率もWikipediaのデータなので、ここにも出典 */
+    ctx.fillStyle = "rgba(244,239,230,.6)";
+    ctx.font = "500 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("倍率はWikipediaの閲覧数（過去30日）から算出", W / 2, H - 38);
+    ctx.textBaseline = "alphabetic";
     var inAir = {};
     flyers.forEach(function (f) { if (f.to != null && f.t < f.d) inAir[f.to] = (inAir[f.to] || 0) + 1; });
     for (var i = 0; i < N; i++) {                             /* 上: 馬名の一覧 */
@@ -999,12 +1007,46 @@
   }
 
   /* 着順・長さ・倍率の一覧と、払い戻し */
+  function finishRows() { return { top: 76, rh: Math.min(64, Math.floor((H - 76 - 140) / N)) }; }
+  /* 着順 r の行の題名の枠（押すとその記事が開く） */
+  function titleRect(r) {
+    var fr = finishRows(), y = fr.top + r * fr.rh, i = order[r];
+    var fit = fitLines(horses[i].title, W - 60 - 190, 1, r < 3 ? 16 : 15, 10, r < 3 ? "800" : "600");
+    ctx.font = (r < 3 ? "800 " : "600 ") + fit.size + "px sans-serif";
+    var w = Math.max(40, ctx.measureText(fit.lines[0]).width);
+    return { x: 54, y: y + 3, w: w + 12, h: fr.rh - 6, textW: w };
+  }
+  function articleUrl(h) { return "https://ja.wikipedia.org/?curid=" + encodeURIComponent(h.id); }
+  var linkEls = [], linkKey = "";
+  function placeLinks() {
+    var show = state === S.PLAY && phase === "finish" && horses && pt > 0.35;
+    var key = show ? horses.map(function (h) { return h.id; }).join(",") + ":" + H : "";
+    if (key === linkKey) return;
+    linkKey = key;
+    while (show && linkEls.length < N) {
+      var el = document.createElement("a");
+      el.className = "article-link"; el.target = "_blank"; el.rel = "noopener";
+      ["pointerdown", "pointerup"].forEach(function (n) { el.addEventListener(n, function (e) { e.stopPropagation(); }); });   /* 押しても次のレースへ進まない */
+      wrap.appendChild(el);
+      linkEls.push(el);
+    }
+    linkEls.forEach(function (el, r) {
+      el.hidden = !show;
+      if (!show) return;
+      var h = horses[order[r]], t = titleRect(r);
+      el.href = articleUrl(h);
+      el.textContent = h.title;
+      el.setAttribute("aria-label", h.title + "（Wikipedia）");
+      el.style.left = (t.x / W * 100) + "%"; el.style.width = (t.w / W * 100) + "%";
+      el.style.top = (t.y / H * 100) + "%"; el.style.height = (t.h / H * 100) + "%";
+    });
+  }
   function drawFinish() {
     var a = Math.min(1, pt / 0.35);
     ctx.fillStyle = "rgba(6,14,9," + (0.92 * a) + ")"; ctx.fillRect(0, 0, W, H);
     drawBar();
     ctx.globalAlpha = a;
-    var top = 76, rh = Math.min(48, Math.floor((H - top - 140) / N));
+    var fr = finishRows(), top = fr.top, rh = fr.rh;
     var maxLen = horses[order[0]].len;
     for (var r = 0; r < N; r++) {
       var i = order[r], y = top + r * rh, hit = bets[i] && r === 0;
@@ -1016,6 +1058,8 @@
       drawNum(i, 40, y + rh / 2, 11);
       ctx.fillStyle = "#fbf4e6";
       drawFitted(horses[i].title, 60, y + rh / 2 - 1, W - 60 - 190, 1, r < 3 ? 16 : 15, 10, r < 3 ? "800" : "600");
+      var tr = titleRect(r);
+      ctx.fillStyle = "rgba(251,244,230,.45)"; ctx.fillRect(60, y + rh / 2 + 11, tr.textW, 1.5);   /* 押せる印の下線 */
       ctx.fillStyle = "rgba(251,244,230,.75)";
       ctx.font = "600 13px sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
       ctx.fillText(comma(horses[i].len), W - 30, y + rh / 2 - 1);
@@ -1059,6 +1103,7 @@
 
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    placeLinks();
     ctx.clearRect(0, 0, W, H);
     drawTurf();
     if (state === S.INTRO) { drawIntro(); return; }
@@ -1149,6 +1194,8 @@
     plain: function (w) { return plainText(w); },
     written: function (i) { return horses && prog ? Math.min(horses[i].len, Math.floor(charsOf(i, Math.min(raceT, finishT[i])) + 1e-6)) : 0; },
     speed: function (i) { return horses && plan[i] ? (posChars(i, raceT + 0.01) - posChars(i, raceT)) / 0.01 : 0; },
+    links: function () { return linkEls.filter(function (e) { return !e.hidden; }).map(function (e) { return e.href; }); },
+    titleAt: function (r) { var t = titleRect(r); return { x: t.x + t.w / 2, y: t.y + t.h / 2 }; },
     goal: function () { return { x: goalX, crossT: crossT, out: outT, confetti: confetti.length }; },
     screenX: function (i) { return horses && prog[i] ? runX(i, raceT) - cam : 0; },
     battle: function () { return battle; },
