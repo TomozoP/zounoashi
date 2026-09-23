@@ -152,7 +152,7 @@ async function start(g) {
     g.step(60); const slow = g.probe.now().pos;
     g.down(270, g.probe.choice(1).y); g.step(60); g.up();   /* 本文の枠を押す（カードを押すと開けるほうになる） */
     const fast = g.probe.now().pos - slow;
-    assert.ok(slow > 50 && slow < 90, '1秒でふつう70文字ほど: ' + slow);
+    assert.ok(slow > 35 && slow < 55, '1秒でふつう45文字ほど: ' + slow);
     assert.ok(fast > slow * 3, '押している間は速い: ' + fast);
   }
 
