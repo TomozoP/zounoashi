@@ -304,7 +304,7 @@ ORDER.slice(0, 5).forEach(mark => {
   g.until(() => now(g).state === 'result', 400);
   assert.ok(now(g).failed);
   assert.deepEqual(now(g).cleared, {}, 'ライフがなくなった回はクリアにしない');
-  assert.equal(g.probe.shareText(), 'ビンゴならず #難読ビンゴ');
+  assert.equal(g.probe.shareText(), '「' + now(g).set + '」のシートにチャレンジしました #難読ビンゴ', '失敗したときのシェアの文');
   ['魚', '難', '木', '金', '虫', '鳥'].forEach((m, k) => {   /* 並びと違う順でも、6つ揃えば 𰻞 が出る */
     back(g);
     const b = g.probe.setButton(I(m)); g.tap(b.x, b.y); g.step(1);
