@@ -50,7 +50,8 @@ const kOf = (g, i) => g.dbg.list().indexOf(i);
   /* 一覧の一文も47個。重ならず、1行に収まる長さで、答えの都道府県名は入れない */
   const L = g.dbg.LINES;
   assert.equal(L.length, 47); assert.equal(new Set(L).size, 47);
-  L.forEach(s => assert(s.length >= 8 && s.length <= 24, '一文の長さ: ' + s));
+  L.forEach(s => assert(/そう$/.test(s), '「〜そう」で終わる: ' + s));
+  L.forEach(s => assert(s.length >= 8 && s.length <= 28, '一文の長さ: ' + s));
   L.forEach(s => REAL.forEach(r => assert(!s.includes(r), s + ' に実在の名前 ' + r)));
   g.dbg.SHAPES.forEach((s, i) => assert(s.length >= 1 && s.every(r => r.length >= 4), (i + 1) + '番の形'));
   /* 県名は、その県の中に置く */
