@@ -34,5 +34,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "Wikipediaの記事でかなビンゴ"
   },
-  {"type":"lab","tags":[],"id":"sakanahen-bingo","title":"難読ビンゴ","year":2026,"date":"2026-09-23","plays":null,"url":"","img":"games/_sakanahen-bingo/img/thumb.webp","play":"games/_sakanahen-bingo/index.html","full":true,"catch":"読みを聞いて魚へんの漢字を開けるビンゴ"},
+  {"type":"lab","tags":[],"id":"nandoku-bingo","title":"難読ビンゴ","year":2026,"date":"2026-09-23","plays":null,"url":"","img":"games/_nandoku-bingo/img/thumb.webp","play":"games/_nandoku-bingo/index.html","full":true,"catch":"読みを聞いて難読漢字を開けるビンゴ"},
 ];

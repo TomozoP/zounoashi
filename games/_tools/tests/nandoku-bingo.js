@@ -1,7 +1,7 @@
 /* 難読ビンゴ: 開始・正しい字で開く・違う字で流れる・時間切れ・箱で飛ばす・キー操作・ビンゴまでの回数を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
-const file = 'games/_sakanahen-bingo/index.html';
+const file = 'games/_nandoku-bingo/index.html';
 
 const open = shape => { const g = load(file, { quiet: true }); if (shape) g.view(...shape); g.step(2); return g; };
 const tapCell = (g, i) => { const p = g.probe.cell(i); g.tap(p.x, p.y); };
@@ -339,7 +339,7 @@ ORDER.slice(0, 5).forEach(mark => {
   const pv = load(file, { quiet: true, inject: 'window.location.hostname = "www.zounoashi.com"; window.location.pathname = "/preview/";' }); pv.step(2);
   assert.equal(pv.probe.setCount(), 7, '固定リンクでは最初から 𰻞 が出る');
   assert.deepEqual(now(pv).cleared, {}, '記録には書かない');
-  const pb = load(file, { quiet: true, inject: 'window.location.hostname = "www.zounoashi.com"; window.location.pathname = "/games/sakanahen-bingo/";' }); pb.step(2);
+  const pb = load(file, { quiet: true, inject: 'window.location.hostname = "www.zounoashi.com"; window.location.pathname = "/games/nandoku-bingo/";' }); pb.step(2);
   assert.equal(pb.probe.setCount(), 6, '公開の場所では出ない');
   const g2 = at('localhost'); g2.step(2);
   g2.press('F8'); g2.step(1); g2.press('F8'); g2.step(1);
