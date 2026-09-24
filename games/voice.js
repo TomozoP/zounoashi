@@ -9,6 +9,7 @@
      opts.out    つなぐ先（省略時は ac.destination）
      opts.volume 音量（省略時 0.34）
      opts.noise  子音に使うノイズのバッファ（省略時はここで作る）
+     opts.swing  声の高さの上がり下がりの強さ（省略時 1。0 に近いほど平らな声）
    window.zVoice.kana(yomi, mora) … ひらがな・カタカナの読みを words にする。mora は1拍の秒数 */
 (function (global) {
   "use strict";
@@ -55,7 +56,8 @@
     words.forEach(function (w, i) {
       var c = w[0], vw = VOWELS[w[1]], dur = w[2];
       var k = (t - start) / total;
-      var p = f0 * (1.12 - 0.3 * k);                 /* 少しずつ下がる */
+      /* 少しずつ下がる。swing を指定したときだけ、その強さに縮める */
+      var p = opts.swing == null ? f0 * (1.12 - 0.3 * k) : f0 * (1 + (0.12 - 0.3 * k) * opts.swing);
       o.frequency.setTargetAtTime(p, t, 0.02);
       /* 間：声を止めて進める */
       if (!vw) {

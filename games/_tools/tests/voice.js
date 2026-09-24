@@ -45,6 +45,21 @@ V.kana('あいうえおかきくけこさしすせそたちつてとなにぬね
   v.stop();
   assert(ac.log.includes('cancel') && ac.log.includes('osc:stop@1.32'), '止めると0.12秒で消える');
 }
+// 抑揚: swing を指定しないときは今までどおり（1.12倍から0.82倍へ下がる）。小さくすると幅が縮む
+{
+  const range = opts => {
+    const fs = [];
+    const ac = fakeAC();
+    const osc = ac.createOscillator;
+    ac.createOscillator = () => { const o = osc(); o.frequency.setTargetAtTime = v => fs.push(v); return o; };
+    V.speak(ac, 0, 400, V.kana('あいうえおあいうえお', 0.1), opts);
+    return [Math.max(...fs) / 400, Math.min(...fs) / 400];
+  };
+  const full = range(), soft = range({ swing: 0.35 });
+  assert(Math.abs(full[0] - 1.12) < 1e-9 && full[1] > 0.84 && full[1] < 0.86, '今までどおりの幅: ' + full);
+  assert(Math.abs(range({ swing: 1 })[0] - 1.12) < 1e-9);
+  assert(soft[0] - soft[1] < (full[0] - full[1]) * 0.4, '抑えると幅が縮む: ' + soft);
+}
 // 間（母音なし）が入っても鳴らせる
 {
   const ac = fakeAC();
