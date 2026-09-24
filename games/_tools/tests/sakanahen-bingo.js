@@ -35,7 +35,7 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
   const g = open();
   const sets = g.probe.sets();
   assert.deepEqual(sets.map(s => s.mark), ORDER, 'やさしい順に左から');
-  assert.equal(g.probe.setCount(), 5, '難は最初は出ていない');
+  assert.equal(g.probe.setCount(), 6, '難も最初から選べる');
   /* 難は、ほかのカードに入っていない字だけ */
   const others = new Set(sets.slice(0, 5).flatMap(s => s.list.map(f => f.kanji)));
   sets[5].list.forEach(f => assert.ok(!others.has(f.kanji), f.kanji + ' はほかのカードにもある'));
@@ -63,15 +63,16 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
   const wood = g.probe.sets()[I('木')].list.map(f => f.kanji);
   assert.ok(now(g).card.filter(Boolean).every(k => wood.includes(k)), '木のカードに配り直す');
   g.press('ArrowRight'); assert.equal(now(g).set, '金');
-  g.press('ArrowLeft'); g.press('ArrowLeft'); assert.equal(now(g).set, '鳥', '端から回る');
+  g.press('ArrowLeft'); g.press('ArrowLeft'); assert.equal(now(g).set, '難', '端から回る');
   const card = now(g).card;
   start(g);
   assert.deepEqual(now(g).card, card);
-  const bird0 = g.probe.sets()[I('鳥')].list.map(f => f.kanji);
-  assert.ok(bird0.includes(now(g).call.kanji), '鳥の読みが出る');
-  /* 丸の間隔もスマホで押せる */
+  const hard0 = g.probe.sets()[I('難')].list.map(f => f.kanji);
+  assert.ok(hard0.includes(now(g).call.kanji), '難の読みが出る');
+  /* 6つ並べても、丸の間隔はスマホで押せて、画面に収まる */
   const a0 = g.probe.setButton(0), a1 = g.probe.setButton(1);
   assert.ok(a1.x - a0.x >= 63);
+  assert.ok(g.probe.setButton(5).x + 34 <= now(g).W && a0.x - 34 >= 0, '画面に収まる');
 }
 
 /* 1. 開始前は真ん中を押すまで始まらない。カードは24字＋真ん中 */
@@ -288,7 +289,7 @@ ORDER.slice(0, 5).forEach(mark => {
   assert.ok(g.probe.dealAlpha(0) > 0.99, '始めた直後も字が見える ' + g.probe.dealAlpha(0));
 }
 
-/* 11. 5つ全部ビンゴすると難が出る。残すのはクリアしたかだけ（回数は残さない）。ライフがなくなった回はクリアにしない */
+/* 11. 残すのはクリアしたかだけ（回数は残さない）。ライフがなくなった回はクリアにしない */
 {
   const g = open();
   /* 1回目: わざと間違えて終わる → 記録なし */
@@ -301,52 +302,25 @@ ORDER.slice(0, 5).forEach(mark => {
   g.until(() => now(g).state === 'result', 400);
   assert.ok(now(g).failed);
   assert.deepEqual(now(g).cleared, {}, 'ライフがなくなった回はクリアにしない');
-  const marks = ['魚', '木', '金', '鳥', '虫'];   /* 並びと違う順に遊んでも、5つ揃えば出る */
-  marks.forEach((m, k) => {
-    const set = I(m);
+  ['魚', '難'].forEach(m => {
     back(g);
-    const b = g.probe.setButton(set); g.tap(b.x, b.y); g.step(1);
+    const b = g.probe.setButton(I(m)); g.tap(b.x, b.y); g.step(1);
     start(g);
     assert.equal(now(g).set, m);
     const res = playOut(g);
     assert.ok(!res.failed);
     assert.equal(res.cleared[m], true, m + ' をクリア');
     assert.ok(Object.values(res.cleared).every(v => v === true), '回数は残さない');
-    assert.equal(g.probe.setCount(), k < 4 ? 5 : 6, k < 4 ? 'まだ難は出ない' : '5つ揃うと難が出る');
   });
-  assert.ok(now(g).unlocked);
-  back(g);
-  g.step(120);
-  /* 難を選んで遊ぶ */
-  const nb = g.probe.setButton(5); g.tap(nb.x, nb.y); g.step(1);
-  assert.equal(now(g).set, '難');
-  const a0 = g.probe.setButton(0), a1 = g.probe.setButton(1);
-  assert.ok(a1.x - a0.x >= 63, '6つ並べても丸同士が離れている');
-  assert.ok(g.probe.setButton(5).x + 34 <= now(g).W && a0.x - 34 >= 0, '画面に収まる');
-  start(g);
-  const hard = g.probe.sets()[5].list.map(f => f.kanji);
-  assert.ok(now(g).card.filter(Boolean).every(k => hard.includes(k)), '難のカード');
-  const res = playOut(g);
-  assert.equal(res.cleared['難'], true, '難もクリアとして残る');
 }
 
-/* 12. 確かめる用: 手元だけ、カード選びで F8 を押すと難が出て選ばれる。もう一度で戻る。公開の場所では効かない。記録には書かない */
+/* 12. 確かめる用: 手元だけ、遊んでいる間の F8 で出ている字を開ける（無ければスキップ）。公開の場所では効かない */
 {
   const at = host => load(file, { quiet: true, inject: 'window.location.hostname = ' + JSON.stringify(host) + ';' });
   const g = at('localhost'); g.step(2);
-  assert.equal(g.probe.setCount(), 5);
   g.press('F8'); g.step(1);
-  assert.equal(g.probe.setCount(), 6, 'F8 で難が出る');
-  assert.equal(now(g).set, '難', '難を選んでいる');
-  assert.deepEqual(now(g).cleared, {}, '記録は空のまま');
-  g.press('F8'); g.step(1);
-  assert.equal(g.probe.setCount(), 5, 'もう一度で戻る');
+  assert.equal(now(g).state, 'intro', 'カード選びの F8 では何も起きない');
   assert.equal(now(g).set, '魚');
-  g.press('F8'); g.step(1);
-  start(g);
-  assert.ok(g.probe.sets()[I('難')].list.some(f => f.kanji === now(g).call.kanji), '難で遊べる');
-  g.press('F8'); g.step(1);
-  assert.equal(g.probe.setCount(), 6, '遊んでいる間の F8 では変わらない');
   /* 遊んでいる間の F8: 出ている字があれば開け、無ければスキップ。押し続ければビンゴまで行く */
   const h = at('localhost'); h.step(2); start(h);
   for (let k = 0; k < 2000 && now(h).state === 'play'; k++) {
@@ -362,8 +336,6 @@ ORDER.slice(0, 5).forEach(mark => {
   assert.ok(!now(h).failed && now(h).bingo, 'F8 だけでビンゴまで');
   assert.equal(now(h).lives, 3, 'ライフは減らない');
   const pub = at('www.zounoashi.com'); pub.step(2);
-  pub.press('F8'); pub.step(1);
-  assert.equal(pub.probe.setCount(), 5, '公開の場所では効かない');
   start(pub);
   const c0 = now(pub).calls;
   pub.press('F8'); pub.step(1);
@@ -372,11 +344,15 @@ ORDER.slice(0, 5).forEach(mark => {
 }
 
 /* 8. 画面の形を変えても、マス同士・箱が押せる大きさ */
-[[375, 667], [390, 844], [430, 932], [768, 1024]].forEach(v => {
+[[375, 667], [320, 480], [390, 844], [430, 932], [768, 1024]].forEach(v => {
   const g = open(v);
   const a = g.probe.cell(0), b = g.probe.cell(1), d = g.probe.cell(5);
   assert.ok(b.x - a.x >= 63 && d.y - a.y >= 63, v + ' マスの間隔 ' + (b.x - a.x) + ',' + (d.y - a.y));
   assert.ok(d.y + (d.y - a.y) * 4 < now(g).H, v + ' カードが画面に収まる');
+  /* 結果のボタンはシートのすぐ下。マスから離れていて、画面に収まる */
+  const last = g.probe.cell(22), rb = g.probe.result().retry, sb = g.probe.result().share;
+  assert.ok(rb.y - last.y >= 63 && rb.y + 27 <= now(g).H, v + ' 結果のボタンの位置 ' + (rb.y - last.y) + ' / ' + (now(g).H - rb.y));
+  assert.equal(rb.y, sb.y);
 });
 
 console.log('難読ビンゴ: ok');
