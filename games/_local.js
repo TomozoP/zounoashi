@@ -33,5 +33,6 @@ window.DRAFT_GAMES = [
     "play": "games/_wiki-bingo/index.html",
     "full": true,
     "catch": "Wikipediaの記事でかなビンゴ"
-  }
+  },
+  {"type":"lab","tags":[],"id":"kakuu-ken","title":"架空県名クイズ","year":2026,"date":"2026-09-24","plays":null,"url":"","img":"games/_kakuu-ken/img/thumb.webp","play":"games/_kakuu-ken/index.html","full":true,"catch":"形から名付けた架空の県名を当てる"},
 ];
