@@ -208,6 +208,25 @@ const window_zVoice = g => { const ctx = { window: {} }; require('vm').runInNewC
   g.dbg.shareButton.fire('click', { stopPropagation() {} });
   assert.equal(g.shared.length, 1);
   assert.equal(g.shared[0], 'AIの偏見をすべて当てました #偏県');
+  /* クリア後も地図を拡大・縮小・移動できる。タップしても何も起きない */
+  {
+    const m = p.map, cy = m.y + m.h / 2, s0 = g.probe.now().cam.s;
+    g.wrap.fire('wheel', Object.assign(P(1, 270, cy), { deltaY: -600 }));
+    assert(g.probe.now().cam.s > s0 * 1.8, 'クリア後もホイールで寄れる');
+    const cx = g.probe.now().cam.x;
+    g.drag([{ x: 300, y: cy }, { x: 250, y: cy }, { x: 200, y: cy }], 1);
+    assert(g.probe.now().cam.x > cx + 10, 'クリア後もドラッグで動かせる');
+    const s2 = g.probe.now().cam.s;
+    g.wrap.fire('pointerdown', P(1, 220, cy)); g.wrap.fire('pointerdown', P(2, 320, cy));
+    g.wrap.fire('pointermove', P(1, 170, cy)); g.wrap.fire('pointermove', P(2, 370, cy));
+    g.wrap.fire('pointerup', P(2, 370, cy)); g.wrap.fire('pointerup', P(1, 170, cy));
+    assert(g.probe.now().cam.s > s2 * 1.5, 'クリア後も2本指で広げられる');
+    g.step(60);
+    assert(g.probe.now().cam.s > s2 * 1.5, '動かした後は勝手に全体へ戻らない');
+    const before = JSON.stringify([g.probe.now().state, g.probe.now().misses, g.probe.now().score]);
+    g.tap(270, cy);
+    assert.equal(JSON.stringify([g.probe.now().state, g.probe.now().misses, g.probe.now().score]), before, '地図のタップでは何も起きない');
+  }
   const retry = p.buttons[0];
   g.tap(retry.x + retry.w / 2, retry.y + retry.h / 2);
   assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().left, 47);
