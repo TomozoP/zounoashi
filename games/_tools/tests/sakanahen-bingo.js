@@ -1,4 +1,4 @@
-/* 魚へんビンゴ: 開始・正しい字で開く・違う字で流れる・時間切れ・箱で飛ばす・キー操作・ビンゴまでの回数を確かめる。 */
+/* 難読ビンゴ: 開始・正しい字で開く・違う字で流れる・時間切れ・箱で飛ばす・キー操作・ビンゴまでの回数を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
 const file = 'games/_sakanahen-bingo/index.html';
@@ -379,4 +379,4 @@ ORDER.slice(0, 5).forEach(mark => {
   assert.ok(d.y + (d.y - a.y) * 4 < now(g).H, v + ' カードが画面に収まる');
 });
 
-console.log('魚へんビンゴ: ok');
+console.log('難読ビンゴ: ok');
