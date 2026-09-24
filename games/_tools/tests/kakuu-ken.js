@@ -1,10 +1,10 @@
-/* 架空県名クイズ: 県名の中身・47県を一覧から当てていく・全問正解・全問不正解・使用済み・一覧のスクロール・キー操作・カメラの寄り・押しどころの距離を確かめる。 */
+/* 架空県名クイズ: 県名の中身・県名の置き場所・47県を一覧から埋めていく・外したら選び直し・使用済み・一覧のスクロール・キー操作・カメラの寄り・押しどころの距離を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
 const file = 'games/_kakuu-ken/index.html';
 /* テストのときだけ、正解と中身を覗く */
 const inject = 'window.__dbg={target:function(){return target;},list:function(){return list.slice();},reveal:reveal,' +
-  'NAMES:NAMES,SHAPES:SHAPES,BOX:BOX,aim:aim,goal:function(){return goal;},FULL:function(){return FULL;},MAP:function(){return MAP;}};';
+  'LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES,BOX:BOX,aim:aim,goal:function(){return goal;},FULL:function(){return FULL;},MAP:function(){return MAP;}};';
 
 function open(shape) {
   const g = load(file, { quiet: true, inject });
@@ -31,7 +31,7 @@ function answerBy(g, pick) {
   const before = g.probe.now().q;
   tapName(g, k);
   assert(g.probe.now().answered, '押すと答えが出る');
-  assert(g.until(() => g.probe.now().state === 'result' || g.probe.now().q !== before, 200), '次へ進む');
+  assert(g.until(() => g.probe.now().state === 'result' || g.probe.now().q !== before, 400), '次へ進む');
   return L[k] === t;
 }
 
@@ -47,6 +47,8 @@ function answerBy(g, pick) {
   const REAL = '北海道 青森 岩手 宮城 秋田 山形 福島 茨城 栃木 群馬 埼玉 千葉 東京 神奈川 新潟 富山 石川 福井 山梨 長野 岐阜 静岡 愛知 三重 滋賀 京都 大阪 兵庫 奈良 和歌山 鳥取 島根 岡山 広島 山口 徳島 香川 愛媛 高知 福岡 佐賀 長崎 熊本 大分 宮崎 鹿児島 沖縄'.split(' ');
   N.forEach(n => REAL.forEach(r => assert(!n.includes(r), n + ' に実在の名前 ' + r)));
   g.dbg.SHAPES.forEach((s, i) => assert(s.length >= 1 && s.every(r => r.length >= 4), (i + 1) + '番の形'));
+  /* 県名は、その県の中に置く */
+  g.dbg.LABEL.forEach((p, i) => assert(g.dbg.SHAPES[i].some(r => g.dbg.inside(r, p[0], p[1])), (i + 1) + '番の県名が県の外'));
 }
 
 // 全問正解・47問で終わる・使用済み・もう一度・全問不正解
@@ -70,11 +72,20 @@ function answerBy(g, pick) {
   assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().score, 0); assert.equal(g.probe.now().q, 0);
   assert.equal(g.probe.now().list.filter(c => c.used).length, 0, 'もう一度で一覧が戻る');
 
-  /* 最後の1問は残りが1つなので、46問まで外す */
-  for (let i = 0; i < 46; i++) assert(!answerBy(g, (L, t, P) => L.findIndex((x, k) => x !== t && !P[k].used)));
+  /* 毎回1つ外してから当てる。最後の1問は残りが1つなので外せない */
+  for (let i = 0; i < 46; i++) {
+    const t = g.dbg.target(), L = g.dbg.list(), P = g.probe.now().list, q = g.probe.now().q;
+    tapName(g, L.findIndex((x, k) => x !== t && !P[k].used));
+    assert.equal(g.probe.now().q, q, '外しても同じ県のまま');
+    assert(!g.probe.now().answered, '外しても終わらない');
+    assert.equal(g.probe.now().tried, 1);
+    assert(answerBy(g, (L2, t2) => L2.indexOf(t2)));
+  }
   assert(answerBy(g, (L, t) => L.indexOf(t)));
-  assert.equal(g.probe.now().score, 1);
-  assert.equal(g.probe.now().done.filter(d => d === 2).length, 46, '外した県は外した印');
+  assert.equal(g.probe.now().state, 'result', '47県すべて埋まったら終わり');
+  assert.equal(g.probe.now().score, 1, '1回で当てた数');
+  assert.equal(g.probe.now().misses, 46);
+  assert.equal(g.probe.now().done.filter(d => d === 2).length, 46, '外してから当てた印');
 }
 
 // 使用済みの名前は押せない・答えた後は押しても変わらない・待ち時間・なぞると押さない
@@ -84,10 +95,16 @@ function answerBy(g, pick) {
   const right = L.indexOf(t), wrong = L.findIndex(x => x !== t);
   tapName(g, wrong);
   const q = g.probe.now().q;
-  g.tap(...center(g.probe.now().list[right]));
-  assert.deepEqual(g.probe.now().done.filter(d => d).length, 1, '2回目の押しは効かない');
+  assert(!g.probe.now().answered && g.probe.now().misses === 1);
+  tapName(g, wrong);
+  assert.equal(g.probe.now().misses, 1, '外した名前はもう押せない');
+  tapName(g, right);
+  assert(g.probe.now().answered, 'すぐ選び直せる');
+  g.tap(...center(g.probe.now().list[wrong]));
+  assert.equal(g.probe.now().misses, 1, '当てた後の押しは効かない');
   let f = 0; while (g.probe.now().q === q) { g.step(1); f++; }
-  assert(f >= 70 && f <= 110, '間違いの答えを見せる時間 ' + f + 'コマ');
+  assert(f >= 45 && f <= 65, '当たった県名を見せる時間 ' + f + 'コマ');
+  assert.equal(g.probe.now().tried, 0, '次の県では外した名前がまた押せる');
   /* 使用済み（さっきの正解の名前）は押しても答えにならない */
   tapName(g, right);
   assert(!g.probe.now().answered, '使用済みは押せない');
@@ -122,7 +139,7 @@ function answerBy(g, pick) {
     const q = g.probe.now().q;
     g.press(' ');
     assert(g.probe.now().answered);
-    g.until(() => g.probe.now().state === 'result' || g.probe.now().q !== q, 200);
+    g.until(() => g.probe.now().state === 'result' || g.probe.now().q !== q, 400);
   }
   assert.equal(g.probe.now().score, 47);
   g.press(' ');
