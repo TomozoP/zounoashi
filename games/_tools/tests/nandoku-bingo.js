@@ -1,7 +1,7 @@
 /* 難読ビンゴ: 開始・正しい字で開く・違う字で流れる・時間切れ・箱で飛ばす・キー操作・ビンゴまでの回数を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
-const file = 'games/_nandoku-bingo/index.html';
+const file = 'games/nandoku-bingo/index.html';
 
 const open = shape => { const g = load(file, { quiet: true }); if (shape) g.view(...shape); g.step(2); return g; };
 const tapCell = (g, i) => { const p = g.probe.cell(i); g.tap(p.x, p.y); };
