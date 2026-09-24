@@ -6,7 +6,7 @@ const file = 'games/_henken/index.html';
 /* テストのときだけ、正解と中身を覗く */
 const inject = 'window.__dbg={ask:function(){return ask;},prefAt:prefAt,' +
   'peek:function(c,dx,dy){var k=cursor;cursor=c;stepPref(dx,dy);var r=cursor;cursor=k;return r;},' +
-  'LINES:LINES,LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES};';
+  'LINES:LINES,YOMI:YOMI,MORA:MORA,LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES};';
 
 function open(shape) {
   const g = load(file, { quiet: true, inject });
@@ -30,6 +30,9 @@ function next(g) {
   assert(g.until(() => !g.probe.now().waiting, 120), '次の偏見が出る');
 }
 
+/* ゲームが読んでいる共通の声（games/voice.js） */
+const window_zVoice = g => { const ctx = { window: {} }; require('vm').runInNewContext(require('fs').readFileSync('games/voice.js', 'utf8'), ctx); return ctx.window.zVoice; };
+
 // 偏県名と一文の中身
 {
   const g = load(file, { quiet: true, inject });
@@ -49,6 +52,14 @@ function next(g) {
   L.forEach(s => assert(/そう$/.test(s), '「〜そう」で終わる: ' + s));
   L.forEach(s => assert(s.length >= 8 && s.length <= 28, '一文の長さ: ' + s));
   L.forEach(s => REAL.forEach(r => assert(!s.includes(r), s + ' に実在の名前 ' + r)));
+  /* 読み上げの読み: ひらがな・「ー」・読点だけ。ゆっくりでも長すぎない */
+  const Y = g.dbg.YOMI;
+  assert.equal(Y.length, 47);
+  Y.forEach(y => assert(/^[ぁ-んー、]+$/.test(y), '読みはひらがなだけ: ' + y));
+  Y.forEach((y, i) => {
+    const sec = window_zVoice(g).kana(y, g.dbg.MORA).reduce((s, w) => s + w[2], 0);
+    assert(sec >= 2 && sec <= 7.5, '読み上げの長さ ' + sec.toFixed(1) + '秒: ' + L[i]);
+  });
   g.dbg.SHAPES.forEach((s, i) => assert(s.length >= 1 && s.every(r => r.length >= 4), (i + 1) + '番の形'));
   /* 県名は、その県の中に置く */
   g.dbg.LABEL.forEach((p, i) => assert(g.dbg.SHAPES[i].some(r => g.dbg.inside(r, p[0], p[1])), (i + 1) + '番の県名が県の外'));
@@ -60,11 +71,13 @@ function next(g) {
   g.step(2); g.press(' '); g.step(1);
   const len = g.probe.now().line.length;
   assert(g.probe.now().spoken < 3, '出た直後はまだ読み上げていない');
-  g.step(30);
+  g.step(60);
   const mid = g.probe.now().spoken;
   assert(mid > 0 && mid < len, '途中まで読み上げている');
-  g.step(len * 4 + 30);
+  let f = 60;
+  while (g.probe.now().spoken < len && f < 1200) { g.step(1); f++; }
   assert.equal(g.probe.now().spoken, len, '最後まで読み上げる');
+  assert(f / 60 > len / 10, 'ゆっくりめ（1秒に10文字より遅い）: ' + (len / (f / 60)).toFixed(1) + '文字/秒');
   tapPref(g, g.dbg.ask());
   next(g);
   assert(g.probe.now().spoken < 3, '次の偏見はまた最初から');

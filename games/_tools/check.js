@@ -13,7 +13,7 @@ try {
   if (config.expressionReviewed !== true) console.log('公開前の要確認: 表現の確認が未記録');
   const names = fs.readdirSync(path.join(__dirname, 'tests'));
   const own = names.filter(n => n === id + '.js' || n.startsWith(id + '-') && n.endsWith('.js'));
-  const common = ['action-icons.js', 'audio-start.js', 'common-view-start.js', 'result-actions.js', 'share.js'];
+  const common = ['action-icons.js', 'audio-start.js', 'common-view-start.js', 'result-actions.js', 'share.js', 'voice.js'];
   const commands = [...new Set(common.concat(own))].map(n => ['tests/' + n]);
   if (fs.readFileSync(path.join(dir, 'index.html'), 'utf8').includes('../pad.js')) commands.push(['tests/pad.js', path.basename(dir)]);
   /* 専用確認があるものはそれを使い、時間切れのないゲームへ汎用の結果画面判定を強制しない。 */

@@ -27,14 +27,14 @@ function load(file, opts) {
   /* <script> を、HTMLに出てくる順につなぐ。順番が入れかわると、
      先に決めておく設定が、後から効くことになってしまう。
      share.js は zShare として渡すので読まない。
-     操作・表示・開始・音声の共通ファイルは、いつでも読む。
+     操作・表示・開始・音声・声の共通ファイルは、いつでも読む。
      それ以外の別ファイルは opts.withScripts のときだけ */
   var found = 0;
   html.replace(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/script>/g, function (m, src, body) {
     if (!src) { parts.push(body); found++; return m; }
     var plain = src.split("?")[0];          /* preview の ?v=… は外して見る */
     if (/share\.js$/.test(plain) || /^https?:/.test(plain)) return m;
-    if (!opts.withScripts && !/(?:pad|action-icons|result-actions|audio|view|start)\.js$/.test(plain)) return m;
+    if (!opts.withScripts && !/(?:pad|action-icons|result-actions|audio|view|start|voice)\.js$/.test(plain)) return m;
     var p = path.join(dir, plain);
     if (fs.existsSync(p)) parts.push(fs.readFileSync(p, "utf8"));
     return m;
