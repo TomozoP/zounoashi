@@ -35,7 +35,7 @@
 <script>
 /* 偏県
 
-   地図をドラッグ・2本指で動かして県をタップで選び、47の「偏県」の一覧から、その県への偏見を選ぶ。
+   上で「偏見ロボ」が県への偏見を1つ読み上げる。地図をドラッグ・2本指で動かして、当てはまる県をタップする。
    外したら同じ県のまま選び直し。当てると偏県が地図に出て、47都道府県を全部埋めたら終わり。
    偏見は名物・景色・あるあるを大げさにしたもの。人の性格や見た目・方言をいじる、
    災害・基地・政治・順位づけに触れる、会社やキャラクターの名前を出す、は避けている。
@@ -265,6 +265,10 @@
     o.connect(g); g.connect(AC.destination);
     o.start(n); o.stop(n + dur + 0.05);
   }
+  /* 偏見ロボの声。1文字ごとに短い電子音（ピポピポ） */
+  function soundTalk() {
+    tone(560 + Math.random() * 360, 0.045, 0.045, "square");
+  }
   function soundRight() {
     tone(880, 0.16, 0.14, "triangle");
     tone(1320, 0.3, 0.12, "triangle", 0, 0.1);
@@ -293,7 +297,7 @@
   var finishT = -1;                            /* 全部埋まってからの時間 */
 
   /* 上に偏見の札、その下は全部地図 */
-  var CARD_H = 112;
+  var CARD_H = 124;
   var MAP, CARD;
   var finale = 0;                              /* 全部埋まった後、札が消えて地図が画面いっぱいに広がる具合 0〜1 */
   function place() {
@@ -391,8 +395,11 @@
     tried = {};
     wrongP = -1; wrongT = 0;
     askT = T;
+    spoken = 0;
   }
-  var askT = 0;                                /* いまの偏見を出した時刻（札が出る動きに使う） */
+  var askT = 0;
+  var TALK_CPS = 16;                           /* 偏見ロボが1秒に読み上げる文字数 */
+  var spoken = 0;                              /* 読み上げ済みの文字数 */                                /* いまの偏見を出した時刻（札が出る動きに使う） */
   /* ヒントで囲む地方（まだなら -1） */
   function hint() { return state === S.PLAY && ask >= 0 && !done[ask] && Object.keys(tried).length >= HINT_AFTER ? regionOf(ask) : -1; }
   function left() { return done.filter(function (d) { return !d; }).length; }
@@ -417,18 +424,22 @@
   }
   /* キー操作: いまの県から、押した向きにあるいちばん近いまだの県へ */
   function stepPref(dx, dy) {
-    var from = cursor >= 0 ? LABEL[cursor] : toWorld(MAP.x + MAP.w / 2, MAP.y + MAP.h / 2), best = -1, cost = Infinity;
-    for (var i = 0; i < N; i++) {
-      if (done[i] || i === cursor) continue;
-      var vx = LABEL[i][0] - from[0], vy = LABEL[i][1] - from[1];
-      var along = cursor < 0 ? 1 : vx * dx + vy * dy, side = Math.abs(vx * dy - vy * dx);
-      /* 押した向きから左右45度以内だけ。広げすぎると2県を行ったり来たりする */
-      if (along <= 0 || (cursor >= 0 && side > along)) continue;
-      var c = cursor < 0 ? Math.hypot(vx, vy) : along + side * 2;
-      if (c < cost) { cost = c; best = i; }
+    var from = cursor >= 0 ? LABEL[cursor] : toWorld(MAP.x + MAP.w / 2, MAP.y + MAP.h / 2);
+    /* まずは押した向きから左右45度以内（広いと2県を行ったり来たりする）。無ければ押した向きの側すべて */
+    for (var wide = 0; wide < 2; wide++) {
+      var best = -1, cost = Infinity;
+      for (var i = 0; i < N; i++) {
+        if (done[i] || i === cursor) continue;
+        var vx = LABEL[i][0] - from[0], vy = LABEL[i][1] - from[1];
+        var along = cursor < 0 ? 1 : vx * dx + vy * dy, side = Math.abs(vx * dy - vy * dx);
+        if (along <= 0 || (cursor >= 0 && !wide && side > along)) continue;
+        var c = cursor < 0 ? Math.hypot(vx, vy) : along + side * 2;
+        if (c < cost) { cost = c; best = i; }
+      }
+      if (best >= 0) { cursor = best; showPref(best); return; }
     }
-    if (best >= 0) { cursor = best; showPref(best); }
   }
+
 
   /* ============ 進行 ============ */
   function update(dt) {
@@ -443,6 +454,11 @@
     }
     if (state !== S.PLAY) return;
     if (wrongT > 0) wrongT = Math.max(0, wrongT - dt);
+    /* 読み上げ。句読点やかぎかっこでは鳴らさない */
+    if (ask >= 0 && finishT < 0) {
+      var s = LINES[ask], n = Math.min(s.length, Math.floor((T - askT - 0.15) * TALK_CPS));
+      while (spoken < n) { if (!/[、。「」]/.test(s[spoken]) && spoken % 2 === 0) soundTalk(); spoken++; }
+    }
     if (nextT >= 0) {
       nextT -= dt;
       if (nextT < 0) { nextT = -1; nextAsk(); }
@@ -690,34 +706,102 @@
     ctx.textBaseline = "alphabetic";
   }
 
-  /* 上の札。いまの偏見を1つ、大きく。長い文は「、」のあたりで2行に分ける */
+  /* 上の段。左に偏見ロボ、右にその吹き出し。文字は読み上げに合わせて1文字ずつ出る。
+     長い文は「、」のあたりで2行に分ける（分け方は全文で決めて、途中で行がずれないように） */
+  var ROBO_W = 104;
   function drawCard() {
     var c = CARD;
     if (c.y + c.h < 0) return;
-    var pop = Math.min(1, (T - askT) / 0.25), ok = nextT >= 0;
+    var ok = nextT >= 0, s = LINES[ask], shown = Math.min(s.length, spoken);
+    var talking = shown < s.length && !ok;
+    drawRobot(c.x + ROBO_W / 2, c.y + c.h / 2 + 8, talking, ok);
+    /* 吹き出し */
+    var bx = c.x + ROBO_W + 10, bw = c.x + c.w - bx, by = c.y, bh = c.h;
+    var pop = Math.min(1, (T - askT) / 0.2);
     ctx.save();
-    ctx.globalAlpha = 0.35 + 0.65 * pop;
+    ctx.globalAlpha *= 0.4 + 0.6 * pop;
     ctx.shadowColor = "rgba(22,32,46,.18)"; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
-    roundRect(c.x, c.y, c.w, c.h, 18);
+    ctx.beginPath();
+    var r = 18;
+    ctx.moveTo(bx + r, by);
+    ctx.arcTo(bx + bw, by, bx + bw, by + bh, r);
+    ctx.arcTo(bx + bw, by + bh, bx, by + bh, r);
+    ctx.arcTo(bx, by + bh, bx, by, r);
+    ctx.lineTo(bx, by + bh * 0.62);
+    ctx.lineTo(bx - 14, by + bh * 0.52);                 /* ロボのほうへ出るしっぽ */
+    ctx.lineTo(bx, by + bh * 0.38);
+    ctx.arcTo(bx, by, bx + bw, by, r);
+    ctx.closePath();
     ctx.fillStyle = ok ? "#e3f3dc" : "#fff";
     ctx.fill();
     ctx.shadowColor = "transparent";
-    ctx.strokeStyle = ok ? "#6db56e" : "rgba(22,32,46,.2)"; ctx.lineWidth = ok ? 3 : 1.5; ctx.stroke();
+    ctx.strokeStyle = ok ? "#6db56e" : "rgba(22,32,46,.25)"; ctx.lineWidth = ok ? 3 : 1.5; ctx.stroke();
     ctx.fillStyle = "#16202e";
-    ctx.textAlign = "center";
+    ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    var s = LINES[ask], room = c.w - 36, cx = c.x + c.w / 2, cy = c.y + c.h / 2 + 1;
-    if (fit(s, room, 28) >= 24) ctx.fillText(s, cx, cy);
+    var room = bw - 32, x0 = bx + 16, cy = by + bh / 2 + 1;
+    var at = fit(s, room, 26) >= 22 ? s.length : breakAt(s);
+    var l1 = s.slice(0, at), l2 = s.slice(at);
+    var size = l2 ? Math.min(fit(l1, room, 24), fit(l2, room, 24)) : fit(s, room, 26);
+    ctx.font = "800 " + size + "px sans-serif";
+    /* 行の幅は全文で決め、左をそろえて中央に置く */
+    var wmax = Math.max(ctx.measureText(l1).width, l2 ? ctx.measureText(l2).width : 0);
+    x0 = bx + (bw - wmax) / 2;
+    if (!l2) ctx.fillText(s.slice(0, shown), x0, cy);
     else {
-      var at = breakAt(s), l1 = s.slice(0, at), l2 = s.slice(at);
-      var size = Math.min(fit(l1, room, 26), fit(l2, room, 26));
-      ctx.font = "800 " + size + "px sans-serif";
-      ctx.fillText(l1, cx, cy - size * 0.65);
-      ctx.fillText(l2, cx, cy + size * 0.65);
+      ctx.fillText(l1.slice(0, shown), x0, cy - size * 0.65);
+      if (shown > at) ctx.fillText(l2.slice(0, shown - at), x0, cy + size * 0.65);
     }
     ctx.restore();
+    ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
   }
+
+  /* 偏見ロボ。四角い頭にアンテナ、丸い目、格子の口。話している間は口がぱくぱく、
+     外されたら首を振り、当てられたら目がにっこり */
+  function drawRobot(x, y, talking, happy) {
+    var shake = wrongT > 0 ? Math.sin(wrongT * 60) * 4 * (wrongT / WRONG_FLASH) : 0;
+    var bob = talking ? Math.sin(T * 18) * 1.5 : Math.sin(T * 2) * 1;
+    ctx.save();
+    ctx.translate(x + shake, y + bob);
+    ctx.scale(1.25, 1.25);
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#16202e";
+    /* アンテナ */
+    ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(0, -54); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, -57, 5, 0, Math.PI * 2);
+    ctx.fillStyle = talking && Math.floor(T * 8) % 2 ? "#ff7a2f" : "#e2504c"; ctx.fill(); ctx.stroke();
+    /* 耳 */
+    roundRect(-44, -18, 9, 22, 3); ctx.fillStyle = "#9fb0c0"; ctx.fill(); ctx.stroke();
+    roundRect(35, -18, 9, 22, 3); ctx.fill(); ctx.stroke();
+    /* 頭 */
+    roundRect(-36, -40, 72, 64, 14);
+    ctx.fillStyle = "#c9d5df"; ctx.fill(); ctx.stroke();
+    /* 顔の画面 */
+    roundRect(-28, -32, 56, 48, 9);
+    ctx.fillStyle = "#23364a"; ctx.fill();
+    /* 目 */
+    ctx.fillStyle = ctx.strokeStyle = "#7df0ff";
+    if (happy) {
+      ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.arc(-12, -12, 6, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+      ctx.beginPath(); ctx.arc(12, -12, 6, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+    } else {
+      var blink = (T % 3.2) < 0.12 ? 0.2 : 1;
+      ctx.beginPath(); ctx.ellipse(-12, -14, 5.5, 6.5 * blink, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(12, -14, 5.5, 6.5 * blink, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    /* 口: 話している間は開いたり閉じたり */
+    var open = talking ? 2 + (Math.sin(T * 26) + 1) * 3.5 : 2;
+    ctx.fillStyle = "#7df0ff";
+    roundRect(-13, 3 - open / 2 + 2, 26, open, 2); ctx.fill();
+    /* 首と胴 */
+    ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
+    roundRect(-8, 24, 16, 6, 2); ctx.fillStyle = "#9fb0c0"; ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
   /* 2行に分ける位置。真ん中にいちばん近い「、」の後。無ければ真ん中 */
   function breakAt(s) {
     var mid = s.length / 2, best = -1;
@@ -796,7 +880,7 @@
     now: function () {
       return {
         state: state, score: score, W: W, H: H, N: N, q: qi, line: state === S.INTRO ? "" : LINES[ask],
-        left: state === S.INTRO ? N : left(), waiting: nextT >= 0, hint: hint(),
+        left: state === S.INTRO ? N : left(), waiting: nextT >= 0, hint: hint(), spoken: spoken,
         done: done.slice(), misses: misses, tried: Object.keys(tried).length, cursor: cursor, keyMode: keyMode,
         cam: { x: cam.x, y: cam.y, s: cam.s }, full: FULL, map: { x: MAP.x, y: MAP.y, w: MAP.w, h: MAP.h },
         card: { x: CARD.x, y: CARD.y, w: CARD.w, h: CARD.h }

@@ -5,6 +5,7 @@ const load = require('../harness');
 const file = 'games/_henken/index.html';
 /* テストのときだけ、正解と中身を覗く */
 const inject = 'window.__dbg={ask:function(){return ask;},prefAt:prefAt,' +
+  'peek:function(c,dx,dy){var k=cursor;cursor=c;stepPref(dx,dy);var r=cursor;cursor=k;return r;},' +
   'LINES:LINES,LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES};';
 
 function open(shape) {
@@ -51,6 +52,22 @@ function next(g) {
   g.dbg.SHAPES.forEach((s, i) => assert(s.length >= 1 && s.every(r => r.length >= 4), (i + 1) + '番の形'));
   /* 県名は、その県の中に置く */
   g.dbg.LABEL.forEach((p, i) => assert(g.dbg.SHAPES[i].some(r => g.dbg.inside(r, p[0], p[1])), (i + 1) + '番の県名が県の外'));
+}
+
+// 偏見ロボが1文字ずつ読み上げる。当てて次の偏見になると、また最初から
+{
+  const g = load(file, { quiet: true, inject });
+  g.step(2); g.press(' '); g.step(1);
+  const len = g.probe.now().line.length;
+  assert(g.probe.now().spoken < 3, '出た直後はまだ読み上げていない');
+  g.step(30);
+  const mid = g.probe.now().spoken;
+  assert(mid > 0 && mid < len, '途中まで読み上げている');
+  g.step(len * 4 + 30);
+  assert.equal(g.probe.now().spoken, len, '最後まで読み上げる');
+  tapPref(g, g.dbg.ask());
+  next(g);
+  assert(g.probe.now().spoken < 3, '次の偏見はまた最初から');
 }
 
 // 上に偏見が1つ出る。地図の県をタップすると答えになる。外したら同じ偏見のまま
@@ -176,19 +193,29 @@ function next(g) {
   const first = g.probe.now().cursor;
   ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].some(k => { g.press(k); return g.probe.now().cursor !== first; });
   assert.notEqual(g.probe.now().cursor, first, '矢印で別の県へ');
-  /* 矢印だけで、いまの偏見の県までたどり着ける */
-  const L = g.dbg.LABEL;
+  /* 矢印だけで、いまの偏見の県までたどり着ける。どの矢印でどこへ移るかをたどって道を探し、実際にそのキーを押す */
+  const KEYS = [['ArrowRight', 1, 0], ['ArrowLeft', -1, 0], ['ArrowDown', 0, 1], ['ArrowUp', 0, -1]];
+  function route(from, to) {
+    const prev = { [from]: null }, q = [from];
+    while (q.length) {
+      const c = q.shift();
+      if (c === to) break;
+      for (const [key, dx, dy] of KEYS) {
+        const n = g.dbg.peek(c, dx, dy);
+        if (n !== c && !(n in prev)) { prev[n] = [c, key]; q.push(n); }
+      }
+    }
+    if (!(to in prev)) return null;
+    const keys = [];
+    for (let c = to; prev[c]; c = prev[c][0]) keys.unshift(prev[c][1]);
+    return keys;
+  }
   for (let n = 0; n < 47; n++) {
     const a = g.dbg.ask();
-    let guard = 0;
-    while (g.probe.now().cursor !== a && guard++ < 80) {
-      if (g.probe.now().cursor < 0) { g.press(' '); continue; }
-      const c = g.probe.now().cursor, dx = L[a][0] - L[c][0], dy = L[a][1] - L[c][1];
-      const h = dx > 0 ? 'ArrowRight' : 'ArrowLeft', v = dy > 0 ? 'ArrowDown' : 'ArrowUp';
-      const keys = Math.abs(dx) > Math.abs(dy) ? [h, v] : [v, h];
-      g.press(keys[0]);
-      if (g.probe.now().cursor === c) g.press(keys[1]);
-    }
+    if (g.probe.now().cursor < 0) g.press(' ');
+    const keys = route(g.probe.now().cursor, a);
+    assert(keys, (n + 1) + '問目: 矢印の道がある');
+    keys.forEach(k => g.press(k));
     assert.equal(g.probe.now().cursor, a, (n + 1) + '問目: 矢印でたどり着ける');
     g.press(' ');
     assert(g.probe.now().done[a] > 0);
