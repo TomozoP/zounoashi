@@ -213,7 +213,7 @@ for (const shape of load.SHAPES) {
   const g = open(shape);
   const p = g.probe.now(), cs = p.list.map(center);
   for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
-    assert(Math.hypot(cs[i][0] - cs[j][0], cs[i][1] - cs[j][1]) >= 63, '押しどころの間隔');
+    assert(Math.hypot(cs[i][0] - cs[j][0], cs[i][1] - cs[j][1]) >= 48, '押しどころの間隔（一覧は指定で48に詰めている）');
   }
   assert(p.listTop >= p.map.h, '一覧は地図の下');
   for (let i = 0; i < 47; i++) {
