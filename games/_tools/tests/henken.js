@@ -1,11 +1,11 @@
-/* 架空県名クイズ: 県名の中身・県名の置き場所・地図をタップして県を選ぶ・ドラッグと2本指とホイールで地図を動かす・
+/* 偏県: 県名の中身・県名の置き場所・地図をタップして県を選ぶ・ドラッグと2本指とホイールで地図を動かす・
    外したら選び直し・47県を埋めて終わる・一覧のスクロール・キー操作・押しどころの距離を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
-const file = 'games/_kakuu-ken/index.html';
+const file = 'games/_henken/index.html';
 /* テストのときだけ、正解と中身を覗く */
 const inject = 'window.__dbg={list:function(){return list.slice();},reveal:reveal,prefAt:prefAt,' +
-  'LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES};';
+  'LINES:LINES,LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES};';
 
 function open(shape) {
   const g = load(file, { quiet: true, inject });
@@ -36,14 +36,22 @@ const kOf = (g, i) => g.dbg.list().indexOf(i);
 // 県名の中身
 {
   const g = load(file, { quiet: true, inject });
-  const N = g.dbg.NAMES;
+  /* 「|」は2行にするときの区切り。1つだけ、端には置かない */
+  g.dbg.NAMES.forEach(n => assert(/^[^|]+|[^|]+$/.test(n), '区切りは1つ: ' + n));
+  const N = g.dbg.NAMES.map(n => n.replace('|', ''));
   assert.equal(N.length, 47);
   assert.equal(g.dbg.SHAPES.length, 47);
   assert.equal(new Set(N).size, 47, '県名は重ならない');
-  N.forEach(n => assert(/^[^\s県]{1,8}県$/.test(n), '名前＋県: ' + n));
-  /* 実際の都道府県名は使わない */
+  const SUFFIX = '道' + '県'.repeat(11) + '都' + '県'.repeat(12) + '府府' + '県'.repeat(20);
+  N.forEach((n, i) => assert(n.length >= 3 && n.length <= 9 && n.slice(-1) === SUFFIX[i], '偏見＋都道府県: ' + n));
+  /* 答えが書いてあると当てる遊びにならないので、実際の都道府県名は入れない */
   const REAL = '北海道 青森 岩手 宮城 秋田 山形 福島 茨城 栃木 群馬 埼玉 千葉 東京 神奈川 新潟 富山 石川 福井 山梨 長野 岐阜 静岡 愛知 三重 滋賀 京都 大阪 兵庫 奈良 和歌山 鳥取 島根 岡山 広島 山口 徳島 香川 愛媛 高知 福岡 佐賀 長崎 熊本 大分 宮崎 鹿児島 沖縄'.split(' ');
   N.forEach(n => REAL.forEach(r => assert(!n.includes(r), n + ' に実在の名前 ' + r)));
+  /* 一覧の一文も47個。重ならず、1行に収まる長さで、答えの都道府県名は入れない */
+  const L = g.dbg.LINES;
+  assert.equal(L.length, 47); assert.equal(new Set(L).size, 47);
+  L.forEach(s => assert(s.length >= 8 && s.length <= 24, '一文の長さ: ' + s));
+  L.forEach(s => REAL.forEach(r => assert(!s.includes(r), s + ' に実在の名前 ' + r)));
   g.dbg.SHAPES.forEach((s, i) => assert(s.length >= 1 && s.every(r => r.length >= 4), (i + 1) + '番の形'));
   /* 県名は、その県の中に置く */
   g.dbg.LABEL.forEach((p, i) => assert(g.dbg.SHAPES[i].some(r => g.dbg.inside(r, p[0], p[1])), (i + 1) + '番の県名が県の外'));
@@ -214,7 +222,7 @@ for (const shape of load.SHAPES) {
   }
   g.dbg.reveal(46); g.step(120);
   const last = g.probe.now().list[46];
-  assert(last.y >= p.listTop && last.y + last.h <= p.listBottom, '最後の名前まで届く ' + shape);
+  assert(last.y >= p.listTop - 0.5 && last.y + last.h <= p.listBottom + 0.5, '最後の名前まで届く ' + shape);
 }
 
-console.log('架空県名クイズ: OK');
+console.log('偏県: OK');

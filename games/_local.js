@@ -34,5 +34,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "Wikipediaの記事でかなビンゴ"
   },
-  {"type":"lab","tags":[],"id":"kakuu-ken","title":"架空県名クイズ","year":2026,"date":"2026-09-24","plays":null,"url":"","img":"games/_kakuu-ken/img/thumb.webp","play":"games/_kakuu-ken/index.html","full":true,"catch":"形から名付けた架空の県名を当てる"},
+  {"type":"lab","tags":[],"id":"henken","title":"偏県","year":2026,"date":"2026-09-24","plays":null,"url":"","img":"games/_henken/img/thumb.webp","play":"games/_henken/index.html","full":true,"catch":"県への偏見を当てる"},
 ];
