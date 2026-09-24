@@ -54,8 +54,10 @@ if (!local) {
           '   公開するときは games/_tools/publish.js を使います。 */\n' +
           'window.DRAFT_GAMES = [\n];\n';
 }
-/* 空の一覧（= [];）にも足せるように、閉じかっこの手前に入れる */
-fs.writeFileSync(localPath, local.replace(/\n?\];\s*$/, () => "\n" + entry + "];\n"));
+/* 空の一覧（= [];）にも足せるように、閉じかっこの手前に入れる。
+   前の項目の終わりにカンマが無ければ付ける（無いまま足すと一覧全体が読めなくなる） */
+var body = local.replace(/\n?\];\s*$/, "").replace(/\}\s*$/, "},");
+fs.writeFileSync(localPath, body + "\n" + entry + "];\n");
 
 console.log("できました:");
 console.log("  games/_" + id + "/index.html   ← ここを書く（▼UPDATE ▼DRAW ▼SHARE）");
