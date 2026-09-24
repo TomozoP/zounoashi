@@ -4,7 +4,7 @@ const assert = require('assert');
 const load = require('../harness');
 const file = 'games/_henken/index.html';
 /* テストのときだけ、正解と中身を覗く */
-const inject = 'window.__dbg={ask:function(){return ask;},prefAt:prefAt,' +
+const inject = 'window.__dbg={ask:function(){return ask;},prefAt:prefAt,shareButton:shareButton,' +
   'peek:function(c,dx,dy){var k=cursor;cursor=c;stepPref(dx,dy);var r=cursor;cursor=k;return r;},' +
   'LINES:LINES,YOMI:YOMI,MORA:MORA,LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES};';
 
@@ -198,7 +198,16 @@ const window_zVoice = g => { const ctx = { window: {} }; require('vm').runInNewC
   assert(g.probe.now().confetti <= 421, '紙吹雪は増えすぎない');
   const p = g.probe.now(), H = p.H;
   p.buttons.forEach(b => assert(b.y > H * 0.8 && b.y + b.h <= H - 20, 'ボタンは画面の下 ' + JSON.stringify(b)));
-  assert(p.card.y >= 0 && p.card.y + p.card.h <= p.map.y, '札（ロボと点数）は上に残る');
+  /* ロボは上の段を左右に行き来する（吹き出しは出さない） */
+  const xs = [];
+  for (let i = 0; i < 300; i++) { g.step(1); xs.push(g.probe.now().roboX); }
+  const lo = Math.min(...xs), hi = Math.max(...xs);
+  assert(lo < p.card.x + 80 && hi > p.card.x + p.card.w - 80, 'ロボが左右の端まで動く: ' + lo.toFixed(0) + '〜' + hi.toFixed(0));
+  /* シェアは持ち主の指定の文（リンクは共通処理が付ける） */
+  assert.equal(g.dbg.shareButton.hidden, false);
+  g.dbg.shareButton.fire('click', { stopPropagation() {} });
+  assert.equal(g.shared.length, 1);
+  assert.equal(g.shared[0], 'AIの偏見をすべて当てました #偏県');
   const retry = p.buttons[0];
   g.tap(retry.x + retry.w / 2, retry.y + retry.h / 2);
   assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().left, 47);
