@@ -276,64 +276,29 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
-  var WRONG_FLASH = 0.45;                      /* 外れの赤を見せる秒数（その間も選び直せる） */
+  var WRONG_FLASH = 0.45;                      /* 外した県を赤く見せる秒数（その間も選び直せる） */
+  var NEXT_WAIT = 0.7;                         /* 当ててから次の偏見が出るまでの秒数 */
   var FINAL_WAIT = 3;                          /* 全部埋まった地図を見せる秒数 */
   var state, score = 0, misses = 0, T = 0, keyMode = false;
-  var target = -1;                             /* 地図で選んでいる県（-1 は未選択） */
-  var sel = 0, focus = "map";                  /* キー操作: 一覧の目印と、地図と一覧のどちらを動かすか */
-  var triedBy = {}, wrongK = -1, wrongT = 0;   /* 県ごとに外した名前（一覧の位置） */
-  var list = [];                               /* 一覧の並び（県の番号） */
+  var order = [], qi = -1, ask = -1;           /* 出す順（県の番号）と、いま出している偏見の県 */
+  var cursor = -1;                             /* キー操作で選んでいる県 */
+  var tried = {}, wrongP = -1, wrongT = 0;     /* いまの偏見で外した県 */
   var done = [];                               /* 県ごと: 0 まだ / 1 1回で当てた / 2 外してから当てた */
   var solvedAt = [];                           /* 県ごとの当てた時刻（県名が出る動きに使う） */
+  var nextT = -1;                              /* 当ててから次へ進むまでの残り */
   var finishT = -1;                            /* 全部埋まってからの時間 */
 
-  /* 地図と、下の一覧の置き場所 */
-  /* 一度に多く見えるよう、行の間隔は持ち主の指定で標準（63）より詰めている */
-  var COLS = 1, CELL_W = 516, BTN_W = 516, BTN_H = 42, PITCH = 48;
-  var MAP, LIST, scrollY = 0, maxScroll = 0;
-  var finale = 0;                              /* 全部埋まった後、地図が画面いっぱいに広がる具合 0〜1 */
+  /* 上に偏見の札、その下は全部地図 */
+  var CARD_H = 112;
+  var MAP, CARD;
+  var finale = 0;                              /* 全部埋まった後、札が消えて地図が画面いっぱいに広がる具合 0〜1 */
   function place() {
-    var base = Math.round(H * 0.42), e = finale * finale * (3 - 2 * finale);
-    MAP = { x: 0, y: 0, w: W, h: base + (H - base) * e };
-    var bottom = Math.max(14, H * 0.015);
-    LIST = { x: (W - CELL_W * COLS) / 2, y: MAP.h + 10, h: H - MAP.h - 10 - bottom };
-    var rows = Math.ceil(N / COLS);
-    maxScroll = Math.max(0, rows * PITCH - (PITCH - BTN_H) - LIST.h);
-    scrollY = clampScroll(scrollY);
+    var e = finale * finale * (3 - 2 * finale), top = (CARD_H + 20) * (1 - e);
+    CARD = { x: 12, y: 12 - (CARD_H + 20) * e, w: W - 24, h: CARD_H };
+    MAP = { x: 0, y: top, w: W, h: H - top };
     var pad = 12;
     FULL = Math.min((MAP.w - pad * 2) / (WORLD[2] - WORLD[0]), (MAP.h - pad * 2) / (WORLD[3] - WORLD[1]));
     clampCam(cam);
-  }
-  function clampScroll(y) { return Math.max(0, Math.min(maxScroll, y)); }
-  /* 一覧のk番目のボタン（画面の座標） */
-  function cell(k) {
-    return {
-      x: LIST.x + (k % COLS) * CELL_W + (CELL_W - BTN_W) / 2,
-      y: LIST.y + Math.floor(k / COLS) * PITCH - scrollY,
-      w: BTN_W, h: BTN_H
-    };
-  }
-  function cellAt(x, y) {
-    if (y < LIST.y || y > LIST.y + LIST.h) return -1;
-    for (var k = 0; k < N; k++) {
-      var b = cell(k);
-      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return k;
-    }
-    return -1;
-  }
-  function used(k) { return done[list[k]] > 0; }
-  function tried(k) { return target >= 0 && !!(triedBy[target] || {})[k]; }
-  /* 押せる名前か（県を選んでいて、まだ埋まっていない名前で、この県でまだ外していない） */
-  function pickable(k) { return target >= 0 && !used(k) && !tried(k); }
-  /* k番目が一覧の中に見えるようにする */
-  var scrollGoal = null;
-  function reveal(k) {
-    var b = cell(k), y = b.y + scrollY - LIST.y;
-    var s = scrollY;
-    if (y - 6 < s) s = y - 6;
-    if (y + BTN_H + 6 > s + LIST.h) s = y + BTN_H + 6 - LIST.h;
-    s = clampScroll(s);
-    if (Math.abs(s - scrollY) > 0.5) scrollGoal = s;
   }
 
   /* ============ カメラ ============
@@ -352,13 +317,13 @@
     return { x: (WORLD[0] + WORLD[2]) / 2, y: (WORLD[1] + WORLD[3]) / 2, s: FULL };
   }
   function snapCam() { cam = clampCam(wholeView()); }
-  function toWorld(X, Y) { return [(X - MAP.w / 2) / cam.s + cam.x, (Y - MAP.h / 2) / cam.s + cam.y]; }
+  function toWorld(X, Y) { return [(X - MAP.x - MAP.w / 2) / cam.s + cam.x, (Y - MAP.y - MAP.h / 2) / cam.s + cam.y]; }
   /* 画面の点 (X, Y) を動かさずに倍率を変える */
   function zoomAt(X, Y, s) {
     var w = toWorld(X, Y);
     cam.s = Math.max(FULL, Math.min(FULL * ZOOM_MAX, s));
-    cam.x = w[0] - (X - MAP.w / 2) / cam.s;
-    cam.y = w[1] - (Y - MAP.h / 2) / cam.s;
+    cam.x = w[0] - (X - MAP.x - MAP.w / 2) / cam.s;
+    cam.y = w[1] - (Y - MAP.y - MAP.h / 2) / cam.s;
     clampCam(cam);
     goal = null;
   }
@@ -366,7 +331,7 @@
   function showPref(i) {
     var b = i === OKINAWA ? INSET : BOX[i];
     var x0 = sx(b[0]), x1 = sx(b[2]), y0 = sy(b[1]), y1 = sy(b[3]);
-    if (x0 >= 0 && x1 <= MAP.w && y0 >= 0 && y1 <= MAP.h) return;
+    if (x0 >= MAP.x && x1 <= MAP.x + MAP.w && y0 >= MAP.y && y1 <= MAP.y + MAP.h) return;
     goal = clampCam({ x: (b[0] + b[2]) / 2, y: (b[1] + b[3]) / 2, s: cam.s });
   }
 
@@ -407,59 +372,56 @@
     T = 0;
     done = NAMES.map(function () { return 0; });
     solvedAt = NAMES.map(function () { return -1; });
-    triedBy = {};
-    list = shuffle(range());
-    target = -1; sel = 0; focus = "map";
-    wrongK = -1; wrongT = 0;
-    scrollY = 0; scrollGoal = null; listDrag = null; vel = 0;
-    finale = 0; finishT = -1;
+    order = shuffle(range());
+    qi = -1;
+    cursor = -1;
+    finale = 0; finishT = -1; nextT = -1;
     pointers = {}; mapDrag = null; pinch = null;
     place();
     goal = wholeView();
+    nextAsk();
   }
-  function choose(i) {
-    if (state !== S.PLAY || finishT >= 0 || i < 0 || done[i]) return;
-    target = i;
-    wrongK = -1; wrongT = 0;
-    if (!pickable(sel)) sel = nextFree(sel, 1);
+  function nextAsk() {
+    qi++;
+    ask = order[qi];
+    tried = {};
+    wrongP = -1; wrongT = 0;
+    askT = T;
   }
-  function nextFree(k, d) {
-    for (var n = 0; n < N; n++) { k = (k + d + N) % N; if (pickable(k)) return k; }
-    return k;
-  }
+  var askT = 0;                                /* いまの偏見を出した時刻（札が出る動きに使う） */
   function left() { return done.filter(function (d) { return !d; }).length; }
-  /* 外したらその名前だけ押せなくなり、同じ県のまま選び直す。当たったら県名が地図に出る */
-  function answer(k) {
-    if (state !== S.PLAY || finishT >= 0 || k < 0 || !pickable(k)) return;
-    if (list[k] !== target) {
-      (triedBy[target] = triedBy[target] || {})[k] = true;
+  /* 地図の県で答える。外したらその県が赤くなり、同じ偏見のまま選び直す */
+  function answer(i) {
+    if (state !== S.PLAY || finishT >= 0 || nextT >= 0 || i < 0 || done[i] || tried[i]) return;
+    if (i !== ask) {
+      tried[i] = true;
       misses++;
-      wrongK = k; wrongT = WRONG_FLASH;
+      wrongP = i; wrongT = WRONG_FLASH;
       soundWrong();
-      if (sel === k) sel = nextFree(sel, 1);
       return;
     }
-    var first = !triedBy[target];
-    done[target] = first ? 1 : 2;
+    var first = !Object.keys(tried).length;
+    done[i] = first ? 1 : 2;
     if (first) score++;
-    solvedAt[target] = T;
+    solvedAt[i] = T;
     soundRight();
-    target = -1;
-    focus = "map";
-    if (!left()) { finishT = 0; goal = null; }
+    if (cursor === i) cursor = -1;
+    if (!left()) { finishT = 0; goal = null; return; }
+    nextT = NEXT_WAIT;
   }
   /* キー操作: いまの県から、押した向きにあるいちばん近いまだの県へ */
   function stepPref(dx, dy) {
-    var from = target >= 0 ? LABEL[target] : toWorld(MAP.w / 2, MAP.h / 2), best = -1, score_ = Infinity;
+    var from = cursor >= 0 ? LABEL[cursor] : toWorld(MAP.x + MAP.w / 2, MAP.y + MAP.h / 2), best = -1, cost = Infinity;
     for (var i = 0; i < N; i++) {
-      if (done[i] || i === target) continue;
+      if (done[i] || i === cursor) continue;
       var vx = LABEL[i][0] - from[0], vy = LABEL[i][1] - from[1];
-      var along = vx * dx + vy * dy, side = Math.abs(vx * dy - vy * dx);
-      if (along <= 0) continue;
-      var c = along + side * 2;
-      if (c < score_) { score_ = c; best = i; }
+      var along = cursor < 0 ? 1 : vx * dx + vy * dy, side = Math.abs(vx * dy - vy * dx);
+      /* 押した向きから左右45度以内だけ。広げすぎると2県を行ったり来たりする */
+      if (along <= 0 || (cursor >= 0 && side > along)) continue;
+      var c = cursor < 0 ? Math.hypot(vx, vy) : along + side * 2;
+      if (c < cost) { cost = c; best = i; }
     }
-    if (best >= 0) { choose(best); showPref(best); }
+    if (best >= 0) { cursor = best; showPref(best); }
   }
 
   /* ============ 進行 ============ */
@@ -473,18 +435,14 @@
       cam.s = Math.exp(Math.log(cam.s) + (Math.log(goal.s) - Math.log(cam.s)) * a);
       if (Math.abs(goal.x - cam.x) + Math.abs(goal.y - cam.y) < 0.2 && Math.abs(goal.s / cam.s - 1) < 0.002) goal = null;
     }
-    if (scrollGoal != null) {
-      scrollY += (scrollGoal - scrollY) * (1 - Math.exp(-dt * 10));
-      if (Math.abs(scrollGoal - scrollY) < 0.5) { scrollY = scrollGoal; scrollGoal = null; }
-    } else if (!listDrag && vel) {
-      scrollY = clampScroll(scrollY + vel * dt);
-      vel *= Math.exp(-dt * 4);
-      if (Math.abs(vel) < 10 || scrollY <= 0 || scrollY >= maxScroll) vel = 0;
-    }
     if (state !== S.PLAY) return;
     if (wrongT > 0) wrongT = Math.max(0, wrongT - dt);
+    if (nextT >= 0) {
+      nextT -= dt;
+      if (nextT < 0) { nextT = -1; nextAsk(); }
+    }
     if (finishT >= 0) {
-      /* 全部埋まったら一覧を消して、県名入りの地図を画面いっぱいに */
+      /* 全部埋まったら札を消して、県名入りの地図を画面いっぱいに */
       finishT += dt;
       finale = Math.min(1, finishT / 1.2);
       place();
@@ -494,9 +452,8 @@
   }
 
   /* ============ 入力 ============
-     地図: 1本指でなぞると動く、2本指で広げる。動かさずに離したら、その県を選ぶ。
-     一覧: なぞると動く。動かさずに離したら、その名前で答える。 */
-  var pointers = {}, mapDrag = null, pinch = null, listDrag = null, vel = 0;
+     地図: 1本指でなぞると動く、2本指で広げる。動かさずに離したら、その県で答える。 */
+  var pointers = {}, mapDrag = null, pinch = null;
   function count() { return Object.keys(pointers).length; }
   function down(x, y, id) {
     if (state === S.INTRO) return;
@@ -506,82 +463,55 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (x == null) {
-      if (focus === "map") { if (target >= 0) { focus = "list"; if (!pickable(sel)) sel = nextFree(sel, 1); reveal(sel); } }
-      else answer(sel);
-      return;
-    }
-    if (finishT >= 0) return;
+    if (x == null) { answer(cursor); return; }
+    if (finishT >= 0 || y < MAP.y) return;
     if (id == null) id = 0;
-    if (y < MAP.h && !listDrag) {
-      pointers[id] = { x: x, y: y };
-      goal = null;
-      if (count() === 1) mapDrag = { x0: x, y0: y, cx: cam.x, cy: cam.y, moved: false };
-      else if (count() === 2) {
-        var p = pointsOf();
-        pinch = { d0: Math.max(10, dist(p)), s0: cam.s };
-        if (mapDrag) mapDrag.moved = true;
-      }
-      return;
+    pointers[id] = { x: x, y: y };
+    goal = null;
+    if (count() === 1) mapDrag = { x0: x, y0: y, cx: cam.x, cy: cam.y, moved: false };
+    else if (count() === 2) {
+      var p = pointsOf();
+      pinch = { d0: Math.max(10, dist(p)), s0: cam.s };
+      if (mapDrag) mapDrag.moved = true;
     }
-    if (count()) return;
-    listDrag = { y0: y, sy: scrollY, moved: false, lastY: y, lastT: performance.now() / 1000, k: cellAt(x, y), stop: Math.abs(vel) > 60 };
-    vel = 0; scrollGoal = null;
   }
   function pointsOf() { var a = []; for (var k in pointers) a.push(pointers[k]); return a; }
   function dist(p) { return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); }
   function move(x, y, id) {
     if (id == null) id = 0;
-    if (pointers[id]) {
-      pointers[id] = { x: x, y: y };
-      if (pinch && count() >= 2) {
-        var p = pointsOf();
-        zoomAt((p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2, pinch.s0 * dist(p) / pinch.d0);
-        return;
-      }
-      if (mapDrag && !pinch) {
-        if (!mapDrag.moved && Math.hypot(x - mapDrag.x0, y - mapDrag.y0) > 8) mapDrag.moved = true;
-        if (mapDrag.moved) {
-          cam.x = mapDrag.cx - (x - mapDrag.x0) / cam.s;
-          cam.y = mapDrag.cy - (y - mapDrag.y0) / cam.s;
-          clampCam(cam);
-          /* 端で止まったぶんは、指の位置を基準に取り直す */
-          mapDrag.cx = cam.x + (x - mapDrag.x0) / cam.s;
-          mapDrag.cy = cam.y + (y - mapDrag.y0) / cam.s;
-        }
-      }
+    if (!pointers[id]) return;
+    pointers[id] = { x: x, y: y };
+    if (pinch && count() >= 2) {
+      var p = pointsOf();
+      zoomAt((p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2, pinch.s0 * dist(p) / pinch.d0);
       return;
     }
-    if (!listDrag) return;
-    if (!listDrag.moved && Math.abs(y - listDrag.y0) > 10) listDrag.moved = true;
-    if (!listDrag.moved) return;
-    var t = performance.now() / 1000, d = Math.max(1 / 120, t - listDrag.lastT);
-    vel = vel * 0.4 + 0.6 * (listDrag.lastY - y) / d;
-    listDrag.lastY = y; listDrag.lastT = t;
-    scrollY = clampScroll(listDrag.sy - (y - listDrag.y0));
+    if (mapDrag && !pinch) {
+      if (!mapDrag.moved && Math.hypot(x - mapDrag.x0, y - mapDrag.y0) > 8) mapDrag.moved = true;
+      if (mapDrag.moved) {
+        cam.x = mapDrag.cx - (x - mapDrag.x0) / cam.s;
+        cam.y = mapDrag.cy - (y - mapDrag.y0) / cam.s;
+        clampCam(cam);
+        /* 端で止まったぶんは、指の位置を基準に取り直す */
+        mapDrag.cx = cam.x + (x - mapDrag.x0) / cam.s;
+        mapDrag.cy = cam.y + (y - mapDrag.y0) / cam.s;
+      }
+    }
   }
   function up(id) {
     if (id == null) id = 0;
-    if (pointers[id]) {
-      delete pointers[id];
-      if (count() < 2) pinch = null;
-      if (!count()) {
-        var d = mapDrag;
-        mapDrag = null;
-        if (d && !d.moved) { keyMode = false; choose(prefAt(d.x0, d.y0)); }
-      } else if (mapDrag) {
-        /* 1本だけ残ったら、その指で続けて動かせるように */
-        var q = pointsOf()[0];
-        mapDrag = { x0: q.x, y0: q.y, cx: cam.x, cy: cam.y, moved: true };
-      }
-      return;
+    if (!pointers[id]) return;
+    delete pointers[id];
+    if (count() < 2) pinch = null;
+    if (!count()) {
+      var d = mapDrag;
+      mapDrag = null;
+      if (d && !d.moved) { keyMode = false; answer(prefAt(d.x0, d.y0)); }
+    } else if (mapDrag) {
+      /* 1本だけ残ったら、その指で続けて動かせるように */
+      var q = pointsOf()[0];
+      mapDrag = { x0: q.x, y0: q.y, cx: cam.x, cy: cam.y, moved: true };
     }
-    if (!listDrag) return;
-    var l = listDrag;
-    listDrag = null;
-    if (l.moved || l.stop) return;
-    vel = 0;
-    answer(l.k);
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -590,61 +520,44 @@
     var p = atCanvas(e); down(p.x, p.y, e.pointerId);
   });
   wrap.addEventListener("pointermove", function (e) {
-    if (!pointers[e.pointerId == null ? 0 : e.pointerId] && !listDrag) return;
+    if (!pointers[e.pointerId == null ? 0 : e.pointerId]) return;
     var p = atCanvas(e); move(p.x, p.y, e.pointerId);
   });
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(e.pointerId); });
   wrap.addEventListener("pointercancel", function (e) {
     delete pointers[e.pointerId == null ? 0 : e.pointerId];
     if (!count()) { mapDrag = null; pinch = null; }
-    listDrag = null;
   });
-  window.addEventListener("blur", function () { pointers = {}; mapDrag = null; pinch = null; listDrag = null; });
+  window.addEventListener("blur", function () { pointers = {}; mapDrag = null; pinch = null; });
   wrap.addEventListener("wheel", function (e) {
     if (state !== S.PLAY || finishT >= 0) return;
     e.preventDefault();
     var p = atCanvas(e);
-    if (p.y < MAP.h) { zoomAt(p.x, p.y, cam.s * Math.exp(-e.deltaY * 0.0015)); return; }
-    scrollGoal = null; vel = 0;
-    scrollY = clampScroll(scrollY + e.deltaY);
+    zoomAt(p.x, Math.max(MAP.y, p.y), cam.s * Math.exp(-e.deltaY * 0.0015));
   }, { passive: false });
 
-  /* キー: 矢印で県を選ぶ → スペースで一覧へ → 矢印で名前 → スペースで答える。
-     一覧からはバックスペースで地図へ戻る */
+  /* キー: 矢印で県を選び、スペースで答える */
   window.addEventListener("keydown", function (e) {
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    var back = e.key === "Backspace";
     var lft = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
     var rgt = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
     var upk = e.key === "ArrowUp" || e.key === "w" || e.key === "W";
     var dn = e.key === "ArrowDown" || e.key === "s" || e.key === "S";
-    if (!esc && !go && !back && !lft && !rgt && !upk && !dn) return;
+    if (!esc && !go && !lft && !rgt && !upk && !dn) return;
     e.preventDefault();
     if (esc) { if (!e.repeat) newRound(); return; }
     if (state !== S.PLAY && !go) return;
-    if (back) { focus = "map"; keyMode = true; return; }
     if (lft || rgt || upk || dn) {
       if (finishT >= 0) return;
       keyMode = true;
-      if (focus === "map") {
-        stepPref(lft ? -1 : rgt ? 1 : 0, upk ? -1 : dn ? 1 : 0);
-        return;
-      }
-      if (lft || rgt) sel = nextFree(sel, lft ? -1 : 1);
-      else {
-        /* 上下は同じ列で、押せる名前まで進む */
-        var d = upk ? -COLS : COLS, k = sel + d;
-        while (k >= 0 && k < N && !pickable(k)) k += d;
-        if (k >= 0 && k < N) sel = k;
-      }
-      reveal(sel);
+      stepPref(lft ? -1 : rgt ? 1 : 0, upk ? -1 : dn ? 1 : 0);
       return;
     }
     if (e.repeat) return;
-    if (state === S.PLAY && !keyMode) {
+    if (state === S.PLAY && (!keyMode || cursor < 0)) {
       keyMode = true;
-      if (target < 0) stepPref(0, 1);
+      if (cursor < 0) stepPref(0, 1);
       return;
     }
     down();
@@ -704,7 +617,7 @@
   function drawMap() {
     ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, W, H);
-    /* 方眼は画面全体でひとつ。地図と一覧で同じ目にして、地図を動かしても動かさない */
+    /* 方眼は画面全体でひとつ。札と地図で同じ目にして、地図を動かしても動かさない */
     drawGrid(0, 0, W, H, 20, 0, 0);
     ctx.save();
     ctx.beginPath(); ctx.rect(MAP.x, MAP.y, MAP.w, MAP.h); ctx.clip();
@@ -716,19 +629,14 @@
 
     ctx.lineJoin = "round";
     var lw = Math.max(0.6, Math.min(1.6, cam.s * 1.2));
-    var lit = state === S.PLAY ? target : -1;
+    var play = state === S.PLAY;
     for (var i = 0; i < N; i++) {
-      if (i === lit) continue;
       prefPath(i);
-      ctx.fillStyle = state !== S.INTRO && done[i] ? FILLED : LAND;
-      ctx.fill();
-      ctx.strokeStyle = EDGE;
-      ctx.lineWidth = lw;
-      ctx.stroke();
-    }
-    if (lit >= 0) {
-      prefPath(lit);
-      ctx.fillStyle = wrongT > 0 ? "#e2504c" : "#ff7a2f";
+      var col = state !== S.INTRO && done[i] ? FILLED : LAND;
+      if (play && i === wrongP && wrongT > 0) col = "#e2504c";         /* いま外した県 */
+      else if (play && !done[i] && tried[i]) col = "#e8b3a4";          /* この偏見で外した県 */
+      else if (play && keyMode && i === cursor) col = "#ff7a2f";       /* キーで選んでいる県 */
+      ctx.fillStyle = col;
       ctx.fill();
       ctx.strokeStyle = EDGE;
       ctx.lineWidth = lw;
@@ -759,12 +667,39 @@
     ctx.textBaseline = "alphabetic";
   }
 
-  /* ボタンの中に一文を書く。入らないときは字を小さくして1行に収める */
-  function lineText(s, b) {
-    fit(s, b.w - 28, 19);
-    ctx.textAlign = "left";
-    ctx.fillText(s, b.x + 14, b.y + b.h / 2 + 1);
+  /* 上の札。いまの偏見を1つ、大きく。長い文は「、」のあたりで2行に分ける */
+  function drawCard() {
+    var c = CARD;
+    if (c.y + c.h < 0) return;
+    var pop = Math.min(1, (T - askT) / 0.25), ok = nextT >= 0;
+    ctx.save();
+    ctx.globalAlpha = 0.35 + 0.65 * pop;
+    ctx.shadowColor = "rgba(22,32,46,.18)"; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
+    roundRect(c.x, c.y, c.w, c.h, 18);
+    ctx.fillStyle = ok ? "#e3f3dc" : "#fff";
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.strokeStyle = ok ? "#6db56e" : "rgba(22,32,46,.2)"; ctx.lineWidth = ok ? 3 : 1.5; ctx.stroke();
+    ctx.fillStyle = "#16202e";
     ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    var s = LINES[ask], room = c.w - 36, cx = c.x + c.w / 2, cy = c.y + c.h / 2 + 1;
+    if (fit(s, room, 28) >= 24) ctx.fillText(s, cx, cy);
+    else {
+      var at = breakAt(s), l1 = s.slice(0, at), l2 = s.slice(at);
+      var size = Math.min(fit(l1, room, 26), fit(l2, room, 26));
+      ctx.font = "800 " + size + "px sans-serif";
+      ctx.fillText(l1, cx, cy - size * 0.65);
+      ctx.fillText(l2, cx, cy + size * 0.65);
+    }
+    ctx.restore();
+    ctx.textBaseline = "alphabetic";
+  }
+  /* 2行に分ける位置。真ん中にいちばん近い「、」の後。無ければ真ん中 */
+  function breakAt(s) {
+    var mid = s.length / 2, best = -1;
+    for (var i = 0; i < s.length - 1; i++) if (s[i] === "、" && (best < 0 || Math.abs(i + 1 - mid) < Math.abs(best - mid))) best = i + 1;
+    return best > 0 && Math.abs(best - mid) < s.length / 3 ? best : Math.ceil(mid);
   }
   /* max の大きさから、幅 room に収まる文字の大きさ */
   function fit(s, room, max) {
@@ -774,41 +709,6 @@
     return size;
   }
 
-  function drawList() {
-    ctx.save();
-    ctx.beginPath(); ctx.rect(0, LIST.y, W, LIST.h); ctx.clip();
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    var off = target < 0;                      /* 県を選ぶまでは押せない */
-    for (var k = 0; k < N; k++) {
-      var b = cell(k);
-      if (b.y + b.h < LIST.y || b.y > LIST.y + LIST.h) continue;
-      var bg = off ? "rgba(255,255,255,.6)" : "#fff", fg = off ? "rgba(22,32,46,.62)" : "#16202e", line = "rgba(22,32,46,.2)";
-      if (used(k)) { bg = "rgba(22,32,46,.05)"; fg = "rgba(22,32,46,.28)"; line = "rgba(22,32,46,.08)"; }
-      else if (k === wrongK && wrongT > 0) { bg = "#e2504c"; fg = "#fff"; line = bg; }
-      else if (tried(k)) { bg = "rgba(226,80,76,.16)"; fg = "rgba(22,32,46,.4)"; line = "rgba(226,80,76,.3)"; }
-      roundRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1, 11);
-      ctx.fillStyle = bg;
-      ctx.fill();
-      ctx.strokeStyle = line; ctx.lineWidth = 1.2; ctx.stroke();
-      if (keyMode && focus === "list" && k === sel) {
-        ctx.strokeStyle = "#f7cc71"; ctx.lineWidth = 4; ctx.stroke();
-      }
-      ctx.fillStyle = fg;
-      lineText(LINES[list[k]], b);
-    }
-    ctx.restore();
-    ctx.textBaseline = "alphabetic";
-    /* 一覧が動かせるときは、右端に位置の目印 */
-    if (maxScroll > 0) {
-      var track = LIST.h - 8, bar = Math.max(40, track * LIST.h / (LIST.h + maxScroll));
-      var y = LIST.y + 4 + (track - bar) * (scrollY / maxScroll);
-      roundRect(W - 7, y, 4, bar, 2);
-      ctx.fillStyle = "rgba(22,32,46,.3)";
-      ctx.fill();
-    }
-  }
-
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
@@ -816,7 +716,7 @@
     if (state !== S.INTRO && finale < 1) {
       ctx.save();
       ctx.globalAlpha = 1 - finale;
-      drawList();
+      drawCard();
       ctx.restore();
     }
     if (state === S.RESULT) drawResult();
@@ -872,14 +772,11 @@
   window.__probe = {
     now: function () {
       return {
-        state: state, score: score, W: W, H: H, N: N, selected: target, left: state === S.INTRO ? N : left(),
-        done: done.slice(), misses: misses, tried: target >= 0 ? Object.keys(triedBy[target] || {}).length : 0,
-        sel: sel, focus: focus, keyMode: keyMode, scroll: scrollY, maxScroll: maxScroll,
-        list: state === S.INTRO ? [] : list.map(function (id, k) {
-          var b = cell(k); return { name: plain(NAMES[id]), line: LINES[id], used: used(k), x: b.x, y: b.y, w: b.w, h: b.h };
-        }),
-        listTop: LIST.y, listBottom: LIST.y + LIST.h,
-        cam: { x: cam.x, y: cam.y, s: cam.s }, full: FULL, map: { x: MAP.x, y: MAP.y, w: MAP.w, h: MAP.h }
+        state: state, score: score, W: W, H: H, N: N, q: qi, line: state === S.INTRO ? "" : LINES[ask],
+        left: state === S.INTRO ? N : left(), waiting: nextT >= 0,
+        done: done.slice(), misses: misses, tried: Object.keys(tried).length, cursor: cursor, keyMode: keyMode,
+        cam: { x: cam.x, y: cam.y, s: cam.s }, full: FULL, map: { x: MAP.x, y: MAP.y, w: MAP.w, h: MAP.h },
+        card: { x: CARD.x, y: CARD.y, w: CARD.w, h: CARD.h }
       };
     },
     spot: function (i) { return { x: sx(LABEL[i][0]), y: sy(LABEL[i][1]) }; },
@@ -893,19 +790,16 @@
     run: async function (r) {
       await r.wait(1000);
       r.key();
-      for (var n = 0; n < 6; n++) {
-        await r.wait(900);
+      for (var n = 0; n < 5; n++) {
+        await r.wait(1400);
         var todo = range().filter(function (i) { return !done[i]; });
-        var i = todo[Math.floor(Math.random() * todo.length)];
-        goal = clampCam({ x: LABEL[i][0], y: LABEL[i][1], s: FULL * 2.5 });
-        await r.wait(700);
-        choose(i);
-        await r.wait(700);
-        var free = list.map(function (id, k) { return k; }).filter(pickable);
-        var k = free[Math.floor(Math.random() * free.length)];
-        reveal(k);
-        await r.wait(500);
-        answer(k);
+        /* ひとつ外してから当てる */
+        var miss = todo.filter(function (i) { return i !== ask; })[0];
+        if (n % 2 && miss != null) { goal = clampCam({ x: LABEL[miss][0], y: LABEL[miss][1], s: FULL * 2 }); await r.wait(700); answer(miss); await r.wait(600); }
+        goal = clampCam({ x: LABEL[ask][0], y: LABEL[ask][1], s: FULL * 2.5 });
+        await r.wait(800);
+        answer(ask);
+        await r.wait(900);
       }
       await r.wait(1000);
     }
