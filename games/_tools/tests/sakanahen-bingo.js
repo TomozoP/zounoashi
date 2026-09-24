@@ -302,6 +302,7 @@ ORDER.slice(0, 5).forEach(mark => {
   g.until(() => now(g).state === 'result', 400);
   assert.ok(now(g).failed);
   assert.deepEqual(now(g).cleared, {}, 'ライフがなくなった回はクリアにしない');
+  assert.equal(g.probe.shareText(), 'ビンゴならず #難読ビンゴ');
   ['魚', '難'].forEach(m => {
     back(g);
     const b = g.probe.setButton(I(m)); g.tap(b.x, b.y); g.step(1);
@@ -311,6 +312,7 @@ ORDER.slice(0, 5).forEach(mark => {
     assert.ok(!res.failed);
     assert.equal(res.cleared[m], true, m + ' をクリア');
     assert.ok(Object.values(res.cleared).every(v => v === true), '回数は残さない');
+    assert.equal(g.probe.shareText(), '「' + m + '」のシートをクリアしました #難読ビンゴ', 'シェアの文');
   });
 }
 
