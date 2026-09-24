@@ -187,14 +187,36 @@ const window_zVoice = g => { const ctx = { window: {} }; require('vm').runInNewC
     if (n < 46) next(g);
   }
   assert.equal(seen.size, 47, '47の偏見が1回ずつ出る');
+  /* クリア: 紙吹雪が降り、ロボが踊る。少しして、もう一度・シェアが下に出る */
+  assert(g.probe.now().party, 'クリアしたらロボが踊る');
+  assert(g.probe.now().confetti > 100, '紙吹雪がどっと降る');
+  assert.equal(g.probe.now().state, 'play', 'すぐには結果にしない');
   assert(g.until(() => g.probe.now().state === 'result', 400), '全部埋めたら結果');
   assert.equal(g.probe.now().score, 47);
-  assert.equal(g.probe.now().map.h, g.probe.now().H, '最後は地図が画面いっぱい');
-  g.step(30);
-  const H = g.probe.now().H;
-  g.tap(270 - 102, H * 0.62 + 27);
+  g.step(600);
+  assert(g.probe.now().confetti > 20, '結果の間も紙吹雪は降り続ける');
+  assert(g.probe.now().confetti <= 421, '紙吹雪は増えすぎない');
+  const p = g.probe.now(), H = p.H;
+  p.buttons.forEach(b => assert(b.y > H * 0.8 && b.y + b.h <= H - 20, 'ボタンは画面の下 ' + JSON.stringify(b)));
+  assert(p.card.y >= 0 && p.card.y + p.card.h <= p.map.y, '札（ロボと点数）は上に残る');
+  const retry = p.buttons[0];
+  g.tap(retry.x + retry.w / 2, retry.y + retry.h / 2);
   assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().left, 47);
-  assert(g.probe.now().map.y > 100, 'もう一度で札が戻る');
+  assert(!g.probe.now().party && g.probe.now().confetti === 0, 'もう一度で踊りと紙吹雪が止まる');
+}
+
+// 手元用の全クリデバグ: G で残りを埋めてクリアの演出へ（台は localhost として開く）
+{
+  const g = open();
+  const a = g.dbg.ask();
+  tapPref(g, (a + 1) % 47);
+  g.press('g');
+  assert.equal(g.probe.now().left, 0, 'G で全部埋まる');
+  assert.equal(g.probe.now().score, 47, '外した県はまだ埋まっていないので、1回で当てた扱い');
+  assert(g.probe.now().party);
+  assert(g.until(() => g.probe.now().state === 'result', 400));
+  g.press('g');
+  assert.equal(g.probe.now().state, 'result', '結果で G を押しても何も起きない');
 }
 
 // キーだけで遊べる

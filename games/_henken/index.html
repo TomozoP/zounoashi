@@ -331,6 +331,13 @@
     tone(880, 0.16, 0.14, "triangle");
     tone(1320, 0.3, 0.12, "triangle", 0, 0.1);
   }
+  /* クリアのファンファーレ。駆け上がって、最後は和音をのばす */
+  function fanfare() {
+    var run = [[392, 0], [523, 0.12], [659, 0.24], [784, 0.36], [659, 0.6], [784, 0.72]];
+    run.forEach(function (n, k) { tone(n[0], k === run.length - 1 ? 0.2 : 0.13, 0.12, "square", 0, n[1]); });
+    [523, 659, 784, 1046].forEach(function (fq) { tone(fq, 1.3, 0.07, "triangle", 0, 0.9); });
+    tone(262, 1.3, 0.08, "square", 0, 0.9);
+  }
   function soundWrong() {
     tone(180, 0.32, 0.12, "square", 120);
   }
@@ -344,7 +351,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var WRONG_FLASH = 0.45;                      /* 外した県を赤く見せる秒数（その間も選び直せる） */
   var NEXT_WAIT = 0.7;                         /* 当ててから次の偏見が出るまでの秒数 */
-  var FINAL_WAIT = 3;                          /* 全部埋まった地図を見せる秒数 */
+  var RESULT_WAIT = 1.6;                       /* 全部埋まってから、もう一度・シェアが出るまでの秒数 */
   var state, score = 0, misses = 0, T = 0, keyMode = false;
   var order = [], qi = -1, ask = -1;           /* 出す順（県の番号）と、いま出している偏見の県 */
   var cursor = -1;                             /* キー操作で選んでいる県 */
@@ -354,13 +361,12 @@
   var nextT = -1;                              /* 当ててから次へ進むまでの残り */
   var finishT = -1;                            /* 全部埋まってからの時間 */
 
-  /* 上に偏見の札、その下は全部地図 */
+  /* 上に偏見の札、その下は全部地図。クリアしても札（踊るロボと点数）は残す */
   var CARD_H = 124;
   var MAP, CARD;
-  var finale = 0;                              /* 全部埋まった後、札が消えて地図が画面いっぱいに広がる具合 0〜1 */
   function place() {
-    var e = finale * finale * (3 - 2 * finale), top = (CARD_H + 20) * (1 - e);
-    CARD = { x: 12, y: 12 - (CARD_H + 20) * e, w: W - 24, h: CARD_H };
+    var top = CARD_H + 20;
+    CARD = { x: 12, y: 12, w: W - 24, h: CARD_H };
     MAP = { x: 0, y: top, w: W, h: H - top };
     var pad = 12;
     FULL = Math.min((MAP.w - pad * 2) / (WORLD[2] - WORLD[0]), (MAP.h - pad * 2) / (WORLD[3] - WORLD[1]));
@@ -442,7 +448,8 @@
     order = shuffle(range());
     qi = -1;
     cursor = -1;
-    finale = 0; finishT = -1; nextT = -1;
+    finishT = -1; nextT = -1;
+    confetti = []; confettiT = 0;
     pointers = {}; mapDrag = null; pinch = null;
     place();
     goal = wholeView();
@@ -463,6 +470,43 @@
   var spoken = 0;                              /* 吹き出しに出した文字数。声の進み具合に合わせる */                                /* いまの偏見を出した時刻（札が出る動きに使う） */
   /* ヒントで囲む地方（まだなら -1） */
   function hint() { return state === S.PLAY && ask >= 0 && !done[ask] && Object.keys(tried).length >= HINT_AFTER ? regionOf(ask) : -1; }
+  /* 紙吹雪。最初にどっと降らせ、そのあとも少しずつ降り続ける */
+  var confetti = [], confettiT = 0;
+  var CONFETTI_COLORS = ["#ff5a5f", "#ffb400", "#3ec46d", "#2f9bff", "#a86bff", "#ff7ac6", "#ffffff"];
+  function addConfetti(burst) {
+    if (confetti.length > 420) return;
+    confetti.push({
+      x: Math.random() * W, y: burst ? -Math.random() * H * 0.5 : -20,
+      vx: (Math.random() - 0.5) * 90, vy: 40 + Math.random() * 120,
+      a: Math.random() * 6.3, va: (Math.random() - 0.5) * 12, sway: Math.random() * 6.3,
+      w: 6 + Math.random() * 6, h: 9 + Math.random() * 8,
+      c: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)]
+    });
+  }
+  function stepConfetti(dt) {
+    if (finishT < 0 && state !== S.RESULT) return;
+    confettiT += dt;
+    while (confettiT > 0.06) { confettiT -= 0.06; addConfetti(false); }
+    confetti.forEach(function (p) {
+      p.vy = Math.min(p.vy + 260 * dt, 170);
+      p.sway += dt * 3;
+      p.x += (p.vx + Math.sin(p.sway) * 40) * dt;
+      p.y += p.vy * dt;
+      p.a += p.va * dt;
+    });
+    confetti = confetti.filter(function (p) { return p.y < H + 30; });
+  }
+  function drawConfetti() {
+    confetti.forEach(function (p) {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.a);
+      ctx.scale(1, Math.cos(p.sway * 1.7));        /* くるくる回って細くなったり太くなったり */
+      ctx.fillStyle = p.c;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    });
+  }
   function left() { return done.filter(function (d) { return !d; }).length; }
   /* 地図の県で答える。外したらその県が赤くなり、同じ偏見のまま選び直す */
   function answer(i) {
@@ -482,8 +526,17 @@
     spoken = LINES[ask].length;
     soundRight();
     if (cursor === i) cursor = -1;
-    if (!left()) { finishT = 0; goal = null; return; }
+    if (!left()) { clear(); return; }
     nextT = NEXT_WAIT;
+  }
+  /* 47県ぜんぶ埋まった。ファンファーレと紙吹雪、ロボは虹色に光って踊る */
+  function clear() {
+    hush();
+    finishT = 0;
+    cursor = -1;
+    goal = wholeView();
+    fanfare();
+    for (var n = 0; n < 160; n++) addConfetti(true);
   }
   /* キー操作: いまの県から、押した向きにあるいちばん近いまだの県へ */
   function stepPref(dx, dy) {
@@ -515,6 +568,7 @@
       cam.s = Math.exp(Math.log(cam.s) + (Math.log(goal.s) - Math.log(cam.s)) * a);
       if (Math.abs(goal.x - cam.x) + Math.abs(goal.y - cam.y) < 0.2 && Math.abs(goal.s / cam.s - 1) < 0.002) goal = null;
     }
+    stepConfetti(dt);
     if (state !== S.PLAY) return;
     if (wrongT > 0) wrongT = Math.max(0, wrongT - dt);
     /* 吹き出しの文字は、声の進み具合に合わせて出す */
@@ -527,12 +581,9 @@
       if (nextT < 0) { nextT = -1; nextAsk(); }
     }
     if (finishT >= 0) {
-      /* 全部埋まったら札を消して、県名入りの地図を画面いっぱいに */
+      /* 全部埋まったら、県名入りの地図を全体で見せてから、もう一度・シェアを出す */
       finishT += dt;
-      finale = Math.min(1, finishT / 1.2);
-      place();
-      goal = wholeView();
-      if (finishT >= FINAL_WAIT) { state = S.RESULT; shareButton.hidden = false; }
+      if (finishT >= RESULT_WAIT) { state = S.RESULT; shareButton.hidden = false; }
     }
   }
 
@@ -774,13 +825,13 @@
   var ROBO_W = 104;
   function drawCard() {
     var c = CARD;
-    if (c.y + c.h < 0) return;
-    var ok = nextT >= 0, s = LINES[ask], shown = Math.min(s.length, spoken);
+    var party = finishT >= 0 || state === S.RESULT;
+    var ok = nextT >= 0 || party, s = party ? score + "/" + N : LINES[ask], shown = party ? s.length : Math.min(s.length, spoken);
     var talking = shown < s.length && !ok;
-    drawRobot(c.x + ROBO_W / 2, c.y + c.h / 2 + 8, talking, ok);
+    drawRobot(c.x + ROBO_W / 2, c.y + c.h / 2 + 8, talking, ok, party);
     /* 吹き出し */
     var bx = c.x + ROBO_W + 10, bw = c.x + c.w - bx, by = c.y, bh = c.h;
-    var pop = Math.min(1, (T - askT) / 0.2);
+    var pop = party ? 1 : Math.min(1, (T - askT) / 0.2);
     ctx.save();
     ctx.globalAlpha *= 0.4 + 0.6 * pop;
     ctx.shadowColor = "rgba(22,32,46,.18)"; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
@@ -803,6 +854,15 @@
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     var room = bw - 32, x0 = bx + 16, cy = by + bh / 2 + 1;
+    if (party) {
+      /* 点数は大きく真ん中に */
+      ctx.textAlign = "center";
+      fit(s, room, 64);
+      ctx.fillText(s, bx + bw / 2, cy + 3);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+      return;
+    }
     var at = fit(s, room, 26) >= 22 ? s.length : breakAt(s);
     var l1 = s.slice(0, at), l2 = s.slice(at);
     var size = l2 ? Math.min(fit(l1, room, 24), fit(l2, room, 24)) : fit(s, room, 26);
@@ -822,11 +882,19 @@
 
   /* 偏見ロボ。四角い頭にアンテナ、「偏」「見」の目、横長の口。首から下はない。話している間は口がぱくぱく、
      外されたら頭を左右に振り、当てられたら目がにっこり */
-  function drawRobot(x, y, talking, happy) {
+  function drawRobot(x, y, talking, happy, party) {
     var shake = wrongT > 0 ? Math.sin(wrongT * 60) * 4 * (wrongT / WRONG_FLASH) : 0;
     var bob = talking ? Math.sin(T * 18) * 1.5 : Math.sin(T * 2) * 1;
     ctx.save();
     ctx.translate(x + shake, y + bob);
+    /* クリアしたら、頭で円を描くようにノリノリで揺れる（1秒に2周） */
+    var hue = 0;
+    if (party) {
+      var ph = T * Math.PI * 4;
+      ctx.translate(Math.cos(ph) * 7, Math.sin(ph) * 4 - Math.abs(Math.sin(ph)) * 3);
+      ctx.rotate(Math.sin(ph) * 0.22);
+      hue = (T * 360) % 360;
+    }
     ctx.scale(1.25, 1.25);
     ctx.lineJoin = "round";
     ctx.lineWidth = 3;
@@ -834,13 +902,15 @@
     /* アンテナ */
     ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(0, -54); ctx.stroke();
     ctx.beginPath(); ctx.arc(0, -57, 5, 0, Math.PI * 2);
-    ctx.fillStyle = talking && Math.floor(T * 8) % 2 ? "#ff7a2f" : "#e2504c"; ctx.fill(); ctx.stroke();
+    ctx.fillStyle = party ? "hsl(" + ((hue + 180) % 360) + ",100%,60%)" : talking && Math.floor(T * 8) % 2 ? "#ff7a2f" : "#e2504c"; ctx.fill(); ctx.stroke();
     /* 耳 */
-    roundRect(-44, -18, 9, 22, 3); ctx.fillStyle = "#9fb0c0"; ctx.fill(); ctx.stroke();
+    if (party) { ctx.shadowColor = "hsl(" + hue + ",100%,60%)"; ctx.shadowBlur = 22; }
+    roundRect(-44, -18, 9, 22, 3); ctx.fillStyle = party ? "hsl(" + ((hue + 40) % 360) + ",85%,62%)" : "#9fb0c0"; ctx.fill(); ctx.stroke();
     roundRect(35, -18, 9, 22, 3); ctx.fill(); ctx.stroke();
-    /* 頭 */
+    /* 頭。クリアしたら虹色に移り変わりながら光る */
     roundRect(-36, -40, 72, 64, 14);
-    ctx.fillStyle = "#c9d5df"; ctx.fill(); ctx.stroke();
+    ctx.fillStyle = party ? "hsl(" + hue + ",90%,70%)" : "#c9d5df"; ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.shadowColor = "transparent";
     /* 顔の画面 */
     roundRect(-28, -32, 56, 48, 9);
     ctx.fillStyle = "#23364a"; ctx.fill();
@@ -886,19 +956,16 @@
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
     drawMap();
-    if (state !== S.INTRO && finale < 1) {
-      ctx.save();
-      ctx.globalAlpha = 1 - finale;
-      drawCard();
-      ctx.restore();
-    }
+    if (state !== S.INTRO) drawCard();
+    drawConfetti();
     if (state === S.RESULT) drawResult();
   }
 
-  /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
+  /* 結果画面。暗い下敷きは敷かず、県名で埋まった地図を見せたまま、下に「もう一度」「Xでシェア」。
+     点数はロボの吹き出しに出す */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H - h - Math.max(24, H * 0.035);
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -913,21 +980,13 @@
     return null;
   }
   function drawResult() {
-    ctx.fillStyle = "rgba(6,12,20,.7)";
-    ctx.fillRect(0, 0, W, H);
-    ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
-    ctx.font = "800 108px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(score + "/" + N, W / 2, H * 0.45);
-    ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
+      ctx.shadowColor = "rgba(22,32,46,.25)"; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
       roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
       ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.shadowColor = "transparent";
       ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
       ctx.fillStyle = "#16202e";
       ctx.font = "800 24px sans-serif";
@@ -939,6 +998,21 @@
     });
   }
 
+  /* ============ 手元用の全クリデバグ ============
+     持ち主の指示で入れたもの。localhost / 127.0.0.1 で開いたときだけ効く（公開サイトでは動かない）。
+       G … 残りの県を全部「1回で当てた」ことにして、クリアの演出へ飛ぶ
+       ?clear=1 … 開始画面を飛ばして、クリアの演出から始める（サムネや録画の確認用） */
+  var DEBUG_OK = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  function debugClear() {
+    if (!DEBUG_OK || state !== S.PLAY || finishT >= 0) return;
+    for (var i = 0; i < N; i++) if (!done[i]) { done[i] = 1; score++; solvedAt[i] = T - Math.random() * 0.3; }
+    nextT = -1;
+    clear();
+  }
+  window.addEventListener("keydown", function (e) {
+    if ((e.key === "g" || e.key === "G") && !e.repeat) debugClear();
+  });
+
   /* ============ 覗き穴 ============
      読むのと進めるだけ。正解は教えない。
      spot(i) は i 番目の県が地図のどこに見えているか（地図を見ればわかること） */
@@ -947,6 +1021,7 @@
       return {
         state: state, score: score, W: W, H: H, N: N, q: qi, line: state === S.INTRO ? "" : LINES[ask],
         left: state === S.INTRO ? N : left(), waiting: nextT >= 0, hint: hint(), spoken: spoken,
+        party: finishT >= 0 || state === S.RESULT, confetti: confetti.length, buttons: resultButtons(),
         done: done.slice(), misses: misses, tried: Object.keys(tried).length, cursor: cursor, keyMode: keyMode,
         cam: { x: cam.x, y: cam.y, s: cam.s }, full: FULL, map: { x: MAP.x, y: MAP.y, w: MAP.w, h: MAP.h },
         card: { x: CARD.x, y: CARD.y, w: CARD.w, h: CARD.h }
@@ -988,6 +1063,7 @@
   state = S.INTRO; startButton.hidden = false;
   layout();
   snapCam();
+  if (DEBUG_OK && /[?&]clear=1(?:&|$)/.test(location.search)) { newRound(); debugClear(); }
   var last = performance.now();
   function loop(now) {
     var dt = Math.min(0.033, (now - last) / 1000);
