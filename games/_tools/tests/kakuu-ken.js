@@ -1,10 +1,11 @@
-/* 架空県名クイズ: 県名の中身・県名の置き場所・47県を一覧から埋めていく・外したら選び直し・使用済み・一覧のスクロール・キー操作・カメラの寄り・押しどころの距離を確かめる。 */
+/* 架空県名クイズ: 県名の中身・県名の置き場所・地図をタップして県を選ぶ・ドラッグと2本指とホイールで地図を動かす・
+   外したら選び直し・47県を埋めて終わる・一覧のスクロール・キー操作・押しどころの距離を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
 const file = 'games/_kakuu-ken/index.html';
 /* テストのときだけ、正解と中身を覗く */
-const inject = 'window.__dbg={target:function(){return target;},list:function(){return list.slice();},reveal:reveal,' +
-  'LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES,BOX:BOX,aim:aim,goal:function(){return goal;},FULL:function(){return FULL;},MAP:function(){return MAP;}};';
+const inject = 'window.__dbg={list:function(){return list.slice();},reveal:reveal,prefAt:prefAt,' +
+  'LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES};';
 
 function open(shape) {
   const g = load(file, { quiet: true, inject });
@@ -14,26 +15,23 @@ function open(shape) {
   g.press(' ');
   g.step(1);
   assert.equal(g.probe.now().state, 'play');
+  g.step(60);
   return g;
 }
 const center = c => [c.x + c.w / 2, c.y + c.h / 2];
+const P = (id, x, y) => ({ clientX: x, clientY: y, pointerId: id, button: 0, preventDefault() {} });
+/* 地図で県 i の県名の場所をタップする */
+function tapPref(g, i) {
+  const s = g.probe.spot(i);
+  g.tap(s.x, s.y);
+}
 /* 一覧のk番目を見えるところまで動かして押す */
 function tapName(g, k) {
   g.dbg.reveal(k);
   g.until(() => { const p = g.probe.now(), c = p.list[k]; return c.y >= p.listTop && c.y + c.h <= p.listBottom; }, 120);
-  const c = g.probe.now().list[k];
-  g.tap(...center(c));
+  g.tap(...center(g.probe.now().list[k]));
 }
-/* 答えて、次の問題（か結果）まで進める */
-function answerBy(g, pick) {
-  const t = g.dbg.target(), L = g.dbg.list();
-  const k = pick(L, t, g.probe.now().list);
-  const before = g.probe.now().q;
-  tapName(g, k);
-  assert(g.probe.now().answered, '押すと答えが出る');
-  assert(g.until(() => g.probe.now().state === 'result' || g.probe.now().q !== before, 400), '次へ進む');
-  return L[k] === t;
-}
+const kOf = (g, i) => g.dbg.list().indexOf(i);
 
 // 県名の中身
 {
@@ -51,73 +49,123 @@ function answerBy(g, pick) {
   g.dbg.LABEL.forEach((p, i) => assert(g.dbg.SHAPES[i].some(r => g.dbg.inside(r, p[0], p[1])), (i + 1) + '番の県名が県の外'));
 }
 
-// 全問正解・47問で終わる・使用済み・もう一度・全問不正解
+// 開始直後は何も選ばれていない。名前を押しても何も起きない。地図の県をタップすると選べる
 {
   const g = open();
-  assert.equal(g.probe.now().list.length, 47, '一覧に47個すべて出る');
-  const seen = new Set();
+  assert.equal(g.probe.now().selected, -1, '県は自動で選ばれない');
+  tapName(g, 0);
+  assert.equal(g.probe.now().misses, 0); assert.equal(g.probe.now().left, 47, '県を選ぶ前は答えられない');
+  /* 全体表示のままで、どの県も県名の場所をタップすればその県が選ばれる */
   for (let i = 0; i < 47; i++) {
-    seen.add(g.dbg.target());
-    assert(g.dbg.list().includes(g.dbg.target()));
-    assert(answerBy(g, (L, t) => L.indexOf(t)));
-    if (i < 46) assert.equal(g.probe.now().list.filter(c => c.used).length, i + 1, '当てた名前は使用済み');
+    const s = g.probe.spot(i);
+    assert.equal(g.dbg.prefAt(s.x, s.y), i, (i + 1) + '番をタップで選べる');
   }
-  assert.equal(seen.size, 47, '47県すべてが1回ずつ出る');
-  assert.equal(g.probe.now().state, 'result');
-  assert.equal(g.probe.now().score, 47);
+  tapPref(g, 12);
+  assert.equal(g.probe.now().selected, 12);
+  tapPref(g, 0);
+  assert.equal(g.probe.now().selected, 0, '別の県を選び直せる');
+  /* 海をタップしても選択は変わらない */
+  g.tap(530, 8);
+  assert.equal(g.probe.now().selected, 0, '海のタップで選択は変わらない');
+}
 
+// ドラッグで動かす（タップ扱いにしない）・2本指とホイールで広げる・端から出ない
+{
+  const g = open();
+  const m = g.probe.now().map, c0 = g.probe.now().cam;
+  g.drag([{ x: 270, y: m.h / 2 }, { x: 200, y: m.h / 2 - 50 }, { x: 150, y: m.h / 2 - 90 }], 1);
+  assert.equal(g.probe.now().selected, -1, 'なぞっただけでは選ばない');
+  /* ホイールで寄る */
+  g.wrap.fire('wheel', Object.assign(P(1, 270, m.h / 2), { deltaY: -600 }));
+  const s1 = g.probe.now().cam.s;
+  assert(s1 > c0.s * 1.8, 'ホイールで寄る');
+  /* 寄った後のドラッグで地図が動く */
+  const cx = g.probe.now().cam.x;
+  g.drag([{ x: 300, y: m.h / 2 }, { x: 250, y: m.h / 2 }, { x: 200, y: m.h / 2 }], 1);
+  assert(g.probe.now().cam.x > cx + 10, 'ドラッグで地図が動く');
+  assert.equal(g.probe.now().selected, -1);
+  /* 2本指で広げる */
+  const s2 = g.probe.now().cam.s;
+  g.wrap.fire('pointerdown', P(1, 220, m.h / 2)); g.wrap.fire('pointerdown', P(2, 320, m.h / 2));
+  g.wrap.fire('pointermove', P(1, 170, m.h / 2)); g.wrap.fire('pointermove', P(2, 370, m.h / 2));
+  g.wrap.fire('pointerup', P(2, 370, m.h / 2)); g.wrap.fire('pointerup', P(1, 170, m.h / 2));
+  assert(Math.abs(g.probe.now().cam.s / s2 - 2) < 0.05, '2本指の開きに合わせて寄る');
+  assert.equal(g.probe.now().selected, -1, '2本指ではタップ扱いにしない');
+  /* 引きすぎ・寄りすぎ・はみ出しを止める */
+  for (let i = 0; i < 20; i++) g.wrap.fire('wheel', Object.assign(P(1, 270, m.h / 2), { deltaY: 800 }));
+  assert(Math.abs(g.probe.now().cam.s - g.probe.now().full) < 1e-6, '全体より引かない');
+  for (let i = 0; i < 20; i++) g.wrap.fire('wheel', Object.assign(P(1, 10, 10), { deltaY: -800 }));
+  assert(g.probe.now().cam.s <= g.probe.now().full * 8 + 1e-6, '寄りすぎない');
+  for (let i = 0; i < 10; i++) g.drag([{ x: 100, y: 100 }, { x: 400, y: 300 }], 1);
+  const spots = g.dbg.LABEL.map((p, i) => g.probe.spot(i));
+  assert(spots.some(s => s.x >= 0 && s.x <= m.w && s.y >= 0 && s.y <= m.h), '地図の外まで行かない');
+  /* 寄った状態でも小さい県をタップで選べる */
+  for (let i = 0; i < 20; i++) g.wrap.fire('wheel', Object.assign(P(1, 270, m.h / 2), { deltaY: 800 }));
+  const z = g.probe.spot(12);
+  g.wrap.fire('wheel', Object.assign(P(1, z.x, z.y), { deltaY: -900 }));
+  tapPref(g, 12);
+  assert.equal(g.probe.now().selected, 12);
+}
+
+// 全部1回で当てる・県名が埋まる・もう一度
+{
+  const g = open();
+  const order = [...Array(47).keys()].sort(() => Math.random() - .5);
+  order.forEach((i, n) => {
+    tapPref(g, i);
+    assert.equal(g.probe.now().selected, i);
+    tapName(g, kOf(g, i));
+    assert.equal(g.probe.now().done[i], 1, '当てた県は埋まる');
+    assert.equal(g.probe.now().selected, -1, '当てたら選択が外れる');
+    assert.equal(g.probe.now().left, 46 - n);
+    if (n < 46) {
+      tapPref(g, i);
+      assert.equal(g.probe.now().selected, -1, '埋まった県は選べない');
+    }
+  });
+  assert(g.until(() => g.probe.now().state === 'result', 400), '全部埋めたら結果');
+  assert.equal(g.probe.now().score, 47);
+  assert.equal(g.probe.now().map.h, g.probe.now().H, '最後は地図が画面いっぱい');
   g.step(30);
   const H = g.probe.now().H;
   g.tap(270 - 102, H * 0.62 + 27);
-  assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().score, 0); assert.equal(g.probe.now().q, 0);
-  assert.equal(g.probe.now().list.filter(c => c.used).length, 0, 'もう一度で一覧が戻る');
-
-  /* 毎回1つ外してから当てる。最後の1問は残りが1つなので外せない */
-  for (let i = 0; i < 46; i++) {
-    const t = g.dbg.target(), L = g.dbg.list(), P = g.probe.now().list, q = g.probe.now().q;
-    tapName(g, L.findIndex((x, k) => x !== t && !P[k].used));
-    assert.equal(g.probe.now().q, q, '外しても同じ県のまま');
-    assert(!g.probe.now().answered, '外しても終わらない');
-    assert.equal(g.probe.now().tried, 1);
-    assert(answerBy(g, (L2, t2) => L2.indexOf(t2)));
-  }
-  assert(answerBy(g, (L, t) => L.indexOf(t)));
-  assert.equal(g.probe.now().state, 'result', '47県すべて埋まったら終わり');
-  assert.equal(g.probe.now().score, 1, '1回で当てた数');
-  assert.equal(g.probe.now().misses, 46);
-  assert.equal(g.probe.now().done.filter(d => d === 2).length, 46, '外してから当てた印');
+  assert.equal(g.probe.now().state, 'play'); assert.equal(g.probe.now().left, 47);
+  assert(g.probe.now().map.h < H * 0.6, 'もう一度で一覧が戻る');
 }
 
-// 使用済みの名前は押せない・答えた後は押しても変わらない・待ち時間・なぞると押さない
+// 外したら同じ県のまま選び直し。外した名前はその県でだけ押せない。途中で別の県に移ってもよい
 {
   const g = open();
-  const t = g.dbg.target(), L = g.dbg.list();
-  const right = L.indexOf(t), wrong = L.findIndex(x => x !== t);
+  const a = 5, b = 30, L = () => g.dbg.list();
+  tapPref(g, a);
+  const wrong = L().findIndex(x => x !== a && x !== b);
   tapName(g, wrong);
-  const q = g.probe.now().q;
-  assert(!g.probe.now().answered && g.probe.now().misses === 1);
+  assert.equal(g.probe.now().selected, a, '外しても同じ県のまま');
+  assert.equal(g.probe.now().misses, 1); assert.equal(g.probe.now().tried, 1);
   tapName(g, wrong);
   assert.equal(g.probe.now().misses, 1, '外した名前はもう押せない');
-  tapName(g, right);
-  assert(g.probe.now().answered, 'すぐ選び直せる');
-  g.tap(...center(g.probe.now().list[wrong]));
-  assert.equal(g.probe.now().misses, 1, '当てた後の押しは効かない');
-  let f = 0; while (g.probe.now().q === q) { g.step(1); f++; }
-  assert(f >= 45 && f <= 65, '当たった県名を見せる時間 ' + f + 'コマ');
-  assert.equal(g.probe.now().tried, 0, '次の県では外した名前がまた押せる');
-  /* 使用済み（さっきの正解の名前）は押しても答えにならない */
-  tapName(g, right);
-  assert(!g.probe.now().answered, '使用済みは押せない');
-  /* 地図を押しても答えにならない */
-  g.tap(270, 100);
-  assert(!g.probe.now().answered);
+  /* 別の県へ移ると、さっき外した名前も押せる */
+  tapPref(g, b);
+  assert.equal(g.probe.now().tried, 0);
+  tapName(g, wrong);
+  assert.equal(g.probe.now().misses, 2);
+  tapName(g, kOf(g, b));
+  assert.equal(g.probe.now().done[b], 2, '外してから当てた印');
+  /* 戻ると、外した記録は残っている */
+  tapPref(g, a);
+  assert.equal(g.probe.now().tried, 1);
+  tapName(g, kOf(g, a));
+  assert.equal(g.probe.now().done[a], 2);
+  assert.equal(g.probe.now().score, 0);
   /* 一覧をなぞるとスクロールして、答えにはならない */
+  tapPref(g, 0);
   const p = g.probe.now();
   if (p.maxScroll > 0) {
-    const s0 = p.scroll, y = p.listBottom - 20;
-    g.drag([{ x: 100, y }, { x: 100, y: y - 40 }, { x: 100, y: y - 120 }], 1);
-    assert(!g.probe.now().answered, 'なぞっただけでは選ばない');
-    assert(g.probe.now().scroll > s0, 'なぞると一覧が動く');
+    /* 動かせる向きへなぞる */
+    const s0 = p.scroll, upward = s0 < p.maxScroll / 2, y = upward ? p.listBottom - 20 : p.listTop + 20, d = upward ? -1 : 1;
+    g.drag([{ x: 100, y }, { x: 100, y: y + 40 * d }, { x: 100, y: y + 120 * d }], 1);
+    assert.equal(g.probe.now().misses, 2, 'なぞっただけでは選ばない');
+    assert(Math.abs(g.probe.now().scroll - s0) > 50, 'なぞると一覧が動く');
   }
 }
 
@@ -125,50 +173,46 @@ function answerBy(g, pick) {
 {
   const g = open();
   g.press(' ');
-  assert(!g.probe.now().answered, '最初のスペースは目印を出すだけ');
-  assert(g.probe.now().keyMode);
-  g.press('ArrowRight'); assert.equal(g.probe.now().sel, 1);
-  g.press('ArrowDown'); assert.equal(g.probe.now().sel, 5);
-  g.press('ArrowLeft'); assert.equal(g.probe.now().sel, 4);
-  g.press('ArrowUp'); assert.equal(g.probe.now().sel, 0);
-  for (let i = 0; i < 47; i++) {
-    const k = g.dbg.list().indexOf(g.dbg.target());
+  assert(g.probe.now().selected >= 0, '最初のスペースで県が1つ選ばれる');
+  const first = g.probe.now().selected;
+  ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].some(k => { g.press(k); return g.probe.now().selected !== first; });
+  assert.notEqual(g.probe.now().selected, first, '矢印で別の県へ');
+  let guard = 0;
+  while (g.probe.now().left > 0 && guard++ < 400) {
+    ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].some(k => { if (g.probe.now().selected >= 0) return true; g.press(k); return false; });
+    const i = g.probe.now().selected;
+    assert(i >= 0, '矢印でまだの県を選べる');
+    g.press(' ');
+    assert.equal(g.probe.now().focus, 'list', 'スペースで一覧へ');
+    const k = kOf(g, i);
     let n = 0;
     while (g.probe.now().sel !== k && n++ < 60) g.press(g.probe.now().sel < k ? 'ArrowRight' : 'ArrowLeft');
     assert.equal(g.probe.now().sel, k, '左右で正解の名前まで行ける');
-    const q = g.probe.now().q;
     g.press(' ');
-    assert(g.probe.now().answered);
-    g.until(() => g.probe.now().state === 'result' || g.probe.now().q !== q, 400);
+    assert.equal(g.probe.now().done[i], 1);
+    assert.equal(g.probe.now().focus, 'map', '当てたら地図へ戻る');
   }
-  assert.equal(g.probe.now().score, 47);
+  assert.equal(g.probe.now().left, 0, 'キーだけで47県を埋められる');
+  assert(g.until(() => g.probe.now().state === 'result', 400));
   g.press(' ');
   assert.equal(g.probe.now().state, 'play', '結果でスペースはもう一度');
   g.esc();
-  assert.equal(g.probe.now().q, 0, 'Escで最初から');
+  assert.equal(g.probe.now().left, 47, 'Escで最初から');
 }
 
-// どの県も、寄ったときに地図の中に見える大きさで収まる・一覧の押しどころ
+// 画面の形ごとに: 押しどころの間隔・一覧の位置・最後の名前まで届く・全体表示で全県が見える
 for (const shape of load.SHAPES) {
   const g = open(shape);
-  const d = g.dbg, M = d.MAP(), F = d.FULL();
-  let small = Infinity;
-  d.BOX.forEach((b, i) => {
-    d.aim(i);
-    const c = d.goal();
-    const x0 = (b[0] - c.x) * c.s + M.w / 2, x1 = (b[2] - c.x) * c.s + M.w / 2;
-    const y0 = (b[1] - c.y) * c.s + M.h / 2, y1 = (b[3] - c.y) * c.s + M.h / 2;
-    assert(x0 >= -1 && x1 <= M.w + 1 && y0 >= -1 && y1 <= M.h + 1, (i + 1) + '番が地図からはみ出す ' + shape);
-    small = Math.min(small, Math.max(x1 - x0, y1 - y0));
-  });
-  assert(small >= 45, 'いちばん小さい県でも45以上に見える（' + Math.round(small) + '）' + shape);
   const p = g.probe.now(), cs = p.list.map(center);
   for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
     assert(Math.hypot(cs[i][0] - cs[j][0], cs[i][1] - cs[j][1]) >= 63, '押しどころの間隔');
   }
-  assert(p.listTop >= M.h, '一覧は地図の下');
-  /* 一番下までスクロールすると、最後の名前が見える */
-  d.reveal(46); g.step(120);
+  assert(p.listTop >= p.map.h, '一覧は地図の下');
+  for (let i = 0; i < 47; i++) {
+    const s = g.probe.spot(i);
+    assert(s.x >= 0 && s.x <= p.map.w && s.y >= 0 && s.y <= p.map.h, '全体表示で全県が見える ' + shape);
+  }
+  g.dbg.reveal(46); g.step(120);
   const last = g.probe.now().list[46];
   assert(last.y >= p.listTop && last.y + last.h <= p.listBottom, '最後の名前まで届く ' + shape);
 }
