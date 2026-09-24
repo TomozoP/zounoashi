@@ -90,6 +90,25 @@ function next(g) {
   assert.equal(g.probe.now().misses, 1, '埋まった県はもう答えにならない');
 }
 
+// 5回外したら、答えの県がある地方を囲む。次の偏見では消える
+{
+  const g = open();
+  const REGION = [0, 1, 7, 14, 23, 30, 35, 39], regionOf = i => REGION.filter(s => i >= s).length - 1;
+  /* 地方の分け方: 東北は青森から福島、九州沖縄は福岡から沖縄 */
+  assert.deepEqual([0, 1, 6, 7, 13, 14, 22, 23, 29, 30, 34, 35, 38, 39, 46].map(regionOf), [0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7]);
+  const a = g.dbg.ask(), others = [...Array(47).keys()].filter(i => i !== a);
+  for (let n = 0; n < 5; n++) {
+    assert.equal(g.probe.now().hint, -1, (n) + '回目まではヒントなし');
+    tapPref(g, others[n]);
+  }
+  assert.equal(g.probe.now().hint, regionOf(a), '5回外すと答えの地方を囲む');
+  g.step(10);
+  tapPref(g, a);
+  assert.equal(g.probe.now().hint, -1, '当てたら消える');
+  next(g);
+  assert.equal(g.probe.now().hint, -1, '次の偏見ではヒントなし');
+}
+
 // ドラッグで動かす（タップ扱いにしない）・2本指とホイールで広げる・端から出ない
 {
   const g = open();
