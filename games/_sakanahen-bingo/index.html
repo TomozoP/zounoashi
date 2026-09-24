@@ -763,7 +763,7 @@
   /* 紙のビンゴカード。漢字はミシン目の丸の上に刷ってあり、当たったらその丸を押し抜いて穴にする */
   var PAPER = "#fbf5e6", INK = "#1d2a44";
   /* カードごとの見た目。SETS と同じ並び。
-     bg: 背景 / rim: 外枠 / chip: 選ぶ丸の色 / sparks: 開けたときの火花 / ball: 抽選の玉の色 / rainbow: 虹色（枠・選ぶ丸・玉が虹色になり、ゆっくり色が流れる） / mark: 真ん中の漢字の色（無ければ chip） / band: 帯の飾り */
+     bg: 背景 / rim: 外枠 / chip: 選ぶ丸の色 / sparks: 開けたときの火花 / ball: 抽選の玉の色 / rainbow: 虹色（枠・選ぶ丸・玉が虹色になり、ゆっくり色が流れる） / rim・chip が "hazard" なら黄黒のしま / mark: 真ん中の漢字の色（無ければ chip） / band: 帯の飾り */
   var THEMES = [
     { bg: "#1d231b", rim: "#7a5230", chip: "#7a5230", ball: "#9a6a3c", grain: true, sparks: ["#9ccc5a", "#e2f0a8", "#f2b84b", "#6fae3e"],   /* 木: 木目の枠と葉 */
       band: function (x, y, k) { drawLeaf(x, y, 8, k % 2 ? "#e7c46a" : "#9ccc5a", k % 2 ? 0.5 : -0.5); } },
@@ -778,8 +778,8 @@
     { bg: "#16121d", rim: "rainbow", chip: "#8a5cc0", ball: "#8a5cc0", mark: "#5b3a7a", rainbow: true,
       sparks: ["#ff5a5f", "#ffd24a", "#5ad07a", "#4aa8ff"],                                                     /* 難: 虹色 */
       band: function (x, y, k) { drawStar(x, y, k % 2 ? 6 : 8, hueHex(k * 40 + T * 60, 80, 70)); } },
-    { bg: "#150b0b", rim: "#8e1a1a", chip: "#8e1a1a", ball: "#c0392b", mark: "#8e1a1a", sparks: ["#ffd24a", "#fff3dc", "#ff7a5a", "#e9c46a"],   /* 𰻞: 深い赤と金 */
-      band: function (x, y, k) { drawCoin(x, y, k % 2 ? 6 : 8, "#e9c46a", "#8e1a1a"); } }
+    { bg: "#141414", rim: "hazard", chip: "hazard", ball: "#f5c400", mark: "#111111", sparks: ["#f5c400", "#ffffff", "#1a1a1a", "#ffe066"],   /* 𰻞: 黄と黒の警告のしま */
+      band: null }
   ];
   function TH() { return THEMES[setNo]; }
   /* 色相（度）から色。虹色に使う */
@@ -796,7 +796,24 @@
   }
   /* 玉の色。虹色のカードでは玉ごとに色がずれて、ゆっくり流れる */
   function ballColorAt(i) { return TH().rainbow ? hueHex(i * 26 + T * 40, 70, 56) : TH().ball; }
+  /* 黄と黒の斜めのしま（警告の色）。一度作って使い回す */
+  var hazardTile = null;
+  function hazardFill() {
+    if (!hazardTile) {
+      hazardTile = document.createElement("canvas");
+      hazardTile.width = hazardTile.height = 28;
+      var h = hazardTile.getContext("2d");
+      if (!h) return "#f5c400";
+      h.fillStyle = "#f5c400"; h.fillRect(0, 0, 28, 28);
+      h.fillStyle = "#151515";
+      [-28, 0, 28].forEach(function (o) {
+        h.beginPath(); h.moveTo(o, 28); h.lineTo(o + 14, 28); h.lineTo(o + 42, 0); h.lineTo(o + 28, 0); h.closePath(); h.fill();
+      });
+    }
+    return (ctx.createPattern && ctx.createPattern(hazardTile, "repeat")) || "#f5c400";
+  }
   function rimFill(F) {
+    if (TH().rim === "hazard") return hazardFill();
     if (TH().rim === "rainbow") return rainbowFill(F.x, F.y, F.x + F.w, F.y + F.h, T * 30);
     if (TH().rim !== "metal") return TH().rim;
     var g = ctx.createLinearGradient(F.x, F.y, F.x + F.w, F.y + F.h);
@@ -841,7 +858,7 @@
       ctx.restore();
     }
     /* 帯の飾り */
-    for (var k = 0; k < 9; k++) TH().band(F.x + F.w * (k + 1) / 10, F.y + F.band / 2 + 4, k);
+    if (TH().band) for (var k = 0; k < 9; k++) TH().band(F.x + F.w * (k + 1) / 10, F.y + F.band / 2 + 4, k);   /* 飾りの無いカードもある */
     /* 紙の面 */
     var gx = CARD.x, gy = CARD.y, gw = CELL.w * 5, gh = CELL.h * 5;
     roundRect(gx - 4, gy - 4, gw + 8, gh + 8, 8); ctx.fillStyle = PAPER; ctx.fill();
@@ -1099,13 +1116,14 @@
         ctx.restore();
         ctx.translate(r.x, r.y); ctx.scale(pop, pop); ctx.translate(-r.x, -r.y);
       }
-      var chip = THEMES[i].rainbow ? rainbowFill(r.x - r.r, r.y - r.r, r.x + r.r, r.y + r.r, T * 60) : THEMES[i].chip;
+      var chip = THEMES[i].rainbow ? rainbowFill(r.x - r.r, r.y - r.r, r.x + r.r, r.y + r.r, T * 60) : THEMES[i].chip === "hazard" ? hazardFill() : THEMES[i].chip;
+      var busy = THEMES[i].rainbow || THEMES[i].chip === "hazard";   /* 柄の上の字には縁取り */
       ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
       ctx.fillStyle = on ? PAPER : chip; ctx.fill();
       ctx.lineWidth = on ? 6 : 2; ctx.strokeStyle = on ? chip : "rgba(255,255,255,.25)"; ctx.stroke();
       ctx.font = "700 " + Math.round(r.r * 1.18) + "px " + KANJI_FONT;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      if (THEMES[i].rainbow && !on) {           /* 虹の上では字に縁取り */
+      if (busy && !on) {
         ctx.lineWidth = 4; ctx.lineJoin = "round"; ctx.strokeStyle = "rgba(20,24,36,.7)";
         ctx.strokeText(SETS[i].mark, r.x, r.y + 2);
       }
