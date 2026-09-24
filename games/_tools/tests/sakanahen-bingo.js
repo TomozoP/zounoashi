@@ -7,7 +7,7 @@ const open = shape => { const g = load(file, { quiet: true }); if (shape) g.view
 const tapCell = (g, i) => { const p = g.probe.cell(i); g.tap(p.x, p.y); };
 const now = g => g.probe.now();
 /* カードの並び（やさしい順に左から）。位置ではなく字で選ぶ */
-const ORDER = ['木', '金', '虫', '魚', '鳥', '難'];
+const ORDER = ['木', '金', '虫', '魚', '鳥', '難', '𰻞'];
 const I = m => ORDER.indexOf(m);
 const cellOf = g => { const n = now(g); return n.card.indexOf(n.call.kanji); };
 /* 次の読みが出るまで進める */
@@ -35,10 +35,12 @@ function start(g) { tapCell(g, 12); g.step(1); assert.equal(now(g).state, 'play'
   const g = open();
   const sets = g.probe.sets();
   assert.deepEqual(sets.map(s => s.mark), ORDER, 'やさしい順に左から');
-  assert.equal(g.probe.setCount(), 6, '難も最初から選べる');
-  /* 難は、ほかのカードに入っていない字だけ */
-  const others = new Set(sets.slice(0, 5).flatMap(s => s.list.map(f => f.kanji)));
-  sets[5].list.forEach(f => assert.ok(!others.has(f.kanji), f.kanji + ' はほかのカードにもある'));
+  assert.equal(g.probe.setCount(), 6, '難は最初から選べて、𰻞 はまだ出ていない');
+  /* 難と 𰻞 は、ほかのカードに入っていない字だけ */
+  [5, 6].forEach(k => {
+    const others = new Set(sets.filter((s, j) => j !== k).flatMap(s => s.list.map(f => f.kanji)));
+    sets[k].list.forEach(f => assert.ok(!others.has(f.kanji), sets[k].mark + ' の ' + f.kanji + ' はほかのカードにもある'));
+  });
   sets.forEach(s => {
     const fish = s.list;
     assert.ok(fish.length >= 32, s.mark + ' の字の数 ' + fish.length);
@@ -303,7 +305,7 @@ ORDER.slice(0, 5).forEach(mark => {
   assert.ok(now(g).failed);
   assert.deepEqual(now(g).cleared, {}, 'ライフがなくなった回はクリアにしない');
   assert.equal(g.probe.shareText(), 'ビンゴならず #難読ビンゴ');
-  ['魚', '難'].forEach(m => {
+  ['魚', '難', '木', '金', '虫', '鳥'].forEach((m, k) => {   /* 並びと違う順でも、6つ揃えば 𰻞 が出る */
     back(g);
     const b = g.probe.setButton(I(m)); g.tap(b.x, b.y); g.step(1);
     start(g);
@@ -312,17 +314,37 @@ ORDER.slice(0, 5).forEach(mark => {
     assert.ok(!res.failed);
     assert.equal(res.cleared[m], true, m + ' をクリア');
     assert.ok(Object.values(res.cleared).every(v => v === true), '回数は残さない');
+    assert.equal(g.probe.setCount(), k < 5 ? 6 : 7, k < 5 ? 'まだ 𰻞 は出ない' : '6つ揃うと 𰻞 が出る');
     assert.equal(g.probe.shareText(), '「' + m + '」のシートをクリアしました #難読ビンゴ', 'シェアの文');
   });
 }
 
-/* 12. 確かめる用: 手元だけ、遊んでいる間の F8 で出ている字を開ける（無ければスキップ）。公開の場所では効かない */
+/* 12. 確かめる用: 手元だけ、遊んでいる間の F8 で出ている字を開ける（無ければスキップ）。カード選びの F8 で 𰻞 を出す／戻す。公開の場所では効かない */
 {
   const at = host => load(file, { quiet: true, inject: 'window.location.hostname = ' + JSON.stringify(host) + ';' });
   const g = at('localhost'); g.step(2);
   g.press('F8'); g.step(1);
-  assert.equal(now(g).state, 'intro', 'カード選びの F8 では何も起きない');
-  assert.equal(now(g).set, '魚');
+  assert.equal(now(g).state, 'intro', 'カード選びの F8 では始まらない');
+  assert.equal(g.probe.setCount(), 7, 'F8 で 𰻞 が出る');
+  assert.equal(now(g).set, '𰻞', '𰻞 を選んでいる');
+  assert.deepEqual(now(g).cleared, {}, '記録には書かない');
+  const a0 = g.probe.setButton(0), a1 = g.probe.setButton(1), a6 = g.probe.setButton(6);
+  assert.ok(a1.x - a0.x >= 63, '7つ並べても丸同士が離れている');
+  assert.ok(a6.x + 30 <= now(g).W && a0.x - 30 >= 0, '7つ並べても画面に収まる');
+  start(g);
+  const bl = g.probe.sets()[I('𰻞')].list.map(f => f.kanji);
+  assert.ok(bl.includes(now(g).call.kanji), '𰻞 で遊べる');
+  assert.ok(now(g).card.filter(Boolean).every(k => bl.includes(k)), '𰻞 のカード');
+  /* 制作中の固定リンク（/preview/）では最初から 𰻞 が出ている（スマホで確かめるため）。公開の場所では出ない */
+  const pv = load(file, { quiet: true, inject: 'window.location.hostname = "www.zounoashi.com"; window.location.pathname = "/preview/";' }); pv.step(2);
+  assert.equal(pv.probe.setCount(), 7, '固定リンクでは最初から 𰻞 が出る');
+  assert.deepEqual(now(pv).cleared, {}, '記録には書かない');
+  const pb = load(file, { quiet: true, inject: 'window.location.hostname = "www.zounoashi.com"; window.location.pathname = "/games/sakanahen-bingo/";' }); pb.step(2);
+  assert.equal(pb.probe.setCount(), 6, '公開の場所では出ない');
+  const g2 = at('localhost'); g2.step(2);
+  g2.press('F8'); g2.step(1); g2.press('F8'); g2.step(1);
+  assert.equal(g2.probe.setCount(), 6, 'もう一度で戻る');
+  assert.equal(now(g2).set, '魚');
   /* 遊んでいる間の F8: 出ている字があれば開け、無ければスキップ。押し続ければビンゴまで行く */
   const h = at('localhost'); h.step(2); start(h);
   for (let k = 0; k < 2000 && now(h).state === 'play'; k++) {
