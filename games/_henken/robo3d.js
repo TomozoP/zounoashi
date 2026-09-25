@@ -11,7 +11,8 @@
      party   … クリア（虹色に光って踊る）
      hue     … party のときの色相（0〜360）
 
-   形: 角の丸い箱の頭に、顔の画面とアンテナ。顎のところ（画面の左下・顔の前）に、体とつながっていない浮いた白いグローブの右手（考える顔の絵文字の手の位置）。
+   形: 角の丸い箱の頭に、顔の画面とアンテナ。顎のところ（画面の右下・顔の前）に、体とつながっていない浮いた白いグローブの左手（考える顔の絵文字の手の位置）。
+   手の甲がこちらを向く。
    口は片側が上がったニヤッとした形。黒い縁取り付き。目は「偏」「見」の光る字、口は横長の光る棒。耳と首はない。 */
 (function (global) {
   "use strict";
@@ -100,28 +101,36 @@
 
     /* 浮いた手。白い丸いミトンに親指。頭とは別に動かす（頭の傾きにはつられない）。クリアの虹色にも染まらない */
     var handMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0, roughness: 0.45 });
-    /* 白いグローブの右手（1本）。丸い手のひらに3本の指と親指、手首のふくらんだ袖口。
+    /* 白いグローブの左手（1本）。丸い手のひらに指4本と親指（5本）、手首のふくらんだ袖口、手の甲に縫い目3本。
        指と親指はそれぞれ付け根で曲がる。どれも黒い縁取り付き（ひと回り大きい黒を裏側だけ描く） */
     function part(parent, geo, lineGeo, x, y, z, sx, sy, sz) {
       var line = new THREE.Mesh(lineGeo, lineMat), m = new THREE.Mesh(geo, handMat);
       [line, m].forEach(function (o) { o.position.set(x, y, z); o.scale.set(sx || 1, sy || 1, sz || 1); parent.add(o); });
     }
     function capsule(r, len) { return new THREE.CapsuleGeometry(r, len, 6, 12); }
-    var FINGER_LEN = 0.25;
-    var IN = -1;                                    /* 親指の出る向き（手首の中の座標で -x）。顎に当てると親指が上に来る */
+    /* 手首の中の座標: 指は +y、手のひらは +z、手の甲は -z、親指は IN の向き（x）。
+       手首を y で半回転させて手の甲をこちらに向け、z で倒して指を顎のほうへ向ける */
+    var IN = -1;
+    var seamMat = new THREE.MeshBasicMaterial({ color: 0x16202e });
     function makeHand() {
       var root = new THREE.Group(), wrist = new THREE.Group();
       root.add(wrist);
       /* 手のひら・袖口 */
       part(wrist, new THREE.SphereGeometry(0.2, 22, 16), new THREE.SphereGeometry(0.2 + LINE, 22, 16), 0, 0, 0, 1.05, 0.95, 0.7);
       part(wrist, new THREE.CylinderGeometry(0.15, 0.17, 0.1, 20), new THREE.CylinderGeometry(0.15 + LINE, 0.17 + LINE, 0.1 + LINE * 2, 20), 0, -0.24, 0);
-      /* 指3本。頭に近いほうから人さし指・中指・薬指。付け根で曲がる */
-      var fingers = [0.11 * IN, 0, -0.11 * IN].map(function (fxp) {
-        var pivot = new THREE.Group();
-        pivot.position.set(fxp, 0.13 - Math.abs(fxp) * 0.2, 0.02);
-        part(pivot, capsule(0.065, 0.12), capsule(0.065 + LINE, 0.12), 0, FINGER_LEN / 2, 0, 1, 1, 0.85);
+      /* 指4本。親指に近いほうから人さし指・中指・薬指・小指。長さを少しずつ変える。付け根で曲がる */
+      var fingers = [[0.14, 0.12], [0.047, 0.14], [-0.047, 0.12], [-0.14, 0.085]].map(function (d) {
+        var fxp = d[0] * IN, len = d[1], pivot = new THREE.Group();
+        pivot.position.set(fxp, 0.13 - Math.abs(fxp) * 0.3, 0.02);
+        part(pivot, capsule(0.05, len), capsule(0.05 + LINE, len), 0, (len + 0.1) / 2, 0, 1, 1, 0.85);
         wrist.add(pivot);
-        return { pivot: pivot, fan: -fxp * 1.2 };
+        return { pivot: pivot, fan: -fxp * 1.0 };
+      });
+      /* 手の甲の縫い目3本（手袋らしさ。甲がこちらを向いたときに見える） */
+      [-0.06, 0, 0.06].forEach(function (sx) {
+        var seam = new THREE.Mesh(capsule(0.011, 0.11), seamMat);
+        seam.position.set(sx, 0.02, -0.142);
+        wrist.add(seam);
       });
       /* 親指。頭のほうへ出て、付け根で手のひら側へ倒れる */
       var thumb = new THREE.Group();
@@ -200,37 +209,39 @@
         } else robo.position.x = 0;
         robo.rotation.set(pitch, yaw, roll, "YXZ");
         robo.position.y = y;
-        /* 右手: 目標の構えを決めて、なめらかに寄せる。位置は考える顔の絵文字のように、顎（画面の左下・顔の前）。
+        /* 左手: 目標の構えを決めて、なめらかに寄せる。位置は考える顔の絵文字のように、顎（画面の右下・顔の前）。
+           手首は y で半回転して手の甲をこちらへ向け、指は顎（画面の左）へ向ける。
            ふだん … 人さし指を顎に沿わせ、親指を立て、ほかは握る。人さし指で顎をなでる
            話す   … 同じ構えで、人さし指で顎をトントンたたく
            外れ   … 顔の横で人さし指だけ立てて「チッチッ」と振る
            当たり … 顎の前で指を開いて、ふふんと笑う
            クリア … 頭の右上で手を振り、指をひらひら */
+        var BACK = Math.PI;                              /* 手の甲をこちらへ */
         var g = {
-          x: -0.36, y: -0.52 + Math.sin(t * 1.5) * 0.02, z: 0.8,
-          rx: 0.1, ry: 0.25, rz: -1.25 + Math.sin(t * 1.2) * 0.05,
-          curl: [0.15 + Math.sin(t * 2) * 0.1, 1.5, 1.6],
+          x: 0.42, y: -0.6 + Math.sin(t * 1.5) * 0.02, z: 0.8,
+          rx: -0.1, ry: BACK + 0.25, rz: -1.25 + Math.sin(t * 1.2) * 0.05,
+          curl: [0.15 + Math.sin(t * 2) * 0.1, 1.5, 1.6, 1.6],
           spread: 0.7, thumb: 0
         };
         if (o.talking) {
           g.y += Math.sin(t * 6) * 0.025;
           g.rz += Math.sin(t * 6) * 0.06;
-          g.curl = [0.1 + (Math.sin(t * 9) + 1) * 0.28, 1.5, 1.6];
+          g.curl = [0.1 + (Math.sin(t * 9) + 1) * 0.28, 1.5, 1.6, 1.6];
         }
         if (o.shake) {
-          g.x = -0.62; g.y = -0.3; g.z = 0.8; g.rx = 0; g.ry = 0.2;
+          g.x = 0.62; g.y = -0.3; g.z = 0.8; g.rx = 0; g.ry = BACK - 0.2;
           g.rz = Math.sin(t * 26) * 0.38 * Math.min(1, Math.abs(o.shake) * 1.5);
-          g.curl = [0, 1.5, 1.6]; g.spread = 0.6; g.thumb = 0.9;
+          g.curl = [0, 1.5, 1.6, 1.6]; g.spread = 0.6; g.thumb = 0.9;
         }
         if (o.happy && !o.party) {
-          g.y = -0.46 + Math.sin(t * 8) * 0.02; g.rz = -0.95 + Math.sin(t * 10) * 0.05;
-          g.curl = [0.1, 0.2, 0.3]; g.spread = 1.4; g.thumb = 0.1;
+          g.y = -0.55 + Math.sin(t * 8) * 0.02; g.rz = -0.95 + Math.sin(t * 10) * 0.05;
+          g.curl = [0.1, 0.15, 0.2, 0.3]; g.spread = 1.4; g.thumb = 0.1;
         }
         if (o.party) {
           var wv = t * Math.PI * 4;
-          g.x = 1.05 + Math.cos(wv) * 0.06; g.y = 0.5 + Math.sin(wv) * 0.2; g.z = 0.3;
-          g.rx = 0; g.ry = -0.15; g.rz = Math.sin(wv) * 0.55;
-          g.curl = [0, 1, 2].map(function (i) { return 0.2 + Math.sin(t * 18 + i * 1.3) * 0.25; });
+          g.x = 1.02 + Math.cos(wv) * 0.06; g.y = 0.5 + Math.sin(wv) * 0.2; g.z = 0.3;
+          g.rx = 0; g.ry = BACK - 0.15; g.rz = Math.sin(wv) * 0.55;
+          g.curl = [0, 1, 2, 3].map(function (i) { return 0.2 + Math.sin(t * 18 + i * 1.3) * 0.25; });
           g.spread = 1.4; g.thumb = -0.1 + Math.sin(t * 18) * 0.15;
         }
         var dt = lastT == null ? 1 : Math.max(0, Math.min(0.2, t - lastT));
