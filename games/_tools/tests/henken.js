@@ -145,20 +145,44 @@ const window_zVoice = g => { const ctx = { window: {} }; require('vm').runInNewC
   assert.equal(g.probe.now().hint, -1, '次の偏見ではヒントなし');
 }
 
-// ロボをつつくと反応する。答えにはならない。クリア後もつつける
+// ロボをつつくと反応して、別の偏見を読み直す。答えにはならない。クリア後もつつける
 {
   const g = open();
   const r = g.probe.now().robo;
+  g.tap(r.x + 150, r.y);
+  assert.equal(g.probe.now().pokes, 0, 'ロボの外（吹き出し）は反応しない');
+  g.tap(r.x, r.y);
+  assert.equal(g.probe.now().pokes, 1);
+  assert.equal(g.probe.now().misses + (47 - g.probe.now().left), 0, 'つついても答えにはならない');
+}
+{
+  const g = open();
+  const r = g.probe.now().robo, a0 = g.dbg.ask(), line0 = g.probe.now().line;
+  tapPref(g, (a0 + 1) % 47);
+  assert.equal(g.probe.now().tried, 1);
   g.tap(r.x, r.y);
   assert.equal(g.probe.now().pokes, 1, 'つつくと反応する');
-  assert.equal(g.probe.now().misses + (47 - g.probe.now().left), 0, 'つついても答えにはならない');
-  g.tap(r.x + 150, r.y);
-  assert.equal(g.probe.now().pokes, 1, 'ロボの外（吹き出し）は反応しない');
-  g.press('g');
+  assert.notEqual(g.dbg.ask(), a0, 'つつくと別の偏見になる');
+  assert.notEqual(g.probe.now().line, line0);
+  assert(g.probe.now().spoken < 3, '新しい偏見を最初から読み上げる');
+  assert.equal(g.probe.now().tried, 0, '外した記録はリセット');
+  assert.equal(g.probe.now().misses, 1, 'ミスの数はそのまま');
+  /* 後回しにした偏見も、あとで必ず出る。つつきながら全部当てても47県そろう */
+  const seen = new Set();
+  let guard = 0;
+  while (g.probe.now().left > 0 && guard++ < 300) {
+    if (guard % 3 === 0 && g.probe.now().left > 1) { g.tap(r.x, r.y); continue; }
+    const a = g.dbg.ask(); seen.add(a);
+    tapPref(g, a);
+    if (g.probe.now().left > 0) next(g);
+  }
+  assert.equal(seen.size, 47, 'つついても47の偏見がすべて出る');
+  assert.equal(g.probe.now().left, 0);
+  assert.equal(g.probe.now().misses, 1, 'つついてもミスにはならない');
   g.until(() => g.probe.now().state === 'result', 400);
-  const r2 = g.probe.now().robo;
+  const n0 = g.probe.now().pokes, r2 = g.probe.now().robo;
   g.tap(r2.x, r2.y);
-  assert.equal(g.probe.now().pokes, 2, 'クリア後もつつける');
+  assert.equal(g.probe.now().pokes, n0 + 1, 'クリア後もつつける');
   assert.equal(g.probe.now().state, 'result');
 }
 
