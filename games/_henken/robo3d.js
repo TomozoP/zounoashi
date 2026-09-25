@@ -150,7 +150,7 @@
       fx.fillStyle = "#7df0ff";
       fx.shadowColor = "rgba(125,240,255,.9)";
       fx.shadowBlur = 14;
-      fx.font = "900 64px sans-serif";
+      fx.font = '64px "DotGothic16", sans-serif';     /* ドット風の字（ゲーム側で読み込み済み） */
       fx.textAlign = "center";
       fx.textBaseline = "middle";
       var sy = o.happy ? 0.5 : o.blink ? 0.15 : 1;
