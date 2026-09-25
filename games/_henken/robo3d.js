@@ -9,6 +9,7 @@
      blink   … まばたき中
      shake   … 首を振る量（-1〜1。外されたとき）
      party   … クリア（虹色に光って踊る）
+     poke    … つつかれてからの進み具合（0〜1。つつかれていないときは -1）
      hue     … party のときの色相（0〜360）
 
    形: 角の丸い箱の頭に、顔の画面とアンテナ。顎のところ（画面の右下・顔の前）に、体とつながっていない浮いた白いグローブの左手（考える顔の絵文字の手の位置）。
@@ -164,37 +165,45 @@
       fx.font = '64px "DotGothic16", sans-serif';     /* ドット風の字（ゲーム側で読み込み済み） */
       fx.textAlign = "center";
       fx.textBaseline = "middle";
-      var sy = o.happy ? 0.5 : o.blink ? 0.15 : 1;
+      var surprised = o.poke >= 0 && o.poke < 0.8;
+      var sy = surprised ? 1.25 : o.happy ? 0.5 : o.blink ? 0.15 : 1;
       ["偏", "見"].forEach(function (ch, k) {
         fx.save();
         fx.translate(k ? 180 : 76, o.happy ? 70 : 80);
-        fx.scale(1, sy);
+        fx.scale(surprised ? 1.25 : 1, sy);
         fx.fillText(ch, 0, 2);
         fx.restore();
       });
+      /* つつかれて驚いた口は「お」 */
+      if (surprised) {
+        fx.strokeStyle = "#7df0ff"; fx.lineWidth = 8;
+        fx.beginPath(); fx.ellipse(128, 150, 14, 18, 0, 0, Math.PI * 2); fx.stroke();
+      }
       /* 口: 左が低く右が上がった、ニヤッとした弧。話すときはその形のまま開く */
-      var open = o.talking ? 4 + (o.mouth || 0) * 20 : 0, grin = o.happy ? 1.4 : 1;
-      var lx = 76, ly = 146, rx = 182, ry = 146 - 14 * grin, cx = 124, cy = 146 + 14 * grin;
-      if (open > 0) {
+      if (!surprised) {
+        var open = o.talking ? 4 + (o.mouth || 0) * 20 : 0, grin = o.happy ? 1.4 : 1;
+        var lx = 76, ly = 146, rx = 182, ry = 146 - 14 * grin, cx = 124, cy = 146 + 14 * grin;
+        if (open > 0) {
+          fx.beginPath();
+          fx.moveTo(lx, ly);
+          fx.quadraticCurveTo(cx, cy, rx, ry);
+          fx.quadraticCurveTo(cx + 6, cy + open * 1.6, lx, ly);
+          fx.fill();
+        }
+        fx.strokeStyle = "#7df0ff";
+        fx.lineWidth = 9;
+        fx.lineCap = "round";
         fx.beginPath();
         fx.moveTo(lx, ly);
         fx.quadraticCurveTo(cx, cy, rx, ry);
-        fx.quadraticCurveTo(cx + 6, cy + open * 1.6, lx, ly);
-        fx.fill();
+        fx.stroke();
+        /* 上がった口角に小さなえくぼ */
+        fx.lineWidth = 6;
+        fx.beginPath();
+        fx.moveTo(rx - 2, ry - 8);
+        fx.lineTo(rx + 6, ry + 4);
+        fx.stroke();
       }
-      fx.strokeStyle = "#7df0ff";
-      fx.lineWidth = 9;
-      fx.lineCap = "round";
-      fx.beginPath();
-      fx.moveTo(lx, ly);
-      fx.quadraticCurveTo(cx, cy, rx, ry);
-      fx.stroke();
-      /* 上がった口角に小さなえくぼ */
-      fx.lineWidth = 6;
-      fx.beginPath();
-      fx.moveTo(rx - 2, ry - 8);
-      fx.lineTo(rx + 6, ry + 4);
-      fx.stroke();
       fx.shadowBlur = 0; fx.shadowColor = "transparent";
       /* 走査線 */
       fx.fillStyle = "rgba(0,0,0,.24)";
@@ -239,6 +248,14 @@
         var y = Math.sin(t * 2) * 0.03;
         if (o.talking) { pitch += Math.sin(t * 18) * 0.05; y += Math.sin(t * 18) * 0.015; }
         if (o.shake) yaw += o.shake * 0.5;
+        /* つつかれた: ぷるぷる揺れて、のけぞって戻る */
+        var pk = o.poke >= 0 ? o.poke : -1;
+        if (pk >= 0) {
+          var dmp = 1 - pk;
+          roll += Math.sin(pk * 28) * 0.25 * dmp;
+          yaw += Math.sin(pk * 22 + 1) * 0.2 * dmp;
+          pitch -= Math.sin(Math.PI * Math.min(1, pk / 0.35)) * 0.25;
+        }
         if (o.party) {
           /* 頭で円を描くようにノリノリで揺れる（顔が見えるよう、回りきらずに左右へ首を振る） */
           var ph = t * Math.PI * 4;

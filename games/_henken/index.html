@@ -374,7 +374,7 @@
   var finishT = -1;                            /* 全部埋まってからの時間 */
 
   /* 上に偏見の札、その下が地図の見る範囲（地図そのものは札の下にも描く）。クリアしても札（踊るロボと点数）は残す */
-  var CARD_H = 124;
+  var CARD_H = 140;
   var MAP, CARD;
   function place() {
     var top = CARD_H + 20;
@@ -460,7 +460,7 @@
     order = shuffle(range());
     qi = -1;
     cursor = -1;
-    finishT = -1; nextT = -1; clearAt = -1; hopT = -9;
+    finishT = -1; nextT = -1; clearAt = -1; hopT = -9; pokeT = -9;
     confetti = []; confettiT = 0;
     pointers = {}; mapDrag = null; pinch = null;
     place();
@@ -659,7 +659,11 @@
       var d = mapDrag;
       mapDrag = null;
       /* 吹き出しの上のタップは答えにしない（下に県が透けていても） */
-      if (d && !d.moved && !onCard(d.x0, d.y0)) { keyMode = false; answer(prefAt(d.x0, d.y0)); }
+      if (d && !d.moved) {
+        keyMode = false;
+        if (onRobot(d.x0, d.y0)) poke();
+        else if (!onCard(d.x0, d.y0)) answer(prefAt(d.x0, d.y0));
+      }
     } else if (mapDrag) {
       /* 1本だけ残ったら、その指で続けて動かせるように */
       var q = pointsOf()[0];
@@ -841,7 +845,7 @@
 
   /* 上の段。左に偏見ロボ、右にその吹き出し。文字は読み上げに合わせて1文字ずつ出る。
      長い文は「、」のあたりで2行に分ける（分け方は全文で決めて、途中で行がずれないように） */
-  var ROBO_W = 110;                             /* ロボの置き場 */
+  var ROBO_W = 128;                             /* ロボの置き場 */
   function drawCard() {
     var c = CARD;
     var party = finishT >= 0 || state === S.RESULT;
@@ -850,7 +854,7 @@
     var talking = shown < s.length && !ok;
     if (party) {
       /* クリアしたら吹き出しは出さず、ロボが上の段を左右に行き来しながら踊る */
-      drawRobot(roboX(), c.y + c.h / 2 + 8, false, true, true);
+      drawRobot(roboAt().x, roboAt().y, false, true, true);
       return;
     }
     /* 吹き出し（ロボは後から描く。浮いた手が吹き出しの手前に来るように） */
@@ -893,7 +897,7 @@
     ctx.restore();
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
-    drawRobot(c.x + ROBO_W / 2, c.y + c.h / 2 + 8, talking, ok, party);
+    drawRobot(roboAt().x, roboAt().y, talking, ok, party);
   }
 
   /* クリア後のロボの横位置。左端から始まって、4秒ほどで左右を1往復する */
@@ -910,7 +914,7 @@
   try {
     if (window.THREE && window.WebGLRenderingContext && window.HenkenRobo3D) ROBO3D = window.HenkenRobo3D.create(320);
   } catch (e) { ROBO3D = null; }
-  var ROBO3D_SIZE = 170;                         /* 画面に貼る大きさ（ゲーム座標） */
+  var ROBO3D_SIZE = 205;                         /* 画面に貼る大きさ（ゲーム座標） */
   /* 正解したら、ロボが縦に小さく2回跳ねる（1回目は高く、2回目は低く） */
   var hopT = -9, HOP_TIME = 0.55;
   function hopY() {
@@ -918,15 +922,37 @@
     if (p < 0 || p > 1) return 0;
     return p < 0.6 ? -Math.sin(Math.PI * p / 0.6) * 16 : -Math.sin(Math.PI * (p - 0.6) / 0.4) * 6;
   }
+  /* ロボのいる場所（画面の座標）。クリア後は左右に行き来する */
+  function roboAt() {
+    var party = finishT >= 0 || state === S.RESULT;
+    return { x: party ? roboX() : CARD.x + ROBO_W / 2, y: CARD.y + CARD.h / 2 + 8 };
+  }
+  /* つついたか。頭のあたり（手も含めて少し広め） */
+  function onRobot(x, y) {
+    var r = roboAt();
+    return Math.abs(x - r.x) < ROBO3D_SIZE * 0.36 && Math.abs(y - r.y) < ROBO3D_SIZE * 0.34;
+  }
+  /* つつかれたら、頭がぷるぷる揺れて少し跳ね、目を見開いて「ピポッ」 */
+  var pokeT = -9, POKE_TIME = 0.7, pokes = 0;
+  function poke() {
+    pokeT = T;
+    pokes++;
+    tone(880, 0.06, 0.1, "square", 1500);
+    tone(1500, 0.09, 0.08, "square", 0, 0.07);
+  }
+  function pokeP() { var p = (T - pokeT) / POKE_TIME; return p >= 0 && p <= 1 ? p : -1; }
   function drawRobot(x, y, talking, happy, party) {
     y += hopY();
+    var pk = pokeP();
+    if (pk >= 0) y -= Math.sin(Math.PI * Math.min(1, pk / 0.4)) * 10;
     if (ROBO3D) {
       try {
         var hue3 = (T * 360) % 360;
         var img = ROBO3D.render({
           t: T, talking: talking, mouth: (Math.sin(T * 26) + 1) / 2, happy: happy,
           blink: (T % 3.2) < 0.12, party: party, hue: hue3,
-          shake: wrongT > 0 ? Math.sin(wrongT * 60) * (wrongT / WRONG_FLASH) : 0
+          shake: wrongT > 0 ? Math.sin(wrongT * 60) * (wrongT / WRONG_FLASH) : 0,
+          poke: pk
         });
         ctx.save();
         if (party) { ctx.shadowColor = "hsl(" + hue3 + ",100%,60%)"; ctx.shadowBlur = 26; }
@@ -940,8 +966,10 @@
   function drawRobot2D(x, y, talking, happy, party) {
     var shake = wrongT > 0 ? Math.sin(wrongT * 60) * 4 * (wrongT / WRONG_FLASH) : 0;
     var bob = talking ? Math.sin(T * 18) * 1.5 : Math.sin(T * 2) * 1;
+    var pk2 = pokeP();
     ctx.save();
     ctx.translate(x + shake, y + bob);
+    if (pk2 >= 0) ctx.rotate(Math.sin(pk2 * 28) * 0.18 * (1 - pk2));
     /* クリアしたら、頭で円を描くようにノリノリで揺れる（1秒に2周） */
     var hue = 0;
     if (party) {
@@ -950,7 +978,7 @@
       ctx.rotate(Math.sin(ph) * 0.22);
       hue = (T * 360) % 360;
     }
-    ctx.scale(1.25, 1.25);
+    ctx.scale(1.5, 1.5);
     ctx.lineJoin = "round";
     ctx.lineWidth = 3;
     ctx.strokeStyle = "#16202e";
@@ -1009,7 +1037,7 @@
     ctx.clearRect(0, 0, W, H);
     drawMap();
     if (state !== S.INTRO) drawCard();
-    else drawRobot(CARD.x + ROBO_W / 2, CARD.y + CARD.h / 2 + 8, false, false, false);   /* START前からロボは出ておく（吹き出しはまだ） */
+    else drawRobot(roboAt().x, roboAt().y, false, false, false);   /* START前からロボは出ておく（吹き出しはまだ） */
     drawConfetti();
     if (state === S.RESULT) drawResult();
   }
@@ -1076,7 +1104,7 @@
         left: state === S.INTRO ? N : left(), waiting: nextT >= 0, hint: hint(), spoken: spoken,
         party: finishT >= 0 || state === S.RESULT, confetti: confetti.length, buttons: resultButtons(),
         roboX: finishT >= 0 || state === S.RESULT ? roboX() : null,
-        hop: hopY(),
+        hop: hopY(), pokes: pokes, robo: roboAt(),
         done: done.slice(), misses: misses, tried: Object.keys(tried).length, cursor: cursor, keyMode: keyMode,
         cam: { x: cam.x, y: cam.y, s: cam.s }, full: FULL, map: { x: MAP.x, y: MAP.y, w: MAP.w, h: MAP.h },
         card: { x: CARD.x, y: CARD.y, w: CARD.w, h: CARD.h }

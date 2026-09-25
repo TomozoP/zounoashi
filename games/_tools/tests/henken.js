@@ -145,6 +145,23 @@ const window_zVoice = g => { const ctx = { window: {} }; require('vm').runInNewC
   assert.equal(g.probe.now().hint, -1, '次の偏見ではヒントなし');
 }
 
+// ロボをつつくと反応する。答えにはならない。クリア後もつつける
+{
+  const g = open();
+  const r = g.probe.now().robo;
+  g.tap(r.x, r.y);
+  assert.equal(g.probe.now().pokes, 1, 'つつくと反応する');
+  assert.equal(g.probe.now().misses + (47 - g.probe.now().left), 0, 'つついても答えにはならない');
+  g.tap(r.x + 150, r.y);
+  assert.equal(g.probe.now().pokes, 1, 'ロボの外（吹き出し）は反応しない');
+  g.press('g');
+  g.until(() => g.probe.now().state === 'result', 400);
+  const r2 = g.probe.now().robo;
+  g.tap(r2.x, r2.y);
+  assert.equal(g.probe.now().pokes, 2, 'クリア後もつつける');
+  assert.equal(g.probe.now().state, 'result');
+}
+
 // ドラッグで動かす（タップ扱いにしない）・2本指とホイールで広げる・端から出ない
 {
   const g = open();
@@ -208,7 +225,7 @@ const window_zVoice = g => { const ctx = { window: {} }; require('vm').runInNewC
   const xs = [];
   for (let i = 0; i < 300; i++) { g.step(1); xs.push(g.probe.now().roboX); }
   const lo = Math.min(...xs), hi = Math.max(...xs);
-  assert(lo < p.card.x + 80 && hi > p.card.x + p.card.w - 80, 'ロボが左右の端まで動く: ' + lo.toFixed(0) + '〜' + hi.toFixed(0));
+  assert(lo < p.card.x + 100 && hi > p.card.x + p.card.w - 110, 'ロボが左右の端まで動く: ' + lo.toFixed(0) + '〜' + hi.toFixed(0));
   /* シェアは持ち主の指定の文（リンクは共通処理が付ける） */
   assert.equal(g.dbg.shareButton.hidden, false);
   g.dbg.shareButton.fire('click', { stopPropagation() {} });
