@@ -163,6 +163,15 @@
     "黒豚のしゃぶしゃぶを、まずだしだけで味見してそう",
     "苦い野菜の苦さで、その日の元気をはかってそう"
   ];
+  /* しつこくつつかれたら、ロボがこっちを指差して言う、プレイヤーへの偏見。つつき方にからめた軽いものだけ */
+  var SCOLD = [
+    ["何度もつつく人は、エレベーターのボタンも連打してそう", "なんどもつつくひとは、えれべーたーのぼたんもれんだしてそう"],
+    ["しつこくつつく人は、プリンのふたの裏もなめてそう", "しつこくつつくひとは、ぷりんのふたのうらもなめてそう"],
+    ["そんなにつつく人は、レンジを残り1秒で開けてそう", "そんなにつつくひとは、れんじをのこりいちびょうであけてそう"],
+    ["つつきすぎる人は、ぷちぷちを全部つぶすまで寝なそう", "つつきすぎるひとは、ぷちぷちをぜんぶつぶすまでねなそう"],
+    ["連打する人は、ポテチの袋を最後に振って食べてそう", "れんだするひとは、ぽてちのふくろをさいごにふってたべてそう"]
+  ];
+
   /* 偏見ロボが読み上げる読み（LINES と同じ並び）。数字や漢字もひらがなにしておく */
   var YOMI = [
     "きんじょのはんいが、はんけいさんじゅっきろくらいありそう",
@@ -332,9 +341,10 @@
   var MORA = 0.15, ROBO_PITCH = 470;            /* 1拍の秒数（ふつうの話し方より遅め）と声の高さ（高め） */
   var ROBO_SWING = 0.35;                         /* 抑揚。ふつう(1)の3分の1ほどに抑えて、平たいロボの声に */
   var voice = null;
-  function talk(i) {
+  function talk(i) { talkYomi(YOMI[i]); }
+  function talkYomi(yomi) {
     hush();
-    talkWords = window.zVoice.kana(YOMI[i], MORA);
+    talkWords = window.zVoice.kana(yomi, MORA);
     talkLen = talkWords.reduce(function (s, w) { return s + w[2]; }, 0);
     if (AC) voice = window.zVoice.speak(AC, AC.currentTime + TALK_LEAD, ROBO_PITCH, talkWords, { volume: 0.3, swing: ROBO_SWING });
   }
@@ -461,6 +471,7 @@
     qi = -1;
     cursor = -1;
     finishT = -1; nextT = -1; clearAt = -1; hopT = -9; pokeT = -9;
+    scold = -1; pokeLog = [];
     confetti = []; confettiT = 0;
     pointers = {}; mapDrag = null; pinch = null;
     place();
@@ -538,6 +549,7 @@
     done[i] = first ? 1 : 2;
     if (first) score++;
     solvedAt[i] = T;
+    scold = -1;
     hopT = T;                                    /* ロボがぴょんと跳ねる */
     hush();
     spoken = LINES[ask].length;
@@ -591,8 +603,9 @@
     if (state !== S.PLAY) return;
     if (wrongT > 0) wrongT = Math.max(0, wrongT - dt);
     /* 吹き出しの文字は、声の進み具合に合わせて出す */
+    if (scold >= 0 && T - askT > TALK_LEAD + talkLen + SCOLD_HOLD) endScold();
     if (ask >= 0 && finishT < 0) {
-      var s = LINES[ask], k = Math.max(0, Math.min(1, (T - askT - TALK_LEAD) / talkLen));
+      var s = shownLine(), k = Math.max(0, Math.min(1, (T - askT - TALK_LEAD) / talkLen));
       spoken = Math.max(spoken, Math.ceil(s.length * k));
     }
     if (nextT >= 0) {
@@ -854,7 +867,7 @@
     var c = CARD;
     var party = finishT >= 0 || state === S.RESULT;
     if (!party && ask < 0) return;
-    var ok = nextT >= 0, s = party ? "" : LINES[ask], shown = Math.min(s.length, spoken);
+    var ok = nextT >= 0, s = party ? "" : shownLine(), shown = Math.min(s.length, spoken);
     var talking = shown < s.length && !ok;
     if (party) {
       /* クリアしたら吹き出しは出さず、ロボが上の段を左右に行き来しながら踊る */
@@ -901,7 +914,7 @@
     ctx.restore();
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
-    drawRobot(roboAt().x, roboAt().y, talking, ok, party);
+    drawRobot(roboAt().x, roboAt().y, talking, ok || scold >= 0, party);
   }
 
   /* クリア後のロボの横位置。左端から始まって、4秒ほどで左右を1往復する */
@@ -947,9 +960,28 @@
     readAsk();
     return true;
   }
+  /* 3秒以内に5回つつかれたら、こっちを指差してプレイヤーへの偏見を言う。言い終わったら、もとの偏見を読み直す */
+  var POKE_LIMIT = 5, POKE_WINDOW = 3, SCOLD_HOLD = 1.2;
+  var pokeLog = [], scold = -1;
+  function shownLine() { return scold >= 0 ? SCOLD[scold][0] : LINES[ask]; }
+  function startScold() {
+    scold = Math.floor(Math.random() * SCOLD.length);
+    pokeLog = [];
+    askT = T; spoken = 0;
+    talkYomi(SCOLD[scold][1]);
+  }
+  function endScold() {
+    scold = -1;
+    askT = T; spoken = 0;
+    talk(ask);
+  }
   function poke() {
     pokeT = T;
     pokes++;
+    if (state !== S.PLAY || finishT >= 0 || nextT >= 0 || scold >= 0) return;
+    pokeLog = pokeLog.filter(function (t0) { return T - t0 < POKE_WINDOW; });
+    pokeLog.push(T);
+    if (pokeLog.length >= POKE_LIMIT) { startScold(); return; }
     skipAsk();
     tone(880, 0.06, 0.1, "square", 1500);
     tone(1500, 0.09, 0.08, "square", 0, 0.07);
@@ -966,7 +998,7 @@
           t: T, talking: talking, mouth: (Math.sin(T * 26) + 1) / 2, happy: happy,
           blink: (T % 3.2) < 0.12, party: party, hue: hue3,
           shake: wrongT > 0 ? Math.sin(wrongT * 60) * (wrongT / WRONG_FLASH) : 0,
-          poke: pk
+          poke: pk, point: scold >= 0
         });
         ctx.save();
         if (party) { ctx.shadowColor = "hsl(" + hue3 + ",100%,60%)"; ctx.shadowBlur = 26; }
@@ -1114,11 +1146,11 @@
   window.__probe = {
     now: function () {
       return {
-        state: state, score: score, W: W, H: H, N: N, q: qi, line: state === S.INTRO ? "" : LINES[ask],
+        state: state, score: score, W: W, H: H, N: N, q: qi, line: state === S.INTRO ? "" : shownLine(),
         left: state === S.INTRO ? N : left(), waiting: nextT >= 0, hint: hint(), spoken: spoken,
         party: finishT >= 0 || state === S.RESULT, confetti: confetti.length, buttons: resultButtons(),
         roboX: finishT >= 0 || state === S.RESULT ? roboX() : null,
-        hop: hopY(), pokes: pokes, robo: roboAt(),
+        hop: hopY(), pokes: pokes, robo: roboAt(), scolding: scold >= 0,
         done: done.slice(), misses: misses, tried: Object.keys(tried).length, cursor: cursor, keyMode: keyMode,
         cam: { x: cam.x, y: cam.y, s: cam.s }, full: FULL, map: { x: MAP.x, y: MAP.y, w: MAP.w, h: MAP.h },
         card: { x: CARD.x, y: CARD.y, w: CARD.w, h: CARD.h }

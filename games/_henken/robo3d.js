@@ -10,6 +10,7 @@
      shake   … 首を振る量（-1〜1。外されたとき）
      party   … クリア（虹色に光って踊る）
      poke    … つつかれてからの進み具合（0〜1。つつかれていないときは -1）
+     point   … こっち（プレイヤー）を指差す
      hue     … party のときの色相（0〜360）
 
    形: 角の丸い箱の頭に、顔の画面とアンテナ。顎のところ（画面の右下・顔の前）に、体とつながっていない浮いた白いグローブの左手（考える顔の絵文字の手の位置）。
@@ -279,7 +280,7 @@
           x: 0.42, y: -0.6 + Math.sin(t * 1.5) * 0.02, z: 0.8,
           rx: -0.1, ry: BACK + 0.25, rz: -1.25 + Math.sin(t * 1.2) * 0.05,
           curl: [0.15 + Math.sin(t * 2) * 0.1, 1.5, 1.6, 1.6],
-          spread: 0.7, thumb: 0
+          spread: 0.7, thumb: 0, ilen: 1
         };
         if (o.talking) {
           g.y += Math.sin(t * 6) * 0.025;
@@ -295,6 +296,13 @@
           g.y = -0.55 + Math.sin(t * 8) * 0.02; g.rz = -0.95 + Math.sin(t * 10) * 0.05;
           g.curl = [0.1, 0.15, 0.2, 0.3]; g.spread = 1.4; g.thumb = 0.1;
         }
+        if (o.point && !o.party) {
+          /* こっちを指差す: 顔の前で、人さし指をこちらへ突き出す。言葉に合わせて小さく突く */
+          /* 手の甲をこちらに向けたまま手首を返して、人さし指の先をこちらへ突き出す（いくつか比べて決めた角度） */
+          g.x = 0.35; g.y = -0.3 + Math.sin(t * 6) * 0.02; g.z = 1.4 + Math.max(0, Math.sin(t * 7)) * 0.1;
+          g.rx = 0.9; g.ry = Math.PI; g.rz = -0.6;
+          g.curl = [0, 1.5, 1.6, 1.6]; g.spread = 0.6; g.thumb = 0.9; g.ilen = 1.8;
+        }
         if (o.party) {
           var wv = t * Math.PI * 4;
           g.x = 1.02 + Math.cos(wv) * 0.06; g.y = 0.5 + Math.sin(wv) * 0.2; g.z = 0.3;
@@ -306,12 +314,13 @@
         lastT = t;
         if (!pose || dt === 0) pose = JSON.parse(JSON.stringify(g));
         var k = 1 - Math.exp(-dt * 14);
-        ["x", "y", "z", "rx", "ry", "rz", "spread", "thumb"].forEach(function (n) { pose[n] = lerp(pose[n], g[n], k); });
+        ["x", "y", "z", "rx", "ry", "rz", "spread", "thumb", "ilen"].forEach(function (n) { pose[n] = lerp(pose[n], g[n], k); });
         pose.curl = pose.curl.map(function (c, i) { return lerp(c, g.curl[i], 1 - Math.exp(-dt * 20)); });
         hand.root.position.set(robo.position.x + pose.x, robo.position.y + pose.y, pose.z);
         hand.wrist.rotation.set(pose.rx, pose.ry, pose.rz, "YXZ");
         hand.fingers.forEach(function (fg, i) {
           fg.pivot.rotation.set(pose.curl[i], 0, fg.fan * pose.spread);
+          fg.pivot.scale.y = i === 0 ? pose.ilen : 1;       /* 指差すときは人さし指を長めに */
         });
         hand.thumb.rotation.set(pose.thumb * 0.6, 0, (-1.0 + pose.thumb) * IN);
         if (o.party) {

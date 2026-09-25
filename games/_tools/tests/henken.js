@@ -6,7 +6,7 @@ const file = 'games/_henken/index.html';
 /* テストのときだけ、正解と中身を覗く */
 const inject = 'window.__dbg={ask:function(){return ask;},prefAt:prefAt,shareButton:shareButton,' +
   'peek:function(c,dx,dy){var k=cursor;cursor=c;stepPref(dx,dy);var r=cursor;cursor=k;return r;},' +
-  'LINES:LINES,YOMI:YOMI,MORA:MORA,LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES};';
+  'SCOLD:SCOLD,LINES:LINES,YOMI:YOMI,MORA:MORA,LABEL:LABEL,inside:inside,NAMES:NAMES,SHAPES:SHAPES};';
 
 function open(shape) {
   const g = load(file, { quiet: true, inject });
@@ -184,6 +184,40 @@ const window_zVoice = g => { const ctx = { window: {} }; require('vm').runInNewC
   g.tap(r2.x, r2.y);
   assert.equal(g.probe.now().pokes, n0 + 1, 'クリア後もつつける');
   assert.equal(g.probe.now().state, 'result');
+}
+
+// しつこくつつくと、こっちを指差してプレイヤーへの偏見を言う。言い終わったら、もとの偏見に戻る
+{
+  const g = open();
+  const S = g.dbg.SCOLD;
+  assert(S.length >= 3);
+  const REAL = '北海道 青森 岩手 宮城 秋田 山形 福島 茨城 栃木 群馬 埼玉 千葉 東京 神奈川 新潟 富山 石川 福井 山梨 長野 岐阜 静岡 愛知 三重 滋賀 京都 大阪 兵庫 奈良 和歌山 鳥取 島根 岡山 広島 山口 徳島 香川 愛媛 高知 福岡 佐賀 長崎 熊本 大分 宮崎 鹿児島 沖縄'.split(' ');
+  S.forEach(s => {
+    assert(/そう$/.test(s[0]) && s[0].length <= 28, s[0]);
+    assert(/^[ぁ-んー、]+$/.test(s[1]), '読み: ' + s[1]);
+    REAL.forEach(r => assert(!s[0].includes(r), s[0]));
+  });
+  const r = g.probe.now().robo;
+  for (let n = 0; n < 4; n++) { g.tap(r.x, r.y); g.step(10); assert(!g.probe.now().scolding, (n + 1) + '回目までは別の偏見に変わるだけ'); }
+  const a = g.dbg.ask();
+  g.tap(r.x, r.y);
+  assert(g.probe.now().scolding, '3秒以内に5回つつくと指差して言う');
+  assert.equal(g.dbg.ask(), a, '言っている間も、当てる偏見は変わらない');
+  assert(S.some(s => s[0] === g.probe.now().line), 'プレイヤーへの偏見を出す');
+  g.tap(r.x, r.y);
+  assert(g.probe.now().scolding, '言っている間につついても止まらない');
+  assert(g.until(() => !g.probe.now().scolding, 900), '言い終わったら戻る');
+  assert.equal(g.probe.now().line, g.dbg.LINES[a], 'もとの偏見に戻る');
+  assert(g.probe.now().spoken < 3, 'もとの偏見を最初から読み直す');
+  /* ゆっくりつつくなら、何回つついても指差さない */
+  for (let n = 0; n < 8; n++) { g.tap(r.x, r.y); g.step(50); assert(!g.probe.now().scolding, 'ゆっくりなら指差さない'); }
+  /* 言っている最中に当てても大丈夫 */
+  for (let n = 0; n < 5; n++) g.tap(r.x, r.y);
+  assert(g.probe.now().scolding);
+  const b = g.dbg.ask();
+  tapPref(g, b);
+  assert.equal(g.probe.now().done[b], 1, '指差し中でも当てられる');
+  assert(!g.probe.now().scolding, '当てたら指差しはやめる');
 }
 
 // ドラッグで動かす（タップ扱いにしない）・2本指とホイールで広げる・端から出ない
