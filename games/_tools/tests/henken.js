@@ -108,8 +108,14 @@ const window_zVoice = g => { const ctx = { window: {} }; require('vm').runInNewC
   /* 札をタップしても答えにならない */
   g.tap(270, g.probe.now().card.y + 40);
   assert.equal(g.probe.now().misses, 1);
+  assert.equal(g.probe.now().hop, 0, '外してもロボは跳ねない');
   tapPref(g, a);
   assert.equal(g.probe.now().done[a], 2, '外してから当てた印');
+  /* 正解するとロボが縦に小さく跳ね、すぐ元に戻る */
+  let top = 0;
+  for (let i = 0; i < 40; i++) { g.step(1); top = Math.min(top, g.probe.now().hop); }
+  assert(top < -10 && top > -20, '正解でロボが跳ねる: ' + top.toFixed(1));
+  assert.equal(g.probe.now().hop, 0, '跳ねたあとは元の位置');
   assert(g.probe.now().waiting, '当てたら少し間をおく');
   tapPref(g, (a + 1) % 47);
   assert.equal(g.probe.now().misses, 1, '間の最中のタップは数えない');
