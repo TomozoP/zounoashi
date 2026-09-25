@@ -11,7 +11,8 @@
      party   … クリア（虹色に光って踊る）
      hue     … party のときの色相（0〜360）
 
-   形: 角の丸い箱の頭に、顔の画面とアンテナ。画面の右側（吹き出し側）に、体とつながっていない浮いた白いグローブの右手。黒い縁取り付き。目は「偏」「見」の光る字、口は横長の光る棒。耳と首はない。 */
+   形: 角の丸い箱の頭に、顔の画面とアンテナ。顎のところ（画面の左下・顔の前）に、体とつながっていない浮いた白いグローブの右手（考える顔の絵文字の手の位置）。
+   口は片側が上がったニヤッとした形。黒い縁取り付き。目は「偏」「見」の光る字、口は横長の光る棒。耳と首はない。 */
 (function (global) {
   "use strict";
 
@@ -99,7 +100,7 @@
 
     /* 浮いた手。白い丸いミトンに親指。頭とは別に動かす（頭の傾きにはつられない）。クリアの虹色にも染まらない */
     var handMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0, roughness: 0.45 });
-    /* 白いグローブの右手（画面の右側に1本）。丸い手のひらに3本の指と親指、手首のふくらんだ袖口。
+    /* 白いグローブの右手（1本）。丸い手のひらに3本の指と親指、手首のふくらんだ袖口。
        指と親指はそれぞれ付け根で曲がる。どれも黒い縁取り付き（ひと回り大きい黒を裏側だけ描く） */
     function part(parent, geo, lineGeo, x, y, z, sx, sy, sz) {
       var line = new THREE.Mesh(lineGeo, lineMat), m = new THREE.Mesh(geo, handMat);
@@ -107,7 +108,7 @@
     }
     function capsule(r, len) { return new THREE.CapsuleGeometry(r, len, 6, 12); }
     var FINGER_LEN = 0.25;
-    var IN = -1;                                    /* 頭のほうの向き。右手なので -x（左右を入れ替えるときはここだけ） */
+    var IN = -1;                                    /* 親指の出る向き（手首の中の座標で -x）。顎に当てると親指が上に来る */
     function makeHand() {
       var root = new THREE.Group(), wrist = new THREE.Group();
       root.add(wrist);
@@ -151,12 +152,29 @@
         fx.fillText(ch, 0, 2);
         fx.restore();
       });
-      var open = o.talking ? 8 + (o.mouth || 0) * 26 : 8;
+      /* 口: 左が低く右が上がった、ニヤッとした弧。話すときはその形のまま開く */
+      var open = o.talking ? 4 + (o.mouth || 0) * 20 : 0, grin = o.happy ? 1.4 : 1;
+      var lx = 76, ly = 146, rx = 182, ry = 146 - 14 * grin, cx = 124, cy = 146 + 14 * grin;
+      if (open > 0) {
+        fx.beginPath();
+        fx.moveTo(lx, ly);
+        fx.quadraticCurveTo(cx, cy, rx, ry);
+        fx.quadraticCurveTo(cx + 6, cy + open * 1.6, lx, ly);
+        fx.fill();
+      }
+      fx.strokeStyle = "#7df0ff";
+      fx.lineWidth = 9;
+      fx.lineCap = "round";
       fx.beginPath();
-      var x = 78, y = 150 - open / 2, w = 100, r = 4;
-      fx.moveTo(x + r, y); fx.arcTo(x + w, y, x + w, y + open, r); fx.arcTo(x + w, y + open, x, y + open, r);
-      fx.arcTo(x, y + open, x, y, r); fx.arcTo(x, y, x + w, y, r); fx.closePath();
-      fx.fill();
+      fx.moveTo(lx, ly);
+      fx.quadraticCurveTo(cx, cy, rx, ry);
+      fx.stroke();
+      /* 上がった口角に小さなえくぼ */
+      fx.lineWidth = 6;
+      fx.beginPath();
+      fx.moveTo(rx - 2, ry - 8);
+      fx.lineTo(rx + 6, ry + 4);
+      fx.stroke();
       faceTex.needsUpdate = true;
     }
 
@@ -182,40 +200,36 @@
         } else robo.position.x = 0;
         robo.rotation.set(pitch, yaw, roll, "YXZ");
         robo.position.y = y;
-        /* 右手: 目標の構えを決めて、なめらかに寄せる。構えは頭の左に置いたときの値で書き、IN で左右を反転する。
-           ふだん … 頭の横でゆるく丸めた手が、ふわふわ浮く。指はそれぞれ少しずつ動く
-           話す   … 手首を返しながら上下に身ぶり。指が波のように開いたり握ったり
-           外れ   … 人さし指だけ立てて、ほかは握る。「チッチッ」と手首ごと振る
-           当たり … 手を上げてパッと開く
-           クリア … 頭の上で手を振り、指をひらひら */
+        /* 右手: 目標の構えを決めて、なめらかに寄せる。位置は考える顔の絵文字のように、顎（画面の左下・顔の前）。
+           ふだん … 人さし指を顎に沿わせ、親指を立て、ほかは握る。人さし指で顎をなでる
+           話す   … 同じ構えで、人さし指で顎をトントンたたく
+           外れ   … 顔の横で人さし指だけ立てて「チッチッ」と振る
+           当たり … 顎の前で指を開いて、ふふんと笑う
+           クリア … 頭の右上で手を振り、指をひらひら */
         var g = {
-          x: -1.18, y: -0.66 + Math.sin(t * 2.2) * 0.05, z: 0.25,
-          rx: -0.15, ry: 0.5, rz: -0.35 + Math.sin(t * 1.3) * 0.06,
-          curl: [0, 1, 2].map(function (i) { return 0.4 + i * 0.12 + Math.sin(t * 1.6 + i * 1.1) * 0.1; }),
-          spread: 1, thumb: 0.15
+          x: -0.36, y: -0.52 + Math.sin(t * 1.5) * 0.02, z: 0.8,
+          rx: 0.1, ry: 0.25, rz: -1.25 + Math.sin(t * 1.2) * 0.05,
+          curl: [0.15 + Math.sin(t * 2) * 0.1, 1.5, 1.6],
+          spread: 0.7, thumb: 0
         };
         if (o.talking) {
-          g.y += 0.14 + Math.sin(t * 6) * 0.08;
-          g.x += Math.sin(t * 4) * 0.05;
-          g.ry = 0.25;
-          g.rz = -0.3 + Math.sin(t * 5) * 0.28;
-          g.curl = [0, 1, 2].map(function (i) { return 0.15 + (Math.sin(t * 7 - i * 0.7) + 1) * 0.35; });
-          g.thumb = 0.1 + (Math.sin(t * 7 + 1) + 1) * 0.2;
+          g.y += Math.sin(t * 6) * 0.025;
+          g.rz += Math.sin(t * 6) * 0.06;
+          g.curl = [0.1 + (Math.sin(t * 9) + 1) * 0.28, 1.5, 1.6];
         }
         if (o.shake) {
-          g.y = -0.45; g.ry = 0.2;
-          g.rz = -0.05 + Math.sin(t * 26) * 0.38 * Math.min(1, Math.abs(o.shake) * 1.5);
+          g.x = -0.62; g.y = -0.3; g.z = 0.8; g.rx = 0; g.ry = 0.2;
+          g.rz = Math.sin(t * 26) * 0.38 * Math.min(1, Math.abs(o.shake) * 1.5);
           g.curl = [0, 1.5, 1.6]; g.spread = 0.6; g.thumb = 0.9;
         }
         if (o.happy && !o.party) {
-          g.x = -1.12; g.y = 0.05 + Math.sin(t * 8) * 0.03; g.z = 0.3;
-          g.rx = 0; g.ry = 0.15; g.rz = -0.2 + Math.sin(t * 10) * 0.08;
-          g.curl = [0, 0, 0]; g.spread = 1.6; g.thumb = -0.2;
+          g.y = -0.46 + Math.sin(t * 8) * 0.02; g.rz = -0.95 + Math.sin(t * 10) * 0.05;
+          g.curl = [0.1, 0.2, 0.3]; g.spread = 1.4; g.thumb = 0.1;
         }
         if (o.party) {
           var wv = t * Math.PI * 4;
-          g.x = -1.08 + Math.cos(wv) * 0.06; g.y = 0.5 + Math.sin(wv) * 0.2; g.z = 0.3;
-          g.rx = 0; g.ry = 0.15; g.rz = Math.sin(wv) * 0.55;
+          g.x = 1.05 + Math.cos(wv) * 0.06; g.y = 0.5 + Math.sin(wv) * 0.2; g.z = 0.3;
+          g.rx = 0; g.ry = -0.15; g.rz = Math.sin(wv) * 0.55;
           g.curl = [0, 1, 2].map(function (i) { return 0.2 + Math.sin(t * 18 + i * 1.3) * 0.25; });
           g.spread = 1.4; g.thumb = -0.1 + Math.sin(t * 18) * 0.15;
         }
@@ -225,8 +239,8 @@
         var k = 1 - Math.exp(-dt * 14);
         ["x", "y", "z", "rx", "ry", "rz", "spread", "thumb"].forEach(function (n) { pose[n] = lerp(pose[n], g[n], k); });
         pose.curl = pose.curl.map(function (c, i) { return lerp(c, g.curl[i], 1 - Math.exp(-dt * 20)); });
-        hand.root.position.set(robo.position.x + pose.x * IN, robo.position.y + pose.y, pose.z);
-        hand.wrist.rotation.set(pose.rx, pose.ry * IN, pose.rz * IN, "YXZ");
+        hand.root.position.set(robo.position.x + pose.x, robo.position.y + pose.y, pose.z);
+        hand.wrist.rotation.set(pose.rx, pose.ry, pose.rz, "YXZ");
         hand.fingers.forEach(function (fg, i) {
           fg.pivot.rotation.set(pose.curl[i], 0, fg.fan * pose.spread);
         });
