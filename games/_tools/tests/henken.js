@@ -2,7 +2,7 @@
    ドラッグと2本指とホイールで地図を動かす・外したら選び直し・47県を埋めて終わる・キー操作を確かめる。 */
 const assert = require('assert');
 const load = require('../harness');
-const file = 'games/_henken/index.html';
+const file = 'games/henken/index.html';
 /* テストのときだけ、正解と中身を覗く */
 const inject = 'window.__dbg={ask:function(){return ask;},prefAt:prefAt,shareButton:shareButton,' +
   'peek:function(c,dx,dy){var k=cursor;cursor=c;stepPref(dx,dy);var r=cursor;cursor=k;return r;},' +
