@@ -101,7 +101,7 @@
 
     /* 浮いた手。白い丸いミトンに親指。頭とは別に動かす（頭の傾きにはつられない）。クリアの虹色にも染まらない */
     var handMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0, roughness: 0.45 });
-    /* 白いグローブの左手（1本）。丸い手のひらに指4本と親指（5本）、手首のふくらんだ袖口、手の甲に縫い目3本。
+    /* 白いグローブの左手（1本）。丸い手のひらに指4本と親指（5本）、手首のふくらんだ袖口。
        指と親指はそれぞれ付け根で曲がる。どれも黒い縁取り付き（ひと回り大きい黒を裏側だけ描く） */
     function part(parent, geo, lineGeo, x, y, z, sx, sy, sz) {
       var line = new THREE.Mesh(lineGeo, lineMat), m = new THREE.Mesh(geo, handMat);
@@ -111,7 +111,6 @@
     /* 手首の中の座標: 指は +y、手のひらは +z、手の甲は -z、親指は IN の向き（x）。
        手首を y で半回転させて手の甲をこちらに向け、z で倒して指を顎のほうへ向ける */
     var IN = -1;
-    var seamMat = new THREE.MeshBasicMaterial({ color: 0x16202e });
     function makeHand() {
       var root = new THREE.Group(), wrist = new THREE.Group();
       root.add(wrist);
@@ -126,12 +125,6 @@
         wrist.add(pivot);
         return { pivot: pivot, fan: -fxp * 1.0 };
       });
-      /* 手の甲の縫い目3本（手袋らしさ。甲がこちらを向いたときに見える） */
-      [-0.06, 0, 0.06].forEach(function (sx) {
-        var seam = new THREE.Mesh(capsule(0.011, 0.11), seamMat);
-        seam.position.set(sx, 0.02, -0.142);
-        wrist.add(seam);
-      });
       /* 親指。頭のほうへ出て、付け根で手のひら側へ倒れる */
       var thumb = new THREE.Group();
       thumb.position.set(0.15 * IN, -0.02, 0.05);
@@ -145,8 +138,26 @@
     var pose = null, lastT = null;
     function lerp(a, b, k) { return a + (b - a) * k; }
 
+    /* 顔の画面。光る字と口の上に、画面らしい効果をかける:
+       中央がほんのり明るい地・細い走査線・ゆっくり下へ流れる明るい帯・わずかなちらつき・
+       端が暗くなる周辺減光・斜めのガラスの映り込み */
+    function screenShape() {
+      var r = 16;
+      fx.beginPath();
+      fx.moveTo(r, 0); fx.arcTo(256, 0, 256, 208, r); fx.arcTo(256, 208, 0, 208, r);
+      fx.arcTo(0, 208, 0, 0, r); fx.arcTo(0, 0, 256, 0, r); fx.closePath();
+    }
     function drawFace(o) {
+      var t = o.t || 0;
       fx.clearRect(0, 0, 256, 208);
+      fx.save();
+      screenShape();
+      fx.clip();
+      var bg = fx.createRadialGradient(128, 100, 10, 128, 104, 170);
+      bg.addColorStop(0, "#2d4d6b");
+      bg.addColorStop(1, "#13202f");
+      fx.fillStyle = bg;
+      fx.fillRect(0, 0, 256, 208);
       fx.fillStyle = "#7df0ff";
       fx.shadowColor = "rgba(125,240,255,.9)";
       fx.shadowBlur = 14;
@@ -184,6 +195,36 @@
       fx.moveTo(rx - 2, ry - 8);
       fx.lineTo(rx + 6, ry + 4);
       fx.stroke();
+      fx.shadowBlur = 0; fx.shadowColor = "transparent";
+      /* 走査線 */
+      fx.fillStyle = "rgba(0,0,0,.24)";
+      for (var sl = 0; sl < 208; sl += 4) fx.fillRect(0, sl, 256, 1.6);
+      /* ゆっくり下へ流れる明るい帯 */
+      var by = (t * 55) % 280 - 40;
+      var band = fx.createLinearGradient(0, by - 24, 0, by + 24);
+      band.addColorStop(0, "rgba(125,240,255,0)");
+      band.addColorStop(0.5, "rgba(125,240,255,.10)");
+      band.addColorStop(1, "rgba(125,240,255,0)");
+      fx.fillStyle = band;
+      fx.fillRect(0, by - 24, 256, 48);
+      /* わずかなちらつき */
+      fx.fillStyle = "rgba(125,240,255," + (0.015 + 0.02 * Math.abs(Math.sin(t * 37) * Math.sin(t * 13))) + ")";
+      fx.fillRect(0, 0, 256, 208);
+      /* 周辺減光 */
+      var vg = fx.createRadialGradient(128, 104, 70, 128, 104, 165);
+      vg.addColorStop(0, "rgba(0,0,0,0)");
+      vg.addColorStop(1, "rgba(0,0,0,.5)");
+      fx.fillStyle = vg;
+      fx.fillRect(0, 0, 256, 208);
+      /* 斜めのガラスの映り込み */
+      fx.beginPath();
+      fx.moveTo(0, 0); fx.lineTo(150, 0); fx.lineTo(40, 208); fx.lineTo(0, 208); fx.closePath();
+      var gl = fx.createLinearGradient(0, 0, 150, 120);
+      gl.addColorStop(0, "rgba(255,255,255,.14)");
+      gl.addColorStop(1, "rgba(255,255,255,0)");
+      fx.fillStyle = gl;
+      fx.fill();
+      fx.restore();
       faceTex.needsUpdate = true;
     }
 
