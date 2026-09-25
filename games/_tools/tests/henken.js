@@ -288,7 +288,7 @@ const window_zVoice = g => { const ctx = { window: {} }; require('vm').runInNewC
   assert.equal(g.dbg.shareButton.hidden, false);
   g.dbg.shareButton.fire('click', { stopPropagation() {} });
   assert.equal(g.shared.length, 1);
-  assert.equal(g.shared[0], 'AIの偏見をすべて当てました #偏県');
+  assert.equal(g.shared[0], 'AIの偏見をすべて当てました #偏県クイズ');
   /* クリア後も地図を拡大・縮小・移動できる。タップしても何も起きない */
   {
     const m = p.map, cy = m.y + m.h / 2, s0 = g.probe.now().cam.s;
