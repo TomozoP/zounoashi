@@ -41,7 +41,7 @@
 
     var scene = new THREE.Scene();
     var camera = new THREE.PerspectiveCamera(26, 1, 0.1, 50);
-    camera.position.set(0, 0.25, 6.2);
+    camera.position.set(0, 0.25, 7.0);           /* 浮いた手まで枠に収まる距離 */
     camera.lookAt(0, 0.12, 0);
     scene.add(new THREE.HemisphereLight(0xffffff, 0x8aa0b8, 1.6));
     var key = new THREE.DirectionalLight(0xffffff, 2.2);
@@ -97,18 +97,28 @@
     robo.add(ball);
     outline(new THREE.SphereGeometry(0.12 + LINE * 0.8, 20, 14), 0, 1.02, 0);
 
-    /* 浮いた手。丸いミトンに親指。頭とは別に動かす（頭の傾きにはつられない） */
+    /* 浮いた手。白い丸いミトンに親指。頭とは別に動かす（頭の傾きにはつられない）。クリアの虹色にも染まらない */
+    var handMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0, roughness: 0.45 });
+    /* 白いグローブ。丸い手のひらに、上へ並ぶ3本の指と、頭のほうへ出る親指、手首のふくらんだ袖口。
+       それぞれに黒い縁取り（ひと回り大きい黒を裏側だけ描く） */
+    function part(g, geo, lineGeo, x, y, z, rz, sx, sy, sz) {
+      var line = new THREE.Mesh(lineGeo, lineMat), m = new THREE.Mesh(geo, handMat);
+      [line, m].forEach(function (o) { o.position.set(x, y, z); o.rotation.z = rz || 0; o.scale.set(sx || 1, sy || 1, sz || 1); g.add(o); });
+      return m;
+    }
+    function capsule(r, len) { return new THREE.CapsuleGeometry(r, len, 6, 12); }
     function makeHand(side) {
-      var g = new THREE.Group();
-      var palm = new THREE.Mesh(new THREE.SphereGeometry(0.17, 20, 16), bodyMat);
-      palm.scale.set(1, 1.12, 0.8);
-      var palmLine = new THREE.Mesh(new THREE.SphereGeometry(0.17 + LINE, 20, 16), lineMat);
-      palmLine.scale.copy(palm.scale);
-      var thumb = new THREE.Mesh(new THREE.SphereGeometry(0.075, 14, 10), bodyMat);
-      thumb.position.set(-side * 0.15, 0.04, 0.05);
-      var thumbLine = new THREE.Mesh(new THREE.SphereGeometry(0.075 + LINE, 14, 10), lineMat);
-      thumbLine.position.copy(thumb.position);
-      g.add(palmLine, thumbLine, palm, thumb);
+      var g = new THREE.Group(), inward = -side;          /* 頭のほうの向き（左手なら右） */
+      /* 手のひら */
+      part(g, new THREE.SphereGeometry(0.2, 22, 16), new THREE.SphereGeometry(0.2 + LINE, 22, 16), 0, 0, 0, 0, 1.05, 0.95, 0.7);
+      /* 指3本（少し扇に開く） */
+      [-0.12, 0, 0.12].forEach(function (fxp, k) {
+        part(g, capsule(0.065, 0.12), capsule(0.065 + LINE, 0.12), fxp, 0.22 - Math.abs(fxp) * 0.25, 0.02, -fxp * 1.1, 1, 1, 0.85);
+      });
+      /* 親指 */
+      part(g, capsule(0.06, 0.1), capsule(0.06 + LINE, 0.1), inward * 0.2, 0.02, 0.05, inward * -0.9, 1, 1, 0.85);
+      /* 袖口（手首のふくらみ） */
+      part(g, new THREE.CylinderGeometry(0.15, 0.17, 0.1, 20), new THREE.CylinderGeometry(0.15 + LINE, 0.17 + LINE, 0.1 + LINE * 2, 20), 0, -0.24, 0);
       scene.add(g);
       return g;
     }
@@ -164,10 +174,10 @@
         /* 手: ふだんはふわふわ。話すと身ぶり、外されると小刻みに振り、当てられると上げ、クリアでは頭の上で交互に振る */
         hands.forEach(function (hd, k) {
           var s = k ? 1 : -1, ph2 = t * Math.PI * 4 + k * Math.PI;
-          var hx = s * 1.14, hy = -0.66 + Math.sin(t * 2.2 + k * 1.3) * 0.06, hz = 0.2, rz = 0;
+          var hx = s * 1.1, hy = -0.7 + Math.sin(t * 2.2 + k * 1.3) * 0.06, hz = 0.2, rz = 0;
           if (o.talking) { hy += Math.max(0, Math.sin(t * 7 + k * 2)) * 0.2; hx += s * Math.sin(t * 5 + k) * 0.05; }
           if (o.shake) { hx += Math.sin(t * 40) * 0.07 * Math.abs(o.shake); hy += 0.15; }
-          if (o.happy && !o.party) { hy = 0.1 + Math.sin(t * 6 + k) * 0.05; hx = s * 1.16; rz = -s * 0.4; }
+          if (o.happy && !o.party) { hy = 0.1 + Math.sin(t * 6 + k) * 0.05; hx = s * 1.12; rz = -s * 0.4; }
           if (o.party) { hy = 0.45 + Math.sin(ph2) * 0.35; hx = s * (1.08 + Math.cos(ph2) * 0.08); rz = -s * 0.3 + Math.sin(ph2) * 0.4; }
           hd.position.set(robo.position.x + hx, robo.position.y + hy, hz);
           hd.rotation.set(0, 0, rz);
