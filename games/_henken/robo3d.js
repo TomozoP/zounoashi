@@ -11,7 +11,7 @@
      party   … クリア（虹色に光って踊る）
      hue     … party のときの色相（0〜360）
 
-   形: 角の丸い箱の頭に、顔の画面とアンテナ。目は「偏」「見」の光る字、口は横長の光る棒。耳と首はない。 */
+   形: 角の丸い箱の頭に、顔の画面とアンテナ。黒い縁取り付き。目は「偏」「見」の光る字、口は横長の光る棒。耳と首はない。 */
 (function (global) {
   "use strict";
 
@@ -54,10 +54,20 @@
     var robo = new THREE.Group();
     scene.add(robo);
 
+    /* 黒い縁取り。ひと回り大きい黒い形を裏側だけ描くと、外側に輪郭が残る */
+    var LINE = 0.05;
+    var lineMat = new THREE.MeshBasicMaterial({ color: 0x16202e, side: THREE.BackSide });
+    function outline(geom, x, y, z) {
+      var m = new THREE.Mesh(geom, lineMat);
+      m.position.set(x || 0, y || 0, z || 0);
+      robo.add(m);
+    }
+
     /* 頭 */
     var bodyMat = new THREE.MeshStandardMaterial({ color: 0xc9d5df, metalness: 0.18, roughness: 0.34 });
     var head = new THREE.Mesh(roundedBox(THREE, 1.5, 1.32, 1.15, 0.26, 8), bodyMat);
     robo.add(head);
+    outline(roundedBox(THREE, 1.5 + LINE * 2, 1.32 + LINE * 2, 1.15 + LINE * 2, 0.26 + LINE, 8));
 
     /* 顔の画面。字と口は小さい2D画面に描いて貼る（毎コマ描き直す） */
     var faceCv = document.createElement("canvas");
@@ -69,6 +79,7 @@
       new THREE.MeshStandardMaterial({ color: 0x23364a, metalness: 0.1, roughness: 0.25 }));
     face.position.set(0, -0.02, 0.56);
     robo.add(face);
+    outline(roundedBox(THREE, 1.16 + LINE, 0.98 + LINE, 0.08 + LINE, 0.035 + LINE / 2, 4), 0, -0.02, 0.56);
     var screen = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.9),
       new THREE.MeshBasicMaterial({ map: faceTex, transparent: true }));
     screen.position.set(0, -0.02, 0.605);
@@ -79,10 +90,12 @@
     var stem = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.34, 12), stemMat);
     stem.position.set(0, 0.82, 0);
     robo.add(stem);
+    outline(new THREE.CylinderGeometry(0.035 + LINE * 0.7, 0.035 + LINE * 0.7, 0.34, 12), 0, 0.82, 0);
     var ballMat = new THREE.MeshStandardMaterial({ color: 0xe2504c, emissive: 0xe2504c, emissiveIntensity: 0.35, roughness: 0.3 });
     var ball = new THREE.Mesh(new THREE.SphereGeometry(0.12, 20, 14), ballMat);
     ball.position.set(0, 1.02, 0);
     robo.add(ball);
+    outline(new THREE.SphereGeometry(0.12 + LINE * 0.8, 20, 14), 0, 1.02, 0);
 
     function drawFace(o) {
       fx.clearRect(0, 0, 256, 208);
