@@ -11,7 +11,7 @@
      party   … クリア（虹色に光って踊る）
      hue     … party のときの色相（0〜360）
 
-   形: 角の丸い箱の頭に、顔の画面とアンテナ。黒い縁取り付き。目は「偏」「見」の光る字、口は横長の光る棒。耳と首はない。 */
+   形: 角の丸い箱の頭に、顔の画面とアンテナ。左右に、体とつながっていない浮いた手。黒い縁取り付き。目は「偏」「見」の光る字、口は横長の光る棒。耳と首はない。 */
 (function (global) {
   "use strict";
 
@@ -97,6 +97,23 @@
     robo.add(ball);
     outline(new THREE.SphereGeometry(0.12 + LINE * 0.8, 20, 14), 0, 1.02, 0);
 
+    /* 浮いた手。丸いミトンに親指。頭とは別に動かす（頭の傾きにはつられない） */
+    function makeHand(side) {
+      var g = new THREE.Group();
+      var palm = new THREE.Mesh(new THREE.SphereGeometry(0.17, 20, 16), bodyMat);
+      palm.scale.set(1, 1.12, 0.8);
+      var palmLine = new THREE.Mesh(new THREE.SphereGeometry(0.17 + LINE, 20, 16), lineMat);
+      palmLine.scale.copy(palm.scale);
+      var thumb = new THREE.Mesh(new THREE.SphereGeometry(0.075, 14, 10), bodyMat);
+      thumb.position.set(-side * 0.15, 0.04, 0.05);
+      var thumbLine = new THREE.Mesh(new THREE.SphereGeometry(0.075 + LINE, 14, 10), lineMat);
+      thumbLine.position.copy(thumb.position);
+      g.add(palmLine, thumbLine, palm, thumb);
+      scene.add(g);
+      return g;
+    }
+    var hands = [makeHand(-1), makeHand(1)];          /* 左・右 */
+
     function drawFace(o) {
       fx.clearRect(0, 0, 256, 208);
       fx.fillStyle = "#7df0ff";
@@ -144,6 +161,17 @@
         } else robo.position.x = 0;
         robo.rotation.set(pitch, yaw, roll, "YXZ");
         robo.position.y = y;
+        /* 手: ふだんはふわふわ。話すと身ぶり、外されると小刻みに振り、当てられると上げ、クリアでは頭の上で交互に振る */
+        hands.forEach(function (hd, k) {
+          var s = k ? 1 : -1, ph2 = t * Math.PI * 4 + k * Math.PI;
+          var hx = s * 1.14, hy = -0.66 + Math.sin(t * 2.2 + k * 1.3) * 0.06, hz = 0.2, rz = 0;
+          if (o.talking) { hy += Math.max(0, Math.sin(t * 7 + k * 2)) * 0.2; hx += s * Math.sin(t * 5 + k) * 0.05; }
+          if (o.shake) { hx += Math.sin(t * 40) * 0.07 * Math.abs(o.shake); hy += 0.15; }
+          if (o.happy && !o.party) { hy = 0.1 + Math.sin(t * 6 + k) * 0.05; hx = s * 1.16; rz = -s * 0.4; }
+          if (o.party) { hy = 0.45 + Math.sin(ph2) * 0.35; hx = s * (1.08 + Math.cos(ph2) * 0.08); rz = -s * 0.3 + Math.sin(ph2) * 0.4; }
+          hd.position.set(robo.position.x + hx, robo.position.y + hy, hz);
+          hd.rotation.set(0, 0, rz);
+        });
         if (o.party) {
           tmp.setHSL((o.hue || 0) / 360, 0.9, 0.62);
           bodyMat.color.copy(tmp);
