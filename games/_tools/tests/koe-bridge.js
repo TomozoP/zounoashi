@@ -1,9 +1,9 @@
 const assert=require('assert'),load=require('../harness');
 for(const shape of [[390,844],[700,700],[500,1600]]){
- const g=load('games/_koe-bridge/index.html',{w:shape[0],h:shape[1],inject:`var volume=0;readVoice=function(){return volume;};window.__dbg={volume:function(v){volume=v;}};`});
- g.press(' ');g.dbg.volume(.45);g.step(241);assert.equal(g.probe.now().road.length,120);assert(g.until(()=>g.probe.now().state==='result',1400));assert(g.probe.now().won,'一定の声で渡れる');
- g.probe.reset();g.dbg.volume(0);g.step(600);assert.equal(g.probe.now().road.length,0);assert.equal(g.probe.now().time,0);
- g.dbg.volume(.45);g.step(60);const n=g.probe.now().road.length,t=g.probe.now().time;g.dbg.volume(0);g.step(300);assert.equal(g.probe.now().road.length,n);assert.equal(g.probe.now().time,t,'無音で即停止');g.dbg.volume(.45);g.step(181);g.until(()=>g.probe.now().state==='result',1400);assert(g.probe.now().won,'途中で黙っても橋をつなげる');
- g.probe.reset();g.dbg.volume(1);g.step(241);g.until(()=>g.probe.now().state==='result',1400);assert(!g.probe.now().won,'大声の急坂では止まる');
- console.log(shape.join('×')+'：発声中だけ橋作り・無音で停止・再開して成功・急坂で失敗');
+const g=load('games/_koe-bridge/index.html',{w:shape[0],h:shape[1],inject:`var hz=0;readPitch=function(){return hz;};window.__dbg={pitch:function(v){hz=v;},detect:detectPitch};`});
+g.press(' ');let jumps=0;for(let n=0;n<3600;n++){g.dbg.pitch(n%240<120?120:400);g.step(1);if(g.probe.now().airborne)jumps++;}
+let p=g.probe.now();assert.equal(p.state,'play');assert(Math.abs(p.x-7200)<.01);assert(p.road.length<90,'古い道を保持し続けない');assert(jumps>0,'起伏で跳ねる');assert(Number.isFinite(p.y));
+g.dbg.pitch(0);g.step(120);p=g.probe.now();assert.equal(p.road.at(-1).y,p.road.at(-2).y,'無音で平らな道');
+for(const rate of [44100,48000])for(const hz of [100,180,300,500])for(const amp of [.04,.3]){const data=Float32Array.from({length:2048},(_,i)=>amp*Math.sin(i*2*Math.PI*hz/rate));assert(Math.abs(g.dbg.detect(data,rate)-hz)/hz<.03,'音量によらず音程を検出');}
+assert.equal(g.dbg.detect(new Float32Array(2048),48000),0);console.log(shape.join('×')+'：60秒定速走行・跳ね・無音・音程を確認');
 }

@@ -121,7 +121,7 @@
   var S = { INTRO: "intro", PLAY: "play", FALL: "fall", RESULT: "result" };
   var state, score, T, held, keyMode = false;
 
-  var level=0,won=false,road=[],carX=65,carY=0,angle=0,speed=0,fallSpeed=0,runTime=0,stuck=0;
+  var level=0,won=false,road=[],carX=0,carY=0,angle=0,speed=120,fallSpeed=0,pitch=0,targetHeight=0,penHeight=0,lastPitchTime=-1,airborne=false;
   var mic=null, micSource=null, analyser=null, samples=null, micPending=false, micError=false;
   function stopMic() { if(micSource){micSource.disconnect();micSource=null;} if(mic) mic.getTracks().forEach(function(t){t.stop();}); mic=null; analyser=null; }
   function requestInputs(){requestMic();}
@@ -133,7 +133,7 @@
     try {
       var stream=await window.navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
       if(document.hidden){stream.getTracks().forEach(function(t){t.stop();});return;}
-      mic=stream; analyser=AC.createAnalyser(); analyser.fftSize=1024;
+      mic=stream; analyser=AC.createAnalyser(); analyser.fftSize=2048;
       samples=new Float32Array(analyser.fftSize);
       micSource=AC.createMediaStreamSource(stream); micSource.connect(analyser);
       stream.getTracks().forEach(function(t){t.onended=function(){stopMic();micError=true;};});
@@ -142,12 +142,20 @@
   }
   window.addEventListener('pagehide',stopInputs);
   document.addEventListener('visibilitychange',function(){if(document.hidden){stopInputs();held=false;}else if(state===S.PLAY && !micError){requestInputs();}});
-  function readVoice() {
-    if(!analyser) return 0;
-    analyser.getFloatTimeDomainData(samples);
-    var sum=0; for(var i=0;i<samples.length;i++)sum+=samples[i]*samples[i];
-    return Math.max(0,Math.min(1,(Math.sqrt(sum/samples.length)-0.012)/0.075));
+  // 周期の最初の強い山から音程を推定。音量は無音を除くためだけに使う。
+  function detectPitch(data,rate){
+    var n=data.length,mean=0,energy=0;for(var i=0;i<n;i++)mean+=data[i];mean/=n;
+    for(var i=0;i<n;i++)energy+=(data[i]-mean)*(data[i]-mean);
+    if(Math.sqrt(energy/n)<.012)return 0;
+    var lo=Math.floor(rate/700),hi=Math.min(Math.floor(rate/75),Math.floor(n/2)),previous=0,rising=false;
+    for(var lag=lo;lag<=hi;lag++){
+      var cross=0,e1=0,e2=0;for(var i=0;i<n-hi;i+=2){var a=data[i]-mean,b=data[i+lag]-mean;cross+=a*b;e1+=a*a;e2+=b*b;}
+      var c=cross/Math.sqrt(e1*e2+1e-12);
+      if(c<previous&&rising&&previous>.85)return rate/(lag-1);
+      rising=c>previous;previous=c;
+    }return 0;
   }
+  function readPitch(){if(!analyser)return 0;analyser.getFloatTimeDomainData(samples);return detectPitch(samples,AC.sampleRate);}
   var CY;                                      /* 高さから決まる置き場所 */
   function place() {
     CY = Math.round(H * 0.5);                  /* ▼UPDATE: 置き場所の計算 */
@@ -155,35 +163,31 @@
 
   function newRound(){
     stopInputs();shareButton.hidden=true;retryButton.hidden=true;document.getElementById('start').hidden=true;
-    state=S.PLAY;score=0;T=0;held=false;level=0;won=false;road=[];carX=65;carY=H*.48-17;angle=speed=fallSpeed=runTime=stuck=0;
+    state=S.PLAY;score=0;T=0;held=false;level=0;won=false;road=[];carX=0;carY=-18;angle=fallSpeed=pitch=targetHeight=penHeight=0;speed=120;lastPitchTime=-1;airborne=false;
+    for(var x=-180;x<=270;x+=6)road.push({x:x,y:0});
   }
   function ground(x){
-    if(x<=140||x>=400)return H*.48;
-    var i=Math.max(0,Math.min(road.length-1,Math.round((x-140)/260*119))),v=road[i];
-    if(v===undefined||v<.045)return null;
-    var blend=Math.min(1,(x-140)/25,(400-x)/25);
-    return H*.48+(65-v*145)*Math.max(0,blend);
+    var i=Math.max(0,Math.min(road.length-2,Math.floor((x-road[0].x)/6))),a=road[i],b=road[i+1];
+    return a.y+(b.y-a.y)*Math.max(0,Math.min(1,(x-a.x)/6));
   }
-  function finish(ok){won=ok;state=S.RESULT;stopInputs();if(ok){score=100;tone(784,.3,.08);}else noiseHit(.2,170,.1);}
   function update(dt){
-    if(document.hidden||micPending)return;
-    if(state===S.PLAY){
-      var v=held?.45:readVoice();
-      if(v<=.045)return;
-      T+=dt;level+=(v-level)*Math.min(1,dt*14);
-      while(road.length<Math.min(120,Math.floor(T*30)))road.push(level);
-      if(T>=4){state=S.FALL;stopInputs();carY=H*.48-17;}
-      return;
+    if(document.hidden||micPending||state!==S.PLAY)return;
+    T+=dt;
+    if(T-lastPitchTime>=.05){lastPitchTime=T;pitch=held?360:readPitch();
+      if(pitch>0)targetHeight=Math.max(-130,Math.min(130,-Math.log2(pitch/200)*105));else targetHeight=penHeight;
     }
-    if(state!==S.FALL)return;runTime+=dt;
-    var back=ground(carX-17),front=ground(carX+17);
-    if(back===null||front===null){fallSpeed+=430*dt;carY+=fallSpeed*dt;carX+=speed*dt;angle+=dt*1.5;if(carY>H*.48+130)finish(false);return;}
-    var target=Math.atan2(front-back,34),slope=(front-back)/34;
-    angle+=(target-angle)*Math.min(1,dt*9);carY+=( (front+back)*.5-17-carY)*Math.min(1,dt*18);
-    speed=Math.max(0,Math.min(67,speed+(26+slope*70-speed*.35)*dt));carX+=speed*dt;
-    stuck=speed<3?stuck+dt:0;score=Math.max(score,Math.round(Math.min(1,(carX-65)/405)*100));
-    if(Math.abs(target)>1.08||stuck>1.5||runTime>18){finish(false);return;}
-    if(carX>=470)finish(true);
+    carX+=speed*dt;score=Math.floor(carX/10);
+    while(road[road.length-1].x<carX+270){
+      // 急な音程変化も坂としてつなぎ、線を途切れさせない。
+      penHeight+=Math.max(-5,Math.min(5,targetHeight-penHeight));
+      road.push({x:road[road.length-1].x+6,y:penHeight});
+    }
+    while(road.length>2&&road[1].x<carX-200)road.shift();
+    var back=ground(carX-17),front=ground(carX+17),surface=(back+front)*.5-18;
+    var slope=(front-back)/34,targetAngle=Math.atan2(front-back,34);
+    fallSpeed+=240*dt;carY+=fallSpeed*dt;airborne=carY<surface-2;
+    if(carY>=surface){carY=surface;fallSpeed=slope*speed;airborne=false;}
+    angle+=((airborne?Math.max(-.3,Math.min(.3,angle)):targetAngle)-angle)*Math.min(1,dt*7);
   }
 
   /* ============ 入力 ============
@@ -246,7 +250,7 @@
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    window.zResultActions.x({ text: score+"% 渡れました #声の橋" });
+    window.zResultActions.x({ text: score+"m 走りました #声の橋" });
   }
 
   /* ============ 描画 ============ */
@@ -272,21 +276,18 @@
   }
   function rect(x,y,w,h,color){ctx.fillStyle=color;ctx.fillRect(x,y,w,h);}
   function drawBridge(){
-    var base=H*.48,sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#bddedc');sky.addColorStop(.6,'#edf0d7');sky.addColorStop(1,'#536977');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
-    ctx.fillStyle='#9db9b2';ctx.beginPath();ctx.moveTo(0,base+130);ctx.lineTo(95,base-110);ctx.lineTo(230,base+90);ctx.lineTo(372,base-85);ctx.lineTo(540,base+110);ctx.lineTo(540,H);ctx.lineTo(0,H);ctx.fill();
-    [0,400].forEach(function(x){rect(x,base,140,H-base,'#6b5146');rect(x,base,140,14,'#92ab67');rect(x,base+14,140,12,'#bba07c');
-      ctx.strokeStyle='#493f3b';ctx.lineWidth=3;for(var i=0;i<7;i++){ctx.beginPath();ctx.moveTo(x+20+(i%3)*26,base+40+i*65);ctx.lineTo(x+45+(i%2)*30,base+100+i*65);ctx.lineTo(x+21,base+135+i*65);ctx.stroke();}});
-    ctx.setLineDash([5,9]);ctx.strokeStyle='rgba(255,255,255,.6)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(140,base);ctx.lineTo(400,base);ctx.stroke();ctx.setLineDash([]);
-    ctx.strokeStyle='#f4c65b';ctx.lineWidth=8;ctx.lineJoin='round';ctx.lineCap='round';ctx.beginPath();var drawing=false;
-    road.forEach(function(v,i){var x=140+i/119*260,y=ground(x);if(v<.045||y===null){drawing=false;return;}if(!drawing)ctx.moveTo(x,y);else ctx.lineTo(x,y);drawing=true;});ctx.stroke();
-    if(state===S.PLAY){var x=140+Math.min(T/4,1)*260;ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,base-100);ctx.lineTo(x,base+90);ctx.stroke();ctx.fillStyle='#fff';ellipse(x,base-100,5,5);}
-    rect(488,base-82,4,82,'#344852');for(var i=0;i<3;i++)for(var j=0;j<4;j++)rect(492+j*9,base-82+i*9,9,9,(i+j)%2?'#273d49':'#fff7df');
-    ctx.save();ctx.translate(carX,state===S.INTRO?base-17:carY);ctx.rotate(angle);
+    var base=H*.52,sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#b6dede');sky.addColorStop(.6,'#edf0d7');sky.addColorStop(1,'#819b9c');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+    for(var layer=0;layer<2;layer++){ctx.fillStyle=layer?'#a2bfb3':'#c3d3be';ctx.beginPath();ctx.moveTo(0,H);for(var x=-100;x<W+150;x+=60){var yy=base+80+layer*60-Math.sin((x+carX*(.12+layer*.1))/130)*70;ctx.lineTo(x,yy);}ctx.lineTo(W,H);ctx.fill();}
+    var offset=carX-125,end=road[road.length-1];
+    ctx.beginPath();ctx.moveTo(road[0].x-offset,H);road.forEach(function(p){ctx.lineTo(p.x-offset,base+p.y);});ctx.lineTo(end.x-offset,H);ctx.fillStyle='#796450';ctx.fill();
+    ctx.beginPath();road.forEach(function(p,i){if(i)ctx.lineTo(p.x-offset,base+p.y);else ctx.moveTo(p.x-offset,base+p.y);});ctx.strokeStyle='#f3d07a';ctx.lineWidth=8;ctx.lineJoin='round';ctx.stroke();
+    ctx.strokeStyle='rgba(55,52,47,.28)';ctx.lineWidth=2;for(var x=Math.floor((carX-200)/60)*60;x<end.x;x+=60){var y=base+ground(x);ctx.beginPath();ctx.moveTo(x-offset,y+20);ctx.lineTo(x-offset-20,y+80);ctx.lineTo(x-offset+15,y+120);ctx.stroke();}
+    ctx.fillStyle='#fff9de';ellipse(end.x-offset,base+end.y,8,8);ctx.strokeStyle='#ffb865';ctx.lineWidth=2;ctx.beginPath();ctx.arc(end.x-offset,base+end.y,14+Math.sin(T*8)*2,0,Math.PI*2);ctx.stroke();
+    ctx.save();ctx.translate(125,base+carY);ctx.rotate(angle);
     rect(-28,-16,56,23,'#d96540');ctx.fillStyle='#f58851';roundRect(-17,-33,36,23,7);ctx.fill();rect(-12,-29,12,15,'#c9edef');rect(4,-29,10,15,'#c9edef');rect(23,-10,6,6,'#ffed9e');
-    [-17,17].forEach(function(x){ctx.fillStyle='#24343c';ellipse(x,8,10,10);ctx.fillStyle='#dad8c6';ellipse(x,8,4,4);});ctx.restore();
-    var y=H-190;rect(85,y,370,78,'#263e49');ctx.strokeStyle='#77d8c6';ctx.lineWidth=2;ctx.beginPath();
-    for(var i=0;i<120;i++){var v=road[i]||0,x=95+i/119*350,yy=y+39-Math.sin(i*2.7)*v*31;if(i)ctx.lineTo(x,yy);else ctx.moveTo(x,yy);}ctx.stroke();
-    if(state===S.PLAY){ctx.fillStyle='#f38666';ellipse(105,y+15,5,5);rect(120,y+12,Math.min(310,T/4*310),5,'#f4c65b');}
+    [-17,17].forEach(function(x){ctx.fillStyle='#24343c';ellipse(x,8,10,10);ctx.fillStyle='#dad8c6';ellipse(x,8,4,4);ctx.save();ctx.translate(x,8);ctx.rotate(carX/10);ctx.strokeStyle='#9faeae';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-7,0);ctx.lineTo(7,0);ctx.stroke();ctx.restore();});ctx.restore();
+    if(state===S.PLAY){ctx.fillStyle='#365560';ctx.font='bold 28px sans-serif';ctx.textAlign='right';ctx.fillText(score+'m',W-24,48);}
+    var y=H-175;rect(85,y,370,65,'#263e49');ctx.strokeStyle=pitch?'#f3d07a':'#77a6a6';ctx.lineWidth=2;ctx.beginPath();for(var i=0;i<=120;i++){var yy=y+33+(pitch?Math.sin(i*pitch/100)*18:0);if(i)ctx.lineTo(95+i*350/120,yy);else ctx.moveTo(95,yy);}ctx.stroke();
   }
 
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
@@ -338,7 +339,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now:function(){return {state:state,score:score,W:W,H:H,level:level,won:won,time:T,x:carX,angle:angle,road:road.slice(),micPending:micPending,micError:micError};},
+    now:function(){return {state:state,score:score,W:W,H:H,level:level,won:won,time:T,x:carX,y:carY,angle:angle,pitch:pitch,targetHeight:targetHeight,airborne:airborne,road:road.slice(),micPending:micPending,micError:micError};},
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
@@ -350,7 +351,7 @@
     run: async function (r) {
       await r.wait(1000);
       r.key();
-      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("勝敗が出ない");
+      await r.wait(10000);
       await r.wait(1500);
     }
   };
