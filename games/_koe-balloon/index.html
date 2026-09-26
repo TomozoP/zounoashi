@@ -136,13 +136,21 @@
   var replayGhosts=[],explosions=[],fired={},serial=0,attemptNumber=1,attemptSaved=false;
   var inputRms=0,inputTrace=[];
   var RUN_SPEED=150;
-  function stopReplay(){replaySources.forEach(function(s){try{s.stop();}catch(e){}});replaySources=[];replayStarted=false;}
+  function stopReplay(){replaySources.forEach(function(s){try{s.stop();}catch(e){}if(s.releaseRobot)s.releaseRobot();});replaySources=[];replayStarted=false;}
   function lead(i){return Math.min(2.4,(history.length-i)*.08);}
   function startReplay(){
     if(replayStarted||!AC||state!==S.PLAY)return;replayStarted=true;
     history.forEach(function(h,i){var offset=T+lead(i);if(!h.audio||offset>=h.audio.duration)return;
       var src=AC.createBufferSource(),gain=AC.createGain();src.buffer=h.audio;gain.gain.value=.38;
-      src.connect(gain);gain.connect(AC.destination);src.start(0,offset);replaySources.push(src);
+      // 再生側だけを加工する。録音と操作の入力には戻さない。
+      var high=AC.createBiquadFilter(),low=AC.createBiquadFilter(),metal=AC.createGain(),carrier=AC.createOscillator(),depth=AC.createGain();
+      high.type="highpass";high.frequency.value=220;high.Q.value=.7;
+      low.type="lowpass";low.frequency.value=2800;low.Q.value=.7;
+      metal.gain.value=.45;carrier.type="sine";carrier.frequency.value=65;depth.gain.value=.55;
+      carrier.connect(depth);depth.connect(metal.gain);
+      src.connect(high);high.connect(low);low.connect(metal);metal.connect(gain);gain.connect(AC.destination);
+      var released=false;src.releaseRobot=function(){if(released)return;released=true;try{carrier.stop();}catch(e){}[src,high,low,metal,carrier,depth,gain].forEach(function(n){n.disconnect();});};
+      src.onended=src.releaseRobot;carrier.start();src.start(0,offset);replaySources.push(src);
     });
   }
   function beginCapture(){
