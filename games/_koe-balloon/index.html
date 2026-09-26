@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>100体ジェット</title>
+<title>ステガマリーズ大行進</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -36,7 +36,7 @@
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* 100体ジェット
+/* ステガマリーズ大行進
 
    書き換えるところの目印は3つ。
      ▼UPDATE … 進行と入力
@@ -132,7 +132,7 @@
   var musicBuffer=null,musicSource=null,musicOrigin=0;
   function stopMusic(){if(musicSource){try{musicSource.stop();}catch(e){}musicSource.disconnect();musicSource=null;}}
   function makeMusic(){
-    var duration=(533+(GATE_COUNT-1)*GATE_STEP)/RUN_SPEED,rate=22050;
+    var duration=goalDistance()/RUN_SPEED,rate=22050;
     var buffer=AC.createBuffer(1,Math.ceil(duration*rate),rate),data=buffer.getChannelData(0),beat=duration/64;
     var roots=[45,41,48,43],melody=[0,7,12,7,3,7,15,12];
     function note(at,len,midi,amp){
@@ -182,6 +182,10 @@
   var history=[],damage={},track=[],won=false,lives=100,traps=[],hazards=[],destroyed={},screenBursts=[],wrecks=[];
   var replayGhosts=[],explosions=[],fired={},serial=0,attemptNumber=1,attemptSaved=false;
   var RUN_SPEED=410,GATE_COUNT=30,GATE_STEP=240;
+  var victoryTime=0;
+  function goalDistance(){return 533+(GATE_COUNT-1)*GATE_STEP+780;}
+  function resultVisible(){return state===S.RESULT&&(!won||victoryTime>.9);}
+  function fanfare(){[72,76,79,84,79,84].forEach(function(n,i){tone(440*Math.pow(2,(n-69)/12),i===5?.75:.17,.09,'triangle',0,i*.12);});}
   function lead(i){return (history.length-i)*.035+.12;}
   function saveAttempt(){
     if(attemptSaved)return;attemptSaved=true;
@@ -251,13 +255,14 @@
   }
 
   function newRound(retry){
-    stopMusic();deathWait=0;wrecks=[];screenBursts=[];
+    stopMusic();deathWait=0;victoryTime=0;wrecks=[];screenBursts=[];
     var keepHeld=retry&&held;
     if(!retry){history=[];serial=0;lives=100;screenBursts=[];wrecks=[];}
     attemptNumber=serial+1;damage={};destroyed={};won=false;track=[];attemptSaved=false;fired={};explosions=[];replayGhosts=[];traps=[];hazards=[];
     shareButton.hidden=true;retryButton.hidden=true;document.getElementById("start").hidden=true;
     state=S.PLAY;score=0;T=0;held=!!keepHeld;
     py=H*.52;vy=0;air=held?1:0;level=air;distance=0;gates=[];doll=null;fallTime=0;burst=null;
+    if(!retry&&new URLSearchParams(location.search).get("debug")==="goal"){T=(533+(GATE_COUNT-1)*GATE_STEP+60)/RUN_SPEED;score=GATE_COUNT;distance=T*RUN_SPEED/10;py=H*.51;}
   }
   // 関節同士の距離を保ちながら、重力と接触で手足を動かす。
   function pose(){return [[155,py],[155,py],[155,py],[129,py+6],[134,py+20],[181,py+6],[176,py+20],[145,py+33],[142,py+48],[165,py+33],[171,py+48]];}
@@ -277,6 +282,7 @@
     wrecks.forEach(function(w){w.age+=dt;w.vy+=1100*dt;w.x+=w.vx*dt;w.y+=w.vy*dt;w.angle+=w.spin*dt;});wrecks=wrecks.filter(function(w){return w.age<1.2&&w.y<H+80;});
     screenBursts.forEach(function(b){b.age+=dt;});screenBursts=screenBursts.filter(function(b){return b.age<.45;});
     if(state===S.DEAD){deathWait-=dt;if(deathWait<=1e-8){if(lives<=0){state=S.RESULT;held=false;}else newRound(true);}return;}
+    if(state===S.RESULT&&won){T+=dt;victoryTime+=dt;distance+=RUN_SPEED*dt/10;air=1;py+=(H*.48-py)*dt*2;gates.forEach(function(g){g.x-=RUN_SPEED*dt;});traps=[];hazards=[];replayStep(dt);return;}
     if (state !== S.PLAY) return;
     T += dt;
     updateMusic();
@@ -297,12 +303,14 @@
     traps=[];
     for(var j=0;j<44;j++){var m=trapPosition(j,T);if(!destroyed[j]&&T>=m.born&&m.x>-80&&m.x<W+100)traps.push(m);}
     hazards=[];for(var k=0;k<12;k++){if(k%3!==1)continue;var h=hazardPosition(k,T);if(!destroyed["h"+k]&&h.x>-220&&h.x<W+100)hazards.push(h);}
-    if(hazards.some(hazardHit)||py-34<0 || py+29>H || gates.some(function(g){return pillarHit(149,py,35,31,g);})||traps.some(function(m){return Math.abs(m.x-149)<48&&Math.abs(m.y-py)<40;})) {
+    var finalStretch=T*RUN_SPEED>533+(GATE_COUNT-1)*GATE_STEP;
+    if(finalStretch){traps=[];hazards=[];vy=0;py+=(H*.48-py)*dt*2;air=1;}
+    if(!finalStretch&&(hazards.some(hazardHit)||py-34<0 || py+29>H || gates.some(function(g){return pillarHit(149,py,35,31,g);})||traps.some(function(m){return Math.abs(m.x-149)<48&&Math.abs(m.y-py)<40;}))) {
       popBalloon();
       return;
     }
     score=Math.min(GATE_COUNT,Math.max(0,Math.floor((T*RUN_SPEED-533)/GATE_STEP)+1));
-    if(score>=GATE_COUNT){stopMusic();won=true;state=S.RESULT;held=false;tone(784,.4,.08);}
+    if(T*RUN_SPEED>=goalDistance()){stopMusic();won=true;state=S.RESULT;held=false;victoryTime=0;fanfare();}
   }
 
   /* ============ 入力 ============
@@ -366,7 +374,7 @@
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    window.zResultActions.x({ text: score + "本くぐりました #100体ジェット" });
+    window.zResultActions.x({ text: won ? "ステガマリーズ"+attemptNumber+"号機でゴールに到達！ #ステガマリーズ大行進" : "ステガマリーズ"+attemptNumber+"号機で挑戦！ #ステガマリーズ大行進" });
   }
 
   /* ============ 描画 ============ */
@@ -383,8 +391,8 @@
   function ellipse(x,y,rx,ry){ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);ctx.fill();}
   function draw() {
     updateJetSound();
-    window.zResultActions.place(retryButton, resultButtons()[0], W, H, state === S.RESULT);
-    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(retryButton, resultButtons()[0], W, H, resultVisible());
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, resultVisible());
     ctx.clearRect(0, 0, W, H);
 
     var sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#86d6e8');sky.addColorStop(1,'#edf5dc');
@@ -449,13 +457,17 @@
     });
     if(state!==S.INTRO){ctx.fillStyle="#365664";ctx.font="800 26px sans-serif";ctx.textAlign="left";ctx.fillText(String(lives),24,58);}
     if(state!==S.INTRO){
-      var progress=Math.max(0,Math.min(1,T*RUN_SPEED/(533+(GATE_COUNT-1)*GATE_STEP)));
+      var progress=Math.max(0,Math.min(1,T*RUN_SPEED/goalDistance()));
       ctx.fillStyle="rgba(14,34,46,.7)";roundRect(40,H-37,W-80,12,6);ctx.fill();
       ctx.fillStyle="#f2cd65";roundRect(40,H-37,Math.max(12,(W-80)*progress),12,6);ctx.fill();
       ctx.fillStyle="#fff";ellipse(40+(W-80)*progress,H-31,5,5);
       ctx.fillRect(W-44,H-45,3,28);
     }
-    if (state === S.RESULT) drawResult();
+    var goalX=155+goalDistance()-T*RUN_SPEED;
+    if(score>=GATE_COUNT&&goalX<W+25&&goalX>-25){for(var row=0;row<Math.ceil(H/22);row++)for(var col=0;col<2;col++){ctx.fillStyle=(row+col)%2?'#fff':'#243d4a';ctx.fillRect(goalX+col*11,row*22,11,22);}}
+    if(resultVisible())drawResult();
+    if(won){for(var i=0;i<100;i++){var age=victoryTime,life=age-i%7*.035;if(life<0||life>3)continue;var x=W/2+Math.sin(i*2.4)*(100+life*240),y=H*.35-life*(180+i%5*30)+life*life*190;ctx.save();ctx.translate(x,y);ctx.rotate(life*(i%2?7:-7)+i);ctx.globalAlpha=Math.min(1,3-life);ctx.fillStyle=['#ff6975','#f9d568','#77dfff','#fff','#b594ff'][i%5];ctx.fillRect(-4,-7,8,14);ctx.restore();}}
+
   }
 
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
@@ -506,7 +518,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now:function(){return {state:state,score:score,W:W,H:H,y:py,vy:vy,air:air,level:level,won:won,lives:lives,number:attemptNumber,time:T,historyCount:history.length,hazards:hazards.map(function(h){return {type:h.type,x:h.x,y:h.y,gap:h.gap,active:h.active};}),progress:Math.min(1,T*RUN_SPEED/(533+(GATE_COUNT-1)*GATE_STEP)),threeD:!!scene3d,gates:gates.map(function(g){return {x:g.x,top:g.top,bottom:g.bottom};}),traps:traps.map(function(m){return {id:m.id,x:m.x,y:m.y};}),ghosts:replayGhosts,damage:JSON.parse(JSON.stringify(damage)),destroyed:Object.keys(destroyed).length};},
+    now:function(){return {state:state,score:score,W:W,H:H,y:py,vy:vy,air:air,level:level,won:won,lives:lives,number:attemptNumber,time:T,historyCount:history.length,hazards:hazards.map(function(h){return {type:h.type,x:h.x,y:h.y,gap:h.gap,active:h.active};}),progress:Math.min(1,T*RUN_SPEED/goalDistance()),threeD:!!scene3d,gates:gates.map(function(g){return {x:g.x,top:g.top,bottom:g.bottom};}),traps:traps.map(function(m){return {id:m.id,x:m.x,y:m.y};}),ghosts:replayGhosts,damage:JSON.parse(JSON.stringify(damage)),destroyed:Object.keys(destroyed).length};},
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
