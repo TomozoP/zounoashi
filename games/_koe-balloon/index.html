@@ -128,6 +128,42 @@
     s.connect(f); f.connect(g); g.connect(AC.destination);
     s.start(n); s.stop(n + dur + 0.05);
   }
+  // 16小節をコース全長に合わせて合成する自作曲。音素材の取得は行わない。
+  var musicBuffer=null,musicSource=null,musicOrigin=0;
+  function stopMusic(){if(musicSource){try{musicSource.stop();}catch(e){}musicSource.disconnect();musicSource=null;}}
+  function makeMusic(){
+    var duration=(533+(GATE_COUNT-1)*GATE_STEP)/RUN_SPEED,rate=22050;
+    var buffer=AC.createBuffer(1,Math.ceil(duration*rate),rate),data=buffer.getChannelData(0),beat=duration/64;
+    var roots=[45,41,48,43],melody=[0,7,12,7,3,7,15,12];
+    function note(at,len,midi,amp){
+      var start=Math.floor(at*rate),count=Math.floor(len*rate),freq=440*Math.pow(2,(midi-69)/12);
+      for(var i=0;i<count&&start+i<data.length;i++){var t=i/rate,env=Math.min(1,t/.004)*Math.pow(1-i/count,1.6);
+        data[start+i]+=amp*env*(Math.sin(2*Math.PI*freq*t)+.24*Math.sin(6*Math.PI*freq*t));}
+    }
+    for(var b=0;b<64;b++){
+      var root=roots[Math.floor(b/4)%4],final=b>=60;
+      if(b<63){
+        note(b*beat,beat*.8,root,.11);note((b+.5)*beat,beat*.35,root+12,.065);
+        for(var n=0;n<4;n++)note((b+n/4)*beat,beat*.23,root+24+melody[(b*4+n)%8],b>=32?.055:.04);
+        if(b>=16&&b%2===0){note(b*beat,beat*1.7,root+12,.03);note(b*beat,beat*1.7,root+19,.025);}
+      }else{[45,57,60,64,69].forEach(function(m){note(b*beat,beat,m,.055);});}
+      var start=Math.floor(b*beat*rate),count=Math.floor(beat*rate);
+      for(var j=0;j<count&&start+j<data.length;j++){
+        var t=j/rate,kick=Math.sin(2*Math.PI*(48*t+8*(1-Math.exp(-t*32))))*Math.exp(-t*28);
+        var noise=Math.sin(j*78.233+b*12.9898)*43758.5453;noise=(noise-Math.floor(noise))*2-1;
+        var hatTime=t%(beat/(final?4:2));
+        data[start+j]+=.2*kick+noise*(b%2?.095*Math.exp(-t*34):0)+noise*.032*Math.exp(-hatTime*160);
+      }
+    }
+    for(var q=0;q<data.length;q++){var end=(data.length-q)/rate;data[q]=Math.tanh(data[q])*Math.min(1,end/.045);}
+    return buffer;
+  }
+  function updateMusic(){
+    if(!AC||document.hidden||state!==S.PLAY)return;
+    if(!musicBuffer)musicBuffer=makeMusic();
+    if(musicSource&&Math.abs((AC.currentTime-musicOrigin)-T)>.15)stopMusic();
+    if(!musicSource&&T<musicBuffer.duration){musicSource=AC.createBufferSource();musicSource.buffer=musicBuffer;musicSource.connect(AC.destination);musicOrigin=AC.currentTime-T;musicSource.start(0,T);}
+  }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -208,6 +244,7 @@
   }
 
   function newRound(retry){
+    stopMusic();
     var keepHeld=retry&&held;
     if(!retry){history=[];serial=0;lives=100;screenBursts=[];}
     attemptNumber=serial+1;damage={};destroyed={};won=false;track=[];attemptSaved=false;fired={};explosions=[];replayGhosts=[];traps=[];hazards=[];
@@ -219,6 +256,7 @@
   function pose(){return [[155,py],[155,py],[155,py],[129,py+6],[134,py+20],[181,py+6],[176,py+20],[145,py+33],[142,py+48],[165,py+33],[171,py+48]];}
   function popBalloon(){
     if(state!==S.PLAY)return;
+    stopMusic();
     saveAttempt();lives--;screenBursts.push({x:155,y:py,age:0});
     explosionSound(155,py,1);
     if(lives<=0){state=S.RESULT;held=false;return;}
@@ -230,6 +268,7 @@
     screenBursts.forEach(function(b){b.age+=dt;});screenBursts=screenBursts.filter(function(b){return b.age<.45;});
     if (state !== S.PLAY) return;
     T += dt;
+    updateMusic();
     replayStep(dt);
     level=held?1:0;air=level;
     vy+=(1550-air*4100-vy*1.1)*dt;
@@ -252,7 +291,7 @@
       return;
     }
     score=Math.min(GATE_COUNT,Math.max(0,Math.floor((T*RUN_SPEED-533)/GATE_STEP)+1));
-    if(score>=GATE_COUNT){won=true;state=S.RESULT;held=false;tone(784,.4,.08);}
+    if(score>=GATE_COUNT){stopMusic();won=true;state=S.RESULT;held=false;tone(784,.4,.08);}
   }
 
   /* ============ 入力 ============
