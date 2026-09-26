@@ -6,7 +6,7 @@ const hook=`window.__check={scene:function(){return scene3d;},setup:function(hei
   H=height;canvas.width=540;canvas.height=H;newRound();air=amount;py=H*.54;
   gates=[{x:320,top:py-220,bottom:py+140}];draw();
 },intro:function(){state=S.INTRO;draw();},result:function(){state=S.RESULT;draw();},
-voice:function(v){level=v;air=v;draw();},crash:function(){gates=[{x:140,top:py-20,bottom:H}];update(1/60);draw();}};`;
+echo:function(){newRound();history=[{id:99,frames:Array.from({length:120},function(){return {y:.5,air:1};}),end:2,y:.5,worldX:455}];T=.5;update(1/60);draw();},blast:function(){T=2;update(1/60);draw();},voice:function(v){level=v;air=v;draw();},crash:function(){py=20;update(1/60);draw();}};`;
 const runner=`<script>window.__recordManual=true;(async()=>{try{
 function check(ok,msg){if(!ok)throw Error(msg);}
 const c=document.getElementById('c'),p=window.__probe,t=window.__check;
@@ -37,6 +37,7 @@ t.crash();check(p.now().state==='fall','衝突後に落下しない');check(scen
 const before=p.now().doll[0].y;p.step(35);check(p.now().doll[0].y>before,'人が落下していない');await save('fall.png');
 p.step(110);check(p.now().state==='result','落下後に結果へ移らない');
 check(p.now().doll.every(j=>Number.isFinite(j.x)&&Number.isFinite(j.y)),'関節が壊れている');
+t.echo();check(scene.ghostModels[0].visible,'過去の人物が描かれない');check(scene.ghostModels[0].position.x>155,'人物が先行しない');await save('echo.png');t.blast();check(scene.blastModels[0].visible,'過去の爆発が描かれない');await save('blast.png');
 await fetch('/__done',{method:'POST',body:'3種類の縦横比・立体の投影位置・噴射と停止・柱への衝突・録画画面の合成を確認'});
 }catch(e){await fetch('/__fail',{method:'POST',body:e.stack});}})();</script>`;
 const server=http.createServer((req,res)=>{

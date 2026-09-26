@@ -1,23 +1,23 @@
-const assert=require('assert');const load=require('../harness');
+const assert=require('assert'),load=require('../harness');
 const file='games/_koe-balloon/index.html';
-let g=load(file);g.step(120);assert.equal(g.probe.now().state,'intro');
-g.press(' ');assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().air,0);
-g.key(' ');g.step(18);assert(g.probe.now().air>.95);assert(g.probe.now().vy<0);
-g.key(' ',true);g.step(18);assert.equal(g.probe.now().air,0,'無音で噴射を止める');g.step(30);assert(g.probe.now().vy>0);
-g.probe.reset();assert(g.until(()=>g.probe.now().state==='result',1200),'無操作で落下して終わる');
-g.press(' ');assert.equal(g.probe.now().state,'play');
 for(const shape of [[390,844],[700,700],[500,1600]]){
-  g=load(file,{w:shape[0],h:shape[1]});g.probe.reset();
-  let hold=false;
-  for(let n=0;n<3600;n++){
-    let p=g.probe.now();assert.equal(p.state,'play','経路を通過できる '+shape+' '+n);
-    let gate=p.gates.find(x=>x.x+58>90);
-    let target=gate?(gate.top+gate.bottom)/2:p.H*.52;
-    let desired=p.y+p.vy*.18>target;
-    if(n%6===0 && !hold && desired){g.key(' ');hold=true;}
-    if(n%6===0 && hold && !desired){g.key(' ',true);hold=false;}
-    g.step(1);
+ const g=load(file,{w:shape[0],h:shape[1]});
+ g.press(' ');let hold=false,cleared=false;
+ for(let attempt=0;attempt<12&&!cleared;attempt++){
+  for(let n=0;n<2700;n++){
+   const p=g.probe.now();if(p.state!=='play')break;
+   const gate=p.gates.find(x=>x.x+58>112);
+   const target=gate?(gate.top+gate.bottom)/2:p.H*.52;
+   const desired=p.y+p.vy*.16>target;
+   if(hold!==desired){g.key(' ',!desired);hold=desired;}
+   g.step(1);
   }
-  assert(g.probe.now().score>=14);console.log('60秒の通過確認',shape.join('×'),g.probe.now().score);
+  const p=g.probe.now();cleared=p.won;
+  if(!cleared){g.until(()=>g.probe.now().state==='result',200);g.press(' ');hold=false;}
+ }
+ assert(cleared,'履歴を重ねて10本通過できる '+shape);
+ assert.equal(g.probe.now().score,10);
+ console.log(shape.join('×')+'：先行する履歴と削れた柱で10本通過');
+ g.press(' ');assert.equal(g.probe.now().historyCount,0,'クリア後は新しいコース');
+ assert.equal(g.probe.now().state,'play');
 }
-console.log('開始・噴射・停止・落下・再挑戦を確認');

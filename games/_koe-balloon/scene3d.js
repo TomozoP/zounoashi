@@ -57,14 +57,14 @@
       self.part(self.pack,self.ball,0xe5bc54,x,21,-10,10,6,10,true);
       self.part(self.pack,self.tube,0x263a49,x,-22,-10,8,9,8,true);
       var flame=self.part(self.pack,new T.ConeGeometry(1,1,14),0xff922e,x,-42,-10,8,35,8);
-      flame.rotation.z=Math.PI;
+      flame.rotation.z=Math.PI;flame.name="jetFlame";
       var core=self.part(self.pack,new T.ConeGeometry(1,1,14),0xffefb6,x,-34,-3,4,18,4);
-      core.rotation.z=Math.PI;self.flames.push({outer:flame,core:core});
+      core.rotation.z=Math.PI;core.name="jetFlame";self.flames.push({outer:flame,core:core});
     });
     this.up=new T.Vector3(0,1,0);
     this.fragments=[];
     for(var i=0;i<12;i++)this.fragments.push(this.part(this.scene,new T.TetrahedronGeometry(1),0xffba58,0,0,0,5,9,2,true));
-    this.gateModels=[];
+    this.gateModels=[];this.ghostModels=[];this.blastModels=[];
   }
   BalloonScene.prototype.makeGate=function(){
     var T=global.THREE,self=this,root=new T.Group();this.scene.add(root);
@@ -122,6 +122,18 @@
       m.bottom.cap.position.y=-g.bottom-7;
       m.bottom.inset.position.y=-(g.bottom+s.H+44)/2;m.bottom.inset.scale.y=Math.max(1,s.H+16-g.bottom);
     });
+    var ghosts=s.ghosts||[],blasts=s.explosions||[];
+    while(this.ghostModels.length<ghosts.length){
+      var ghost=this.person.clone(true);
+      ghost.traverse(function(o){if(o.isMesh){o.material=o.material.clone();o.material.transparent=true;o.material.opacity=.38;o.material.depthWrite=false;o.material.color.lerp(new global.THREE.Color(0x80dfff),.45);}});
+      this.scene.add(ghost);this.ghostModels.push(ghost);
+    }
+    this.ghostModels.forEach(function(g,i){var f=ghosts[i];g.visible=!!f&&!s.doll;if(!g.visible)return;g.position.set(f.x,-f.y,-35);g.traverse(function(o){if(o.name==="jetFlame")o.visible=f.air>0;});});
+    while(this.blastModels.length<blasts.length){
+      var material=new global.THREE.MeshBasicMaterial({color:0xffb54c,transparent:true,opacity:.5,depthWrite:false});
+      var blast=new global.THREE.Mesh(this.ball,material);this.scene.add(blast);this.blastModels.push(blast);
+    }
+    this.blastModels.forEach(function(m,i){var e=blasts[i];m.visible=!!e;if(!e)return;m.position.set(e.x-s.scroll,-e.y,35);m.scale.setScalar(25+e.age*170);m.material.opacity=Math.max(0,.6-e.age);});
     this.renderer.render(this.scene,this.camera);
     ctx.drawImage(this.renderer.domElement,0,0,s.W,s.H);
   };
