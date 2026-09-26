@@ -27,7 +27,7 @@
     };
     this.person=new T.Group();this.scene.add(this.person);
     var p=this.person;
-    this.body=this.part(p,this.ball,0xfff3d9,0,-8,0,18,22,12);
+
     this.head=new T.Group();p.add(this.head);
     this.face=this.part(this.head,this.ball,0xe7a67d,0,0,0,20,23,18);
     this.skin=this.face.material;this.skinBase=new T.Color(0xe7a67d);this.skinRed=new T.Color(0xee373d);
@@ -40,14 +40,6 @@
     });
     this.cheeks=[-1,1].map(function(side){return self.part(self.head,self.ball,0xe7a67d,side*12,-6,14,6,6,5);});
     this.mouth=this.part(this.head,this.ball,0xa86156,0,-9,18,4,3,3);
-    this.joints=[];
-    // 上腕・前腕・太もも・すねを、それぞれ別の関節でつなぐ。
-    [[1,3,7,0xfff3d9],[3,4,5,0xe7a67d],[1,5,7,0xfff3d9],[5,6,5,0xe7a67d],
-     [0,7,6,0x314858],[7,8,5,0x314858],[0,9,6,0x314858],[9,10,5,0x314858]].forEach(function(v){
-      self.joints.push({a:v[0],b:v[1],mesh:self.part(p,self.tube,v[3],0,0,0,v[2],1,v[2])});
-    });
-    this.hands=[4,6].map(function(i){return {index:i,mesh:self.part(p,self.ball,0xf0b792,0,0,3,5.5,6,5.5)};});
-    this.feet=[8,10].map(function(i){return {index:i,mesh:self.part(p,self.ball,0x243846,0,0,3,7,5,10)};});
     this.balloon=this.part(this.scene,this.ball,0xf04b68,155,-400,0,40,44,40,true);
     this.neck=this.part(this.scene,this.tube,0xd83d59,155,-360,0,3,14,3,true);
     this.up=new T.Vector3(0,1,0);
@@ -57,43 +49,32 @@
   }
   BalloonScene.prototype.makeGate=function(){
     var T=global.THREE,self=this,root=new T.Group();this.scene.add(root);
-    // 回転後の見える横幅を58にそろえ、当たり判定との横ずれを防ぐ。
-    var angle=-.42,extent=43*Math.cos(angle)+44*Math.abs(Math.sin(angle));
-    root.scale.x=58/extent;root.rotation.y=0;
-    function column(){
-      var g=new T.Group();g.rotation.y=angle;root.add(g);
-      var body=self.part(g,self.box,0x456873,0,0,0,43,1,44);
-      var cap=self.part(g,self.box,0xffc563,0,0,0,43,14,44,true);
-      var inset=self.part(g,self.box,0x658690,-11,0,22.2,5,1,.5);
-      return {root:g,body:body,cap:cap,inset:inset};
+    function bar(){
+      var g=new T.Group();root.add(g);g.rotation.x=.4;
+      return {root:g,body:self.part(g,self.box,0x456873,0,0,0,1,30,26),cap:self.part(g,self.box,0xffc563,0,0,0,12,30,26,true)};
     }
-    return {root:root,top:column(),bottom:column()};
+    root.scale.y=40/(30*Math.cos(.4)+26*Math.sin(.4));
+    return {root:root,left:bar(),right:bar()};
   };
   BalloonScene.prototype.render=function(ctx,canvas,s){
     var w=Math.min(canvas.width,810),h=Math.round(w*s.H/s.W);
     if(this.renderer.domElement.width!==w||this.renderer.domElement.height!==h)this.renderer.setSize(w,h,false);
     this.camera.right=s.W;this.camera.bottom=-s.H;this.camera.updateProjectionMatrix();
-    this.person.position.set(155,-s.y,0);
-    var pts=s.doll?s.doll.points:s.pose.map(function(p){return {x:p[0],y:p[1]};});
-    function local(i){return new global.THREE.Vector3(pts[i].x-155,s.y-pts[i].y,0);}
-    var hips=local(0),shoulder=local(1),head=local(2),bodyDirection=shoulder.clone().sub(hips);
-    this.body.position.copy(hips).add(shoulder).multiplyScalar(.5);
-    this.body.quaternion.setFromUnitVectors(this.up,bodyDirection.normalize());
-    this.head.position.copy(head);
-    this.head.rotation.set(s.doll?-.1:-.8,.5,s.doll?-Math.atan2(pts[2].x-pts[1].x,pts[1].y-pts[2].y):0);
-    this.skin.color.copy(this.skinBase).lerp(this.skinRed,s.doll?Math.max(0,1-s.fallTime*2):Math.min(1,s.level*1.15));
+    var x=s.fallen?s.fallen.x:s.x,y=s.fallen?s.fallen.y:s.y;
+    this.person.position.set(x,-y,0);
+    this.person.rotation.z=s.fallen?s.fallen.angle:0;
+    this.head.position.set(0,0,0);this.head.scale.setScalar(1.35);
+    this.head.rotation.set(s.fallen?-.1:-.8,.5,0);
+    this.skin.color.copy(this.skinBase).lerp(this.skinRed,s.fallen?Math.max(0,1-s.fallTime*2):Math.min(1,s.level*1.15));
     this.cheeks.forEach(function(m){m.scale.set(6+s.level*3,6+s.level*2,5+s.level*2);});
-    var self=this;
-    this.joints.forEach(function(j){var a=local(j.a),b=local(j.b),d=b.clone().sub(a);j.mesh.position.copy(a).add(b).multiplyScalar(.5);j.mesh.scale.y=d.length();j.mesh.quaternion.setFromUnitVectors(self.up,d.normalize());});
-    this.hands.concat(this.feet).forEach(function(p){p.mesh.position.copy(local(p.index));p.mesh.position.z=3;});
     this.head.updateWorldMatrix(true,true);
     var mouth=this.mouth.getWorldPosition(new global.THREE.Vector3());
     this.neck.position.copy(mouth);this.neck.position.y+=7;
     this.balloon.position.copy(mouth);this.balloon.position.y+=14+s.radius*1.08;
     this.balloon.scale.set(s.radius,s.radius*1.08,s.radius);
-    this.balloon.visible=this.neck.visible=!s.doll;
+    this.balloon.visible=this.neck.visible=!s.fallen;
     this.fragments.forEach(function(m,i){
-      m.visible=!!s.doll&&s.fallTime<.65;if(!m.visible)return;
+      m.visible=!!s.fallen&&s.fallTime<.65;if(!m.visible)return;
       var angle=i*Math.PI*2/12,t=s.fallTime;
       m.position.set(s.burst.x+Math.cos(angle)*(s.burst.r+180*t),-s.burst.y+Math.sin(angle)*(s.burst.r+180*t)-220*t*t,Math.sin(i)*20);
       m.rotation.set(i+t*8,i*.4+t*12,t*10);m.scale.setScalar(Math.max(.01,1-t/.65)*6);
@@ -101,13 +82,11 @@
     while(this.gateModels.length<s.gates.length)this.gateModels.push(this.makeGate());
     this.gateModels.forEach(function(m,i){
       var g=s.gates[i];m.root.visible=!!g;if(!g)return;
-      m.root.position.x=g.x+29;
-      m.top.body.position.y=-(g.top-30)/2;m.top.body.scale.y=g.top+30;
-      m.top.cap.position.y=-g.top+7;
-      m.top.inset.position.y=-(g.top-30)/2;m.top.inset.scale.y=Math.max(1,g.top+2);
-      m.bottom.body.position.y=-(g.bottom+s.H+30)/2;m.bottom.body.scale.y=s.H+30-g.bottom;
-      m.bottom.cap.position.y=-g.bottom-7;
-      m.bottom.inset.position.y=-(g.bottom+s.H+44)/2;m.bottom.inset.scale.y=Math.max(1,s.H+16-g.bottom);
+      m.root.position.set(0,-g.y,0);
+      m.left.body.scale.x=g.left;m.left.body.position.x=g.left/2;
+      m.left.cap.position.x=g.left-6;
+      m.right.body.scale.x=s.W-g.right;m.right.body.position.x=(s.W+g.right)/2;
+      m.right.cap.position.x=g.right+6;
     });
     this.renderer.render(this.scene,this.camera);
     ctx.drawImage(this.renderer.domElement,0,0,s.W,s.H);

@@ -3,10 +3,10 @@ const fs=require('fs'),path=require('path'),http=require('http'),os=require('os'
 const root=path.resolve(__dirname,'../../..'),out=fs.mkdtempSync(path.join(os.tmpdir(),'koe-balloon-3d-'));
 let child,timer,finished=false;
 const hook=`window.__check={scene:function(){return scene3d;},setup:function(height,amount){
-  H=height;canvas.width=540;canvas.height=H;newRound();air=amount;py=H*.54;
-  gates=[{x:320,top:py-220,bottom:py+140}];draw();
+  H=height;canvas.width=540;canvas.height=H;newRound();air=amount;py=H*.68;
+  gates=[{height:300,left:130,right:350,passed:false}];draw();
 },intro:function(){state=S.INTRO;draw();},result:function(){state=S.RESULT;draw();},
-voice:function(v){level=v;draw();},crash:function(){gates=[{x:140,top:py-65,bottom:H}];update(1/60);draw();}};`;
+voice:function(v){level=v;draw();},crash:function(){gates=[{height:0,left:400,right:520,passed:false}];update(1/60);draw();}};`;
 const runner=`<script>window.__recordManual=true;(async()=>{try{
 function check(ok,msg){if(!ok)throw Error(msg);}
 const c=document.getElementById('c'),p=window.__probe,t=window.__check;
@@ -17,11 +17,12 @@ for(const height of [780,1130,1700]){
   check(scene.renderer.info.render.triangles>1000,'模型が描かれない');
   check(scene.renderer.info.render.calls<100,'描画回数が多すぎる');
   const projected=scene.person.position.clone().project(scene.camera);
-  check(Math.abs((projected.x+1)*270-155)<.01,'人物の横位置');
+  check(Math.abs((projected.x+1)*270-270)<.01,'人物の横位置');
   check(Math.abs((1-projected.y)*height/2-state.y)<.01,'人物の縦位置');
   const box=new THREE.Box3().setFromObject(scene.gateModels[0].root);
-  check(Math.abs(box.min.x-320)<1&&Math.abs(box.max.x-378)<1,'柱の横幅と判定の不一致');
-  const pixel=c.getContext('2d').getImageData(330,30,1,1).data;
+  check(Math.abs(box.max.y-box.min.y-40)<1,'横向きの障害物の厚み');
+  check(scene.person.children.length===1,'顔以外の体が残っている');
+  const pixel=c.getContext('2d').getImageData(50,Math.round(height*.68-300),1,1).data;
   check(pixel[0]<150&&pixel[3]===255,'録画元の画面に柱が合成されていない');
 }
 t.setup(960,0);const small=scene.balloon.scale.x;t.setup(960,1);
@@ -36,10 +37,19 @@ const mouth=scene.mouth.getWorldPosition(new THREE.Vector3());
 check(Math.abs(scene.neck.position.y-7-mouth.y)<.01,'口と風船の付け根が離れている');
 await save('blow.png');
 t.crash();check(p.now().state==='fall','衝突後に落下しない');check(!scene.balloon.visible,'破裂後も風船がある');
-const before=p.now().doll[0].y;p.step(35);check(p.now().doll[0].y>before,'人が落下していない');await save('fall.png');
+const before=p.now().fallen.y;p.step(35);check(p.now().fallen.y>before,'人が落下していない');await save('fall.png');
 p.step(110);check(p.now().state==='result','落下後に結果へ移らない');
-check(p.now().doll.every(j=>Number.isFinite(j.x)&&Number.isFinite(j.y)),'関節が壊れている');
-await fetch('/__done',{method:'POST',body:'3種類の縦横比・立体の投影位置・4倍の風船・柱への衝突・録画画面の合成を確認'});
+check(Number.isFinite(p.now().fallen.angle),'顔の落下が壊れている');
+${process.argv.includes('--model')?`
+const source=document.createElement('canvas');source.width=320;source.height=240;
+const fill=source.getContext('2d');fill.fillStyle='#8899aa';fill.fillRect(0,0,320,240);
+const original=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+navigator.mediaDevices.getUserMedia=async()=>source.captureStream(10);
+const faceTest=new window.FaceSteering();await faceTest.start();
+check(faceTest.status==='active','公式の顔判定モデルを起動できない');
+faceTest.tick(performance.now());check(faceTest.status==='active'&&faceTest.previousFrame>=0,'試験映像の顔判定が実行されない');check(!faceTest.found,'顔のない画像を顔と判定');faceTest.stop();navigator.mediaDevices.getUserMedia=original;
+`:''}
+await fetch('/__done',{method:'POST',body:'顔のみの3D表示・上方向の障害物・衝突・録画画面を確認'+(${process.argv.includes('--model')}?'。公式モデルを読み込み、試験映像の判定も確認':'')});
 }catch(e){await fetch('/__fail',{method:'POST',body:e.stack});}})();</script>`;
 const server=http.createServer((req,res)=>{
   const u=req.url.split('?')[0];
