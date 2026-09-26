@@ -165,7 +165,7 @@
       ctx.restore();
     }
     ghosts.forEach(function(g){robot(g.x,g.y,g.air,g.number,.35);});
-    robot(155,s.y,s.level,s.number,1);
+    if(!s.dead)robot(155,s.y,s.level,s.number,1);
   };
   global.BalloonScene=BalloonScene;
 })(window);

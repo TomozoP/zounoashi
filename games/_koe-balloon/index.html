@@ -179,7 +179,7 @@
   var BX=155, MOUTH_UP=51;
   var doll=null, fallTime=0, fallAccumulator=0, burst=null;
   // 100体の飛行履歴を、このページ内だけで保持する。
-  var history=[],damage={},track=[],won=false,lives=100,traps=[],hazards=[],destroyed={},screenBursts=[];
+  var history=[],damage={},track=[],won=false,lives=100,traps=[],hazards=[],destroyed={},screenBursts=[],wrecks=[];
   var replayGhosts=[],explosions=[],fired={},serial=0,attemptNumber=1,attemptSaved=false;
   var RUN_SPEED=410,GATE_COUNT=30,GATE_STEP=240;
   function lead(i){return (history.length-i)*.035+.12;}
@@ -230,9 +230,13 @@
     noiseHit(.09,2400,.2*volume,.65);noiseHit(.42,260,.24*volume,.55);noiseHit(.6,850,.09*volume,.5);
     tone(155,.36,.19*volume,"sine",32);tone(85,.48,.1*volume,"triangle",24,.025);
   }
+  function flingRobot(x,y,number){
+    if(x<-50||x>W+50||y<-50||y>H+50)return;
+    wrecks.push({x:x,y:y,vx:number%2? -240:280,vy:-430,angle:0,spin:number%2?-9:10,age:0,number:number});
+  }
   function replayStep(dt){
     replayGhosts=[];history.forEach(function(h,i){var age=T+lead(i);
-      if(age>=h.end){if(!fired[h.id]){fired[h.id]=true;carve(h.worldX,h.y*H);explosions.push({x:h.worldX,y:h.y*H,age:0});explosionSound(h.worldX-T*RUN_SPEED,h.y*H,.55);}return;}
+      if(age>=h.end){if(!fired[h.id]){fired[h.id]=true;carve(h.worldX,h.y*H);explosions.push({x:h.worldX,y:h.y*H,age:0});explosionSound(h.worldX-T*RUN_SPEED,h.y*H,.55);flingRobot(h.worldX-T*RUN_SPEED,h.y*H,h.id);}return;}
       var n=Math.min(h.frames.length-1,Math.floor(age*60)),f=h.frames[n];
       if(f&&155+lead(i)*RUN_SPEED<W+50)replayGhosts.push({number:h.id,x:155+lead(i)*RUN_SPEED,y:f.y*H,air:f.air});
     });
@@ -247,7 +251,7 @@
   function newRound(retry){
     stopMusic();deathWait=0;
     var keepHeld=retry&&held;
-    if(!retry){history=[];serial=0;lives=100;screenBursts=[];}
+    if(!retry){history=[];serial=0;lives=100;screenBursts=[];wrecks=[];}
     attemptNumber=serial+1;damage={};destroyed={};won=false;track=[];attemptSaved=false;fired={};explosions=[];replayGhosts=[];traps=[];hazards=[];
     shareButton.hidden=true;retryButton.hidden=true;document.getElementById("start").hidden=true;
     state=S.PLAY;score=0;T=0;held=!!keepHeld;
@@ -258,13 +262,14 @@
   function popBalloon(){
     if(state!==S.PLAY)return;
     stopMusic();
-    saveAttempt();lives--;screenBursts.push({x:155,y:py,age:0});
+    saveAttempt();lives--;flingRobot(155,py,attemptNumber);screenBursts.push({x:155,y:py,age:0});
     explosionSound(155,py,1);
     state=S.DEAD;deathWait=.3;
   }
   /* ============ 進行 ============ */
   function update(dt) {
     if(document.hidden)return;
+    wrecks.forEach(function(w){w.age+=dt;w.vy+=1100*dt;w.x+=w.vx*dt;w.y+=w.vy*dt;w.angle+=w.spin*dt;});wrecks=wrecks.filter(function(w){return w.age<1.2&&w.y<H+80;});
     screenBursts.forEach(function(b){b.age+=dt;});screenBursts=screenBursts.filter(function(b){return b.age<.45;});
     if(state===S.DEAD){deathWait-=dt;if(deathWait<=1e-8){if(lives<=0){state=S.RESULT;held=false;}else newRound(true);}return;}
     if (state !== S.PLAY) return;
@@ -387,7 +392,7 @@
     ctx.fillStyle='#b4cfb9';
     for(var i=0;i<12;i++){var x=((i*73-distance*3)%880+880)%880-120;ctx.fillRect(x,H-55-(i%3)*18,55,120);}
     if(scene3d){
-      scene3d.render(ctx,canvas,{number:attemptNumber,W:W,H:H,y:py,vy:vy,radius:16+air*48,time:T,gates:gates,ghosts:replayGhosts,explosions:explosions,scroll:T*RUN_SPEED,level:air,doll:doll,pose:pose(),fallTime:fallTime,burst:burst});
+      scene3d.render(ctx,canvas,{number:attemptNumber,W:W,H:H,y:py,vy:vy,radius:16+air*48,time:T,gates:gates,ghosts:replayGhosts,explosions:explosions,scroll:T*RUN_SPEED,level:air,dead:state===S.DEAD||state===S.RESULT&&!won,doll:doll,pose:pose(),fallTime:fallTime,burst:burst});
     }else{
     gates.forEach(function(g){
       if((g.holes||[]).length){
@@ -402,6 +407,7 @@
       ctx.fillStyle='#ffc86b';ctx.fillRect(g.x-5,g.top-16,68,16);ctx.fillRect(g.x-5,g.bottom,68,16);
       ctx.fillStyle='rgba(255,255,255,.16)';ctx.fillRect(g.x+8,0,8,g.top-16);ctx.fillRect(g.x+8,g.bottom+16,8,H);
     });
+    if(state!==S.DEAD&&(state!==S.RESULT||won)){
     var hp=doll?doll.points[2]:{x:155,y:py},jp=doll?doll.points[0]:hp;
     ctx.fillStyle='#71899b';roundRect(jp.x-32,jp.y-20,55,43,6);ctx.fill();
     if(!doll&&air>0){ctx.fillStyle='#ffab38';[-25,17].forEach(function(x){ctx.beginPath();ctx.moveTo(jp.x+x-5,jp.y+23);ctx.lineTo(jp.x+x,jp.y+40+air*35);ctx.lineTo(jp.x+x+5,jp.y+23);ctx.fill();});}
@@ -409,6 +415,7 @@
     ctx.fillStyle='#182f40';ctx.fillRect(hp.x-14,hp.y-6,28,13);
     ctx.fillStyle='#78f4ff';ctx.fillRect(hp.x-10,hp.y-2,6,5);ctx.fillRect(hp.x+4,hp.y-2,6,5);
     ctx.fillStyle='#263b4b';ctx.font='bold 10px sans-serif';ctx.textAlign='center';ctx.fillText(String(attemptNumber).padStart(2,'0'),hp.x,hp.y-9);
+    }
     }
 
     if(state===S.INTRO){ctx.fillStyle='#fff';roundRect(150,H-98,240,68,34);ctx.fill();ctx.fillStyle='#16202e';ctx.font='bold 28px sans-serif';ctx.textAlign='center';ctx.fillText('START',270,H-54);}
@@ -427,6 +434,14 @@
       ctx.fillStyle="rgba(255,183,70,"+(1-b.age/.45)+")";
       for(var i=0;i<28;i++){var angle=i*2.399,r=b.age*(150+i%5*85);ellipse(b.x+Math.cos(angle)*r,b.y+Math.sin(angle)*r+b.age*b.age*200,3+i%4,3+i%4);}
       ctx.strokeStyle="rgba(255,244,184,"+(1-b.age/.45)+")";ctx.lineWidth=5;ctx.beginPath();ctx.arc(b.x,b.y,10+b.age*230,0,Math.PI*2);ctx.stroke();
+    });
+    wrecks.forEach(function(w){
+      ctx.save();ctx.translate(w.x,w.y);ctx.rotate(w.angle);ctx.globalAlpha=Math.min(1,(1.2-w.age)*4);
+      ctx.fillStyle='#506675';ctx.fillRect(-30,-14,12,36);ctx.fillRect(16,-14,10,36);
+      ctx.fillStyle='#d0dbe0';ctx.fillRect(-19,-19,38,36);ctx.fillStyle='#9eb4c0';ctx.fillRect(-19,13,38,5);
+      ctx.fillStyle='#163444';ctx.fillRect(-14,-4,28,14);ctx.strokeStyle='#ff6975';ctx.lineWidth=2.5;
+      [-7,7].forEach(function(x){ctx.beginPath();ctx.moveTo(x-3,-1);ctx.lineTo(x+3,6);ctx.moveTo(x+3,-1);ctx.lineTo(x-3,6);ctx.stroke();});
+      ctx.fillStyle='#263b4b';ctx.font='bold 10px sans-serif';ctx.textAlign='center';ctx.fillText(String(w.number).padStart(2,'0'),0,-7);ctx.restore();
     });
     if(state!==S.INTRO){ctx.fillStyle="#365664";ctx.font="800 26px sans-serif";ctx.textAlign="left";ctx.fillText(String(lives),24,58);}
     if(state!==S.INTRO){
