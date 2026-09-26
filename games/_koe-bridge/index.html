@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>声の橋</title>
+<title>声のサーフィン</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -34,7 +34,7 @@
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* 声の橋
+/* 声のサーフィン
 
    書き換えるところの目印は3つ。
      ▼UPDATE … 進行と入力
@@ -121,8 +121,8 @@
   var S = { INTRO: "intro", PLAY: "play", FALL: "fall", RESULT: "result" };
   var state, score, T, held, keyMode = false;
 
-  var level=0,won=false,road=[],carX=0,carY=0,angle=0,speed=180,fallSpeed=0,pitch=0,targetHeight=0,penHeight=0,lastPitchTime=-1,airborne=false;
-  var spin=0,crashTime=0,obstacles=[],obstacleIndex=0;
+  var level=0,won=false,road=[],carX=0,carY=0,angle=0,speed=230,fallSpeed=0,pitch=0,targetHeight=0,penHeight=0,lastPitchTime=-1,airborne=false;
+  var spin=0,crashTime=0,obstacles=[],obstacleIndex=0,spray=[],bestHeight=0,flips=0,airTurn=0,takeoffY=0,landing=0;
   var mic=null, micSource=null, analyser=null, samples=null, micPending=false, micError=false;
   function stopMic() { if(micSource){micSource.disconnect();micSource=null;} if(mic) mic.getTracks().forEach(function(t){t.stop();}); mic=null; analyser=null; }
   function requestInputs(){requestMic();}
@@ -164,12 +164,12 @@
 
   function newRound(){
     stopInputs();shareButton.hidden=true;retryButton.hidden=true;document.getElementById('start').hidden=true;
-    state=S.PLAY;score=0;T=0;held=false;level=0;won=false;road=[];carX=0;carY=-18;angle=fallSpeed=pitch=targetHeight=penHeight=0;speed=180;lastPitchTime=-1;airborne=false;spin=crashTime=0;obstacles=[];obstacleIndex=0;
+    state=S.PLAY;score=0;T=0;held=false;level=0;won=false;road=[];carX=0;carY=-18;angle=fallSpeed=pitch=targetHeight=penHeight=0;speed=230;lastPitchTime=-1;airborne=false;spin=crashTime=0;obstacles=[];obstacleIndex=0;spray=[];bestHeight=flips=airTurn=landing=0;
     for(var x=-180;x<=270;x+=6)road.push({x:x,y:0});
   }
   function ground(x){
     var i=Math.max(0,Math.min(road.length-2,Math.floor((x-road[0].x)/6))),a=road[i],b=road[i+1];
-    return a.y+(b.y-a.y)*Math.max(0,Math.min(1,(x-a.x)/6));
+    return a.y+(b.y-a.y)*Math.max(0,Math.min(1,(x-a.x)/6))+Math.sin(x/100-T*1.4)*23;
   }
   function update(dt){
     if(document.hidden||micPending)return;
@@ -179,29 +179,32 @@
     if(T-lastPitchTime>=.05){lastPitchTime=T;pitch=held?360:readPitch();
       if(pitch>0)targetHeight=Math.max(-130,Math.min(130,-Math.log2(pitch/200)*105));else targetHeight=penHeight;
     }
-    carX+=speed*dt;score=Math.floor(carX/10);
+    carX+=speed*dt;score=Math.round(bestHeight/10*10)/10;
     while(road[road.length-1].x<carX+270){
       // 急な音程変化も坂としてつなぎ、線を途切れさせない。
-      penHeight+=Math.max(-5,Math.min(5,targetHeight-penHeight));
+      penHeight+=Math.max(-6,Math.min(6,(targetHeight-penHeight)*.16));
       road.push({x:road[road.length-1].x+6,y:penHeight});
     }
     while(road.length>2&&road[1].x<carX-200)road.shift();
-    var back=ground(carX-17),front=ground(carX+17),surface=(back+front)*.5-18;
-    var slope=(front-back)/34,targetAngle=Math.atan2(front-back,34);
-    var penetration=carY-surface;
-    airborne=penetration<0;
-    var acceleration=400;
-    if(!airborne)acceleration+=-penetration*100-(fallSpeed-slope*speed)*12;
+    var back=ground(carX-22),front=ground(carX+22),surface=(back+front)*.5-5;
+    var slope=(front-back)/44,targetAngle=Math.atan2(front-back,44),surfaceSpeed=slope*speed-32.2*Math.cos(carX/100-T*1.4);
+    var wasAirborne=airborne,penetration=carY-surface;
+    airborne=penetration<-8;landing=Math.max(0,landing-dt*3);
+    var acceleration=260;
+    if(penetration>=0)acceleration+=-penetration*125-(fallSpeed-surfaceSpeed)*13;
     fallSpeed+=acceleration*dt;carY+=fallSpeed*dt;
-    if(carY>surface+18){carY=surface+18;fallSpeed=Math.min(fallSpeed,slope*speed);}
-    spin+=(!airborne?(targetAngle-angle)*55-spin*7:-spin*.3)*dt;angle+=spin*dt;
-    while(750+obstacleIndex*750<carX+800){obstacles.push({x:750+obstacleIndex*750,y:obstacleIndex%2?40:-40,r:29});obstacleIndex++;}
-    obstacles=obstacles.filter(function(o){return o.x>carX-200;});
-    if(obstacles.some(function(o){
-      var dx=o.x-carX,dy=o.y-carY,c=Math.cos(angle),sn=Math.sin(angle),lx=dx*c+dy*sn,ly=-dx*sn+dy;
-      var nx=Math.max(-29,Math.min(29,lx)),ny=Math.max(-33,Math.min(18,ly));
-      return (lx-nx)*(lx-nx)+(ly-ny)*(ly-ny)<o.r*o.r;
-    })){state=S.FALL;crashTime=0;spin+=3;fallSpeed=-120;stopInputs();noiseHit(.25,180,.15);}
+    if(carY>surface+17){carY=surface+17;fallSpeed=Math.min(fallSpeed,surfaceSpeed);}
+    if(airborne&&!wasAirborne){takeoffY=carY;airTurn=0;}
+    if(airborne){bestHeight=Math.max(bestHeight,takeoffY-carY);var turn=spin*dt;airTurn+=Math.abs(turn);
+      if(pitch>0&&surface-carY>35)spin+=(10-spin)*Math.min(1,dt*4);
+      else {var nearest=targetAngle+Math.round((angle-targetAngle)/(Math.PI*2))*Math.PI*2;spin+=((nearest-angle)*18-spin*4)*dt;}
+    }else{
+      var nearest=targetAngle+Math.round((angle-targetAngle)/(Math.PI*2))*Math.PI*2;spin+=((nearest-angle)*75-spin*10)*dt;
+      if(wasAirborne){flips+=Math.floor(airTurn/(Math.PI*2));landing=1;noiseHit(.12,900,.025);for(var j=0;j<15;j++)spray.push({x:carX,y:surface,vx:-80-Math.random()*130,vy:-50-Math.random()*140,life:.7});}
+      if(Math.random()<dt*40)spray.push({x:carX-23,y:surface,vx:-80,vy:-30-Math.random()*45,life:.45});
+    }
+    angle+=spin*dt;
+    spray.forEach(function(p){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=380*dt;p.life-=dt;});spray=spray.filter(function(p){return p.life>0;});
 
   }
 
@@ -265,7 +268,7 @@
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    window.zResultActions.x({ text: score+"m 走りました #声の橋" });
+    window.zResultActions.x({ text: (bestHeight/10).toFixed(1)+"m 跳びました #声のサーフィン" });
   }
 
   /* ============ 描画 ============ */
@@ -291,22 +294,23 @@
   }
   function rect(x,y,w,h,color){ctx.fillStyle=color;ctx.fillRect(x,y,w,h);}
   function drawBridge(){
-    var base=H*.52,sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#b6dede');sky.addColorStop(.6,'#edf0d7');sky.addColorStop(1,'#819b9c');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
-    for(var layer=0;layer<2;layer++){ctx.fillStyle=layer?'#a2bfb3':'#c3d3be';ctx.beginPath();ctx.moveTo(0,H);for(var x=-100;x<W+150;x+=60){var yy=base+80+layer*60-Math.sin((x+carX*(.2+layer*.2))/130)*70;ctx.lineTo(x,yy);}ctx.lineTo(W,H);ctx.fill();}
-    if(state===S.PLAY){
-      ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=2;
-      for(var i=0;i<18;i++){var x=((i*137-carX*(1.3+i%3*.3))%640+640)%640-50,y=H*(.12+(i%9)*.09);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+18+(i%3)*12,y);ctx.stroke();}
-    }
-    var offset=carX-125,end=road[road.length-1];
-    ctx.lineJoin='round';ctx.lineCap='round';
-    [12,7,2].forEach(function(width,i){ctx.beginPath();road.forEach(function(p,j){if(j)ctx.lineTo(p.x-offset,base+p.y);else ctx.moveTo(p.x-offset,base+p.y);});ctx.strokeStyle=['#184452','#06a9bb','#b5ffff'][i];ctx.lineWidth=width;ctx.stroke();});
-    obstacles.forEach(function(o){var x=o.x-offset,y=base+o.y;ctx.save();ctx.translate(x,y);ctx.rotate(T*.5);ctx.beginPath();for(var i=0;i<24;i++){var a=i*Math.PI/12,r=i%2?o.r-6:o.r+4;if(i)ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);else ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);}ctx.closePath();ctx.fillStyle='#ce4f58';ctx.fill();ctx.strokeStyle='#723c4b';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='#ffe3b6';ellipse(0,0,11,11);ctx.restore();});
-    ctx.fillStyle='#fff9de';ellipse(end.x-offset,base+end.y,8,8);ctx.strokeStyle='#ffb865';ctx.lineWidth=2;ctx.beginPath();ctx.arc(end.x-offset,base+end.y,14+Math.sin(T*8)*2,0,Math.PI*2);ctx.stroke();
-    ctx.save();ctx.translate(125,base+carY+(state===S.PLAY&&!airborne?Math.sin(T*65)*.9:0));ctx.rotate(angle);
-    rect(-28,-16,56,23,'#d96540');ctx.fillStyle='#f58851';roundRect(-17,-33,36,23,7);ctx.fill();rect(-12,-29,12,15,'#c9edef');rect(4,-29,10,15,'#c9edef');rect(23,-10,6,6,'#ffed9e');
-    [-17,17].forEach(function(x){ctx.fillStyle='#24343c';ellipse(x,8,10,10);ctx.fillStyle='#dad8c6';ellipse(x,8,4,4);ctx.save();ctx.translate(x,8);ctx.rotate(carX/10);ctx.strokeStyle='#9faeae';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-7,0);ctx.lineTo(7,0);ctx.stroke();ctx.restore();});ctx.restore();
-    if(state===S.PLAY){ctx.fillStyle='#365560';ctx.font='bold 28px sans-serif';ctx.textAlign='right';ctx.fillText(score+'m',W-24,48);}
-
+    var base=H*.54,offset=carX-145;
+    var sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#79d7ed');sky.addColorStop(.6,'#e7f7eb');sky.addColorStop(1,'#148dad');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#fff3bd';ellipse(425,H*.17,42,42);ctx.fillStyle='rgba(255,255,255,.55)';for(var i=0;i<5;i++){var x=((i*157-carX*.12)%690+690)%690-70;ellipse(x,H*.2+(i%3)*35,48,10);}
+    for(var layer=0;layer<3;layer++){ctx.beginPath();ctx.moveTo(0,H);for(var x=0;x<=W;x+=8)ctx.lineTo(x,base+50+layer*30+Math.sin((x+carX*.3)/80+T+layer)*13);ctx.lineTo(W,H);ctx.fillStyle=['#78d8dc','#40bdcd','#179fbb'][layer];ctx.fill();}
+    function seaY(x){return base+ground(x+offset);}
+    ctx.beginPath();ctx.moveTo(0,H);for(var x=0;x<=W;x+=4)ctx.lineTo(x,seaY(x));ctx.lineTo(W,H);var sea=ctx.createLinearGradient(0,base-140,0,H);sea.addColorStop(0,'#36d5ce');sea.addColorStop(.5,'#078eaf');sea.addColorStop(1,'#075479');ctx.fillStyle=sea;ctx.fill();
+    ctx.beginPath();for(var x=0;x<=W;x+=4){if(x)ctx.lineTo(x,seaY(x));else ctx.moveTo(x,seaY(x));}ctx.strokeStyle='#d9fff3';ctx.lineWidth=7;ctx.lineJoin='round';ctx.stroke();
+    ctx.strokeStyle='rgba(200,255,245,.4)';ctx.lineWidth=2;for(var i=0;i<22;i++){var x=((i*93-carX*.9)%610+610)%610-35,y=seaY(x)+24+(i%5)*28;ctx.beginPath();ctx.moveTo(x,y);ctx.quadraticCurveTo(x+18,y+5,x+38,y);ctx.stroke();}
+    spray.forEach(function(p){ctx.fillStyle='rgba(239,255,250,'+Math.min(1,p.life*3)+')';ellipse(p.x-offset,base+p.y,3,3);});
+    ctx.save();ctx.translate(145,base+carY);ctx.rotate(angle);
+    ctx.fillStyle='#ffcc5d';ellipse(0,0,38,6);ctx.strokeStyle='#ee7850';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-26,0);ctx.lineTo(25,0);ctx.stroke();
+    var crouch=landing*10;
+    ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#f4b587';ctx.lineWidth=8;ctx.beginPath();ctx.moveTo(-16,-7);ctx.lineTo(-8,-24+crouch);ctx.lineTo(4,-36+crouch);ctx.lineTo(18,-21+crouch);ctx.lineTo(19,-7);ctx.stroke();
+    ctx.strokeStyle='#253c69';ctx.lineWidth=13;ctx.beginPath();ctx.moveTo(3,-34+crouch);ctx.lineTo(0,-52+crouch);ctx.stroke();
+    ctx.strokeStyle='#f4b587';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(0,-49+crouch);ctx.lineTo(-17,-41+crouch);ctx.lineTo(-27,-47+crouch);ctx.moveTo(1,-49+crouch);ctx.lineTo(20,-47+crouch);ctx.lineTo(29,-56+crouch);ctx.stroke();
+    ctx.fillStyle='#f4b587';ellipse(0,-65+crouch,11,12);ctx.fillStyle='#473d3c';ellipse(-2,-72+crouch,12,7);ctx.restore();
+    if(state===S.PLAY){ctx.fillStyle='#155574';ctx.font='bold 30px sans-serif';ctx.textAlign='right';ctx.fillText((bestHeight/10).toFixed(1)+'m',W-22,46);if(flips){ctx.font='bold 23px sans-serif';ctx.fillText('↻ '+flips,W-22,78);}}
   }
 
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
@@ -358,7 +362,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now:function(){return {state:state,score:score,W:W,H:H,level:level,won:won,time:T,x:carX,y:carY,angle:angle,pitch:pitch,targetHeight:targetHeight,airborne:airborne,obstacles:obstacles.map(function(o){return {x:o.x,y:o.y,r:o.r};}),road:road.slice(),micPending:micPending,micError:micError};},
+    now:function(){return {state:state,score:score,W:W,H:H,level:level,won:won,time:T,x:carX,y:carY,angle:angle,pitch:pitch,targetHeight:targetHeight,airborne:airborne,bestHeight:bestHeight,flips:flips,obstacles:obstacles.map(function(o){return {x:o.x,y:o.y,r:o.r};}),road:road.slice(),micPending:micPending,micError:micError};},
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
