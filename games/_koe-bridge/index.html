@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>声の橋</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:0; opacity:0; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #retry-button, #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #retry-button[hidden], #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="retry-button" type="button" aria-label="もう一度" hidden></button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 声の橋
+
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+  var retryButton=document.getElementById('retry-button');
+  window.zResultActions.bind(retryButton,function(){audioOn();newRound();requestInputs();});
+
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+
+    place();                                   /* 高さが決まってから置き直す */
+
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null;
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", FALL: "fall", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+
+  var level=0,won=false,road=[],carX=65,carY=0,angle=0,speed=0,fallSpeed=0,runTime=0,stuck=0;
+  var mic=null, micSource=null, analyser=null, samples=null, micPending=false, micError=false;
+  function stopMic() { if(micSource){micSource.disconnect();micSource=null;} if(mic) mic.getTracks().forEach(function(t){t.stop();}); mic=null; analyser=null; }
+  function requestInputs(){requestMic();}
+  function stopInputs(){stopMic();}
+  async function requestMic() {
+    if(micPending || mic) return;
+    if(!window.navigator.mediaDevices || !window.navigator.mediaDevices.getUserMedia || !AC) { micError=true; return; }
+    micPending=true; micError=false;
+    try {
+      var stream=await window.navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+      if(document.hidden){stream.getTracks().forEach(function(t){t.stop();});return;}
+      mic=stream; analyser=AC.createAnalyser(); analyser.fftSize=1024;
+      samples=new Float32Array(analyser.fftSize);
+      micSource=AC.createMediaStreamSource(stream); micSource.connect(analyser);
+      stream.getTracks().forEach(function(t){t.onended=function(){stopMic();micError=true;};});
+    } catch(e) { stopMic(); micError=true; }
+    finally { micPending=false; }
+  }
+  window.addEventListener('pagehide',stopInputs);
+  document.addEventListener('visibilitychange',function(){if(document.hidden){stopInputs();held=false;}else if(state===S.PLAY && !micError){requestInputs();}});
+  function readVoice() {
+    if(!analyser) return 0;
+    analyser.getFloatTimeDomainData(samples);
+    var sum=0; for(var i=0;i<samples.length;i++)sum+=samples[i]*samples[i];
+    return Math.max(0,Math.min(1,(Math.sqrt(sum/samples.length)-0.012)/0.075));
+  }
+  var CY;                                      /* 高さから決まる置き場所 */
+  function place() {
+    CY = Math.round(H * 0.5);                  /* ▼UPDATE: 置き場所の計算 */
+  }
+
+  function newRound(){
+    stopInputs();shareButton.hidden=true;retryButton.hidden=true;document.getElementById('start').hidden=true;
+    state=S.PLAY;score=0;T=0;held=false;level=0;won=false;road=[];carX=65;carY=H*.48-17;angle=speed=fallSpeed=runTime=stuck=0;
+  }
+  function ground(x){
+    if(x<=140||x>=400)return H*.48;
+    var i=Math.max(0,Math.min(road.length-1,Math.round((x-140)/260*119))),v=road[i];
+    if(v===undefined||v<.045)return null;
+    var blend=Math.min(1,(x-140)/25,(400-x)/25);
+    return H*.48+(65-v*145)*Math.max(0,blend);
+  }
+  function finish(ok){won=ok;state=S.RESULT;stopInputs();if(ok){score=100;tone(784,.3,.08);}else noiseHit(.2,170,.1);}
+  function update(dt){
+    if(document.hidden||micPending)return;
+    if(state===S.PLAY){
+      T+=dt;var v=held?.45:readVoice();level+=(v-level)*Math.min(1,dt*14);
+      while(road.length<Math.min(120,Math.floor(T*30)))road.push(level);
+      if(T>=4){state=S.FALL;stopInputs();carY=H*.48-17;}
+      return;
+    }
+    if(state!==S.FALL)return;runTime+=dt;
+    var back=ground(carX-17),front=ground(carX+17);
+    if(back===null||front===null){fallSpeed+=430*dt;carY+=fallSpeed*dt;carX+=speed*dt;angle+=dt*1.5;if(carY>H*.48+130)finish(false);return;}
+    var target=Math.atan2(front-back,34),slope=(front-back)/34;
+    angle+=(target-angle)*Math.min(1,dt*9);carY+=( (front+back)*.5-17-carY)*Math.min(1,dt*18);
+    speed=Math.max(0,Math.min(67,speed+(26+slope*70-speed*.35)*dt));carX+=speed*dt;
+    stuck=speed<3?stuck+dt:0;score=Math.max(score,Math.round(Math.min(1,(carX-65)/405)*100));
+    if(Math.abs(target)>1.08||stuck>1.5||runTime>18){finish(false);return;}
+    if(carX>=470)finish(true);
+  }
+
+  /* ============ 入力 ============
+     タップとスペースキーで同じことができるようにする。
+     x が null のときはキー操作（場所を指さない）。 */
+  function down(x, y) {
+    if(state===S.INTRO||state===S.FALL)return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") { newRound(); requestInputs(); }
+      return;
+    }
+    held = true;
+    /* ▼UPDATE: 押したときの処理 */
+    if(!mic && !micPending && !micError) requestInputs();
+  }
+  function move(x, y) {
+    if (state !== S.PLAY || !held) return;
+
+  }
+  function up() {
+    if (!held) return;
+    held = false;
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  window.addEventListener("keydown", function (e) {
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (!esc && !go && !left && !right) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) { newRound(); audioOn(); requestInputs(); } return; }
+    if (left || right) {
+      if (state !== S.PLAY) return;
+
+      return;
+    }
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
+  });
+
+  function doShare() {
+    /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
+       URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
+    window.zResultActions.x({ text: score+"% 渡れました #声の橋" });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function ellipse(x,y,rx,ry){ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);ctx.fill();}
+  function draw() {
+    window.zResultActions.place(retryButton, resultButtons()[0], W, H, state === S.RESULT);
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+
+    drawBridge();
+    if(state===S.INTRO){ctx.fillStyle='#fff';roundRect(150,H-98,240,68,34);ctx.fill();ctx.fillStyle='#16202e';ctx.font='bold 28px sans-serif';ctx.textAlign='center';ctx.fillText('START',270,H-54);}
+    if(state===S.RESULT)drawResult();
+  }
+  function rect(x,y,w,h,color){ctx.fillStyle=color;ctx.fillRect(x,y,w,h);}
+  function drawBridge(){
+    var base=H*.48,sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#bddedc');sky.addColorStop(.6,'#edf0d7');sky.addColorStop(1,'#536977');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#9db9b2';ctx.beginPath();ctx.moveTo(0,base+130);ctx.lineTo(95,base-110);ctx.lineTo(230,base+90);ctx.lineTo(372,base-85);ctx.lineTo(540,base+110);ctx.lineTo(540,H);ctx.lineTo(0,H);ctx.fill();
+    [0,400].forEach(function(x){rect(x,base,140,H-base,'#6b5146');rect(x,base,140,14,'#92ab67');rect(x,base+14,140,12,'#bba07c');
+      ctx.strokeStyle='#493f3b';ctx.lineWidth=3;for(var i=0;i<7;i++){ctx.beginPath();ctx.moveTo(x+20+(i%3)*26,base+40+i*65);ctx.lineTo(x+45+(i%2)*30,base+100+i*65);ctx.lineTo(x+21,base+135+i*65);ctx.stroke();}});
+    ctx.setLineDash([5,9]);ctx.strokeStyle='rgba(255,255,255,.6)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(140,base);ctx.lineTo(400,base);ctx.stroke();ctx.setLineDash([]);
+    ctx.strokeStyle='#f4c65b';ctx.lineWidth=8;ctx.lineJoin='round';ctx.lineCap='round';ctx.beginPath();var drawing=false;
+    road.forEach(function(v,i){var x=140+i/119*260,y=ground(x);if(v<.045||y===null){drawing=false;return;}if(!drawing)ctx.moveTo(x,y);else ctx.lineTo(x,y);drawing=true;});ctx.stroke();
+    if(state===S.PLAY){var x=140+Math.min(T/4,1)*260;ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,base-100);ctx.lineTo(x,base+90);ctx.stroke();ctx.fillStyle='#fff';ellipse(x,base-100,5,5);}
+    rect(488,base-82,4,82,'#344852');for(var i=0;i<3;i++)for(var j=0;j<4;j++)rect(492+j*9,base-82+i*9,9,9,(i+j)%2?'#273d49':'#fff7df');
+    ctx.save();ctx.translate(carX,state===S.INTRO?base-17:carY);ctx.rotate(angle);
+    rect(-28,-16,56,23,'#d96540');ctx.fillStyle='#f58851';roundRect(-17,-33,36,23,7);ctx.fill();rect(-12,-29,12,15,'#c9edef');rect(4,-29,10,15,'#c9edef');rect(23,-10,6,6,'#ffed9e');
+    [-17,17].forEach(function(x){ctx.fillStyle='#24343c';ellipse(x,8,10,10);ctx.fillStyle='#dad8c6';ellipse(x,8,4,4);});ctx.restore();
+    var y=H-190;rect(85,y,370,78,'#263e49');ctx.strokeStyle='#77d8c6';ctx.lineWidth=2;ctx.beginPath();
+    for(var i=0;i<120;i++){var v=road[i]||0,x=95+i/119*350,yy=y+39-Math.sin(i*2.7)*v*31;if(i)ctx.lineTo(x,yy);else ctx.moveTo(x,yy);}ctx.stroke();
+    if(state===S.PLAY){ctx.fillStyle='#f38666';ellipse(105,y+15,5,5);rect(120,y+12,Math.min(310,T/4*310),5,'#f4c65b');}
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.76;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(score+'%',W/2,H*.45);
+    ctx.restore();
+
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx,b.label,0,1,30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
+     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
+  window.__probe = {
+    now:function(){return {state:state,score:score,W:W,H:H,level:level,won:won,time:T,x:carX,angle:angle,road:road.slice(),micPending:micPending,micError:micError};},
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============
+     record.js が呼ぶ自動操作。ゲームに合わせて run の中だけ書き換える。 */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("勝敗が出ない");
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();requestInputs();});
+  newRound();state=S.INTRO;startButton.hidden=false;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000);   /* 戻ってきたとき飛ばないように上限 */
+    last = now;
+    if (!window.__recordManual) { update(dt); draw(); }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
