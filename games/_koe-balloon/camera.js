@@ -1,4 +1,4 @@
-/* カメラ映像はブラウザ内だけで処理する。保存・送信・画面への表示はしない。
+/* カメラ映像はブラウザ内だけで処理する。ゲーム画面に表示するが、外部へ送信しない。
    外部から読み込むものは固定版の判定プログラムと公式モデルだけ。 */
 (function(global){
   'use strict';
@@ -53,6 +53,13 @@
     var offset=this.neutral-center;
     var target=Math.abs(offset)<.025?0:Math.sign(offset)*Math.min(1,(Math.abs(offset)-.025)/.19);
     this.vector+=(target-this.vector)*.65;
+  };
+  // 判定の準備中や顔を見失った間も、元の映像は表示する。
+  FaceSteering.prototype.drawPreview=function(ctx){
+    var v=this.video;if(!v||v.readyState<2||!v.videoWidth||!v.videoHeight)return;
+    var x=18,y=18,w=180,h=w*v.videoHeight/v.videoWidth;
+    ctx.save();ctx.fillStyle='#16202e';ctx.fillRect(x-3,y-3,w+6,h+6);
+    ctx.translate(x+w,y);ctx.scale(-1,1);ctx.drawImage(v,0,0,w,h);ctx.restore();
   };
   FaceSteering.prototype.tick=function(now){
     if(this.status!=='active')return;

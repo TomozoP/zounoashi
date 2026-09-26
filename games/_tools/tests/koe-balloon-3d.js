@@ -3,10 +3,10 @@ const fs=require('fs'),path=require('path'),http=require('http'),os=require('os'
 const root=path.resolve(__dirname,'../../..'),out=fs.mkdtempSync(path.join(os.tmpdir(),'koe-balloon-3d-'));
 let child,timer,finished=false;
 const hook=`window.__check={scene:function(){return scene3d;},setup:function(height,amount){
-  H=height;canvas.width=540;canvas.height=H;newRound();air=amount;py=H*.68;
+  if(camera)camera.stop();H=height;canvas.width=540;canvas.height=H;newRound();air=amount;py=H*.68;
   gates=[{height:300,left:130,right:350,passed:false}];draw();
 },intro:function(){state=S.INTRO;draw();},result:function(){state=S.RESULT;draw();},
-voice:function(v){level=v;draw();},crash:function(){gates=[{height:0,left:400,right:520,passed:false}];update(1/60);draw();}};`;
+preview:function(){camera=new window.FaceSteering();var v=document.createElement('canvas');v.width=320;v.height=240;v.videoWidth=320;v.videoHeight=240;v.readyState=2;v.pause=function(){};v.getContext('2d').fillStyle='#f000cc';v.getContext('2d').fillRect(0,0,320,240);camera.video=v;camera.status='loading';draw();},voice:function(v){level=v;draw();},crash:function(){gates=[{height:0,left:400,right:520,passed:false}];update(1/60);draw();}};`;
 const runner=`<script>window.__recordManual=true;(async()=>{try{
 function check(ok,msg){if(!ok)throw Error(msg);}
 const c=document.getElementById('c'),p=window.__probe,t=window.__check;
@@ -29,7 +29,7 @@ t.setup(960,0);const small=scene.balloon.scale.x;t.setup(960,1);
 check(scene.balloon.scale.x/small===4,'風船の大小が模型に反映されない');
 t.setup(960,.5);
 async function save(name){await fetch('/__image/'+name,{method:'POST',body:await new Promise(r=>c.toBlob(r))});}
-await save('play.png');t.intro();await save('start.png');t.result();await save('result.png');
+await save('play.png');t.preview();const previewPixel=c.getContext('2d').getImageData(40,40,1,1).data;check(previewPixel[0]===240&&previewPixel[2]===204,'判定準備中のカメラ映像が表示されない');await save('preview.png');t.intro();await save('start.png');t.result();await save('result.png');
 check(!document.getElementById('retry-button').hidden&&!document.getElementById('share-button').hidden,'結果の操作ボタン');
 t.setup(960,.5);
 const baseColor=scene.face.material.color.clone();t.voice(1);check(scene.face.material.color.g<baseColor.g,'声で顔が赤くならない');
