@@ -9,5 +9,5 @@ g.press(' ');assert.equal(g.probe.now().lives,100);
 g.dbg.set(1,400);g.dbg.crash();assert.deepEqual(g.probe.now().damage,{});
 g.dbg.set(.84,400);g.dbg.replay(0);assert.deepEqual(g.probe.now().damage,{});
 g.dbg.set(.9,400);g.dbg.replay(0);assert(g.probe.now().damage[0],'先行する機体の爆発で柱が削れる');
-const m=g.dbg.trap(0,2);g.dbg.set(2,400);g.dbg.carve(m.x+640,m.y);assert(g.probe.now().destroyed>0,'爆風で正面の弾を壊す');
+const m=g.dbg.trap(0,2);g.dbg.set(2,400);g.dbg.carve(m.x+820,m.y);assert(g.probe.now().destroyed>0,'爆風で正面の弾を壊す');
 console.log('即時交代・長押し継続・100体終了・爆発による柱と弾の破壊を確認');

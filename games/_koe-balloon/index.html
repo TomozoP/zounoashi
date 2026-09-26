@@ -142,9 +142,9 @@
   var BX=155, MOUTH_UP=51;
   var doll=null, fallTime=0, fallAccumulator=0, burst=null;
   // 100体の飛行履歴を、このページ内だけで保持する。
-  var history=[],damage={},track=[],won=false,lives=100,traps=[],destroyed={},screenBursts=[];
+  var history=[],damage={},track=[],won=false,lives=100,traps=[],hazards=[],destroyed={},screenBursts=[];
   var replayGhosts=[],explosions=[],fired={},serial=0,attemptNumber=1,attemptSaved=false;
-  var RUN_SPEED=320,GATE_COUNT=30,GATE_STEP=240;
+  var RUN_SPEED=410,GATE_COUNT=30,GATE_STEP=240;
   function lead(i){return (history.length-i)*.035+.12;}
   function saveAttempt(){
     if(attemptSaved)return;attemptSaved=true;
@@ -152,6 +152,14 @@
     if(history.length>100)history.shift();
   }
   function trapPosition(id,time){var late=id>=12,born=late?15.4+(id-12)*.3:1.6+id*1.15;return {id:id,x:W+90-(time-born)*(late?720:540),y:H*.5+Math.sin(id*2.17)*Math.min(late?250:200,H*.28),born:born,late:late};}
+  function hazardPosition(id,time){var type=id%3,x=900+id*530-time*RUN_SPEED,center=H*.5+Math.sin(id*1.4)*Math.min(110,H*.12);
+    return {id:id,type:type,x:x,y:type===1?center+Math.sin(time*5+id)*85:center,gap:85+(Math.sin(time*7+id)+1)*55,active:Math.sin(time*9+id)>.1};
+  }
+  function hazardHit(h){
+    if(h.type===0)return Math.abs(h.x-149)<52&&(py-30<h.y-h.gap/2||py+30>h.y+h.gap/2);
+    if(h.type===1)return Math.hypot((h.x-149)*.9,h.y-py)<57;
+    return h.active&&149>h.x-36&&149<h.x+216&&Math.abs(py-h.y)<35;
+  }
   function baseGate(id){var danger=Math.max(0,(id-12)/17),gap=Math.min(180-danger*100,H*(.24-danger*.1)),center=H*.51+Math.sin(id*1.7)*Math.min(85+danger*55,H*.14);return {top:center-gap/2,bottom:center+gap/2};}
   function carve(wx,y){
     for(var id=0;id<GATE_COUNT;id++){var x=575+id*GATE_STEP;if(wx+108<x||wx-108>x+58)continue;
@@ -159,6 +167,10 @@
       if(holes.length>64)holes.shift();
     }
     gates.forEach(function(g){g.holes=damage[g.id]||[];});
+    for(var k=0;k<12;k++){var h=hazardPosition(k,T),hx=h.x+T*RUN_SPEED;
+      var nearX=wx>=hx-108&&wx<=hx+(h.type===2?288:108);
+      if(nearX&&(h.type===0||Math.abs(h.y-y)<138))destroyed["h"+k]=true;
+    }
     for(var j=0;j<44;j++){var missile=trapPosition(j,T);if(T>=missile.born&&Math.hypot(missile.x+T*RUN_SPEED-wx,missile.y-y)<140)destroyed[j]=true;}
   }
   // 円で抜いた後に残る縦の区間と、人物の楕円が重なるかを調べる。
@@ -193,7 +205,7 @@
   function newRound(retry){
     var keepHeld=retry&&held;
     if(!retry){history=[];serial=0;lives=100;screenBursts=[];}
-    attemptNumber=serial+1;damage={};destroyed={};won=false;track=[];attemptSaved=false;fired={};explosions=[];replayGhosts=[];traps=[];
+    attemptNumber=serial+1;damage={};destroyed={};won=false;track=[];attemptSaved=false;fired={};explosions=[];replayGhosts=[];traps=[];hazards=[];
     shareButton.hidden=true;retryButton.hidden=true;document.getElementById("start").hidden=true;
     state=S.PLAY;score=0;T=0;held=!!keepHeld;
     py=H*.52;vy=0;air=held?1:0;level=air;distance=0;gates=[];doll=null;fallTime=0;burst=null;
@@ -223,14 +235,15 @@
     var speed=RUN_SPEED;
     distance+=speed*dt/10;
     gates=[];
-    for(var id=0;id<10;id++){
-      var x=575+id*270-T*RUN_SPEED;if(x>W+80||x<-70)continue;
+    for(var id=0;id<GATE_COUNT;id++){
+      var x=575+id*GATE_STEP-T*RUN_SPEED;if(x>W+80||x<-70)continue;
       var base=baseGate(id),cut=damage[id];
       gates.push({id:id,danger:Math.max(0,(id-12)/17),x:x,top:base.top,bottom:base.bottom,holes:cut||[]});
     }
     traps=[];
     for(var j=0;j<44;j++){var m=trapPosition(j,T);if(!destroyed[j]&&T>=m.born&&m.x>-80&&m.x<W+100)traps.push(m);}
-    if(py-34<0 || py+29>H || gates.some(function(g){return pillarHit(149,py,35,31,g);})||traps.some(function(m){return Math.abs(m.x-149)<48&&Math.abs(m.y-py)<40;})) {
+    hazards=[];for(var k=0;k<12;k++){var h=hazardPosition(k,T);if(!destroyed["h"+k]&&h.x>-220&&h.x<W+100)hazards.push(h);}
+    if(hazards.some(hazardHit)||py-34<0 || py+29>H || gates.some(function(g){return pillarHit(149,py,35,31,g);})||traps.some(function(m){return Math.abs(m.x-149)<48&&Math.abs(m.y-py)<40;})) {
       popBalloon();
       return;
     }
@@ -361,12 +374,25 @@
       ctx.fillStyle="#ffdc77";ctx.fillRect(m.x+14,m.y-5,20+Math.sin(T*70)*8,10);
       ctx.strokeStyle="rgba(255,125,65,.45)";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(m.x+35,m.y);ctx.lineTo(m.x+100,m.y);ctx.stroke();
     });
+    hazards.forEach(function(h){ctx.save();
+      if(h.type===0){ctx.fillStyle="#71354a";ctx.fillRect(h.x-17,0,34,h.y-h.gap/2);ctx.fillRect(h.x-17,h.y+h.gap/2,34,H);ctx.fillStyle="#ff6575";ctx.fillRect(h.x-22,h.y-h.gap/2-10,44,10);ctx.fillRect(h.x-22,h.y+h.gap/2,44,10);}
+      else if(h.type===1){ctx.translate(h.x,h.y);ctx.rotate(T*11);ctx.fillStyle="#e9eef0";ctx.strokeStyle="#a93c58";ctx.lineWidth=3;ctx.beginPath();for(var k=0;k<32;k++){var a=k*Math.PI/16,r=k%2?22:34;var x=Math.cos(a)*r,y=Math.sin(a)*r;if(k)ctx.lineTo(x,y);else ctx.moveTo(x,y);}ctx.closePath();ctx.fill();ctx.stroke();ctx.fillStyle="#ef5161";ellipse(0,0,8,8);}
+      else{ctx.strokeStyle=h.active?"#ff316b":"rgba(255,49,107,.3)";ctx.lineWidth=h.active?10:2;ctx.beginPath();ctx.moveTo(h.x,h.y);ctx.lineTo(h.x+180,h.y);ctx.stroke();if(h.active){ctx.strokeStyle="#fff2dc";ctx.lineWidth=3;ctx.stroke();}ctx.fillStyle="#532e52";ctx.fillRect(h.x-8,h.y-13,16,26);}
+      ctx.restore();
+    });
     screenBursts.forEach(function(b){
       ctx.fillStyle="rgba(255,183,70,"+(1-b.age/.45)+")";
       for(var i=0;i<28;i++){var angle=i*2.399,r=b.age*(150+i%5*85);ellipse(b.x+Math.cos(angle)*r,b.y+Math.sin(angle)*r+b.age*b.age*200,3+i%4,3+i%4);}
       ctx.strokeStyle="rgba(255,244,184,"+(1-b.age/.45)+")";ctx.lineWidth=5;ctx.beginPath();ctx.arc(b.x,b.y,10+b.age*230,0,Math.PI*2);ctx.stroke();
     });
     if(state!==S.INTRO){ctx.fillStyle="#365664";ctx.font="800 26px sans-serif";ctx.textAlign="left";ctx.fillText(String(lives),24,58);}
+    if(state!==S.INTRO){
+      var progress=Math.max(0,Math.min(1,T*RUN_SPEED/(533+(GATE_COUNT-1)*GATE_STEP)));
+      ctx.fillStyle="rgba(14,34,46,.7)";roundRect(40,H-37,W-80,12,6);ctx.fill();
+      ctx.fillStyle="#f2cd65";roundRect(40,H-37,Math.max(12,(W-80)*progress),12,6);ctx.fill();
+      ctx.fillStyle="#fff";ellipse(40+(W-80)*progress,H-31,5,5);
+      ctx.fillRect(W-44,H-45,3,28);
+    }
     if (state === S.RESULT) drawResult();
   }
 
@@ -418,7 +444,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now:function(){return {state:state,score:score,W:W,H:H,y:py,vy:vy,air:air,level:level,won:won,lives:lives,number:attemptNumber,time:T,historyCount:history.length,threeD:!!scene3d,gates:gates.map(function(g){return {x:g.x,top:g.top,bottom:g.bottom};}),traps:traps.map(function(m){return {id:m.id,x:m.x,y:m.y};}),ghosts:replayGhosts,damage:JSON.parse(JSON.stringify(damage)),destroyed:Object.keys(destroyed).length};},
+    now:function(){return {state:state,score:score,W:W,H:H,y:py,vy:vy,air:air,level:level,won:won,lives:lives,number:attemptNumber,time:T,historyCount:history.length,hazards:hazards.map(function(h){return {type:h.type,x:h.x,y:h.y,gap:h.gap,active:h.active};}),progress:Math.min(1,T*RUN_SPEED/(533+(GATE_COUNT-1)*GATE_STEP)),threeD:!!scene3d,gates:gates.map(function(g){return {x:g.x,top:g.top,bottom:g.bottom};}),traps:traps.map(function(m){return {id:m.id,x:m.x,y:m.y};}),ghosts:replayGhosts,damage:JSON.parse(JSON.stringify(damage)),destroyed:Object.keys(destroyed).length};},
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
