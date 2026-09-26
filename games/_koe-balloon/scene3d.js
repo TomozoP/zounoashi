@@ -94,7 +94,7 @@
     var w=Math.min(canvas.width,810),h=Math.round(w*s.H/s.W);
     if(this.renderer.domElement.width!==w||this.renderer.domElement.height!==h)this.renderer.setSize(w,h,false);
     this.camera.right=s.W;this.camera.bottom=-s.H;this.camera.updateProjectionMatrix();
-    this.person.position.set(155,-s.y,0);
+    this.person.position.set(155,-s.y,0);this.person.visible=false;
     var pts=s.doll?s.doll.points:s.pose.map(function(p){return {x:p[0],y:p[1]};});
     function local(i){return new global.THREE.Vector3(pts[i].x-155,s.y-pts[i].y,0);}
     var hips=local(0),shoulder=local(1),head=local(2),bodyDirection=shoulder.clone().sub(hips);
@@ -138,12 +138,6 @@
       m.bottom.inset.position.y=-(g.bottom+s.H+44)/2;m.bottom.inset.scale.y=Math.max(1,s.H+16-g.bottom);
     });
     var ghosts=s.ghosts||[],blasts=s.explosions||[];
-    while(this.ghostModels.length<ghosts.length){
-      var ghost=this.person.clone(true);
-      ghost.traverse(function(o){if(o.isMesh){o.material=o.material.clone();o.material.transparent=true;o.material.opacity=.38;o.material.depthWrite=false;o.material.color.lerp(new global.THREE.Color(0x80dfff),.45);}});
-      this.scene.add(ghost);this.ghostModels.push(ghost);
-    }
-    this.ghostModels.forEach(function(g,i){var f=ghosts[i];g.visible=!!f&&!s.doll;if(!g.visible)return;g.position.set(f.x,-f.y,-35);g.traverse(function(o){if(o.name==="jetFlame")o.visible=f.air>0;});});
     while(this.blastModels.length<blasts.length){
       var material=new global.THREE.MeshBasicMaterial({color:0xffb54c,transparent:true,opacity:.5,depthWrite:false});
       var blast=new global.THREE.Mesh(this.ball,material);this.scene.add(blast);this.blastModels.push(blast);
@@ -151,11 +145,25 @@
     this.blastModels.forEach(function(m,i){var e=blasts[i];m.visible=!!e;if(!e)return;m.position.set(e.x-s.scroll,-e.y,35);m.scale.set(25+e.age*230,25+e.age*230,15+e.age*30);m.material.opacity=Math.max(0,.6-e.age);});
     this.renderer.render(this.scene,this.camera);
     ctx.drawImage(this.renderer.domElement,0,0,s.W,s.H);
-    // 小さな画面でも読めるよう、額の番号を録画元の画面へ直接重ねる。
-    ctx.save();ctx.textAlign="center";ctx.textBaseline="middle";ctx.font="bold 10px sans-serif";ctx.fillStyle="#263b4b";
-    ctx.fillText(String(s.number||1).padStart(2,"0"),pts[2].x+3,pts[2].y-11);
-    if(!s.doll)ghosts.forEach(function(g){ctx.globalAlpha=.65;ctx.fillText(String(g.number||1).padStart(2,"0"),g.x+3,g.y-11);});
-    ctx.restore();
+    // 人物は2Dで描き、同じ画面を録画にも使う。
+    function robot(x,y,thrust,number,opacity){
+      ctx.save();ctx.translate(x,y);ctx.globalAlpha=opacity;
+      if(thrust>0){
+        [-24,19].forEach(function(dx){var length=25+Math.sin(s.time*65+dx)*7;
+          ctx.fillStyle="#ff9a35";ctx.beginPath();ctx.moveTo(dx-5,19);ctx.lineTo(dx,19+length);ctx.lineTo(dx+5,19);ctx.fill();
+          ctx.fillStyle="#fff0a6";ctx.fillRect(dx-2,20,4,length*.45);
+        });
+      }
+      ctx.fillStyle="#506675";ctx.fillRect(-30,-14,12,36);ctx.fillRect(16,-14,10,36);
+      ctx.fillStyle="#d0dbe0";ctx.fillRect(-19,-19,38,36);
+      ctx.fillStyle="#9eb4c0";ctx.fillRect(-19,13,38,5);
+      ctx.fillStyle="#163444";ctx.fillRect(-14,-3,28,11);
+      ctx.fillStyle="#80efff";ctx.fillRect(-9,0,5,5);ctx.fillRect(5,0,5,5);
+      ctx.fillStyle="#263b4b";ctx.textAlign="center";ctx.textBaseline="middle";ctx.font="bold 10px sans-serif";ctx.fillText(String(number||1).padStart(2,"0"),0,-11);
+      ctx.restore();
+    }
+    ghosts.forEach(function(g){robot(g.x,g.y,g.air,g.number,.35);});
+    robot(155,s.y,s.level,s.number,1);
   };
   global.BalloonScene=BalloonScene;
 })(window);

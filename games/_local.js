@@ -34,5 +34,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "Wikipediaの記事でかなビンゴ"
   },
-  {"type":"lab","tags":[],"id":"koe-balloon","title":"声のジェットパック","year":2026,"date":"2026-09-26","plays":null,"url":"","img":"games/_koe-balloon/img/thumb.webp","play":"games/_koe-balloon/index.html","full":true,"catch":""},
+  {"type":"lab","tags":[],"id":"koe-balloon","title":"100体ジェット","year":2026,"date":"2026-09-26","plays":null,"url":"","img":"games/_koe-balloon/img/thumb.webp","play":"games/_koe-balloon/index.html","full":true,"catch":""},
 ];

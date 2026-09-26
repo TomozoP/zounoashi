@@ -1,16 +1,13 @@
 const assert=require('assert'),load=require('../harness');
-const g=load('games/_koe-balloon/index.html',{inject:'window.__dbg={crash:function(){T=2.7;py=H*.36;track=[{y:.36,air:1},{y:.36,air:0}];popBalloon();},replay:function(t){T=t;replayStep(0);},off:function(){air=0;},physics:fallStep};'});
+const g=load('games/_koe-balloon/index.html',{inject:'window.__dbg={crash:popBalloon,set:function(t,y){T=t;py=y;},replay:replayStep,carve:carve,trap:trapPosition};'});
 g.press(' ');g.key(' ');g.step(1);assert.equal(g.probe.now().air,1);
-g.key(' ',true);g.step(1);assert.equal(g.probe.now().air,0);
-g.dbg.crash();let p=g.probe.now();assert.equal(p.historyCount,1);assert(p.damage[0],'爆発が柱を削る');
-const first=p.doll[0].y;g.step(35);assert(g.probe.now().doll[0].y>first);
-g.step(54);assert.equal(g.probe.now().state,'fall','1.5秒より前は落下中');g.step(2);assert.equal(g.probe.now().state,'play','1.5秒で自動再開');
-g.step(1);p=g.probe.now();assert.equal(p.historyCount,1);assert(!p.damage[0],'再開時は柱に穴がない');assert(p.ghosts[0].x>155,'過去の自分は先行');
-g.dbg.replay(2.61);assert(!g.probe.now().damage[0],'爆発前は削れない');g.dbg.replay(2.63);assert.equal(g.probe.now().damage[0].length,1,'過去のロボが爆発した時だけ削る');g.dbg.replay(2.8);assert.equal(g.probe.now().damage[0].length,1,'同じ爆発を二重に適用しない');
-for(let i=0;i<32;i++){g.dbg.crash();g.step(91);}
-assert.equal(g.probe.now().historyCount,30,'記録は直近30回まで');
-console.log('即時噴射・落下・爆発による削れ・先行する履歴・30回の上限を確認');
-
-const bottom=load('games/_koe-balloon/index.html',{inject:'window.__dbg={fall:function(){newRound();py=H-10;vy=200;popBalloon();}};'});bottom.dbg.fall();bottom.step(60);assert(bottom.probe.now().doll[0].y>bottom.probe.now().H,'下端を越えて落ち続ける');
-
-assert(bottom.probe.now().doll.some(p=>p.x<0||p.x>bottom.probe.now().W),'左右の画面端でも部品を止めない');
+g.dbg.crash();assert.equal(g.probe.now().lives,99);assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().time,0,'待ち時間なし');assert.equal(g.probe.now().air,1,'長押しを次の機体へ引き継ぐ');
+for(let i=0;i<99;i++)g.dbg.crash();
+assert.equal(g.probe.now().lives,0);assert.equal(g.probe.now().historyCount,100);assert.equal(g.probe.now().state,'result');
+g.dbg.crash();assert.equal(g.probe.now().lives,0,'残機が負にならない');
+g.press(' ');assert.equal(g.probe.now().lives,100);
+g.dbg.set(1,400);g.dbg.crash();assert.deepEqual(g.probe.now().damage,{});
+g.dbg.set(.84,400);g.dbg.replay(0);assert.deepEqual(g.probe.now().damage,{});
+g.dbg.set(.9,400);g.dbg.replay(0);assert(g.probe.now().damage[0],'先行する機体の爆発で柱が削れる');
+const m=g.dbg.trap(0,2);g.dbg.set(2,400);g.dbg.carve(m.x+640,m.y);assert(g.probe.now().destroyed>0,'爆風で正面の弾を壊す');
+console.log('即時交代・長押し継続・100体終了・爆発による柱と弾の破壊を確認');
