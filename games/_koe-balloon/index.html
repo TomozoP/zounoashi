@@ -134,6 +134,7 @@
   // このページ内だけで履歴と音声を保持する。再読み込みで破棄される。
   var history=[],damage={},track=[],capture=[],processor=null,replaySources=[],replayStarted=false,won=false;
   var replayGhosts=[],explosions=[],fired={},serial=0,attemptNumber=1,attemptSaved=false;
+  var inputRms=0,inputTrace=[];
   var RUN_SPEED=150;
   function stopReplay(){replaySources.forEach(function(s){try{s.stop();}catch(e){}});replaySources=[];replayStarted=false;}
   function lead(i){return Math.min(2.4,(history.length-i)*.08);}
@@ -203,7 +204,7 @@
     if(!window.navigator.mediaDevices || !window.navigator.mediaDevices.getUserMedia || !AC) { micError=true; return; }
     micPending=true; micError=false;
     try {
-      var stream=await window.navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:false,autoGainControl:false}});
+      var stream=await window.navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
       if(document.hidden){stream.getTracks().forEach(function(t){t.stop();});return;}
       mic=stream; analyser=AC.createAnalyser(); analyser.fftSize=1024;
       samples=new Float32Array(analyser.fftSize);
@@ -218,7 +219,8 @@
     if(!analyser) return 0;
     analyser.getFloatTimeDomainData(samples);
     var sum=0; for(var i=0;i<samples.length;i++)sum+=samples[i]*samples[i];
-    return Math.max(0,Math.min(1,(Math.sqrt(sum/samples.length)-0.012)/0.075));
+    inputRms=Math.sqrt(sum/samples.length);
+    return Math.max(0,Math.min(1,(inputRms-0.012)/0.075));
   }
   var CY;                                      /* 高さから決まる置き場所 */
   function place() {
@@ -281,6 +283,7 @@
     T += dt;
     startReplay();replayStep(dt);
     level=held?1:readVoice();
+    inputTrace.push({attempt:attemptNumber,time:T,rms:inputRms,level:level,dt:dt,replays:replaySources.length});if(inputTrace.length>300)inputTrace.shift();
     air=level>0.06?Math.min(1,.6+level*.4):0;
     vy+=(900-air*2600-vy*.8)*dt;
     vy=Math.max(-520,Math.min(600,vy));
@@ -471,6 +474,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
+    microphone:function(){var t=mic&&mic.getAudioTracks?mic.getAudioTracks()[0]:null;return {settings:t&&t.getSettings?t.getSettings():{},recent:inputTrace.slice()};},
     now: function () { return { state: state, score: score, W: W, H: H, y:py, vy:vy, air:air, level:level, gates:gates.map(function(g){return {x:g.x,top:g.top,bottom:g.bottom};}), micPending:micPending, micError:micError, threeD:!!scene3d,won:won,historyCount:history.length,ghosts:replayGhosts.map(function(g){return {x:g.x,y:g.y};}),damage:JSON.parse(JSON.stringify(damage)), fallTime:fallTime, doll:doll?doll.points.map(function(p){return {x:p.x,y:p.y};}):null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
