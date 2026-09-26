@@ -6,8 +6,8 @@ const hook=`window.__check={setup:function(height){H=height;canvas.width=540;can
 const runner=`<script>window.__recordManual=true;(async()=>{try{
 const c=document.getElementById('c'),p=window.__probe,t=window.__check;
 async function save(name){await fetch('/__image/'+name,{method:'POST',body:await new Promise(r=>c.toBlob(r))});}
-for(const h of [700,1130,1700]){t.setup(h);await save('start-'+h+'.png');t.win();p.step(300);if(p.now().state!=='play')throw Error('走行が止まる');await save('win-'+h+'.png');}
-await fetch('/__done',{method:'POST',body:'波・サーファー・連続走行・録画元の画面を3種類で確認'});
+for(const h of [700,1130,1700]){t.setup(h);await save('start-'+h+'.png');t.win();p.step(900);if(!p.now().won)throw Error('平らな橋で渡れない');if(p.now().state!=='result')throw Error('結果が出ない');await save('win-'+h+'.png');}
+await fetch('/__done',{method:'POST',body:'橋・車の通過・録画元の画面を3種類で確認'});
 }catch(e){await fetch('/__fail',{method:'POST',body:e.stack});}})();</script>`;
 const server=http.createServer((req,res)=>{
   const u=req.url.split('?')[0];
