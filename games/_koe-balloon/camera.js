@@ -14,11 +14,13 @@
     return loading;
   }
   function WingInput(){
+    this.points=null;this.pointTime=-Infinity;this.flashes=[-Infinity,-Infinity];
     this.stream=null;this.video=null;this.model=null;this.status='idle';this.vector=0;
     this.wings=[-.45,-.45];this.pending=[0,0];this.arms=[{},{}];this.portrait=null;this.crop=null;
-    this.found=false;this.neutral=null;this.centers=[];this.seen=-Infinity;this.last=-Infinity;this.epoch=0;this.previousFrame=-1;
+    this.found=false;this.seen=-Infinity;this.last=-Infinity;this.epoch=0;this.previousFrame=-1;
   }
   WingInput.prototype.stop=function(keepFrame){
+    this.points=null;this.flashes=[-Infinity,-Infinity];
     this.epoch++;if(this.stream)this.stream.getTracks().forEach(function(t){t.stop();});
     if(this.video){this.video.pause();this.video.srcObject=null;}
     this.stream=null;this.video=null;this.vector=0;this.found=false;this.status='idle';this.pending=[0,0];this.arms=[{},{}];
@@ -27,7 +29,7 @@
   WingInput.prototype.start=async function(){
     if(this.status==='loading'||this.status==='active')return;
     this.stop();var epoch=this.epoch,self=this;
-    this.status='loading';this.neutral=null;this.centers=[];this.previousFrame=-1;this.seen=-Infinity;this.last=-Infinity;
+    this.status='loading';this.previousFrame=-1;this.seen=-Infinity;this.last=-Infinity;
     try{
       if(!global.navigator.mediaDevices)throw Error('カメラ非対応');
       var stream=await global.navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:30}},audio:false});
@@ -46,15 +48,12 @@
   WingInput.prototype.lose=function(){this.vector=0;this.found=false;this.pending=[0,0];this.arms=[{},{}];};
   WingInput.prototype.accept=function(result,width,height,now){
     var p=result.landmarks&&result.landmarks[0];
-    var valid=p&&[0,11,12,13,14,15,16].every(function(i){return p[i]&&p[i].visibility>.5&&p[i].x>0&&p[i].x<1&&p[i].y>0&&p[i].y<1;});
+    this.points=p||null;this.pointTime=now;
+    var valid=p&&[11,12,13,14,15,16].every(function(i){return p[i]&&p[i].visibility>.5&&p[i].x>0&&p[i].x<1&&p[i].y>0&&p[i].y<1;});
     if(!valid){if(now-this.seen>350)this.lose();return;}
     this.seen=now;
-    var span=Math.max(.08,Math.abs(p[11].x-p[12].x)),center=p[0].x;
-    if(this.neutral===null){this.centers.push(center);if(this.centers.length>=5)this.neutral=this.centers.reduce(function(a,b){return a+b;},0)/this.centers.length;}
-    if(this.neutral===null)return;
-    this.found=true;
-    var offset=this.neutral-center,target=Math.abs(offset)<.025?0:Math.sign(offset)*Math.min(1,(Math.abs(offset)-.025)/.19);
-    this.vector+=(target-this.vector)*.65;
+    var span=Math.max(.08,Math.abs(p[11].x-p[12].x));
+    this.found=true;this.vector=0;
     for(var i=0;i<2;i++){
       var shoulder=p[11+i],wrist=p[15+i],elevation=(shoulder.y-wrist.y)*height/width/span;
       this.wings[i]=Math.max(-1.15,Math.min(1.15,Math.atan2((shoulder.y-wrist.y)*height,Math.abs(wrist.x-shoulder.x)*width)));
@@ -62,7 +61,7 @@
       // 上げてから十分な距離を下げた一往復だけを数える。静止・手の小さな揺れでは飛ばない。
       if(elevation>.2){if(!arm.armed)arm.raised=now;arm.armed=true;arm.peak=Math.max(arm.peak||elevation,elevation);}
       if(arm.armed&&dt>0&&dt<.4&&elevation<-.15&&arm.peak-elevation>.55&&(arm.previous-elevation)/dt>.7&&now-arm.raised<1800){
-        this.pending[i]=Math.min(1.3,Math.max(.65,(arm.peak-elevation)*.65));arm.armed=false;arm.peak=0;
+        this.flashes[i]=now;this.pending[i]=Math.min(1.3,Math.max(.65,(arm.peak-elevation)*.65));arm.armed=false;arm.peak=0;
       }
       if(arm.armed&&now-arm.raised>=1800){arm.armed=false;arm.peak=0;}
       arm.previous=elevation;arm.time=now;
@@ -84,7 +83,7 @@
       mc.putImageData(pixels,0,0);ctx.globalCompositeOperation='destination-in';ctx.drawImage(m,0,0,width,height);ctx.globalCompositeOperation='source-over';
     }
     var cx=(p[11].x+p[12].x)*.5,cy=(p[11].y+p[12].y)*.5;
-    var top=Math.max(0,p[0].y-span*.7*width/height),bottom=Math.min(1,cy+span*1.6*width/height);
+    var top=Math.max(0,cy-span*1.3*width/height),bottom=Math.min(1,cy+span*1.6*width/height);
     var left=Math.max(0,cx-span*1.25),right=Math.min(1,cx+span*1.25);
     this.crop={x:left*width,y:top*height,w:(right-left)*width,h:(bottom-top)*height,cx:cx*width,cy:cy*height,scale:54/(span*width)};
   };
@@ -92,6 +91,36 @@
     var c=this.crop;if(!this.portrait||!c)return false;
     ctx.save();ctx.translate(x,y);ctx.rotate(angle||0);ctx.scale(-c.scale,c.scale);
     ctx.drawImage(this.portrait,c.x,c.y,c.w,c.h,c.x-c.cx,c.y-c.cy,c.w,c.h);ctx.restore();return true;
+  };
+  // 元映像と判定を同じ画面へ描き、検出できない理由も確認できるようにする。
+  WingInput.prototype.drawDetection=function(ctx,now){
+    if(this.status==='idle')return;
+    var x=18,y=18,w=220,h=165,video=this.video;
+    if(video&&video.videoWidth&&video.videoHeight)h=w*video.videoHeight/video.videoWidth;
+    ctx.save();ctx.fillStyle='#142731';ctx.fillRect(x-3,y-3,w+6,h+57);
+    if(video&&video.readyState>=2){ctx.save();ctx.translate(x+w,y);ctx.scale(-1,1);ctx.drawImage(video,0,0,w,h);ctx.restore();}
+    var p=now-this.pointTime<350?this.points:null;
+    function visible(i){return p&&p[i]&&p[i].visibility>.5&&p[i].x>0&&p[i].x<1&&p[i].y>0&&p[i].y<1;}
+    function point(i){return [x+(1-p[i].x)*w,y+p[i].y*h];}
+    if(p){
+      ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();ctx.lineWidth=3;
+      [[11,12],[11,13],[13,15],[12,14],[14,16]].forEach(function(pair){
+        if(!visible(pair[0])||!visible(pair[1]))return;
+        var a=point(pair[0]),b=point(pair[1]);ctx.strokeStyle='#5cffbd';ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
+      });
+      [11,12,13,14,15,16].forEach(function(i){
+        if(!p[i])return;var a=point(i);ctx.fillStyle=visible(i)?'#5cffbd':'#ff6464';ctx.beginPath();ctx.arc(a[0],a[1],4,0,Math.PI*2);ctx.fill();
+      });ctx.restore();
+    }
+    ctx.font='bold 13px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillStyle='#fff';
+    var label=this.status==='loading'?'カメラ・判定の準備中':this.status==='error'?'カメラを開始できません':!this.found?'肩・肘・手首を映してください':'検出中';
+    ctx.fillText(label,x+3,y+h+15);
+    for(var i=0;i<2;i++){
+      var flash=now-this.flashes[i]<450;
+      ctx.fillStyle=flash?'#ffe268':this.found?'#5cffbd':'#a0abb1';
+      ctx.fillText((i===0?'左腕：':'右腕：')+(flash?'はばたき':this.found?(this.arms[i].armed?'上げた':'待機'):'未検出'),x+3+i*110,y+h+37);
+    }
+    ctx.restore();
   };
   WingInput.prototype.tick=function(now){
     if(this.status!=='active')return;

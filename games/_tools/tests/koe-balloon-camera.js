@@ -14,16 +14,16 @@ const game=require('../harness')('games/_koe-balloon/index.html',{inject:`
   camera={status:'active',found:true,vector:0,wings:[.3,.3],takeFlaps:function(){return [0,0];},drawPlayer:function(){},tick:function(){},stop:function(){},start:function(){}};
   window.__dbg={face:function(v,found){camera.vector=v;camera.found=found;}};
 `});
-game.probe.reset();game.dbg.face(-1,true);game.step(20);assert(game.probe.now().x<250,'顔の左入力がゲームへ届く');
-game.dbg.face(1,true);game.step(40);assert(game.probe.now().x>270,'顔の右入力がゲームへ届く');
+game.probe.reset();game.dbg.face(-1,true);game.step(20);assert.equal(game.probe.now().x,270,'顔の左入力では動かない');
+game.dbg.face(1,true);game.step(40);assert.equal(game.probe.now().x,270,'顔の右入力では動かない');
 game.dbg.face(0,false);const paused=game.probe.now();game.step(100);
 assert.equal(game.probe.now().altitude,paused.altitude,'顔を見失うと止まる');assert.equal(game.probe.now().x,paused.x);
 (async()=>{
  request=async()=>stream();await face.start();assert.equal(face.status,'active');
  for(let i=0;i<5;i++)face.accept(hit(.5),320,240,i*100);
  assert(face.found);assert.equal(face.vector,0);
- face.accept(hit(.7),320,240,600);assert(face.vector<-.5,'自分の左へ動くと左');
- face.accept(hit(.3),320,240,700);face.accept(hit(.3),320,240,800);assert(face.vector>.5,'自分の右へ動くと右');
+ face.accept(hit(.7),320,240,600);assert.equal(face.vector,0,'顔の位置は操作に使わない');
+ face.accept(hit(.3),320,240,700);face.accept(hit(.3),320,240,800);assert.equal(face.vector,0,'顔を動かしても横移動しない');
  face.accept(hit(.5,.15,.15),320,240,900);face.accept(hit(.5,.65,.15),320,240,1000);
  assert(face.takeFlaps()[0]>.65,'左腕の振り下ろし');assert.equal(face.takeFlaps()[0],0,'一往復で一度だけ');
  face.accept(hit(.5,.65,.65),320,240,1100);assert(face.takeFlaps()[1]>.65,'右腕は独立');
@@ -37,5 +37,5 @@ assert.equal(game.probe.now().altitude,paused.altitude,'顔を見失うと止ま
  request=async()=>{throw Error('拒否');};await face.start();assert.equal(face.status,'error');
  let resolve;request=()=>new Promise(r=>resolve=r);const pending=face.start();face.stop();resolve(stream());await pending;
  assert.equal(stopped,2,'取消後に届いたカメラも止める');assert.equal(face.status,'idle');
- console.log('左右のはばたき・静止・小さな揺れ・消失・左右移動・拒否・取消を確認');
+ console.log('左右のはばたき・静止・小さな揺れ・消失・顔操作なし・拒否・取消を確認');
 })().catch(e=>{console.error(e);process.exitCode=1;});

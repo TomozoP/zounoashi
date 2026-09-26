@@ -5,7 +5,7 @@ let child,timer,finished=false;
 const hook=`window.__check={scene:function(){return scene3d;},setup:function(height,amount){
   H=height;canvas.width=540;canvas.height=H;newRound();wings=[amount,-amount];py=H*.68;
   gates=[{height:300,left:130,right:350,passed:false}];draw();
-},intro:function(){state=S.INTRO;draw();},result:function(){state=S.RESULT;draw();},
+},detection:function(){camera.status='active';camera.video=camera.portrait;camera.video.readyState=2;camera.video.videoWidth=100;camera.video.videoHeight=140;camera.points=Array.from({length:33},function(){return {x:.5,y:.5,visibility:1};});camera.pointTime=performance.now();draw();camera.video=null;camera.status='idle';},intro:function(){state=S.INTRO;draw();},result:function(){state=S.RESULT;draw();},
 pose:function(){
  camera=new window.WingInput();var source=document.createElement('canvas');source.width=100;source.height=140;
  var c=source.getContext('2d');c.fillStyle='#ff00cc';c.fillRect(0,0,100,140);camera.video=source;
@@ -40,7 +40,7 @@ check(!document.getElementById('retry-button').hidden&&!document.getElementById(
 t.setup(960,.5);
 t.pose();check(!scene.placeholder.visible,'映像があるのに仮の人物が残る');
 const portraitPixel=c.getContext('2d').getImageData(270,Math.round(960*.68),1,1).data;
-check(portraitPixel[0]===255&&portraitPixel[2]===204,'本人の映像が録画元へ合成されない');await save('portrait.png');
+check(portraitPixel[0]===255&&portraitPixel[2]===204,'本人の映像が録画元へ合成されない');await save('portrait.png');t.detection();await save('detection.png');
 t.crash();check(p.now().state==='fall','衝突後に落下しない');
 const before=p.now().fallen.y;p.step(35);check(p.now().fallen.y>before,'人が落下していない');await save('fall.png');
 p.step(110);check(p.now().state==='result','落下後に結果へ移らない');
