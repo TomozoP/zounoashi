@@ -26,6 +26,8 @@
   <button id="retry-button" type="button" aria-label="もう一度" hidden></button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="scene3d.js"></script>
 <script src="../start.js"></script>
 <script src="../view.js"></script>
 <script src="../audio.js"></script>
@@ -56,6 +58,11 @@
      タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
      どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
   var W = 540, H = 960;
+  var scene3d=null;
+  if(window.THREE && window.BalloonScene){
+    try { scene3d=new window.BalloonScene(); }
+    catch(e){console.warn('立体描画を起動できないため平面で表示します。',e);}
+  }
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
@@ -167,7 +174,7 @@
     if(document.hidden || micPending) return;
     T += dt;
     level=held?1:readVoice();
-    air=Math.max(0,Math.min(1,air+(level>0.06 ? 0.34+level*0.36 : -0.34)*dt));
+    air=Math.max(0,Math.min(1,air+(level>0.06 ? 1.2+level*0.6 : -1.05)*dt));
     vy+=(210-air*460-vy*2.5)*dt;
     py+=vy*dt;
     var speed=Math.min(145,100+distance*0.018);
@@ -180,13 +187,14 @@
     }
     gates.forEach(function(g){g.x-=speed*dt;});
     gates=gates.filter(function(g){return g.x>-70;});
-    var radius=21+air*33, by=py-65-radius;
-    function touches(cx,cy,r,g){
+    var radius=16+air*48, by=py-65-radius;
+    function touches(cx,cy,r,g,ry){
+      ry=ry||r;
       var nx=Math.max(g.x,Math.min(cx,g.x+58));
       var topY=Math.min(cy,g.top), bottomY=Math.max(cy,g.bottom);
-      return (cx-nx)*(cx-nx)+(cy-topY)*(cy-topY)<r*r || (cx-nx)*(cx-nx)+(cy-bottomY)*(cy-bottomY)<r*r;
+      return (cx-nx)*(cx-nx)/(r*r)+(cy-topY)*(cy-topY)/(ry*ry)<1 || (cx-nx)*(cx-nx)/(r*r)+(cy-bottomY)*(cy-bottomY)/(ry*ry)<1;
     }
-    if(by-radius<0 || py+42>H || gates.some(function(g){return touches(155,by,radius,g)||touches(155,py+5,27,g);})) {
+    if(by-radius*1.08<0 || py+48>H || gates.some(function(g){return touches(155,by,radius,g,radius*1.08)||touches(155,py+4,28,g,44);})) {
       state=S.RESULT; held=false; noiseHit(0.18,450,0.09); stopMic();
     }
   }
@@ -281,12 +289,15 @@
     }
     ctx.fillStyle='#b4cfb9';
     for(var i=0;i<12;i++){var x=((i*73-distance*3)%880+880)%880-120;ctx.fillRect(x,H-55-(i%3)*18,55,120);}
+    if(scene3d){
+      scene3d.render(ctx,canvas,{W:W,H:H,y:py,vy:vy,radius:16+air*48,time:T,gates:gates});
+    }else{
     gates.forEach(function(g){
       ctx.fillStyle='#3b5960';roundRect(g.x, -30,58,g.top+30,12);ctx.fill();roundRect(g.x,g.bottom,58,H-g.bottom+30,12);ctx.fill();
       ctx.fillStyle='#ffc86b';ctx.fillRect(g.x-5,g.top-16,68,16);ctx.fillRect(g.x-5,g.bottom,68,16);
       ctx.fillStyle='rgba(255,255,255,.16)';ctx.fillRect(g.x+8,0,8,g.top-16);ctx.fillRect(g.x+8,g.bottom+16,8,H);
     });
-    var radius=21+air*33, by=py-65-radius;
+    var radius=16+air*48, by=py-65-radius;
     ctx.strokeStyle='#3c4a51';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(155,by+radius);ctx.quadraticCurveTo(148+Math.sin(T*4)*5,py-55,155,py-17);ctx.stroke();
     ctx.save();ctx.translate(155,py);ctx.rotate(Math.max(-0.18,Math.min(0.18,vy/700)));
     ctx.strokeStyle='#263a4c';ctx.lineWidth=10;ctx.lineCap='round';
@@ -300,6 +311,7 @@
     ctx.fillStyle=balloon;ellipse(155,by,radius,radius*1.08);
     ctx.fillStyle='#d63c5c';ctx.beginPath();ctx.moveTo(155,by+radius);ctx.lineTo(149,by+radius+9);ctx.lineTo(161,by+radius+9);ctx.fill();
     ctx.fillStyle='rgba(255,255,255,.65)';ellipse(155-radius*.35,by-radius*.4,radius*.13,radius*.25);
+    }
     // マイクの状態と入力音量は、文字を増やさず絵で示す。
     ctx.save();ctx.translate(42,48);ctx.strokeStyle=micError?'#aa5262':'#365664';ctx.fillStyle=mic?'#365664':'#ffffff';
     roundRect(-6,-15,12,23,6);ctx.fill();ctx.lineWidth=3;ctx.beginPath();ctx.arc(0,1,12,0,Math.PI);ctx.moveTo(0,13);ctx.lineTo(0,20);ctx.moveTo(-7,20);ctx.lineTo(7,20);ctx.stroke();
@@ -359,7 +371,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, W: W, H: H, y:py, vy:vy, air:air, level:level, gates:gates.map(function(g){return {x:g.x,top:g.top,bottom:g.bottom};}), micPending:micPending, micError:micError }; },
+    now: function () { return { state: state, score: score, W: W, H: H, y:py, vy:vy, air:air, level:level, gates:gates.map(function(g){return {x:g.x,top:g.top,bottom:g.bottom};}), micPending:micPending, micError:micError, threeD:!!scene3d }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
