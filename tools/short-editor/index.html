@@ -1113,8 +1113,9 @@ function trimSel() {
 let asr = null, asrModel = null;
 async function runWhisper() {
   const btn = $('wBtn'), st = $('wStatus'), bar = $('wBar');
-  const target = selected && selected.type === 'a' ? find('a', selected.id) : null;
-  if (!target && totalDur() <= 0) { toast('先に動画か音声を追加してください'); return; }
+  // 選んでいる音声クリップを全部（無音を詰めて分かれたものもまとめて）。なければ全体のミックス
+  const targets = selItems().filter(([t]) => t === 'a').map(([, o]) => o).sort((a, b) => a.at - b.at);
+  if (!targets.length && totalDur() <= 0) { toast('先に動画か音声を追加してください'); return; }
   btn.disabled = true;
   try {
     const model = $('wModel').value;
@@ -1135,18 +1136,20 @@ async function runWhisper() {
       }
       asrModel = model;
     }
-    let buf, from, len, offset;
-    if (target) { buf = await procBuffer(target.buf, laneOf(target)); from = target.in; len = target.out - target.in; offset = target.at; }
-    else { buf = await ensureMix(); from = 0; len = totalDur(); offset = 0; }
-    st.textContent = '文字起こし中…'; bar.style.width = '100%';
-    const pcm = await to16k(buf, from, len);
-    const out = await asr(pcm, { language: 'japanese', task: 'transcribe', return_timestamps: true, chunk_length_s: 30, stride_length_s: 5 });
-    const segs = (out.chunks || [{ text: out.text, timestamp: [0, len] }])
-      .map(c => ({ text: c.text, start: offset + (c.timestamp[0] ?? 0), end: offset + (c.timestamp[1] ?? len) }))
-      .filter(s => s.text.trim() && !/^[\s(（\[].*[)）\]]\s*$/.test(s.text));
+    const jobs = targets.length ? targets.map(c => ({ c, from: c.in, len: c.out - c.in, offset: c.at })) : [{ from: 0, len: totalDur(), offset: 0 }];
+    const segs = [];
+    for (const [i, j] of jobs.entries()) {
+      st.textContent = jobs.length > 1 ? `文字起こし中…（${i + 1}/${jobs.length}）` : '文字起こし中…'; bar.style.width = ((i + 1) / jobs.length * 100) + '%';
+      const buf = j.c ? await procBuffer(j.c.buf, laneOf(j.c)) : await ensureMix();
+      const pcm = await to16k(buf, j.from, j.len);
+      const out = await asr(pcm, { language: 'japanese', task: 'transcribe', return_timestamps: true, chunk_length_s: 30, stride_length_s: 5 });
+      segs.push(...(out.chunks || [{ text: out.text, timestamp: [0, j.len] }])
+        .map(c => ({ text: c.text, start: j.offset + (c.timestamp[0] ?? 0), end: j.offset + Math.min(c.timestamp[1] ?? j.len, j.len) }))
+        .filter(s => s.text.trim() && !/^[\s(（\[].*[)）\]]\s*$/.test(s.text)));
+    }
     commit();
     // 同じ範囲にある既存字幕は置き換える
-    subs = subs.filter(s => isHeader(s) || s.end <= offset || s.start >= offset + len);
+    subs = subs.filter(s => isHeader(s) || jobs.every(j => s.end <= j.offset || s.start >= j.offset + j.len));
     addSubsFromSegs(segs);
     changed(true);
     st.textContent = segs.length ? `字幕を${subs.filter(s => !isHeader(s)).length}枚にしました。一覧で誤字を直せます` : '音声が見つかりませんでした';
