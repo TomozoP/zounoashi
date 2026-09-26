@@ -100,6 +100,9 @@
     var hips=local(0),shoulder=local(1),head=local(2),bodyDirection=shoulder.clone().sub(hips);
     this.body.position.copy(hips);if(!s.doll)this.body.position.add(shoulder).multiplyScalar(.5);
     if(s.doll)this.body.rotation.set(s.fallTime*5,s.fallTime*4,s.fallTime*3);else this.body.quaternion.setFromUnitVectors(this.up,bodyDirection.normalize());
+    this.body.visible=false;
+    this.joints.forEach(function(j){j.mesh.visible=false;});
+    this.hands.concat(this.feet).forEach(function(p){p.mesh.visible=false;});
     this.head.position.copy(head);
     this.head.rotation.set(s.doll?s.fallTime*7:0,.5,s.doll?s.fallTime*5:0);
     this.skin.color.copy(this.skinBase);
@@ -107,7 +110,7 @@
     var self=this;
     this.joints.forEach(function(j){if(s.doll){j.mesh.position.copy(local(j.b));j.mesh.scale.y=18;j.mesh.rotation.set(s.fallTime*(j.b-4),0,s.fallTime*(j.b-2));return;}var a=local(j.a),b=local(j.b),d=b.clone().sub(a);j.mesh.position.copy(a).add(b).multiplyScalar(.5);j.mesh.scale.y=d.length();j.mesh.quaternion.setFromUnitVectors(self.up,d.normalize());});
     this.hands.concat(this.feet).forEach(function(p){p.mesh.position.copy(local(p.index));p.mesh.position.z=3;});
-    this.pack.position.copy(this.body.position);
+    this.pack.position.copy(s.doll?hips:head);
     this.pack.quaternion.copy(this.body.quaternion);
     this.flames.forEach(function(f,i){
       f.outer.visible=f.core.visible=!s.doll&&s.level>0;
