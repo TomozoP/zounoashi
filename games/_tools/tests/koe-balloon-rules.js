@@ -10,4 +10,6 @@ for(let i=0;i<12;i++){g.dbg.crash();g.step(91);}
 assert.equal(g.probe.now().historyCount,10,'記録は直近10回まで');
 console.log('即時噴射・落下・爆発による削れ・先行する履歴・10回の上限を確認');
 
-const bottom=load('games/_koe-balloon/index.html',{inject:'window.__dbg={fall:function(){newRound();py=H-10;vy=200;popBalloon();}};'});bottom.dbg.fall();bottom.step(60);assert(bottom.probe.now().doll.every(p=>p.y>bottom.probe.now().H),'下端を越えて落ち続ける');
+const bottom=load('games/_koe-balloon/index.html',{inject:'window.__dbg={fall:function(){newRound();py=H-10;vy=200;popBalloon();}};'});bottom.dbg.fall();bottom.step(60);assert(bottom.probe.now().doll[0].y>bottom.probe.now().H,'下端を越えて落ち続ける');
+
+assert(bottom.probe.now().doll.some(p=>p.x<0||p.x>bottom.probe.now().W),'左右の画面端でも部品を止めない');

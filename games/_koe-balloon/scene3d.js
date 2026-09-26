@@ -27,26 +27,25 @@
     };
     this.person=new T.Group();this.scene.add(this.person);
     var p=this.person;
-    this.body=this.part(p,this.ball,0xfff3d9,0,-8,0,18,22,12);
+    this.body=this.part(p,this.box,0xc3d2db,0,-8,0,32,34,25,true);
     this.head=new T.Group();p.add(this.head);
-    this.face=this.part(this.head,this.ball,0xe7a67d,0,0,0,20,23,18);
-    this.skin=this.face.material;this.skinBase=new T.Color(0xe7a67d);this.skinRed=new T.Color(0xee373d);
-    this.part(this.head,this.ball,0x253b4b,0,13,-1,20.5,12,18.5);
-    this.part(this.head,this.ball,0xe7a67d,0,-3,18,4,4,5);
+    this.face=this.part(this.head,this.box,0xb1c7d2,0,0,0,36,34,30,true);
+    this.skin=this.face.material;this.skinBase=new T.Color(0xb1c7d2);
+    this.part(this.head,this.box,0x182f40,0,1,16,28,13,3,true);
     [-1,1].forEach(function(side){
-      self.part(self.head,self.ball,0xe7a67d,side*19,0,0,4,6,4);
-      self.part(self.head,self.ball,0x162d3d,side*7,3,17,2,2.5,2);
-      self.part(self.head,self.ball,0xffffff,side*7-.5,4,18.5,.65,.7,.6);
+      self.part(self.head,self.box,0x78f4ff,side*7,2,18,6,5,2);
+      self.part(self.head,self.tube,0x647f93,side*20,0,0,5,12,5,true);
     });
-    this.cheeks=[-1,1].map(function(side){return self.part(self.head,self.ball,0xe7a67d,side*12,-6,14,6,6,5);});
-    this.mouth=this.part(this.head,this.ball,0xa86156,0,-9,18,4,1.4,1);
+    this.part(this.head,this.tube,0x718b9d,0,23,0,2,12,2,true);
+    this.part(this.head,this.ball,0xffaa42,0,30,0,4,4,4,true);
+    this.cheeks=[];this.mouth=this.part(this.head,this.box,0x4a677a,0,-10,16,13,3,2);
     this.joints=[];
     // 上腕・前腕・太もも・すねを、それぞれ別の関節でつなぐ。
-    [[1,3,7,0xfff3d9],[3,4,5,0xe7a67d],[1,5,7,0xfff3d9],[5,6,5,0xe7a67d],
+    [[1,3,7,0xb5c7d1],[3,4,5,0x829bac],[1,5,7,0xb5c7d1],[5,6,5,0x829bac],
      [0,7,6,0x314858],[7,8,5,0x314858],[0,9,6,0x314858],[9,10,5,0x314858]].forEach(function(v){
       self.joints.push({a:v[0],b:v[1],mesh:self.part(p,self.tube,v[3],0,0,0,v[2],1,v[2])});
     });
-    this.hands=[4,6].map(function(i){return {index:i,mesh:self.part(p,self.ball,0xf0b792,0,0,3,5.5,6,5.5)};});
+    this.hands=[4,6].map(function(i){return {index:i,mesh:self.part(p,self.ball,0x71899b,0,0,3,5.5,6,5.5)};});
     this.feet=[8,10].map(function(i){return {index:i,mesh:self.part(p,self.ball,0x243846,0,0,3,7,5,10)};});
     this.pack=new T.Group();p.add(this.pack);
     this.part(this.pack,this.box,0x405365,-8,0,-13,34,32,18,true);
@@ -63,7 +62,7 @@
     });
     this.up=new T.Vector3(0,1,0);
     this.fragments=[];
-    for(var i=0;i<12;i++)this.fragments.push(this.part(this.scene,new T.TetrahedronGeometry(1),0xffba58,0,0,0,5,9,2,true));
+    for(var i=0;i<36;i++)this.fragments.push(this.part(this.scene,new T.TetrahedronGeometry(1),0xffba58,0,0,0,5,9,2,true));
     this.gateModels=[];this.ghostModels=[];this.blastModels=[];
   }
   BalloonScene.prototype.makeGate=function(){
@@ -99,14 +98,14 @@
     var pts=s.doll?s.doll.points:s.pose.map(function(p){return {x:p[0],y:p[1]};});
     function local(i){return new global.THREE.Vector3(pts[i].x-155,s.y-pts[i].y,0);}
     var hips=local(0),shoulder=local(1),head=local(2),bodyDirection=shoulder.clone().sub(hips);
-    this.body.position.copy(hips).add(shoulder).multiplyScalar(.5);
-    this.body.quaternion.setFromUnitVectors(this.up,bodyDirection.normalize());
+    this.body.position.copy(hips);if(!s.doll)this.body.position.add(shoulder).multiplyScalar(.5);
+    if(s.doll)this.body.rotation.set(s.fallTime*5,s.fallTime*4,s.fallTime*3);else this.body.quaternion.setFromUnitVectors(this.up,bodyDirection.normalize());
     this.head.position.copy(head);
-    this.head.rotation.set(s.doll?-.1:0,.5,s.doll?-Math.atan2(pts[2].x-pts[1].x,pts[1].y-pts[2].y):0);
+    this.head.rotation.set(s.doll?s.fallTime*7:0,.5,s.doll?s.fallTime*5:0);
     this.skin.color.copy(this.skinBase);
     this.cheeks.forEach(function(m){m.scale.set(0,0,0);});
     var self=this;
-    this.joints.forEach(function(j){var a=local(j.a),b=local(j.b),d=b.clone().sub(a);j.mesh.position.copy(a).add(b).multiplyScalar(.5);j.mesh.scale.y=d.length();j.mesh.quaternion.setFromUnitVectors(self.up,d.normalize());});
+    this.joints.forEach(function(j){if(s.doll){j.mesh.position.copy(local(j.b));j.mesh.scale.y=18;j.mesh.rotation.set(s.fallTime*(j.b-4),0,s.fallTime*(j.b-2));return;}var a=local(j.a),b=local(j.b),d=b.clone().sub(a);j.mesh.position.copy(a).add(b).multiplyScalar(.5);j.mesh.scale.y=d.length();j.mesh.quaternion.setFromUnitVectors(self.up,d.normalize());});
     this.hands.concat(this.feet).forEach(function(p){p.mesh.position.copy(local(p.index));p.mesh.position.z=3;});
     this.pack.position.copy(this.body.position);
     this.pack.quaternion.copy(this.body.quaternion);
@@ -117,10 +116,10 @@
       f.core.scale.y=length*.58;f.core.position.y=-26-length*.29;
     });
     this.fragments.forEach(function(m,i){
-      m.visible=!!s.doll&&s.fallTime<.65;if(!m.visible)return;
-      var angle=i*Math.PI*2/12,t=s.fallTime;
-      m.position.set(s.burst.x+Math.cos(angle)*(s.burst.r+180*t),-s.burst.y+Math.sin(angle)*(s.burst.r+180*t)-220*t*t,Math.sin(i)*20);
-      m.rotation.set(i+t*8,i*.4+t*12,t*10);m.scale.setScalar(Math.max(.01,1-t/.65)*6);
+      m.visible=!!s.doll&&s.fallTime<1.1;if(!m.visible)return;
+      var angle=i*2.399,t=s.fallTime;
+      m.position.set(s.burst.x+Math.cos(angle)*(s.burst.r+(220+i%5*70)*t),-s.burst.y+Math.sin(angle)*(s.burst.r+180*t)-220*t*t,Math.sin(i)*20);
+      m.rotation.set(i+t*8,i*.4+t*12,t*10);m.scale.setScalar(Math.max(.01,1-t/1.1)*6);
     });
     while(this.gateModels.length<s.gates.length)this.gateModels.push(this.makeGate());
     this.gateModels.forEach(function(m,i){
@@ -146,7 +145,7 @@
       var material=new global.THREE.MeshBasicMaterial({color:0xffb54c,transparent:true,opacity:.5,depthWrite:false});
       var blast=new global.THREE.Mesh(this.ball,material);this.scene.add(blast);this.blastModels.push(blast);
     }
-    this.blastModels.forEach(function(m,i){var e=blasts[i];m.visible=!!e;if(!e)return;m.position.set(e.x-s.scroll,-e.y,35);m.scale.setScalar(25+e.age*170);m.material.opacity=Math.max(0,.6-e.age);});
+    this.blastModels.forEach(function(m,i){var e=blasts[i];m.visible=!!e;if(!e)return;m.position.set(e.x-s.scroll,-e.y,35);m.scale.set(25+e.age*230,25+e.age*230,15+e.age*30);m.material.opacity=Math.max(0,.6-e.age);});
     this.renderer.render(this.scene,this.camera);
     ctx.drawImage(this.renderer.domElement,0,0,s.W,s.H);
   };

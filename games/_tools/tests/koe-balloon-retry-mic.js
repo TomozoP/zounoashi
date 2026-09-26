@@ -1,6 +1,6 @@
 const assert=require('assert'),load=require('../harness');
 const g=load('games/_koe-balloon/index.html',{inject:
-"window.__dbg={setup:function(get){window.navigator.mediaDevices={getUserMedia:get};AC={createAnalyser:function(){return {fftSize:1024,getFloatTimeDomainData:function(a){a.fill(.09);}};},createMediaStreamSource:function(){return {connect:function(){},disconnect:function(){}};}};},request:requestMic,crash:popBalloon,stop:stopMic};"});
+"window.__dbg={setup:function(get){tone=function(){};window.navigator.mediaDevices={getUserMedia:get};AC={createAnalyser:function(){return {fftSize:1024,getFloatTimeDomainData:function(a){a.fill(.09);}};},createMediaStreamSource:function(){return {connect:function(){},disconnect:function(){}};}};},request:requestMic,crash:popBalloon,stop:stopMic};"});
 (async()=>{
  let requests=0,stops=0;g.dbg.setup(async()=>{requests++;return {getTracks:()=>[{stop(){stops++;}}]};});
  g.probe.reset();await g.dbg.request();
