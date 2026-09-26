@@ -29,16 +29,16 @@
     var p=this.person;
     this.body=this.part(p,this.box,0xc3d2db,0,-8,0,32,34,25,true);
     this.head=new T.Group();p.add(this.head);
-    this.face=this.part(this.head,this.box,0xb1c7d2,0,0,0,36,34,30,true);
+    this.face=this.part(this.head,this.box,0xb1c7d2,0,0,0,40,38,24,false);
     this.skin=this.face.material;this.skinBase=new T.Color(0xb1c7d2);
-    this.part(this.head,this.box,0x182f40,0,1,16,28,13,3,true);
+    this.part(this.head,this.box,0x182f40,0,-4,13,30,12,2,false);
     [-1,1].forEach(function(side){
-      self.part(self.head,self.box,0x78f4ff,side*7,2,18,6,5,2);
+      self.part(self.head,self.box,0x78f4ff,side*7,-3,15,5,4,2);
       self.part(self.head,self.tube,0x647f93,side*20,0,0,5,12,5,true);
     });
-    this.part(this.head,this.tube,0x718b9d,0,23,0,2,12,2,true);
-    this.part(this.head,this.ball,0xffaa42,0,30,0,4,4,4,true);
-    this.cheeks=[];this.mouth=this.part(this.head,this.box,0x4a677a,0,-10,16,13,3,2);
+
+
+    this.cheeks=[];
     this.joints=[];
     // 上腕・前腕・太もも・すねを、それぞれ別の関節でつなぐ。
     [[1,3,7,0xb5c7d1],[3,4,5,0x829bac],[1,5,7,0xb5c7d1],[5,6,5,0x829bac],
@@ -52,8 +52,8 @@
     this.flames=[];
     [-1,1].forEach(function(side){
       var x=side*20-6;
-      self.part(self.pack,self.tube,0x94afbf,x,1,-10,10,39,10,true);
-      self.part(self.pack,self.ball,0xe5bc54,x,21,-10,10,6,10,true);
+      self.part(self.pack,self.box,0x71899b,x,0,-10,13,32,14,false);
+
       self.part(self.pack,self.tube,0x263a49,x,-22,-10,8,9,8,true);
       var flame=self.part(self.pack,new T.ConeGeometry(1,1,14),0xff922e,x,-42,-10,8,35,8);
       flame.rotation.z=Math.PI;flame.name="jetFlame";
@@ -105,8 +105,6 @@
     this.hands.concat(this.feet).forEach(function(p){p.mesh.visible=false;});
     this.head.position.copy(head);
     this.head.rotation.set(s.doll?s.fallTime*7:0,.5,s.doll?s.fallTime*5:0);
-    this.head.scale.setScalar(1+(s.scream||0)*.18);
-    if(s.scream)this.head.rotation.z=Math.sin(s.time*80+s.scream*40)*s.scream*.13;
     this.skin.color.copy(this.skinBase);
     this.cheeks.forEach(function(m){m.scale.set(0,0,0);});
     var self=this;
@@ -150,9 +148,14 @@
       var material=new global.THREE.MeshBasicMaterial({color:0xffb54c,transparent:true,opacity:.5,depthWrite:false});
       var blast=new global.THREE.Mesh(this.ball,material);this.scene.add(blast);this.blastModels.push(blast);
     }
-    this.blastModels.forEach(function(m,i){var e=blasts[i];m.visible=!!e;if(!e)return;m.position.set(e.x-s.scroll,-e.y,35);m.scale.set((e.radius||108)*Math.min(1,e.age*5+.15),(e.radius||108)*Math.min(1,e.age*5+.15),15+e.age*30);m.material.opacity=Math.max(0,.6-e.age);});
+    this.blastModels.forEach(function(m,i){var e=blasts[i];m.visible=!!e;if(!e)return;m.position.set(e.x-s.scroll,-e.y,35);m.scale.set(25+e.age*230,25+e.age*230,15+e.age*30);m.material.opacity=Math.max(0,.6-e.age);});
     this.renderer.render(this.scene,this.camera);
     ctx.drawImage(this.renderer.domElement,0,0,s.W,s.H);
+    // 小さな画面でも読めるよう、額の番号を録画元の画面へ直接重ねる。
+    ctx.save();ctx.textAlign="center";ctx.textBaseline="middle";ctx.font="bold 10px sans-serif";ctx.fillStyle="#263b4b";
+    ctx.fillText(String(s.number||1).padStart(2,"0"),pts[2].x+3,pts[2].y-11);
+    if(!s.doll)ghosts.forEach(function(g){ctx.globalAlpha=.65;ctx.fillText(String(g.number||1).padStart(2,"0"),g.x+3,g.y-11);});
+    ctx.restore();
   };
   global.BalloonScene=BalloonScene;
 })(window);
