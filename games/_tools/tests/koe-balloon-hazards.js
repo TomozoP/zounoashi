@@ -5,7 +5,7 @@ g.dbg.set(0,300);
 assert(!g.dbg.hit({type:0,x:149,y:300,gap:50}),'撤去した壁は当たらない');
 assert(!g.dbg.hit({type:0,x:149,y:300,gap:160}),'開いた壁');
 assert(g.dbg.hit({type:1,x:149,y:300}),'ノコギリ');
-assert(!g.dbg.hit({type:2,x:130,y:300,active:true}),'撤去したレーザーは当たらない');
+assert(g.dbg.hit({type:2,x:130,y:300,active:true}),'発射中のレーザー');
 assert(!g.dbg.hit({type:2,x:130,y:300,active:false}),'予告線は当たらない');
 g.dbg.set(2,300);const h=g.dbg.hazard(1,2);g.dbg.carve(h.x+820,h.y);
 assert(g.probe.now().destroyed>0,'爆発でトラップ破壊');
