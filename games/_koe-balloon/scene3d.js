@@ -127,6 +127,8 @@
     while(this.gateModels.length<s.gates.length)this.gateModels.push(this.makeGate());
     this.gateModels.forEach(function(m,i){
       var g=s.gates[i];m.root.visible=!!g;if(!g)return;
+      var danger=g.danger||0;
+      [m.top,m.bottom].forEach(function(c){c.cap.material.color.setHex(danger>.5?0xff4051:0xffc563);c.body.material.color.setHex(danger>.5?0x633747:0x456873);});
       m.root.position.x=g.x+29;m.left.value=g.x;
       m.cutCount.value=Math.min(64,(g.holes||[]).length);
       (g.holes||[]).slice(0,64).forEach(function(h,j){m.cuts.value[j].set(h.x,h.y*s.H,h.r);});
