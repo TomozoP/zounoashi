@@ -125,10 +125,12 @@
   });
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var S = { INTRO: "intro", PLAY: "play", FALL: "fall", RESULT: "result" };
   var state, score, T, held, keyMode = false;
 
   var py=480, vy=0, air=0.5, level=0, distance=0, gates=[], spawn=0, gateIndex=0;
+  var BX=155, MOUTH_UP=51;
+  var doll=null, fallTime=0, fallAccumulator=0, burst=null;
   var mic=null, micSource=null, analyser=null, samples=null, micPending=false, micError=false;
   function stopMic() { if(micSource){micSource.disconnect();micSource=null;} if(mic) mic.getTracks().forEach(function(t){t.stop();}); mic=null; analyser=null; }
   async function requestMic() {
@@ -165,20 +167,57 @@
     score = 0;
     T = 0;
     held = false;
-    py=H*0.52; vy=0; air=0.5; level=0; distance=0; gates=[]; spawn=1.2; gateIndex=0;
+    py=H*0.52; vy=0; air=0.5; level=0; distance=0; gates=[]; spawn=1.2; gateIndex=0; doll=null;fallTime=0;burst=null;
+  }
+
+  // 関節同士の距離を保ちながら、重力と接触で手足を動かす。
+  function pose(){return [[155,py+17],[155,py-5],[155,py-25],[132,py-6],[128,py-23],[178,py-6],[182,py-23],[145,py+33],[142,py+48],[165,py+33],[171,py+48]];}
+  function popBalloon(){
+    if(state!==S.PLAY)return;
+    state=S.FALL;held=false;level=0;fallTime=0;fallAccumulator=0;stopMic();noiseHit(.12,1300,.13);
+    burst={x:BX,y:py-MOUTH_UP-14-(16+air*48)*1.08,r:16+air*48};
+    var points=pose().map(function(p,i){var vx=-85+(i%3)*70,vv=vy-80+(i%4)*25;return {x:p[0],y:p[1],ox:p[0]-vx/120,oy:p[1]-vv/120};});
+    var pairs=[[0,1],[1,2],[1,3],[3,4],[1,5],[5,6],[0,7],[7,8],[0,9],[9,10],[3,5],[7,9]];
+    doll={points:points,links:pairs.map(function(a){var x=points[a[0]],y=points[a[1]];return {a:a[0],b:a[1],length:Math.hypot(x.x-y.x,x.y-y.y)};})};
+  }
+  function fallStep(dt){
+    fallTime+=dt;
+    fallAccumulator+=dt;
+    var h=1/120;
+    while(fallAccumulator>=h){
+      fallAccumulator-=h;
+      doll.points.forEach(function(p){var vx=(p.x-p.ox)*.995,vy=(p.y-p.oy)*.995;p.ox=p.x;p.oy=p.y;p.x+=vx;p.y+=vy+850*h*h;});
+      for(var pass=0;pass<10;pass++){
+        doll.links.forEach(function(l){var a=doll.points[l.a],b=doll.points[l.b],dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,k=(d-l.length)/d*.5;a.x+=dx*k;a.y+=dy*k;b.x-=dx*k;b.y-=dy*k;});
+        doll.points.forEach(function(p,i){var r=i===2?20:6;
+          p.x=Math.max(r,Math.min(W-r,p.x));
+          if(p.y>H-r){p.y=H-r;p.ox=p.x-(p.x-p.ox)*.65;}
+          gates.forEach(function(g){
+            if(p.x<g.x-r||p.x>g.x+58+r)return;
+            var above=p.y<g.top+r,below=p.y>g.bottom-r;if(!above&&!below)return;
+            var left=Math.abs(p.x-(g.x-r)),right=Math.abs(p.x-(g.x+58+r));
+            var vertical=above?Math.abs(p.y-(g.top+r)):Math.abs(p.y-(g.bottom-r));
+            if(vertical<left&&vertical<right)p.y=above?g.top+r:g.bottom-r;
+            else p.x=left<right?g.x-r:g.x+58+r;
+          });
+        });
+      }
+    }
+    if(fallTime>2.2)state=S.RESULT;
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
-    if (state !== S.PLAY) return;
     if(document.hidden || micPending) return;
+    if(state===S.FALL){fallStep(dt);return;}
+    if (state !== S.PLAY) return;
     T += dt;
     level=held?1:readVoice();
-    air=Math.max(0,Math.min(1,air+(level>0.06 ? 1.2+level*0.6 : -1.05)*dt));
+    air=Math.max(0,Math.min(1,air+(level>0.06 ? 5+level*5 : -10)*dt));
     vy+=(210-air*460-vy*2.5)*dt;
     py+=vy*dt;
     var speed=Math.min(145,100+distance*0.018);
-    distance+=speed*dt/10; score=Math.floor(distance);
+    distance+=speed*dt/10;
     spawn-=dt;
     if(spawn<=0){
       var gap=Math.min(360,H*0.43), center=H*0.51+Math.sin(gateIndex*1.7)*Math.min(105,H*0.1);
@@ -187,23 +226,25 @@
     }
     gates.forEach(function(g){g.x-=speed*dt;});
     gates=gates.filter(function(g){return g.x>-70;});
-    var radius=16+air*48, by=py-65-radius;
+    var radius=16+air*48, by=py-MOUTH_UP-14-radius*1.08;
     function touches(cx,cy,r,g,ry){
       ry=ry||r;
       var nx=Math.max(g.x,Math.min(cx,g.x+58));
       var topY=Math.min(cy,g.top), bottomY=Math.max(cy,g.bottom);
       return (cx-nx)*(cx-nx)/(r*r)+(cy-topY)*(cy-topY)/(ry*ry)<1 || (cx-nx)*(cx-nx)/(r*r)+(cy-bottomY)*(cy-bottomY)/(ry*ry)<1;
     }
-    if(by-radius*1.08<0 || py+48>H || gates.some(function(g){return touches(155,by,radius,g,radius*1.08)||touches(155,py+4,28,g,44);})) {
-      state=S.RESULT; held=false; noiseHit(0.18,450,0.09); stopMic();
+    if(by-radius*1.08<0 || py+48>H || gates.some(function(g){return touches(BX,by,radius,g,radius*1.08)||touches(155,py+4,28,g,44);})) {
+      popBalloon();
+      return;
     }
+    gates.forEach(function(g){if(!g.passed && g.x+58<100){g.passed=true;score++;}});
   }
 
   /* ============ 入力 ============
      タップとスペースキーで同じことができるようにする。
      x が null のときはキー操作（場所を指さない）。 */
   function down(x, y) {
-    if(state===S.INTRO)return;
+    if(state===S.INTRO||state===S.FALL)return;
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
@@ -260,7 +301,7 @@
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    window.zResultActions.x({ text: score + "点でした #声の風船" });
+    window.zResultActions.x({ text: score + "本くぐりました #声の風船" });
   }
 
   /* ============ 描画 ============ */
@@ -290,14 +331,19 @@
     ctx.fillStyle='#b4cfb9';
     for(var i=0;i<12;i++){var x=((i*73-distance*3)%880+880)%880-120;ctx.fillRect(x,H-55-(i%3)*18,55,120);}
     if(scene3d){
-      scene3d.render(ctx,canvas,{W:W,H:H,y:py,vy:vy,radius:16+air*48,time:T,gates:gates});
+      scene3d.render(ctx,canvas,{W:W,H:H,y:py,vy:vy,radius:16+air*48,time:T,gates:gates,level:level,doll:doll,pose:pose(),fallTime:fallTime,burst:burst});
     }else{
     gates.forEach(function(g){
       ctx.fillStyle='#3b5960';roundRect(g.x, -30,58,g.top+30,12);ctx.fill();roundRect(g.x,g.bottom,58,H-g.bottom+30,12);ctx.fill();
       ctx.fillStyle='#ffc86b';ctx.fillRect(g.x-5,g.top-16,68,16);ctx.fillRect(g.x-5,g.bottom,68,16);
       ctx.fillStyle='rgba(255,255,255,.16)';ctx.fillRect(g.x+8,0,8,g.top-16);ctx.fillRect(g.x+8,g.bottom+16,8,H);
     });
-    var radius=16+air*48, by=py-65-radius;
+    if(doll){
+      ctx.strokeStyle='#314858';ctx.lineWidth=10;ctx.lineCap='round';
+      doll.links.slice(0,10).forEach(function(l){var a=doll.points[l.a],b=doll.points[l.b];ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();});
+      ctx.fillStyle='#e7a67d';ellipse(doll.points[2].x,doll.points[2].y,20,23);
+    }else{
+    var radius=16+air*48, by=py-MOUTH_UP-14-radius*1.08;
     ctx.strokeStyle='#3c4a51';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(155,by+radius);ctx.quadraticCurveTo(148+Math.sin(T*4)*5,py-55,155,py-17);ctx.stroke();
     ctx.save();ctx.translate(155,py);ctx.rotate(Math.max(-0.18,Math.min(0.18,vy/700)));
     ctx.strokeStyle='#263a4c';ctx.lineWidth=10;ctx.lineCap='round';
@@ -312,12 +358,8 @@
     ctx.fillStyle='#d63c5c';ctx.beginPath();ctx.moveTo(155,by+radius);ctx.lineTo(149,by+radius+9);ctx.lineTo(161,by+radius+9);ctx.fill();
     ctx.fillStyle='rgba(255,255,255,.65)';ellipse(155-radius*.35,by-radius*.4,radius*.13,radius*.25);
     }
-    // マイクの状態と入力音量は、文字を増やさず絵で示す。
-    ctx.save();ctx.translate(42,48);ctx.strokeStyle=micError?'#aa5262':'#365664';ctx.fillStyle=mic?'#365664':'#ffffff';
-    roundRect(-6,-15,12,23,6);ctx.fill();ctx.lineWidth=3;ctx.beginPath();ctx.arc(0,1,12,0,Math.PI);ctx.moveTo(0,13);ctx.lineTo(0,20);ctx.moveTo(-7,20);ctx.lineTo(7,20);ctx.stroke();
-    if(micError){ctx.beginPath();ctx.moveTo(-17,17);ctx.lineTo(17,-17);ctx.stroke();}
-    for(var j=0;j<5;j++){ctx.fillStyle=level>(j/5)?'#ee6473':'rgba(54,86,100,.18)';roundRect(25+j*8,12-j*4,5,8+j*4,2);ctx.fill();}ctx.restore();
-    if(state===S.PLAY){ctx.fillStyle='#365664';ctx.font='800 34px sans-serif';ctx.textAlign='right';ctx.fillText(String(score),W-28,60);}
+    }
+    if(state===S.PLAY||state===S.FALL){ctx.fillStyle='#365664';ctx.font='800 34px sans-serif';ctx.textAlign='right';ctx.fillText(String(score),W-28,60);}
     if(state===S.INTRO){ctx.fillStyle='#fff';roundRect(150,H-98,240,68,34);ctx.fill();ctx.fillStyle='#16202e';ctx.font='bold 28px sans-serif';ctx.textAlign='center';ctx.fillText('START',270,H-54);}
 
     if (state === S.RESULT) drawResult();
@@ -371,7 +413,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, W: W, H: H, y:py, vy:vy, air:air, level:level, gates:gates.map(function(g){return {x:g.x,top:g.top,bottom:g.bottom};}), micPending:micPending, micError:micError, threeD:!!scene3d }; },
+    now: function () { return { state: state, score: score, W: W, H: H, y:py, vy:vy, air:air, level:level, gates:gates.map(function(g){return {x:g.x,top:g.top,bottom:g.bottom};}), micPending:micPending, micError:micError, threeD:!!scene3d, fallTime:fallTime, doll:doll?doll.points.map(function(p){return {x:p.x,y:p.y};}):null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };

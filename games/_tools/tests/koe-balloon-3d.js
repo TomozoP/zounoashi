@@ -6,7 +6,7 @@ const hook=`window.__check={scene:function(){return scene3d;},setup:function(hei
   H=height;canvas.width=540;canvas.height=H;newRound();air=amount;py=H*.54;
   gates=[{x:320,top:py-220,bottom:py+140}];draw();
 },intro:function(){state=S.INTRO;draw();},result:function(){state=S.RESULT;draw();},
-crash:function(){gates=[{x:140,top:py-65,bottom:H}];update(1/60);draw();}};`;
+voice:function(v){level=v;draw();},crash:function(){gates=[{x:140,top:py-65,bottom:H}];update(1/60);draw();}};`;
 const runner=`<script>window.__recordManual=true;(async()=>{try{
 function check(ok,msg){if(!ok)throw Error(msg);}
 const c=document.getElementById('c'),p=window.__probe,t=window.__check;
@@ -30,7 +30,15 @@ t.setup(960,.5);
 async function save(name){await fetch('/__image/'+name,{method:'POST',body:await new Promise(r=>c.toBlob(r))});}
 await save('play.png');t.intro();await save('start.png');t.result();await save('result.png');
 check(!document.getElementById('retry-button').hidden&&!document.getElementById('share-button').hidden,'結果の操作ボタン');
-t.setup(960,.5);t.crash();check(p.now().state==='result','柱への衝突');
+t.setup(960,.5);
+const baseColor=scene.face.material.color.clone();t.voice(1);check(scene.face.material.color.equals(baseColor),'以前の顔色を保つ');
+const mouth=scene.mouth.getWorldPosition(new THREE.Vector3());
+check(scene.neck.position.y>mouth.y+25&&scene.rope.visible,'風船が頭上でひもにつながる');
+await save('blow.png');
+t.crash();check(p.now().state==='fall','衝突後に落下しない');check(!scene.balloon.visible,'破裂後も風船がある');
+const before=p.now().doll[0].y;p.step(35);check(p.now().doll[0].y>before,'人が落下していない');await save('fall.png');
+p.step(110);check(p.now().state==='result','落下後に結果へ移らない');
+check(p.now().doll.every(j=>Number.isFinite(j.x)&&Number.isFinite(j.y)),'関節が壊れている');
 await fetch('/__done',{method:'POST',body:'3種類の縦横比・立体の投影位置・4倍の風船・柱への衝突・録画画面の合成を確認'});
 }catch(e){await fetch('/__fail',{method:'POST',body:e.stack});}})();</script>`;
 const server=http.createServer((req,res)=>{
