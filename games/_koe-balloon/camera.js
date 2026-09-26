@@ -14,11 +14,11 @@
     return loading;
   }
   function FaceSteering(){
-    this.stream=null;this.video=null;this.model=null;this.status='idle';this.vector=0;
+    this.box=null;this.stream=null;this.video=null;this.model=null;this.status='idle';this.vector=0;
     this.found=false;this.neutral=null;this.centers=[];this.seen=-Infinity;this.last=-Infinity;this.epoch=0;this.previousFrame=-1;
   }
   FaceSteering.prototype.stop=function(){
-    this.epoch++;if(this.stream)this.stream.getTracks().forEach(function(t){t.stop();});
+    this.box=null;this.epoch++;if(this.stream)this.stream.getTracks().forEach(function(t){t.stop();});
     if(this.video){this.video.pause();this.video.srcObject=null;}
     this.stream=null;this.video=null;this.vector=0;this.found=false;this.status='idle';
   };
@@ -44,6 +44,7 @@
   FaceSteering.prototype.accept=function(detections,width,now){
     // 複数の顔が映る場合は一番大きい顔を使う。
     var box=detections.map(function(d){return d.boundingBox;}).filter(Boolean).sort(function(a,b){return b.width*b.height-a.width*a.height;})[0];
+    this.box=box||null;
     if(!box){if(now-this.seen>350){this.vector=0;this.found=false;}return;}
     var center=(box.originX+box.width*.5)/width;
     this.seen=now;
@@ -60,6 +61,9 @@
     var x=18,y=18,w=180,h=w*v.videoHeight/v.videoWidth;
     ctx.save();ctx.fillStyle='#16202e';ctx.fillRect(x-3,y-3,w+6,h+6);
     ctx.translate(x+w,y);ctx.scale(-1,1);ctx.drawImage(v,0,0,w,h);ctx.restore();
+    ctx.save();ctx.strokeStyle='#42ffb1';ctx.lineWidth=3;
+    var b=this.box;if(b&&performance.now()-this.seen<350)ctx.strokeRect(x+w-(b.originX+b.width)*w/v.videoWidth,y+b.originY*h/v.videoHeight,b.width*w/v.videoWidth,b.height*h/v.videoHeight);
+    ctx.fillStyle='#16202e';ctx.fillRect(x-3,y+h,w+6,24);ctx.fillStyle='#fff';ctx.font='bold 13px sans-serif';ctx.textAlign='left';ctx.fillText(this.status==='loading'?'顔検出の準備中':this.found?'顔を検出中':'顔を探しています',x+4,y+h+17);ctx.restore();
   };
   FaceSteering.prototype.tick=function(now){
     if(this.status!=='active')return;
