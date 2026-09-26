@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>はばたき</title>
+<title>声の風船</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -37,7 +37,7 @@
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* はばたき
+/* 声の風船
 
    書き換えるところの目印は3つ。
      ▼UPDATE … 進行と入力
@@ -60,8 +60,8 @@
      どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
   var W = 540, H = 960;
   var scene3d=null;
-  if(window.THREE && window.WingScene){
-    try { scene3d=new window.WingScene(); }
+  if(window.THREE && window.BalloonScene){
+    try { scene3d=new window.BalloonScene(); }
     catch(e){console.warn('立体描画を起動できないため平面で表示します。',e);}
   }
   function layout() {
@@ -129,18 +129,36 @@
   var S = { INTRO: "intro", PLAY: "play", FALL: "fall", RESULT: "result" };
   var state, score, T, held, keyMode = false;
 
-  var px=270,py=480,vx=0,vy=0,altitude=0,scroll=0,gates=[],gateIndex=0;
-  var leftHeld=false,rightHeld=false,dragX=null,steer=0,wings=[.3,.3],stroke=0;
-  var camera=window.WingInput?new window.WingInput():null;
-  var fallen=null,fallTime=0;
-  function requestInputs(){if(camera)camera.start();}
-  function stopInputs(){if(camera)camera.stop();}
+  var px=270,py=480,vx=0,vy=0,altitude=0,scroll=0,air=.5,level=0,distance=0,gates=[],gateIndex=0;
+  var leftHeld=false,rightHeld=false,dragX=null,steer=0;
+  var camera=window.FaceSteering?new window.FaceSteering():null;
+  var BX=18*Math.sin(.5)*1.35, MOUTH_UP=(-9*Math.cos(.8)+18*Math.cos(.5)*Math.sin(.8))*1.35;
+  var fallen=null, fallTime=0, burst=null;
+  var mic=null, micSource=null, analyser=null, samples=null, micPending=false, micError=false;
+  function stopMic() { if(micSource){micSource.disconnect();micSource=null;} if(mic) mic.getTracks().forEach(function(t){t.stop();}); mic=null; analyser=null; }
+  function requestInputs(){requestMic();if(camera)camera.start();}
+  function stopInputs(){stopMic();if(camera)camera.stop();}
+  async function requestMic() {
+    if(micPending || mic) return;
+    if(!window.navigator.mediaDevices || !window.navigator.mediaDevices.getUserMedia || !AC) { micError=true; return; }
+    micPending=true; micError=false;
+    try {
+      var stream=await window.navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+      if(document.hidden){stream.getTracks().forEach(function(t){t.stop();});return;}
+      mic=stream; analyser=AC.createAnalyser(); analyser.fftSize=1024;
+      samples=new Float32Array(analyser.fftSize);
+      micSource=AC.createMediaStreamSource(stream); micSource.connect(analyser);
+      stream.getTracks().forEach(function(t){t.onended=function(){stopMic();micError=true;};});
+    } catch(e) { stopMic(); micError=true; }
+    finally { micPending=false; }
+  }
   window.addEventListener('pagehide',stopInputs);
-  document.addEventListener('visibilitychange',function(){if(document.hidden){stopInputs();held=false;leftHeld=rightHeld=false;dragX=null;}else if(state===S.PLAY){requestInputs();}});
-  function flap(pulses){
-    if(state!==S.PLAY)return;
-    var power=pulses[0]+pulses[1];if(!power)return;
-    vy=Math.min(260,vy+power*145);noiseHit(.13,450,.025);
+  document.addEventListener('visibilitychange',function(){if(document.hidden){stopInputs();held=false;leftHeld=rightHeld=false;dragX=null;}else if(state===S.PLAY && !micError){requestInputs();}});
+  function readVoice() {
+    if(!analyser) return 0;
+    analyser.getFloatTimeDomainData(samples);
+    var sum=0; for(var i=0;i<samples.length;i++)sum+=samples[i]*samples[i];
+    return Math.max(0,Math.min(1,(Math.sqrt(sum/samples.length)-0.012)/0.075));
   }
   var CY;                                      /* 高さから決まる置き場所 */
   function place() {
@@ -154,20 +172,21 @@
     score = 0;
     T = 0;
     held = false;
-    px=270;py=H*.68;vx=vy=altitude=scroll=0;wings=[.3,.3];stroke=0;gates=[];gateIndex=0;
-    leftHeld=rightHeld=false;dragX=null;steer=0;fallen=null;fallTime=0;addGates();
+    px=270;py=H*.68;vx=vy=altitude=scroll=0;air=.5;level=distance=0;gates=[];gateIndex=0;
+    leftHeld=rightHeld=false;dragX=null;steer=0;fallen=null;fallTime=0;burst=null;addGates();
   }
 
   function addGates(){
     while(gateIndex*320+360<scroll+H+700){
-      var center=270;
-      gates.push({height:360+gateIndex*320,left:center-135,right:center+135,passed:false});gateIndex++;
+      var center=270+Math.sin(gateIndex*1.65)*120;
+      gates.push({height:360+gateIndex*320,left:center-110,right:center+110,passed:false});gateIndex++;
     }
   }
   function visibleGates(){return gates.map(function(g){return {y:H*.68-g.height+scroll,left:g.left,right:g.right};});}
-  function fallPlayer(){
+  function popBalloon(){
     if(state!==S.PLAY)return;
-    state=S.FALL;held=false;fallTime=0;if(camera)camera.stop(true);noiseHit(.12,1300,.13);
+    state=S.FALL;held=false;level=0;fallTime=0;stopInputs();noiseHit(.12,1300,.13);
+    burst={x:px+BX,y:py-MOUTH_UP-14-(16+air*48)*1.08,r:16+air*48};
     fallen={x:px,y:py,vx:vx*.7+60,vy:-vy-70,angle:0,spin:3.4};
   }
   function fallStep(dt){
@@ -177,32 +196,25 @@
     if(fallTime>2)state=S.RESULT;
   }
   function update(dt){
-    if(document.hidden)return;
+    if(document.hidden||micPending)return;
     if(state===S.FALL){fallStep(dt);return;}
     if(state!==S.PLAY)return;
-    if(camera){camera.tick(performance.now());if(camera.status==='error'||camera.status==='loading'||(camera.status==='active'&&!camera.found))return;}
-    T+=dt;
-    if(camera&&camera.status==='active'){wings=camera.wings.slice();flap(camera.takeFlaps());}
-    else{stroke=Math.max(0,stroke-dt);var angle=stroke>.2?-1.05:.3;wings=[angle,angle];}
-    steer=leftHeld?-1:rightHeld?1:dragX!==null?Math.max(-1,Math.min(1,(dragX-px)/70)):0;
-    vx+=(steer*215-vx)*Math.min(1,dt*7);px=Math.max(112,Math.min(W-112,px+vx*dt));
-    vy+=(-280-vy*.65)*dt;altitude+=vy*dt;
-    scroll=Math.max(scroll,altitude-H*.25);py=H*.68-altitude+scroll;
+    if(camera){camera.tick(performance.now());if(camera.status==='loading'||(camera.status==='active'&&!camera.found))return;}
+    T+=dt;level=held?1:readVoice();
+    air=Math.max(0,Math.min(1,air+(level>.06?5+level*5:-10)*dt));
+    steer=leftHeld?-1:rightHeld?1:dragX!==null?Math.max(-1,Math.min(1,(dragX-px)/70)):camera?camera.vector:0;
+    vx+=(steer*215-vx)*Math.min(1,dt*7);px=Math.max(76,Math.min(W-76,px+vx*dt));
+    vy+=(air*560-170-vy*2.7)*dt;altitude+=vy*dt;
+    scroll=Math.max(scroll,altitude-H*.25);distance=scroll/10;py=H*.68-altitude+scroll;
     addGates();gates=gates.filter(function(g){return g.height>scroll-H;});
+    var radius=16+air*48,by=py-MOUTH_UP-14-radius*1.08;
     function touches(cx,cy,rx,ry,g){
       var y=H*.68-g.height+scroll,ny=Math.max(y-20,Math.min(cy,y+20));
       var lx=Math.min(cx,g.left),rxp=Math.max(cx,g.right);
       return (cx-lx)*(cx-lx)/(rx*rx)+(cy-ny)*(cy-ny)/(ry*ry)<1 || (cx-rxp)*(cx-rxp)/(rx*rx)+(cy-ny)*(cy-ny)/(ry*ry)<1;
     }
-    if(py>H+65||gates.some(function(g){
-      if(touches(px,py+12,30,62,g))return true;
-      return wings.some(function(angle,i){
-        var side=i===0?-1:1;
-        for(var t=0;t<=1;t+=.2)if(touches(px+side*(24+80*t*Math.cos(angle)),py-80*t*Math.sin(angle),12,16,g))return true;
-        return false;
-      });
-    })){fallPlayer();return;}
-    gates.forEach(function(g){if(!g.passed&&altitude-85>g.height+20){g.passed=true;score++;}});
+    if(py>H+35||gates.some(function(g){return touches(px+BX,by,radius,radius*1.08,g)||touches(px,py,30,34,g);})){popBalloon();return;}
+    gates.forEach(function(g){if(!g.passed&&altitude-34>g.height+20){g.passed=true;score++;}});
   }
 
   /* ============ 入力 ============
@@ -216,9 +228,9 @@
       if (hit === "retry") { newRound(); requestInputs(); }
       return;
     }
-    if(camera&&camera.status==='error'){requestInputs();return;}
-    if(!held){flap([1,1]);stroke=.4;}
-    held=true;if(x!=null)dragX=x;
+    held = true;if(x!=null)dragX=x;
+    /* ▼UPDATE: 押したときの処理 */
+    if(!mic && !micPending) requestInputs();
   }
   function move(x, y) {
     if (state !== S.PLAY || !held) return;
@@ -267,7 +279,7 @@
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
-    window.zResultActions.x({ text: score + "本くぐりました #はばたき" });
+    window.zResultActions.x({ text: score + "本くぐりました #声の風船" });
   }
 
   /* ============ 描画 ============ */
@@ -298,17 +310,14 @@
     for(var i=0;i<12;i++){var x=i*73-120;ctx.fillRect(x,H-55-(i%3)*18+scroll,55,120);}
     var visible=visibleGates();
     if(scene3d){
-      scene3d.render(ctx,canvas,{W:W,H:H,x:px,y:py,vy:vy,wings:wings,time:T,gates:visible,portrait:!!(camera&&camera.portrait),fallen:fallen,fallTime:fallTime});
+      scene3d.render(ctx,canvas,{W:W,H:H,x:px,y:py,vy:vy,radius:16+air*48,time:T,gates:visible,level:level,fallen:fallen,fallTime:fallTime,burst:burst});
     }else{
       visible.forEach(function(g){ctx.fillStyle='#456873';ctx.fillRect(0,g.y-20,g.left,40);ctx.fillRect(g.right,g.y-20,W-g.right,40);ctx.fillStyle='#ffc563';ctx.fillRect(g.left-10,g.y-20,10,40);ctx.fillRect(g.right,g.y-20,10,40);});
       var fx=fallen?fallen.x:px,fy=fallen?fallen.y:py;
-      ctx.save();ctx.translate(fx,fy);ctx.rotate(fallen?fallen.angle:0);
-      wings.forEach(function(angle,i){ctx.save();ctx.scale(i===0?-1:1,1);ctx.translate(24,0);ctx.rotate(-angle);ctx.fillStyle='#fff8df';ellipse(40,0,48,16);ctx.restore();});
-      if(!camera||!camera.portrait){ctx.fillStyle='#365664';ellipse(0,22,23,40);ctx.fillStyle='#e7a67d';ellipse(0,-28,23,28);}
-      ctx.restore();
+      ctx.fillStyle=level>.1?'#ef5660':'#e7a67d';ellipse(fx,fy,28,32);
+      ctx.fillStyle='#263a4c';ellipse(fx-8,fy-6,3,4);ellipse(fx+8,fy-6,3,4);
+      if(!fallen){var r=16+air*48;ctx.fillStyle='#f04b68';ellipse(px+BX,py-MOUTH_UP-14-r*1.08,r,r*1.08);}
     }
-    if(camera)camera.drawPlayer(ctx,fallen?fallen.x:px,fallen?fallen.y:py,fallen?fallen.angle:0);
-    if(camera&&camera.drawDetection)camera.drawDetection(ctx,performance.now());
     if(state===S.PLAY||state===S.FALL){ctx.fillStyle='#365664';ctx.font='800 34px sans-serif';ctx.textAlign='right';ctx.fillText(String(score),W-28,60);}
     if(state===S.INTRO){ctx.fillStyle='#fff';roundRect(150,H-98,240,68,34);ctx.fill();ctx.fillStyle='#16202e';ctx.font='bold 28px sans-serif';ctx.textAlign='center';ctx.fillText('START',270,H-54);}
 
@@ -363,7 +372,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, W: W, H: H, y:py, vy:vy, wings:wings.slice(), x:px,altitude:altitude,scroll:scroll,steer:steer,gates:gates.map(function(g){return {height:g.height,left:g.left,right:g.right,passed:g.passed};}), threeD:!!scene3d, fallTime:fallTime, fallen:fallen?{x:fallen.x,y:fallen.y,angle:fallen.angle}:null,camera:camera?{status:camera.status,found:camera.found,vector:camera.vector}:null }; },
+    now: function () { return { state: state, score: score, W: W, H: H, y:py, vy:vy, air:air, level:level, x:px,altitude:altitude,scroll:scroll,steer:steer,gates:gates.map(function(g){return {height:g.height,left:g.left,right:g.right,passed:g.passed};}), micPending:micPending, micError:micError, threeD:!!scene3d, fallTime:fallTime, fallen:fallen?{x:fallen.x,y:fallen.y,angle:fallen.angle}:null,camera:camera?{status:camera.status,found:camera.found,vector:camera.vector}:null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
