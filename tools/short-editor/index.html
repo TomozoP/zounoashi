@@ -270,6 +270,7 @@ aside .sec>h3:before{content:none}
         <div class="subgroup">
           <h4>録音</h4>
           <label class="chk"><input type="checkbox" id="optMuteRec" checked>録音中は再生音を消す</label>
+          <label class="chk"><input type="checkbox" id="optTrimRec" checked>録音後に喋っていない間を詰める</label>
         </div>
       </div>
 
@@ -978,23 +979,60 @@ async function onRecStop() {
   const clip = { id: nid(), buf: bid, in: 0, out: raw.duration, at: recAt, gain: 1 };
   aclips.push(clip);
   setSel('a', clip.id);
+  if ($('optTrimRec').checked) { const ids = trimSilence(clip); if (ids) { sel = new Set(ids.map(i => keyOf('a', i))); selected = { type: 'a', id: ids[0] }; } }
   playhead = recAt;
   changed(true);
 }
 // 長い文を字幕1枚ぶんずつに分けて時間を按分
+const jaSeg = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('ja', { granularity: 'word' }) : null;
+const FUNC_WORDS = new Set('は が を に で と も へ の や か ね よ な て た だ し ば から まで より けど けれど ので のに です でし ます まし ない なかっ した して する れる られる せる させる たい ながら って っ ん'.split(' '));
+const START_WORDS = new Set('ただし でも だから じゃあ じゃ そして それで それから あと まず また さらに しかも なので つまり たとえば こんな そんな あんな めちゃくちゃ めっちゃ ちょっと すごく とても もう まだ さっそく'.split(' '));
+const isHira = c => /[ぁ-ゖ]/.test(c);
+const isContent = c => /[\p{sc=Han}ァ-ヺ一-龯A-Za-z0-9０-９Ａ-Ｚａ-ｚ々]/u.test(c);
+// 各位置で改行したときのペナルティ（小さいほど文節の切れ目らしい）
+function breakPenalties(s) {
+  const ch = [...s], n = ch.length, pen = new Array(n + 1).fill(12);
+  const segB = new Map();
+  if (jaSeg) { let i = 0; for (const x of jaSeg.segment(s)) { const len = [...x.segment].length; if (i > 0) segB.set(i, x.segment); i += len; } }
+  for (let i = 1; i < n; i++) {
+    const a = ch[i - 1], b = ch[i];
+    if (/[ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮー、。，．,.!?！？」』）)]/.test(b) || /[「『（(]/.test(a)) { pen[i] = Infinity; continue; }
+    if (/[、，, 　]/.test(a)) pen[i] = 0;
+    else if (isHira(a) && isContent(b)) pen[i] = a === 'の' ? 2 : 0.5;
+    else if (segB.has(i)) {
+      const w = segB.get(i);
+      if (START_WORDS.has(w)) pen[i] = /(ました|ます|です|でした|ましょう|だ|よ|ね)$/.test(ch.slice(0, i).join('')) ? -1 : 1;
+      else if (isHira(b) && !FUNC_WORDS.has(w) && [...w].length >= 2 && isHira(a)) pen[i] = 3;
+      else if (!(isContent(a) && isContent(b)) && !FUNC_WORDS.has(w)) pen[i] = 4;
+      else pen[i] = 8;
+    }
+  }
+  // 「この」「その」などで行を終えない
+  for (const [i] of segB) { const prev = ch.slice(0, i).join(''); if (/(この|その|あの|どの|こんな|そんな|あんな)$/.test(prev) && pen[i] < 6) pen[i] = 6; }
+  return { ch, pen };
+}
+function wrapSentence(s, max) {
+  const { ch, pen } = breakPenalties(s), n = ch.length;
+  if (n <= max) return [s];
+  const best = new Array(n + 1).fill(Infinity), from = new Array(n + 1).fill(-1); best[0] = 0;
+  for (let j = 1; j <= n; j++) {
+    if (j < n && pen[j] === Infinity) continue;
+    for (let i = Math.max(0, j - max); i < j; i++) {
+      if (best[i] === Infinity) continue;
+      const len = j - i, slack = (max - len) / max;
+      const c = best[i] + 1 + slack * slack * 3 + (len < 3 ? 6 : 0) + (j < n ? pen[j] : 0);
+      if (c < best[j]) { best[j] = c; from[j] = i; }
+    }
+  }
+  if (best[n] === Infinity) { const out = []; for (let i = 0; i < n; i += max) out.push(ch.slice(i, i + max).join('')); return out; }
+  const out = []; for (let j = n; j > 0; j = from[j]) out.unshift(ch.slice(from[j], j).join('').trim());
+  return out;
+}
 function splitText(text, max) {
   text = text.replace(/\s+/g, ' ').trim();
   const sent = text.split(/(?<=[。！？!?])/).map(s => s.trim()).filter(Boolean);
   const out = [];
-  for (let s of sent) {
-    while ([...s].length > max) {
-      const chars = [...s]; let cut = -1;
-      for (let i = Math.min(max, chars.length - 1); i >= Math.floor(max * 0.5); i--) if ('、, '.includes(chars[i - 1])) { cut = i; break; }
-      if (cut < 0) cut = Math.ceil(chars.length / Math.ceil(chars.length / max));
-      out.push(chars.slice(0, cut).join('')); s = chars.slice(cut).join('').trim();
-    }
-    if (s) out.push(s);
-  }
+  for (const s of sent) out.push(...wrapSentence(s, max));
   return out.map(x => x.replace(/[。、,]+$/, '').trim()).filter(Boolean);
 }
 function addSubsFromSegs(segs) {
@@ -1008,6 +1046,67 @@ function addSubsFromSegs(segs) {
   for (let i = 0; i < res.length - 1; i++) if (res[i].end > res[i + 1].start) res[i].end = res[i + 1].start;
   subs.push(...res.filter(s => s.end - s.start > 0.05));
   subs.sort((a, b) => a.start - b.start);
+}
+
+/* ---------- 無音を詰める ---------- */
+// バッファの [from, to] 秒のうち、声があって残す範囲の一覧を返す
+function speechRanges(raw, from, to, pad = 0.15, minGap = 0.4) {
+  const sr = raw.sampleRate, fr = Math.round(sr * 0.02), chs = [];
+  for (let c = 0; c < raw.numberOfChannels; c++) chs.push(raw.getChannelData(c));
+  const i0 = Math.floor(from * sr), n = Math.max(0, Math.floor((Math.floor(to * sr) - i0) / fr));
+  if (n < 5) return [[from, to]];
+  const db = new Float32Array(n);
+  for (let f = 0; f < n; f++) {
+    let sum = 0; const a = i0 + f * fr;
+    for (const d of chs) for (let i = a; i < a + fr; i++) sum += d[i] * d[i];
+    db[f] = 10 * Math.log10(sum / (fr * chs.length) + 1e-10);
+  }
+  const sorted = [...db].sort((a, b) => a - b), floor = sorted[Math.floor(n * 0.1)], peak = sorted[Math.floor(n * 0.95)];
+  if (peak - floor < 10) return [[from, to]];   // 声と無音の差がない
+  const thr = floor + Math.max(6, (peak - floor) * 0.3);
+  const voiced = []; let st = -1;
+  for (let f = 0; f <= n; f++) {
+    const on = f < n && db[f] > thr;
+    if (on && st < 0) st = f;
+    if (!on && st >= 0) { voiced.push([st * 0.02, f * 0.02]); st = -1; }
+  }
+  if (!voiced.length) return [[from, to]];
+  // 息つぎくらいの短い間はつないだまま
+  const merged = [voiced[0].slice()];
+  for (const v of voiced.slice(1)) { const m = merged[merged.length - 1]; if (v[0] - m[1] < minGap) m[1] = v[1]; else merged.push(v.slice()); }
+  const len = to - from;
+  return merged.filter(([a, b]) => b - a >= 0.06)
+    .map(([a, b]) => [from + Math.max(0, a - pad), from + Math.min(len, b + pad)]);
+}
+// クリップの喋っていない間を詰めて、いくつかのクリップに分ける。中の字幕も一緒にずらす
+function trimSilence(clip) {
+  const raw = buffers.get(clip.buf)?.raw; if (!raw) return null;
+  const keeps = speechRanges(raw, clip.in, clip.out);
+  if (!keeps.length) return null;
+  const cut = (clip.out - clip.in) - keeps.reduce((s, [a, b]) => s + b - a, 0);
+  if (cut < 0.05) return null;
+  const t0 = clip.at, t1 = clip.at + clip.out - clip.in;
+  const map = t => { const r = clip.in + (t - t0); let x = 0; for (const [a, b] of keeps) x += Math.max(0, Math.min(b, r) - a); return t0 + x; };
+  for (const s of subs) {
+    if (s.start >= t1 - 1e-3 || s.end <= t0 + 1e-3) continue;
+    const a = s.start > t0 ? map(s.start) : s.start, b = s.end < t1 ? map(s.end) : s.end - cut;
+    s.start = a; s.end = Math.max(b, a + 0.3);
+  }
+  aclips.splice(aclips.indexOf(clip), 1);
+  const ids = []; let at = t0;
+  keeps.forEach(([a, b], i) => { const c = { ...clip, id: i ? nid() : clip.id, in: a, out: b, at }; aclips.push(c); ids.push(c.id); at += b - a; });
+  return ids;
+}
+function trimSel() {
+  const items = selItems().filter(([t, o]) => t === 'a' && laneOf(o) === 'vo');
+  if (!items.length) return;
+  commit();
+  const before = items.reduce((s, [, o]) => s + o.out - o.in, 0), ids = [];
+  for (const [, o] of items) ids.push(...(trimSilence(o) || [o.id]));
+  sel = new Set(ids.map(i => keyOf('a', i))); selected = { type: 'a', id: ids[0] };
+  const after = ids.reduce((s, i) => { const o = find('a', i); return s + o.out - o.in; }, 0);
+  changed(true);
+  toast(before - after > 0.05 ? `${(before - after).toFixed(1)}秒詰めました` : '詰められる間がありませんでした');
 }
 
 /* ---------- Whisper ---------- */
@@ -1470,6 +1569,7 @@ function renderInspector() {
       (clips.length ? '<div class="row"><label>音量</label><input type="range" id="iG" min="0" max="2" step="0.05"><span class="val" id="iGV"></span></div>' : '');
     const texts = many.filter(([t]) => t === 's').map(([t, o]) => o);
     if (texts.length) textControls(el, texts);
+    if (many.some(([t, o]) => t === 'a' && laneOf(o) === 'vo')) { el.insertAdjacentHTML('beforeend', '<button id="iTrim" style="width:100%">喋っていない間を詰める</button>'); $('iTrim').onclick = trimSel; }
     if (clips.length) {
       const iG = $('iG'); iG.value = clips[0].gain ?? 1; $('iGV').textContent = Math.round(iG.value * 100) + '%';
       let first = true;
@@ -1502,6 +1602,7 @@ function renderInspector() {
   let first = true;
   iG.oninput = () => { if (first) { undoStack.push(snap()); redoStack.length = 0; first = false; } o.gain = +iG.value; $('iGV').textContent = Math.round(o.gain * 100) + '%'; mixDirty = true; };
   iG.onchange = () => { first = true; renderTimeline(); };
+  if (!isV && laneOf(o) === 'vo') { el.insertAdjacentHTML('beforeend', '<button id="iTrim" style="width:100%">喋っていない間を詰める</button>'); $('iTrim').onclick = trimSel; }
 }
 // 文字の見せ方（1つでも、まとめて選んでいても同じ）
 function textControls(el, items) {
