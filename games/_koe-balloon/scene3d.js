@@ -1,4 +1,4 @@
-/* 人物・風船・柱を立体で描き、録画にも使う主画面へ合成する。
+/* 人物・噴射装置・柱を立体で描き、録画にも使う主画面へ合成する。
    模型はすべて基本図形から自作。three.js は隣の既存配布物（MIT）を使う。 */
 (function(global){
   'use strict';
@@ -48,12 +48,22 @@
     });
     this.hands=[4,6].map(function(i){return {index:i,mesh:self.part(p,self.ball,0xf0b792,0,0,3,5.5,6,5.5)};});
     this.feet=[8,10].map(function(i){return {index:i,mesh:self.part(p,self.ball,0x243846,0,0,3,7,5,10)};});
-    this.balloon=this.part(this.scene,this.ball,0xf04b68,155,-400,0,40,44,40,true);
-    this.neck=this.part(this.scene,new T.ConeGeometry(1,1,12),0xd83d59,155,-360,0,6,10,6,true);
-    this.rope=this.part(this.scene,this.tube,0x6b6060,155,-335,0,1.2,20,1.2);
+    this.pack=new T.Group();p.add(this.pack);
+    this.part(this.pack,this.box,0x405365,-8,0,-13,34,32,18,true);
+    this.flames=[];
+    [-1,1].forEach(function(side){
+      var x=side*20-6;
+      self.part(self.pack,self.tube,0x94afbf,x,1,-10,10,39,10,true);
+      self.part(self.pack,self.ball,0xe5bc54,x,21,-10,10,6,10,true);
+      self.part(self.pack,self.tube,0x263a49,x,-22,-10,8,9,8,true);
+      var flame=self.part(self.pack,new T.ConeGeometry(1,1,14),0xff922e,x,-42,-10,8,35,8);
+      flame.rotation.z=Math.PI;
+      var core=self.part(self.pack,new T.ConeGeometry(1,1,14),0xffefb6,x,-34,-3,4,18,4);
+      core.rotation.z=Math.PI;self.flames.push({outer:flame,core:core});
+    });
     this.up=new T.Vector3(0,1,0);
     this.fragments=[];
-    for(var i=0;i<12;i++)this.fragments.push(this.part(this.scene,new T.TetrahedronGeometry(1),0xf04b68,0,0,0,5,9,2,true));
+    for(var i=0;i<12;i++)this.fragments.push(this.part(this.scene,new T.TetrahedronGeometry(1),0xffba58,0,0,0,5,9,2,true));
     this.gateModels=[];
   }
   BalloonScene.prototype.makeGate=function(){
@@ -87,14 +97,15 @@
     var self=this;
     this.joints.forEach(function(j){var a=local(j.a),b=local(j.b),d=b.clone().sub(a);j.mesh.position.copy(a).add(b).multiplyScalar(.5);j.mesh.scale.y=d.length();j.mesh.quaternion.setFromUnitVectors(self.up,d.normalize());});
     this.hands.concat(this.feet).forEach(function(p){p.mesh.position.copy(local(p.index));p.mesh.position.z=3;});
-    var by=s.y-65-s.radius*1.08;
-    this.balloon.position.set(155,-by,0);
-    this.balloon.scale.set(s.radius,s.radius*1.08,s.radius);
-    this.neck.position.set(155,-by-s.radius*1.08-4,0);
-    var ropeTop=-by-s.radius*1.08-8,ropeBottom=-s.y+43;
-    this.rope.position.set(155,(ropeTop+ropeBottom)/2,0);
-    this.rope.scale.y=Math.max(1,ropeTop-ropeBottom);
-    this.balloon.visible=this.neck.visible=this.rope.visible=!s.doll;    this.fragments.forEach(function(m,i){
+    this.pack.position.copy(this.body.position);
+    this.pack.quaternion.copy(this.body.quaternion);
+    this.flames.forEach(function(f,i){
+      f.outer.visible=f.core.visible=!s.doll&&s.level>0;
+      var length=22+s.level*48+(Math.sin(s.time*65+i*2)+1)*6;
+      f.outer.scale.y=length;f.outer.position.y=-26-length/2;
+      f.core.scale.y=length*.58;f.core.position.y=-26-length*.29;
+    });
+    this.fragments.forEach(function(m,i){
       m.visible=!!s.doll&&s.fallTime<.65;if(!m.visible)return;
       var angle=i*Math.PI*2/12,t=s.fallTime;
       m.position.set(s.burst.x+Math.cos(angle)*(s.burst.r+180*t),-s.burst.y+Math.sin(angle)*(s.burst.r+180*t)-220*t*t,Math.sin(i)*20);
