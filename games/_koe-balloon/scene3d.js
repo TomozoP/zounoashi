@@ -105,6 +105,8 @@
     this.hands.concat(this.feet).forEach(function(p){p.mesh.visible=false;});
     this.head.position.copy(head);
     this.head.rotation.set(s.doll?s.fallTime*7:0,.5,s.doll?s.fallTime*5:0);
+    this.head.scale.setScalar(1+(s.scream||0)*.18);
+    if(s.scream)this.head.rotation.z=Math.sin(s.time*80+s.scream*40)*s.scream*.13;
     this.skin.color.copy(this.skinBase);
     this.cheeks.forEach(function(m){m.scale.set(0,0,0);});
     var self=this;
@@ -148,7 +150,7 @@
       var material=new global.THREE.MeshBasicMaterial({color:0xffb54c,transparent:true,opacity:.5,depthWrite:false});
       var blast=new global.THREE.Mesh(this.ball,material);this.scene.add(blast);this.blastModels.push(blast);
     }
-    this.blastModels.forEach(function(m,i){var e=blasts[i];m.visible=!!e;if(!e)return;m.position.set(e.x-s.scroll,-e.y,35);m.scale.set(25+e.age*230,25+e.age*230,15+e.age*30);m.material.opacity=Math.max(0,.6-e.age);});
+    this.blastModels.forEach(function(m,i){var e=blasts[i];m.visible=!!e;if(!e)return;m.position.set(e.x-s.scroll,-e.y,35);m.scale.set((e.radius||108)*Math.min(1,e.age*5+.15),(e.radius||108)*Math.min(1,e.age*5+.15),15+e.age*30);m.material.opacity=Math.max(0,.6-e.age);});
     this.renderer.render(this.scene,this.camera);
     ctx.drawImage(this.renderer.domElement,0,0,s.W,s.H);
   };
