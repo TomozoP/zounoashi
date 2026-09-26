@@ -33,5 +33,6 @@ window.DRAFT_GAMES = [
     "play": "games/_wiki-bingo/index.html",
     "full": true,
     "catch": "Wikipediaの記事でかなビンゴ"
-  }
+  },
+  {"type":"lab","tags":[],"id":"koe-balloon","title":"声の風船","year":2026,"date":"2026-09-26","plays":null,"url":"","img":"games/_koe-balloon/img/thumb.webp","play":"games/_koe-balloon/index.html","full":true,"catch":""},
 ];
