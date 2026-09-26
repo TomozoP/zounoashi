@@ -20,8 +20,8 @@ const g=load('games/_koe-balloon/index.html',{inject:`
   accept(stream);await pending;assert(!g.probe.now().micPending);
   g.dbg.volume=.005;assert.equal(g.dbg.read(),0,'小さい雑音を除く');
   g.dbg.volume=.09;assert.equal(g.dbg.read(),1,'声の音量を拾う');
-  g.step(60);assert(g.probe.now().air>.95,'マイク入力で風船がふくらむ');
-  g.dbg.volume=0;g.step(135);assert(g.probe.now().air<.3,'無音でしぼむ');
+  g.step(6);assert(g.probe.now().air>.95,'マイク入力で噴射');
+  g.dbg.volume=0;g.step(6);assert(g.probe.now().air<.3,'無音で停止');
   g.dbg.stop();assert.equal(stopped,1,'マイクを解放');
   g.dbg.setup(()=>Promise.reject(Error('拒否')));await g.dbg.request();
   assert(g.probe.now().micError);assert(!g.probe.now().micPending);

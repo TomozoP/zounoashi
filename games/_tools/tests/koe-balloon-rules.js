@@ -4,8 +4,10 @@ g.press(' ');g.key(' ');g.step(1);assert.equal(g.probe.now().air,1);
 g.key(' ',true);g.step(1);assert.equal(g.probe.now().air,0);
 g.dbg.crash();let p=g.probe.now();assert.equal(p.historyCount,1);assert(p.damage[0],'爆発が柱を削る');
 const first=p.doll[0].y;g.step(35);assert(g.probe.now().doll[0].y>first);
-g.step(120);assert.equal(g.probe.now().state,'result');
-g.press(' ');g.step(1);p=g.probe.now();assert.equal(p.historyCount,1);assert(p.damage[0]);assert(p.ghosts[0].x>155,'過去の自分は先行');
-for(let i=0;i<12;i++){g.dbg.crash();g.step(140);g.press(' ');}
+g.step(54);assert.equal(g.probe.now().state,'fall','1.5秒より前は落下中');g.step(2);assert.equal(g.probe.now().state,'play','1.5秒で自動再開');
+g.step(1);p=g.probe.now();assert.equal(p.historyCount,1);assert(p.damage[0]);assert(p.ghosts[0].x>155,'過去の自分は先行');
+for(let i=0;i<12;i++){g.dbg.crash();g.step(91);}
 assert.equal(g.probe.now().historyCount,10,'記録は直近10回まで');
 console.log('即時噴射・落下・爆発による削れ・先行する履歴・10回の上限を確認');
+
+const bottom=load('games/_koe-balloon/index.html',{inject:'window.__dbg={fall:function(){newRound();py=H-10;vy=200;popBalloon();}};'});bottom.dbg.fall();bottom.step(60);assert(bottom.probe.now().doll.every(p=>p.y>bottom.probe.now().H),'下端を越えて落ち続ける');

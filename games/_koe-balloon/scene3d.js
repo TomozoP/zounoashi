@@ -78,7 +78,18 @@
       var inset=self.part(g,self.box,0x658690,-11,0,22.2,5,1,.5);
       return {root:g,body:body,cap:cap,inset:inset};
     }
-    return {root:root,top:column(),bottom:column()};
+    var model={root:root,top:column(),bottom:column(),cuts:{value:Array.from({length:64},function(){return new T.Vector3(0,0,0);})},cutCount:{value:0},left:{value:0}};
+    root.traverse(function(mesh){if(!mesh.isMesh)return;
+      mesh.material=mesh.material.clone();
+      mesh.material.onBeforeCompile=function(shader){
+        shader.uniforms.craters=model.cuts;shader.uniforms.craterCount=model.cutCount;shader.uniforms.pillarLeft=model.left;
+        shader.vertexShader="varying vec3 craterWorld;\n"+shader.vertexShader;
+        shader.vertexShader=shader.vertexShader.replace("#include <project_vertex>","#include <project_vertex>\ncraterWorld=(modelMatrix*vec4(transformed,1.0)).xyz;");
+        shader.fragmentShader="varying vec3 craterWorld;uniform vec3 craters[64];uniform int craterCount;uniform float pillarLeft;\n"+shader.fragmentShader;
+        shader.fragmentShader=shader.fragmentShader.replace("#include <clipping_planes_fragment>","#include <clipping_planes_fragment>\nfor(int ci=0;ci<64;ci++){if(ci>=craterCount)break;vec2 delta=vec2(craterWorld.x-pillarLeft,-craterWorld.y)-craters[ci].xy;if(dot(delta,delta)<craters[ci].z*craters[ci].z)discard;}");
+      };
+      mesh.material.customProgramCacheKey=function(){return "円形の爆発跡";};
+    });return model;
   };
   BalloonScene.prototype.render=function(ctx,canvas,s){
     var w=Math.min(canvas.width,810),h=Math.round(w*s.H/s.W);
@@ -114,7 +125,9 @@
     while(this.gateModels.length<s.gates.length)this.gateModels.push(this.makeGate());
     this.gateModels.forEach(function(m,i){
       var g=s.gates[i];m.root.visible=!!g;if(!g)return;
-      m.root.position.x=g.x+29;
+      m.root.position.x=g.x+29;m.left.value=g.x;
+      m.cutCount.value=Math.min(64,(g.holes||[]).length);
+      (g.holes||[]).slice(0,64).forEach(function(h,j){m.cuts.value[j].set(h.x,h.y*s.H,h.r);});
       m.top.body.position.y=-(g.top-30)/2;m.top.body.scale.y=g.top+30;
       m.top.cap.position.y=-g.top+7;
       m.top.inset.position.y=-(g.top-30)/2;m.top.inset.scale.y=Math.max(1,g.top+2);

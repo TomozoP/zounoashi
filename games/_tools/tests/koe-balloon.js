@@ -13,7 +13,7 @@ for(const shape of [[390,844],[700,700],[500,1600]]){
    g.step(1);
   }
   const p=g.probe.now();cleared=p.won;
-  if(!cleared){g.until(()=>g.probe.now().state==='result',200);g.press(' ');hold=false;}
+  if(!cleared){g.until(()=>g.probe.now().state==='play',100);hold=false;}
  }
  assert(cleared,'履歴を重ねて10本通過できる '+shape);
  assert.equal(g.probe.now().score,10);
