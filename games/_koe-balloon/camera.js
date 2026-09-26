@@ -29,7 +29,7 @@
   WingInput.prototype.start=async function(){
     if(this.status==='loading'||this.status==='active')return;
     this.stop();var epoch=this.epoch,self=this;
-    this.status='loading';this.previousFrame=-1;this.seen=-Infinity;this.last=-Infinity;
+    this.status='loading';this.errorMessage='';this.previousFrame=-1;this.seen=-Infinity;this.last=-Infinity;
     try{
       if(!global.navigator.mediaDevices)throw Error('カメラ非対応');
       var stream=await global.navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:30}},audio:false});
@@ -43,7 +43,7 @@
       finally{clearTimeout(timer);}
       if(epoch!==this.epoch)return;
       this.status='active';
-    }catch(e){if(epoch!==this.epoch)return;this.stop();this.status='error';console.warn('カメラを開始できません。',e);}
+    }catch(e){if(epoch!==this.epoch)return;this.stop();this.status='error';this.errorMessage=e.name==='NotReadableError'?'別の画面でカメラを使用中':e.name==='NotAllowedError'?'カメラの使用を許可してください':e.name==='NotFoundError'?'カメラが見つかりません':'カメラ・判定の準備に失敗';console.warn('カメラを開始できません。',e);}
   };
   WingInput.prototype.lose=function(){this.vector=0;this.found=false;this.pending=[0,0];this.arms=[{},{}];};
   WingInput.prototype.accept=function(result,width,height,now){
@@ -113,8 +113,9 @@
       });ctx.restore();
     }
     ctx.font='bold 13px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillStyle='#fff';
-    var label=this.status==='loading'?'カメラ・判定の準備中':this.status==='error'?'カメラを開始できません':!this.found?'肩・肘・手首を映してください':'検出中';
+    var label=this.status==='loading'?'カメラ・判定の準備中':this.status==='error'?(this.errorMessage||'カメラが停止しました'):!this.found?'肩・肘・手首を映してください':'検出中';
     ctx.fillText(label,x+3,y+h+15);
+    if(this.status==='error'){ctx.fillStyle='#ffe268';ctx.fillText('タップで再接続',x+3,y+h+37);ctx.restore();return;}
     for(var i=0;i<2;i++){
       var flash=now-this.flashes[i]<450;
       ctx.fillStyle=flash?'#ffe268':this.found?'#5cffbd':'#a0abb1';

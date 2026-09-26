@@ -12,12 +12,13 @@ const face=new win.WingInput();face.capture=function(){};
 const hit=(x,left=.65,right=.65)=>{const p=Array.from({length:33},()=>({x:.5,y:.5,visibility:1}));p[0].x=x;p[11]={x:.4,y:.4,visibility:1};p[12]={x:.6,y:.4,visibility:1};p[15]={x:.2,y:left,visibility:1};p[16]={x:.8,y:right,visibility:1};return {landmarks:[p]};};
 const game=require('../harness')('games/_koe-balloon/index.html',{inject:`
   camera={status:'active',found:true,vector:0,wings:[.3,.3],takeFlaps:function(){return [0,0];},drawPlayer:function(){},tick:function(){},stop:function(){},start:function(){}};
-  window.__dbg={face:function(v,found){camera.vector=v;camera.found=found;}};
+  window.__dbg={error:function(){camera.status='error';},face:function(v,found){camera.vector=v;camera.found=found;}};
 `});
 game.probe.reset();game.dbg.face(-1,true);game.step(20);assert.equal(game.probe.now().x,270,'顔の左入力では動かない');
 game.dbg.face(1,true);game.step(40);assert.equal(game.probe.now().x,270,'顔の右入力では動かない');
 game.dbg.face(0,false);const paused=game.probe.now();game.step(100);
 assert.equal(game.probe.now().altitude,paused.altitude,'顔を見失うと止まる');assert.equal(game.probe.now().x,paused.x);
+game.dbg.error();const failed=game.probe.now();game.step(300);assert.equal(game.probe.now().state,'play');assert.equal(game.probe.now().altitude,failed.altitude,'カメラ失敗中は落下しない');
 (async()=>{
  request=async()=>stream();await face.start();assert.equal(face.status,'active');
  for(let i=0;i<5;i++)face.accept(hit(.5),320,240,i*100);
@@ -34,6 +35,8 @@ assert.equal(game.probe.now().altitude,paused.altitude,'顔を見失うと止ま
  for(let i=0;i<20;i++)face.accept(hit(.5,.4+(i%2)*.01,.4),320,240,2700+i*60);
  assert.equal(face.takeFlaps().join(),'0,0','小さな揺れでは上昇しない');
  face.stop();assert.equal(stopped,1);assert.equal(face.video,null);
+ request=async()=>{const e=Error('使用中');e.name='NotReadableError';throw e;};await face.start();assert.equal(face.errorMessage,'別の画面でカメラを使用中');
+ request=async()=>stream();await face.start();assert.equal(face.status,'active','使用中の解消後に再接続');face.stop();stopped--;
  request=async()=>{throw Error('拒否');};await face.start();assert.equal(face.status,'error');
  let resolve;request=()=>new Promise(r=>resolve=r);const pending=face.start();face.stop();resolve(stream());await pending;
  assert.equal(stopped,2,'取消後に届いたカメラも止める');assert.equal(face.status,'idle');
