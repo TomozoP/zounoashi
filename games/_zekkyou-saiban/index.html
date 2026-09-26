@@ -124,8 +124,8 @@
   var level=0,peak=0,charge=0,won=false,verdictTime=0;
   var mic=null, micSource=null, analyser=null, samples=null, micPending=false, micError=false;
   function stopMic() { if(micSource){micSource.disconnect();micSource=null;} if(mic) mic.getTracks().forEach(function(t){t.stop();}); mic=null; analyser=null; }
-  function requestInputs(){requestMic();}
-  function stopInputs(){stopMic();}
+  function requestInputs(){requestMic();startRecognition();}
+  function stopInputs(){stopMic();stopRecognition();}
   async function requestMic() {
     if(micPending || mic) return;
     if(!window.navigator.mediaDevices || !window.navigator.mediaDevices.getUserMedia || !AC) { micError=true; return; }
@@ -153,8 +153,39 @@
     CY = Math.round(H * 0.5);                  /* ▼UPDATE: 置き場所の計算 */
   }
 
+  var cases=[
+    {fact:'店は午後6時に閉店。',statement:'「午後7時に、その店でパンを買った」',lines:['天気','時間','場所'],keys:[['天気','てんき'],['時間','じかん'],['場所','ばしょ']],answer:1},
+    {fact:'建物には階段しかありません。',statement:'「エレベーターで3階へ行った」',lines:['移動','時間','天気'],keys:[['移動','いどう'],['時間','じかん'],['天気','てんき']],answer:0},
+    {fact:'その日は一日中、晴れでした。',statement:'「大雨だったので傘を差した」',lines:['場所','時間','天気'],keys:[['場所','ばしょ'],['時間','じかん'],['天気','てんき']],answer:2}
+  ];
+  var caseIndex=-1,current=cases[0],selected=-1,scan=0,scanTime=0,selectionTime=0,quiet=0,mode='scan',recognizer=null,recognitionEpoch=0;
+  function stopRecognition(){recognitionEpoch++;if(recognizer){recognizer.onend=null;recognizer.abort();recognizer=null;}}
+  function chooseWords(text){
+    if(state!==S.PLAY||mode!=='words')return;
+    var clean=text.replace(/[\s。、！？]/g,'');var hits=[];
+    current.keys.forEach(function(keys,i){if(keys.some(function(k){return clean.includes(k);}))hits.push(i);});
+    if(hits.length===1){selected=hits[0];selectionTime=T;charge=0;}
+  }
+  async function startRecognition(){
+    if(recognizer)return;var R=window.SpeechRecognition||window.webkitSpeechRecognition;
+    mode='scan';
+    // 端末内処理を保証できない実装では、認識を開始しない。
+    if(!R||!('processLocally' in R.prototype)||typeof R.available!=='function')return;
+    var epoch=++recognitionEpoch;
+    try{
+      var available=await R.available({langs:['ja-JP'],processLocally:true});
+      if(epoch!==recognitionEpoch||state!==S.PLAY||document.hidden||available!=='available')return;
+      var r=new R();r.processLocally=true;if(r.processLocally!==true)return;
+      recognizer=r;mode='words';r.lang='ja-JP';r.continuous=true;r.interimResults=false;
+      r.onresult=function(e){if(epoch!==recognitionEpoch)return;for(var i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)chooseWords(e.results[i][0].transcript);};
+      r.onerror=function(){if(epoch!==recognitionEpoch)return;stopRecognition();mode='scan';scanTime=0;quiet=0;};
+      r.onend=function(){if(epoch!==recognitionEpoch||state!==S.PLAY||document.hidden)return;try{r.start();}catch(e){stopRecognition();mode='scan';}};
+      r.start();
+    }catch(e){if(epoch===recognitionEpoch){stopRecognition();mode='scan';}}
+  }
   function newRound(){
     shareButton.hidden=true;retryButton.hidden=true;document.getElementById('start').hidden=true;
+    stopRecognition();caseIndex=(caseIndex+1)%cases.length;current=cases[caseIndex];selected=-1;scan=0;scanTime=selectionTime=quiet=0;mode="scan";
     state=S.PLAY;score=0;T=0;held=false;level=peak=charge=verdictTime=0;won=false;
   }
   function update(dt){
@@ -163,8 +194,13 @@
     if(state!==S.PLAY)return;
     T+=dt;var input=held?1:readVoice();level+=(input-level)*Math.min(1,dt*18);
     peak=Math.max(peak,level);score=Math.round(peak*100);
-    charge=level>.72?charge+dt:Math.max(0,charge-dt*2);
-    if(charge>=.25||T>=8){won=charge>=.25;state=S.FALL;verdictTime=0;held=false;stopInputs();
+    if(level<.15)quiet+=dt;
+    if(mode==='scan'&&selected<0){scanTime+=dt;if(scanTime>=2.4){scanTime-=2.4;scan=(scan+1)%3;}
+      if(level>.45&&quiet>.2){selected=scan;selectionTime=T;charge=0;}
+    }
+    if(selected>=0&&T-selectionTime>3){selected=-1;charge=0;quiet=0;}
+    charge=selected>=0&&level>.72?charge+dt:Math.max(0,charge-dt*2);
+    if(charge>=.25||T>=30){won=charge>=.25&&selected===current.answer;state=S.FALL;verdictTime=0;held=false;stopInputs();
       noiseHit(.2,180,.15);if(won){tone(523,.18,.09);tone(659,.22,.08,'sine',null,.12);tone(784,.4,.08,'sine',null,.25);}
     }
   }
@@ -250,6 +286,7 @@
     ctx.clearRect(0, 0, W, H);
 
     drawCourt();
+    if(state===S.PLAY)drawTestimony();
     if(state===S.INTRO){ctx.fillStyle='#fff';roundRect(150,H-98,240,68,34);ctx.fill();ctx.fillStyle='#16202e';ctx.font='bold 28px sans-serif';ctx.textAlign='center';ctx.fillText('START',270,H-54);}
     if(state===S.FALL&&won)drawVerdict();
     if (state === S.RESULT) drawResult();
@@ -281,8 +318,18 @@
     rect(131,py+51,278,18,'#b88750');rect(151,py+69,238,90,'#633a2a');rect(165,py+81,210,4,'#9a6440');
     if(power>.08&&state!==S.INTRO){ctx.strokeStyle='rgba(255,224,135,'+(power*.6)+')';ctx.lineWidth=2+power*3;for(var i=0;i<3;i++){ctx.beginPath();ctx.arc(270,py-20,65+((T*150+i*38)%120),Math.PI*1.17,Math.PI*1.83);ctx.stroke();}}
     var mw=240,mx=150,my=H-127;rect(mx,my,mw,9,'#192530');rect(mx,my,mw*power,9,power>.72?'#f6d877':'#7ed2c4');rect(mx+mw*.72,my-4,3,17,'#fff3d3');
-    if(state===S.PLAY){ctx.strokeStyle='#e6c58b';ctx.lineWidth=4;ctx.beginPath();ctx.arc(492,45,17,-Math.PI/2,-Math.PI/2+Math.PI*2*(1-T/8));ctx.stroke();}
+    if(state===S.PLAY){ctx.strokeStyle='#e6c58b';ctx.lineWidth=4;ctx.beginPath();ctx.arc(492,45,17,-Math.PI/2,-Math.PI/2+Math.PI*2*(1-T/30));ctx.stroke();}
     if(state===S.INTRO){ctx.fillStyle='#fff0ca';ctx.font='900 48px serif';ctx.textAlign='center';ctx.fillText('絶叫裁判',270,H*.1);}
+  }
+  function drawTestimony(){
+    var y=H-325;
+    rect(22,y-44,496,206,'#fff8e8');ctx.textAlign='left';ctx.fillStyle='#28313b';ctx.font='bold 20px sans-serif';ctx.fillText(current.fact,36,y-12);
+    ctx.font='17px sans-serif';ctx.fillText(current.statement,36,y+22);
+    current.lines.forEach(function(line,i){
+      var active=selected===i||(selected<0&&mode==='scan'&&scan===i);
+      rect(32+i*162,y+43,152,67,active?'#f6d877':'#eadfcc');ctx.fillStyle='#18252e';ctx.textAlign='center';ctx.font='bold 30px sans-serif';ctx.fillText(line,108+i*162,y+88);
+    });
+    ctx.textAlign='left';ctx.font='14px sans-serif';ctx.fillStyle='#37424c';ctx.fillText(mode==='words'?'怪しい言葉を1つ叫ぶ':'光った言葉を声で選ぶ（言葉の認識は非対応）',36,y+143);
   }
   function drawVerdict(){
     var k=Math.min(1,verdictTime*5);ctx.save();ctx.translate(270,H*.4);ctx.rotate(-.065);ctx.scale(.8+k*.2,.8+k*.2);
@@ -338,7 +385,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now:function(){return {state:state,score:score,W:W,H:H,level:level,won:won,time:T,micPending:micPending,micError:micError};},
+    now:function(){return {state:state,score:score,W:W,H:H,level:level,won:won,time:T,micPending:micPending,micError:micError,selected:selected,mode:mode,scan:scan,answer:current.answer};},
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
@@ -362,7 +409,7 @@
 
   ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
   startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();requestInputs();});
-  newRound();state=S.INTRO;startButton.hidden=false;
+  newRound();caseIndex=-1;state=S.INTRO;startButton.hidden=false;
   layout();
   var last = performance.now();
   function loop(now) {

@@ -2,7 +2,7 @@
 const fs=require('fs'),path=require('path'),http=require('http'),os=require('os'),cp=require('child_process');
 const root=path.resolve(__dirname,'../../..'),out=fs.mkdtempSync(path.join(os.tmpdir(),'zekkyou-saiban-3d-'));
 let child,timer,finished=false;
-const hook=`window.__check={setup:function(height){H=height;canvas.width=540;canvas.height=H;newRound();state=S.INTRO;draw();},win:function(){newRound();held=true;},draw:draw};`;
+const hook=`window.__check={setup:function(height){H=height;canvas.width=540;canvas.height=H;newRound();state=S.PLAY;draw();},win:function(){newRound();selected=current.answer;held=true;},draw:draw};`;
 const runner=`<script>window.__recordManual=true;(async()=>{try{
 const c=document.getElementById('c'),p=window.__probe,t=window.__check;
 async function save(name){await fetch('/__image/'+name,{method:'POST',body:await new Promise(r=>c.toBlob(r))});}
