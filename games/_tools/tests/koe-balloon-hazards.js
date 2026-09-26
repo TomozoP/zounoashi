@@ -1,5 +1,5 @@
 const assert=require('assert'),load=require('../harness');
-const g=load('games/_koe-balloon/index.html',{inject:'window.__dbg={trap:trapPosition,hazard:hazardPosition,hit:hazardHit,set:function(t,y){T=t;py=y;},carve:carve};'});
+const g=load('games/koe-balloon/index.html',{inject:'window.__dbg={trap:trapPosition,hazard:hazardPosition,hit:hazardHit,set:function(t,y){T=t;py=y;},carve:carve};'});
 g.probe.reset();
 g.dbg.set(0,300);
 assert(!g.dbg.hit({type:0,x:149,y:300,gap:50}),'撤去した壁は当たらない');

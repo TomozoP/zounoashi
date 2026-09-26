@@ -1,5 +1,5 @@
 const assert=require('assert'),load=require('../harness');
-const g=load('games/_koe-balloon/index.html',{inject:'window.__dbg={crash:popBalloon,set:function(t,y){T=t;py=y;},replay:replayStep,carve:carve,trap:trapPosition};'});
+const g=load('games/koe-balloon/index.html',{inject:'window.__dbg={crash:popBalloon,set:function(t,y){T=t;py=y;},replay:replayStep,carve:carve,trap:trapPosition};'});
 g.press(' ');g.key(' ');g.step(1);assert.equal(g.probe.now().air,1);
 g.dbg.crash();assert.equal(g.probe.now().lives,99);assert.equal(g.probe.now().state,'dead');const frozen=g.probe.now().time;g.step(17);assert.equal(g.probe.now().state,'dead');assert.equal(g.probe.now().time,frozen);g.step(1);assert.equal(g.probe.now().state,'play');assert.equal(g.probe.now().time,0,'0.3秒後に再開');assert.equal(g.probe.now().air,1,'長押しを次の機体へ引き継ぐ');
 for(let i=0;i<99;i++){g.dbg.crash();g.step(18);}
