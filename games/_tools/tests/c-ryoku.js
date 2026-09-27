@@ -16,6 +16,7 @@
    ・投げるCは一覧のCと同じ向き（上下左右）と大きさ。下の行ほど小さい
    ・引っかけた段は保存され、次に開いたとき続きから始まる
    ・クリアすると紙吹雪が降り、しばらくすると消える
+   ・つかんで動かしている間だけ、小さな音がぽろぽろ鳴る（鳴りすぎない）
    ・Esc でいまの行の最初から */
 
 var load = require("../harness");
@@ -147,6 +148,21 @@ function dropOnto(gap, miss) {
   ok("クリアすると紙吹雪が降り、しばらくすると消える", n > 0 && g.probe.now().confetti === 0, "枚数 " + n + " → " + g.probe.now().confetti);
   ok("丸い背に落ちて転げ落ちたらクリアしない", !dropOnto(90));
   ok("相手から外れて落ちたらクリアしない", !dropOnto(-90, true));
+})();
+
+/* ---- 動かしている間だけ、小さな音がぽろぽろ鳴る ---- */
+(function () {
+  var g = openWith({});
+  g.press(" "); g.step(2);
+  var p = g.probe.now(), b = p.ball;
+  g.down(b.x - b.rm, b.y); g.step(60);
+  var t0 = g.probe.now().tinks, x = b.x - b.rm;
+  for (var i = 0; i < 60; i++) { x += (i % 12 < 6 ? 25 : -25); g.moveTo(x, b.y); g.step(1); }
+  var t1 = g.probe.now().tinks;
+  g.step(90);
+  var t2 = g.probe.now().tinks;
+  g.up();
+  ok("動かしている間だけ音が鳴り、1秒に十数回までに収まる", t0 === 0 && t1 - t0 >= 4 && t1 - t0 <= 15 && t2 === t1, "動かして " + (t1 - t0) + "回 / 止めて " + (t2 - t1) + "回");
 })();
 
 /* ---- 25段とも引っかけられる。行の終わりで結果、保存 ---- */
