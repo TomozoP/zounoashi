@@ -34,14 +34,14 @@ function openWith(mem, extra) {
   var inj = "CLOCK_FIX = 36600;" +
             "window.__mem = " + JSON.stringify(mem || {}) + ";" +
             "window.localStorage = { getItem: function (k) { return window.__mem[k] == null ? null : window.__mem[k]; }, setItem: function (k, v) { window.__mem[k] = String(v); } };" +
-            "window.__probe.go = function (i) { newRound(i); }; window.__probe.mem = function () { return window.__mem; };";
+            "window.__probe.go = function (i) { newRound(i); }; window.__probe.startHidden = function () { return startButton.hidden; }; window.__probe.mem = function () { return window.__mem; };";
   return load(FILE, { quiet: true, inject: inj + (extra || "") });
 }
 
-/* STARTを押す。最初は段の一覧が開くので、閉じて今の段から遊ぶ */
+/* 開くと段の一覧なので、閉じて今の段から遊ぶ */
 function begin(g) {
-  g.press(" "); g.step(2);
-  if (g.probe.now().sel) { g.press(" "); g.step(2); }
+  if (g.probe.now().sel) g.press(" ");
+  g.step(2);
 }
 function settle(g) {
   g.drawn.length = 0;
@@ -96,8 +96,9 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
 (function () {
   var g = openWith({});
   var p0 = g.probe.now();
+  var startSel = p0.sel && p0.state === "play" && g.probe.startHidden();
   g.down(p0.ball.x + 44, p0.ball.y); g.step(5); g.up();
-  ok("開始前はつかめない", g.probe.now().state === "intro" && g.probe.now().ball.idle);
+  ok("STARTはなく、開くとすぐ段の一覧。一覧の間はつかめない", startSel && g.probe.now().ball.idle && !g.probe.now().grab);
   begin(g);
   var p = g.probe.now();
   ok("はじめてなら1段目から", p.state === "play" && p.stage === 0);
@@ -272,9 +273,7 @@ function dropOnto(gap, miss) {
 /* ---- 段を選ぶ・続きから ---- */
 (function () {
   var g = openWith({ "zounoashi.c-ryoku.v1": JSON.stringify({ c: [0, 1, 2, 3, 4, 5, 6] }) });
-  ok("続きの段から始まる", g.probe.now().stage === 7);
-  g.press(" "); g.step(2);
-  ok("STARTを押すと、まず段の一覧が開く", g.probe.now().state === "play" && g.probe.now().sel);
+  ok("続きの段から始まり、まず段の一覧が開いている", g.probe.now().stage === 7 && g.probe.now().sel);
   g.press(" "); g.step(2);
   ok("行の途中の段から遊べる", g.probe.now().stage === 7 && g.probe.now().power === "0.9");
   var b = g.probe.selButton();
@@ -284,7 +283,12 @@ function dropOnto(gap, miss) {
   ok("一覧のマスはスマホで押せる大きさ", cells.every(function (c) { return c.w >= 63 && c.h >= 63; }), "高さ " + Math.round(cells[0].h));
   var far = cells[22];
   g.tap(far.x + far.w / 2, far.y + far.h / 2); g.step(1);
-  ok("まだクリアしていない先の段も選べる", !g.probe.now().sel && g.probe.now().stage === 22);
+  ok("前の段をクリアしていない段は選べない", g.probe.now().sel && g.probe.now().stage === 7);
+  var c7 = cells[7], c8 = cells[8];
+  g.tap(c8.x + c8.w / 2, c8.y + c8.h / 2); g.step(1);
+  var locked8 = g.probe.now().sel;
+  g.tap(c7.x + c7.w / 2, c7.y + c7.h / 2); g.step(1);
+  ok("次にクリアする段までは選べる", locked8 && !g.probe.now().sel && g.probe.now().stage === 7);
   g.tap(b.x + b.w / 2, b.y + b.h / 2); g.step(1);
   var c2 = cells[2];
   g.tap(c2.x + c2.w / 2, c2.y + c2.h / 2); g.step(2);
