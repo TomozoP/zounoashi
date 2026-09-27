@@ -159,34 +159,37 @@
     });
   }
 
-  /* つかんで動かしている間の音。動いた道のりに合わせて、小さな木琴のような音をぽろぽろ鳴らす。
-     五音音階なのでどう並んでも濁らない。速いほど高い音寄り、少し大きく */
-  var PENTA = [523, 587, 659, 784, 880, 1047, 1175, 1319, 1568, 1760];
-  var tinkDist = 0, tinkLast = 0, tinkCount = 0;
-  function tink(k) {
-    if (!AC) return;
-    var lo = Math.floor(k * 5), i = Math.min(PENTA.length - 1, lo + Math.floor(Math.random() * 5));
-    var n = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
-    o.type = "triangle"; o.frequency.value = PENTA[i];
-    g.gain.setValueAtTime(0.0001, n);
-    g.gain.exponentialRampToValueAtTime(0.035 + 0.05 * k, n + 0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001, n + 0.28);
-    o.connect(g); g.connect(OUT);
-    o.start(n); o.stop(n + 0.32);
+  /* つかんで動かしている間の音。指の動きに合わせて、ド（C）の音がなめらかに大きくなったり小さくなったりする。
+     低いドと高いドを重ね、速いほど高いドが強くなって明るくなる。指を止めると消える */
+  var hum = null, humLevel = 0, humSmooth = 0, humPx = null, humPy = 0;
+  var C4 = 261.63, C5 = 523.25;
+  function makeHum() {
+    var lp = AC.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 1400; lp.Q.value = 0.5;
+    var g = AC.createGain(); g.gain.value = 0;
+    lp.connect(g); g.connect(OUT);
+    var lo = AC.createOscillator(); lo.type = "sine"; lo.frequency.value = C4;
+    var hi = AC.createOscillator(); hi.type = "triangle"; hi.frequency.value = C5;
+    var gh = AC.createGain(); gh.gain.value = 0;
+    lo.connect(lp); hi.connect(gh); gh.connect(lp);
+    lo.start(); hi.start();
+    return { g: g, gh: gh, lp: lp };
   }
-  var tinkPx = null, tinkPy = 0;
-  function updateTink(dt) {
-    if (!grab || !ball || state !== S.PLAY || sel || !dt) { tinkDist = 0; tinkPx = null; return; }
-    /* 指の動いた速さで決める。指を止めてCが揺れているだけなら鳴らない */
-    var d = tinkPx == null ? 0 : Math.hypot(grab.px - tinkPx, grab.py - tinkPy);
-    tinkPx = grab.px; tinkPy = grab.py;
-    var sp = d / dt;
-    if (sp < 150) return;
-    tinkDist += d;
-    if (tinkDist > 110 && T - tinkLast > 0.07) {
-      tinkDist = 0; tinkLast = T; tinkCount++;
-      tink(Math.min(1, (sp - 150) / 1500));
-    }
+  function updateHum(dt) {
+    var sp = 0;
+    if (grab && ball && state === S.PLAY && !sel && dt) {
+      /* 指の動いた速さで決める。指を止めてCが揺れているだけなら鳴らない */
+      sp = humPx == null ? 0 : Math.hypot(grab.px - humPx, grab.py - humPy) / dt;
+      humPx = grab.px; humPy = grab.py;
+    } else humPx = null;
+    var k = Math.max(0, Math.min(1, (sp - 60) / 1400));
+    humSmooth += (k - humSmooth) * Math.min(1, dt * (k > humSmooth ? 14 : 6));
+    humLevel = humSmooth;
+    if (!AC) return;
+    if (!hum) { if (humLevel < 0.01) return; hum = makeHum(); }
+    var n = AC.currentTime, v = humLevel;
+    hum.g.gain.setTargetAtTime(0.16 * Math.pow(v, 1.1), n, 0.03);
+    hum.gh.gain.setTargetAtTime(0.25 + 0.6 * v, n, 0.05);
+    hum.lp.frequency.setTargetAtTime(900 + 1800 * v, n, 0.05);
   }
   var lastClack = 0;
   /* ぶつかったときの音。相手のCはコツッ、物はそれぞれの材質っぽく。続けざまには鳴らさない */
@@ -603,7 +606,7 @@
 
   function update(dt) {
     updateConfetti(dt);
-    updateTink(dt);
+    updateHum(dt);
     if (state === S.INTRO) { T += dt; return; }
     if (state !== S.PLAY) return;
     T += dt;
@@ -1143,7 +1146,7 @@
     now: function () {
       return {
         state: state, score: score, W: W, H: H, stage: stage, throws: throws, rowThrows: rowThrows, power: cPower(), gain: gain,
-        clearing: clearT >= 0, hooked: hookT, confetti: confetti.length, tinks: tinkCount, launch: { x: LX, y: LY }, sel: sel, cleared: cleared.slice(),
+        clearing: clearT >= 0, hooked: hookT, confetti: confetti.length, hum: humLevel, launch: { x: LX, y: LY }, sel: sel, cleared: cleared.slice(),
         area: { x: AX, y: AY, w: AW, h: AH }, grab: grab && { lx: grab.lx, ly: grab.ly, px: grab.px, py: grab.py },
         ball: ball && { x: ball.x, y: ball.y, a: ball.a, vx: ball.vx, vy: ball.vy, w: ball.w, idle: ball.idle, out: ball.out, rm: BALL.rm, D: BALL.D },
         target: target ? { x: target.x, y: target.y, D: target.shape.D, a: target.a } : (function () { var gp = goalPos(); return { x: gp.x, y: gp.y, D: goal.R * 2, a: 0, kind: goal.kind }; })(),
