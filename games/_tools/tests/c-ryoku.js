@@ -15,7 +15,7 @@
    ・左上のボタンで段を選べる。最初から全部選べる
    ・投げるCは一覧のCと同じ向き（上下左右）と大きさ。下の行ほど小さい
    ・引っかけた段は保存され、次に開いたとき続きから始まる
-   ・つかんで振っている間だけ、速さに応じた声っぽい音が鳴る。弱まってまた振ると「シ」から言い直す
+   ・クリアすると紙吹雪が降り、しばらくすると消える
    ・Esc でいまの行の最初から */
 
 var load = require("../harness");
@@ -125,8 +125,10 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
 })();
 
 /* ---- 相手のCに乗って止まる：エリアを上に移した台で、真下の相手へ落とす ---- */
+var lastDrop = null;
 function dropOnto(gap, miss) {
   var g = openWith({}, "AREA = [0.03, 0.3, 0.94, 0.25]; STAGES[0] = { t: [180, " + (miss ? 0.85 : 0.5) + ", 0.8, " + gap + "] };");
+  lastDrop = g;
   g.press(" "); g.step(2);
   var p = g.probe.now(), b = p.ball, T = p.target;
   g.down(b.x - 44, b.y); g.step(5);
@@ -138,31 +140,13 @@ function dropOnto(gap, miss) {
 (function () {
   ok("すき間が上の相手の中へ落ちて止まるとクリア", dropOnto(-90));
   ok("すき間の縁に乗って止まるとクリア", dropOnto(-60));
+  var g = lastDrop;
+  g.step(1);
+  var n = g.probe.now().confetti;
+  g.until(function () { return g.probe.now().confetti === 0; }, 600);
+  ok("クリアすると紙吹雪が降り、しばらくすると消える", n > 0 && g.probe.now().confetti === 0, "枚数 " + n + " → " + g.probe.now().confetti);
   ok("丸い背に落ちて転げ落ちたらクリアしない", !dropOnto(90));
   ok("相手から外れて落ちたらクリアしない", !dropOnto(-90, true));
-})();
-
-/* ---- 振っている間だけ「シィィ〜」。弱まって、また振ると「シ」から言い直す ---- */
-(function () {
-  var g = openWith({});
-  g.press(" "); g.step(2);
-  var p = g.probe.now(), b = p.ball;
-  g.down(b.x - b.rm, b.y); g.step(60);
-  var still = g.probe.now().swish, x = b.x - b.rm, starts = 0, was = false, peak = 0;
-  function shake(n) {
-    for (var i = 0; i < n; i++) {
-      x += (i % 12 < 6 ? 30 : -30); g.moveTo(x, b.y); g.step(1);
-      var q = g.probe.now(); peak = Math.max(peak, q.swish);
-      if (q.swishOn && !was) starts++;
-      was = q.swishOn;
-    }
-  }
-  function rest(n) { for (var i = 0; i < n; i++) { g.step(1); var q = g.probe.now(); if (q.swishOn && !was) starts++; was = q.swishOn; } }
-  shake(12); var first = starts; rest(90); var calm = g.probe.now().swish, quiet = !g.probe.now().swishOn; shake(12); rest(60);
-  g.up(); g.step(5);
-  ok("つかんで振ると鳴り、止めると・離すと止む", still < 0.05 && peak > 0.3 && calm < 0.05 && g.probe.now().swish === 0,
-     "止め " + still.toFixed(2) + " 振り " + peak.toFixed(2) + " 静止 " + calm.toFixed(2));
-  ok("止めてからまた振ると「シ」から言い直す", first >= 1 && quiet && starts > first, "言いはじめ " + starts + "回");
 })();
 
 /* ---- 25段とも引っかけられる。行の終わりで結果、保存 ---- */
