@@ -228,24 +228,24 @@ function dropOnto(gap, miss) {
 /* ---- 時計の針は今の時刻 ---- */
 (function () {
   var g = openWith({}, "CLOCK_FIX = 3 * 3600;");
-  begin(g); g.probe.go(23); g.step(2);
+  begin(g); g.probe.go(11); g.step(2);
   var kind = g.probe.now().objs[0].kind, h24 = g.probe.hands();
   var r = openWith({}, "CLOCK_FIX = null;");
-  begin(r); r.probe.go(23); r.step(2);
+  begin(r); r.probe.go(11); r.step(2);
   var d = new Date(), m = -90 + (d.getMinutes() + d.getSeconds() / 60) * 6, hr = r.probe.hands();
   ok("時計の針は時刻どおり（3時で長い針が上、短い針が右）", h24[0] === -90 && h24[1] === 0, h24.join("/"));
   ok("ふだんは端末の今の時刻を指す", Math.abs(((hr[0] - m) % 360 + 540) % 360 - 180) < 2, hr[0] + " / " + m.toFixed(0));
-  ok("24段は枠のない時計（針だけ）", kind === "hands");
+  ok("12段は枠のない時計（針だけ）", kind === "hands");
 })();
 
-/* ---- 24段は、どの時刻でも針に載せられる ---- */
+/* ---- 12段は、どの時刻でも針に載せられる ---- */
 (function () {
   var fails = [];
   ["2:00", "3:30", "6:30", "10:15"].forEach(function (tm) {
     var hm = tm.split(":"), g = openWith({}, "CLOCK_FIX = " + (hm[0] * 3600 + hm[1] * 60) + ";");
-    begin(g); g.probe.go(23); g.step(2);
+    begin(g); g.probe.go(11); g.step(2);
     var found = false;
-    function done() { var q = g.probe.now(); return q.clearing || q.stage !== 23 || q.state !== "play"; }
+    function done() { var q = g.probe.now(); return q.clearing || q.stage !== 11 || q.state !== "play"; }
     for (var th = 0; th < 8 && !found; th++)
       for (var sx = 0.12; sx < 0.95 && !found; sx += 0.08)
         for (var vx = -1200; vx <= 1200 && !found; vx += 150) for (var vy = -2400; vy <= -600 && !found; vy += 150) {
@@ -253,7 +253,7 @@ function dropOnto(gap, miss) {
         }
     if (!found) fails.push(tm);
   });
-  ok("24段は針が下を向く時刻でも載せられる", !fails.length, fails.join(" "));
+  ok("12段は針が下を向く時刻でも載せられる", !fails.length, fails.join(" "));
 })();
 
 /* ---- 演出の覗き穴（F2・F4） ---- */
