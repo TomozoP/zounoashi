@@ -389,16 +389,6 @@
       return { body: out };
     },
     coin: function () { return { body: [] }; },
-    /* 王冠。ぎざぎざの3つの先に掛けたり、間のくぼみに乗せたりする */
-    crown: function (s) {
-      var P = CROWN.map(function (p) { return { x: p[0] * s, y: p[1] * s }; }), out = [];
-      for (var i = 0; i < P.length; i++) {
-        var a = P[i], b = P[(i + 1) % P.length];
-        out = out.concat(circleRow(a.x, a.y, b.x, b.y, 0.12 * s));
-      }
-      [1, 3, 5].forEach(function (k) { out.push({ x: P[k].x, y: P[k].y, r: 0.16 * s }); });
-      return { body: out };
-    },
     car: function (s) {
       return { body: circleRow(-1.4 * s, 0.1 * s, 1.4 * s, 0.1 * s, 0.4 * s).concat(circleRow(-0.6 * s, -0.4 * s, 0.6 * s, -0.4 * s, 0.4 * s), [{ x: -0.85 * s, y: 0.55 * s, r: 0.32 * s }, { x: 0.85 * s, y: 0.55 * s, r: 0.32 * s }]) };
     },
@@ -494,6 +484,12 @@
       .concat([[0.45, 0.75]]).concat(arcPts(0, 0.75, 0.45, 0, Math.PI, 7)).concat([[-0.45, -0.85]])
       .concat(arcPts(0.1, -0.85, 0.55, Math.PI, Math.PI * 2, 7)).concat([[0.65, 0.4]]), 0.12)
   };
+  /* 王冠。ぎざぎざの3つの先に掛けたり、間のくぼみに乗せたりする */
+  ART.crown = {
+    polys: [CROWN],
+    dots: [1, 3, 5].map(function (k) { return [CROWN[k][0], CROWN[k][1], 0.16]; }),
+    deco: [[-0.85, 0.42, 0.85, 0.42]]
+  };
   var EDGE = 0.1;                              /* 形の縁の太さ（半分） */
   function artBody(a, s) {
     var out = [];
@@ -509,24 +505,33 @@
     return { body: out };
   }
   Object.keys(ART).forEach(function (k) { KINDS[k] = function (s) { return artBody(ART[k], s); }; });
+  /* 最初からある物（blob）と同じ見た目にする：黒で少し太く描いてから、白で本来の太さを重ねる。
+     重なった部分はひとつの白い形になり、まわりに細い黒ふちが残る */
   function drawArt(a, x, y, s) {
     ctx.lineJoin = "round"; ctx.lineCap = "round";
-    (a.balls || []).forEach(function (d) { dot(x + d[0] * s, y + d[1] * s, d[2] * s + EDGE * s); dot(x + d[0] * s, y + d[1] * s, d[2] * s - EDGE * s, "#fff"); });
-    (a.polys || []).forEach(function (P) {
-      ctx.beginPath();
-      P.forEach(function (p, k) { ctx[k ? "lineTo" : "moveTo"](x + p[0] * s, y + p[1] * s); });
-      ctx.closePath();
-      ctx.fillStyle = "#fff"; ctx.fill();
-      ctx.lineWidth = EDGE * 2 * s; ctx.strokeStyle = INK; ctx.stroke();
+    [[INK, LINE * 2], ["#fff", 0]].forEach(function (pass) {
+      var col = pass[0], ex = pass[1];
+      ctx.fillStyle = col; ctx.strokeStyle = col;
+      (a.polys || []).forEach(function (P) {
+        ctx.beginPath();
+        P.forEach(function (p, k) { ctx[k ? "lineTo" : "moveTo"](x + p[0] * s, y + p[1] * s); });
+        ctx.closePath(); ctx.fill();
+        ctx.lineWidth = EDGE * 2 * s + ex; ctx.stroke();
+      });
+      (a.segs || []).forEach(function (q) {
+        ctx.lineWidth = q[4] * s + ex;
+        ctx.beginPath(); ctx.moveTo(x + q[0] * s, y + q[1] * s); ctx.lineTo(x + q[2] * s, y + q[3] * s); ctx.stroke();
+      });
+      (a.dots || []).concat(a.balls || [], a.ring ? [a.ring] : []).forEach(function (d) {
+        ctx.beginPath(); ctx.arc(x + d[0] * s, y + d[1] * s, d[2] * s + ex / 2, 0, Math.PI * 2); ctx.fill();
+      });
     });
-    (a.segs || []).forEach(function (q) { line(x + q[0] * s, y + q[1] * s, x + q[2] * s, y + q[3] * s, q[4] * s); });
-    (a.dots || []).forEach(function (d) { dot(x + d[0] * s, y + d[1] * s, d[2] * s); });
     if (a.ring) {
-      dot(x + a.ring[0] * s, y + a.ring[1] * s, a.ring[2] * s);
-      dot(x + a.ring[0] * s, y + a.ring[1] * s, a.ring[2] * s * 0.55, "#fff");
+      ctx.lineWidth = LINE; ctx.strokeStyle = INK;
+      ctx.beginPath(); ctx.arc(x + a.ring[0] * s, y + a.ring[1] * s, a.ring[2] * s * 0.55, 0, Math.PI * 2); ctx.stroke();
     }
     (a.holes || []).forEach(function (d) { dot(x + d[0] * s, y + d[1] * s, d[2] * s); });
-    (a.deco || []).forEach(function (q) { line(x + q[0] * s, y + q[1] * s, x + q[2] * s, y + q[3] * s, Math.max(2, 0.07 * s)); });
+    (a.deco || []).forEach(function (q) { line(x + q[0] * s, y + q[1] * s, x + q[2] * s, y + q[3] * s, 3); });
   }
 
   /* 時計の針。今の時刻を指す。長い針（分）と短い針（時）。どちらも当たる */
@@ -1139,15 +1144,6 @@
         ctx.fillStyle = INK;
         ctx.fillRect(x - 0.33 * s, y - 0.3 * s, 0.66 * s, 0.22 * s);
         ctx.fillRect(x - 1 * s, y + 0.9 * s, 2 * s, 0.25 * s);
-        break;
-      case "crown":
-        ctx.beginPath();
-        CROWN.forEach(function (p, k) { ctx[k ? "lineTo" : "moveTo"](x + p[0] * s, y + p[1] * s); });
-        ctx.closePath();
-        ctx.fillStyle = "#fff"; ctx.fill();
-        ctx.lineWidth = 0.24 * s; ctx.strokeStyle = INK; ctx.lineJoin = "round"; ctx.stroke();
-        [1, 3, 5].forEach(function (k) { dot(x + CROWN[k][0] * s, y + CROWN[k][1] * s, 0.18 * s); });
-        line(x - 0.95 * s, y + 0.42 * s, x + 0.95 * s, y + 0.42 * s, 0.12 * s);
         break;
       case "coin":
         /* くるくる回るコイン（当たらない） */
