@@ -6,7 +6,7 @@
    ・開始画面ではつかめない
    ・エリアのCを触ったところでつかみ、ぶら下げると回る。Cはエリアの外へ持ち出せない
    ・離してエリアから出たら1投。エリアの下へ落としただけなら数えない
-   ・相手のCに乗って止まってもクリア。丸い背から転げ落ちたらクリアしない
+   ・相手のCに乗って止まってもクリア。外れて落ちたらクリアしない
    ・1・10・20・25段は相手がC、ほかの段は「C」から始まる物がゴール
    ・25段とも、実際につかんで運ぶ・振る操作で引っかけられる（物なら乗って止まってもよい）
    ・初めてクリアするたびにC力が0.1上がり、上がる演出が出る。2回目は上がらない
@@ -37,16 +37,6 @@ function settle(g) {
   g.drawn.length = 0;
   g.until(function () { var q = g.probe.now(); return q.clearing || q.state !== "play" || q.ball.idle; }, 900);
 }
-/* Cの縁の th 番目（45°刻み）をつかみ、エリアの相手側の縁の割合 f の位置まで運んで、ぶら下げてから離す */
-function carry(g, th, f) {
-  var p = g.probe.now(), b = p.ball, A = p.area, T = p.target;
-  var gx = b.x + 44 * Math.cos(th * Math.PI / 4 + b.a), gy = b.y + 44 * Math.sin(th * Math.PI / 4 + b.a);
-  var hx = A.x + A.w * f, hy = T.y > A.y + A.h ? A.y + A.h - 70 : A.y + 60;
-  g.down(gx, gy);
-  for (var i = 1; i <= 20; i++) { g.moveTo(gx + (hx - gx) * i / 20, gy + (hy - gy) * i / 20); g.step(1); }
-  g.step(50);
-  g.up();
-}
 /* Cの縁の th 番目をつかみ、エリアの真ん中から指を (vx, vy) の速さでエリアの縁まで動かして離す */
 function swing(g, th, vx, vy) {
   var p = g.probe.now(), b = p.ball, A = p.area;
@@ -56,21 +46,32 @@ function swing(g, th, vx, vy) {
   while (fx > A.x + 8 && fx < A.x + A.w - 8 && fy > A.y + 8 && fy < A.y + A.h - 8 && n < 40) { fx += vx / 60; fy += vy / 60; g.moveTo(fx, fy); g.step(1); n++; }
   g.up();
 }
-/* いまの段を、運ぶ・振るの総当たりで引っかけるまで試す。見つけた操作を返す */
+/* Cの縁の th 番目をつかみ、エリアの下の横 sx の位置まで運んでぶら下げ、そこから指を (vx, vy) の速さで動かして離す */
+function toss(g, th, sx, vx, vy) {
+  var p = g.probe.now(), b = p.ball, A = p.area;
+  var gx = b.x + 44 * Math.cos(th * Math.PI / 4 + b.a), gy = b.y + 44 * Math.sin(th * Math.PI / 4 + b.a);
+  var hx = A.x + A.w * sx, hy = A.y + A.h - 20;
+  g.down(gx, gy);
+  for (var i = 1; i <= 15; i++) { g.moveTo(gx + (hx - gx) * i / 15, gy + (hy - gy) * i / 15); g.step(1); }
+  g.step(40);
+  var fx = hx, fy = hy, n = 0;
+  while (fx > A.x + 8 && fx < A.x + A.w - 8 && fy > A.y + 8 && fy < A.y + A.h + 8 && n < 40) { fx += vx / 60; fy += vy / 60; g.moveTo(fx, fy); g.step(1); n++; }
+  g.up();
+}
+/* いまの段を、運んで放る操作の総当たりで引っかけるまで試す。見つけた操作を返す */
 function solve(g) {
   var idx = g.probe.now().stage;
   function done() { var q = g.probe.now(); return q.clearing || q.stage !== idx || q.state !== "play"; }
-  for (var th = 0; th < 8; th++) {
-    for (var f = 0.05; f <= 0.951; f += 0.075) { carry(g, th, f); settle(g); if (done()) return "運ぶ " + th + "/" + f.toFixed(2); }
-    for (var vx = -1500; vx <= 1500; vx += 250) for (var vy = -2400; vy <= 600; vy += 300) {
-      swing(g, th, vx, vy); settle(g); if (done()) return "振る " + th + "/" + vx + "/" + vy;
-    }
-  }
+  for (var th = 0; th < 8; th += 2)
+    for (var sx = 0.12; sx < 0.95; sx += 0.19)
+      for (var vx = -1200; vx <= 1200; vx += 300) for (var vy = -2400; vy <= -600; vy += 300) {
+        toss(g, th, sx, vx, vy); settle(g); if (done()) return "放る " + th + "/" + sx.toFixed(2) + "/" + vx + "/" + vy;
+      }
   return null;
 }
 function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 200); }
 
-/* ---- つかむ・運ぶ・離す（1段目：エリアは左下、相手は右の低いところ） ---- */
+/* ---- つかむ・運ぶ・離す（1段目：エリアは下、相手はその上） ---- */
 (function () {
   var g = openWith({});
   var p0 = g.probe.now();
@@ -79,7 +80,7 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
   g.press(" "); g.step(2);
   var p = g.probe.now();
   ok("はじめてなら1段目から", p.state === "play" && p.stage === 0);
-  ok("1段目はCが下のエリアで待ち、相手はその右", p.ball.y > p.area.y && p.ball.y < p.area.y + p.area.h && p.area.y > g.H / 2 && p.target.x > p.area.x + p.area.w);
+  ok("1段目はCが下のエリアで待ち、相手はその上", p.ball.y > p.area.y && p.ball.y < p.area.y + p.area.h && p.area.y > g.H / 2 && p.target.y < p.area.y);
   g.down(p.ball.x + 150, p.ball.y + 150); g.step(30); g.up();
   ok("Cから離れたところを触ってもつかまない", g.probe.now().ball.idle);
   g.down(p.ball.x - 44, p.ball.y + 3); g.step(1);
@@ -121,20 +122,22 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
   ok("振って離すとエリアの上へ飛んで1投", q.throws === 1 && !q.grab && q.ball.out, "vx " + Math.round(q.ball.vx) + " vy " + Math.round(q.ball.vy) + " 回転 " + q.ball.w.toFixed(1));
 })();
 
-/* ---- 相手のCに乗って止まる：真上に置いた相手へ落とす ---- */
-function dropOnto(gap) {
-  var g = openWith({}, "STAGES[0] = { area: [0.03, 0.3, 0.94, 0.25], t: [180, 0.5, 0.8, " + gap + "], o: [] };");
+/* ---- 相手のCに乗って止まる：エリアを上に移した台で、真下の相手へ落とす ---- */
+function dropOnto(gap, miss) {
+  var g = openWith({}, "AREA = [0.03, 0.3, 0.94, 0.25]; STAGES[0] = { t: [180, " + (miss ? 0.85 : 0.5) + ", 0.8, " + gap + "] };");
   g.press(" "); g.step(2);
   var p = g.probe.now(), b = p.ball, T = p.target;
   g.down(b.x - 44, b.y); g.step(5);
-  for (var i = 1; i <= 20; i++) { g.moveTo(b.x - 44 + (T.x - b.x + 44) * i / 20, b.y + (p.area.y + p.area.h - b.y) * i / 20); g.step(1); }
+  var tx = miss ? 270 : T.x;
+  for (var i = 1; i <= 20; i++) { g.moveTo(b.x - 44 + (tx - b.x + 44) * i / 20, b.y + (p.area.y + p.area.h - b.y) * i / 20); g.step(1); }
   g.step(300); g.up();
   return g.until(function () { return g.probe.now().clearing; }, 400);
 }
 (function () {
   ok("すき間が上の相手の中へ落ちて止まるとクリア", dropOnto(-90));
   ok("すき間の縁に乗って止まるとクリア", dropOnto(-60));
-  ok("丸い背に落ちて転げ落ちたらクリアしない", !dropOnto(90));
+  ok("丸い背に乗って止まってもクリア", dropOnto(90));
+  ok("相手から外れて落ちたらクリアしない", !dropOnto(-90, true));
 })();
 
 /* ---- 25段とも引っかけられる。行の終わりで結果、保存 ---- */
