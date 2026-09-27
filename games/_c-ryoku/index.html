@@ -204,7 +204,6 @@
     tone(700 + Math.random() * 120, 0.05, v * 0.5, "triangle");
   }
   /* 引っかかった：検査のピッ */
-  function sndDone() { tone(1000, 0.2, 0.22, "sine"); tone(1000, 0.2, 0.22, "sine", null, 0.28); tone(1500, 0.4, 0.2, "sine", null, 0.56); }
   function sndTap() { tone(1800, 0.05, 0.1, "sine"); }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
@@ -358,7 +357,7 @@
   var SAVE = "zounoashi.c-ryoku.v1";
   var cleared = [];
   var gain = false;                            /* いまの段が初めてのクリアで、C力が上がるところ */
-  var CLEAR_T = 1.5;
+  var CLEAR_T = 1.1;
   var HOLD = 1.0;                              /* 止まってからクリアと判定するまで */                           /* 引っかけてから次の段へ移るまで */
   function load() {
     cleared = [];
@@ -649,17 +648,12 @@
   function finishStage() {
     if (!isCleared(stage)) { cleared.push(stage); save(); }
     gain = false;
-    var endRow = stage % ROW === ROW - 1;
-    if (endRow) {
-      score = cPower();
-      state = S.RESULT;
-      clearT = -1;
-      sndDone();
-      return;
-    }
-    if (stage + 1 < STAGES.length) goStage(stage + 1);
-    else { clearT = -1; readyBall(); sel = true; }
+    /* 毎段、クリアの画面。場面はそのまま残し、「次」と「シェア」を出す */
+    score = cPower();
+    state = S.RESULT;
+    clearT = -1;
   }
+  function nextStage() { newRound(stage + 1 < STAGES.length ? stage + 1 : firstOpen()); }
 
   /* C力：クリアした段ごとの上がり幅の合計。25段で 10.0 */
   function gainOf(i) { return GAINS[Math.floor(i / ROW)]; }
@@ -704,10 +698,8 @@
     if (x != null && inRect(x, y, SEL_BTN) && !sel) { sndTap(); sel = true; return; }
     if (sel) { if (x == null) { sel = false; return; } selectTap(x, y); return; }
     if (state === S.RESULT) {
-      var hit = x == null ? "retry" : hitButton(x, y);
-      if (hit === "retry") { newRound(Math.floor(stage / ROW) * ROW); return; }
-      /* ボタンの外を触ったら次の行へ */
-      if (!hit && stage + 1 < STAGES.length) { newRound(stage + 1); }
+      var hit = x == null ? "next" : hitButton(x, y);
+      if (hit === "next") { sndTap(); nextStage(); }
       return;
     }
     if (x == null) { keyThrow(); return; }
@@ -974,7 +966,7 @@
 
     objs.forEach(drawObj);
 
-    var fade = clearT >= 0 ? Math.max(0, 1 - Math.max(0, clearT - 0.6) / 0.5) : 1;
+    var fade = 1;                              /* クリアしても場面は消さずに残す */
     if (target) drawC(target.shape, target.x, target.y, target.a, fade);
 
     if (ball) {
@@ -1052,9 +1044,9 @@
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.4;
     return [
-      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "next", x: x0, y: y, w: wr, h: h, label: "次" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
     ];
   }
@@ -1070,7 +1062,7 @@
   function drawGain() {
     var before = cPower(), after = cPower(cleared.concat([stage]));
     var t = clearT, flip = 0.45;
-    var inA = Math.min(1, t / 0.2), out = Math.max(0, Math.min(1, (t - (CLEAR_T - 0.25)) / 0.25));
+    var inA = Math.min(1, t / 0.2), out = 0;     /* 消さずに、そのままクリアの画面の表示につなぐ */
     var pop = t < flip ? 1 : 1 + 0.45 * Math.max(0, 1 - (t - flip) / 0.3);
     var cy = H * 0.16;
     ctx.save();
@@ -1091,7 +1083,7 @@
     ctx.scale(pop, pop);
     ctx.font = "800 84px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillStyle = t < flip ? INK : "#e0463a";
+    ctx.fillStyle = t < flip || t > flip + 0.5 ? INK : "#e0463a";
     ctx.fillText(num, 0, 30);
     ctx.restore();
     if (t >= flip) {
@@ -1105,24 +1097,44 @@
     ctx.restore();
   }
 
-  function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.66)";
-    ctx.fillRect(0, 0, W, H);
+  /* 「次」の矢印。共通のアイコンと同じ線の太さ・色 */
+  function drawNextIcon(size) {
+    var u = size / 30;
     ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
-    ctx.textAlign = "left";
-    var label = "C力", num = String(score);
-    ctx.font = "800 52px sans-serif";
+    ctx.strokeStyle = "#16202e"; ctx.lineWidth = 4.5 * u; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(-11 * u, 0); ctx.lineTo(11 * u, 0);
+    ctx.moveTo(2 * u, -9 * u); ctx.lineTo(11 * u, 0); ctx.lineTo(2 * u, 9 * u);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* クリアの画面の「C力 0.0」。上がる演出の終わりと同じ形 */
+  function drawPower(num) {
+    var cy = H * 0.16, label = "C力";
+    ctx.save();
+    ctx.fillStyle = INK; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+    ctx.font = "800 40px sans-serif";
     var lw = ctx.measureText(label).width;
-    ctx.font = "800 108px sans-serif";
+    ctx.font = "800 84px sans-serif";
     var nw = ctx.measureText(num).width;
-    var x0 = W / 2 - (lw + 18 + nw) / 2;
-    ctx.font = "800 52px sans-serif";
-    ctx.fillText(label, x0, H * 0.45);
-    ctx.font = "800 108px sans-serif";
-    ctx.fillText(num, x0 + lw + 18, H * 0.45);
+    var x0 = W / 2 - (lw + 14 + nw) / 2;
+    ctx.font = "800 40px sans-serif";
+    ctx.fillText(label, x0, cy);
+    ctx.font = "800 84px sans-serif";
+    ctx.fillText(num, x0 + lw + 14, cy);
+    ctx.restore();
+  }
+
+  function drawResult() {
+    /* 暗くしない。場面の上に、今のC力と「クリア」、ボタン */
+    drawPower(score);
+    ctx.save();
+    ctx.fillStyle = INK; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.font = "800 64px sans-serif";
+    ctx.lineWidth = 10; ctx.strokeStyle = PAPER; ctx.lineJoin = "round";
+    ctx.strokeText("クリア", W / 2, H * 0.33);
+    ctx.fillText("クリア", W / 2, H * 0.33);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
@@ -1131,10 +1143,11 @@
       ctx.fillStyle = "#fff"; ctx.fill();
       ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
       ctx.fillStyle = "#16202e";
-      ctx.font = "800 24px sans-serif";
+      ctx.font = "800 28px sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      if (b.id === "next") drawNextIcon(30);     /* 「次」は右向きの矢印。文字は出さない（読み上げ用の名前だけ） */
+      else if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
       ctx.restore();
       ctx.textBaseline = "alphabetic";
     });
@@ -1156,6 +1169,7 @@
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     power: function (list) { return cPower(list); },
+    buttons: function () { return resultButtons(); },
     size: function (i) { return SIZES[Math.floor(i / ROW)]; },
     dir: function (i) { return DIRS[i]; },
     stages: function () { return STAGES.length; },

@@ -10,8 +10,8 @@
    ・1・10・20・25段は相手がC、ほかの段は「C」から始まる物がゴール
    ・25段とも、実際につかんで運ぶ・振る操作で引っかけられる（物なら乗って止まってもよい）
    ・初めてクリアするたびにC力が上がり、上がる演出が出る。小さいCの段ほど多く上がり、全部で10.0。2回目は上がらない
-   ・行の終わりで結果画面になり、そのときのC力が出る
-   ・結果画面でボタンの外を触ると次の行へ、もう一度でその行の最初から
+   ・毎段クリアの画面になり、そのときのC力と「次」「シェア」が出る（暗くしない）
+   ・クリアの画面はボタンの外を触っても進まず、「次」で次の段へ
    ・左上のボタンで段を選べる。最初から全部選べる
    ・投げるCは一覧のCと同じ向き（上下左右）と大きさ。下の行ほど小さい
    ・引っかけた段は保存され、次に開いたとき続きから始まる
@@ -166,11 +166,12 @@ function dropOnto(gap, miss) {
      "止め " + h0.toFixed(2) + " ゆっくり " + slow.toFixed(2) + " 速く " + fast.toFixed(2) + " 止めた後 " + h1.toFixed(2));
 })();
 
-/* ---- 25段とも引っかけられる。行の終わりで結果、保存 ---- */
+/* ---- 25段とも引っかけられる。毎段クリアの画面、次へ、保存 ---- */
 (function () {
   var g = openWith({});
   g.press(" "); g.step(2);
-  var found = [], results = [], gains = [];
+  var found = [], scores = [], gains = [], outsideOk = true, nextOk = true;
+  function center(id) { var b = g.probe.buttons().filter(function (q) { return q.id === id; })[0]; return [b.x + b.w / 2, b.y + b.h / 2]; }
   for (var i = 0; i < 25; i++) {
     if (g.probe.now().stage !== i) { found.push(null); break; }
     var how = solve(g);
@@ -178,21 +179,26 @@ function dropOnto(gap, miss) {
     if (!how) break;
     gains.push(g.probe.now().gain);
     waitNext(g);
-    if (i % 5 === 4) {
-      var r = g.probe.now();
-      results.push(r.state === "result" ? r.score : "×");
-      if (r.state === "result" && i < 24) { g.tap(270, 160); g.step(2); }   /* ボタンの外を触って次の行へ */
+    var r = g.probe.now();
+    scores.push(r.state === "result" ? r.score : "×");
+    if (r.state !== "result") break;
+    if (i === 0) { g.tap(40, g.H - 40); g.step(2); if (g.probe.now().state !== "result") outsideOk = false; }
+    if (i < 24) {
+      var c = center("next"); g.tap(c[0], c[1]); g.step(2);
+      if (!(g.probe.now().state === "play" && g.probe.now().stage === i + 1)) nextOk = false;
     }
   }
   var solved = found.filter(Boolean).length;
   ok("25段とも引っかけられる", solved === 25, solved + "段");
   found.forEach(function (h, i) { console.log("      " + (i + 1) + "段目  " + (h || "見つからない")); });
   ok("初めてのクリアではどの段もC力が上がる演出が出る", gains.length === 25 && gains.every(Boolean));
-  ok("行の終わりごとに結果画面でC力が出る（全部で10.0）", results.join("/") === "0.5/1.5/3.5/6.0/10.0", results.join(" / "));
+  ok("毎段クリアの画面になり、そのときのC力が出る（全部で10.0）", scores.length === 25 && scores[0] === "0.1" && scores[4] === "0.5" && scores[24] === "10.0", scores.filter(function (x, k) { return k % 5 === 4; }).join(" / "));
+  ok("クリアの画面はボタンの外を触っても進まない", outsideOk);
+  ok("「次」で次の段へ", nextOk);
   var m = JSON.parse(g.probe.mem()["zounoashi.c-ryoku.v1"] || "{}");
   ok("引っかけた段が保存される", m.c && m.c.length === 25);
   g.press(" "); g.step(2);
-  ok("もう一度でその行の最初から", g.probe.now().state === "play" && g.probe.now().stage === 20 && g.probe.now().rowThrows === 0);
+  ok("最後の段の「次」は最初の段へ（全部クリア済みのとき）", g.probe.now().state === "play" && g.probe.now().stage === 0);
   solve(g);
   ok("クリア済みの段をもう一度クリアしてもC力は上がらない", g.probe.now().clearing && !g.probe.now().gain && g.probe.now().power === "10.0");
 })();
