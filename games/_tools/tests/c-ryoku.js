@@ -6,6 +6,7 @@
    ・開始画面ではつかめない
    ・エリアのCを触ったところでつかみ、ぶら下げると回る。Cはエリアの外へ持ち出せない
    ・離してエリアから出たら1投。エリアの下へ落としただけなら数えない
+   ・相手のCに乗って止まってもクリア。丸い背から転げ落ちたらクリアしない
    ・25段とも、実際につかんで運ぶ・振る操作で引っかけられる
    ・1行（5段）を通して引っかけると結果画面で、その行の回数に応じたC力が出る
    ・結果画面でボタンの外を触ると次の行へ、もう一度でその行の最初から
@@ -23,11 +24,11 @@ function ok(label, cond, extra) {
 }
 
 /* 端末の保存場所の代わりを入れて開く。mem は保存済みの中身 */
-function openWith(mem) {
+function openWith(mem, extra) {
   var inj = "window.__mem = " + JSON.stringify(mem || {}) + ";" +
             "window.localStorage = { getItem: function (k) { return window.__mem[k] == null ? null : window.__mem[k]; }, setItem: function (k, v) { window.__mem[k] = String(v); } };" +
             "window.__probe.go = function (i) { newRound(i); }; window.__probe.mem = function () { return window.__mem; };";
-  return load(FILE, { quiet: true, inject: inj });
+  return load(FILE, { quiet: true, inject: inj + (extra || "") });
 }
 
 function settle(g) {
@@ -116,6 +117,22 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
   g.step(10);
   var q = g.probe.now();
   ok("振って離すとエリアの上へ飛んで1投", q.throws === 1 && !q.grab && q.ball.out, "vx " + Math.round(q.ball.vx) + " vy " + Math.round(q.ball.vy) + " 回転 " + q.ball.w.toFixed(1));
+})();
+
+/* ---- 相手のCに乗って止まる：真上に置いた相手へ落とす ---- */
+function dropOnto(gap) {
+  var g = openWith({}, "STAGES[0] = { area: [0.03, 0.3, 0.94, 0.25], t: [180, 0.5, 0.8, " + gap + "], o: [] };");
+  g.press(" "); g.step(2);
+  var p = g.probe.now(), b = p.ball, T = p.target;
+  g.down(b.x - 44, b.y); g.step(5);
+  for (var i = 1; i <= 20; i++) { g.moveTo(b.x - 44 + (T.x - b.x + 44) * i / 20, b.y + (p.area.y + p.area.h - b.y) * i / 20); g.step(1); }
+  g.step(300); g.up();
+  return g.until(function () { return g.probe.now().clearing; }, 400);
+}
+(function () {
+  ok("すき間が上の相手の中へ落ちて止まるとクリア", dropOnto(-90));
+  ok("すき間の縁に乗って止まるとクリア", dropOnto(-60));
+  ok("丸い背に落ちて転げ落ちたらクリアしない", !dropOnto(90));
 })();
 
 /* ---- 25段とも引っかけられる。行の終わりで結果、保存 ---- */
