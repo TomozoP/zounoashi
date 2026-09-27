@@ -121,27 +121,37 @@
   function sndThrow() { noiseHit(0.16, 900, 0.18, 0.8); }
   /* 成功の合唱「シィィィ〜」。「シ」の息から入って、和音（ド・ミ・ソ・ド）の「ィ」を伸ばす。
      1声ごとに少しずらした2本ののこぎり波を、イの形（300・2300・3000Hzあたり）に絞る */
-  /* big：全段そろった回の大合唱。声を増やし、音域を広げ、長く、ゆっくり盛り上げる */
+  /* 合唱の「シィィィ〜」。big：全段そろった回の大合唱。
+     「し〜　し〜↑　し〜〜〜↑↑」と3回言いなおし、Cの和音のまま1回ごとに声を高く積み、最後を長く大きくする */
+  var E4 = 329.63, G4 = 392.0;
   function sndChoir(big) {
     if (!AC || !NOISE) return;
-    var n = AC.currentTime, len = big ? 3.8 : 1.5;
+    var n = AC.currentTime;
+    if (!big) { choirPhrase(n, 1.5, [C4 / 2, C4, E4, G4, C5], [-7, 7], 1, 0.16, 0.3, 0); return; }
+    /* いちばん上の声が ド → ソ → 高いド と上がる。2回目と3回目は、しゃくり上げて入る */
+    choirPhrase(n, 1.05, [C4 / 2, C4, E4, G4, C5], [-9, 0, 9], 0.7, 0.15, 0.2, 0);
+    choirPhrase(n + 1.2, 1.05, [C4 / 2, G4, C5, E4 * 2, G4 * 2], [-9, 0, 9], 0.7, 0.17, 0.2, 200);
+    choirPhrase(n + 2.4, 2.8, [C4 / 4, C4 / 2, G4 / 2, C4, E4, G4, C5, E4 * 2, G4 * 2, C5 * 2], [-13, -5, 5, 13], 0.42, 0.21, 0.5, 300);
+  }
+  /* 1回ぶんの「シィィィ〜」。at：始まり、len：長さ、notes：和音、cents：声ごとのずれ、vg：声の強さ、peak：全体の大きさ、rise：立ち上がり秒、
+     scoop：この分（セント）だけ低いところから入って、すぐ本来の高さへ上がる */
+  function choirPhrase(at, len, notes, cents, vg, peak, rise, scoop) {
+    var n = at;
     var src = AC.createBufferSource(); src.buffer = NOISE; src.loop = true;
     var hp = AC.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 2000;
     var sh = AC.createBiquadFilter(); sh.type = "bandpass"; sh.frequency.value = 3300; sh.Q.value = 1.2;
     var gs = AC.createGain();
     gs.gain.setValueAtTime(0.0001, n);
     gs.gain.linearRampToValueAtTime(0.3, n + 0.04);
-    gs.gain.setTargetAtTime(big ? 0.05 : 0.03, n + 0.16, 0.08);
+    gs.gain.setTargetAtTime(0.03, n + 0.16, 0.08);
     gs.gain.setTargetAtTime(0.0001, n + len - 0.3, 0.12);
     src.connect(hp); hp.connect(sh); sh.connect(gs); gs.connect(OUT);
     src.start(n, Math.random()); src.stop(n + len + 0.3);
     var bus = AC.createGain();
     bus.gain.setValueAtTime(0.0001, n);
-    var peak = big ? 0.2 : 0.16;
-    bus.gain.linearRampToValueAtTime(peak * (big ? 0.6 : 1), n + 0.3);
-    if (big) bus.gain.linearRampToValueAtTime(peak, n + 1.4);
-    bus.gain.setValueAtTime(peak, n + len - 0.4);
-    bus.gain.exponentialRampToValueAtTime(0.0001, n + len + 0.2);
+    bus.gain.linearRampToValueAtTime(peak, n + rise);
+    bus.gain.setValueAtTime(peak, n + len - 0.35);
+    bus.gain.exponentialRampToValueAtTime(0.0001, n + len + 0.15);
     [300, 2300, 3000].forEach(function (fq, i) {
       var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = fq; f.Q.value = [4, 7, 8][i];
       var fg = AC.createGain(); fg.gain.value = [1, 0.6, 0.4][i] * 2.2;
@@ -149,16 +159,16 @@
     });
     var lfo = AC.createOscillator(); lfo.frequency.value = 4.8;
     lfo.start(n); lfo.stop(n + len + 0.3);
-    /* Cの和音（ド・ド・ミ・ソ・ド）。動かす音のドと同じ高さ。大合唱は下と上にも広げる */
-    var notes = big ? [C4 / 4, C4 / 2, 196.0, C4, 329.63, 392.0, C5, 659.26, 783.99, C5 * 2] : [C4 / 2, C4, 329.63, 392.0, C5];
-    var cents = big ? [-13, -5, 5, 13] : [-7, 7];
-    notes.forEach(function (hz, i) {
+    notes.forEach(function (hz, i) {   /* Cの和音（ド・ミ・ソ）。動かす音のドと同じ高さ */
       cents.forEach(function (cent) {
         var o = AC.createOscillator(); o.type = "sawtooth";
-        o.frequency.value = hz; o.detune.value = cent + (Math.random() - 0.5) * 6;
+        o.frequency.value = hz;
+        var dc = cent + (Math.random() - 0.5) * 6;
+        o.detune.setValueAtTime(dc - scoop, n);
+        if (scoop) o.detune.setTargetAtTime(dc, n + 0.05, 0.06);
         var lg = AC.createGain(); lg.gain.value = hz * 0.004;       /* ほんの少しだけ揺らす */
         lfo.connect(lg); lg.connect(o.frequency);
-        var og = AC.createGain(); og.gain.value = (i === 0 ? 0.7 : 0.5) * (big ? 0.42 : 1);
+        var og = AC.createGain(); og.gain.value = (i === 0 ? 0.7 : 0.5) * vg;
         o.connect(og); og.connect(bus);
         o.start(n + 0.05 + i * 0.012); o.stop(n + len + 0.3);
       });
