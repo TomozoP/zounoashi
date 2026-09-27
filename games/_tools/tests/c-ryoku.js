@@ -20,7 +20,7 @@
    ・Esc でいまの行の最初から */
 
 var load = require("../harness");
-var FILE = "games/_c-ryoku/index.html";
+var FILE = "games/c-ryoku/index.html";
 
 var bad = [];
 function ok(label, cond, extra) {
