@@ -35,4 +35,5 @@ window.DRAFT_GAMES = [
     "catch": "Wikipediaの記事でかなビンゴ"
   },
   {"type":"lab","tags":[],"id":"brute-escape","title":"総当たり脱出ゲーム","year":2026,"date":"2026-09-27","plays":null,"url":"","img":"games/_brute-escape/img/thumb.webp","play":"games/_brute-escape/index.html","full":true,"catch":""},
+  {"type":"lab","tags":[],"id":"c-ryoku","title":"C力検査","year":2026,"date":"2026-09-27","plays":null,"url":"","img":"games/_c-ryoku/img/thumb.webp","play":"games/_c-ryoku/index.html","full":true,"catch":""},
 ];
