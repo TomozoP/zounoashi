@@ -30,7 +30,9 @@ function ok(label, cond, extra) {
 
 /* 端末の保存場所の代わりを入れて開く。mem は保存済みの中身 */
 function openWith(mem, extra) {
-  var inj = "window.__mem = " + JSON.stringify(mem || {}) + ";" +
+  /* 時計の段は今の時刻で針が変わるので、ふだんは10時10分に止めて確かめる */
+  var inj = "CLOCK_FIX = 36600;" +
+            "window.__mem = " + JSON.stringify(mem || {}) + ";" +
             "window.localStorage = { getItem: function (k) { return window.__mem[k] == null ? null : window.__mem[k]; }, setItem: function (k, v) { window.__mem[k] = String(v); } };" +
             "window.__probe.go = function (i) { newRound(i); }; window.__probe.mem = function () { return window.__mem; };";
   return load(FILE, { quiet: true, inject: inj + (extra || "") });
@@ -205,6 +207,39 @@ function dropOnto(gap, miss) {
   ok("クリア済みの段をもう一度クリアしてもC力は上がらない", g.probe.now().clearing && !g.probe.now().gain && g.probe.now().power === "10.0");
   waitNext(g);
   ok("全部そろった後のやり直しは「Complete」にならない", g.probe.now().state === "result" && !g.probe.now().complete);
+})();
+
+/* ---- 時計の針は今の時刻 ---- */
+(function () {
+  var g = openWith({}, "CLOCK_FIX = 3 * 3600;");
+  g.press(" "); g.step(2); g.probe.go(17); g.step(2);
+  var h3 = g.probe.hands();
+  g.probe.go(23); g.step(2);
+  var kind = g.probe.now().objs[0].kind, h24 = g.probe.hands();
+  var r = openWith({}, "CLOCK_FIX = null;");
+  r.press(" "); r.step(2); r.probe.go(17); r.step(2);
+  var d = new Date(), m = -90 + (d.getMinutes() + d.getSeconds() / 60) * 6, hr = r.probe.hands();
+  ok("時計の針は時刻どおり（3時で長い針が上、短い針が右）", h3[0] === -90 && h3[1] === 0 && h24[0] === -90 && h24[1] === 0, h3.join("/"));
+  ok("ふだんは端末の今の時刻を指す", Math.abs(((hr[0] - m) % 360 + 540) % 360 - 180) < 2, hr[0] + " / " + m.toFixed(0));
+  ok("24段は枠のない時計（針だけ）", kind === "hands");
+})();
+
+/* ---- 24段は、どの時刻でも針に載せられる ---- */
+(function () {
+  var fails = [];
+  ["2:00", "3:30", "6:30", "10:15"].forEach(function (tm) {
+    var hm = tm.split(":"), g = openWith({}, "CLOCK_FIX = " + (hm[0] * 3600 + hm[1] * 60) + ";");
+    g.press(" "); g.step(2); g.probe.go(23); g.step(2);
+    var found = false;
+    function done() { var q = g.probe.now(); return q.clearing || q.stage !== 23 || q.state !== "play"; }
+    for (var th = 0; th < 8 && !found; th++)
+      for (var sx = 0.12; sx < 0.95 && !found; sx += 0.08)
+        for (var vx = -1200; vx <= 1200 && !found; vx += 150) for (var vy = -2400; vy <= -600 && !found; vy += 150) {
+          toss(g, th, sx, vx, vy); settle(g); if (done()) found = true;
+        }
+    if (!found) fails.push(tm);
+  });
+  ok("24段は針が下を向く時刻でも載せられる", !fails.length, fails.join(" "));
 })();
 
 /* ---- 演出の覗き穴（F2・F4） ---- */

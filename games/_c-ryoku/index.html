@@ -256,7 +256,7 @@
     lastClack = T;
     var v = Math.min(0.35, power / 2400);
     if (kind === "cloud") { noiseHit(0.12, 500, v * 0.8, 0.7); return; }
-    if (kind === "car" || kind === "clock" || kind === "coin") { tone(1400 + Math.random() * 300, 0.12, v * 0.5, "triangle"); noiseHit(0.03, 4000, v * 0.6, 4); return; }
+    if (kind === "car" || kind === "clock" || kind === "hands" || kind === "coin") { tone(1400 + Math.random() * 300, 0.12, v * 0.5, "triangle"); noiseHit(0.03, 4000, v * 0.6, 4); return; }
     if (kind === "cat") { tone(700, 0.18, v * 0.5, "sine", 1100); return; }
     noiseHit(0.03, 2600, v, 5);
     tone(700 + Math.random() * 120, 0.05, v * 0.5, "triangle");
@@ -316,14 +316,14 @@
     /* 4行目：動く */
     { g: ["crab", 0.7, 0.6, 40, 0.12, 3] },
     { g: ["cup", 0.5, 0.6, 80, 0.2, 3.6] },
-    { g: ["clock", 0.2, 0.6, 70, 0, 1.5] },
+    { g: ["clock", 0.2, 0.6, 70] },
     { g: ["car", 0.5, 0.6, 36, 0.2, 3.2] },
     { t: [200, 0.2, 0.6, -60] },
     /* 5行目 */
     { g: ["cloud", 0.75, 0.6, 64] },
     { g: ["cone", 0.2, 0.45, 48] },
     { g: ["cactus", 0.5, 0.6, 46] },
-    { g: ["clock", 0.8, 0.6, 70, 0, -1.6] },
+    { g: ["hands", 0.5, 0.5, 100] },
     { t: [160, 0.2, 0.55, -60] }
   ];
   var ROW = 5;
@@ -379,19 +379,38 @@
     clock: function (s) {
       var ring = [], n = Math.ceil(Math.PI * 2 * s / 9);
       for (var i = 0; i < n; i++) { var a = Math.PI * 2 * i / n; ring.push({ x: Math.cos(a) * s, y: Math.sin(a) * s, r: 6 }); }
-      return { body: ring, hand: circleRow(0, 0, 0.82 * s, 0, 6) };
+      return { body: ring, hands: clockHands(s) };
+    },
+    /* 枠のない時計。針と真ん中の軸だけ */
+    hands: function (s) {
+      return { body: [{ x: 0, y: 0, r: 10 }], hands: clockHands(s) };
     }
   };
+
+  /* 時計の針。今の時刻を指す。長い針（分）と短い針（時）。どちらも当たる */
+  function clockHands(s) {
+    return [
+      { len: 0.82 * s, w: 12, circles: circleRow(0, 0, 0.82 * s, 0, 6), sec: 3600 },
+      { len: 0.5 * s, w: 16, circles: circleRow(0, 0, 0.5 * s, 0, 8), sec: 43200 }
+    ];
+  }
+  /* 今日の0時からの秒。CLOCK_FIX を入れると、その時刻に止めて確かめられる */
+  var CLOCK_FIX = null, CLOCK0 = 0;
+  function daySec() {
+    if (CLOCK_FIX != null) return CLOCK_FIX;
+    var d = new Date();
+    return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000;
+  }
 
   function makeObj(d) {
     var o = { kind: d[0], fx: d[1], fy: d[2], s: d[3], amp: d[4] || 0, per: d[5] || 0 };
     var k = KINDS[o.kind](o.s);
-    o.body = k.body; o.hand = k.hand || null;
+    o.body = k.body; o.hands = k.hands || null;
     o.R = 0;
-    o.body.concat(o.hand || []).forEach(function (c) { o.R = Math.max(o.R, Math.hypot(c.x, c.y) + c.r); });
+    o.body.concat.apply(o.body, (o.hands || []).map(function (h) { return h.circles; })).forEach(function (c) { o.R = Math.max(o.R, Math.hypot(c.x, c.y) + c.r); });
     return o;
   }
-  /* 時刻 t での位置と速さ。時計は針だけ回る（per を角速度として使う） */
+  /* 時刻 t での位置と速さ。時計は針だけが今の時刻に合わせて回る（has：針の角度、hws：針の角速度） */
   function objPose(o, t) {
     var x = W * o.fx, y = H * o.fy, vx = 0, vy = 0;
     if (o.amp && o.per) {
@@ -399,8 +418,13 @@
       if (o.kind === "cloud") { x += Math.sin(t * w) * o.amp * W; vx = Math.cos(t * w) * w * o.amp * W; }
       else { x += Math.sin(t * w) * o.amp * W; vx = Math.cos(t * w) * w * o.amp * W; }
     }
-    var ha = o.kind === "clock" ? t * o.per : 0, hw = o.kind === "clock" ? o.per : 0;
-    return { x: x, y: y, vx: vx, vy: vy, ha: ha, hw: hw };
+    var has = [], hws = [];
+    if (o.hands) o.hands.forEach(function (h) {
+      var sec = CLOCK0 + t;
+      has.push(-Math.PI / 2 + Math.PI * 2 * ((sec % h.sec) / h.sec));
+      hws.push(Math.PI * 2 / h.sec);
+    });
+    return { x: x, y: y, vx: vx, vy: vy, has: has, hws: hws };
   }
 
   /* ============ 状態 ============ */
@@ -482,6 +506,7 @@
     stage = i;
     if (i % ROW === 0) rowThrows = 0;
     ST = 0;
+    CLOCK0 = daySec();
     clearT = -1;
     target = null;
     stageObjs();
@@ -552,13 +577,13 @@
   function objCircles(o, t) {
     var p = objPose(o, t), out = [];
     o.body.forEach(function (c) { out.push({ x: p.x + c.x, y: p.y + c.y, r: c.r, vx: p.vx, vy: p.vy }); });
-    if (o.hand) {
-      var ca = Math.cos(p.ha), sa = Math.sin(p.ha);
-      o.hand.forEach(function (c) {
+    if (o.hands) o.hands.forEach(function (h, k) {
+      var ca = Math.cos(p.has[k]), sa = Math.sin(p.has[k]), hw = p.hws[k];
+      h.circles.forEach(function (c) {
         var hx = c.x * ca - c.y * sa, hy = c.x * sa + c.y * ca;
-        out.push({ x: p.x + hx, y: p.y + hy, r: c.r, vx: p.vx - p.hw * hy, vy: p.vy + p.hw * hx });
+        out.push({ x: p.x + hx, y: p.y + hy, r: c.r, vx: p.vx - hw * hy, vy: p.vy + hw * hx });
       });
-    }
+    });
     return out;
   }
 
@@ -589,7 +614,7 @@
     }
     for (var i = 0; i < objs.length; i++) {
       var o = objs[i];
-      if (!o.body.length && !o.hand) continue;
+      if (!o.body.length && !o.hands) continue;
       var p = objPose(o, ST);
       if (Math.hypot(b.x - p.x, b.y - p.y) > BALL.rm + BALL.r + o.R) continue;
       var n0 = acc.n;
@@ -615,9 +640,9 @@
     var g = goalPos();                         /* 動く物に乗っているときは、物と同じ速さなら止まっている扱い */
     return Math.hypot(ball.vx - g.vx, ball.vy - g.vy) < 30 && Math.abs(ball.w) < 0.6;
   }
-  /* 引っかかっているか乗っていて、しっかり止まっている。回る針に掛かっているときは止まれないので、掛かっていればよい */
+  /* 引っかかっているか乗っていて、しっかり止まっている */
   function settled() {
-    if (linked()) return goal && goal.hand && goal.per ? true : still();
+    if (linked()) return still();
     return ball.onC && still();
   }
 
@@ -892,6 +917,15 @@
     ctx.lineWidth = w || LINE; ctx.strokeStyle = INK; ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
   }
+  /* 時計の針（今の時刻）と真ん中の軸 */
+  function drawHands(o, x, y) {
+    var p = objPose(o, ST);
+    o.hands.forEach(function (h, k) {
+      ctx.lineWidth = h.w; ctx.strokeStyle = INK; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(p.has[k]) * h.len, y + Math.sin(p.has[k]) * h.len); ctx.stroke();
+    });
+    dot(x, y, 10);
+  }
   function dot(x, y, r, color) { ctx.fillStyle = color || INK; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
 
   function drawObj(o) {
@@ -1011,12 +1045,10 @@
           var ta = h * Math.PI / 6, r0 = s - 14, r1 = s - (h % 3 ? 20 : 26);
           line(x + Math.cos(ta) * r0, y + Math.sin(ta) * r0, x + Math.cos(ta) * r1, y + Math.sin(ta) * r1, h % 3 ? 2 : 4);
         }
-        /* 短い針（飾り）と、当たる長い針 */
-        var ha = objPose(o, ST).ha;
-        line(x, y, x + Math.cos(ha / 12 - 1) * s * 0.45, y + Math.sin(ha / 12 - 1) * s * 0.45, 6);
-        ctx.lineWidth = 12; ctx.strokeStyle = INK; ctx.lineCap = "round";
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(ha) * 0.82 * s, y + Math.sin(ha) * 0.82 * s); ctx.stroke();
-        dot(x, y, 8);
+        drawHands(o, x, y);
+        break;
+      case "hands":
+        drawHands(o, x, y);
         break;
     }
     ctx.restore();
@@ -1243,6 +1275,7 @@
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     power: function (list) { return cPower(list); },
+    hands: function () { return goal && goal.hands ? objPose(goal, ST).has.map(function (r) { return Math.round(r * 180 / Math.PI); }) : null; },
     buttons: function () { return resultButtons(); },
     size: function (i) { return SIZES[Math.floor(i / ROW)]; },
     dir: function (i) { return DIRS[i]; },
