@@ -194,7 +194,7 @@ function dropOnto(gap, miss) {
   found.forEach(function (h, i) { console.log("      " + (i + 1) + "段目  " + (h || "見つからない")); });
   ok("初めてのクリアではどの段もC力が上がる演出が出る", gains.length === 25 && gains.every(Boolean));
   ok("毎段クリアの画面になり、そのときのC力が出る（全部で10.0）", scores.length === 25 && scores[0] === "0.1" && scores[4] === "0.5" && scores[24] === "10.0", scores.filter(function (x, k) { return k % 5 === 4; }).join(" / "));
-  ok("全段そろった回だけ「Complete」、それまでは「クリア」", completes.length === 25 && completes[24] === true && completes.slice(0, 24).every(function (x) { return !x; }));
+  ok("全段そろった回だけ「Complete」、それまでは文字なし", completes.length === 25 && completes[24] === true && completes.slice(0, 24).every(function (x) { return !x; }));
   ok("クリアの画面はボタンの外を触っても進まない", outsideOk);
   ok("「次」で次の段へ", nextOk);
   var m = JSON.parse(g.probe.mem()["zounoashi.c-ryoku.v1"] || "{}");
