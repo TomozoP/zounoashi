@@ -121,23 +121,26 @@
   function sndThrow() { noiseHit(0.16, 900, 0.18, 0.8); }
   /* 成功の合唱「シィィィ〜」。「シ」の息から入って、和音（ド・ミ・ソ・ド）の「ィ」を伸ばす。
      1声ごとに少しずらした2本ののこぎり波を、イの形（300・2300・3000Hzあたり）に絞る */
-  function sndChoir() {
+  /* big：全段そろった回の大合唱。声を増やし、音域を広げ、長く、ゆっくり盛り上げる */
+  function sndChoir(big) {
     if (!AC || !NOISE) return;
-    var n = AC.currentTime, len = 1.5;
-    var src = AC.createBufferSource(); src.buffer = NOISE;
+    var n = AC.currentTime, len = big ? 3.8 : 1.5;
+    var src = AC.createBufferSource(); src.buffer = NOISE; src.loop = true;
     var hp = AC.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 2000;
     var sh = AC.createBiquadFilter(); sh.type = "bandpass"; sh.frequency.value = 3300; sh.Q.value = 1.2;
     var gs = AC.createGain();
     gs.gain.setValueAtTime(0.0001, n);
     gs.gain.linearRampToValueAtTime(0.3, n + 0.04);
-    gs.gain.setTargetAtTime(0.03, n + 0.16, 0.08);
+    gs.gain.setTargetAtTime(big ? 0.05 : 0.03, n + 0.16, 0.08);
     gs.gain.setTargetAtTime(0.0001, n + len - 0.3, 0.12);
     src.connect(hp); hp.connect(sh); sh.connect(gs); gs.connect(OUT);
     src.start(n, Math.random()); src.stop(n + len + 0.3);
     var bus = AC.createGain();
     bus.gain.setValueAtTime(0.0001, n);
-    bus.gain.linearRampToValueAtTime(0.16, n + 0.3);
-    bus.gain.setValueAtTime(0.16, n + len - 0.4);
+    var peak = big ? 0.2 : 0.16;
+    bus.gain.linearRampToValueAtTime(peak * (big ? 0.6 : 1), n + 0.3);
+    if (big) bus.gain.linearRampToValueAtTime(peak, n + 1.4);
+    bus.gain.setValueAtTime(peak, n + len - 0.4);
     bus.gain.exponentialRampToValueAtTime(0.0001, n + len + 0.2);
     [300, 2300, 3000].forEach(function (fq, i) {
       var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = fq; f.Q.value = [4, 7, 8][i];
@@ -146,13 +149,16 @@
     });
     var lfo = AC.createOscillator(); lfo.frequency.value = 4.8;
     lfo.start(n); lfo.stop(n + len + 0.3);
-    [C4 / 2, C4, 329.63, 392.0, C5].forEach(function (hz, i) {   /* Cの和音（ド・ド・ミ・ソ・ド）。動かす音のドと同じ高さ */
-      [-7, 7].forEach(function (cent) {
+    /* Cの和音（ド・ド・ミ・ソ・ド）。動かす音のドと同じ高さ。大合唱は下と上にも広げる */
+    var notes = big ? [C4 / 4, C4 / 2, 196.0, C4, 329.63, 392.0, C5, 659.26, 783.99, C5 * 2] : [C4 / 2, C4, 329.63, 392.0, C5];
+    var cents = big ? [-13, -5, 5, 13] : [-7, 7];
+    notes.forEach(function (hz, i) {
+      cents.forEach(function (cent) {
         var o = AC.createOscillator(); o.type = "sawtooth";
         o.frequency.value = hz; o.detune.value = cent + (Math.random() - 0.5) * 6;
         var lg = AC.createGain(); lg.gain.value = hz * 0.004;       /* ほんの少しだけ揺らす */
         lfo.connect(lg); lg.connect(o.frequency);
-        var og = AC.createGain(); og.gain.value = i === 0 ? 0.7 : 0.5;
+        var og = AC.createGain(); og.gain.value = (i === 0 ? 0.7 : 0.5) * (big ? 0.42 : 1);
         o.connect(og); og.connect(bus);
         o.start(n + 0.05 + i * 0.012); o.stop(n + len + 0.3);
       });
@@ -568,10 +574,11 @@
      成功したら画面の上から降らせる。形は小さなC。白黒の絵に合わせて、黒・灰・赤・白 */
   var confetti = [];
   var CONF_COLORS = ["#111", "#111", "#8c8b85", "#e0463a", "#e0463a", "#fff"];
-  function burstConfetti() {
-    for (var i = 0; i < 140; i++) {
+  function burstConfetti(big) {
+    var count = big ? 380 : 140, spread = big ? 1.2 : 0.35;   /* 大合唱のときは多く、長く降る */
+    for (var i = 0; i < count; i++) {
       confetti.push({
-        x: Math.random() * W, y: -20 - Math.random() * H * 0.35,
+        x: Math.random() * W, y: -20 - Math.random() * H * spread,
         vx: (Math.random() - 0.5) * 120, vy: 120 + Math.random() * 160,
         a: Math.random() * Math.PI * 2, w: (Math.random() - 0.5) * 12,
         flip: Math.random() * Math.PI * 2, fw: 6 + Math.random() * 8,
@@ -634,7 +641,11 @@
     /* 引っかかるか乗って、HOLD 秒止まっていればクリア */
     if (!grab && settled()) {
       hookT += dt;
-      if (hookT > HOLD) { clearT = 0; gain = !isCleared(stage); sndChoir(); burstConfetti(); }
+      if (hookT > HOLD) {
+        clearT = 0; gain = !isCleared(stage);
+        var big = gain && cleared.length === STAGES.length - 1;   /* これで全段そろう */
+        sndChoir(big); burstConfetti(big);
+      }
     } else hookT = 0;
 
     var sp = Math.hypot(ball.vx, ball.vy);
@@ -760,7 +771,13 @@
   wrap.addEventListener("pointercancel", function () { up(); });
   window.addEventListener("blur", function () { up(); });
 
+  /* 演出の覗き穴。F2：ふつうのクリアの合唱と紙吹雪。F4：全段そろったときの大合唱と「Complete」の画面（記録は変えない） */
+  function debugFx(big) {
+    sndChoir(big); burstConfetti(big);
+    if (big && state !== S.INTRO) { grab = null; hookT = 0; complete = true; score = cPower(); state = S.RESULT; clearT = -1; }
+  }
   window.addEventListener("keydown", function (e) {
+    if (e.key === "F2" || e.key === "F4") { e.preventDefault(); if (!e.repeat) debugFx(e.key === "F4"); return; }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
     var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";

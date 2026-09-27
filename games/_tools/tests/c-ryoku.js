@@ -207,6 +207,19 @@ function dropOnto(gap, miss) {
   ok("全部そろった後のやり直しは「Complete」にならない", g.probe.now().state === "result" && !g.probe.now().complete);
 })();
 
+/* ---- 演出の覗き穴（F2・F4） ---- */
+(function () {
+  var g = openWith({ "zounoashi.c-ryoku.v1": JSON.stringify({ c: [0, 1, 2] }) });
+  g.press(" "); g.step(2);
+  g.press("F2"); g.step(1);
+  var small = g.probe.now().confetti, st1 = g.probe.now().state;
+  g.step(900);
+  g.press("F4"); g.step(1);
+  var r = g.probe.now();
+  ok("F2でふつうの演出、F4で大合唱の紙吹雪と「Complete」の画面", small === 140 && st1 === "play" && r.confetti === 380 && r.state === "result" && r.complete, small + " / " + r.confetti);
+  ok("演出の覗き穴は記録を変えない", r.cleared.length === 3 && r.power === g.probe.power([0, 1, 2]));
+})();
+
 /* ---- 段を選ぶ・続きから ---- */
 (function () {
   var g = openWith({ "zounoashi.c-ryoku.v1": JSON.stringify({ c: [0, 1, 2, 3, 4, 5, 6] }) });
