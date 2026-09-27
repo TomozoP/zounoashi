@@ -170,7 +170,7 @@ function dropOnto(gap, miss) {
 (function () {
   var g = openWith({});
   g.press(" "); g.step(2);
-  var found = [], scores = [], gains = [], outsideOk = true, nextOk = true;
+  var found = [], scores = [], gains = [], completes = [], outsideOk = true, nextOk = true;
   function center(id) { var b = g.probe.buttons().filter(function (q) { return q.id === id; })[0]; return [b.x + b.w / 2, b.y + b.h / 2]; }
   for (var i = 0; i < 25; i++) {
     if (g.probe.now().stage !== i) { found.push(null); break; }
@@ -181,6 +181,7 @@ function dropOnto(gap, miss) {
     waitNext(g);
     var r = g.probe.now();
     scores.push(r.state === "result" ? r.score : "×");
+    completes.push(r.complete);
     if (r.state !== "result") break;
     if (i === 0) { g.tap(40, g.H - 40); g.step(2); if (g.probe.now().state !== "result") outsideOk = false; }
     if (i < 24) {
@@ -193,6 +194,7 @@ function dropOnto(gap, miss) {
   found.forEach(function (h, i) { console.log("      " + (i + 1) + "段目  " + (h || "見つからない")); });
   ok("初めてのクリアではどの段もC力が上がる演出が出る", gains.length === 25 && gains.every(Boolean));
   ok("毎段クリアの画面になり、そのときのC力が出る（全部で10.0）", scores.length === 25 && scores[0] === "0.1" && scores[4] === "0.5" && scores[24] === "10.0", scores.filter(function (x, k) { return k % 5 === 4; }).join(" / "));
+  ok("全段そろった回だけ「Complete」、それまでは「クリア」", completes.length === 25 && completes[24] === true && completes.slice(0, 24).every(function (x) { return !x; }));
   ok("クリアの画面はボタンの外を触っても進まない", outsideOk);
   ok("「次」で次の段へ", nextOk);
   var m = JSON.parse(g.probe.mem()["zounoashi.c-ryoku.v1"] || "{}");
@@ -201,6 +203,8 @@ function dropOnto(gap, miss) {
   ok("最後の段の「次」は最初の段へ（全部クリア済みのとき）", g.probe.now().state === "play" && g.probe.now().stage === 0);
   solve(g);
   ok("クリア済みの段をもう一度クリアしてもC力は上がらない", g.probe.now().clearing && !g.probe.now().gain && g.probe.now().power === "10.0");
+  waitNext(g);
+  ok("全部そろった後のやり直しは「Complete」にならない", g.probe.now().state === "result" && !g.probe.now().complete);
 })();
 
 /* ---- 段を選ぶ・続きから ---- */
