@@ -36,16 +36,20 @@
 <script>
 /* C力検査
 
-   視力検査のような白い紙に、黒いCがふたつ。
-   下のエリアでCを触ったところでつかみ、振り回して離すと飛ぶ。上のCに引っかける。
+   視力検査のような白い紙に、黒いC。
+   薄いグレーのエリアの中でCを触ったところでつかみ、振り回して離すと飛ぶ。相手のCに引っかける。
    Cどうしは円を並べた剛体としてぶつかる（重力・反発・摩擦・回転あり）。
    引っかかる＝相手のCの線が、自分のCの穴の中に入って抜けない状態。
-   5段で上のCは小さくなっていく。5つ引っかけるまでに投げた回数から「C力」を出す。
+
+   25段。5段ずつが視力検査表の1行。行の1段目から5段目までを通して引っかけると、
+   その行で投げた回数から「C力」を出して結果画面になる。
+   途中の道には「C」から始まる物（雲・時計・車・カップ・サボテン・ろうそく・猫・カニ・コイン・コーン）を置く。
+   左上のボタンで段を選べる。引っかけた段は端末に保存する。
 
    操作
      つかむ   … エリアの中のCを触ると、その点でつかむ（離すと飛ぶ）
-     スペース … 上のCへ届く速さで投げる（左右キーで横の強さを変える）
-     Esc      … 最初から */
+     スペース … 相手のCへ向けて投げる（左右キーで横の強さを変える）
+     Esc      … いまの行の最初から */
 (function () {
   "use strict";
 
@@ -114,17 +118,21 @@
   }
   function sndThrow() { noiseHit(0.16, 900, 0.18, 0.8); }
   var lastClack = 0;
-  /* Cどうしが当たるコツッ。強さで音量を変え、続けざまには鳴らさない */
-  function sndClack(power) {
+  /* ぶつかったときの音。相手のCはコツッ、物はそれぞれの材質っぽく。続けざまには鳴らさない */
+  function sndClack(power, kind) {
     if (!AC || T - lastClack < 0.05 || power < 60) return;
     lastClack = T;
     var v = Math.min(0.35, power / 2400);
+    if (kind === "cloud") { noiseHit(0.12, 500, v * 0.8, 0.7); return; }
+    if (kind === "car" || kind === "clock" || kind === "coin") { tone(1400 + Math.random() * 300, 0.12, v * 0.5, "triangle"); noiseHit(0.03, 4000, v * 0.6, 4); return; }
+    if (kind === "cat") { tone(700, 0.18, v * 0.5, "sine", 1100); return; }
     noiseHit(0.03, 2600, v, 5);
     tone(700 + Math.random() * 120, 0.05, v * 0.5, "triangle");
   }
   /* 引っかかった：検査のピッ */
   function sndBeep() { tone(1000, 0.28, 0.22, "sine"); }
   function sndDone() { tone(1000, 0.2, 0.22, "sine"); tone(1000, 0.2, 0.22, "sine", null, 0.28); tone(1500, 0.4, 0.2, "sine", null, 0.56); }
+  function sndTap() { tone(1800, 0.05, 0.1, "sine"); }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -135,7 +143,7 @@
      Cは「中心線の半径 rm・線の太さ st・すき間の半分の角度 gh」で決まる。
      すき間は角度0（右）向き。回すと向きが変わる。
      当たり判定は、中心線に沿って線の太さの円を並べたもの。 */
-  var GAP = 50 * Math.PI / 180;               /* すき間の半分の角度（上下とも同じ形） */
+  var GAP = 50 * Math.PI / 180;               /* すき間の半分の角度 */
   var STROKE = 0.12;                          /* 線の太さ / 直径 */
   function makeC(D, gh) {
     gh = gh || GAP;
@@ -150,19 +158,51 @@
     return { D: D, st: st, rm: rm, r: r, gh: gh, pts: pts };
   }
 
-  /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
-  /* 相手のCの大きさ・横位置・すき間の向き（右が0°、上が -90°）・高さ・エリアの位置。
-     投げたCは、相手の上向きの端へ上からかぶさると引っかかる。
-     1段目はエリアを上に置き、下のCへ落とすだけで掛けられるようにする。
-     2段目からはエリアが下になり、左右の上寄りの相手へ投げ上げる。 */
+  /* ============ 段 ============
+     area   … Cを自由に動かせるエリア [左, 上, 幅, 高さ]（画面の横幅・高さに対する割合）
+     t      … 相手のC [直径, 横, 高さ, すき間の向き]。向きは右が0°、上が -90°
+     o      … 道中の物 [種類, 横, 高さ, 大きさ, 動きの幅, 動きの周期]
+     投げたCは、相手の上向きの端に上からかぶさると引っかかる。 */
+  var A_TOP = [0.03, 0.09, 0.94, 0.27], A_BOTTOM = [0.03, 0.66, 0.94, 0.32];
+  var A_LEFT = [0.03, 0.54, 0.36, 0.43], A_RIGHT = [0.61, 0.54, 0.36, 0.43];
+  var A_TOPL = [0.03, 0.09, 0.46, 0.27], A_TOPR = [0.51, 0.09, 0.46, 0.27];
+  var A_BOTL = [0.03, 0.66, 0.46, 0.32], A_BOTR = [0.51, 0.66, 0.46, 0.32];
+  var A_SL = [0.03, 0.3, 0.36, 0.3], A_SR = [0.61, 0.3, 0.36, 0.3];
+  var A_SL2 = [0.03, 0.45, 0.36, 0.3], A_SR2 = [0.61, 0.45, 0.36, 0.3];
   var STAGES = [
-    { D: 160, x: 0.5, gap: -90, y: 0.6, area: "top" },
-    { D: 140, x: 0.79, gap: -135 },
-    { D: 120, x: 0.2, gap: 0 },
-    { D: 100, x: 0.8, gap: 180 },
-    { D: 80, x: 0.22, gap: -45 }
+    /* 1行目：上から落として掛ける */
+    { area: A_TOP, t: [160, 0.5, 0.62, -90], o: [["coin", 0.14, 0.5, 18]] },
+    { area: A_TOP, t: [150, 0.3, 0.64, -90], o: [["cloud", 0.76, 0.52, 46]] },
+    { area: A_TOP, t: [140, 0.62, 0.66, -60], o: [["cup", 0.2, 0.8, 40]] },
+    { area: A_TOP, t: [140, 0.62, 0.76, -90], o: [["cloud", 0.26, 0.54, 40]] },
+    { area: A_TOPR, t: [130, 0.62, 0.72, -120], o: [["cat", 0.2, 0.84, 44], ["coin", 0.85, 0.52, 16]] },
+    /* 2行目：上の隅から、斜め下へ */
+    { area: A_TOPL, t: [140, 0.75, 0.6, -90], o: [["cloud", 0.8, 0.2, 34]] },
+    { area: A_TOPR, t: [140, 0.25, 0.62, -45], o: [["coin", 0.5, 0.5, 16], ["coin", 0.6, 0.56, 16]] },
+    { area: A_TOPL, t: [130, 0.78, 0.72, -120], o: [["cone", 0.2, 0.86, 34]] },
+    { area: A_TOPR, t: [130, 0.22, 0.66, -60], o: [["cup", 0.75, 0.84, 40]] },
+    { area: A_TOPL, t: [120, 0.75, 0.62, -135], o: [["cactus", 0.52, 0.66, 30]] },
+    /* 3行目：横の中ほどから */
+    { area: A_SL, t: [140, 0.75, 0.62, -135], o: [["cloud", 0.8, 0.15, 36]] },
+    { area: A_SR, t: [130, 0.25, 0.66, -45], o: [["candle", 0.1, 0.84, 28]] },
+    { area: A_SL2, t: [130, 0.76, 0.62, -90], o: [["candle", 0.56, 0.72, 28]] },
+    { area: A_SR2, t: [120, 0.26, 0.62, -60], o: [["cactus", 0.5, 0.3, 30]] },
+    { area: A_SL, t: [120, 0.8, 0.7, -120], o: [["cat", 0.55, 0.86, 40]] },
+    /* 4行目：動く物 */
+    { area: A_TOP, t: [130, 0.5, 0.8, -90], o: [["car", 0.5, 0.6, 34, 0.3, 3.2]] },
+    { area: A_TOPL, t: [120, 0.75, 0.66, -90], o: [["clock", 0.3, 0.62, 56, 0, 3]] },
+    { area: A_SR, t: [120, 0.25, 0.62, -60], o: [["crab", 0.55, 0.2, 26, 0.2, 2.6]] },
+    { area: A_TOP, t: [110, 0.62, 0.8, -90], o: [["clock", 0.3, 0.58, 60, 0, -3]] },
+    { area: A_SL, t: [110, 0.78, 0.62, -135], o: [["car", 0.5, 0.45, 30, 0.14, 2.4], ["cloud", 0.4, 0.12, 30]] },
+    /* 5行目：下や横から投げ上げる */
+    { area: A_BOTR, t: [160, 0.2, 0.45, -45], o: [["cloud", 0.72, 0.16, 40]] },
+    { area: A_BOTTOM, t: [140, 0.79, 0.36, -135], o: [["coin", 0.3, 0.2, 18], ["coin", 0.4, 0.14, 18]] },
+    { area: A_LEFT, t: [140, 0.76, 0.36, -135], o: [["cloud", 0.3, 0.2, 36]] },
+    { area: A_RIGHT, t: [130, 0.24, 0.36, -45], o: [["candle", 0.72, 0.4, 30]] },
+    { area: A_BOTL, t: [140, 0.8, 0.4, -135], o: [["clock", 0.35, 0.3, 50, 0, 3], ["coin", 0.8, 0.2, 16]] }
   ];
+  var ROW = 5;
+
   var BALL = makeC(100);                       /* 投げるC */
   var G = 1800;                                /* 重力 */
   var SUB = 8;                                 /* 1コマを何回に分けて計算するか */
@@ -171,30 +211,109 @@
   /* つかんだ点を指へ引き寄せるばね。強さと、揺れを止める力 */
   var K = 700, DAMP = 38;
 
+  /* ============ 道中の物 ============
+     どれも「C」から始まる物。白く塗って黒い線で縁取る。
+     当たり判定は円の集まり（parts）。時計の針・車・カニ・雲は動く。 */
+  function circleRow(x0, y0, x1, y1, r) {
+    var n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (r * 0.9))), out = [];
+    for (var i = 0; i <= n; i++) out.push({ x: x0 + (x1 - x0) * i / n, y: y0 + (y1 - y0) * i / n, r: r });
+    return out;
+  }
+  var KINDS = {
+    cloud: function (s) { return { body: [{ x: -0.9 * s, y: 0.15 * s, r: 0.5 * s }, { x: -0.35 * s, y: -0.25 * s, r: 0.62 * s }, { x: 0.35 * s, y: -0.2 * s, r: 0.56 * s }, { x: 0.9 * s, y: 0.15 * s, r: 0.48 * s }, { x: 0, y: 0.25 * s, r: 0.5 * s }] }; },
+    cup: function (s) {
+      var r = 0.14 * s;
+      return { body: circleRow(-0.8 * s, -0.9 * s, -0.65 * s, 0.75 * s, r).concat(circleRow(-0.65 * s, 0.75 * s, 0.65 * s, 0.75 * s, r), circleRow(0.65 * s, 0.75 * s, 0.8 * s, -0.9 * s, r)) };
+    },
+    cactus: function (s) {
+      var r = 0.3 * s;
+      return { body: circleRow(0, -1.4 * s, 0, 1.5 * s, r).concat(circleRow(-0.75 * s, -0.5 * s, -0.75 * s, 0.25 * s, r * 0.8), circleRow(-0.75 * s, 0.25 * s, 0, 0.25 * s, r * 0.8), circleRow(0.75 * s, -0.9 * s, 0.75 * s, -0.15 * s, r * 0.8), circleRow(0.75 * s, -0.15 * s, 0, -0.15 * s, r * 0.8)) };
+    },
+    candle: function (s) { return { body: circleRow(0, -0.9 * s, 0, 1.6 * s, 0.34 * s) }; },
+    cat: function (s) { return { body: [{ x: 0, y: 0.3 * s, r: 0.75 * s }, { x: 0, y: 0.75 * s, r: 0.7 * s }, { x: 0, y: -0.75 * s, r: 0.55 * s }] }; },
+    cone: function (s) {
+      var out = [];
+      for (var i = 0; i <= 6; i++) { var k = i / 6; out.push({ x: 0, y: (-1.1 + 2 * k) * s, r: (0.16 + 0.5 * k) * s }); }
+      out.push({ x: -0.8 * s, y: 1 * s, r: 0.2 * s }, { x: 0.8 * s, y: 1 * s, r: 0.2 * s });
+      return { body: out };
+    },
+    coin: function () { return { body: [] }; },
+    car: function (s) {
+      return { body: circleRow(-1.4 * s, 0.1 * s, 1.4 * s, 0.1 * s, 0.4 * s).concat(circleRow(-0.6 * s, -0.4 * s, 0.6 * s, -0.4 * s, 0.4 * s), [{ x: -0.85 * s, y: 0.55 * s, r: 0.32 * s }, { x: 0.85 * s, y: 0.55 * s, r: 0.32 * s }]) };
+    },
+    crab: function (s) {
+      return { body: [{ x: -0.4 * s, y: 0, r: 0.55 * s }, { x: 0.4 * s, y: 0, r: 0.55 * s }, { x: -1.15 * s, y: -0.6 * s, r: 0.35 * s }, { x: 1.15 * s, y: -0.6 * s, r: 0.35 * s }] };
+    },
+    clock: function (s) {
+      var ring = [], n = Math.ceil(Math.PI * 2 * s / 9);
+      for (var i = 0; i < n; i++) { var a = Math.PI * 2 * i / n; ring.push({ x: Math.cos(a) * s, y: Math.sin(a) * s, r: 6 }); }
+      return { body: ring, hand: circleRow(0, 0, 0.82 * s, 0, 6) };
+    }
+  };
+
+  function makeObj(d) {
+    var o = { kind: d[0], fx: d[1], fy: d[2], s: d[3], amp: d[4] || 0, per: d[5] || 0 };
+    var k = KINDS[o.kind](o.s);
+    o.body = k.body; o.hand = k.hand || null;
+    o.R = 0;
+    o.body.concat(o.hand || []).forEach(function (c) { o.R = Math.max(o.R, Math.hypot(c.x, c.y) + c.r); });
+    return o;
+  }
+  /* 時刻 t での位置と速さ。時計は針だけ回る（per を角速度として使う） */
+  function objPose(o, t) {
+    var x = W * o.fx, y = H * o.fy, vx = 0, vy = 0;
+    if (o.amp && o.per) {
+      var w = Math.PI * 2 / o.per;
+      if (o.kind === "cloud") { x += Math.sin(t * w) * o.amp * W; vx = Math.cos(t * w) * w * o.amp * W; }
+      else { x += Math.sin(t * w) * o.amp * W; vx = Math.cos(t * w) * w * o.amp * W; }
+    }
+    var ha = o.kind === "clock" ? t * o.per : 0, hw = o.kind === "clock" ? o.per : 0;
+    return { x: x, y: y, vx: vx, vy: vy, ha: ha, hw: hw };
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
-  var stage, throws, target, ball, hookT, clearT, aimX, grab;
+  var stage = 0, throws, target, ball, hookT, clearT, aimX, grab, objs = [], ST = 0;
+  var rowThrows = 0, rowFull = false, sel = false;
   var AX, AY, AW, AH;                          /* Cを自由に動かせるエリア */
   var LX, LY;                                  /* Cが出てくる場所 */
 
-  /* エリアは段ごとに上か下。上のときは、下のCへ落として引っかける */
-  function areaTop() { return STAGES[Math.min(stage || 0, STAGES.length - 1)].area === "top"; }
+  /* ---- 引っかけた段を端末に残す ---- */
+  var SAVE = "zounoashi.c-ryoku.v1";
+  var cleared = [];
+  function load() {
+    cleared = [];
+    try {
+      var d = JSON.parse(window.localStorage.getItem(SAVE) || "{}");
+      if (d && Array.isArray(d.c)) cleared = d.c.filter(function (i) { return i >= 0 && i < STAGES.length; });
+    } catch (e) {}
+  }
+  function save() {
+    try { window.localStorage.setItem(SAVE, JSON.stringify({ c: cleared })); } catch (e) {}
+  }
+  function isCleared(i) { return cleared.indexOf(i) >= 0; }
+  function isOpen(i) { return i === 0 || isCleared(i) || isCleared(i - 1); }
+  function firstOpen() {
+    for (var i = 0; i < STAGES.length; i++) if (!isCleared(i)) return i;
+    return 0;
+  }
+
   function place() {
-    AX = 16; AW = W - 32;
-    if (areaTop()) { AY = 16; AH = Math.round(H * 0.34) - AY; }
-    else { AY = Math.round(H * 0.66); AH = H - 16 - AY; }
-    LX = W / 2;
+    var st = STAGES[stage], a = st.area;
+    AX = Math.round(W * a[0]); AW = Math.round(W * a[2]);
+    AY = Math.round(H * a[1]); AH = Math.round(H * a[3]);
+    LX = AX + AW / 2;
     LY = AY + AH / 2;
-    if (target) setTarget(stage, true);
+    setTarget(!!target);
+    if (ball && ball.idle) { ball.x = LX; ball.y = LY; }
   }
   function inArea(x, y) { return x >= AX && x <= AX + AW && y >= AY && y <= AY + AH; }
 
-  function setTarget(i, keepShape) {
-    var st = STAGES[Math.min(i, STAGES.length - 1)];
-    var shape = keepShape && target ? target.shape : makeC(st.D);
-    target = {
-      shape: shape, x: W * st.x, y: Math.round(H * (st.y || 0.36)),
-      a: st.gap * Math.PI / 180
-    };
+  function setTarget(keepShape) {
+    var t = STAGES[stage].t;
+    var shape = keepShape && target && target.shape.D === t[0] ? target.shape : makeC(t[0]);
+    target = { shape: shape, x: W * t[1], y: Math.round(H * t[2]), a: t[3] * Math.PI / 180 };
     target.world = shape.pts.map(function (p) {
       var c = Math.cos(target.a), s = Math.sin(target.a);
       return { x: target.x + p.x * c - p.y * s, y: target.y + p.x * s + p.y * c };
@@ -208,20 +327,29 @@
     grab = null;
   }
 
-  function newRound() {
+  function goStage(i, full) {
+    stage = i;
+    if (i % ROW === 0) { rowThrows = 0; rowFull = true; }
+    else if (!full) { rowFull = false; }
+    ST = 0;
+    clearT = -1;
+    target = null;
+    objs = STAGES[i].o.map(makeObj);
+    place();
+    readyBall();
+  }
+
+  function newRound(from) {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     score = 0;
     T = 0;
     held = false;
-    stage = 0;
     throws = 0;
-    clearT = -1;
     aimX = 0;
-    setTarget(0);
-    place();
-    readyBall();
+    sel = false;
+    goStage(from == null ? Math.floor(stage / ROW) * ROW : from);
   }
 
   /* スペースで投げるとき用。待っているCにそのまま速さを与える */
@@ -233,9 +361,61 @@
   }
 
   /* ============ 物理 ============ */
+  var hitKind = null;
+  function collideSet(b, list, rr, ca, sa, acc, kind) {
+    /* list: 動かない・動く円 {x, y, r, vx, vy}。rr を渡すと全部その半径 */
+    var hit = 0;
+    for (var i = 0; i < BALL.pts.length; i++) {
+      var p = BALL.pts[i];
+      var px = b.x + p.x * ca - p.y * sa, py = b.y + p.x * sa + p.y * ca;
+      for (var j = 0; j < list.length; j++) {
+        var q = list[j], qr = rr || q.r, R = BALL.r + qr;
+        var dx = px - q.x, dy = py - q.y;
+        if (dx * dx + dy * dy >= R * R) continue;
+        var d = Math.sqrt(dx * dx + dy * dy) || 0.001;
+        var nx = dx / d, ny = dy / d, pen = R - d;
+        /* 接点（相手の円の表面）と、重心からの腕 */
+        var rx = q.x + nx * qr - b.x, ry = q.y + ny * qr - b.y;
+        var qvx = q.vx || 0, qvy = q.vy || 0;
+        var vpx = b.vx - b.w * ry - qvx, vpy = b.vy + b.w * rx - qvy;
+        var vn = vpx * nx + vpy * ny;
+        if (vn < 0) {
+          var rn = rx * ny - ry * nx;
+          var jn = -(1 + E) * vn / (IM + rn * rn * II);
+          b.vx += jn * nx * IM; b.vy += jn * ny * IM; b.w += rn * jn * II;
+          hit = Math.max(hit, -vn);
+          /* 摩擦 */
+          vpx = b.vx - b.w * ry - qvx; vpy = b.vy + b.w * rx - qvy;
+          var tx = -ny, ty = nx, vt = vpx * tx + vpy * ty;
+          var rt = rx * ty - ry * tx;
+          var jt = -vt / (IM + rt * rt * II);
+          var lim = MU * jn;
+          if (jt > lim) jt = lim; else if (jt < -lim) jt = -lim;
+          b.vx += jt * tx * IM; b.vy += jt * ty * IM; b.w += rt * jt * II;
+        }
+        acc.x += nx * pen; acc.y += ny * pen; acc.n++;
+      }
+    }
+    if (hit > (acc.hit || 0)) { acc.hit = hit; acc.kind = kind; }
+  }
+  /* 物の円を、時刻 t の世界の位置と速さにする */
+  function objCircles(o, t) {
+    var p = objPose(o, t), out = [];
+    o.body.forEach(function (c) { out.push({ x: p.x + c.x, y: p.y + c.y, r: c.r, vx: p.vx, vy: p.vy }); });
+    if (o.hand) {
+      var ca = Math.cos(p.ha), sa = Math.sin(p.ha);
+      o.hand.forEach(function (c) {
+        var hx = c.x * ca - c.y * sa, hy = c.x * sa + c.y * ca;
+        out.push({ x: p.x + hx, y: p.y + hy, r: c.r, vx: p.vx - p.hw * hy, vy: p.vy + p.hw * hx });
+      });
+    }
+    return out;
+  }
+
   function physics(dt) {
     var b = ball;
     if (b.idle) return;
+    ST += dt;
     b.vy += G * dt;
     if (grab) {
       /* つかんだ点（Cに貼りついた点）を指の位置へばねで引く。
@@ -251,43 +431,19 @@
     }
     b.x += b.vx * dt; b.y += b.vy * dt; b.a += b.w * dt;
     var ca = Math.cos(b.a), sa = Math.sin(b.a);
-    var R = BALL.r + target.shape.r;
+    var acc = { x: 0, y: 0, n: 0 };
     /* 外側の円どうしが離れていれば調べない */
-    var far = Math.hypot(b.x - target.x, b.y - target.y) > BALL.rm + target.shape.rm + R;
-    if (far) return;
-    var cx = 0, cy = 0, cn = 0, hit = 0;
-    for (var i = 0; i < BALL.pts.length; i++) {
-      var p = BALL.pts[i];
-      var px = b.x + p.x * ca - p.y * sa, py = b.y + p.x * sa + p.y * ca;
-      for (var j = 0; j < target.world.length; j++) {
-        var q = target.world[j];
-        var dx = px - q.x, dy = py - q.y;
-        if (dx * dx + dy * dy >= R * R) continue;
-        var d = Math.sqrt(dx * dx + dy * dy) || 0.001;
-        var nx = dx / d, ny = dy / d, pen = R - d;
-        /* 接点（相手の円の表面）と、重心からの腕 */
-        var rx = q.x + nx * target.shape.r - b.x, ry = q.y + ny * target.shape.r - b.y;
-        var vpx = b.vx - b.w * ry, vpy = b.vy + b.w * rx;
-        var vn = vpx * nx + vpy * ny;
-        if (vn < 0) {
-          var rn = rx * ny - ry * nx;
-          var jn = -(1 + E) * vn / (IM + rn * rn * II);
-          b.vx += jn * nx * IM; b.vy += jn * ny * IM; b.w += rn * jn * II;
-          hit = Math.max(hit, -vn);
-          /* 摩擦 */
-          vpx = b.vx - b.w * ry; vpy = b.vy + b.w * rx;
-          var tx = -ny, ty = nx, vt = vpx * tx + vpy * ty;
-          var rt = rx * ty - ry * tx;
-          var jt = -vt / (IM + rt * rt * II);
-          var lim = MU * jn;
-          if (jt > lim) jt = lim; else if (jt < -lim) jt = -lim;
-          b.vx += jt * tx * IM; b.vy += jt * ty * IM; b.w += rt * jt * II;
-        }
-        cx += nx * pen; cy += ny * pen; cn++;
-      }
+    if (Math.hypot(b.x - target.x, b.y - target.y) < BALL.rm + target.shape.rm + BALL.r + target.shape.r)
+      collideSet(b, target.world, target.shape.r, ca, sa, acc, "c");
+    for (var i = 0; i < objs.length; i++) {
+      var o = objs[i];
+      if (!o.body.length && !o.hand) continue;
+      var p = objPose(o, ST);
+      if (Math.hypot(b.x - p.x, b.y - p.y) > BALL.rm + BALL.r + o.R) continue;
+      collideSet(b, objCircles(o, ST), 0, ca, sa, acc, o.kind);
     }
-    if (cn) { b.x += cx / cn * 0.9; b.y += cy / cn * 0.9; }
-    if (hit) sndClack(hit);
+    if (acc.n) { b.x += acc.x / acc.n * 0.9; b.y += acc.y / acc.n * 0.9; }
+    if (acc.hit) sndClack(acc.hit, acc.kind);
   }
 
   /* 相手のCの線が、投げたCの穴の中にある＝引っかかっている */
@@ -305,35 +461,24 @@
     if (state === S.INTRO) { T += dt; return; }
     if (state !== S.PLAY) return;
     T += dt;
+    if (ball.idle) ST += dt;                   /* 待っている間も物は動く */
+    if (sel) return;
 
     if (clearT >= 0) {
       clearT += dt;
       for (var k = 0; k < SUB; k++) physics(dt / SUB);
-      if (clearT > 1.1) {
-        stage++;
-        if (stage >= STAGES.length) {
-          score = cPower(throws);
-          state = S.RESULT;
-          sndDone();
-          return;
-        }
-        setTarget(stage);
-        place();
-        readyBall();
-        clearT = -1;
-      }
+      if (clearT > 1.1) finishStage();
       return;
     }
 
     if (ball.idle) return;
     for (var i = 0; i < SUB; i++) physics(dt / SUB);
 
-    /* 手を離したCがエリアから相手の側へ出たら1投と数える */
-    var away = areaTop() ? ball.y > AY + AH && ball.vy > 0 : ball.y < AY && ball.vy < 0;
-    if (!grab && !ball.out && away) {
-      ball.out = true;
-      throws++;
-      sndThrow();
+    /* 手を離したCがエリアから出たら1投と数える。
+       相手がエリアより上にいて、下へ落ちただけのときは数えない */
+    if (!grab && !ball.out && !inArea(ball.x, ball.y)) {
+      var fell = ball.y > AY + AH && target.y < AY;
+      if (!fell) { ball.out = true; throws++; rowThrows++; sndThrow(); }
     }
 
     if (!grab && linked()) {
@@ -343,19 +488,62 @@
 
     var sp = Math.hypot(ball.vx, ball.vy);
     ball.still = !grab && sp < 25 && Math.abs(ball.w) < 0.6 ? ball.still + dt : 0;
-    var lost = ball.y > H + BALL.D || ball.x < -BALL.D || ball.x > W + BALL.D;
+    var lost = ball.y > H + BALL.D || ball.x < -BALL.D * 2 || ball.x > W + BALL.D * 2;
     if (lost || ball.still > 1.2) {
       ball.gone += dt;
       if (ball.gone > (lost ? 0.25 : 0.4)) readyBall();
     }
   }
 
-  /* 5段を引っかけるまでに投げた回数 → C力（視力の段階に合わせる） */
+  function finishStage() {
+    if (!isCleared(stage)) { cleared.push(stage); save(); }
+    var endRow = stage % ROW === ROW - 1;
+    if (endRow && rowFull) {
+      score = cPower(rowThrows);
+      state = S.RESULT;
+      clearT = -1;
+      sndDone();
+      return;
+    }
+    if (stage + 1 < STAGES.length) goStage(stage + 1, true);
+    else { clearT = -1; readyBall(); sel = true; }
+  }
+
+  /* 1行（5段）を引っかけるまでに投げた回数 → C力（視力の段階に合わせる） */
   var TABLE = [[5, "2.0"], [7, "1.5"], [9, "1.2"], [11, "1.0"], [13, "0.9"], [15, "0.8"], [18, "0.7"],
                [21, "0.6"], [25, "0.5"], [30, "0.4"], [36, "0.3"], [45, "0.2"], [60, "0.1"]];
   function cPower(n) {
     for (var i = 0; i < TABLE.length; i++) if (n <= TABLE[i][0]) return TABLE[i][1];
     return "0.01";
+  }
+
+  /* ============ 段を選ぶ ============
+     左上のボタンで、視力検査表のように並んだ25個のCを出す。
+     引っかけた段は黒、選べる段は灰色、まだ選べない段は薄く。 */
+  var SEL_BTN = { x: 12, y: 12, w: 64, h: 64 };
+  function selCells() {
+    var cells = [], top = Math.max(110, H * 0.16), rowH = Math.min(130, (H - top - 60) / 5);
+    for (var r = 0; r < 5; r++) for (var c = 0; c < 5; c++) {
+      var i = r * 5 + c;
+      cells.push({ i: i, x: 20 + c * 100, y: top + r * rowH, w: 100, h: rowH, d: 76 - r * 10 });
+    }
+    return cells;
+  }
+  function inRect(x, y, b) { return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
+  function selectTap(x, y) {
+    var cells = selCells();
+    for (var k = 0; k < cells.length; k++) {
+      if (inRect(x, y, cells[k])) {
+        var i = cells[k].i;
+        if (!isOpen(i)) return;
+        sndTap();
+        state = S.PLAY; shareButton.hidden = true;
+        sel = false;
+        goStage(i);
+        return;
+      }
+    }
+    sel = false;
   }
 
   /* ============ 入力 ============
@@ -364,9 +552,13 @@
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
+    if (x != null && inRect(x, y, SEL_BTN) && !sel) { sndTap(); sel = true; return; }
+    if (sel) { if (x == null) { sel = false; return; } selectTap(x, y); return; }
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
-      if (hit === "retry") newRound();
+      if (hit === "retry") { newRound(Math.floor(stage / ROW) * ROW); return; }
+      /* ボタンの外を触ったら次の行へ */
+      if (!hit && stage + 1 < STAGES.length) { newRound(stage + 1); }
       return;
     }
     if (x == null) { keyThrow(); return; }
@@ -397,18 +589,18 @@
     if (sp > MAX) { ball.vx *= MAX / sp; ball.vy *= MAX / sp; }
     ball.w = Math.max(-24, Math.min(24, ball.w));
   }
-  /* スペース：上のCの高さまで届く速さ。横は上のCの真上へ向かう＋左右キーの分 */
-  function keyThrow() {
-    if (areaTop()) {
-      /* 上のエリアからは、横へ押し出して相手の真上あたりへ落とす */
+  /* スペース：相手のCへ向けた速さ。相手が下なら横へ押し出して落とし、上なら少し上まで届く速さ */
+  function keyVel() {
+    if (target.y > LY) {
       var ft = Math.sqrt(2 * (target.y - LY) / G);
-      launch((target.x - LX) / ft + aimX, 0);
-      return;
+      return [(target.x - LX) / ft + aimX, 0];
     }
-    var h = LY - target.y + 30;
-    var vy = -Math.sqrt(2 * G * h);
-    var t = -vy / G;
-    launch((target.x - LX) / t + aimX, vy);
+    var h = LY - target.y + 30, vy = -Math.sqrt(2 * G * h), t = -vy / G;
+    return [(target.x - LX) / t + aimX, vy];
+  }
+  function keyThrow() {
+    var v = keyVel();
+    if (launch(v[0], v[1])) { ball.out = false; }
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -431,7 +623,7 @@
     if (!esc && !go && !left && !right) return;
     e.preventDefault();
     if (!esc) keyMode = true;
-    if (esc) { if (!e.repeat) newRound(); return; }
+    if (esc) { if (!e.repeat && state !== S.INTRO) newRound(Math.floor(stage / ROW) * ROW); return; }
     if (left || right) {
       if (state !== S.PLAY) return;
       aimX = Math.max(-300, Math.min(300, aimX + (left ? -30 : 30)));
@@ -450,7 +642,7 @@
   }
 
   /* ============ 描画 ============ */
-  var INK = "#111";
+  var INK = "#111", PAPER = "#fbfbf8";
   function roundRect(x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -461,11 +653,11 @@
     ctx.closePath();
   }
   /* 当たり判定の円の外側まで線を引き、端は切りっぱなしにする */
-  function drawC(shape, x, y, a, alpha) {
+  function drawC(shape, x, y, a, alpha, color) {
     var ext = shape.r / shape.rm;
     ctx.save();
     ctx.globalAlpha = alpha == null ? 1 : alpha;
-    ctx.strokeStyle = INK;
+    ctx.strokeStyle = color || INK;
     ctx.lineWidth = shape.st;
     ctx.lineCap = "butt";
     ctx.beginPath();
@@ -474,10 +666,154 @@
     ctx.restore();
   }
 
+  /* 円の集まりを、外周だけ黒く縁取った白い形として描く */
+  var LINE = 4;
+  function blob(list, x, y) {
+    ctx.fillStyle = INK;
+    list.forEach(function (c) { ctx.beginPath(); ctx.arc(x + c.x, y + c.y, c.r + LINE, 0, Math.PI * 2); ctx.fill(); });
+    ctx.fillStyle = "#fff";
+    list.forEach(function (c) { ctx.beginPath(); ctx.arc(x + c.x, y + c.y, c.r, 0, Math.PI * 2); ctx.fill(); });
+  }
+  function line(x0, y0, x1, y1, w) {
+    ctx.lineWidth = w || LINE; ctx.strokeStyle = INK; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+  function dot(x, y, r, color) { ctx.fillStyle = color || INK; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+
+  function drawObj(o) {
+    var p = objPose(o, ST), x = p.x, y = p.y, s = o.s;
+    ctx.save();
+    switch (o.kind) {
+      case "cloud":
+        blob(o.body, x, y);
+        break;
+      case "cup":
+        /* 取っ手（飾り） */
+        ctx.lineWidth = 0.28 * s + LINE * 2; ctx.strokeStyle = INK;
+        ctx.beginPath(); ctx.arc(x + 0.95 * s, y - 0.05 * s, 0.45 * s, -1.4, 1.4); ctx.stroke();
+        ctx.lineWidth = 0.28 * s; ctx.strokeStyle = "#fff";
+        ctx.beginPath(); ctx.arc(x + 0.95 * s, y - 0.05 * s, 0.45 * s, -1.4, 1.4); ctx.stroke();
+        blob(o.body, x, y);
+        /* 湯気 */
+        ctx.globalAlpha = 0.5;
+        for (var k = -1; k <= 1; k++) {
+          var sx = x + k * 0.35 * s, ph = ST * 2 + k;
+          ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.beginPath();
+          ctx.moveTo(sx, y - 1.1 * s);
+          ctx.quadraticCurveTo(sx + Math.sin(ph) * 0.2 * s, y - 1.4 * s, sx, y - 1.7 * s);
+          ctx.stroke();
+        }
+        break;
+      case "cactus":
+        blob(o.body, x, y);
+        ctx.globalAlpha = 0.8;
+        for (var k2 = 0; k2 < 5; k2++) line(x - 0.12 * s, y - 1.1 * s + k2 * 0.55 * s, x - 0.02 * s, y - 1.0 * s + k2 * 0.55 * s, 2);
+        /* 花 */
+        ctx.globalAlpha = 1;
+        dot(x, y - 1.75 * s, 0.18 * s, "#e0463a");
+        break;
+      case "candle":
+        blob(o.body, x, y);
+        line(x, y - 1.25 * s, x, y - 1.45 * s, 3);
+        var fl = 1 + Math.sin(ST * 13) * 0.08 + Math.sin(ST * 7.3) * 0.05;
+        ctx.fillStyle = INK;
+        ctx.beginPath();
+        ctx.moveTo(x, y - 1.45 * s - 0.9 * s * fl);
+        ctx.quadraticCurveTo(x + 0.35 * s, y - 1.6 * s, x, y - 1.42 * s);
+        ctx.quadraticCurveTo(x - 0.35 * s, y - 1.6 * s, x, y - 1.45 * s - 0.9 * s * fl);
+        ctx.fill();
+        break;
+      case "cat":
+        /* しっぽ（飾り）→ 体 → 耳 → 顔 */
+        var tw = Math.sin(ST * 2.4) * 0.35;
+        ctx.lineWidth = 0.22 * s + LINE * 2; ctx.strokeStyle = INK; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(x + 0.6 * s, y + 1.1 * s); ctx.quadraticCurveTo(x + 1.5 * s, y + 0.9 * s, x + (1.3 + tw) * s, y + 0.1 * s); ctx.stroke();
+        ctx.lineWidth = 0.22 * s; ctx.strokeStyle = "#fff";
+        ctx.beginPath(); ctx.moveTo(x + 0.6 * s, y + 1.1 * s); ctx.quadraticCurveTo(x + 1.5 * s, y + 0.9 * s, x + (1.3 + tw) * s, y + 0.1 * s); ctx.stroke();
+        [-1, 1].forEach(function (k) {
+          ctx.fillStyle = INK; ctx.beginPath();
+          ctx.moveTo(x + k * 0.55 * s, y - 0.95 * s); ctx.lineTo(x + k * 0.45 * s, y - 1.5 * s); ctx.lineTo(x + k * 0.1 * s, y - 1.2 * s); ctx.fill();
+        });
+        blob(o.body, x, y);
+        var blink = (ST % 3.2) < 0.12;
+        [-1, 1].forEach(function (k) {
+          if (blink) line(x + k * 0.22 * s - 0.08 * s, y - 0.8 * s, x + k * 0.22 * s + 0.08 * s, y - 0.8 * s, 2.5);
+          else dot(x + k * 0.22 * s, y - 0.8 * s, 0.07 * s);
+        });
+        line(x - 0.1 * s, y - 0.6 * s, x + 0.1 * s, y - 0.6 * s, 2);
+        break;
+      case "cone":
+        ctx.fillStyle = INK;
+        ctx.beginPath(); ctx.moveTo(x, y - 1.35 * s); ctx.lineTo(x + 0.72 * s, y + 0.95 * s); ctx.lineTo(x - 0.72 * s, y + 0.95 * s); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.beginPath(); ctx.moveTo(x, y - 1.2 * s); ctx.lineTo(x + 0.6 * s, y + 0.9 * s); ctx.lineTo(x - 0.6 * s, y + 0.9 * s); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = INK;
+        ctx.fillRect(x - 0.33 * s, y - 0.3 * s, 0.66 * s, 0.22 * s);
+        ctx.fillRect(x - 1 * s, y + 0.9 * s, 2 * s, 0.25 * s);
+        break;
+      case "coin":
+        /* くるくる回るコイン（当たらない） */
+        var sx2 = Math.abs(Math.cos(ST * 3 + o.fx * 10));
+        ctx.translate(x, y + Math.sin(ST * 2 + o.fy * 9) * 4);
+        ctx.scale(Math.max(0.12, sx2), 1);
+        dot(0, 0, s + LINE);
+        dot(0, 0, s, "#fff");
+        ctx.lineWidth = 3; ctx.strokeStyle = INK;
+        ctx.beginPath(); ctx.arc(0, 0, s * 0.55, 0.9, Math.PI * 2 - 0.9); ctx.stroke();
+        break;
+      case "car":
+        blob(o.body.slice(0, -2), x, y);
+        /* 窓 */
+        ctx.fillStyle = INK;
+        roundRect(x - 0.55 * s, y - 0.62 * s, 0.5 * s, 0.34 * s, 4); ctx.fill();
+        roundRect(x + 0.05 * s, y - 0.62 * s, 0.5 * s, 0.34 * s, 4); ctx.fill();
+        /* 車輪（回る） */
+        [-0.85, 0.85].forEach(function (k) {
+          var wx = x + k * s, wy = y + 0.55 * s, ang = (x - W * o.fx) / (0.32 * s);
+          dot(wx, wy, 0.32 * s + 2);
+          dot(wx, wy, 0.13 * s, "#fff");
+          ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(wx, wy); ctx.lineTo(wx + Math.cos(ang) * 0.28 * s, wy + Math.sin(ang) * 0.28 * s); ctx.stroke();
+        });
+        break;
+      case "crab":
+        /* 足（動く） */
+        for (var k3 = 0; k3 < 3; k3++) {
+          [-1, 1].forEach(function (d) {
+            var ph = Math.sin(ST * 14 + k3 * 1.4 + d) * 0.12 * s;
+            line(x + d * (0.3 + k3 * 0.25) * s, y + 0.3 * s, x + d * (0.6 + k3 * 0.3) * s, y + (0.9 + (d > 0 ? ph : -ph) / s) * s, 3);
+          });
+        }
+        blob(o.body, x, y);
+        /* はさみの切れ目と目 */
+        [-1, 1].forEach(function (d) {
+          line(x + d * 1.15 * s, y - 0.6 * s, x + d * 1.45 * s, y - 0.9 * s, 3);
+          line(x + d * 0.25 * s, y - 0.45 * s, x + d * 0.3 * s, y - 0.8 * s, 2.5);
+          dot(x + d * 0.3 * s, y - 0.85 * s, 0.1 * s);
+        });
+        break;
+      case "clock":
+        dot(x, y, s + 8);
+        dot(x, y, s - 8, "#fff");
+        for (var h = 0; h < 12; h++) {
+          var ta = h * Math.PI / 6, r0 = s - 14, r1 = s - (h % 3 ? 20 : 26);
+          line(x + Math.cos(ta) * r0, y + Math.sin(ta) * r0, x + Math.cos(ta) * r1, y + Math.sin(ta) * r1, h % 3 ? 2 : 4);
+        }
+        /* 短い針（飾り）と、当たる長い針 */
+        var ha = objPose(o, ST).ha;
+        line(x, y, x + Math.cos(ha / 12 - 1) * s * 0.45, y + Math.sin(ha / 12 - 1) * s * 0.45, 6);
+        ctx.lineWidth = 12; ctx.strokeStyle = INK; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(ha) * 0.82 * s, y + Math.sin(ha) * 0.82 * s); ctx.stroke();
+        dot(x, y, 8, "#e0463a");
+        break;
+    }
+    ctx.restore();
+  }
+
   function draw() {
-    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT && !sel);
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#fbfbf8";
+    ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, W, H);
 
     if (!target) return;
@@ -486,6 +822,8 @@
     roundRect(AX, AY, AW, AH, 22);
     ctx.fill();
 
+    objs.forEach(drawObj);
+
     var fade = clearT >= 0 ? Math.max(0, 1 - Math.max(0, clearT - 0.6) / 0.5) : 1;
     drawC(target.shape, target.x, target.y, target.a, fade);
 
@@ -493,10 +831,39 @@
       var alpha = fade * (ball.gone > 0 ? Math.max(0, 1 - ball.gone / 0.4) : 1);
       drawC(BALL, ball.x, ball.y, ball.a, alpha);
       if (grab) drawGrab();
-      if (ball.idle && keyMode && state === S.PLAY && clearT < 0) drawAim();
+      if (ball.idle && keyMode && state === S.PLAY && clearT < 0 && !sel) drawAim();
     }
 
     if (state === S.RESULT) drawResult();
+    if (state !== S.INTRO) {
+      if (sel) drawSelect();
+      drawSelButton();
+    }
+  }
+
+  /* 左上のボタン：視力検査表を小さくしたもの */
+  function drawSelButton() {
+    var b = SEL_BTN;
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,.18)"; ctx.shadowBlur = 8;
+    roundRect(b.x, b.y, b.w, b.h, 16);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.restore();
+    var cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    var mini = [[0, -14, 22, 0], [-10, 8, 14, -90], [10, 8, 14, 180]];
+    mini.forEach(function (m) { drawC(makeC(m[2]), cx + m[0], cy + m[1], m[3] * Math.PI / 180, 1); });
+  }
+
+  function drawSelect() {
+    ctx.fillStyle = "rgba(251,251,248,.97)";
+    ctx.fillRect(0, 0, W, H);
+    var cells = selCells();
+    cells.forEach(function (c) {
+      var st = STAGES[c.i], cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+      var color = isCleared(c.i) ? INK : isOpen(c.i) ? "#9a9a94" : "#dedcd4";
+      drawC(makeC(c.d), cx, cy, st.t[3] * Math.PI / 180, 1, color);
+      if (c.i === stage) dot(cx, cy + c.d / 2 + 12, 5, "#e0463a");
+    });
   }
 
   /* つかんでいる点と、指までの引っぱり */
@@ -513,18 +880,12 @@
 
   /* キー操作のときだけ、投げる向きを点で見せる */
   function drawAim() {
-    var vx, vy;
-    if (areaTop()) { vy = 0; vx = (target.x - LX) / Math.sqrt(2 * (target.y - LY) / G) + aimX; }
-    else {
-      var h = LY - target.y + 30, t;
-      vy = -Math.sqrt(2 * G * h); t = -vy / G;
-      vx = (target.x - LX) / t + aimX;
-    }
+    var v = keyVel();
     ctx.fillStyle = "rgba(17,17,17,.35)";
     for (var k = 1; k <= 7; k++) {
       var s = k * 0.05;
       ctx.beginPath();
-      ctx.arc(LX + vx * s, LY + vy * s + G * s * s / 2, 3, 0, Math.PI * 2);
+      ctx.arc(LX + v[0] * s, LY + v[1] * s + G * s * s / 2, 3, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -586,16 +947,20 @@
   window.__probe = {
     now: function () {
       return {
-        state: state, score: score, W: W, H: H, stage: stage, throws: throws,
-        clearing: clearT >= 0, hooked: hookT, launch: { x: LX, y: LY },
+        state: state, score: score, W: W, H: H, stage: stage, throws: throws, rowThrows: rowThrows, rowFull: rowFull,
+        clearing: clearT >= 0, hooked: hookT, launch: { x: LX, y: LY }, sel: sel, cleared: cleared.slice(),
         area: { x: AX, y: AY, w: AW, h: AH }, grab: grab && { lx: grab.lx, ly: grab.ly, px: grab.px, py: grab.py },
         ball: ball && { x: ball.x, y: ball.y, a: ball.a, vx: ball.vx, vy: ball.vy, w: ball.w, idle: ball.idle, out: ball.out },
-        target: target && { x: target.x, y: target.y, D: target.shape.D, a: target.a }
+        target: target && { x: target.x, y: target.y, D: target.shape.D, a: target.a },
+        objs: objs.map(function (o) { var p = objPose(o, ST); return { kind: o.kind, x: p.x, y: p.y, R: o.R }; })
       };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
-    table: function () { return TABLE.slice(); }
+    table: function () { return TABLE.slice(); },
+    stages: function () { return STAGES.length; },
+    selButton: function () { return SEL_BTN; },
+    selCells: function () { return selCells(); }
   };
 
   /* ============ 手元用の動画撮影 ============ */
@@ -619,9 +984,13 @@
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
 
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(stage); });
+  load();
+  stage = firstOpen();
+  objs = STAGES[stage].o.map(makeObj);
   layout();
-  newRound(); state = S.INTRO; startButton.hidden = false;
+  readyBall();
+  state = S.INTRO; startButton.hidden = false;
   var last = performance.now();
   function loop(now) {
     var dt = Math.min(0.033, (now - last) / 1000);
