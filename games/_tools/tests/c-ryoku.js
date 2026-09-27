@@ -7,7 +7,7 @@
    ・エリアのCを触ったところでつかみ、ぶら下げると回る。Cはエリアの外へ持ち出せない
    ・離してエリアから出たら1投。エリアの下へ落としただけなら数えない
    ・相手のCに乗って止まってもクリア。丸い背から転げ落ちたり、外れて落ちたらクリアしない
-   ・1・10・20・25段は相手がC、ほかの段は「C」から始まる物がゴール
+   ・25段目（最後）だけ相手がC、ほかの段は「C」から始まる物がゴール（24段とも別のモチーフ）
    ・25段とも、実際につかんで運ぶ・振る操作で引っかけられる（物なら乗って止まってもよい）
    ・初めてクリアするたびにC力が上がり、上がる演出が出る。小さいCの段ほど多く上がり、全部で10.0。2回目は上がらない
    ・毎段クリアの画面になり、そのときのC力と「次」「シェア」が出る（暗くしない）
@@ -317,9 +317,9 @@ function dropOnto(gap, miss) {
   }
   ok("物がエリアに食い込まない", clash.length === 0, clash.join(" "));
   var cAt = goals.map(function (k, i) { return k === "C" ? i + 1 : 0; }).filter(Boolean);
-  ok("1・10・20・25段は相手がC、ほかは物がひとつだけのゴール", cAt.join() === "1,10,20,25" && goals.every(Boolean), goals.join(" "));
+  ok("25段目だけ相手がC、ほかは物がひとつだけのゴール", cAt.join() === "25" && goals.every(Boolean), goals.join(" "));
   var kinds = goals.filter(function (k) { return k !== "C"; });
-  ok("物のゴールは21段とも別のモチーフ", kinds.length === 21 && kinds.every(function (k, i) { return kinds.indexOf(k) === i; }), kinds.length + "種類");
+  ok("物のゴールは24段とも別のモチーフ", kinds.length === 24 && kinds.every(function (k, i) { return kinds.indexOf(k) === i; }), kinds.length + "種類");
   ok("エリアはどの段も画面の下半分", low);
 })();
 
