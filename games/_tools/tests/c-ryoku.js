@@ -7,8 +7,10 @@
    ・エリアのCを触ったところでつかみ、ぶら下げると回る。Cはエリアの外へ持ち出せない
    ・離してエリアから出たら1投。エリアの下へ落としただけなら数えない
    ・相手のCに乗って止まってもクリア。丸い背から転げ落ちたらクリアしない
-   ・25段とも、実際につかんで運ぶ・振る操作で引っかけられる
-   ・1行（5段）を通して引っかけると結果画面で、その行の回数に応じたC力が出る
+   ・1・10・20・25段は相手がC、ほかの段は「C」から始まる物がゴール
+   ・25段とも、実際につかんで運ぶ・振る操作で引っかけられる（物なら乗って止まってもよい）
+   ・初めてクリアするたびにC力が0.1上がり、上がる演出が出る。2回目は上がらない
+   ・行の終わりで結果画面になり、そのときのC力が出る
    ・結果画面でボタンの外を触ると次の行へ、もう一度でその行の最初から
    ・左上のボタンで段を選べる。まだ選べない段は選べない
    ・引っかけた段は保存され、次に開いたとき続きから始まる
@@ -139,12 +141,13 @@ function dropOnto(gap) {
 (function () {
   var g = openWith({});
   g.press(" "); g.step(2);
-  var found = [], results = [];
+  var found = [], results = [], gains = [];
   for (var i = 0; i < 25; i++) {
     if (g.probe.now().stage !== i) { found.push(null); break; }
     var how = solve(g);
     found.push(how);
     if (!how) break;
+    gains.push(g.probe.now().gain);
     waitNext(g);
     if (i % 5 === 4) {
       var r = g.probe.now();
@@ -155,11 +158,14 @@ function dropOnto(gap) {
   var solved = found.filter(Boolean).length;
   ok("25段とも引っかけられる", solved === 25, solved + "段");
   found.forEach(function (h, i) { console.log("      " + (i + 1) + "段目  " + (h || "見つからない")); });
-  ok("行の終わりごとに結果画面でC力が出る", results.length === 5 && results.every(function (s) { return s !== "×"; }), results.join(" / "));
+  ok("初めてのクリアではどの段もC力が上がる演出が出る", gains.length === 25 && gains.every(Boolean));
+  ok("行の終わりごとに結果画面でC力が出る（0.1 × クリアした段）", results.join("/") === "0.5/1.0/1.5/2.0/2.5", results.join(" / "));
   var m = JSON.parse(g.probe.mem()["zounoashi.c-ryoku.v1"] || "{}");
   ok("引っかけた段が保存される", m.c && m.c.length === 25);
   g.press(" "); g.step(2);
   ok("もう一度でその行の最初から", g.probe.now().state === "play" && g.probe.now().stage === 20 && g.probe.now().rowThrows === 0);
+  solve(g);
+  ok("クリア済みの段をもう一度クリアしてもC力は上がらない", g.probe.now().clearing && !g.probe.now().gain && g.probe.now().power === "2.5");
 })();
 
 /* ---- 段を選ぶ・続きから ---- */
@@ -167,7 +173,7 @@ function dropOnto(gap) {
   var g = openWith({ "zounoashi.c-ryoku.v1": JSON.stringify({ c: [0, 1, 2, 3, 4, 5, 6] }) });
   ok("続きの段から始まる", g.probe.now().stage === 7);
   g.press(" "); g.step(2);
-  ok("行の途中から始めたら結果はその行で出さない", g.probe.now().stage === 7 && !g.probe.now().rowFull);
+  ok("行の途中の段から遊べる", g.probe.now().stage === 7 && g.probe.now().power === "0.7");
   var b = g.probe.selButton();
   g.tap(b.x + b.w / 2, b.y + b.h / 2); g.step(1);
   ok("左上のボタンで段の一覧が開く", g.probe.now().sel);
@@ -185,18 +191,18 @@ function dropOnto(gap) {
   var c5 = cells[5];
   g.tap(b.x + b.w / 2, b.y + b.h / 2); g.step(1);
   g.tap(c5.x + c5.w / 2, c5.y + c5.h / 2); g.step(2);
-  ok("行の最初を選ぶと結果の対象になる", g.probe.now().stage === 5 && g.probe.now().rowFull);
+  ok("行の最初を選べる", g.probe.now().stage === 5);
 })();
 
 /* ---- 物の配置：エリアと重ならない。序盤は物なし。エリアは下 ---- */
 (function () {
   var g = openWith({});
   g.press(" "); g.step(2);
-  var clash = [], bare = true, low = true;
+  var clash = [], goals = [], low = true;
   for (var i = 0; i < 25; i++) {
     g.probe.go(i); g.step(1);
     var p = g.probe.now(), A = p.area;
-    if (i < 10 && p.objs.length) bare = false;
+    goals.push(p.target.kind ? p.objs.length === 1 && p.target.kind : (p.objs.length === 0 && "C"));
     if (A.y < g.H / 2) low = false;
     p.objs.forEach(function (o) {
       var nx = Math.max(A.x, Math.min(A.x + A.w, o.x)), ny = Math.max(A.y, Math.min(A.y + A.h, o.y));
@@ -206,16 +212,15 @@ function dropOnto(gap) {
     if (A.y < sb.y + sb.h && A.x < sb.x + sb.w) clash.push((i + 1) + "段目のエリアと左上のボタン");
   }
   ok("物がエリアに食い込まない", clash.length === 0, clash.join(" "));
-  ok("1〜10段は物なし", bare);
+  var cAt = goals.map(function (k, i) { return k === "C" ? i + 1 : 0; }).filter(Boolean);
+  ok("1・10・20・25段は相手がC、ほかは物がひとつだけのゴール", cAt.join() === "1,10,20,25" && goals.every(Boolean), goals.join(" "));
   ok("エリアはどの段も画面の下半分", low);
 })();
 
-/* ---- 回数とC力 ---- */
+/* ---- C力はクリアした段の数 × 0.1 ---- */
 (function () {
   var g = openWith({});
-  var t = g.probe.table();
-  ok("最少の5回でC力 2.0", t[0][0] === 5 && t[0][1] === "2.0");
-  ok("回数が増えるほどC力は下がる", t.every(function (r, i) { return i === 0 || (r[0] > t[i - 1][0] && +r[1] < +t[i - 1][1]); }));
+  ok("C力は 0.0 から 2.5 まで0.1刻み", g.probe.power(0) === "0.0" && g.probe.power(1) === "0.1" && g.probe.power(10) === "1.0" && g.probe.power(25) === "2.5");
 })();
 
 if (bad.length) { console.log("\nNG " + bad.length + "件"); process.exit(1); }
