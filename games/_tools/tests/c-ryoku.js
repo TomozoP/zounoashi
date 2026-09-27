@@ -38,6 +38,11 @@ function openWith(mem, extra) {
   return load(FILE, { quiet: true, inject: inj + (extra || "") });
 }
 
+/* STARTを押す。最初は段の一覧が開くので、閉じて今の段から遊ぶ */
+function begin(g) {
+  g.press(" "); g.step(2);
+  if (g.probe.now().sel) { g.press(" "); g.step(2); }
+}
 function settle(g) {
   g.drawn.length = 0;
   g.until(function () { var q = g.probe.now(); return q.clearing || q.state !== "play" || q.ball.idle; }, 900);
@@ -72,6 +77,17 @@ function solve(g) {
       for (var vx = -1200; vx <= 1200; vx += 300) for (var vy = -2400; vy <= -600; vy += 300) {
         toss(g, th, sx, vx, vy); settle(g); if (done()) return "放る " + th + "/" + sx.toFixed(2) + "/" + vx + "/" + vy;
       }
+  /* 粗い目で見つからなければ、細かい目で探す */
+  for (th = 1; th < 8; th += 2)
+    for (sx = 0.12; sx < 0.95; sx += 0.1)
+      for (vx = -1200; vx <= 1200; vx += 200) for (vy = -2400; vy <= -600; vy += 200) {
+        toss(g, th, sx, vx, vy); settle(g); if (done()) return "細かく放る " + th + "/" + sx.toFixed(2) + "/" + vx + "/" + vy;
+      }
+  for (th = 0; th < 8; th += 2)
+    for (sx = 0.17; sx < 0.95; sx += 0.1)
+      for (vx = -1100; vx <= 1100; vx += 200) for (vy = -2300; vy <= -600; vy += 200) {
+        toss(g, th, sx, vx, vy); settle(g); if (done()) return "細かく放る " + th + "/" + sx.toFixed(2) + "/" + vx + "/" + vy;
+      }
   return null;
 }
 function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 200); }
@@ -82,7 +98,7 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
   var p0 = g.probe.now();
   g.down(p0.ball.x + 44, p0.ball.y); g.step(5); g.up();
   ok("開始前はつかめない", g.probe.now().state === "intro" && g.probe.now().ball.idle);
-  g.press(" "); g.step(2);
+  begin(g);
   var p = g.probe.now();
   ok("はじめてなら1段目から", p.state === "play" && p.stage === 0);
   ok("1段目はCが下のエリアで待ち、相手はその上", p.ball.y > p.area.y && p.ball.y < p.area.y + p.area.h && p.area.y > g.H / 2 && p.target.y < p.area.y);
@@ -113,7 +129,7 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
 /* ---- 相手が上の段：振って投げ上げると1投 ---- */
 (function () {
   var g = openWith({});
-  g.press(" "); g.step(2);
+  begin(g);
   g.probe.go(21); g.step(2);
   var p = g.probe.now();
   ok("22段目はCが下のエリア、相手はその上", p.ball.y > p.area.y && p.target.y < p.area.y);
@@ -132,7 +148,7 @@ var lastDrop = null;
 function dropOnto(gap, miss) {
   var g = openWith({}, "AREA = [0.03, 0.3, 0.94, 0.25]; STAGES[0] = { t: [180, " + (miss ? 0.85 : 0.5) + ", 0.8, " + gap + "] };");
   lastDrop = g;
-  g.press(" "); g.step(2);
+  begin(g);
   var p = g.probe.now(), b = p.ball, T = p.target;
   g.down(b.x - 44, b.y); g.step(5);
   var tx = miss ? 270 : T.x;
@@ -155,7 +171,7 @@ function dropOnto(gap, miss) {
 /* ---- 動かしている間だけ、ドの音が動きに合わせて鳴る ---- */
 (function () {
   var g = openWith({});
-  g.press(" "); g.step(2);
+  begin(g);
   var p = g.probe.now(), b = p.ball;
   g.down(b.x - b.rm, b.y); g.step(60);
   var h0 = g.probe.now().hum, x = b.x - b.rm, slow = 0, fast = 0;
@@ -171,7 +187,7 @@ function dropOnto(gap, miss) {
 /* ---- 25段とも引っかけられる。毎段クリアの画面、次へ、保存 ---- */
 (function () {
   var g = openWith({});
-  g.press(" "); g.step(2);
+  begin(g);
   var found = [], scores = [], gains = [], completes = [], outsideOk = true, nextOk = true;
   function center(id) { var b = g.probe.buttons().filter(function (q) { return q.id === id; })[0]; return [b.x + b.w / 2, b.y + b.h / 2]; }
   for (var i = 0; i < 25; i++) {
@@ -212,12 +228,12 @@ function dropOnto(gap, miss) {
 /* ---- 時計の針は今の時刻 ---- */
 (function () {
   var g = openWith({}, "CLOCK_FIX = 3 * 3600;");
-  g.press(" "); g.step(2); g.probe.go(17); g.step(2);
+  begin(g); g.probe.go(17); g.step(2);
   var h3 = g.probe.hands();
   g.probe.go(23); g.step(2);
   var kind = g.probe.now().objs[0].kind, h24 = g.probe.hands();
   var r = openWith({}, "CLOCK_FIX = null;");
-  r.press(" "); r.step(2); r.probe.go(17); r.step(2);
+  begin(r); r.probe.go(17); r.step(2);
   var d = new Date(), m = -90 + (d.getMinutes() + d.getSeconds() / 60) * 6, hr = r.probe.hands();
   ok("時計の針は時刻どおり（3時で長い針が上、短い針が右）", h3[0] === -90 && h3[1] === 0 && h24[0] === -90 && h24[1] === 0, h3.join("/"));
   ok("ふだんは端末の今の時刻を指す", Math.abs(((hr[0] - m) % 360 + 540) % 360 - 180) < 2, hr[0] + " / " + m.toFixed(0));
@@ -229,7 +245,7 @@ function dropOnto(gap, miss) {
   var fails = [];
   ["2:00", "3:30", "6:30", "10:15"].forEach(function (tm) {
     var hm = tm.split(":"), g = openWith({}, "CLOCK_FIX = " + (hm[0] * 3600 + hm[1] * 60) + ";");
-    g.press(" "); g.step(2); g.probe.go(23); g.step(2);
+    begin(g); g.probe.go(23); g.step(2);
     var found = false;
     function done() { var q = g.probe.now(); return q.clearing || q.stage !== 23 || q.state !== "play"; }
     for (var th = 0; th < 8 && !found; th++)
@@ -245,7 +261,7 @@ function dropOnto(gap, miss) {
 /* ---- 演出の覗き穴（F2・F4） ---- */
 (function () {
   var g = openWith({ "zounoashi.c-ryoku.v1": JSON.stringify({ c: [0, 1, 2] }) });
-  g.press(" "); g.step(2);
+  begin(g);
   g.press("F2"); g.step(1);
   var small = g.probe.now().confetti, st1 = g.probe.now().state;
   g.step(900);
@@ -259,6 +275,8 @@ function dropOnto(gap, miss) {
 (function () {
   var g = openWith({ "zounoashi.c-ryoku.v1": JSON.stringify({ c: [0, 1, 2, 3, 4, 5, 6] }) });
   ok("続きの段から始まる", g.probe.now().stage === 7);
+  g.press(" "); g.step(2);
+  ok("STARTを押すと、まず段の一覧が開く", g.probe.now().state === "play" && g.probe.now().sel);
   g.press(" "); g.step(2);
   ok("行の途中の段から遊べる", g.probe.now().stage === 7 && g.probe.now().power === "0.9");
   var b = g.probe.selButton();
@@ -285,7 +303,7 @@ function dropOnto(gap, miss) {
 /* ---- 物の配置：エリアと重ならない。序盤は物なし。エリアは下 ---- */
 (function () {
   var g = openWith({});
-  g.press(" "); g.step(2);
+  begin(g);
   var clash = [], goals = [], low = true;
   for (var i = 0; i < 25; i++) {
     g.probe.go(i); g.step(1);
@@ -310,7 +328,7 @@ function dropOnto(gap, miss) {
   var g = openWith({});
   var all = []; for (var i = 0; i < 25; i++) all.push(i);
   ok("C力は小さいCの段ほど多く上がり、全部で10.0", g.probe.power([]) === "0.0" && g.probe.power([0]) === "0.1" && g.probe.power([24]) === "0.8" && g.probe.power(all) === "10.0");
-  g.press(" "); g.step(2);
+  begin(g);
   var same = true, dirs = true, cells = g.probe.selCells(), prev = 1e9;
   for (var k = 0; k < 25; k++) {
     g.probe.go(k); g.step(1);
