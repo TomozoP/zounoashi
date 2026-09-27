@@ -121,51 +121,58 @@
   function sndThrow() { noiseHit(0.16, 900, 0.18, 0.8); }
   /* 成功の合唱「シィィィ〜」。「シ」の息から入って、和音（ド・ミ・ソ・ド）の「ィ」を伸ばす。
      1声ごとに少しずらした2本ののこぎり波を、イの形（300・2300・3000Hzあたり）に絞る */
-  /* 合唱の「シィィィ〜」。big：全段そろった回のファンファーレ。
-     金管のような音で「タタタ ターン、タ タ、タタタ ターーン」と上がり、最後の高いドに合わせてCの大合唱で祝う */
-  var E4 = 329.63, G4 = 392.0, F3 = 174.61, A3 = 220.0, B3 = 246.94, D4 = 293.66, A4 = 440.0, B4 = 493.88, D5 = 587.33;
+  /* 合唱の「シィィィ〜」。big：全段そろった回のファンファーレを合唱で歌う。
+     「シシシ シーン、シ シ、シシシ」と音ごとに言いなおして上がり、最後の高いドをCの大合唱で伸ばす */
+  var E4 = 329.63, G4 = 392.0, F3 = 174.61, A3 = 220.0, B3 = 246.94, D4 = 293.66, A4 = 440.0, B4 = 493.88;
   function sndChoir(big) {
     if (!AC || !NOISE) return;
     var n = AC.currentTime;
     if (!big) { choirPhrase(n, 1.5, [C4 / 2, C4, E4, G4, C5], [-7, 7], 1, 0.16, 0.3, 0); return; }
+    var bus = choirBus();
     var CC = [C4 / 2, C4, E4], FF = [F3, A3, C4], GG = [G4 / 2, B3, D4];
     [ /* 始まり秒, 長さ, 旋律, 下の和音 */
       [0.00, 0.10, G4, CC], [0.13, 0.10, G4, CC], [0.26, 0.10, G4, CC],
       [0.40, 0.46, C5, CC],
       [0.92, 0.20, A4, FF], [1.14, 0.20, B4, GG],
-      [1.36, 0.10, C5, CC], [1.48, 0.10, E4 * 2, CC], [1.60, 0.10, G4 * 2, CC],
-      [1.74, 2.4, C5 * 2, [C4 / 2, C4, E4, G4, C5]]
-    ].forEach(function (e) {
-      brass(n + e[0], e[1], e[2], 0.13);
-      e[3].forEach(function (hz) { brass(n + e[0], e[1], hz, 0.06); });
-    });
-    choirPhrase(n + 1.74, 2.6, [C4 / 4, C4 / 2, G4 / 2, C4, E4, G4, C5, E4 * 2, G4 * 2, C5 * 2], [-13, -5, 5, 13], 0.42, 0.2, 0.25, 0);
+      [1.36, 0.10, C5, CC], [1.48, 0.10, E4 * 2, CC], [1.60, 0.10, G4 * 2, CC]
+    ].forEach(function (e) { choirNote(bus, n + e[0], e[1], e[2], e[3]); });
+    choirPhrase(n + 1.74, 2.6, [C4 / 4, C4 / 2, G4 / 2, C4, E4, G4, C5, E4 * 2, G4 * 2, C5 * 2], [-13, -5, 5, 13], 0.42, 0.21, 0.12, 0);
   }
-  /* 金管のような音。のこぎり波2本を、息を吹き込むように明るくしてから少し落ち着かせる。長い音は少し揺らす */
-  function brass(at, dur, hz, vol) {
-    var lp = AC.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 2;
-    lp.frequency.setValueAtTime(hz * 1.5, at);
-    lp.frequency.linearRampToValueAtTime(Math.min(hz * 7, 6000), at + 0.04);
-    lp.frequency.setTargetAtTime(Math.min(hz * 4, 4200), at + 0.06, 0.1);
-    var g = AC.createGain();
-    g.gain.setValueAtTime(0.0001, at);
-    g.gain.linearRampToValueAtTime(vol, at + 0.025);
-    g.gain.setTargetAtTime(vol * 0.75, at + 0.05, 0.08);
-    g.gain.setValueAtTime(vol * 0.75, at + dur);
-    g.gain.exponentialRampToValueAtTime(0.0001, at + dur + (dur > 1 ? 0.6 : 0.07));
-    lp.connect(g); g.connect(OUT);
-    var vib = null;
-    if (dur > 1) {
-      vib = AC.createOscillator(); vib.frequency.value = 5.2;
-      var vg = AC.createGain(); vg.gain.setValueAtTime(0, at); vg.gain.linearRampToValueAtTime(hz * 0.006, at + 0.6);
-      vib.connect(vg); vib.start(at); vib.stop(at + dur + 0.7);
-      vib = vg;
-    }
-    [-6, 6].forEach(function (c) {
-      var o = AC.createOscillator(); o.type = "sawtooth";
-      o.frequency.value = hz; o.detune.value = c;
-      if (vib) vib.connect(o.frequency);
-      o.connect(lp); o.start(at); o.stop(at + dur + 0.7);
+  /* 声の響き（「イ」の口の形）を通す入れ物。ファンファーレの音はみなここへ流す */
+  function choirBus() {
+    var bus = AC.createGain(); bus.gain.value = 1;
+    [300, 2300, 3000].forEach(function (fq, i) {
+      var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = fq; f.Q.value = [4, 7, 8][i];
+      var fg = AC.createGain(); fg.gain.value = [1, 0.6, 0.4][i] * 2.2;
+      bus.connect(f); f.connect(fg); fg.connect(OUT);
+    });
+    return bus;
+  }
+  /* ファンファーレの1音。頭で「シ」と言い、旋律を強め、下の和音を添える */
+  function choirNote(bus, at, dur, top, chord) {
+    var src = AC.createBufferSource(); src.buffer = NOISE; src.loop = true;
+    var hp = AC.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 2000;
+    var sh = AC.createBiquadFilter(); sh.type = "bandpass"; sh.frequency.value = 3300; sh.Q.value = 1.2;
+    var gs = AC.createGain();
+    gs.gain.setValueAtTime(0.0001, at);
+    gs.gain.linearRampToValueAtTime(0.28, at + 0.015);
+    gs.gain.setTargetAtTime(0.0001, at + 0.04, 0.03);
+    src.connect(hp); hp.connect(sh); sh.connect(gs); gs.connect(OUT);
+    src.start(at, Math.random()); src.stop(at + 0.3);
+    var env = AC.createGain(), peak = 0.17;
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.linearRampToValueAtTime(peak, at + 0.03);
+    env.gain.setValueAtTime(peak, at + dur);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.09);
+    env.connect(bus);
+    [top].concat(chord).forEach(function (hz, i) {
+      [-10, 0, 10].forEach(function (c) {
+        var o = AC.createOscillator(); o.type = "sawtooth";
+        o.frequency.value = hz; o.detune.value = c + (Math.random() - 0.5) * 6;
+        var og = AC.createGain(); og.gain.value = i === 0 ? 0.55 : 0.3;
+        o.connect(og); og.connect(env);
+        o.start(at); o.stop(at + dur + 0.12);
+      });
     });
   }
   /* 1回ぶんの「シィィィ〜」。at：始まり、len：長さ、notes：和音、cents：声ごとのずれ、vg：声の強さ、peak：全体の大きさ、rise：立ち上がり秒、
@@ -1034,7 +1041,8 @@
     var fade = 1;                              /* クリアしても場面は消さずに残す */
     if (target) drawC(target.shape, target.x, target.y, target.a, fade);
 
-    if (ball) {
+    /* クリアの画面では、エリアに残ったCはボタンの邪魔なので描かない */
+    if (ball && !(state === S.RESULT && inArea(ball.x, ball.y))) {
       var alpha = fade * (ball.gone > 0 ? Math.max(0, 1 - ball.gone / 0.4) : 1);
       drawC(BALL, ball.x, ball.y, ball.a, alpha);
       if (hookT > 0.15 && clearT < 0) drawHold();
@@ -1109,7 +1117,8 @@
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.4;
+    /* 下のC操作エリアの真ん中に出す */
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = AY + AH / 2 - h / 2;
     return [
       { id: "next", x: x0, y: y, w: wr, h: h, label: "次" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
