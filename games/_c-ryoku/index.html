@@ -43,9 +43,10 @@
 
    25段。5段ずつが視力検査表の1行。行の終わりで結果画面になる。
    1・10・20・25段は相手がC。ほかの段は「C」から始まる物（雲・時計・車・カップ・サボテン・
-   ろうそく・猫・カニ・コーン）がゴールで、引っかけるか乗って止まればよい。
-   「C力」は初めてクリアした段の数 × 0.1。クリアのたびに0.1上がる演出を出す。
-   左上のボタンで段を選べる。引っかけた段は端末に保存する。
+   猫・カニ・コーン）がゴールで、引っかけるか乗って止まればよい。
+   投げるCの向き（上下左右）と大きさは段ごとに決まっていて、段の一覧（視力表）に並ぶCと同じ。下の行ほど小さい。
+   「C力」は初めてクリアした段ごとに上がる。小さいCの段ほど多く上がり、25段で 10.0。上がる演出を出す。
+   左上のボタンで段を選べる（最初から全部選べる）。引っかけた段は端末に保存する。
 
    操作
      つかむ   … エリアの中のCを触ると、その点でつかむ（離すと飛ぶ）
@@ -176,13 +177,13 @@
     /* 2行目 */
     { g: ["cup", 0.5, 0.58, 60] },
     { g: ["cactus", 0.5, 0.58, 46] },
-    { g: ["clock", 0.15, 0.58, 70, 0, 0] },
-    { g: ["candle", 0.5, 0.58, 36] },
+    { g: ["clock", 0.17, 0.58, 70, 0, 0] },
+    { g: ["crab", 0.3, 0.58, 36] },
     { t: [200, 0.2, 0.4, -60] },
     /* 3行目：少し高く、小さく */
     { g: ["cloud", 0.5, 0.5, 48] },
     { g: ["car", 0.85, 0.5, 36] },
-    { g: ["cat", 0.5, 0.5, 48] },
+    { g: ["cat", 0.3, 0.5, 48] },
     { g: ["cone", 0.3, 0.4, 38] },
     { g: ["cactus", 0.7, 0.4, 36] },
     /* 4行目：動く */
@@ -193,19 +194,25 @@
     { t: [160, 0.5, 0.58, -90] },
     /* 5行目：高いところ */
     { g: ["cup", 0.15, 0.3, 60] },
-    { g: ["candle", 0.7, 0.4, 28] },
-    { g: ["cat", 0.78, 0.3, 48] },
-    { g: ["clock", 0.3, 0.32, 54, 0, -2.4] },
+    { g: ["crab", 0.7, 0.35, 36] },
+    { g: ["car", 0.75, 0.3, 40] },
+    { g: ["clock", 0.3, 0.32, 64, 0, -2.4] },
     { t: [160, 0.5, 0.3, -90] }
   ];
   var ROW = 5;
 
-  var BALL = makeC(100);                       /* 投げるC */
+  /* 投げるC。段の一覧（視力表）と同じで、行が下がるほど小さい。向き（すき間の向き）は段ごとに上下左右 */
+  var SIZES = [100, 88, 76, 64, 52];
+  var R_ = 0, U_ = -90, L_ = 180, D_ = 90;
+  var DIRS = [R_, U_, L_, D_, U_,  L_, D_, R_, U_, R_,  D_, L_, U_, R_, L_,  U_, R_, D_, L_, D_,  L_, U_, R_, D_, U_];
+  /* 初めてクリアしたときに上がるC力。小さいCほど多い。25段で合計 10.0 */
+  var GAINS = [0.1, 0.2, 0.4, 0.5, 0.8];
+  var BALL = makeC(SIZES[0]);
   var G = 1800;                                /* 重力 */
   var SUB = 8;                                 /* 1コマを何回に分けて計算するか */
   var E = 0.25, MU = 0.35;                     /* 反発・摩擦 */
   var SOFT_E = 0, SOFT_MU = 3, SOFT_ROLL = 40;   /* ゴール（相手のCと物）は跳ねにくく、ざらざらで、転がりにくい */
-  var IM = 1, II = 1 / (BALL.rm * BALL.rm);    /* 質量1の輪。慣性は m r^2 */
+  var IM = 1, II = 1 / (BALL.rm * BALL.rm);    /* 質量1の輪。慣性は m r^2。大きさが変わるたびに直す */
   /* つかんだ点を指へ引き寄せるばね。強さと、揺れを止める力 */
   var K = 700, DAMP = 38;
 
@@ -293,7 +300,7 @@
     try { window.localStorage.setItem(SAVE, JSON.stringify({ c: cleared })); } catch (e) {}
   }
   function isCleared(i) { return cleared.indexOf(i) >= 0; }
-  function isOpen(i) { return i === 0 || isCleared(i) || isCleared(i - 1); }
+  function isOpen(i) { return i >= 0 && i < STAGES.length; }      /* 最初から全部選べる */
   function firstOpen() {
     for (var i = 0; i < STAGES.length; i++) if (!isCleared(i)) return i;
     return 0;
@@ -335,7 +342,9 @@
 
   /* 新しいCはエリアの真ん中に浮いて待つ。つかむまでは落ちない */
   function readyBall() {
-    ball = { x: LX, y: LY, a: 0, vx: 0, vy: 0, w: 0, idle: true, out: false, still: 0, gone: 0 };
+    var D = SIZES[Math.floor(stage / ROW)];
+    if (BALL.D !== D) { BALL = makeC(D); II = 1 / (BALL.rm * BALL.rm); }
+    ball = { x: LX, y: LY, a: DIRS[stage] * Math.PI / 180, vx: 0, vy: 0, w: 0, idle: true, out: false, still: 0, gone: 0 };
     hookT = 0;
     grab = null;
   }
@@ -542,8 +551,10 @@
     else { clearT = -1; readyBall(); sel = true; }
   }
 
-  /* C力：クリアした段の数 × 0.1。25段で 2.5 */
-  function cPower(n) { return ((n == null ? cleared.length : n) / 10).toFixed(1); }
+  /* C力：クリアした段ごとの上がり幅の合計。25段で 10.0 */
+  function gainOf(i) { return GAINS[Math.floor(i / ROW)]; }
+  function cPowerNum(list) { return (list || cleared).reduce(function (a, i) { return a + gainOf(i); }, 0); }
+  function cPower(list) { return cPowerNum(list).toFixed(1); }
 
   /* ============ 段を選ぶ ============
      左上のボタンで、視力検査表のように並んだ25個のCを出す。
@@ -553,7 +564,7 @@
     var cells = [], top = Math.max(110, H * 0.16), rowH = Math.min(130, (H - top - 60) / 5);
     for (var r = 0; r < 5; r++) for (var c = 0; c < 5; c++) {
       var i = r * 5 + c;
-      cells.push({ i: i, x: 20 + c * 100, y: top + r * rowH, w: 100, h: rowH, d: 76 - r * 10 });
+      cells.push({ i: i, x: 20 + c * 100, y: top + r * rowH, w: 100, h: rowH, d: Math.round(76 * SIZES[r] / SIZES[0]) });
     }
     return cells;
   }
@@ -871,7 +882,7 @@
     }
   }
 
-  /* 左上のボタン：視力検査表を小さくしたもの */
+  /* 左上のボタン：3×3のます（段の一覧） */
   function drawSelButton() {
     var b = SEL_BTN;
     ctx.save();
@@ -880,8 +891,11 @@
     ctx.fillStyle = "#fff"; ctx.fill();
     ctx.restore();
     var cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-    var mini = [[0, -14, 22, 0], [-10, 8, 14, -90], [10, 8, 14, 180]];
-    mini.forEach(function (m) { drawC(makeC(m[2]), cx + m[0], cy + m[1], m[3] * Math.PI / 180, 1); });
+    ctx.fillStyle = INK;
+    for (var r = -1; r <= 1; r++) for (var c = -1; c <= 1; c++) {
+      roundRect(cx + c * 13 - 4.5, cy + r * 13 - 4.5, 9, 9, 2.5);
+      ctx.fill();
+    }
   }
 
   function drawSelect() {
@@ -889,10 +903,9 @@
     ctx.fillRect(0, 0, W, H);
     var cells = selCells();
     cells.forEach(function (c) {
-      var st = STAGES[c.i], cx = c.x + c.w / 2, cy = c.y + c.h / 2;
-      var color = isCleared(c.i) ? INK : isOpen(c.i) ? "#9a9a94" : "#dedcd4";
-      var ga = st.t ? st.t[3] : [0, 90, 180, -90, 45, 135, -135, -45][c.i % 8];   /* 物の段は視力表らしく向きを散らす */
-      drawC(makeC(c.d), cx, cy, ga * Math.PI / 180, 1, color);
+      var cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+      var color = isCleared(c.i) ? INK : "#b4b3ac";
+      drawC(makeC(c.d), cx, cy, DIRS[c.i] * Math.PI / 180, 1, color);   /* その段で投げるCの向きと大きさ */
       if (c.i === stage) dot(cx, cy + c.d / 2 + 12, 5, "#e0463a");
     });
   }
@@ -940,11 +953,11 @@
   }
   /* 初めて引っかけたとき、C力が0.1上がる */
   function drawGain() {
-    var before = cPower(cleared.length), after = cPower(cleared.length + 1);
+    var before = cPower(), after = cPower(cleared.concat([stage]));
     var t = clearT, flip = 0.45;
     var inA = Math.min(1, t / 0.2), out = Math.max(0, Math.min(1, (t - (CLEAR_T - 0.25)) / 0.25));
     var pop = t < flip ? 1 : 1 + 0.45 * Math.max(0, 1 - (t - flip) / 0.3);
-    var cy = H * 0.3;
+    var cy = H * 0.16;
     ctx.save();
     ctx.globalAlpha = inA * (1 - out);
     ctx.fillStyle = INK;
@@ -972,7 +985,7 @@
       ctx.font = "800 34px sans-serif";
       ctx.textAlign = "left";
       ctx.fillStyle = "#e0463a";
-      ctx.fillText("+0.1", x0 + lw + 14 + nw + 8, cy - 58 - k * 26);
+      ctx.fillText("+" + gainOf(stage).toFixed(1), x0 + lw + 14 + nw + 8, cy - 58 - k * 26);
     }
     ctx.restore();
   }
@@ -1020,14 +1033,16 @@
         state: state, score: score, W: W, H: H, stage: stage, throws: throws, rowThrows: rowThrows, power: cPower(), gain: gain,
         clearing: clearT >= 0, hooked: hookT, launch: { x: LX, y: LY }, sel: sel, cleared: cleared.slice(),
         area: { x: AX, y: AY, w: AW, h: AH }, grab: grab && { lx: grab.lx, ly: grab.ly, px: grab.px, py: grab.py },
-        ball: ball && { x: ball.x, y: ball.y, a: ball.a, vx: ball.vx, vy: ball.vy, w: ball.w, idle: ball.idle, out: ball.out },
+        ball: ball && { x: ball.x, y: ball.y, a: ball.a, vx: ball.vx, vy: ball.vy, w: ball.w, idle: ball.idle, out: ball.out, rm: BALL.rm, D: BALL.D },
         target: target ? { x: target.x, y: target.y, D: target.shape.D, a: target.a } : (function () { var gp = goalPos(); return { x: gp.x, y: gp.y, D: goal.R * 2, a: 0, kind: goal.kind }; })(),
         objs: objs.map(function (o) { var p = objPose(o, ST); return { kind: o.kind, x: p.x, y: p.y, R: o.R }; })
       };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
-    power: function (n) { return cPower(n); },
+    power: function (list) { return cPower(list); },
+    size: function (i) { return SIZES[Math.floor(i / ROW)]; },
+    dir: function (i) { return DIRS[i]; },
     stages: function () { return STAGES.length; },
     selButton: function () { return SEL_BTN; },
     selCells: function () { return selCells(); }

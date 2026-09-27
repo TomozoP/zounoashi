@@ -9,10 +9,11 @@
    ・相手のCに乗って止まってもクリア。外れて落ちたらクリアしない
    ・1・10・20・25段は相手がC、ほかの段は「C」から始まる物がゴール
    ・25段とも、実際につかんで運ぶ・振る操作で引っかけられる（物なら乗って止まってもよい）
-   ・初めてクリアするたびにC力が0.1上がり、上がる演出が出る。2回目は上がらない
+   ・初めてクリアするたびにC力が上がり、上がる演出が出る。小さいCの段ほど多く上がり、全部で10.0。2回目は上がらない
    ・行の終わりで結果画面になり、そのときのC力が出る
    ・結果画面でボタンの外を触ると次の行へ、もう一度でその行の最初から
-   ・左上のボタンで段を選べる。まだ選べない段は選べない
+   ・左上のボタンで段を選べる。最初から全部選べる
+   ・投げるCは一覧のCと同じ向き（上下左右）と大きさ。下の行ほど小さい
    ・引っかけた段は保存され、次に開いたとき続きから始まる
    ・Esc でいまの行の最初から */
 
@@ -40,7 +41,7 @@ function settle(g) {
 /* Cの縁の th 番目をつかみ、エリアの真ん中から指を (vx, vy) の速さでエリアの縁まで動かして離す */
 function swing(g, th, vx, vy) {
   var p = g.probe.now(), b = p.ball, A = p.area;
-  var gx = b.x + 44 * Math.cos(th * Math.PI / 4 + b.a), gy = b.y + 44 * Math.sin(th * Math.PI / 4 + b.a);
+  var gx = b.x + b.rm * Math.cos(th * Math.PI / 4 + b.a), gy = b.y + b.rm * Math.sin(th * Math.PI / 4 + b.a);
   g.down(gx, gy); g.step(10);
   var fx = gx, fy = gy, n = 0;
   while (fx > A.x + 8 && fx < A.x + A.w - 8 && fy > A.y + 8 && fy < A.y + A.h - 8 && n < 40) { fx += vx / 60; fy += vy / 60; g.moveTo(fx, fy); g.step(1); n++; }
@@ -49,7 +50,7 @@ function swing(g, th, vx, vy) {
 /* Cの縁の th 番目をつかみ、エリアの下の横 sx の位置まで運んでぶら下げ、そこから指を (vx, vy) の速さで動かして離す */
 function toss(g, th, sx, vx, vy) {
   var p = g.probe.now(), b = p.ball, A = p.area;
-  var gx = b.x + 44 * Math.cos(th * Math.PI / 4 + b.a), gy = b.y + 44 * Math.sin(th * Math.PI / 4 + b.a);
+  var gx = b.x + b.rm * Math.cos(th * Math.PI / 4 + b.a), gy = b.y + b.rm * Math.sin(th * Math.PI / 4 + b.a);
   var hx = A.x + A.w * sx, hy = A.y + A.h - 20;
   g.down(gx, gy);
   for (var i = 1; i <= 15; i++) { g.moveTo(gx + (hx - gx) * i / 15, gy + (hy - gy) * i / 15); g.step(1); }
@@ -112,7 +113,7 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
   g.probe.go(21); g.step(2);
   var p = g.probe.now();
   ok("22段目はCが下のエリア、相手はその上", p.ball.y > p.area.y && p.target.y < p.area.y);
-  g.down(p.ball.x - 44, p.ball.y); g.step(20);
+  g.down(p.ball.x - p.ball.rm, p.ball.y); g.step(20);
   g.moveTo(p.area.x + p.area.w / 2, p.area.y + p.area.h - 10); g.step(40); g.up();
   settle(g);
   ok("エリアの中で落としただけなら数えず、次のCが出る", g.probe.now().throws === 0 && g.probe.now().ball.idle);
@@ -162,13 +163,13 @@ function dropOnto(gap, miss) {
   ok("25段とも引っかけられる", solved === 25, solved + "段");
   found.forEach(function (h, i) { console.log("      " + (i + 1) + "段目  " + (h || "見つからない")); });
   ok("初めてのクリアではどの段もC力が上がる演出が出る", gains.length === 25 && gains.every(Boolean));
-  ok("行の終わりごとに結果画面でC力が出る（0.1 × クリアした段）", results.join("/") === "0.5/1.0/1.5/2.0/2.5", results.join(" / "));
+  ok("行の終わりごとに結果画面でC力が出る（全部で10.0）", results.join("/") === "0.5/1.5/3.5/6.0/10.0", results.join(" / "));
   var m = JSON.parse(g.probe.mem()["zounoashi.c-ryoku.v1"] || "{}");
   ok("引っかけた段が保存される", m.c && m.c.length === 25);
   g.press(" "); g.step(2);
   ok("もう一度でその行の最初から", g.probe.now().state === "play" && g.probe.now().stage === 20 && g.probe.now().rowThrows === 0);
   solve(g);
-  ok("クリア済みの段をもう一度クリアしてもC力は上がらない", g.probe.now().clearing && !g.probe.now().gain && g.probe.now().power === "2.5");
+  ok("クリア済みの段をもう一度クリアしてもC力は上がらない", g.probe.now().clearing && !g.probe.now().gain && g.probe.now().power === "10.0");
 })();
 
 /* ---- 段を選ぶ・続きから ---- */
@@ -176,15 +177,16 @@ function dropOnto(gap, miss) {
   var g = openWith({ "zounoashi.c-ryoku.v1": JSON.stringify({ c: [0, 1, 2, 3, 4, 5, 6] }) });
   ok("続きの段から始まる", g.probe.now().stage === 7);
   g.press(" "); g.step(2);
-  ok("行の途中の段から遊べる", g.probe.now().stage === 7 && g.probe.now().power === "0.7");
+  ok("行の途中の段から遊べる", g.probe.now().stage === 7 && g.probe.now().power === "0.9");
   var b = g.probe.selButton();
   g.tap(b.x + b.w / 2, b.y + b.h / 2); g.step(1);
   ok("左上のボタンで段の一覧が開く", g.probe.now().sel);
   var cells = g.probe.selCells();
   ok("一覧のマスはスマホで押せる大きさ", cells.every(function (c) { return c.w >= 63 && c.h >= 63; }), "高さ " + Math.round(cells[0].h));
-  var locked = cells[12];
-  g.tap(locked.x + locked.w / 2, locked.y + locked.h / 2); g.step(1);
-  ok("まだ選べない段は選べない", g.probe.now().sel && g.probe.now().stage === 7);
+  var far = cells[22];
+  g.tap(far.x + far.w / 2, far.y + far.h / 2); g.step(1);
+  ok("まだクリアしていない先の段も選べる", !g.probe.now().sel && g.probe.now().stage === 22);
+  g.tap(b.x + b.w / 2, b.y + b.h / 2); g.step(1);
   var c2 = cells[2];
   g.tap(c2.x + c2.w / 2, c2.y + c2.h / 2); g.step(2);
   ok("引っかけた段を選べる", !g.probe.now().sel && g.probe.now().stage === 2 && g.probe.now().ball.idle);
@@ -220,10 +222,23 @@ function dropOnto(gap, miss) {
   ok("エリアはどの段も画面の下半分", low);
 })();
 
-/* ---- C力はクリアした段の数 × 0.1 ---- */
+/* ---- C力の上がり幅と、投げるCの向き・大きさ ---- */
 (function () {
   var g = openWith({});
-  ok("C力は 0.0 から 2.5 まで0.1刻み", g.probe.power(0) === "0.0" && g.probe.power(1) === "0.1" && g.probe.power(10) === "1.0" && g.probe.power(25) === "2.5");
+  var all = []; for (var i = 0; i < 25; i++) all.push(i);
+  ok("C力は小さいCの段ほど多く上がり、全部で10.0", g.probe.power([]) === "0.0" && g.probe.power([0]) === "0.1" && g.probe.power([24]) === "0.8" && g.probe.power(all) === "10.0");
+  g.press(" "); g.step(2);
+  var same = true, dirs = true, cells = g.probe.selCells(), prev = 1e9;
+  for (var k = 0; k < 25; k++) {
+    g.probe.go(k); g.step(1);
+    var q = g.probe.now();
+    if (q.ball.D !== g.probe.size(k) || Math.abs(q.ball.a - g.probe.dir(k) * Math.PI / 180) > 1e-9) same = false;
+    if ([0, -90, 90, 180].indexOf(g.probe.dir(k)) < 0) dirs = false;
+    if (k % 5 === 0) { if (!(cells[k].d < prev)) same = false; prev = cells[k].d; }
+    if (Math.abs(cells[k].d / cells[0].d - q.ball.D / g.probe.size(0)) > 0.02) same = false;
+  }
+  ok("投げるCは一覧のCと同じ向き・大きさで、下の行ほど小さい", same);
+  ok("向きは上下左右だけ", dirs);
 })();
 
 if (bad.length) { console.log("\nNG " + bad.length + "件"); process.exit(1); }
