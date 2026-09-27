@@ -137,25 +137,27 @@
      当たり判定は、中心線に沿って線の太さの円を並べたもの。 */
   var GAP = 50 * Math.PI / 180;               /* すき間の半分の角度（上下とも同じ形） */
   var STROKE = 0.12;                          /* 線の太さ / 直径 */
-  function makeC(D) {
+  function makeC(D, gh) {
+    gh = gh || GAP;
     var st = D * STROKE, rm = D / 2 - st / 2, r = st / 2;
-    var span = Math.PI * 2 - GAP * 2;
+    var span = Math.PI * 2 - gh * 2;
     var n = Math.max(12, Math.ceil(span * rm / (r * 0.9)));
     var pts = [];
     for (var i = 0; i <= n; i++) {
-      var a = GAP + span * i / n;
+      var a = gh + span * i / n;
       pts.push({ a: a, x: Math.cos(a) * rm, y: Math.sin(a) * rm });
     }
-    return { D: D, st: st, rm: rm, r: r, pts: pts };
+    return { D: D, st: st, rm: rm, r: r, gh: gh, pts: pts };
   }
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
-  /* 上のCの大きさ・横位置・すき間の向き（右が0°、上が -90°）。
-     投げたCは、すき間を下にして相手の上向きの端へ落とすと引っかかる。
-     そのため相手は左右の上寄りに置き、上向きの端を真ん中の側へ向ける。 */
+  /* 相手のCの大きさ・横位置・すき間の向き（右が0°、上が -90°）・高さ・エリアの位置。
+     投げたCは、相手の上向きの端へ上からかぶさると引っかかる。
+     1段目はエリアを上に置き、下のCへ落とすだけで掛けられるようにする。
+     2段目からはエリアが下になり、左右の上寄りの相手へ投げ上げる。 */
   var STAGES = [
-    { D: 160, x: 0.2, gap: -45 },
+    { D: 160, x: 0.5, gap: -90, y: 0.6, area: "top" },
     { D: 140, x: 0.79, gap: -135 },
     { D: 120, x: 0.2, gap: 0 },
     { D: 100, x: 0.8, gap: 180 },
@@ -174,9 +176,12 @@
   var AX, AY, AW, AH;                          /* Cを自由に動かせるエリア */
   var LX, LY;                                  /* Cが出てくる場所 */
 
+  /* エリアは段ごとに上か下。上のときは、下のCへ落として引っかける */
+  function areaTop() { return STAGES[Math.min(stage || 0, STAGES.length - 1)].area === "top"; }
   function place() {
     AX = 16; AW = W - 32;
-    AY = Math.round(H * 0.66); AH = H - 16 - AY;
+    if (areaTop()) { AY = 16; AH = Math.round(H * 0.34) - AY; }
+    else { AY = Math.round(H * 0.66); AH = H - 16 - AY; }
     LX = W / 2;
     LY = AY + AH / 2;
     if (target) setTarget(stage, true);
@@ -187,7 +192,7 @@
     var st = STAGES[Math.min(i, STAGES.length - 1)];
     var shape = keepShape && target ? target.shape : makeC(st.D);
     target = {
-      shape: shape, x: W * st.x, y: Math.round(H * 0.36),
+      shape: shape, x: W * st.x, y: Math.round(H * (st.y || 0.36)),
       a: st.gap * Math.PI / 180
     };
     target.world = shape.pts.map(function (p) {
@@ -215,6 +220,7 @@
     clearT = -1;
     aimX = 0;
     setTarget(0);
+    place();
     readyBall();
   }
 
@@ -312,6 +318,7 @@
           return;
         }
         setTarget(stage);
+        place();
         readyBall();
         clearT = -1;
       }
@@ -321,8 +328,9 @@
     if (ball.idle) return;
     for (var i = 0; i < SUB; i++) physics(dt / SUB);
 
-    /* 手を離したCがエリアの上へ出たら1投と数える */
-    if (!grab && !ball.out && ball.y < AY && ball.vy < 0) {
+    /* 手を離したCがエリアから相手の側へ出たら1投と数える */
+    var away = areaTop() ? ball.y > AY + AH && ball.vy > 0 : ball.y < AY && ball.vy < 0;
+    if (!grab && !ball.out && away) {
       ball.out = true;
       throws++;
       sndThrow();
@@ -391,6 +399,12 @@
   }
   /* スペース：上のCの高さまで届く速さ。横は上のCの真上へ向かう＋左右キーの分 */
   function keyThrow() {
+    if (areaTop()) {
+      /* 上のエリアからは、横へ押し出して相手の真上あたりへ落とす */
+      var ft = Math.sqrt(2 * (target.y - LY) / G);
+      launch((target.x - LX) / ft + aimX, 0);
+      return;
+    }
     var h = LY - target.y + 30;
     var vy = -Math.sqrt(2 * G * h);
     var t = -vy / G;
@@ -455,7 +469,7 @@
     ctx.lineWidth = shape.st;
     ctx.lineCap = "butt";
     ctx.beginPath();
-    ctx.arc(x, y, shape.rm, a + GAP - ext, a + Math.PI * 2 - GAP + ext);
+    ctx.arc(x, y, shape.rm, a + shape.gh - ext, a + Math.PI * 2 - shape.gh + ext);
     ctx.stroke();
     ctx.restore();
   }
@@ -499,8 +513,13 @@
 
   /* キー操作のときだけ、投げる向きを点で見せる */
   function drawAim() {
-    var h = LY - target.y + 30, vy = -Math.sqrt(2 * G * h), t = -vy / G;
-    var vx = (target.x - LX) / t + aimX;
+    var vx, vy;
+    if (areaTop()) { vy = 0; vx = (target.x - LX) / Math.sqrt(2 * (target.y - LY) / G) + aimX; }
+    else {
+      var h = LY - target.y + 30, t;
+      vy = -Math.sqrt(2 * G * h); t = -vy / G;
+      vx = (target.x - LX) / t + aimX;
+    }
     ctx.fillStyle = "rgba(17,17,17,.35)";
     for (var k = 1; k <= 7; k++) {
       var s = k * 0.05;
