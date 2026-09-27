@@ -5,7 +5,7 @@
    見るところ
    ・開始画面ではつかめない
    ・エリアのCを触ったところでつかみ、ぶら下げると回る。Cはエリアの外へ持ち出せない
-   ・離してエリアから出たら1投。相手が上にいて下へ落としただけなら数えない
+   ・離してエリアから出たら1投。エリアの下へ落としただけなら数えない
    ・25段とも、実際につかんで運ぶ・振る操作で引っかけられる
    ・1行（5段）を通して引っかけると結果画面で、その行の回数に応じたC力が出る
    ・結果画面でボタンの外を触ると次の行へ、もう一度でその行の最初から
@@ -67,7 +67,7 @@ function solve(g) {
 }
 function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 200); }
 
-/* ---- つかむ・運ぶ・離す（1段目：エリアが上） ---- */
+/* ---- つかむ・運ぶ・離す（1段目：エリアは左下、相手は右の低いところ） ---- */
 (function () {
   var g = openWith({});
   var p0 = g.probe.now();
@@ -76,7 +76,7 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
   g.press(" "); g.step(2);
   var p = g.probe.now();
   ok("はじめてなら1段目から", p.state === "play" && p.stage === 0);
-  ok("1段目はCが上のエリアで待ち、相手はその下", p.ball.y > p.area.y && p.ball.y < p.area.y + p.area.h && p.target.y > p.area.y + p.area.h);
+  ok("1段目はCが下のエリアで待ち、相手はその右", p.ball.y > p.area.y && p.ball.y < p.area.y + p.area.h && p.area.y > g.H / 2 && p.target.x > p.area.x + p.area.w);
   g.down(p.ball.x + 150, p.ball.y + 150); g.step(30); g.up();
   ok("Cから離れたところを触ってもつかまない", g.probe.now().ball.idle);
   g.down(p.ball.x - 44, p.ball.y + 3); g.step(1);
@@ -90,7 +90,7 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
   ok("指をエリアの外へ出してもCはエリアに残る", q.grab.py === q.area.y + q.area.h && q.ball.y < q.area.y + q.area.h + 60 && q.throws === 0,
      "Cの中心 " + Math.round(q.ball.y) + " / エリア下端 " + (q.area.y + q.area.h));
   g.up(); g.step(30);
-  ok("離すと下へ落ちて1投", g.probe.now().throws === 1);
+  ok("離して下へ落ちただけなら数えない", g.probe.now().throws === 0);
   settle(g);
   g.down(g.probe.now().ball.x + 44, g.probe.now().ball.y); g.step(1);
   q = g.probe.now();
@@ -101,7 +101,7 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
   ok("Esc でいまの行の最初から", g.probe.now().rowThrows === 0 && g.probe.now().stage === 0);
 })();
 
-/* ---- 相手が上の段：エリアの中で落としただけなら数えない ---- */
+/* ---- 相手が上の段：振って投げ上げると1投 ---- */
 (function () {
   var g = openWith({});
   g.press(" "); g.step(2);
@@ -171,14 +171,16 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
   ok("行の最初を選ぶと結果の対象になる", g.probe.now().stage === 5 && g.probe.now().rowFull);
 })();
 
-/* ---- 物の配置：エリアと重ならない ---- */
+/* ---- 物の配置：エリアと重ならない。序盤は物なし。エリアは下 ---- */
 (function () {
   var g = openWith({});
   g.press(" "); g.step(2);
-  var clash = [];
+  var clash = [], bare = true, low = true;
   for (var i = 0; i < 25; i++) {
     g.probe.go(i); g.step(1);
     var p = g.probe.now(), A = p.area;
+    if (i < 10 && p.objs.length) bare = false;
+    if (A.y < g.H / 2) low = false;
     p.objs.forEach(function (o) {
       var nx = Math.max(A.x, Math.min(A.x + A.w, o.x)), ny = Math.max(A.y, Math.min(A.y + A.h, o.y));
       if (o.R && Math.hypot(nx - o.x, ny - o.y) < o.R * 0.6) clash.push((i + 1) + "段目の" + o.kind);
@@ -187,6 +189,8 @@ function waitNext(g) { g.until(function () { return !g.probe.now().clearing; }, 
     if (A.y < sb.y + sb.h && A.x < sb.x + sb.w) clash.push((i + 1) + "段目のエリアと左上のボタン");
   }
   ok("物がエリアに食い込まない", clash.length === 0, clash.join(" "));
+  ok("1〜10段は物なし", bare);
+  ok("エリアはどの段も画面の下半分", low);
 })();
 
 /* ---- 回数とC力 ---- */
