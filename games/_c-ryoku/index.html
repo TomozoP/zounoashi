@@ -119,6 +119,50 @@
     s.start(n, Math.random() * 1.5); s.stop(n + dur + 0.05);
   }
   function sndThrow() { noiseHit(0.16, 900, 0.18, 0.8); }
+  /* つかんで振っている間の「シィィ〜」。声っぽく、「シ」の息の音と「ィ」の母音を混ぜる。
+     速いほど大きく、声も高くなる。ずっと流しておいて音量と高さだけ動かす */
+  var swish = null, swishLevel = 0;
+  function swishSpeed() {
+    if (!grab || !ball) return 0;
+    return Math.hypot(ball.vx, ball.vy) + Math.abs(ball.w) * BALL.rm;
+  }
+  function makeSwish() {
+    var n = AC.currentTime;
+    /* 「シ」：高い息の音 */
+    var src = AC.createBufferSource(); src.buffer = NOISE; src.loop = true;
+    var hp = AC.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 2200;
+    var sh = AC.createBiquadFilter(); sh.type = "bandpass"; sh.frequency.value = 3600; sh.Q.value = 1.4;
+    var gs = AC.createGain(); gs.gain.value = 0;
+    src.connect(hp); hp.connect(sh); sh.connect(gs); gs.connect(OUT);
+    /* 「ィ」：のこぎり波の声を、イの形（300・2300・3000Hzあたり）に絞る。少し揺らす */
+    var osc = AC.createOscillator(); osc.type = "sawtooth"; osc.frequency.value = 220;
+    var lfo = AC.createOscillator(); lfo.frequency.value = 5.5;
+    var lg = AC.createGain(); lg.gain.value = 6;
+    lfo.connect(lg); lg.connect(osc.frequency);
+    var gv = AC.createGain(); gv.gain.value = 0;
+    [[300, 6, 1], [2300, 10, 0.7], [3000, 12, 0.5]].forEach(function (fm) {
+      var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = fm[0]; f.Q.value = fm[1];
+      var fg = AC.createGain(); fg.gain.value = fm[2] * 3;
+      osc.connect(f); f.connect(fg); fg.connect(gv);
+    });
+    gv.connect(OUT);
+    src.start(n); osc.start(n); lfo.start(n);
+    return { gs: gs, gv: gv, osc: osc };
+  }
+  function updateSwish() {
+    var sp = state === S.PLAY && !sel ? swishSpeed() : 0;
+    var k = Math.max(0, Math.min(1, (sp - 250) / 1400));   /* ぶら下がって揺れているくらいでは鳴らない */
+    swishLevel = k;
+    if (!AC || !NOISE) return;
+    if (!swish) {
+      if (k === 0) return;
+      swish = makeSwish();
+    }
+    var n = AC.currentTime, v = Math.pow(k, 1.3);
+    swish.gs.gain.setTargetAtTime(0.22 * v, n, 0.04);
+    swish.gv.gain.setTargetAtTime(0.2 * v, n, 0.05);
+    swish.osc.frequency.setTargetAtTime(200 + 260 * k, n, 0.06);
+  }
   var lastClack = 0;
   /* ぶつかったときの音。相手のCはコツッ、物はそれぞれの材質っぽく。続けざまには鳴らさない */
   function sndClack(power, kind) {
@@ -495,6 +539,7 @@
 
   /* ============ 進行 ============ */
   function update(dt) {
+    updateSwish();
     if (state === S.INTRO) { T += dt; return; }
     if (state !== S.PLAY) return;
     T += dt;
@@ -1035,7 +1080,7 @@
     now: function () {
       return {
         state: state, score: score, W: W, H: H, stage: stage, throws: throws, rowThrows: rowThrows, power: cPower(), gain: gain,
-        clearing: clearT >= 0, hooked: hookT, launch: { x: LX, y: LY }, sel: sel, cleared: cleared.slice(),
+        clearing: clearT >= 0, hooked: hookT, swish: swishLevel, launch: { x: LX, y: LY }, sel: sel, cleared: cleared.slice(),
         area: { x: AX, y: AY, w: AW, h: AH }, grab: grab && { lx: grab.lx, ly: grab.ly, px: grab.px, py: grab.py },
         ball: ball && { x: ball.x, y: ball.y, a: ball.a, vx: ball.vx, vy: ball.vy, w: ball.w, idle: ball.idle, out: ball.out, rm: BALL.rm, D: BALL.D },
         target: target ? { x: target.x, y: target.y, D: target.shape.D, a: target.a } : (function () { var gp = goalPos(); return { x: gp.x, y: gp.y, D: goal.R * 2, a: 0, kind: goal.kind }; })(),

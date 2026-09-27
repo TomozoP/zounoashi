@@ -15,6 +15,7 @@
    ・左上のボタンで段を選べる。最初から全部選べる
    ・投げるCは一覧のCと同じ向き（上下左右）と大きさ。下の行ほど小さい
    ・引っかけた段は保存され、次に開いたとき続きから始まる
+   ・つかんで振っている間だけ、速さに応じた声っぽい音が鳴る
    ・Esc でいまの行の最初から */
 
 var load = require("../harness");
@@ -139,6 +140,22 @@ function dropOnto(gap, miss) {
   ok("すき間の縁に乗って止まるとクリア", dropOnto(-60));
   ok("丸い背に落ちて転げ落ちたらクリアしない", !dropOnto(90));
   ok("相手から外れて落ちたらクリアしない", !dropOnto(-90, true));
+})();
+
+/* ---- 振っている間だけ「シィィ〜」 ---- */
+(function () {
+  var g = openWith({});
+  g.press(" "); g.step(2);
+  var p = g.probe.now(), b = p.ball, A = p.area;
+  g.down(b.x - b.rm, b.y); g.step(60);
+  var still = g.probe.now().swish;
+  var x = b.x - b.rm, peak = 0;
+  for (var i = 0; i < 12; i++) { x += (i < 6 ? 30 : -30); g.moveTo(x, b.y); g.step(1); peak = Math.max(peak, g.probe.now().swish); }
+  g.step(90);
+  var calm = g.probe.now().swish;
+  g.up(); g.step(5);
+  ok("つかんで振ると鳴り、止めると・離すと止む", still < 0.05 && peak > 0.3 && calm < 0.05 && g.probe.now().swish === 0,
+     "止め " + still.toFixed(2) + " 振り " + peak.toFixed(2) + " 静止 " + calm.toFixed(2));
 })();
 
 /* ---- 25段とも引っかけられる。行の終わりで結果、保存 ---- */
