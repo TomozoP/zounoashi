@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>総当たり脱出ゲーム</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #15181d; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 総当たり脱出ゲーム
+
+   扉に2桁のダイヤル錠が3つ。押すたびに今の錠の番号を1つ進めて引っぱる。
+   当たれば錠が外れて鎖ごと落ちる。3つ外れたら扉が開き、そこまでの秒数が記録。
+   番号は 01〜99 のどれか（00 は最初から合わせてある状態なので当たりにしない）。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null, OUT = null;
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    /* 連打で音が重なっても割れないように、出口の手前で抑える */
+    OUT = AC.createDynamicsCompressor();
+    OUT.threshold.value = -14; OUT.ratio.value = 6;
+    OUT.connect(AC.destination);
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(OUT);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q, delay) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(OUT);
+    s.start(n, Math.random() * 1.5); s.stop(n + dur + 0.05);
+  }
+  /* ダイヤルが1つ回るカチッ */
+  function sndDial() {
+    noiseHit(0.025, 4200 + Math.random() * 600, 0.22, 6);
+  }
+  /* 外れ：掛け金が引っかかるガチッ */
+  function sndTug() {
+    noiseHit(0.06, 1500 + Math.random() * 300, 0.34, 3, 0.03);
+    tone(180 + Math.random() * 20, 0.07, 0.16, "square", 120, 0.03);
+  }
+  /* 当たり：掛け金が抜けるカチャン */
+  function sndOpen() {
+    noiseHit(0.05, 3000, 0.4, 4);
+    tone(1320, 0.25, 0.14, "triangle");
+    tone(1980, 0.35, 0.08, "sine", null, 0.03);
+  }
+  /* 錠と鎖が床に落ちる */
+  function sndDrop() {
+    for (var i = 0; i < 5; i++) noiseHit(0.08, 2200 + Math.random() * 1600, 0.2, 5, i * 0.045 + Math.random() * 0.02);
+    tone(90, 0.18, 0.2, "sine", 50);
+  }
+  /* 扉がきしんで開く */
+  function sndDoor() {
+    tone(110, 0.9, 0.12, "sawtooth", 70);
+    tone(163, 0.7, 0.05, "sawtooth", 140, 0.1);
+    noiseHit(1.2, 400, 0.12, 0.7, 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var LOCKS = 3;
+  var state, score, T, held, keyMode = false;
+  var locks, cur, tries, escapeT, doorT, shake;
+
+  var DX, DY, DW, DH, LY;                      /* 扉の位置と、錠を掛ける高さ */
+  function place() {
+    DW = 330; DX = (W - DW) / 2;
+    DY = Math.round(H * 0.1);
+    DH = Math.round(H * 0.8) - DY;
+    LY = [];
+    for (var i = 0; i < LOCKS; i++) LY.push(Math.round(DY + DH * (0.24 + i * 0.26)));
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    score = 0;
+    T = 0;
+    held = false;
+    cur = 0;
+    tries = 0;
+    escapeT = -1;
+    doorT = -1;
+    shake = 0;
+    locks = [];
+    for (var i = 0; i < LOCKS; i++) {
+      locks.push({
+        code: 1 + Math.floor(Math.random() * 99),
+        n: 0, shown: 0,                        /* 合わせた番号と、表示中の回転位置 */
+        jolt: 0, open: false, openT: 0,
+        fy: 0, vy: 0, rot: 0, vr: 0, landed: false
+      });
+    }
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    if (state === S.INTRO) return;
+    if (state === S.PLAY) T += dt;
+    shake = Math.max(0, shake - dt * 30);
+    for (var i = 0; i < locks.length; i++) {
+      var L = locks[i];
+      L.shown += (L.n - L.shown) * Math.min(1, dt * 28);
+      if (Math.abs(L.n - L.shown) < 0.002) L.shown = L.n;
+      L.jolt = Math.max(0, L.jolt - dt * 9);
+      if (L.open) {
+        L.openT += dt;
+        if (L.openT > 0.16) {                  /* 掛け金が抜けてから落ちはじめる */
+          L.vy += 2600 * dt; L.fy += L.vy * dt; L.rot += L.vr * dt;
+          if (!L.landed && LY[i] + L.fy > H + 120) { L.landed = true; }
+        }
+      }
+    }
+    if (state !== S.PLAY) return;
+
+    if (escapeT >= 0 && doorT < 0 && T - escapeT > 0.45) { doorT = 0; sndDoor(); }
+    if (doorT >= 0) {
+      doorT += dt;
+      if (doorT > 1.5) { state = S.RESULT; }
+    }
+  }
+
+  function tryNext() {
+    var L = locks[cur];
+    L.n++;
+    tries++;
+    sndDial();
+    if (L.n === L.code) {
+      L.open = true; L.openT = 0;
+      L.vr = (Math.random() < 0.5 ? -1 : 1) * (2 + Math.random() * 2);
+      sndOpen();
+      setTimeoutSafe(sndDrop, 420);
+      cur++;
+      if (cur >= LOCKS) { escapeT = T; score = Math.floor(T * 100) / 100; }
+    } else {
+      L.jolt = 1; shake = 3;
+      sndTug();
+    }
+  }
+  function setTimeoutSafe(fn, ms) { if (AC) setTimeout(fn, ms); }
+
+  /* ============ 入力 ============ */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    held = true;
+    if (cur < LOCKS) tryNext();
+  }
+  function move() {}
+  function up() {
+    if (!held) return;
+    held = false;
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  window.addEventListener("keydown", function (e) {
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function scoreText() { return score.toFixed(2); }
+  function doShare() {
+    /* ▼SHARE: 正方形サムネの共有リンクは share.js が付ける */
+    window.zResultActions.x({ text: scoreText() + "秒で脱出 #総当たり脱出ゲーム" });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawRoom() {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#1b1f26"); g.addColorStop(1, "#262b33");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    /* コンクリートの目地 */
+    ctx.strokeStyle = "rgba(0,0,0,.22)"; ctx.lineWidth = 2;
+    for (var y = 60; y < H * 0.84; y += 120) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    /* 床 */
+    var fy = Math.round(H * 0.84);
+    var fg = ctx.createLinearGradient(0, fy, 0, H);
+    fg.addColorStop(0, "#2e2a26"); fg.addColorStop(1, "#141210");
+    ctx.fillStyle = fg; ctx.fillRect(0, fy, W, H - fy);
+    /* 真上の裸電球の明かり */
+    var lg = ctx.createRadialGradient(W / 2, 0, 20, W / 2, H * 0.3, H * 0.7);
+    lg.addColorStop(0, "rgba(255,226,160,.20)"); lg.addColorStop(1, "rgba(255,226,160,0)");
+    ctx.fillStyle = lg; ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawDoor() {
+    var fy = Math.round(H * 0.84);
+    /* 枠 */
+    ctx.fillStyle = "#0e1014";
+    ctx.fillRect(DX - 18, DY - 18, DW + 36, fy - DY + 18);
+    /* 開いた先の外の光 */
+    var open = doorT < 0 ? 0 : Math.min(1, doorT / 0.9);
+    open = 1 - Math.pow(1 - open, 3);
+    if (open > 0) {
+      var og = ctx.createLinearGradient(0, DY, 0, fy);
+      og.addColorStop(0, "#fffbe8"); og.addColorStop(1, "#ffe7a8");
+      ctx.fillStyle = og; ctx.fillRect(DX, DY, DW, fy - DY);
+    }
+    /* 扉の板。左の蝶番を軸に手前へ開く（横幅が縮む） */
+    var w = DW * (1 - open * 0.86);
+    ctx.save();
+    var dg = ctx.createLinearGradient(DX, 0, DX + w, 0);
+    dg.addColorStop(0, "#5b6068"); dg.addColorStop(0.5, "#6c727b"); dg.addColorStop(1, "#4d525a");
+    ctx.fillStyle = dg;
+    ctx.beginPath();
+    ctx.moveTo(DX, DY); ctx.lineTo(DX + w, DY - open * 26);
+    ctx.lineTo(DX + w, fy + open * 26); ctx.lineTo(DX, fy);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#2c3036"; ctx.lineWidth = 4; ctx.stroke();
+    if (open < 0.05) {
+      /* 補強の帯と鋲 */
+      ctx.fillStyle = "rgba(0,0,0,.18)";
+      [0.12, 0.88].forEach(function (r) { ctx.fillRect(DX + 8, DY + (fy - DY) * r - 12, DW - 16, 24); });
+      ctx.fillStyle = "#8a9099";
+      [0.12, 0.88].forEach(function (r) {
+        for (var k = 0; k < 7; k++) {
+          ctx.beginPath(); ctx.arc(DX + 26 + k * (DW - 52) / 6, DY + (fy - DY) * r, 4, 0, Math.PI * 2); ctx.fill();
+        }
+      });
+      /* 取っ手 */
+      ctx.fillStyle = "#30343a";
+      roundRect(DX + DW - 44, DY + (fy - DY) * 0.5 - 50, 18, 100, 9); ctx.fill();
+    }
+    ctx.restore();
+    if (open > 0) {
+      /* 光が部屋へ差す */
+      ctx.fillStyle = "rgba(255,244,210," + (0.35 * open) + ")";
+      ctx.beginPath();
+      ctx.moveTo(DX + w, fy); ctx.lineTo(DX + DW, fy);
+      ctx.lineTo(W + 80, H); ctx.lineTo(DX - 40 + w, H);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  /* 扉を横切る鎖。i 番目の錠の左右にかかる */
+  function drawChain(i, L, dy) {
+    var y = LY[i] - 58 + dy;
+    var linkW = 26;
+    ctx.save();
+    ctx.lineWidth = 6; ctx.strokeStyle = "#9aa1aa";
+    for (var x = DX - 30; x < DX + DW + 30; x += linkW) {
+      if (Math.abs(x + linkW / 2 - W / 2) < 44) continue;   /* 真ん中は錠の掛け金 */
+      var odd = Math.round((x - DX) / linkW) % 2;
+      ctx.beginPath();
+      if (odd) { ctx.moveTo(x + 4, y); ctx.lineTo(x + linkW - 4, y); }
+      else { roundRect(x, y - 7, linkW, 14, 7); }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawWheel(cx, cy, value) {
+    /* value は小数も持つ。0〜9 をたてに巻いた筒として描く */
+    var w = 40, h = 58, step = 40;
+    ctx.save();
+    roundRect(cx - w / 2, cy - h / 2, w, h, 6);
+    ctx.fillStyle = "#f3efe4"; ctx.fill();
+    ctx.clip();
+    ctx.fillStyle = "#1a1c20";
+    ctx.font = "800 40px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    var base = Math.floor(value), frac = value - base;
+    for (var k = -1; k <= 2; k++) {
+      var d = ((base + k) % 10 + 10) % 10;
+      ctx.fillText(String(d), cx, cy + 2 + (k - frac) * step);
+    }
+    var sg = ctx.createLinearGradient(0, cy - h / 2, 0, cy + h / 2);
+    sg.addColorStop(0, "rgba(0,0,0,.45)"); sg.addColorStop(0.3, "rgba(0,0,0,0)");
+    sg.addColorStop(0.7, "rgba(0,0,0,0)"); sg.addColorStop(1, "rgba(0,0,0,.45)");
+    ctx.fillStyle = sg; ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+    ctx.restore();
+  }
+
+  function drawLock(i) {
+    var L = locks[i];
+    var jolt = L.jolt * L.jolt * 9;
+    var lift = L.open ? Math.min(1, L.openT / 0.12) * 22 : 0;
+    var cx = W / 2, cy = LY[i] + L.fy + jolt;
+    if (L.landed) return;
+    drawChain(i, L, L.fy + jolt * 0.5);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(L.fy > 0 ? L.rot * Math.min(1, L.fy / 300) : 0);
+    /* 掛け金（U字）。当たると右脚が抜けて持ち上がる */
+    ctx.lineWidth = 16; ctx.lineCap = "round";
+    ctx.strokeStyle = "#b9bfc7";
+    ctx.beginPath();
+    ctx.moveTo(-30, -40); ctx.lineTo(-30, -70 - lift);
+    ctx.arc(0, -70 - lift, 30, Math.PI, 0);
+    ctx.lineTo(30, -40 - lift * 1.6);
+    ctx.stroke();
+    /* 本体（真鍮） */
+    var bw = 132, bh = 112;
+    var bg = ctx.createLinearGradient(-bw / 2, 0, bw / 2, 0);
+    bg.addColorStop(0, "#9a6c1c"); bg.addColorStop(0.35, "#e2b347"); bg.addColorStop(1, "#8a5d14");
+    roundRect(-bw / 2, -46, bw, bh, 18);
+    ctx.fillStyle = bg; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#5c3d0b"; ctx.stroke();
+    /* 番号の窓 */
+    ctx.fillStyle = "#2a1c06";
+    roundRect(-50, -24, 100, 68, 10); ctx.fill();
+    var v = L.shown;
+    var ones = v % 10;
+    var tens = Math.floor(v / 10) + Math.max(0, ones - 9);
+    drawWheel(-22, 10, tens);
+    drawWheel(22, 10, ones);
+    ctx.restore();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    drawRoom();
+    drawDoor();
+    if (doorT < 0) for (var i = LOCKS - 1; i >= 0; i--) drawLock(i);
+    ctx.restore();
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.textAlign = "center";
+    ctx.font = "800 108px sans-serif";
+    var num = scoreText(), unit = "秒";
+    var nw = ctx.measureText(num).width;
+    ctx.font = "800 48px sans-serif";
+    var uw = ctx.measureText(unit).width;
+    var x0 = W / 2 - (nw + 8 + uw) / 2;
+    ctx.textAlign = "left";
+    ctx.font = "800 108px sans-serif";
+    ctx.fillText(num, x0, H * 0.45);
+    ctx.font = "800 48px sans-serif";
+    ctx.fillText(unit, x0 + nw + 8, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
+  window.__probe = {
+    now: function () {
+      return {
+        state: state, score: score, T: T, W: W, H: H, cur: cur, tries: tries, door: doorT,
+        locks: locks.map(function (L) { return { code: L.code, n: L.n, open: L.open }; })
+      };
+    },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      var guard = Date.now() + 60000;
+      while (state !== S.RESULT && Date.now() < guard) {
+        if (state === S.PLAY && cur < LOCKS) r.key();
+        await r.wait(110);
+      }
+      if (state !== S.RESULT) throw Error("脱出できない");
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    if (!window.__recordManual) { update(dt); draw(); }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
