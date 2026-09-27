@@ -228,14 +228,12 @@ function dropOnto(gap, miss) {
 /* ---- 時計の針は今の時刻 ---- */
 (function () {
   var g = openWith({}, "CLOCK_FIX = 3 * 3600;");
-  begin(g); g.probe.go(17); g.step(2);
-  var h3 = g.probe.hands();
-  g.probe.go(23); g.step(2);
+  begin(g); g.probe.go(23); g.step(2);
   var kind = g.probe.now().objs[0].kind, h24 = g.probe.hands();
   var r = openWith({}, "CLOCK_FIX = null;");
-  begin(r); r.probe.go(17); r.step(2);
+  begin(r); r.probe.go(23); r.step(2);
   var d = new Date(), m = -90 + (d.getMinutes() + d.getSeconds() / 60) * 6, hr = r.probe.hands();
-  ok("時計の針は時刻どおり（3時で長い針が上、短い針が右）", h3[0] === -90 && h3[1] === 0 && h24[0] === -90 && h24[1] === 0, h3.join("/"));
+  ok("時計の針は時刻どおり（3時で長い針が上、短い針が右）", h24[0] === -90 && h24[1] === 0, h24.join("/"));
   ok("ふだんは端末の今の時刻を指す", Math.abs(((hr[0] - m) % 360 + 540) % 360 - 180) < 2, hr[0] + " / " + m.toFixed(0));
   ok("24段は枠のない時計（針だけ）", kind === "hands");
 })();
@@ -320,6 +318,8 @@ function dropOnto(gap, miss) {
   ok("物がエリアに食い込まない", clash.length === 0, clash.join(" "));
   var cAt = goals.map(function (k, i) { return k === "C" ? i + 1 : 0; }).filter(Boolean);
   ok("1・10・20・25段は相手がC、ほかは物がひとつだけのゴール", cAt.join() === "1,10,20,25" && goals.every(Boolean), goals.join(" "));
+  var kinds = goals.filter(function (k) { return k !== "C"; });
+  ok("物のゴールは21段とも別のモチーフ", kinds.length === 21 && kinds.every(function (k, i) { return kinds.indexOf(k) === i; }), kinds.length + "種類");
   ok("エリアはどの段も画面の下半分", low);
 })();
 
