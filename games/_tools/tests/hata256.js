@@ -14,7 +14,7 @@
    ・← → キーでも遊べる。Esc で最初から */
 
 var load = require("../harness");
-var FILE = "games/_hata256/index.html";
+var FILE = "games/hata256/index.html";
 
 var bad = [];
 function ok(label, cond, extra) {
