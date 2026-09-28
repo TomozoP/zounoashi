@@ -43,6 +43,10 @@ header .title img{border-radius:5px}
 #view{width:100%;height:100%;display:block}
 #simView{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 #simView[hidden]{display:none}
+#cropGuide{position:absolute;inset:0;pointer-events:none}
+#cropGuide i{position:absolute;left:0;right:0;background:rgba(0,0,0,.45)}
+#cropGuide i:first-child{top:0;border-bottom:1px dashed #ffb08a}
+#cropGuide i:last-child{bottom:0;border-top:1px dashed #ffb08a}
 #simBar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:center}
 #drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:14px;pointer-events:none}
 #stage.dragover #viewWrap{box-shadow:0 0 0 3px var(--accent)}
@@ -170,6 +174,7 @@ aside .sec>h3:before{content:none}
         <div id="viewWrap">
           <canvas id="view" width="1080" height="1920"></canvas>
           <canvas id="simView" hidden aria-label="サムネとスマホ再生の表示確認"></canvas>
+          <div id="cropGuide" hidden><i></i><i></i></div>
           <div id="drop">動画をドロップ</div>
           <div id="count"></div>
         </div>
@@ -210,6 +215,8 @@ aside .sec>h3:before{content:none}
             <select id="stOut" style="flex:1"><option value="source">元の動画のまま</option><option value="vertical">縦 1080×1920</option></select></div>
           <div class="row"><label>映像の配置</label>
             <select id="stFit" style="flex:1"><option value="blur">収める（背景ぼかし）</option><option value="cover">画面いっぱい</option></select></div>
+          <button id="stLayout23" type="button" style="width:100%;margin-top:4px" title="縦1080×1920にして、上の帯を23%・黒背景にする">上の帯23%の配置にする</button>
+          <label class="chk"><input id="stCropGuide" type="checkbox" checked>サムネ2:3の切り抜き線</label>
         </div>
         <div class="subgroup">
           <h4>ヘッダー帯</h4>
@@ -347,7 +354,7 @@ const buffers = new Map();   // id -> {raw, peaks, proc, procKey}
 let vclips = [];             // {id,src,in,out,at,gain}  at の順に並べておく
 let aclips = [];             // {id,buf,in,out,at,gain}
 let subs = [];               // {id,text,start,end}
-const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur', out: 'source', headH: 0.2, headBg: 'blur', headSize: 110, headFont: "'M PLUS Rounded 1c'|900", headPreset: 0 };
+const style = { preset: 0, font: "'M PLUS Rounded 1c'|900", size: 96, y: 0.74, max: 16, fit: 'blur', out: 'source', headH: 0.2, headBg: 'blur', headSize: 110, headFont: "'M PLUS Rounded 1c'|900", headPreset: 0, cropGuide: true };
 const opt = { off: {}, norm: true, enhance: true, gate: 0.5, vvol: 1, avol: 1, sevol: 1, bgmvol: 0.5 };
 // 音声のレーン：vo=ナレーション（補正あり） se=効果音 bgm=BGM
 const LANES = { vo: 'ナレーション', se: '効果音', bgm: 'BGM' };
@@ -1701,6 +1708,13 @@ $('stOut').onchange = e => { style.out = e.target.value; applyOutSize(); drawSti
 $('stHeadBg').onchange = e => { style.headBg = e.target.value; drawStill(); };
 $('stHeadLayout').onchange = e => { style.headLayout = e.target.value; applyOutSize(); drawStill(); };
 $('stHeadFont').onchange = e => { style.headFont = e.target.value; loadFonts(); compose(playhead); };
+$('stCropGuide').onchange = e => { style.cropGuide = e.target.checked; updateCropGuide(); };
+// 上の帯23%。題名はサムネで欠けないよう、切り抜き線より内側へ少し下げる。
+$('stLayout23').onclick = () => {
+  Object.assign(style, { out: 'vertical', headLayout: 'inside', headH: 0.23, headBg: 'black', headY: 0.04 });
+  syncControls(); applyOutSize(); drawStill();
+  if (!subs.some(isHeader)) toast('ヘッダーの文字を足すと上の帯が出ます');
+};
 ['optGate', 'optVVol', 'optAVol', 'optSEVol', 'optBGMVol'].forEach(id => $(id).addEventListener('change', () => { if (playing && !recording) { pause(); play(); } }));
 $('optEnhance').addEventListener('change', () => { if (playing && !recording) { pause(); play(); } });
 for (const [boxId, key] of [['presets', 'preset'], ['headPresets', 'headPreset']]) {
@@ -1747,6 +1761,13 @@ function fitView() {
   let h = Math.max(80, m.clientHeight - 52 - $('simBar').offsetHeight), w = h * sw / sh;
   if (w > m.clientWidth) { w = m.clientWidth; h = w * sh / sw; }
   vw.style.width = w + 'px'; vw.style.height = h + 'px';
+  updateCropGuide();
+}
+// 一覧のサムネは中央を2:3で切り抜くので、見えなくなる上下を暗くする。書き出しには入らない。
+function updateCropGuide() {
+  const cut = Math.max(0, (1 - W * 1.5 / H) / 2), el = $('cropGuide');
+  el.hidden = !style.cropGuide || $('simMode').value !== 'off' || cut <= 0;
+  for (const i of el.children) i.style.height = cut * 100 + '%';
 }
 // 端末名は初期値の切り替えだけに使い、比率は実際の表示に合わせて変更できる。
 function updateSimulationControls() {
@@ -1847,7 +1868,7 @@ function syncControls() {
   set('optNorm', opt.norm !== false); set('optEnhance', opt.enhance); set('optGate', opt.gate); set('optVVol', opt.vvol); set('optAVol', opt.avol); set('optSEVol', opt.sevol); set('optBGMVol', opt.bgmvol);
   set('stHeadH', style.headH ?? 0.2); set('stHeadBg', style.headBg || 'blur');
   set('stHeadY', style.headY ?? 0);
-  set('stHeadLayout', style.headLayout || 'expand');
+  set('stHeadLayout', style.headLayout || 'expand'); set('stCropGuide', style.cropGuide !== false);
   set('stHeadSize', style.headSize || 110); set('stHeadFont', style.headFont || style.font); set('stSize', style.size); set('stY', style.y); set('stMax', style.max); set('stFont', style.font); set('stFit', style.fit); set('stOut', style.out);
   [...$('presets').children].forEach((x, j) => x.classList.toggle('on', j === style.preset));
   [...$('headPresets').children].forEach((x, j) => x.classList.toggle('on', j === (style.headPreset || 0)));
