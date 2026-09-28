@@ -5,11 +5,12 @@ var path = require("path");
 var vm = require("vm");
 var root = path.resolve(__dirname, "../../..");
 var script = fs.readFileSync(path.join(root, "games/share.js"), "utf8");
-function share(url, parent, native, unlisted) {
+function share(url, parent, native, unlisted, version) {
   var result;
   var win = { location: new URL(url), navigator: {}, open: function (to) { result = new URL(to).searchParams.get("url"); return {}; } };
   win.parent = parent ? { location: new URL(parent) } : win;
   if (unlisted) win.document = { querySelector: function () { return {}; } };
+  if (version) win.document = { querySelector: function (q) { return /preview-version/.test(q) ? { content: version } : null; } };
   if (native) win.navigator = { userAgent: "iPhone", share: function (data) { result = data.url; return Promise.resolve(); } };
   vm.runInNewContext(script, { window: win, URL: URL, URLSearchParams: URLSearchParams });
   win.zShare({ text: "共有の確認", native: !!native });
@@ -23,6 +24,9 @@ assert.equal(share(origin + "/games/wanko/", origin + "/#/game/wanko?card=old"),
 var result = "A".repeat(30);
 assert.equal(share(origin + "/games/type16oku/index.html", origin + "/#/game/type16oku?r=" + result), origin + "/share/type16oku/?r=" + result + "&card=square2");
 assert.equal(share(origin + "/games/type16oku/index.html?r=" + result), origin + "/share/type16oku/?r=" + result + "&card=square2");
+/* 制作中の固定リンクでも、本番の共有ページを出す */
+assert.equal(share(origin + "/shisaku-i87mixcr/?rec=1&_preview=2", null, false, false, "hata256-1790565434105"), origin + "/share/hata256/?card=square2");
+assert.equal(share(origin + "/shisaku-i87mixcr/?r=" + result, null, true, false, "type16oku-1"), origin + "/share/type16oku/?r=" + result + "&card=square2");
 assert.equal(share("http://localhost/games/_new/index.html", "http://localhost/#/game/new"), "http://localhost/#/game/new");
 var source = fs.readFileSync(path.join(root, "index.html"), "utf8");
 var games = vm.runInNewContext(source.match(/var GAMES = (\[[\s\S]*?\n\]);/)[1], { UR: "", KY: "" }).filter(function (g) { return g.id && g.play; });

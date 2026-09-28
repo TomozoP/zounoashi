@@ -7,7 +7,8 @@
      });
 
    公開ゲームはタイトルとサムネのある共有ページを使う。
-   下書きなどは、埋め込んでいるページのURLを共有する。
+   制作中の固定リンクでも、同じゲームの本番の共有ページを出す（固定リンクは広めない）。
+   手元の下書きなどは、埋め込んでいるページのURLを共有する。
 
    スマホでは、まず端末の共有シート（Web Share）を試す。
    window.open はポップアップとして止められることがあり、
@@ -24,6 +25,10 @@
       direct.searchParams.delete("v");
       return direct.href;
     }
+    /* 制作中の固定リンク。版の名前「<ゲーム名>-<時刻>」からゲームを見分ける */
+    var version = global.document && global.document.querySelector('meta[name="preview-version"]');
+    var preview = version && /^([a-z0-9-]+?)-\d+$/.exec(version.content || "");
+    if (preview) return shareUrl(preview[1], global.location.search);
     var game = global.location.pathname.match(/^\/games\/([a-z0-9-]+)\/(?:index\.html)?$/);
     var current = global.location.href;
     try {
@@ -33,13 +38,16 @@
     var page = new URL(current);
     var query = page.hash.indexOf("#/game/" + game[1]) === 0
       ? page.hash.slice(page.hash.indexOf("?")) : page.search;
+    return shareUrl(game[1], query);
+  }
+  function shareUrl(id, query) {
     if (query.charAt(0) !== "?") query = "";
     var params = new URLSearchParams(query);
-    params.delete("v");
+    ["v", "_preview", "rec", "recorder-cli"].forEach(function (k) { params.delete(k); });
     /* 大きいカードの保存済み表示を避け、確認済みの正方形カードのURLを使う。 */
     params.set("card", "square2");
     var search = params.toString();
-    return global.location.origin + "/share/" + game[1] + "/" + (search ? "?" + search : "");
+    return global.location.origin + "/share/" + id + "/" + (search ? "?" + search : "");
   }
 
   function isPhone() {
