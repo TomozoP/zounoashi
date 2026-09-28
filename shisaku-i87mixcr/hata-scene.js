@@ -55,15 +55,15 @@ var ZHataScene = (function () {
     var g = new T.Group();
     g.position.y = -.62;
     parentArm.pivot.add(g);
-    var pole = new T.Mesh(new T.CylinderGeometry(.016, .016, .92, 8), mat(0xd8c6a0, .6));
-    pole.position.y = -.35; g.add(pole);
-    var knob = new T.Mesh(new T.SphereGeometry(.024, 10, 8), mat(0xe9d9b2, .5)); knob.position.y = -.81; g.add(knob);
-    var geo = new T.PlaneGeometry(.72, .5, 12, 5);
-    geo.translate(.36, 0, 0);
+    var pole = new T.Mesh(new T.CylinderGeometry(.013, .013, .66, 8), mat(0xd8c6a0, .6));
+    pole.position.y = -.22; g.add(pole);
+    var knob = new T.Mesh(new T.SphereGeometry(.024, 10, 8), mat(0xe9d9b2, .5)); knob.position.y = -.56; g.add(knob);
+    var geo = new T.PlaneGeometry(.42, .3, 10, 4);
+    geo.translate(.21, 0, 0);
     var cloth = new T.Mesh(geo, new T.MeshBasicMaterial({ color: 0xffffff, side: T.DoubleSide }));
     var edge = new T.LineSegments(new T.EdgesGeometry(geo), new T.LineBasicMaterial({ color: INK }));
     var holder = new T.Group();
-    holder.position.y = -.55;                        /* 棒の先寄りに、布の一辺を棒に沿わせる */
+    holder.position.y = -.38;                        /* 棒の先寄りに、布の一辺を棒に沿わせる */
     holder.scale.x = parentArm.side;                 /* 外側へ向ける */
     holder.add(cloth); holder.add(edge);
     g.add(holder);
@@ -125,7 +125,7 @@ var ZHataScene = (function () {
 
   /* 腕の角度。p=0 で下げた（少し外へ開く）、p=1 で上げた（斜め上） */
   function armAngle(side, p) {
-    var down = .12, up = 2.85;
+    var down = .45, up = 2.5;
     return side * (down + (up - down) * p);
   }
 
@@ -141,7 +141,7 @@ var ZHataScene = (function () {
       /* 布のはためき */
       var pos = f.cloth.geometry.attributes.position, a = pos.array, b = f.base;
       for (var k = 0; k < a.length; k += 3) {
-        var u = b[k] / .72;
+        var u = b[k] / .42;
         a[k + 2] = Math.sin(t * 9 + u * 5 + i) * .05 * u;
       }
       pos.needsUpdate = true;
