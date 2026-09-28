@@ -10,6 +10,8 @@ assert(page.includes('./auto-reload.js?'));
 /* 公開のページと取り違えないよう、画面とタブの題名にプレビューと出す */
 assert(page.includes('id="preview-label"'));
 assert(/<title>【プレビュー】/.test(page));
+/* 上部の表示に、ハッシュタグと本番の共有リンクを写すボタンを付ける */
+assert(page.includes('./preview-header.js?'));
 
 async function main() {
   var next = "1", ok = true, offline = false, requests = [], moves = [], events = {};
