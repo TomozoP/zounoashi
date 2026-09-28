@@ -47,5 +47,6 @@ window.DRAFT_GAMES = [
     "play": "games/_brute-escape/index.html",
     "full": true,
     "catch": ""
-  }
+  },
+  {"type":"lab","tags":[],"id":"hata256","title":"256色旗揚げ","year":2026,"date":"2026-09-28","plays":null,"url":"","img":"games/_hata256/img/thumb.webp","play":"games/_hata256/index.html","full":true,"catch":""},
 ];
