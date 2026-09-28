@@ -136,8 +136,8 @@ var ZHataScene = (function () {
       arm.pivot.rotation.z = armAngle(arm.side, s.arms[i]);
       arm.pivot.rotation.x = -.18;
       f.cloth.material.color.set(s.colors[i]);
-      var pop = 1 + .25 * s.pop[i];
-      f.holder.scale.set(arm.side * pop, pop, pop);
+      /* 持ち替え：布が棒のまわりを1回転する */
+      f.holder.rotation.y = s.pop[i] * Math.PI * 2;
       /* 布のはためき */
       var pos = f.cloth.geometry.attributes.position, a = pos.array, b = f.base;
       for (var k = 0; k < a.length; k += 3) {
