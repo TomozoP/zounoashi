@@ -3,10 +3,13 @@ var assert = require("assert");
 var fs = require("fs");
 var path = require("path");
 var vm = require("vm");
-var script = fs.readFileSync(path.resolve(__dirname, "../../../preview/auto-reload.js"), "utf8");
-var page = fs.readFileSync(path.resolve(__dirname, "../../../preview/index.html"), "utf8");
+var script = fs.readFileSync(path.resolve(__dirname, "../../../shisaku-i87mixcr/auto-reload.js"), "utf8");
+var page = fs.readFileSync(path.resolve(__dirname, "../../../shisaku-i87mixcr/index.html"), "utf8");
 assert(page.includes('name="preview-version"'));
 assert(page.includes('./auto-reload.js?'));
+/* 公開のページと取り違えないよう、画面とタブの題名にプレビューと出す */
+assert(page.includes('id="preview-label"'));
+assert(/<title>【プレビュー】/.test(page));
 
 async function main() {
   var next = "1", ok = true, offline = false, requests = [], moves = [], events = {};
@@ -19,7 +22,7 @@ async function main() {
   vm.runInNewContext(script, {
     document: doc,
     window: { addEventListener: function (name, fn) { events[name] = fn; } },
-    location: { href: "https://www.zounoashi.com/preview/?r=abc#test", replace: function (url) { moves.push(url); } },
+    location: { href: "https://www.zounoashi.com/shisaku-i87mixcr/?r=abc#test", replace: function (url) { moves.push(url); } },
     URL: URL, AbortController: AbortController, Date: Date,
     setTimeout: setTimeout, clearTimeout: clearTimeout,
     setInterval: function (fn, ms) { interval = fn; seconds = ms; },

@@ -1,5 +1,5 @@
 /* F9を押したときだけ出す、ゲーム動画の撮影パネル。
-   localhost では MP4保存係へ送る。制作中の固定リンク（preview/）では保存係がないので、
+   localhost では MP4保存係へ送る。制作中の固定リンク（shisaku-i87mixcr/）では保存係がないので、
    録れた動画をそのまま書き出す。スマホなどF9のない端末は ?rec=1 を付けると録画の釦が出る。 */
 (function () {
   'use strict';
@@ -230,7 +230,7 @@
     status.textContent=remote?'動画を書き出し中':'MP4に変換中';panel.style.display='grid';
     var raw=new Blob(chunks,{type:recorder.mimeType});
     var id=(location.pathname.split('/').filter(Boolean).slice(-2)[0]||'game').replace(/^_/,'');
-    /* 固定リンクではフォルダ名が preview なので、版の名前からゲームを見分ける */
+    /* 固定リンクではフォルダ名が shisaku-i87mixcr なので、版の名前からゲームを見分ける */
     var version=document.querySelector('meta[name="preview-version"]');
     if(version)id=version.content.replace(/-\d+$/,'')||id;
     if(remote){

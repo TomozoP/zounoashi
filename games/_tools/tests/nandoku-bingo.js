@@ -356,8 +356,8 @@ ORDER.slice(0, 5).forEach(mark => {
   const bl = g.probe.sets()[I('𰻞')].list.map(f => f.kanji);
   assert.ok(bl.includes(now(g).call.kanji), '𰻞 で遊べる');
   assert.ok(now(g).card.filter(Boolean).every(k => bl.includes(k)), '𰻞 のカード');
-  /* 制作中の固定リンク（/preview/）では最初から 𰻞 が出ている（スマホで確かめるため）。公開の場所では出ない */
-  const pv = load(file, { quiet: true, inject: 'window.location.hostname = "www.zounoashi.com"; window.location.pathname = "/preview/";' }); pv.step(2);
+  /* 制作中の固定リンク（/shisaku-i87mixcr/）では最初から 𰻞 が出ている（スマホで確かめるため）。公開の場所では出ない */
+  const pv = load(file, { quiet: true, inject: 'window.location.hostname = "www.zounoashi.com"; window.location.pathname = "/shisaku-i87mixcr/";' }); pv.step(2);
   assert.equal(pv.probe.setCount(), 7, '固定リンクでは最初から 𰻞 が出る');
   assert.deepEqual(now(pv).cleared, {}, '記録には書かない');
   const pb = load(file, { quiet: true, inject: 'window.location.hostname = "www.zounoashi.com"; window.location.pathname = "/games/nandoku-bingo/";' }); pb.step(2);
