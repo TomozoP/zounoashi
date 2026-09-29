@@ -1184,10 +1184,111 @@ $('wBtn').onclick = runWhisper;
 
 /* ---------- export ---------- */
 let recChunksX = [], xCanceled = false;
+// 1コマずつ描いて符号化する。画面の描画や実時間に頼らないので、別のタブを見ていても進む。
+const MUXERS = { mp4: 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.mjs', webm: 'https://cdn.jsdelivr.net/npm/webm-muxer@5.1.4/build/webm-muxer.mjs' };
+async function pickCodecs(sr) {
+  if (!window.VideoEncoder || !window.AudioEncoder) return null;
+  const v = { width: W, height: H, bitrate: 10e6, framerate: FPS };
+  const a = { sampleRate: sr, numberOfChannels: 2, bitrate: 192e3 };
+  const ok = async (E, c) => { try { return (await E.isConfigSupported(c)).supported; } catch (e) { return false; } };
+  const plans = [
+    { fmt: 'mp4', v: ['avc1.640028', 'avc1.640033', 'avc1.4d0033'], vm: 'avc', vx: { avc: { format: 'avc' } }, a: [['mp4a.40.2', 'aac'], ['opus', 'opus']] },
+    { fmt: 'webm', v: ['vp09.00.40.08', 'vp8'], vm: null, vx: {}, a: [['opus', 'A_OPUS']] },
+  ];
+  for (const p of plans) {
+    let vc = null, ac = null;
+    for (const c of p.v) if (await ok(VideoEncoder, { ...v, ...p.vx, codec: c })) { vc = { ...v, ...p.vx, codec: c }; break; }
+    if (!vc) continue;
+    for (const [c, m] of p.a) if (await ok(AudioEncoder, { ...a, codec: c })) { ac = { ...a, codec: c, mux: m }; break; }
+    if (!ac) continue;
+    return { fmt: p.fmt, vc, ac, vm: p.vm || (vc.codec === 'vp8' ? 'V_VP8' : 'V_VP9') };
+  }
+  return null;
+}
+// 表示用の要素とは別の要素で、指定の時刻へ飛んで絵が出るのを待つ
+const xv = document.createElement('video'); xv.muted = true; xv.playsInline = true; xv.preload = 'auto';
+function seekExport(clip, time) {
+  return new Promise(res => {
+    let to = 0;
+    const done = () => { clearTimeout(to); xv.removeEventListener('seeked', done); res(); };
+    if (xv.dataset.src != clip.src) { xv.dataset.src = clip.src; xv.src = sources.get(clip.src).url; }
+    else if (!xv.seeking && xv.readyState >= 2 && Math.abs(xv.currentTime - time) < 1e-4) return res();
+    xv.addEventListener('seeked', done); to = setTimeout(done, 5000);
+    xv.currentTime = time;
+  });
+}
+// Opus は 44.1kHz を扱えないので、必要なら 48kHz に直した音で試す
+async function resampleMix(buf, sr) {
+  const off = new OfflineAudioContext(2, Math.ceil(buf.duration * sr), sr), s = off.createBufferSource();
+  s.buffer = buf; s.connect(off.destination); s.start(); return off.startRendering();
+}
+async function exportFrames() {
+  let audio = mix, plan = await pickCodecs(audio.sampleRate);
+  if (!plan && audio.sampleRate !== 48000 && window.AudioEncoder) { audio = await resampleMix(mix, 48000); plan = await pickCodecs(48000); }
+  if (!plan) return false;
+  const sr = audio.sampleRate;
+  let lib;
+  try { lib = await import(MUXERS[plan.fmt]); } catch (e) { return false; }
+  const target = new lib.ArrayBufferTarget();
+  const muxer = new lib.Muxer(plan.fmt === 'mp4'
+    ? { target, video: { codec: plan.vm, width: W, height: H, frameRate: FPS }, audio: { codec: plan.ac.mux, numberOfChannels: 2, sampleRate: sr }, fastStart: 'in-memory', firstTimestampBehavior: 'offset' }
+    : { target, video: { codec: plan.vm, width: W, height: H, frameRate: FPS }, audio: { codec: plan.ac.mux, numberOfChannels: 2, sampleRate: sr }, firstTimestampBehavior: 'offset' });
+  let fail = null;
+  const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: e => fail = e });
+  const aenc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: e => fail = e });
+  const { mux, ...acfg } = plan.ac;
+  venc.configure(plan.vc); aenc.configure(acfg);
+  resetOv(); $('ovMsg').textContent = ''; $('ov').classList.add('on');
+  exporting = true; xCanceled = false;
+  const dur = totalDur(), frames = Math.max(1, Math.round(dur * FPS));
+  // 音は作り済みの全体の音をそのまま渡す
+  const len = Math.min(audio.length, Math.ceil(dur * sr)), L = audio.getChannelData(0), R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
+  for (let i = 0; i < len; i += sr) {
+    const n = Math.min(sr, len - i), d = new Float32Array(n * 2);
+    d.set(L.subarray(i, i + n), 0); d.set(R.subarray(i, i + n), n);
+    const ad = new AudioData({ format: 'f32-planar', sampleRate: sr, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(i / sr * 1e6), data: d });
+    aenc.encode(ad); ad.close();
+  }
+  const drain = () => venc.encodeQueueSize > 4 ? new Promise(r => venc.addEventListener('dequeue', r, { once: true })).then(drain) : null;
+  try {
+    for (let f = 0; f < frames && !xCanceled && !fail; f++) {
+      const t = f / FPS, h = clipAt(t);
+      if (h) { await seekExport(h.c, h.c.in + h.local + 1e-3); if (xv.readyState >= 2) drawVideoFrame(xv); }
+      else { bg.fillStyle = '#000'; bg.fillRect(0, 0, W, H); }
+      g.drawImage(base, 0, 0); drawSubs(g, t);
+      const vf = new VideoFrame(view, { timestamp: Math.round(f * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+      venc.encode(vf, { keyFrame: f % (FPS * 2) === 0 }); vf.close();
+      await drain();
+      if (f % 3 === 0) { $('ovBar').style.width = (f / frames * 100).toFixed(1) + '%'; playhead = t; updateTime(); }
+    }
+    if (!xCanceled && !fail) { await venc.flush(); await aenc.flush(); }
+  } catch (e) { fail = fail || e; }
+  try { venc.close(); aenc.close(); } catch (e) {}
+  exporting = false; xv.removeAttribute('src'); delete xv.dataset.src; xv.load();
+  if (xCanceled) { $('ov').classList.remove('on'); drawStill(); return true; }
+  if (fail) { console.error(fail); $('ov').classList.remove('on'); toast('書き出しに失敗しました'); drawStill(); return true; }
+  muxer.finalize();
+  showExported(new Blob([target.buffer], { type: plan.fmt === 'mp4' ? 'video/mp4' : 'video/webm' }), plan.fmt);
+  playhead = 0; drawStill(); updateTime();
+  return true;
+}
+function showExported(blob, ext) {
+  const url = URL.createObjectURL(blob);
+  $('ovBar').style.width = '100%';
+  $('ovTitle').textContent = '書き出し完了';
+  $('ovMsg').textContent = `${(blob.size / 1e6).toFixed(1)} MB（${ext.toUpperCase()}）`;
+  $('ovActs').innerHTML = '';
+  const a = document.createElement('a'); a.href = url; a.download = 'short_' + new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '') + '.' + ext;
+  const b1 = document.createElement('button'); b1.className = 'primary'; b1.textContent = '保存'; b1.onclick = () => a.click();
+  const b2 = document.createElement('button'); b2.textContent = '閉じる'; b2.onclick = () => { $('ov').classList.remove('on'); resetOv(); };
+  $('ovActs').append(b2, b1);
+}
 async function startExport() {
   if (totalDur() <= 0) { toast('先に動画を追加してください'); return; }
-  if (recording) return;
+  if (recording || exporting) return;
   pause(); await actx.resume(); await document.fonts.ready; await ensureMix();
+  if (await exportFrames()) return;
+  // 符号化の機能がないブラウザでは、これまでどおり再生しながら録る（このタブを表示したままにする）
   const types = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
   const mime = types.find(t => MediaRecorder.isTypeSupported(t));
   const stream = new MediaStream([...view.captureStream(FPS).getVideoTracks(), ...exportDest.stream.getAudioTracks()]);
@@ -1198,15 +1299,7 @@ async function startExport() {
     stream.getVideoTracks().forEach(t => t.stop());
     const r = recorder; recorder = null; exporting = false;
     if (xCanceled) { $('ov').classList.remove('on'); return; }
-    const blob = new Blob(recChunksX, { type: r.mimeType });
-    const url = URL.createObjectURL(blob), ext = r.mimeType.includes('mp4') ? 'mp4' : 'webm';
-    $('ovTitle').textContent = '書き出し完了';
-    $('ovMsg').textContent = `${(blob.size / 1e6).toFixed(1)} MB（${ext.toUpperCase()}）`;
-    $('ovActs').innerHTML = '';
-    const a = document.createElement('a'); a.href = url; a.download = 'short_' + new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '') + '.' + ext;
-    const b1 = document.createElement('button'); b1.className = 'primary'; b1.textContent = '保存'; b1.onclick = () => a.click();
-    const b2 = document.createElement('button'); b2.textContent = '閉じる'; b2.onclick = () => { $('ov').classList.remove('on'); resetOv(); };
-    $('ovActs').append(b2, b1);
+    showExported(new Blob(recChunksX, { type: r.mimeType }), r.mimeType.includes('mp4') ? 'mp4' : 'webm');
   };
   resetOv(); $('ov').classList.add('on');
   exporting = true; playhead = 0; curV = 0;
@@ -1223,7 +1316,7 @@ function finishExport() {
 function resetOv() {
   $('ovTitle').textContent = '書き出し中'; $('ovMsg').textContent = 'このタブを表示したままにしてください'; $('ovBar').style.width = '0';
   $('ovActs').innerHTML = '<button id="ovCancel">中止</button>';
-  $('ovCancel').onclick = () => { xCanceled = true; pause(); if (recorder && recorder.state !== 'inactive') recorder.stop(); exporting = false; };
+  $('ovCancel').onclick = () => { xCanceled = true; pause(); if (recorder && recorder.state !== 'inactive') { recorder.stop(); exporting = false; } };
 }
 $('exportBtn').onclick = startExport;
 
