@@ -59,7 +59,7 @@ ok("運ぶだけでは裏返らない", g.probe.now().flips[6] === flipBefore);
 
 /* 指だけで完成させる */
 function solveByTouch() {
-  for (var want = 0; want < g.probe.now().N; want++) {
+  for (var want = 0; want < g.probe.now().N && g.probe.now().state === "play"; want++) {
     var o = g.probe.now().order;
     var at = o.indexOf(want);
     if (at !== want) {
@@ -90,7 +90,7 @@ ok("もう一度で新しい並びから", n.state === "play" && n.T < 0.1);
 /* キーだけで完成させる */
 function solveByKey() {
   var N = g.probe.now().N;
-  for (var want = 0; want < N; want++) {
+  for (var want = 0; want < N && g.probe.now().state === "play"; want++) {
     var o = g.probe.now().order, at = o.indexOf(want);
     while (g.probe.now().cur < at) g.press("ArrowRight");
     while (g.probe.now().cur > at) g.press("ArrowLeft");
