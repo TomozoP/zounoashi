@@ -47,6 +47,5 @@ window.DRAFT_GAMES = [
     "play": "games/_brute-escape/index.html",
     "full": true,
     "catch": ""
-  },
-  {"type":"lab","tags":[],"id":"shredder","title":"シュレッダー・エージェント","year":2026,"date":"2026-09-28","plays":null,"url":"","img":"games/_shredder/img/thumb.webp","play":"games/_shredder/index.html","full":true,"catch":""},
+  }
 ];

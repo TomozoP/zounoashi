@@ -15,7 +15,7 @@
    ・Esc で最初から。毎回ちがう並びになる */
 
 var load = require("../harness");
-var FILE = "games/_shredder/index.html";
+var FILE = "games/shredder/index.html";
 
 var bad = [];
 function ok(label, cond, extra) {
