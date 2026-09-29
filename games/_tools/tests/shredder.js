@@ -80,7 +80,7 @@ function solveByKey() {
   }
 }
 function nextStage(from) {
-  g.until(function () { var n = g.probe.now(); return n.state === "result" || (n.state === "play" && n.stage === from + 1); }, 60 * 4);
+  g.until(function () { var n = g.probe.now(); return n.state === "result" || (n.state === "play" && n.stage === from + 1); }, 60 * 10);
 }
 
 /* ステージ1で、差し込みと裏返しを確かめる */
@@ -112,6 +112,7 @@ for (var st = 0; st < 3; st++) {
 }
 n = g.probe.now();
 ok("3ステージのあとで結果画面", n.state === "result");
+ok("最後の演出（印・夜空・爆発）の長さ", n.endLen >= 6 && n.endLen <= 10, n.endLen.toFixed(1) + "秒");
 ok("秒数はステージをまたいで増える", times[0] < times[1] && times[1] < times[2], times.map(function (t) { return t.toFixed(2); }).join(" → "));
 ok("結果の秒数は完成時点で止まる", n.T === times[2]);
 
