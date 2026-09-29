@@ -11,6 +11,7 @@
    ・秒数はステージをまたいで足され、完成した時点で止まる
    ・指でも、キー（← → で選び、スペースでつかむ・置く、↑ で裏返す）でも最後まで遊べる
    ・紙片1本の幅（押しどころ）を測っておく
+   ・確認用に F2 か上の「1/3」の3回タップで、今のステージを完成できる
    ・Esc で最初から。毎回ちがう並びになる */
 
 var load = require("../harness");
@@ -128,6 +129,20 @@ for (st = 0; st < 3; st++) {
   nextStage(st);
 }
 ok("キーでも結果画面まで", g.probe.now().state === "result");
+
+/* クリアの覗き穴：F2 と、上の「1/3」を素早く3回タップ */
+g.esc(); g.step(1);
+g.press("F2"); g.step(2);
+ok("F2 で今のステージが完成", g.probe.now().state === "done" && g.probe.now().stage === 0);
+nextStage(0);
+var top = g.probe.now().doc.y - 20;
+g.tap(270, top); g.step(3); g.tap(270, top); g.step(3);
+ok("上を2回タップではまだ", g.probe.now().state === "play" && g.probe.now().stage === 1);
+g.tap(270, top); g.step(2);
+ok("上を3回タップで完成", g.probe.now().state === "done" && g.probe.now().stage === 1);
+nextStage(1);
+g.press("F2"); g.step(2); nextStage(2);
+ok("F2 で最後まで進めて結果画面", g.probe.now().state === "result");
 
 /* Esc と並びのちがい */
 var seen = {};
