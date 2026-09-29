@@ -132,7 +132,9 @@
 
   /* ============ 書類 ============
      毎回ちがう書類を描いて、縦に N 本へ切る。 */
-  var N = 12;                                   /* 紙片の本数 */
+  /* ステージごとの紙片の本数と、逆さまの本数。書類は順に DOCS の1枚目・2枚目・3枚目 */
+  var STAGES = [{ n: 6, flips: 0 }, { n: 10, flips: 3 }, { n: 15, flips: 5 }];
+  var N = STAGES[0].n;                          /* 今のステージの紙片の本数 */
   var DW = 480, DH = 680;                       /* 書類の大きさ（ゲーム座標、縮小前） */
   var RES = 2;                                  /* 書類の絵の細かさ */
   var paper = document.createElement("canvas");
@@ -187,7 +189,7 @@
       pc.fillStyle = "rgba(90,90,80," + rr(0.006, 0.02) + ")";
       pc.beginPath(); pc.arc(rr(0, DW), rr(0, DH), rr(20, 110), 0, Math.PI * 2); pc.fill();
     }
-    var d = DOCS[Math.floor(rnd() * DOCS.length)];
+    var d = DOCS[stage % DOCS.length];
     var L = 38, R = DW - 38, y = 34;
     pc.textBaseline = "alphabetic";
 
@@ -379,7 +381,7 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", DONE: "done", RESULT: "result" };
-  var state, T, doneT, held, keyMode = false;
+  var state, T, doneT, held, keyMode = false, stage = 0;
   var pieces = [];            /* 左から順に並んだ紙片。{ i: 元の位置, flip: 逆さまか, x: 表示中の位置, rot: 表示中の回転, dy: ずれ } */
   var grab = null;            /* つかんでいる紙片 { p, sx, sy, off, x, y, moved } */
   var cur = 0;                /* キー操作の選択位置 */
@@ -387,7 +389,7 @@
 
   var sc, sw, dh, docX, docY;
   function place() {
-    var top = 96, bottom = 110;
+    var top = 70, bottom = 100;
     sc = Math.min(1, (H - top - bottom) / DH, (W - 40) / DW);
     sw = DW * sc / N; dh = DH * sc;
     docX = (W - DW * sc) / 2;
@@ -404,7 +406,7 @@
       for (i = 1; i < N; i++) if (ord[i] === ord[i - 1] + 1 || ord[i] === ord[i - 1] - 1) near++;
     } while (near > 0 && ++tries < 200);
     var flips = {};
-    while (Object.keys(flips).length < Math.round(N / 3)) flips[Math.floor(Math.random() * N)] = true;
+    while (Object.keys(flips).length < STAGES[stage].flips) flips[Math.floor(Math.random() * N)] = true;
     pieces = ord.map(function (i, k) {
       return { i: i, flip: !!flips[i], x: k, rot: flips[i] ? Math.PI : 0, dy: (Math.random() * 2 - 1) * 10, tilt: (Math.random() * 2 - 1) * 0.012 };
     });
@@ -413,8 +415,15 @@
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
+    T = 0;
+    startStage(0);
+  }
+  function startStage(n) {
+    stage = n;
+    N = STAGES[stage].n;
+    place();
     state = S.PLAY;
-    T = 0; doneT = 0;
+    doneT = 0;
     held = false; grab = null; keyHold = false; cur = 0;
     seed = 1 + Math.floor(Math.random() * 2147483640);
     drawPaper();
@@ -441,7 +450,10 @@
     if (state === S.PLAY) T += dt;
     if (state === S.DONE) {
       doneT += dt;
-      if (doneT > 1.4) { state = S.RESULT; }
+      if (doneT > 1.4) {
+        if (stage < STAGES.length - 1) startStage(stage + 1);
+        else state = S.RESULT;
+      }
     }
   }
 
@@ -605,14 +617,6 @@
       ctx.strokeRect(docX + cur * sw - 2, docY - (keyHold ? 18 : 4), sw + 4, dh + 8);
     }
 
-    /* 経過秒 */
-    if (state === S.PLAY || state === S.DONE) {
-      ctx.fillStyle = "#f2ede4";
-      ctx.font = "800 44px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(secText(), W / 2, 66);
-    }
-
     if (state === S.DONE) {
       var a = Math.max(0, 0.5 - doneT * 1.2);
       if (a > 0) { ctx.fillStyle = "rgba(255,255,255," + a + ")"; ctx.fillRect(0, 0, W, H); }
@@ -676,7 +680,7 @@
   window.__probe = {
     now: function () {
       return {
-        state: state, T: T, W: W, H: H, N: N,
+        state: state, stage: stage, T: T, W: W, H: H, N: N,
         order: pieces.map(function (p) { return p.i; }),
         flips: pieces.map(function (p) { return p.flip; }),
         doc: { x: docX, y: docY, sw: sw, h: dh }, cur: cur, keyHold: keyHold, has3d: !!view3d
@@ -695,16 +699,20 @@
       r.key();
       await r.wait(800);
       function key(k) { window.dispatchEvent(new KeyboardEvent("keydown", { key: k })); window.dispatchEvent(new KeyboardEvent("keyup", { key: k })); }
-      for (var want = 0; want < N && state === S.PLAY; want++) {
-        var at = pieces.findIndex(function (p) { return p.i === want; });
-        while (cur < at && state === S.PLAY) { key("ArrowRight"); await r.wait(60); }
-        while (cur > at && state === S.PLAY) { key("ArrowLeft"); await r.wait(60); }
-        if (at !== want) {
-          key(" "); await r.wait(150);
-          while (cur > want) { key("ArrowLeft"); await r.wait(90); }
-          key(" "); await r.wait(150);
+      for (var st = 0; st < STAGES.length; st++) {
+        if (!await r.until(function () { return state === S.PLAY && stage === st; }, 10)) throw Error("次のステージにならない");
+        await r.wait(400);
+        for (var want = 0; want < N && state === S.PLAY; want++) {
+          var at = pieces.findIndex(function (p) { return p.i === want; });
+          while (cur < at && state === S.PLAY) { key("ArrowRight"); await r.wait(60); }
+          while (cur > at && state === S.PLAY) { key("ArrowLeft"); await r.wait(60); }
+          if (at !== want) {
+            key(" "); await r.wait(150);
+            while (cur > want) { key("ArrowLeft"); await r.wait(90); }
+            key(" "); await r.wait(150);
+          }
+          if (pieces[want].flip) { key("ArrowUp"); await r.wait(200); }
         }
-        if (pieces[want].flip) { key("ArrowUp"); await r.wait(200); }
       }
       if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("完成しない");
       await r.wait(1500);
