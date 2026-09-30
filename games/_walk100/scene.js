@@ -42,6 +42,7 @@ var ZLifeScene = (function () {
   }
   function color(t, x, k) { var p = at(t, x); return new T.Color(p.a[k]).lerp(new T.Color(p.b[k]), p.u); }
   function num(t, x, k) { var p = at(t, x); return p.a[k] + (p.b[k] - p.a[k]) * p.u; }
+  var HEAD_BIG = 0.4;   // 2歳までの頭の大きさの上乗せ（15歳でなくなる）
   function smooth(a, b, x) { var u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); }
   // 年齢 age の見た目。色は THREE.Color、ほかは数。
   function looks(age) {
@@ -53,6 +54,9 @@ var ZLifeScene = (function () {
       hair: color(HAIR, age, "v"),
       tie: num(ERAS, age, "tie"), pack: num(ERAS, age, "pack"),
       diaper: 1 - smooth(1.5, 3, age), chest: 1 + 0.35 * smooth(1, 6, age),
+      headK: 1 + HEAD_BIG * (1 - smooth(2, 15, age)),
+      // 幼いほど手足と胴をふっくら見せる（見た目だけ）。
+      fat: 1 + 0.3 * (1 - smooth(2, 12, age)),
       hairSize: age < 1 ? 0.45 : age < 6 ? 0.45 + 0.11 * (age - 1) : age > 75 ? 1 - Math.min(0.25, (age - 75) / 60) : 1
     };
   }
@@ -87,17 +91,17 @@ var ZLifeScene = (function () {
       var k = far ? 0.78 : 1;
       if (name === "trunk") self.trunk(g, b, L, c);
       else if (/^arm/.test(name)) {
-        var up = capsule(b.r * 1.15, b.len * 0.45, self.mat("body", k));
+        var fat = baby ? 1 : L.fat, up = capsule(b.r * 1.15 * fat, b.len * 0.45, self.mat("body", k));
         up.position.y = b.len * 0.22;
-        var low = capsule(b.r, b.len * 0.5, self.mat("lower", k));
+        var low = capsule(b.r * fat, b.len * 0.5, self.mat("lower", k));
         low.position.y = -b.len * 0.2;
-        var hand = ball(b.r * 1.35, self.mat("skin", k));
+        var hand = ball(b.r * 1.35 * fat, self.mat("skin", k));
         hand.position.y = -b.len / 2;
         g.add(up, low, hand);
       } else if (/^thigh/.test(name)) {
-        g.add(capsule(b.r, b.len, self.mat("leg", k)));
+        g.add(capsule(b.r * (baby ? 1 : L.fat), b.len, self.mat("leg", k)));
       } else if (/^shin/.test(name)) {
-        g.add(capsule(b.r * (baby ? 1 : 0.95), b.len, self.mat("shin", k)));
+        g.add(capsule(b.r * (baby ? 1 : 0.95 * L.fat), b.len, self.mat("shin", k)));
         if (baby) { var foot = ball(b.r * 1.3, self.mat("skin", k)); foot.position.y = -b.len / 2; foot.scale.set(1, 1.4, 1); g.add(foot); }
       } else if (/^foot/.test(name)) {
         var f = box(b.len, 0.07 * sc, 0.11 * sc, self.mat("shoe", k, 0.6));
@@ -122,7 +126,7 @@ var ZLifeScene = (function () {
   }
   Figure.prototype.trunk = function (g, b, L, c) {
     var baby = this.form === "baby", len = b.len, half = b.half, sc = this.walker.scale || 0.5;
-    var torso = capsule(half, len - half * 0.6, this.mat("body"));
+    var fat = baby ? 1 : L.fat, torso = capsule(half * fat, len - half * 0.6, this.mat("body"));
     torso.scale.z = L.chest;
     g.add(torso);
     // ネクタイ（胸の前）とランドセル（背中）。年代で大きさを 0〜1 に変えて出し入れする。
@@ -148,6 +152,7 @@ var ZLifeScene = (function () {
     var head = new T.Group(), r = b.headR;
     head.position.y = b.headOffset;
     this.head = head;
+    this.headBase = { y: b.headOffset, r: r };
     head.add(ball(r, this.mat("skin")));
     // 顔は進む向き（大人は体の前、赤ちゃんは頭の先）。
     var ahead = baby ? new T.Vector3(0.35, 0.94, 0).normalize() : new T.Vector3(1, 0.05, 0).normalize();
@@ -183,7 +188,12 @@ var ZLifeScene = (function () {
       if (u >= 1) this.from = null;
     }
     // ハイハイの顔は頭の先を向くので、起き上がる間に顔を前へ回す。
-    if (this.head) this.head.rotation.z = from && from.baby ? 1.16 * (1 - e) : 0;
+    if (this.head) {
+      this.head.rotation.z = from && from.baby ? 1.16 * (1 - e) : 0;
+      // 幼いほど頭を大きく見せる（当たりの大きさは変えない）。首に埋まらないよう、大きくしたぶん上へずらす。
+      this.head.scale.setScalar(L.headK);
+      this.head.position.y = this.headBase.y + (L.headK - 1) * this.headBase.r * 0.9;
+    }
     if (this.fade) { this.fade.opacity = e; if (e >= 1) { this.fade.transparent = false; this.fade = null; } }
     this.meshes.forEach(function (m) {
       var b = m.body, x = b.position.x, y = b.position.y, a = 2 * Math.atan2(b.quaternion.z, b.quaternion.w);

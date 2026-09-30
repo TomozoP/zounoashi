@@ -39,7 +39,7 @@ var ZLifeWalk = (function (C) {
   // 体の大きさ s による縮め方（s の何乗か）。重力も s 倍にすると、小さい体も大人と同じ間合いで倒れ、同じ押し方で歩ける。
   var SIZE = { torque: 5, damp: 5, v: 1, g: 1 };
   var GROW_STEP = 0.005;   // 背がこれだけ変わるたびに体を作り直す（小さいほど途切れなく育つ）
-  var KID = { until: [2, 8], lean: 0.6, ankle: 1, stand: 1 };
+  var KID = { until: [2, 8], lean: 0.2, ankle: 2, stand: 2, leg: 0.08, arm: 0.08, trunk: 0.04, fat: 0 };
 
   // 年齢ごとの背の高さ（大人を1とする）。
   var HEIGHT = [[1, 0.45], [2, 0.51], [4, 0.6], [6, 0.68], [8, 0.75], [10, 0.81], [12, 0.87], [14, 0.94], [16, 0.98], [18, 1], [60, 1], [80, 0.97], [100, 0.94]];
@@ -56,12 +56,14 @@ var ZLifeWalk = (function (C) {
   function smooth(a, b, x) { var u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); }
 
   // 大きさ s の体の寸法。子どもは頭が大きめ。
-  function dims(s) {
-    var m = s * s * s;
+  // 幼いほど脚と腕が短く、胴が長めで、手足が太い（子どもらしい等身）。
+  function dims(s, age) {
+    var m = s * s * s, y = 1 - smooth(2, 14, age || 18);
+    var leg = 1 - KID.leg * y, arm = 1 - KID.arm * y, fat = 1 + KID.fat * y;
     return {
-      trunk: { len: 0.56 * s, half: 0.13 * s, mass: 32 * m }, head: { r: 0.12 * Math.pow(s, 0.3), mass: 5 * Math.pow(s, 1.8) },
-      arm: { len: 0.62 * s, r: 0.045 * s, mass: 3.4 * m },
-      thigh: { len: 0.45 * s, r: 0.07 * s, mass: 8 * m }, shin: { len: 0.44 * s, r: 0.05 * s, mass: 4 * m },
+      trunk: { len: 0.56 * s * (1 + KID.trunk * y), half: 0.13 * s * fat, mass: 32 * m }, head: { r: 0.12 * Math.pow(s, 0.3), mass: 5 * Math.pow(s, 1.8) },
+      arm: { len: 0.62 * s * arm, r: 0.045 * s * fat, mass: 3.4 * m },
+      thigh: { len: 0.45 * s * leg, r: 0.07 * s * fat, mass: 8 * m }, shin: { len: 0.44 * s * leg, r: 0.05 * s * fat, mass: 4 * m },
       foot: FOOT.len * s, footMass: 2 * s * s, cane: { mass: 0.6 * s }
     };
   }
@@ -99,7 +101,7 @@ var ZLifeWalk = (function (C) {
     this.age = opts.age || 0;
     this.cane = !!opts.cane;
     if (form === "baby") this.cfg = BABY;
-    else { this.scale = heightAt(this.age); this.dims = dims(this.scale); this.cfg = params(this.age, this.scale); }
+    else { this.scale = heightAt(this.age); this.dims = dims(this.scale, this.age); this.cfg = params(this.age, this.scale); }
     this.world = new C.World({ gravity: new C.Vec3(0, -9.81 * (form === "baby" ? 1 : Math.pow(this.scale, SIZE.g)), 0) });
     this.world.solver.iterations = 30;
     this.world.solver.tolerance = 1e-6;
