@@ -1,5 +1,5 @@
-/* スフィンクスラン。three.js で砂漠と歩く人を描く。体の位置と向きは walk.js の剛体をそのまま写す。 */
-var ZSphinxScene = (function () {
+/* 100歳まで歩く。three.js で野の道と歩く人を描く。体の位置と向きは walk.js の剛体をそのまま写す。 */
+var ZLifeScene = (function () {
   "use strict";
   var T;
 
@@ -14,17 +14,38 @@ var ZSphinxScene = (function () {
   function ball(r, m) { var s = new T.Mesh(new T.SphereGeometry(r, 18, 14), m); s.castShadow = true; return s; }
   function box(w, h, d, m) { var b = new T.Mesh(new T.BoxGeometry(w, h, d), m); b.castShadow = true; return b; }
 
-  // 形ごとの色と、手足を左右へずらす幅。右は手前（カメラ側）。
-  var LOOKS = {
-    baby: { skin: 0xffd3b5, body: 0xfff0a0, leg: 0xfff0a0, shoe: null, hair: 0x6b4a2b, hairSize: 0.45, legZ: 0.06, armZ: 0.08 },
-    adult: { skin: 0xe9b38c, body: 0x3f7fd0, leg: 0x2c3344, shoe: 0x3a2a20, hair: 0x2d2118, hairSize: 1, legZ: 0.1, armZ: 0.2 },
-    elder: { skin: 0xe6b394, body: 0x8a6a4c, leg: 0x6d7076, shoe: 0x3b2c22, hair: 0xeeeeea, hairSize: 0.8, legZ: 0.1, armZ: 0.19 }
-  };
+  // 年齢ごとの色と、手足を左右へずらす幅。右は手前（カメラ側）。
+  var BABY_LOOK = { skin: 0xffd3b5, body: 0xfff0a0, leg: 0xfff0a0, shoe: null, hair: 0x6b4a2b, hairSize: 0.45, legZ: 0.06, armZ: 0.08 };
+  // 服は子ども・大人・老人の色を年齢で混ぜる。
+  var CLOTHES = [
+    { age: 1, body: 0xf2a33a, leg: 0x3b6fb6, shoe: 0xd8322e, skin: 0xffcfae },
+    { age: 12, body: 0xe8584a, leg: 0x2f4f86, shoe: 0x33383f, skin: 0xf4c29c },
+    { age: 25, body: 0x3f7fd0, leg: 0x2c3344, shoe: 0x3a2a20, skin: 0xe9b38c },
+    { age: 55, body: 0x4f7a5a, leg: 0x3a3a40, shoe: 0x3a2a20, skin: 0xe6b394 },
+    { age: 80, body: 0x8a6a4c, leg: 0x6d7076, shoe: 0x3b2c22, skin: 0xe6b394 }
+  ];
+  var HAIR = [[0, 0x6b4a2b], [20, 0x2d2118], [45, 0x2d2118], [65, 0x8d8a86], [85, 0xeeeeea]];
+  function lerpTable(t, x, k) {
+    if (x <= t[0].age) return new T.Color(t[0][k]);
+    for (var i = 1; i < t.length; i++) if (x <= t[i].age) return new T.Color(t[i - 1][k]).lerp(new T.Color(t[i][k]), (x - t[i - 1].age) / (t[i].age - t[i - 1].age));
+    return new T.Color(t[t.length - 1][k]);
+  }
+  function looks(walker) {
+    if (walker.form === "baby") return BABY_LOOK;
+    var age = walker.age, s = walker.scale;
+    function c(k) { return lerpTable(CLOTHES, age, k).getHex(); }
+    return {
+      skin: c("skin"), body: c("body"), leg: c("leg"), shoe: c("shoe"),
+      hair: lerpTable(HAIR.map(function (h) { return { age: h[0], v: h[1] }; }), age, "v").getHex(),
+      hairSize: age < 5 ? 0.6 + 0.1 * age : age > 75 ? 1 - Math.min(0.25, (age - 75) / 60) : 1,
+      legZ: 0.1 * s, armZ: 0.2 * s
+    };
+  }
 
   function Figure(walker, scene) {
     this.walker = walker;
     this.form = walker.form;
-    var L = LOOKS[walker.form], c = walker.cfg, self = this;
+    var L = looks(walker), c = walker.cfg, self = this, sc = walker.scale || 0.5;
     this.root = new T.Group();
     scene.add(this.root);
     this.meshes = [];
@@ -33,7 +54,7 @@ var ZSphinxScene = (function () {
       var z = 0;
       if (/^(arm|cane)/.test(name)) z = (side === "L" ? -1 : 1) * L.armZ;
       if (/^(thigh|shin|foot)/.test(name)) z = (side === "L" ? -1 : 1) * L.legZ;
-      if (name === "cane") z = L.armZ + 0.03;
+      if (name === "cane") z = L.armZ + 0.03 * sc;
       var k = far ? 0.78 : 1;
       if (name === "trunk") self.trunk(g, b, L, c);
       else if (/^arm/.test(name)) {
@@ -52,15 +73,15 @@ var ZSphinxScene = (function () {
         g.add(capsule(b.r * (walker.form === "baby" ? 1 : 0.95), b.len, mat(shade(sm, k))));
         if (walker.form === "baby") { var foot = ball(b.r * 1.3, mat(shade(L.skin, k))); foot.position.y = -b.len / 2; foot.scale.set(1, 1.4, 1); g.add(foot); }
       } else if (/^foot/.test(name)) {
-        var f = box(b.len, 0.07, 0.11, mat(shade(L.shoe, k), 0.6));
-        f.position.y = 0.005;
+        var f = box(b.len, 0.07 * sc, 0.11 * sc, mat(shade(L.shoe, k), 0.6));
+        f.position.y = 0.005 * sc;
         g.add(f);
       } else if (name === "cane") {
         var wood = mat(0x6b3f1f, 0.5);
-        g.add(capsule(0.018, b.len, wood));
+        g.add(capsule(0.018 * sc, b.len, wood));
         // 握りの曲がり。
-        var crook = new T.Mesh(new T.TorusGeometry(0.05, 0.016, 8, 16, Math.PI), wood);
-        crook.position.set(0.05, b.len / 2, 0);
+        var crook = new T.Mesh(new T.TorusGeometry(0.05 * sc, 0.016 * sc, 8, 16, Math.PI), wood);
+        crook.position.set(0.05 * sc, b.len / 2, 0);
         crook.castShadow = true;
         g.add(crook);
       }
@@ -71,7 +92,7 @@ var ZSphinxScene = (function () {
     this.update();
   }
   Figure.prototype.trunk = function (g, b, L, c) {
-    var baby = this.form === "baby", len = b.len, half = b.half;
+    var baby = this.form === "baby", len = b.len, half = b.half, sc = this.walker.scale || 0.5;
     var torso = capsule(half, len - half * 0.6, mat(L.body));
     torso.scale.z = baby ? 1 : 1.35;
     g.add(torso);
@@ -81,8 +102,8 @@ var ZSphinxScene = (function () {
       diaper.position.y = -len / 2 + half * 0.5;
       g.add(diaper);
     }
-    var neck = capsule(0.045 * (baby ? 0.6 : 1), 0.06, mat(L.skin));
-    neck.position.y = len / 2 + 0.02;
+    var neck = capsule(0.045 * sc, 0.06 * sc, mat(L.skin));
+    neck.position.y = len / 2 + 0.02 * sc;
     if (!baby) g.add(neck);
     var head = new T.Group(), r = b.headR;
     head.position.y = b.headOffset;
@@ -120,7 +141,7 @@ var ZSphinxScene = (function () {
     this.root.traverse(function (o) { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
   };
 
-  // 空の色。朝・昼・夕を進み具合で移る。
+  // 空の色。朝・昼・夕を年齢で移る（0歳が朝、100歳が夕方）。
   var SKY = [
     { p: 0, sky: 0xf6c7a2, sun: 0xffc27a, light: 0xffd2a8, amb: 1.3 },
     { p: 0.18, sky: 0xbfe0f2, sun: 0xfff2c8, light: 0xfff0dc, amb: 1.45 },
@@ -145,7 +166,7 @@ var ZSphinxScene = (function () {
     this.scene = new T.Scene();
     this.scene.fog = new T.Fog(0xf6c7a2, 30, 150);
     this.camera = new T.PerspectiveCamera(46, 540 / 960, 0.05, 400);
-    this.hemi = new T.HemisphereLight(0xfff6ea, 0xc59a62, 1.5);
+    this.hemi = new T.HemisphereLight(0xfff6ea, 0x7fa05a, 1.5);
     this.scene.add(this.hemi);
     this.sun = new T.DirectionalLight(0xffffff, 2.8);
     this.sun.castShadow = true;
@@ -157,22 +178,22 @@ var ZSphinxScene = (function () {
     this.scene.add(this.sunBall);
 
     var end = course.length;
-    var sand = new T.Mesh(new T.PlaneGeometry(end + 400, 400), mat(0xe0c18a, 1));
-    sand.rotation.x = -Math.PI / 2;
-    sand.position.set(end / 2, 0, -100);
-    sand.receiveShadow = true;
-    this.scene.add(sand);
-    // 踏み固めた道。
-    var path = new T.Mesh(new T.PlaneGeometry(end + 40, 1.3), mat(0xd3ad74, 1));
+    var field = new T.Mesh(new T.PlaneGeometry(end + 400, 400), mat(0x9cc47a, 1));
+    field.rotation.x = -Math.PI / 2;
+    field.position.set(end / 2, 0, -100);
+    field.receiveShadow = true;
+    this.scene.add(field);
+    // 踏み固めた土の道。
+    var path = new T.Mesh(new T.PlaneGeometry(end + 40, 1.3), mat(0xd6bf93, 1));
     path.rotation.x = -Math.PI / 2;
-    path.position.set(end / 2, 0.002, 0);
+    path.position.set(end / 2, 0.006, 0);
     path.receiveShadow = true;
     this.scene.add(path);
 
     // 小石と草。同じ並びを毎回作る。
     var seed = 7;
     function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
-    var stoneM = mat(0xb89a6e, 1), tuftM = mat(0x8a8a4a, 1);
+    var stoneM = mat(0xa8a090, 1), tuftM = mat(0x6f9a4a, 1);
     for (var x = -6; x < end + 12; x += 0.35 + rnd() * 0.5) {
       var z = (rnd() < 0.5 ? -1 : 1) * (0.8 + rnd() * 4);
       if (rnd() < 0.75) {
@@ -186,15 +207,14 @@ var ZSphinxScene = (function () {
         this.scene.add(tf);
       }
     }
-    // 遠くのピラミッド。
-    var pyrM = mat(0xd9b27a, 1);
-    [[-20, -90, 34], [30, -120, 44], [75, -100, 30], [130, -140, 50], [end + 10, -95, 36]].forEach(function (p) {
-      var py = new T.Mesh(new T.ConeGeometry(p[2], p[2] * 0.95, 4, 1), pyrM);
-      py.rotation.y = Math.PI / 4;
-      py.position.set(p[0], p[2] * 0.475, p[1]);
-      this.scene.add(py);
+    // 遠くの丘。
+    var hillM = mat(0x86b36a, 1), hillFar = mat(0x9fbf8f, 1);
+    [[-40, -170, 70, 0], [30, -220, 90, 1], [80, -180, 60, 0], [140, -230, 95, 1], [end + 20, -175, 70, 0]].forEach(function (p) {
+      var h = new T.Mesh(new T.SphereGeometry(p[2], 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), p[3] ? hillFar : hillM);
+      h.scale.y = 0.2;
+      h.position.set(p[0], 0, p[1]);
+      this.scene.add(h);
     }, this);
-    this.scene.add(this.sphinx(-9, -34));
 
     // 境目と、ゴールの柱とテープ。
     var postM = mat(0xf2efe6, 0.7), tapeM = mat(0xd8322e, 0.6);
@@ -211,24 +231,6 @@ var ZSphinxScene = (function () {
     this.w = 540; this.h = 960;
   }
 
-  // 伏せたスフィンクス。
-  Scene.prototype.sphinx = function (x, z) {
-    var m = mat(0xcfa46a, 1), g = new T.Group(), k = 1.6;
-    var body = box(3.2 * k, 1.1 * k, 1.3 * k, m); body.position.set(-0.4 * k, 0.55 * k, 0); g.add(body);
-    var chest = box(1.1 * k, 1.9 * k, 1.2 * k, m); chest.position.set(0.9 * k, 0.95 * k, 0); g.add(chest);
-    [-0.4, 0.4].forEach(function (s) { var paw = box(1.6 * k, 0.35 * k, 0.35 * k, m); paw.position.set(1.9 * k, 0.18 * k, s * k); g.add(paw); });
-    var head = box(0.75 * k, 0.8 * k, 0.7 * k, m); head.position.set(1.05 * k, 2.25 * k, 0); g.add(head);
-    // 頭巾。
-    var cloth = new T.Mesh(new T.CylinderGeometry(0.42 * k, 0.75 * k, 1.1 * k, 4, 1), m);
-    cloth.rotation.y = Math.PI / 4; cloth.scale.x = 0.7; cloth.position.set(0.95 * k, 2.1 * k, 0); g.add(cloth);
-    g.add(head);
-    var face = box(0.1 * k, 0.5 * k, 0.45 * k, mat(0xc0955e, 1)); face.position.set(1.43 * k, 2.2 * k, 0); g.add(face);
-    g.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    g.position.set(x, 0, z);
-    g.rotation.y = -0.9;
-    return g;
-  };
-
   Scene.prototype.setWalker = function (walker) {
     if (this.figure) this.figure.dispose();
     this.figure = walker ? new Figure(walker, this.scene) : null;
@@ -241,7 +243,7 @@ var ZSphinxScene = (function () {
     this.camera.updateProjectionMatrix();
   };
 
-  // s = { x, form, progress, snap, dt }
+  // s = { x, form, scale, progress, snap, dt }
   Scene.prototype.draw = function (ctx, W, H, s) {
     if (this.figure) this.figure.update();
     var sky = skyAt(s.progress);
@@ -250,7 +252,8 @@ var ZSphinxScene = (function () {
     this.hemi.intensity = sky.amb;
     this.sun.color.copy(sky.light);
     this.sunBall.material.color.copy(sky.sun);
-    var targetD = s.form === "baby" ? 2.1 : 4.3, targetY = s.form === "baby" ? 0.22 : s.form === "elder" ? 0.85 : 0.95;
+    // 体の大きさに合わせて寄る。
+    var sc = s.form === "baby" ? 0 : s.scale, targetD = s.form === "baby" ? 2.1 : 1.3 + 3 * sc, targetY = s.form === "baby" ? 0.22 : 0.92 * sc;
     var a = s.snap ? 1 : Math.min(1, (s.dt || 0.016) * 3);
     this.look.x += (s.x - this.look.x) * a;
     this.look.y += (targetY - this.look.y) * Math.min(1, a * 0.6);

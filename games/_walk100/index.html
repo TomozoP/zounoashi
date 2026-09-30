@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>スフィンクスラン</title>
+<title>100歳ウォーク</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -37,11 +37,11 @@
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* スフィンクスラン
+/* 100歳ウォーク
 
-   朝は4本（ハイハイ）、昼は2本（二足）、夕は3本（杖）の足で、物理で歩いてゴールを目指す。
+   物理で歩くほど年をとる。0歳はハイハイ、1歳で立ち、背が伸び、年をとると前かがみになって杖をつく。
    押す（タップ・スペース・ジョイパッド）たびに左右が入れ替わって一歩。押している間は足を上げ、離すと前へ伸ばして着く。
-   ← → は左右を選んで押す。転んだら終わり、ゴールまで歩けたら時間が記録になる。 */
+   ← → は左右を選んで押す。転んだらその年齢が記録、100歳まで歩けたらゴール。 */
 (function () {
   "use strict";
 
@@ -51,18 +51,13 @@
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
 
-  /* ============ コース ============ 朝・昼・夕の区切り（メートル） */
-  var COURSE = [
-    { form: "baby", end: 4 },
-    { form: "adult", end: 24 },
-    { form: "elder", end: 32 }
-  ];
-  var LENGTH = COURSE[COURSE.length - 1].end;
+  /* ============ 人生 ============ 進んだ距離がそのまま年齢になる（walk.js の LIFE） */
+  var LW = ZLifeWalk, GOAL_AGE = 100, LENGTH = LW.distanceAt(GOAL_AGE);
 
   var view3d = null;
   try {
-    view3d = (window.WebGLRenderingContext && typeof ZSphinxScene !== "undefined" && typeof THREE !== "undefined")
-      ? new ZSphinxScene({ length: LENGTH }) : null;
+    view3d = (window.WebGLRenderingContext && typeof ZLifeScene !== "undefined" && typeof THREE !== "undefined")
+      ? new ZLifeScene({ length: LENGTH }) : null;
   } catch (e) { view3d = null; }
 
   /* ============ 画面 ============ */
@@ -125,12 +120,13 @@
   // 地面に触れた音。砂を踏む足、ぺたっと着く手、杖の先。
   function contactSound(part, strength) {
     if (/^cane/.test(part)) { tone(1500, 0.05, 0.05 + 0.08 * strength, "triangle", 900); noiseHit(0.04, 3000, 0.05 * strength, 3); return; }
-    if (stage === 0 && /^arm/.test(part)) { noiseHit(0.07, 1300, 0.08 + 0.12 * strength, 1.2); return; }
+    if (walker.form === "baby" && /^arm/.test(part)) { noiseHit(0.07, 1300, 0.08 + 0.12 * strength, 1.2); return; }
     if (/^(foot|shin|arm)/.test(part)) { noiseHit(0.1, 420 + 200 * Math.random(), 0.1 + 0.25 * strength, 1.1); noiseHit(0.06, 2400, 0.03 + 0.05 * strength, 2); return; }
     noiseHit(0.22, 160, 0.2 + 0.35 * strength, 0.8);
     tone(90, 0.18, 0.12 + 0.2 * strength, "sine", 50);
   }
-  function growSound() {
+  // 立ち上がったとき。
+  function standSound() {
     [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.35, 0.09, "triangle", null, i * 0.07); });
   }
   function finishSound() {
@@ -144,11 +140,10 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", DOWN: "down", RESULT: "result" };
-  var state, score, scoreText, T, held, walker, stage, flash, downT, finished, snap, best;
+  var state, score, scoreText, T, held, walker, age, flash, downT, finished, snap, best;
 
-  function makeWalker(i, x) {
-    stage = i;
-    walker = new ZSphinxWalk.Walker(COURSE[i].form, x);
+  function setWalker(w) {
+    walker = w;
     if (view3d) view3d.setWalker(walker);
   }
 
@@ -162,12 +157,19 @@
     flash = 0;
     finished = false;
     best = 0;
-    makeWalker(0, 0);
+    age = 0;
+    setWalker(new LW.Walker("baby", 0));
     snap = true;
   }
 
-  function progress() {
-    return Math.max(0, Math.min(1, (walker ? walker.x() : 0) / LENGTH));
+  // 年齢を進める。背が伸びた・杖を持つ年になったら、同じ姿勢のまま体を作り直す。
+  function grow() {
+    age = Math.min(GOAL_AGE, LW.ageAt(best));
+    walker.setAge(age);
+    if (!walker.outgrown(age)) return;
+    var stood = walker.form === "baby";
+    setWalker(walker.grow(age));
+    if (stood) { held = false; flash = 0.6; standSound(); }
   }
 
   /* ============ 進行 ============ */
@@ -183,8 +185,7 @@
       return;
     }
     T += dt;
-    var x = walker.x();
-    best = Math.max(best, x);
+    best = Math.max(best, walker.x());
     if (walker.fallen()) {
       // 転んだら力を抜いて倒れるにまかせる。
       walker.limp = true;
@@ -192,28 +193,20 @@
       held = false;
       state = S.DOWN;
       downT = 0;
-      score = Math.max(0, Math.floor(best * 10) / 10);
-      scoreText = score.toFixed(1) + "m";
+      score = Math.floor(age);
+      scoreText = score + "歳";
       fallSound();
       return;
     }
-    var end = COURSE[stage].end;
-    if (x >= end) {
-      if (stage + 1 < COURSE.length) {
-        // 次の時刻へ。同じ場所で次の体に育つ。
-        makeWalker(stage + 1, end);
-        held = false;
-        flash = 1;
-        growSound();
-      } else {
-        finished = true;
-        state = S.DOWN;
-        downT = 0.4;
-        score = Math.round(T * 10) / 10;
-        scoreText = score.toFixed(1) + "秒";
-        walker.release();
-        finishSound();
-      }
+    grow();
+    if (age >= GOAL_AGE) {
+      finished = true;
+      state = S.DOWN;
+      downT = 0.4;
+      score = GOAL_AGE;
+      scoreText = score + "歳";
+      walker.release();
+      finishSound();
     }
   }
   function showResult() {
@@ -281,7 +274,7 @@
 
   function doShare() {
     /* ▼SHARE: 共有リンクは share.js が付ける。 */
-    window.zResultActions.x({ text: scoreText + " #スフィンクスラン" });
+    window.zResultActions.x({ text: scoreText + " #100歳ウォーク" });
   }
 
   /* ============ 描画 ============ */
@@ -299,7 +292,7 @@
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
     if (view3d && walker) {
-      view3d.draw(ctx, W, H, { x: walker.x(), form: walker.form, progress: progress(), snap: snap, dt: dt });
+      view3d.draw(ctx, W, H, { x: walker.x(), form: walker.form, scale: walker.scale, progress: age / GOAL_AGE, snap: snap, dt: dt });
       snap = false;
     } else {
       ctx.fillStyle = "#f6c7a2";
@@ -368,22 +361,24 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
   window.__probe = {
     now: function () {
-      return { state: state, score: score, scoreText: scoreText, W: W, H: H, T: T, stage: stage, form: walker && walker.form,
+      return { state: state, score: score, scoreText: scoreText, W: W, H: H, T: T, age: age, form: walker && walker.form, cane: walker ? walker.cane : false, scale: walker ? walker.scale : 0,
         x: walker ? walker.x() : 0, side: walker ? walker.side : 0, pressed: walker ? walker.pressed : false,
         landed: walker ? !walker.side || !!(walker.near || {})[(walker.form === "baby" ? "arm" : "foot") + (walker.side < 0 ? "L" : "R")] : false,
-        fallen: walker ? walker.fallen() : false, finished: finished, has3d: !!view3d, course: COURSE.map(function (c) { return c.end; }) };
+        fallen: walker ? walker.fallen() : false, finished: finished, has3d: !!view3d, length: LENGTH };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(1 / 60); } },
     reset: function () { newRound(); }
   };
 
-  /* サムネ撮影用。setup.stage で朝・昼・夕の体から始める。 */
+  /* サムネ撮影用。setup.age の年齢の体から始める。 */
   window.__thumbnail = function (setup) {
     setup = setup || {};
-    if (setup.stage != null) {
-      if (!(setup.stage >= 0 && setup.stage < COURSE.length)) throw Error("stage は 0〜" + (COURSE.length - 1));
+    if (setup.age != null) {
+      if (!(setup.age >= 0 && setup.age < GOAL_AGE)) throw Error("age は 0〜" + (GOAL_AGE - 1));
       newRound();
-      makeWalker(setup.stage, setup.stage ? COURSE[setup.stage - 1].end + 0.01 : 0);
+      best = LW.distanceAt(setup.age);
+      age = setup.age;
+      setWalker(setup.age < 1 ? new LW.Walker("baby", best) : new LW.Walker("biped", best, { age: age, cane: age >= LW.CANE_AGE }));
       snap = true;
     }
   };
@@ -395,7 +390,7 @@
       await r.wait(1000);
       r.key();
       var o = { key: " ", code: "Space", bubbles: true };
-      for (var i = 0; i < 40 && state === S.PLAY; i++) {
+      for (var i = 0; i < 200 && state === S.PLAY; i++) {
         await r.wait(250);
         window.dispatchEvent(new KeyboardEvent("keydown", o));
         await r.wait(300);

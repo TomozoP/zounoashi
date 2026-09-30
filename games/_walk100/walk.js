@@ -1,50 +1,98 @@
-/* スフィンクスラン。朝は4本、昼は2本、夕は3本の足で歩く体の剛体計算。
+/* 100歳まで歩く体の剛体計算。0歳はハイハイ、1歳で立ち、背が伸び、年をとると前かがみになって杖をつく。
    cannon-es の剛体を縦の面（前後と上下）に限って動かす。前へ押す力や姿勢を起こす外力は加えず、
    関節の回転の力（隣り合う体に同じ大きさで逆向き）だけで歩く。 */
-var ZSphinxWalk = (function (C) {
+var ZLifeWalk = (function (C) {
   "use strict";
 
   var STEP = 1 / 480;
   var G_GROUND = 1, G_BODY = 2;
 
-  // 形ごとの寸法と筋力。角度は、下がった手足が前へ振れる向きを正にする。
-  // k は角度のずれ1ラジアンあたりの回す速さ、max は関節が出せる回転の力の上限。
-  var FORMS = {
-    baby: {
-      trunk: { len: 0.34, half: 0.08, mass: 5 }, head: { r: 0.1, mass: 1.6 },
-      arm: { len: 0.24, r: 0.032, mass: 0.35 },
-      thigh: { len: 0.17, r: 0.045, mass: 0.6 }, shin: { len: 0.16, r: 0.035, mass: 0.3 },
-      k: 17, max: 13.5,
-      swingArm: 1.04, stanceArm: -0.76, swingThigh: 0.93, stanceThigh: -0.49, fold: 2.3
-    },
-    adult: {
-      trunk: { len: 0.56, half: 0.13, mass: 32 }, head: { r: 0.12, mass: 5 },
-      arm: { len: 0.62, r: 0.045, mass: 3.4 },
-      thigh: { len: 0.45, r: 0.07, mass: 8 }, shin: { len: 0.44, r: 0.05, mass: 4 },
-      foot: 0.25,
-      hip: 400, hipKp: 400, hipKd: 30, knee: 350, kneeKp: 400, kneeKd: 25, ankle: 150, ankleKp: 200, ankleKd: 5, standKp: 650,
-      torsoKp: 530, torsoKd: 90, tip: 0, tipKp: 260, pushTime: 0, pushKp: 400, pushMax: 40, placeD: 0.35, placeV: 0.06,
-      lean: 0.22, liftHip: 0.7, liftKnee: -1.3, reachHip: 0.15
-    },
-    elder: {
-      trunk: { len: 0.5, half: 0.13, mass: 30 }, head: { r: 0.12, mass: 5 },
-      arm: { len: 0.56, r: 0.045, mass: 3.2 }, cane: { len: 0.9, mass: 0.6 },
-      thigh: { len: 0.43, r: 0.07, mass: 8 }, shin: { len: 0.42, r: 0.05, mass: 4 },
-      foot: 0.23,
-      hip: 260, hipKp: 280, hipKd: 24, knee: 240, kneeKp: 300, kneeKd: 20, ankle: 110, ankleKp: 300, ankleKd: 4, standKp: 650,
-      torsoKp: 575, torsoKd: 70, tip: 0.03, tipKp: 300, pushTime: 0, pushKp: 250, pushMax: 40, placeD: 0.41, placeV: 0.17,
-      lean: 0.306, liftHip: 0.57, liftKnee: -1.1, reachHip: 0.31,
-      caneLift: 0.26, canePlant: 0.12, caneKp: 58, caneSoft: 14
-    }
+  // ハイハイの赤ちゃん。角度は、下がった手足が前へ振れる向きを正にする。
+  var BABY = {
+    trunk: { len: 0.34, half: 0.08, mass: 5 }, head: { r: 0.1, mass: 1.6 },
+    arm: { len: 0.24, r: 0.032, mass: 0.35 },
+    thigh: { len: 0.17, r: 0.045, mass: 0.6 }, shin: { len: 0.16, r: 0.035, mass: 0.3 },
+    k: 17, max: 13.5,
+    swingArm: 1.04, stanceArm: -0.76, swingThigh: 0.93, stanceThigh: -0.49, fold: 2.3
   };
+  // 立って歩く体の筋力と動かし方。身長170cmの大人の値で、体の大きさに合わせて縮める。
+  // ADULT は働き盛り、ELDER は杖をつく老人。その間の年齢は混ぜる。
+  var ADULT = {
+    hip: 400, hipKp: 400, hipKd: 30, knee: 350, kneeKp: 400, kneeKd: 25, ankle: 150, ankleKp: 200, ankleKd: 5, standKp: 650,
+    torsoKp: 530, torsoKd: 90, tip: 0, tipKp: 260, placeD: 0.35, placeV: 0.06,
+    lean: 0.22, liftHip: 0.7, liftKnee: -1.3, reachHip: 0.15,
+    caneLift: 0.26, canePlant: 0.12, caneKp: 58, caneSoft: 14
+  };
+  var ELDER = {
+    hip: 260, hipKp: 280, hipKd: 24, knee: 240, kneeKp: 300, kneeKd: 20, ankle: 110, ankleKp: 92, ankleKd: 4, standKp: 650,
+    torsoKp: 595, torsoKd: 70, tip: 0.22, tipKp: 58, placeD: 0.467, placeV: 0.021,
+    lean: 0.251, liftHip: 0.676, liftKnee: -1.1, reachHip: 0.36,
+    caneLift: 0.681, canePlant: 0.04, caneKp: 89, caneSoft: 4.8
+  };
+  var TORQUE = ["hip", "hipKp", "knee", "kneeKp", "ankle", "ankleKp", "standKp", "torsoKp", "tipKp", "caneKp", "caneSoft"];
+  var DAMP = ["hipKd", "kneeKd", "ankleKd", "torsoKd"];
+  var CANE_AGE = 70;
+  var KID = { until: [2, 8], lean: 0.6, ankle: 1, stand: 1 };
+
+  // 年齢ごとの背の高さ（大人を1とする）。
+  var HEIGHT = [[1, 0.45], [2, 0.51], [4, 0.6], [6, 0.68], [8, 0.75], [10, 0.81], [12, 0.87], [14, 0.94], [16, 0.98], [18, 1], [60, 1], [80, 0.97], [100, 0.94]];
+  function table(t, x) {
+    if (x <= t[0][0]) return t[0][1];
+    for (var i = 1; i < t.length; i++) if (x <= t[i][0]) { var a = t[i - 1], b = t[i]; return a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]); }
+    return t[t.length - 1][1];
+  }
+  function heightAt(age) { return table(HEIGHT, age); }
+  // 進んだ距離（m）と年齢。ハイハイで1歳、子どものうちに背が伸び、年をとると一歩が重くなる。
+  var LIFE = [[0, 0], [2.5, 1], [14.5, 18], [40.5, 70], [50.5, 100]];
+  function ageAt(x) { return table(LIFE, Math.max(0, x)); }
+  function distanceAt(age) { return table(LIFE.map(function (p) { return [p[1], p[0]]; }), age); }
+  function smooth(a, b, x) { var u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); }
+
+  // 大きさ s の体の寸法。子どもは頭が大きめ。
+  function dims(s) {
+    var m = s * s * s;
+    return {
+      trunk: { len: 0.56 * s, half: 0.13 * s, mass: 32 * m }, head: { r: 0.12 * Math.pow(s, 0.55), mass: 5 * Math.pow(s, 1.8) },
+      arm: { len: 0.62 * s, r: 0.045 * s, mass: 3.4 * m },
+      thigh: { len: 0.45 * s, r: 0.07 * s, mass: 8 * m }, shin: { len: 0.44 * s, r: 0.05 * s, mass: 4 * m },
+      foot: 0.25 * s, footMass: 2 * s * s, cane: { mass: 0.6 * s }
+    };
+  }
+  // 年齢 age、大きさ s の体の筋力と動かし方。
+  function params(age, s) {
+    var t = smooth(50, 85, age), c = {}, k;
+    for (k in ADULT) c[k] = ADULT[k] + (ELDER[k] - ADULT[k]) * t;
+    // 85歳を過ぎると力が落ち、腰が曲がる。
+    var old = Math.max(0, Math.min(1, (age - 85) / 15));
+    ["hip", "knee", "ankle"].forEach(function (k) { c[k] *= 1 - 0.3 * old; });
+    c.lean += 0.08 * old;
+    // 幼い子は頭が重く足が小さいので、前へ傾けず、足首を強くする。
+    var kid = 1 - smooth(KID.until[0], KID.until[1], age);
+    c.lean *= 1 - KID.lean * kid;
+    c.ankle *= 1 + KID.ankle * kid;
+    c.standKp *= 1 + KID.stand * kid;
+    c.tipKp *= 1 + KID.ankle * kid;
+    var r = Math.pow(s, 4), rd = Math.pow(s, 4.5);
+    TORQUE.forEach(function (k) { c[k] *= r; });
+    DAMP.forEach(function (k) { c[k] *= rd; });
+    c.placeD /= s;
+    c.placeV /= Math.sqrt(s);
+    return c;
+  }
 
   function wrap(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
   function angleOf(b) { return wrap(2 * Math.atan2(b.quaternion.z, b.quaternion.w)); }
   function clamp(v, a) { return Math.max(-a, Math.min(a, v)); }
 
-  function Walker(form, x) {
+  // form は "baby"（ハイハイ）か "biped"（立って歩く）。opts: { age, cane, from }。
+  // from に前の体を渡すと、その姿勢と速さを引き継いで大きさだけ変えた体を作る。
+  function Walker(form, x, opts) {
+    opts = opts || {};
     this.form = form;
-    this.cfg = FORMS[form];
+    this.age = opts.age || 0;
+    this.cane = !!opts.cane;
+    if (form === "baby") this.cfg = BABY;
+    else { this.scale = heightAt(this.age); this.dims = dims(this.scale); this.cfg = params(this.age, this.scale); }
     this.world = new C.World({ gravity: new C.Vec3(0, -9.81, 0) });
     this.world.solver.iterations = 30;
     this.world.solver.tolerance = 1e-6;
@@ -65,7 +113,7 @@ var ZSphinxWalk = (function (C) {
     this.limp = false;
     this.impacts = [];
     this.touch = {};
-    if (form === "baby") this.buildBaby(x || 0); else this.buildAdult(x || 0);
+    if (form === "baby") this.buildBaby(x || 0); else this.buildBiped(x || 0, opts.from);
     var self = this;
     this.world.addEventListener("beginContact", function (e) {
       var b = e.bodyA === ground ? e.bodyB : e.bodyB === ground ? e.bodyA : null;
@@ -125,37 +173,116 @@ var ZSphinxWalk = (function (C) {
     return j;
   };
 
-  Walker.prototype.buildAdult = function (x) {
-    var c = this.cfg, ankleY = 0.08, legLen = c.thigh.len + c.shin.len, hipY = legLen + ankleY;
-    var hip = [x, hipY], neck = [x + Math.sin(c.lean) * c.trunk.len, hipY + Math.cos(c.lean) * c.trunk.len];
-    var trunk = this.trunkBody(hip, neck, c.trunk, c.head);
-    var self = this;
-    ["L", "R"].forEach(function (s) {
-      var kneeP = [x, hipY - c.thigh.len], ankle = [x, ankleY];
-      var thigh = self.segment("thigh" + s, hip, kneeP, c.thigh.r, c.thigh.mass);
-      var shin = self.segment("shin" + s, kneeP, ankle, c.shin.r, c.shin.mass);
+  // 年をとらせる。筋力と動かし方だけを変え、体の大きさは作り直すまで変えない。
+  Walker.prototype.setAge = function (age) {
+    if (this.form === "baby") { this.age = age; return; }
+    this.age = age;
+    this.cfg = params(age, this.scale);
+  };
+  // 作り直しが要るか（背が変わった、杖を持つ年になった）。
+  Walker.prototype.outgrown = function (age) {
+    if (this.form === "baby") return age >= 1;
+    return Math.abs(heightAt(age) / this.scale - 1) > 0.025 || (age >= CANE_AGE) !== this.cane;
+  };
+  Walker.prototype.grow = function (age) {
+    return new Walker("biped", 0, { age: age, cane: age >= CANE_AGE, from: this });
+  };
+
+  // 足の裏の四隅と杖の先のうち、いちばん低い高さ。
+  function lowest(w) {
+    var y = Infinity;
+    ["footL", "footR"].forEach(function (n) {
+      var f = w.parts[n];
+      if (!f) return;
+      [[-1, -1], [1, -1]].forEach(function (k) {
+        var p = f.pointToWorldFrame(new C.Vec3(k[0] * f.len / 2, k[1] * f.h, 0));
+        y = Math.min(y, p.y);
+      });
+    });
+    return y;
+  }
+
+  // 立って歩く体。from があれば各部位の角度を引き継ぐ（なければ気をつけの姿勢）。
+  Walker.prototype.buildBiped = function (x, from) {
+    var c = this.cfg, d = this.dims, s = this.scale, self = this;
+    var A = {};
+    function ang(name, def) { return from && from.parts[name] && from.form === "biped" ? angleOf(from.parts[name]) : def; }
+    A.trunk = ang("trunk", -c.lean);
+    ["L", "R"].forEach(function (k) { A["thigh" + k] = ang("thigh" + k, 0); A["shin" + k] = ang("shin" + k, 0); A["foot" + k] = ang("foot" + k, 0); A["arm" + k] = ang("arm" + k, 0); });
+    if (this.cane) { A.armR = from && from.cane ? A.armR : 0.55; A.cane = from && from.cane ? ang("cane", c.canePlant) : c.canePlant; }
+    function down(p, a, len) { return [p[0] + Math.sin(a) * len, p[1] - Math.cos(a) * len]; }
+    var ankleY = 0.08 * s;
+    var hip = [from ? from.hip()[0] : x, 0];
+    var neck = [hip[0] - Math.sin(A.trunk) * d.trunk.len, hip[1] + Math.cos(A.trunk) * d.trunk.len];
+    var pts = { hip: hip, neck: neck };
+    ["L", "R"].forEach(function (k) {
+      pts["knee" + k] = down(hip, A["thigh" + k], d.thigh.len);
+      pts["ankle" + k] = down(pts["knee" + k], A["shin" + k], d.shin.len);
+      pts["hand" + k] = down(neck, A["arm" + k], d.arm.len);
+    });
+    // 足の裏のいちばん低い所を、前の体と同じ高さ（地面より下にはしない）に合わせる。
+    var fh = 0.03 * s, lowNew = Infinity;
+    ["L", "R"].forEach(function (k) {
+      var a = A["foot" + k], cx = pts["ankle" + k][0], cy = pts["ankle" + k][1];
+      var ox = d.foot / 2 - 0.06 * s, oy = 0.03 * s - ankleY;
+      var fx = cx + ox * Math.cos(a) - oy * Math.sin(a), fy = cy + ox * Math.sin(a) + oy * Math.cos(a);
+      pts["footC" + k] = [fx, fy];
+      [-1, 1].forEach(function (e) { lowNew = Math.min(lowNew, fy + e * d.foot / 2 * Math.sin(a) - fh * Math.cos(a)); });
+    });
+    var target = from && from.form === "biped" ? Math.max(0, lowest(from)) : 0;
+    var lift = target - lowNew;
+    Object.keys(pts).forEach(function (k) { pts[k] = [pts[k][0], pts[k][1] + lift]; });
+    hip = pts.hip; neck = pts.neck;
+
+    var trunk = this.trunkBody(hip, neck, d.trunk, d.head);
+    ["L", "R"].forEach(function (k) {
+      var thigh = self.segment("thigh" + k, hip, pts["knee" + k], d.thigh.r, d.thigh.mass);
+      var shin = self.segment("shin" + k, pts["knee" + k], pts["ankle" + k], d.shin.r, d.shin.mass);
       // かかとから前へ伸びる足。足首で脛とつなぐ。
-      var foot = self.body("foot" + s, 2, x + c.foot / 2 - 0.06, 0.03, 0);
-      foot.addShape(new C.Box(new C.Vec3(c.foot / 2, 0.03, 0.05)));
-      foot.len = c.foot;
+      var foot = self.body("foot" + k, d.footMass, pts["footC" + k][0], pts["footC" + k][1], A["foot" + k]);
+      foot.addShape(new C.Box(new C.Vec3(d.foot / 2, fh, 0.05 * s)));
+      foot.len = d.foot;
+      foot.h = fh;
       self.world.addBody(foot);
       self.hinge(trunk, thigh, hip);
-      self.hinge(thigh, shin, kneeP);
-      self.hinge(shin, foot, ankle);
-      var arm = self.segment("arm" + s, neck, [neck[0], neck[1] - c.arm.len], c.arm.r, c.arm.mass);
+      self.hinge(thigh, shin, pts["knee" + k]);
+      self.hinge(shin, foot, pts["ankle" + k]);
+      var arm = self.segment("arm" + k, neck, pts["hand" + k], d.arm.r, d.arm.mass);
       self.hinge(trunk, arm, neck);
     });
-    if (this.form === "elder") {
-      // 右手の杖。手首でつなぎ、先が地面をつく。
-      var armR = this.parts.armR, hand = [neck[0] + Math.sin(0.55) * c.arm.len, neck[1] - Math.cos(0.55) * c.arm.len];
-      armR.position.set((neck[0] + hand[0]) / 2, (neck[1] + hand[1]) / 2, 0);
-      armR.quaternion.setFromEuler(0, 0, 0.55);
-      this.world.removeConstraint(this.joints.armR);
-      this.hinge(trunk, armR, neck);
-      var tipX = hand[0] + Math.tan(c.canePlant) * (hand[1] - 0.02);
-      var cane = this.segment("cane", hand, [tipX, 0.02], 0.02, c.cane.mass);
-      this.hinge(armR, cane, hand);
+    if (this.cane) {
+      // 右手の杖。手首でつなぎ、先が地面をつく長さにする。
+      var hand = pts.handR, len = (hand[1] - 0.02) / Math.cos(A.cane);
+      if (from && from.cane) len = from.parts.cane.len * s / from.scale;
+      var cane = this.segment("cane", hand, down(hand, A.cane, len), 0.02 * s, d.cane.mass);
+      this.hinge(this.parts.armR, cane, hand);
     }
+    if (from && from.form === "baby") {
+      // ハイハイから立ち上がるときは、止まって両足で立つところから。
+      this.time = from.time;
+    } else if (from) {
+      // 速さと回転を引き継ぐ。
+      var ft = from.parts.trunk;
+      this.list.forEach(function (b) {
+        var o = from.parts[b.part] || ft;
+        b.velocity.set(o.velocity.x, o.velocity.y, 0);
+        b.angularVelocity.set(0, 0, o.angularVelocity.z);
+      });
+      this.time = from.time;
+      this.lastTouch = {};
+      for (var k in from.lastTouch || {}) this.lastTouch[k] = from.lastTouch[k];
+      this.near = from.near;
+      this.touch = from.touch || {};
+      this.side = from.side;
+      this.pressed = from.pressed;
+      this.pressTime = from.pressTime;
+      this.limp = from.limp;
+    }
+  };
+  // 股関節の位置。
+  Walker.prototype.hip = function () {
+    var t = this.parts.trunk, p = t.pointToWorldFrame(new C.Vec3(0, -t.len / 2, 0));
+    return [p.x, p.y];
   };
 
   Walker.prototype.buildBaby = function (x) {
@@ -253,7 +380,7 @@ var ZSphinxWalk = (function (C) {
     return torque(a, b, kp * wrap(target - angleOf(b)) - kd * b.angularVelocity.z, max);
   };
 
-  // 立って歩く体（昼・夕）。押している間は振り出す脚を上げ、離すと前へ伸ばして着く。
+  // 立って歩く体。押している間は振り出す脚を上げ、離すと前へ伸ばして着く。
   // 胴を立てる力は、立っている脚の股関節で受け渡す（体の外から支える力はない）。
   Walker.prototype.upright = function () {
     var self = this, p = this.parts, c = this.cfg, near = this.near || {}, trunk = p.trunk;
@@ -263,15 +390,7 @@ var ZSphinxWalk = (function (C) {
     var grounded = stances.filter(function (s) { return near["foot" + s]; });
     var torso = c.torsoKp * wrap(-c.lean - angleOf(trunk)) - c.torsoKd * trunk.angularVelocity.z;
     var swingT = 0;
-    var push = this.pressed && this.time - this.pressTime < c.pushTime && near["foot" + sw];
-    if (push) {
-      // 押した直後は、後ろ足のつま先で地面を蹴る。
-      this.pd("foot" + sw, -0.7, c.pushKp, c.ankleKd, c.pushMax);
-      this.pd("shin" + sw, -0.05, c.kneeKp, c.kneeKd, c.knee);
-      this.pd("thigh" + sw, 0, c.hipKp * 0.2, c.hipKd * 0.2, c.hip);
-      stances = [sw === "L" ? "R" : "L"];
-      grounded = stances.filter(function (s) { return near["foot" + s]; });
-    } else if (!both) {
+    if (!both) {
       // 体が前へ流れているほど、振り出す脚を遠くへ出す（転びそうな側へ足を出す反射）。
       var st = p["foot" + stances[0]], d = trunk.position.x - st.position.x, v = trunk.velocity.x;
       var reach = clamp(c.placeD * d + c.placeV * v, 0.5);
@@ -289,11 +408,11 @@ var ZSphinxWalk = (function (C) {
       else self.pd("foot" + s, c.tip, c.tipKp, c.ankleKd, c.ankle);
     });
     ["L", "R"].forEach(function (s) {
-      if (self.form === "elder" && s === "R") return;
+      if (self.cane && s === "R") return;
       var swing = !sw ? 0 : s === sw ? -0.3 : 0.3;
       self.pdWorld("arm" + s, swing - c.lean * 0.3, 20, 2, 30);
     });
-    if (this.form === "elder") {
+    if (this.cane) {
       // 杖は左脚と一緒に前へ出す。つくと力を抜き、体が前へ出るのに合わせて傾く。
       var lifting = sw === "L" && this.pressed;
       this.pdWorld("armR", 0.55, 200, 12, 160);
@@ -337,12 +456,12 @@ var ZSphinxWalk = (function (C) {
     var t = this.touch, a = angleOf(this.parts.trunk);
     if (t.head) return true;
     if (this.form === "baby") return Math.abs(wrap(a + Math.PI / 2)) > 1.3;
-    return !!(t.trunk || t.thighL || t.thighR || t.armL || (this.form !== "elder" && t.armR));
+    return !!(t.trunk || t.thighL || t.thighR || t.armL || (!this.cane && t.armR));
   };
   Walker.prototype.x = function () { return this.parts.trunk.position.x; };
   Walker.prototype.takeImpacts = function () { var r = this.impacts; this.impacts = []; return r; };
   Walker.prototype.angle = function (name) { return angleOf(this.parts[name]); };
 
-  return { Walker: Walker, FORMS: FORMS, angleOf: angleOf, STEP: STEP };
+  return { Walker: Walker, BABY: BABY, ADULT: ADULT, ELDER: ELDER, heightAt: heightAt, ageAt: ageAt, distanceAt: distanceAt, LIFE: LIFE, params: params, CANE_AGE: CANE_AGE, KID: KID, angleOf: angleOf, STEP: STEP };
 })(CANNON);
-if (typeof module !== "undefined") module.exports = ZSphinxWalk;
+if (typeof module !== "undefined") module.exports = ZLifeWalk;

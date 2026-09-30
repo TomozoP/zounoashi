@@ -48,5 +48,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": ""
   },
-  {"type":"lab","tags":[],"id":"sphinx-run","title":"スフィンクスラン","year":2026,"date":"2026-09-30","plays":null,"url":"","img":"games/_sphinx-run/img/thumb.webp","play":"games/_sphinx-run/index.html","full":true,"catch":""},
+  {"type":"lab","tags":[],"id":"walk100","title":"100歳ウォーク","year":2026,"date":"2026-09-30","plays":null,"url":"","img":"games/_walk100/img/thumb.webp","play":"games/_walk100/index.html","full":true,"catch":""},
 ];
