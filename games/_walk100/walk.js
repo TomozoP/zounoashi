@@ -23,10 +23,11 @@ var ZLifeWalk = (function (C) {
     lean: 0.22, liftHip: 0.7, liftKnee: -1.3, reachHip: 0.15,
     caneLift: 0.26, canePlant: 0.12, caneKp: 58, caneSoft: 14
   };
+  // 杖は見た目だけになったので、老人も働き盛りと同じ動かし方で、前かがみだけ強める（85歳からは力が落ちる）。
   var ELDER = {
-    hip: 260, hipKp: 280, hipKd: 24, knee: 240, kneeKp: 300, kneeKd: 20, ankle: 110, ankleKp: 167.9, ankleKd: 4, standKp: 650,
-    torsoKp: 686.84, torsoKd: 106.519, tip: 0.292, tipKp: 156.169, placeD: 0.459, placeV: 0.05,
-    lean: 0.334, liftHip: 0.812, liftKnee: -0.855, reachHip: 0.261,
+    hip: 400, hipKp: 400, hipKd: 30, knee: 350, kneeKp: 400, kneeKd: 25, ankle: 150, ankleKp: 200, ankleKd: 5, standKp: 650,
+    torsoKp: 530, torsoKd: 90, tip: 0, tipKp: 260, placeD: 0.35, placeV: 0.06,
+    lean: 0.3, liftHip: 0.7, liftKnee: -1.3, reachHip: 0.15,
     caneLift: 0.45, canePlant: 0.02, caneKp: 48.81, caneSoft: 11.118
   };
   var TORQUE = ["hip", "hipKp", "knee", "kneeKp", "ankle", "ankleKp", "standKp", "torsoKp", "tipKp", "caneKp", "caneSoft"];
