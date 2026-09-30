@@ -32,11 +32,13 @@ var ZLifeWalk = (function (C) {
   var TORQUE = ["hip", "hipKp", "knee", "kneeKp", "ankle", "ankleKp", "standKp", "torsoKp", "tipKp", "caneKp", "caneSoft"];
   var DAMP = ["hipKd", "kneeKd", "ankleKd", "torsoKd"];
   var CANE_AGE = 70;
+  var CANE_BODY = false;   // 杖を当たりのある体として持つか（今は見た目だけ。scene.js が手に描く）
   var FOOT = { len: 0.25 };
   var STAIR = { liftHip: 0.423, liftKnee: -0.572, reachHip: 0.601, reachKnee: -0.54, arm: 0.166, caneLift: 0.22, canePlant: -0.009, lip: 0.783, ramp: 0 };
   // 転びにくくする手助け。hold・damp は引き戻す強さ（体重に対する割合）、ahead はつま先より前へ許す幅（大人の m）、old は年をとって弱める割合。
   // cane は杖をついている間の支え：杖の先も足場に数え、胴の回る速さを spin だけ抑える（体重×背の高さに対する割合）。
-  var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15, cane: 1, spin: 3.23 };
+  // tilt は杖の年（70歳から）の胴を決まった傾きへ戻す強さ、caneHold はその年からの引き戻しの倍率。
+  var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15, cane: 1, spin: 6, tilt: 0.8, caneHold: 1 };
   // 体の大きさ s による縮め方（s の何乗か）。重力も s 倍にすると、小さい体も大人と同じ間合いで倒れ、同じ押し方で歩ける。
   var SIZE = { torque: 5, damp: 5, v: 1, g: 1 };
   var GROW_STEP = 0.005;   // 背がこれだけ変わるたびに体を作り直す（小さいほど途切れなく育つ）
@@ -100,7 +102,7 @@ var ZLifeWalk = (function (C) {
     opts = opts || {};
     this.form = form;
     this.age = opts.age || 0;
-    this.cane = !!opts.cane;
+    this.cane = CANE_BODY && !!opts.cane;
     if (form === "baby") this.cfg = BABY;
     else { this.scale = heightAt(this.age); this.dims = dims(this.scale, this.age); this.cfg = params(this.age, this.scale); }
     this.world = new C.World({ gravity: new C.Vec3(0, -9.81 * (form === "baby" ? 1 : Math.pow(this.scale, SIZE.g)), 0) });
@@ -197,7 +199,7 @@ var ZLifeWalk = (function (C) {
   // 作り直しが要るか（背が変わった、杖を持つ年になった）。
   Walker.prototype.outgrown = function (age) {
     if (this.form === "baby") return age >= 1;
-    return Math.abs(heightAt(age) / this.scale - 1) > GROW_STEP || (age >= CANE_AGE) !== this.cane;
+    return Math.abs(heightAt(age) / this.scale - 1) > GROW_STEP || (CANE_BODY && (age >= CANE_AGE) !== this.cane);
   };
   Walker.prototype.grow = function (age) {
     return new Walker("biped", 0, { age: age, cane: age >= CANE_AGE, from: this });
@@ -386,13 +388,15 @@ var ZLifeWalk = (function (C) {
     if (HELP.hold > 0 && lo < hi) {
       hi += HELP.ahead * this.scale;
       var tr = p.trunk, hx = tr.position.x, out = hx < lo ? hx - lo : hx > hi ? hx - hi : 0;
-      var weak = 1 - HELP.old * smooth(60, 100, this.age), mg = this.mass * 9.81 * Math.pow(this.scale, SIZE.g);
+      var weak = (1 - HELP.old * smooth(60, 100, this.age)) * (this.age >= CANE_AGE ? HELP.caneHold : 1), mg = this.mass * 9.81 * Math.pow(this.scale, SIZE.g);
       if (out) {
         tr.force.x -= HELP.hold * mg * weak * clamp(out / (0.1 * this.scale), 1);
         tr.force.x -= HELP.damp * this.mass * weak * (out > 0 ? Math.max(0, tr.velocity.x) : Math.min(0, tr.velocity.x));
       }
     }
-    if (caned && HELP.spin) p.trunk.torque.z -= HELP.spin * this.mass * this.scale * this.scale * p.trunk.angularVelocity.z;
+    var elder = smooth(CANE_AGE - 8, CANE_AGE + 2, this.age);   // 70歳の手前から少しずつ効かせる
+    if ((caned || (!CANE_BODY && elder > 0)) && HELP.spin) p.trunk.torque.z -= (caned ? 1 : elder) * HELP.spin * this.mass * this.scale * this.scale * p.trunk.angularVelocity.z;
+    if (elder > 0 && HELP.tilt) p.trunk.torque.z += elder * HELP.tilt * this.mass * 9.81 * this.scale * wrap(-this.cfg.lean - angleOf(p.trunk));
   };
 
   // 関節の回転の力を、子へ +t、親へ -t で加える。

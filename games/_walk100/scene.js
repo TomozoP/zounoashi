@@ -98,6 +98,7 @@ var ZLifeScene = (function () {
         var hand = ball(b.r * 1.35 * fat, self.mat("skin", k));
         hand.position.y = -b.len / 2;
         g.add(up, low, hand);
+        if (name === "armR" && !baby) self.items(g, b, sc);
       } else if (/^thigh/.test(name)) {
         g.add(capsule(b.r * (baby ? 1 : L.fat), b.len, self.mat("leg", k)));
       } else if (/^shin/.test(name)) {
@@ -124,6 +125,37 @@ var ZLifeScene = (function () {
     });
     this.update();
   }
+  /* 手前の手に持つ物。年代で入れ替える（杖も見た目だけで、当たりはない）。
+     手の位置に吊るし、腕の振りを打ち消してだいたい真下へ下がるようにする。 */
+  var ITEMS = [
+    { name: "kinder", from: 3.5, to: 6.2 },   // 通園バッグ
+    { name: "school", from: 12.5, to: 18.5 }, // 学生カバン
+    { name: "brief", from: 23, to: 60.5 },    // 仕事のカバン
+    { name: "eco", from: 61, to: 69.8 },      // 買い物袋とネギ
+    { name: "cane", from: 70, to: 999 }       // 杖
+  ];
+  Figure.prototype.items = function (g, b, sc) {
+    var hang = new T.Group(), list = {};
+    hang.position.y = -b.len / 2;
+    hang.position.z = 0.02 * sc;
+    function add(name, parts) { var o = new T.Group(); parts.forEach(function (p) { o.add(p); }); o.visible = false; hang.add(o); list[name] = o; }
+    function at(m, x, y, z) { m.position.set(x, y, z || 0); return m; }
+    var strap = function (w, h, c) { return new T.Mesh(new T.TorusGeometry(w, 0.008 * sc, 6, 12, Math.PI), mat(c, 0.6)); };
+    add("kinder", [at(box(0.16 * sc, 0.13 * sc, 0.05 * sc, mat(0xf3c623, 0.6)), 0, -0.1 * sc), at(strap(0.045 * sc, 0, 0xf3c623), 0, -0.035 * sc)]);
+    add("school", [at(box(0.34 * sc, 0.24 * sc, 0.07 * sc, mat(0x1b1b1f, 0.5)), 0, -0.16 * sc), at(strap(0.06 * sc, 0, 0x1b1b1f), 0, -0.04 * sc)]);
+    add("brief", [at(box(0.38 * sc, 0.26 * sc, 0.09 * sc, mat(0x5a3a22, 0.45)), 0, -0.17 * sc), at(strap(0.055 * sc, 0, 0x3a2414), 0, -0.04 * sc),
+      at(box(0.05 * sc, 0.03 * sc, 0.095 * sc, mat(0xc9a64a, 0.3)), 0, -0.1 * sc)]);
+    var leek = capsule(0.018 * sc, 0.3 * sc, mat(0xf2f4ea, 0.7)), leaf = capsule(0.022 * sc, 0.16 * sc, mat(0x3f8f3a, 0.7));
+    leek.rotation.z = -0.35; leaf.rotation.z = -0.35;
+    add("eco", [at(box(0.28 * sc, 0.3 * sc, 0.12 * sc, mat(0xd9ccb0, 0.8)), 0, -0.18 * sc), at(strap(0.07 * sc, 0, 0xd9ccb0), 0, -0.03 * sc),
+      at(leek, 0.07 * sc, -0.02 * sc), at(leaf, 0.14 * sc, 0.13 * sc)]);
+    var len = 0.86 * sc, wood = mat(0x6b3f1f, 0.5), stick = capsule(0.018 * sc, len, wood);
+    var crook = new T.Mesh(new T.TorusGeometry(0.05 * sc, 0.016 * sc, 8, 16, Math.PI), wood);
+    crook.castShadow = true;
+    add("cane", [at(stick, 0.03 * sc, -len / 2 + 0.03 * sc), at(crook, -0.02 * sc, 0.03 * sc)]);
+    g.add(hang);
+    this.hang = hang; this.itemList = list;
+  };
   Figure.prototype.trunk = function (g, b, L, c) {
     var baby = this.form === "baby", len = b.len, half = b.half, sc = this.walker.scale || 0.5;
     var fat = baby ? 1 : L.fat, torso = capsule(half * fat, len - half * 0.6, this.mat("body"));
@@ -181,6 +213,10 @@ var ZLifeScene = (function () {
     show(this.tie, L.tie);
     show(this.pack, L.pack);
     show(this.diaper, L.diaper);
+    if (this.itemList) {
+      var age = this.walker.age, list = this.itemList;
+      ITEMS.forEach(function (it) { list[it.name].visible = age >= it.from && age < it.to; });
+    }
     if (from) {
       this.t += dt || 0;
       var u = Math.min(1, this.t / this.dur);
@@ -210,6 +246,11 @@ var ZLifeScene = (function () {
       m.group.position.y = y;
       m.group.rotation.z = a;
     });
+    // 手に持つ物は腕の向きを打ち消して下へ吊るす（杖は少し前へ傾ける）。
+    if (this.hang) {
+      var armR = this.meshes.filter(function (m) { return m.body.part === "armR"; })[0];
+      if (armR) this.hang.rotation.z = -armR.group.rotation.z + (this.walker.age >= 70 ? 0.12 : 0);
+    }
   };
   // 今の姿を写しておく（次の体へ移るときの出発点）。
   Figure.prototype.pose = function () {
