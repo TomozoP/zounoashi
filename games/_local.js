@@ -47,6 +47,5 @@ window.DRAFT_GAMES = [
     "play": "games/_brute-escape/index.html",
     "full": true,
     "catch": ""
-  },
-  {"type":"lab","tags":[],"id":"walk100","title":"人生ウォーカー","year":2026,"date":"2026-09-30","plays":null,"url":"","img":"games/_walk100/img/thumb.webp","play":"games/_walk100/index.html","full":true,"catch":""},
+  }
 ];

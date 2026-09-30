@@ -139,12 +139,13 @@ var server = http.createServer(function (req, res) {
 /* ---------------- 裏でブラウザを借りる ---------------- */
 function browser() {
   var cands = [
+    process.env.CHROME || "",   // 環境変数 CHROME でブラウザの場所を指定できる（Windows 以外の環境向け）
     "C:/Program Files/Google/Chrome/Application/chrome.exe",
     "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
     "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
     "C:/Program Files/Microsoft/Edge/Application/msedge.exe"
   ];
-  for (var i = 0; i < cands.length; i++) if (fs.existsSync(cands[i])) return cands[i];
+  for (var i = 0; i < cands.length; i++) if (cands[i] && fs.existsSync(cands[i])) return cands[i];
   return null;
 }
 
