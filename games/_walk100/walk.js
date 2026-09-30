@@ -33,7 +33,7 @@ var ZLifeWalk = (function (C) {
   var DAMP = ["hipKd", "kneeKd", "ankleKd", "torsoKd"];
   var CANE_AGE = 70;
   var FOOT = { len: 0.25 };
-  var STAIR = { liftHip: 0.574, liftKnee: -1.033, reachHip: 0.63, reachKnee: -0.687, arm: -0.177, caneLift: 0.314, canePlant: -0.114, lip: 0, ramp: 0 };
+  var STAIR = { liftHip: 0.767, liftKnee: -0.534, reachHip: 0.094, reachKnee: -0.343, arm: -0.121, caneLift: 0.505, canePlant: -0.106, lip: 0.725, ramp: 0 };
   // 転びにくくする手助け。hold・damp は引き戻す強さ（体重に対する割合）、ahead はつま先より前へ許す幅（大人の m）、old は年をとって弱める割合。
   var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15 };
   // 体の大きさ s による縮め方（s の何乗か）。重力も s 倍にすると、小さい体も大人と同じ間合いで倒れ、同じ押し方で歩ける。
