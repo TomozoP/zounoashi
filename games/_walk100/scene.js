@@ -419,7 +419,7 @@ var ZLifeScene = (function () {
     this.camera.fov = 44 + tall * 10;
     this.camera.updateProjectionMatrix();
     // 年をとるほど、横からの眺めを背中の側へ少しずつ回していく（100歳でほぼ真後ろ）。
-    var turn = BACK_TURN * Math.max(0, Math.min(1, s.progress)), c = Math.cos(turn), sn = Math.sin(turn);
+    var turn = BACK_TURN * Math.max(0, Math.min(1, s.turn == null ? s.progress : s.turn)), c = Math.cos(turn), sn = Math.sin(turn);
     var ax = L.x + L.d * 0.08, ay = L.f + L.y * 0.85, ox = L.d * 0.24, oz = L.d;
     this.camera.position.set(ax + ox * c - oz * sn, L.f + L.y + L.d * 0.2, ox * sn + oz * c);
     this.camera.lookAt(ax, ay, 0);

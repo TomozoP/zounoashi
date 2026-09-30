@@ -23,11 +23,11 @@ var ZLifeWalk = (function (C) {
     lean: 0.22, liftHip: 0.7, liftKnee: -1.3, reachHip: 0.15,
     caneLift: 0.26, canePlant: 0.12, caneKp: 58, caneSoft: 14
   };
-  // 杖は見た目だけになったので、老人も働き盛りと同じ動かし方で、前かがみだけ強める（85歳からは力が落ちる）。
+  // 老人は働き盛りと同じ動かし方で、歩幅だけ小さい（85歳からは力が落ちて少し前かがみ）。
   var ELDER = {
     hip: 400, hipKp: 400, hipKd: 30, knee: 350, kneeKp: 400, kneeKd: 25, ankle: 150, ankleKp: 200, ankleKd: 5, standKp: 650,
     torsoKp: 530, torsoKd: 90, tip: 0, tipKp: 260, placeD: 0.35, placeV: 0.06,
-    lean: 0.3, liftHip: 0.7, liftKnee: -1.3, reachHip: 0.15,
+    lean: 0.22, liftHip: 0.45, liftKnee: -1.3, reachHip: 0.15,
     caneLift: 0.45, canePlant: 0.02, caneKp: 48.81, caneSoft: 11.118
   };
   var TORQUE = ["hip", "hipKp", "knee", "kneeKp", "ankle", "ankleKp", "standKp", "torsoKp", "tipKp", "caneKp", "caneSoft"];
@@ -39,7 +39,7 @@ var ZLifeWalk = (function (C) {
   // 転びにくくする手助け。hold・damp は引き戻す強さ（体重に対する割合）、ahead はつま先より前へ許す幅（大人の m）、old は年をとって弱める割合。
   // cane は杖をついている間の支え：杖の先も足場に数え、胴の回る速さを spin だけ抑える（体重×背の高さに対する割合）。
   // tilt は杖の年（70歳から）の胴を決まった傾きへ戻す強さ、caneHold はその年からの引き戻しの倍率。
-  var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15, cane: 1, spin: 6, tilt: 0.8, caneHold: 1 };
+  var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15, cane: 1, spin: 2, tilt: 0.3, caneHold: 1 };
   // 体の大きさ s による縮め方（s の何乗か）。重力も s 倍にすると、小さい体も大人と同じ間合いで倒れ、同じ押し方で歩ける。
   var SIZE = { torque: 5, damp: 5, v: 1, g: 1 };
   var GROW_STEP = 0.005;   // 背がこれだけ変わるたびに体を作り直す（小さいほど途切れなく育つ）
@@ -73,7 +73,7 @@ var ZLifeWalk = (function (C) {
   }
   // 年齢 age、大きさ s の体の筋力と動かし方。
   function params(age, s) {
-    var t = smooth(50, 85, age), c = {}, k;
+    var t = smooth(CANE_AGE, CANE_AGE + 10, age), c = {}, k;   // 階段を上りきった70歳から、歩幅を小さくしていく
     for (k in ADULT) c[k] = ADULT[k] + (ELDER[k] - ADULT[k]) * t;
     // 85歳を過ぎると力が落ち、腰が曲がる。
     var old = Math.max(0, Math.min(1, (age - 85) / 15));
