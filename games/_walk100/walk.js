@@ -32,6 +32,7 @@ var ZLifeWalk = (function (C) {
   var TORQUE = ["hip", "hipKp", "knee", "kneeKp", "ankle", "ankleKp", "standKp", "torsoKp", "tipKp", "caneKp", "caneSoft"];
   var DAMP = ["hipKd", "kneeKd", "ankleKd", "torsoKd"];
   var CANE_AGE = 70;
+  var GROW_STEP = 0.005;   // 背がこれだけ変わるたびに体を作り直す（小さいほど途切れなく育つ）
   var KID = { until: [2, 8], lean: 0.6, ankle: 1, stand: 1 };
 
   // 年齢ごとの背の高さ（大人を1とする）。
@@ -52,7 +53,7 @@ var ZLifeWalk = (function (C) {
   function dims(s) {
     var m = s * s * s;
     return {
-      trunk: { len: 0.56 * s, half: 0.13 * s, mass: 32 * m }, head: { r: 0.12 * Math.pow(s, 0.55), mass: 5 * Math.pow(s, 1.8) },
+      trunk: { len: 0.56 * s, half: 0.13 * s, mass: 32 * m }, head: { r: 0.12 * Math.pow(s, 0.3), mass: 5 * Math.pow(s, 1.8) },
       arm: { len: 0.62 * s, r: 0.045 * s, mass: 3.4 * m },
       thigh: { len: 0.45 * s, r: 0.07 * s, mass: 8 * m }, shin: { len: 0.44 * s, r: 0.05 * s, mass: 4 * m },
       foot: 0.25 * s, footMass: 2 * s * s, cane: { mass: 0.6 * s }
@@ -182,7 +183,7 @@ var ZLifeWalk = (function (C) {
   // 作り直しが要るか（背が変わった、杖を持つ年になった）。
   Walker.prototype.outgrown = function (age) {
     if (this.form === "baby") return age >= 1;
-    return Math.abs(heightAt(age) / this.scale - 1) > 0.025 || (age >= CANE_AGE) !== this.cane;
+    return Math.abs(heightAt(age) / this.scale - 1) > GROW_STEP || (age >= CANE_AGE) !== this.cane;
   };
   Walker.prototype.grow = function (age) {
     return new Walker("biped", 0, { age: age, cane: age >= CANE_AGE, from: this });

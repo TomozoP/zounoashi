@@ -15,10 +15,11 @@ var ZLifeScene = (function () {
   function box(w, h, d, m) { var b = new T.Mesh(new T.BoxGeometry(w, h, d), m); b.castShadow = true; return b; }
 
   // 年齢ごとの色と、手足を左右へずらす幅。右は手前（カメラ側）。
-  var BABY_LOOK = { skin: 0xffd3b5, body: 0xfff0a0, leg: 0xfff0a0, shoe: null, hair: 0x6b4a2b, hairSize: 0.45, legZ: 0.06, armZ: 0.08 };
+  var BABY_LOOK = { skin: 0xffd3b5, body: 0xfff0a0, leg: 0xfff0a0, shin: 0xffd3b5, shoe: null, hair: 0x6b4a2b, hairSize: 0.45, diaper: 1, chest: 1, legZ: 0.06, armZ: 0.08 };
   // 服は子ども・大人・老人の色を年齢で混ぜる。
   var CLOTHES = [
-    { age: 1, body: 0xf2a33a, leg: 0x3b6fb6, shoe: 0xd8322e, skin: 0xffcfae },
+    { age: 1, body: 0xfff0a0, leg: 0xfff0a0, shoe: 0xffd3b5, skin: 0xffd3b5 },
+    { age: 4, body: 0xf2a33a, leg: 0x3b6fb6, shoe: 0xd8322e, skin: 0xffcfae },
     { age: 12, body: 0xe8584a, leg: 0x2f4f86, shoe: 0x33383f, skin: 0xf4c29c },
     { age: 25, body: 0x3f7fd0, leg: 0x2c3344, shoe: 0x3a2a20, skin: 0xe9b38c },
     { age: 55, body: 0x4f7a5a, leg: 0x3a3a40, shoe: 0x3a2a20, skin: 0xe6b394 },
@@ -30,21 +31,29 @@ var ZLifeScene = (function () {
     for (var i = 1; i < t.length; i++) if (x <= t[i].age) return new T.Color(t[i - 1][k]).lerp(new T.Color(t[i][k]), (x - t[i - 1].age) / (t[i].age - t[i - 1].age));
     return new T.Color(t[t.length - 1][k]);
   }
+  function smooth(a, b, x) { var u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); }
   function looks(walker) {
     if (walker.form === "baby") return BABY_LOOK;
     var age = walker.age, s = walker.scale;
     function c(k) { return lerpTable(CLOTHES, age, k).getHex(); }
     return {
       skin: c("skin"), body: c("body"), leg: c("leg"), shoe: c("shoe"),
+      // 幼いうちは素足。すねの色を肌から服へ少しずつ移す。
+      shin: new T.Color(c("skin")).lerp(new T.Color(c("leg")), smooth(1, 4, age)).getHex(),
+      diaper: 1 - smooth(1.5, 3, age), chest: 1 + 0.35 * smooth(1, 6, age),
       hair: lerpTable(HAIR.map(function (h) { return { age: h[0], v: h[1] }; }), age, "v").getHex(),
-      hairSize: age < 5 ? 0.6 + 0.1 * age : age > 75 ? 1 - Math.min(0.25, (age - 75) / 60) : 1,
+      hairSize: age < 6 ? 0.45 + 0.11 * (age - 1) : age > 75 ? 1 - Math.min(0.25, (age - 75) / 60) : 1,
       legZ: 0.1 * s, armZ: 0.2 * s
     };
   }
 
-  function Figure(walker, scene) {
+  // from に前の姿（各部位の位置と角度）を渡すと、dur 秒かけてそこから今の体へ移る。
+  function Figure(walker, scene, from, dur) {
     this.walker = walker;
     this.form = walker.form;
+    this.from = from || null;
+    this.dur = dur || 0;
+    this.t = 0;
     var L = looks(walker), c = walker.cfg, self = this, sc = walker.scale || 0.5;
     this.root = new T.Group();
     scene.add(this.root);
@@ -58,8 +67,7 @@ var ZLifeScene = (function () {
       var k = far ? 0.78 : 1;
       if (name === "trunk") self.trunk(g, b, L, c);
       else if (/^arm/.test(name)) {
-        var sleeve = walker.form === "baby" ? L.skin : L.body;
-        var up = capsule(b.r * 1.15, b.len * 0.45, mat(shade(sleeve, k)));
+        var up = capsule(b.r * 1.15, b.len * 0.45, mat(shade(L.body, k)));
         up.position.y = b.len * 0.22;
         var low = capsule(b.r, b.len * 0.5, mat(shade(L.skin, k)));
         low.position.y = -b.len * 0.2;
@@ -69,8 +77,7 @@ var ZLifeScene = (function () {
       } else if (/^thigh/.test(name)) {
         g.add(capsule(b.r, b.len, mat(shade(L.leg, k))));
       } else if (/^shin/.test(name)) {
-        var sm = walker.form === "baby" ? L.skin : L.leg;
-        g.add(capsule(b.r * (walker.form === "baby" ? 1 : 0.95), b.len, mat(shade(sm, k))));
+        g.add(capsule(b.r * (walker.form === "baby" ? 1 : 0.95), b.len, mat(shade(L.shin, k))));
         if (walker.form === "baby") { var foot = ball(b.r * 1.3, mat(shade(L.skin, k))); foot.position.y = -b.len / 2; foot.scale.set(1, 1.4, 1); g.add(foot); }
       } else if (/^foot/.test(name)) {
         var f = box(b.len, 0.07 * sc, 0.11 * sc, mat(shade(L.shoe, k), 0.6));
@@ -78,6 +85,8 @@ var ZLifeScene = (function () {
         g.add(f);
       } else if (name === "cane") {
         var wood = mat(0x6b3f1f, 0.5);
+        // 杖を持ち始めたときは、すっと現れる。
+        if (self.from && !self.from.cane) { wood.transparent = true; wood.opacity = 0; self.fade = wood; }
         g.add(capsule(0.018 * sc, b.len, wood));
         // 握りの曲がり。
         var crook = new T.Mesh(new T.TorusGeometry(0.05 * sc, 0.016 * sc, 8, 16, Math.PI), wood);
@@ -94,11 +103,12 @@ var ZLifeScene = (function () {
   Figure.prototype.trunk = function (g, b, L, c) {
     var baby = this.form === "baby", len = b.len, half = b.half, sc = this.walker.scale || 0.5;
     var torso = capsule(half, len - half * 0.6, mat(L.body));
-    torso.scale.z = baby ? 1 : 1.35;
+    torso.scale.z = L.chest;
     g.add(torso);
-    if (baby) {
-      // おむつのふくらみ。
-      var diaper = ball(half * 1.15, mat(0xffffff));
+    if (L.diaper > 0.02) {
+      // おむつのふくらみ。育つにつれて小さくなる。
+      var diaper = ball(half * (0.95 + 0.2 * L.diaper), mat(0xffffff));
+      diaper.scale.setScalar(L.diaper);
       diaper.position.y = -len / 2 + half * 0.5;
       g.add(diaper);
     }
@@ -107,6 +117,7 @@ var ZLifeScene = (function () {
     if (!baby) g.add(neck);
     var head = new T.Group(), r = b.headR;
     head.position.y = b.headOffset;
+    this.head = head;
     head.add(ball(r, mat(L.skin)));
     // 顔は進む向き（大人は体の前、赤ちゃんは頭の先）。
     var ahead = baby ? new T.Vector3(0.35, 0.94, 0).normalize() : new T.Vector3(1, 0.05, 0).normalize();
@@ -128,13 +139,43 @@ var ZLifeScene = (function () {
     head.add(hair);
     g.add(head);
   };
-  Figure.prototype.update = function () {
+  Figure.prototype.update = function (dt) {
+    var from = this.from, e = 1;
+    if (from) {
+      this.t += dt || 0;
+      var u = Math.min(1, this.t / this.dur);
+      e = u * u * (3 - 2 * u);
+      if (u >= 1) this.from = null;
+    }
+    // ハイハイの顔は頭の先を向くので、起き上がる間に顔を前へ回す。
+    if (this.head) this.head.rotation.z = from && from.baby ? 1.16 * (1 - e) : 0;
+    if (this.fade) { this.fade.opacity = e; if (e >= 1) { this.fade.transparent = false; this.fade = null; } }
     this.meshes.forEach(function (m) {
-      var b = m.body;
-      m.group.position.x = b.position.x;
-      m.group.position.y = b.position.y;
-      m.group.rotation.z = 2 * Math.atan2(b.quaternion.z, b.quaternion.w);
+      var b = m.body, x = b.position.x, y = b.position.y, a = 2 * Math.atan2(b.quaternion.z, b.quaternion.w);
+      var f = from && from.parts[m.body.part], k = 1;
+      if (f && e < 1) {
+        x = f.x + (x - f.x) * e;
+        y = f.y + (y - f.y) * e;
+        a = f.a + Math.atan2(Math.sin(a - f.a), Math.cos(a - f.a)) * e;
+        // 大きさも前の部位の長さから寄せる。
+        if (f.len && b.len) k = f.len / b.len + (1 - f.len / b.len) * e;
+      }
+      m.group.scale.setScalar(k);
+      m.group.position.x = x;
+      m.group.position.y = y;
+      m.group.rotation.z = a;
     });
+  };
+  // 今の姿を写しておく（次の体へ移るときの出発点）。
+  Figure.prototype.pose = function () {
+    var parts = {}, w = this.walker;
+    this.meshes.forEach(function (m) { parts[m.body.part] = { x: m.group.position.x, y: m.group.position.y, a: m.group.rotation.z, len: m.body.len * m.group.scale.x }; });
+    // ハイハイには足がないので、すねの先から始める。
+    ["L", "R"].forEach(function (k) {
+      var sh = parts["shin" + k], b = w.parts["shin" + k];
+      if (sh && !parts["foot" + k]) parts["foot" + k] = { x: sh.x + Math.sin(sh.a) * b.len / 2, y: sh.y - Math.cos(sh.a) * b.len / 2, a: 0 };
+    });
+    return { parts: parts, cane: w.cane, baby: w.form === "baby" };
   };
   Figure.prototype.dispose = function () {
     this.root.parent && this.root.parent.remove(this.root);
@@ -231,9 +272,14 @@ var ZLifeScene = (function () {
     this.w = 540; this.h = 960;
   }
 
-  Scene.prototype.setWalker = function (walker) {
-    if (this.figure) this.figure.dispose();
-    this.figure = walker ? new Figure(walker, this.scene) : null;
+  // morph 秒かけて、前の体の姿から新しい体へ移る（0 ならすぐ入れ替える）。
+  Scene.prototype.setWalker = function (walker, morph) {
+    var from = null;
+    if (this.figure) {
+      if (morph || (walker && walker.cane && !this.figure.walker.cane)) from = this.figure.pose();
+      this.figure.dispose();
+    }
+    this.figure = walker ? new Figure(walker, this.scene, from, morph || 0.6) : null;
   };
 
   Scene.prototype.resize = function (w, h) {
@@ -245,7 +291,7 @@ var ZLifeScene = (function () {
 
   // s = { x, form, scale, progress, snap, dt }
   Scene.prototype.draw = function (ctx, W, H, s) {
-    if (this.figure) this.figure.update();
+    if (this.figure) this.figure.update(s.dt);
     var sky = skyAt(s.progress);
     this.scene.background = sky.sky;
     this.scene.fog.color.copy(sky.sky);
