@@ -157,7 +157,7 @@
     if (ang > 150) return null;
     var mx = (s.x + e.x) / 2, my = (s.y + e.y) / 2;
     var dx = a.x - mx, dy = a.y - my, dl = Math.hypot(dx, dy) || 1;
-    return { ax: a.x, ay: a.y, dx: dx / dl, dy: dy / dl, size: Math.max(l1, l2) };
+    return { ax: a.x, ay: a.y, dx: dx / dl, dy: dy / dl, size: Math.max(l1, l2), ang: ang };
   }
 
   function shoot(pts) {
@@ -168,7 +168,10 @@
       return;
     }
     var rel = pts.map(function (p) { return { x: p.x - r.ax, y: p.y - r.ay }; });
-    arrows.push({ x: r.ax, y: r.ay, vx: r.dx * 1000, vy: r.dy * 1000, pts: rel,
+    /* 鋭角ほど遠くまで飛び、たくさん貫く。鈍角は手前で失速して1体しか落とせない */
+    var k = Math.max(0, Math.min(1, (r.ang - 25) / 115));
+    arrows.push({ x: r.ax, y: r.ay, dx: r.dx, dy: r.dy, v0: 1150 - 450 * k, pts: rel,
+      range: 1400 - 1180 * k, pierce: Math.round(5 - 4 * k), went: 0, fade: 0,
       reach: Math.min(34, 8 + r.size * 0.18), hit: {} });
     noiseHit(0.18, 2400, 0.25, 0.8);
     tone(900, 0.12, 0.06, "sine", 1500);
@@ -208,21 +211,25 @@
 
     arrows.forEach(function (a) {
       var px = a.x, py = a.y;
-      a.x += a.vx * dt; a.y += a.vy * dt;
+      var left = a.range - a.went;
+      if (left <= 0) { a.fade += dt; return; }
+      var v = a.v0 * Math.min(1, left / (a.range * 0.4) + 0.12);
+      a.x += a.dx * v * dt; a.y += a.dy * v * dt; a.went += v * dt;
       foes.forEach(function (f) {
-        if (f.dead || a.hit[f.id]) return;
+        if (f.dead || a.hit[f.id] || a.pierce <= 0) return;
         /* この1コマで先端が通った線分と、的の中心との距離 */
         var sx = a.x - px, sy = a.y - py, L = sx * sx + sy * sy || 1;
         var k = Math.max(0, Math.min(1, ((f.x - px) * sx + (f.y - py) * sy) / L));
         var d = Math.hypot(px + sx * k - f.x, py + sy * k - f.y);
         if (d < f.r + a.reach) {
-          a.hit[f.id] = 1; f.dead = true; score++;
+          a.hit[f.id] = 1; f.dead = true; score++; a.pierce--;
+          if (a.pierce <= 0) a.went = a.range;
           burst(f);
         }
       });
     });
     foes = foes.filter(function (f) { return !f.dead; });
-    arrows = arrows.filter(function (a) { return a.x > -200 && a.x < W + 200 && a.y > -200 && a.y < H + 200; });
+    arrows = arrows.filter(function (a) { return a.fade < 0.3 && a.x > -200 && a.x < W + 200 && a.y > -200 && a.y < H + 200; });
   }
 
   function burst(f) {
@@ -351,7 +358,8 @@
       line(f.pts, 0, 0, "#8a8196", 8);
     });
     ctx.globalAlpha = 1;
-    arrows.forEach(function (a) { line(a.pts, a.x, a.y, "#fff", 9); });
+    arrows.forEach(function (a) { ctx.globalAlpha = 1 - a.fade / 0.3; line(a.pts, a.x, a.y, "#fff", 9); });
+    ctx.globalAlpha = 1;
     if (stroke) line(stroke, 0, 0, "#f2c14e", 9);
 
     bits.forEach(function (b) {
