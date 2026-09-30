@@ -526,6 +526,29 @@ var ZLifeWalk = (function (C) {
     return Math.min(Math.floor((x - st.x0) / st.run) + 1, st.n || Infinity) * st.rise;
   }
   Walker.prototype.floorAt = function (x) { return floorAt(this.stairs, x); };
+  // 車いすに座った姿を、物理を使わずに置く。x は腰の位置、f は床の高さ、push は腕で車輪を押す動き（0〜1）。
+  Walker.prototype.sit = function (x, f, push) {
+    var p = this.parts, s = this.scale;
+    function put(b, cx, cy, a) {
+      if (!b) return;
+      b.position.set(cx, cy, 0);
+      b.quaternion.setFromAxisAngle(new C.Vec3(0, 0, 1), a);
+      b.velocity.set(0, 0, 0);
+      b.angularVelocity.set(0, 0, 0);
+    }
+    function seg(b, top, a) { if (b) put(b, top[0] + Math.sin(a) * b.len / 2, top[1] - Math.cos(a) * b.len / 2, a); return b ? [top[0] + Math.sin(a) * b.len, top[1] - Math.cos(a) * b.len] : top; }
+    var shin = p.shinR.len, hip = [x, f + shin + 0.1 * s], lean = -0.12;
+    var tl = p.trunk.len, neck = [hip[0] - Math.sin(lean) * tl, hip[1] + Math.cos(lean) * tl];
+    put(p.trunk, (hip[0] + neck[0]) / 2, (hip[1] + neck[1]) / 2, lean);
+    ["L", "R"].forEach(function (k) {
+      var knee = seg(p["thigh" + k], hip, Math.PI / 2 - 0.08);
+      var ankle = seg(p["shin" + k], knee, 0.12);
+      if (p["foot" + k]) put(p["foot" + k], ankle[0] + p["foot" + k].len * 0.3, f + 0.04 * s, 0);
+      var arm = 0.35 + 0.5 * (push || 0);
+      seg(p["arm" + k], [neck[0], neck[1] - 0.04 * s], arm);
+    });
+    this.touch = {}; this.near = { footL: true, footR: true };
+  };
 
   Walker.prototype.step = function (dt) {
     var n = Math.max(1, Math.round(dt / STEP));

@@ -182,7 +182,7 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", DOWN: "down", RESULT: "result" };
-  var state, score, scoreText, T, held, walker, age, downT, finished, snap, best, bestX, stairs, falls, life, setbacks;
+  var state, score, scoreText, T, held, walker, age, downT, finished, snap, best, bestX, stairs, falls, life, setbacks, wheel, chairX, chairX0, chairV, pushT;
 
   // morph 秒かけて、前の体の姿から新しい体へ見た目を移す。
   function setWalker(w, morph) {
@@ -201,6 +201,7 @@
     falls = 0;
     songAt = 0;
     camStop = null;
+    wheel = false; chairV = 0; pushT = 1;
     life = [[0, 0]];
     setbacks = [];
     best = 0;
@@ -234,9 +235,10 @@
   function update(dt) {
     if (state === S.INTRO) { if (walker) walker.step(dt); return; }
     if (state !== S.PLAY && state !== S.DOWN) return;
-    walker.step(dt);
+    if (!wheel) walker.step(dt);
     walker.takeImpacts().forEach(function (hit) { contactSound(hit.part, hit.strength); });
     T += dt;
+    if (wheel) { rollChair(dt); return; }
     if (state === S.DOWN) {
       downT += dt;
       if (finished) { if (downT > 1.6) showResult(); }
@@ -260,6 +262,7 @@
       return;
     }
     grow();
+    if (age >= WHEEL_AGE) sitDown();
     music();
     // 結果のグラフ用に、時間と年齢を少しずつ残す。
     if (T - life[life.length - 1][0] >= 0.25 || age >= GOAL_AGE) life.push([T, age]);
@@ -313,6 +316,32 @@
     held = false;
     snap = true;
   }
+  /* 85歳からは車いす。押すたびに前へ押し出し、あとは少しずつ止まる（転ばない）。 */
+  var WHEEL_AGE = 85, CHAIR = { kick: 0.45, max: 1.3, slow: 1.1 };
+  function sitDown() {
+    wheel = true;
+    chairX = chairX0 = walker.x();
+    chairV = 0.2;
+    pushT = 1;
+    walker.release();
+    walker.sit(chairX, walker.floorAt(chairX), 0);
+    held = false;
+  }
+  function rollChair(dt) {
+    if (state === S.DOWN) { downT += dt; if (downT > 1.6) showResult(); walker.sit(chairX, walker.floorAt(chairX), 0); return; }
+    chairV *= Math.exp(-CHAIR.slow * dt);
+    var dx = chairV * dt;
+    chairX += dx;
+    pushT += dt;
+    walker.sit(chairX, walker.floorAt(chairX), Math.max(0, 1 - Math.abs(pushT - 0.2) / 0.2));
+    best += dx / walker.scale;
+    bestX = chairX;
+    age = Math.min(GOAL_AGE, LW.ageAt(best));
+    walker.age = age;
+    music();
+    if (T - life[life.length - 1][0] >= 0.25 || age >= GOAL_AGE) life.push([T, age]);
+    if (age >= GOAL_AGE) { end(); state = S.DOWN; downT = 0.4; }
+  }
   function showResult() {
     state = S.RESULT;
     shareButton.hidden = false;
@@ -329,6 +358,7 @@
       return;
     }
     if (state !== S.PLAY) return;
+    if (wheel) { chairV = Math.min(CHAIR.max, chairV + CHAIR.kick); pushT = 0; return; }
     held = true;
     walker.press(side);
   }
@@ -401,7 +431,7 @@
       // 90歳でカメラをその場に止め、歩いていく背中を見送る。
       if (camStop == null && age >= SEE_OFF) camStop = walker.x();
       var cx = camStop == null ? walker.x() : camStop;
-      view3d.draw(ctx, W, H, { x: cx, floor: walker.floorAt(cx), form: walker.form, scale: walker.scale, progress: age / GOAL_AGE, turn: Math.min(age, SEE_OFF) / GOAL_AGE, snap: snap, dt: dt });
+      view3d.draw(ctx, W, H, { x: cx, floor: walker.floorAt(cx), form: walker.form, scale: walker.scale, progress: age / GOAL_AGE, chair: wheel ? { x: chairX, f: walker.floorAt(chairX), dist: chairX - chairX0, scale: walker.scale } : null, turn: Math.min(age, SEE_OFF) / GOAL_AGE, snap: snap, dt: dt });
       snap = false;
     } else {
       ctx.fillStyle = "#f6c7a2";
@@ -538,8 +568,8 @@
     now: function () {
       return { state: state, score: score, scoreText: scoreText, W: W, H: H, T: T, age: age, form: walker && walker.form, cane: walker ? walker.cane : false, floor: walker ? walker.floorAt(walker.x()) : 0, stairs: !!stairs, scale: walker ? walker.scale : 0,
         x: walker ? walker.x() : 0, side: walker ? walker.side : 0, pressed: walker ? walker.pressed : false,
-        landed: walker ? !walker.side || !!(walker.near || {})[(walker.form === "baby" ? "arm" : "foot") + (walker.side < 0 ? "L" : "R")] : false,
-        fallen: walker ? walker.fallen() : false, finished: finished, falls: falls, setbacks: setbacks ? setbacks.length : 0, lifePoints: life ? life.length : 0, has3d: !!view3d, length: LENGTH };
+        landed: wheel ? true : walker ? !walker.side || !!(walker.near || {})[(walker.form === "baby" ? "arm" : "foot") + (walker.side < 0 ? "L" : "R")] : false,
+        fallen: walker && !wheel ? walker.fallen() : false, wheel: wheel, finished: finished, falls: falls, setbacks: setbacks ? setbacks.length : 0, lifePoints: life ? life.length : 0, has3d: !!view3d, length: LENGTH };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(1 / 60); } },
     reset: function () { newRound(); },
@@ -559,6 +589,7 @@
       setStairs(st);
       bestX = walker.x();
       snap = true;
+      if (age >= WHEEL_AGE) sitDown();
     }
   };
 

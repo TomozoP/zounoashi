@@ -132,7 +132,7 @@ var ZLifeScene = (function () {
     { name: "school", from: 12.5, to: 18.5 }, // 学生カバン
     { name: "brief", from: 23, to: 60.5 },    // 仕事のカバン
     { name: "eco", from: 61, to: 69.8 },      // 買い物袋とネギ
-    { name: "cane", from: 70, to: 999 }       // 杖
+    { name: "cane", from: 70, to: 85 }        // 杖（85歳からは車いす）
   ];
   Figure.prototype.items = function (g, b, sc) {
     var hang = new T.Group(), list = {};
@@ -390,6 +390,45 @@ var ZLifeScene = (function () {
     this.scene.add(g);
   };
   var STAIR_COUNT = 160;
+  // 車いす。c = { x: 腰の位置, f: 床の高さ, dist: 進んだ距離, scale }。null ならしまう。
+  Scene.prototype.drawChair = function (c) {
+    if (!c) { if (this.chair) this.chair.visible = false; return; }
+    if (!this.chair) {
+      var g = new T.Group(), metal = mat(0x9aa3ad, 0.35), tire = mat(0x22252a, 0.8), seatM = mat(0x2f5d8a, 0.7), R = 0.3;
+      var wheels = [];
+      [-1, 1].forEach(function (k) {
+        var w = new T.Group(), rim = new T.Mesh(new T.TorusGeometry(R, 0.025, 8, 28), tire);
+        rim.castShadow = true;
+        w.add(rim);
+        for (var i = 0; i < 3; i++) { var sp = box(R * 2, 0.012, 0.012, metal); sp.rotation.z = i * Math.PI / 3; w.add(sp); }
+        w.position.set(-0.06, R, k * 0.3);
+        g.add(w); wheels.push(w);
+        var caster = new T.Mesh(new T.TorusGeometry(0.06, 0.018, 6, 14), tire);
+        caster.position.set(0.32, 0.06, k * 0.24);
+        g.add(caster);
+        var frame = box(0.5, 0.025, 0.025, metal);
+        frame.position.set(0.1, 0.44, k * 0.26);
+        var leg = box(0.025, 0.4, 0.025, metal);
+        leg.position.set(0.32, 0.26, k * 0.24);
+        var back = box(0.025, 0.5, 0.025, metal);
+        back.position.set(-0.2, 0.68, k * 0.26);
+        g.add(frame, leg, back);
+      });
+      var seat = box(0.42, 0.04, 0.5, seatM);
+      seat.position.set(0.04, 0.45, 0);
+      var rest = box(0.03, 0.34, 0.5, seatM);
+      rest.position.set(-0.2, 0.72, 0);
+      g.add(seat, rest);
+      this.scene.add(g);
+      this.chair = g; this.chairWheels = wheels; this.chairR = R;
+    }
+    var sc = c.scale || 1;
+    this.chair.visible = true;
+    this.chair.scale.setScalar(sc);
+    this.chair.position.set(c.x, c.f, 0);
+    var self = this;
+    this.chairWheels.forEach(function (w) { w.rotation.z = -(c.dist || 0) / (self.chairR * sc); });
+  };
   var BACK_TURN = 1.4;
 
   Scene.prototype.resize = function (w, h) {
@@ -429,6 +468,7 @@ var ZLifeScene = (function () {
     this.sunBall.position.set(L.x - Math.cos(ang) * 160, L.f + 6 + Math.sin(ang) * 90, -200);
     this.sun.target.position.set(L.x, L.f, 0);
     this.sun.position.set(L.x + dir.x * 20, L.f + Math.max(2, dir.y * 20), dir.z * 20 + 6);
+    this.drawChair(s.chair);
     this.renderer.render(this.scene, this.camera);
     ctx.drawImage(this.renderer.domElement, 0, 0, W, H);
   };
