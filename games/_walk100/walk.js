@@ -33,7 +33,7 @@ var ZLifeWalk = (function (C) {
   var DAMP = ["hipKd", "kneeKd", "ankleKd", "torsoKd"];
   var CANE_AGE = 70;
   var FOOT = { len: 0.25 };
-  var STAIR = { liftHip: 0.3, liftKnee: -0.5, reachHip: 0.3, reachKnee: -0.6 };
+  var STAIR = { liftHip: 0.574, liftKnee: -1.033, reachHip: 0.63, reachKnee: -0.687, arm: 0, caneLift: 0, canePlant: 0 };
   // 転びにくくする手助け。hold・damp は引き戻す強さ（体重に対する割合）、ahead はつま先より前へ許す幅（大人の m）、old は年をとって弱める割合。
   var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15 };
   // 体の大きさ s による縮め方（s の何乗か）。重力も s 倍にすると、小さい体も大人と同じ間合いで倒れ、同じ押し方で歩ける。
@@ -445,9 +445,10 @@ var ZLifeWalk = (function (C) {
     });
     if (this.cane) {
       // 杖は左脚と一緒に前へ出す。つくと力を抜き、体が前へ出るのに合わせて傾く。
-      var lifting = sw === "L" && lift;
-      this.pdWorld("armR", 0.55, 200, 12, 160);
-      this.pdWorld("cane", lifting ? c.canePlant + c.caneLift : c.canePlant, lifting ? c.caneKp : c.caneSoft, 2, 80);
+      var lifting = sw === "L" && lift, onStairs = this.stairs && trunk.position.x > this.stairs.x0 - 0.5 ? 1 : 0;
+      // 階段では腕を前へ出して、杖を一段上へつく。
+      this.pdWorld("armR", 0.55 + STAIR.arm * onStairs, 200, 12, 160);
+      this.pdWorld("cane", lifting ? c.canePlant + c.caneLift + STAIR.caneLift * onStairs : c.canePlant + STAIR.canePlant * onStairs, lifting ? c.caneKp : c.caneSoft, 2, 80);
     }
   };
 
