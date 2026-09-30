@@ -340,6 +340,7 @@ var ZLifeScene = (function () {
     this.scene.add(g);
   };
   var STAIR_COUNT = 160;
+  var BACK_TURN = 1.4;
 
   Scene.prototype.resize = function (w, h) {
     this.w = w; this.h = h;
@@ -367,8 +368,11 @@ var ZLifeScene = (function () {
     var L = this.look, tall = Math.max(0, Math.min(1, (H / W - 1.45) / 0.9));
     this.camera.fov = 44 + tall * 10;
     this.camera.updateProjectionMatrix();
-    this.camera.position.set(L.x + L.d * 0.32, L.f + L.y + L.d * 0.2, L.d);
-    this.camera.lookAt(L.x + L.d * 0.08, L.f + L.y * 0.85, 0);
+    // 年をとるほど、横からの眺めを背中の側へ少しずつ回していく（100歳でほぼ真後ろ）。
+    var turn = BACK_TURN * Math.max(0, Math.min(1, s.progress)), c = Math.cos(turn), sn = Math.sin(turn);
+    var ax = L.x + L.d * 0.08, ay = L.f + L.y * 0.85, ox = L.d * 0.24, oz = L.d;
+    this.camera.position.set(ax + ox * c - oz * sn, L.f + L.y + L.d * 0.2, ox * sn + oz * c);
+    this.camera.lookAt(ax, ay, 0);
     // 太陽は左の低い所から昇り、真上を通って右へ沈む。
     var ang = Math.PI * (0.06 + 0.88 * s.progress);
     var dir = new T.Vector3(-Math.cos(ang), Math.sin(ang) * 0.9 + 0.08, -0.45).normalize();

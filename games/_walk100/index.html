@@ -41,7 +41,7 @@
 
    物理で歩くほど年をとる。0歳はハイハイ、1歳で立ち、背が伸び、年をとると前かがみになって杖をつく。
    押す（タップ・スペース・ジョイパッド）たびに左右が入れ替わって一歩。押している間は足を上げ、離すと前へ伸ばして着く。
-   ← → は左右を選んで押す。転んだらその年齢が記録、100歳まで歩けたらゴール。 */
+   ← → は左右を選んで押す。転んでもその場で起き上がって続き、100歳（大往生）でゴール。かかった時間が記録。 */
 (function () {
   "use strict";
 
@@ -146,7 +146,7 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", DOWN: "down", RESULT: "result" };
-  var state, score, scoreText, T, held, walker, age, downT, finished, snap, best, bestX, stairs;
+  var state, score, scoreText, T, held, walker, age, downT, finished, snap, best, bestX, stairs, falls, life, setbacks;
 
   // morph 秒かけて、前の体の姿から新しい体へ見た目を移す。
   function setWalker(w, morph) {
@@ -162,6 +162,9 @@
     T = 0;
     held = false;
     finished = false;
+    falls = 0;
+    life = [[0, 0]];
+    setbacks = [];
     best = 0;
     age = 0;
     setStairs(null);
@@ -195,12 +198,13 @@
     if (state !== S.PLAY && state !== S.DOWN) return;
     walker.step(dt);
     walker.takeImpacts().forEach(function (hit) { contactSound(hit.part, hit.strength); });
+    T += dt;
     if (state === S.DOWN) {
       downT += dt;
-      if (downT > 1.6) showResult();
+      if (finished) { if (downT > 1.6) showResult(); }
+      else if (downT > RISE_AFTER) getUp();
       return;
     }
-    T += dt;
     // 進んだ最長の距離を、背の高さで割って足していく（小さい体は歩幅も小さいので、同じ歩数で同じだけ育つ）。
     var x = walker.x();
     if (x > bestX) { best += (x - bestX) / (walker.form === "baby" ? 1 : walker.scale); bestX = x; }
@@ -211,21 +215,34 @@
       held = false;
       state = S.DOWN;
       downT = 0;
-      score = Math.floor(age);
-      scoreText = score + "歳";
+      falls++;
+      setbacks.push([T, age]);
       fallSound();
       return;
     }
     grow();
+    // 結果のグラフ用に、時間と年齢を少しずつ残す。
+    if (T - life[life.length - 1][0] >= 0.25 || age >= GOAL_AGE) life.push([T, age]);
     if (age >= GOAL_AGE) {
+      // 大往生。100歳まで歩いた時間が記録。
       finished = true;
       state = S.DOWN;
       downT = 0.4;
-      score = GOAL_AGE;
-      scoreText = score + "歳";
+      score = Math.round(T * 10) / 10;
+      scoreText = score.toFixed(1) + "秒";
       walker.release();
       finishSound();
     }
+  }
+  // 転んだら、その場で同じ年齢のまま起き上がる（倒れた姿から立ち姿へ見た目を寄せる）。
+  var RISE_AFTER = 1.2, WHITE_FROM = 90;
+  function getUp() {
+    var x = walker.x(), w = walker.form === "baby" ? new LW.Walker("baby", x - 0.13, { age: age })
+      : new LW.Walker("biped", x, { age: age, cane: age >= LW.CANE_AGE, stairs: stairs });
+    setWalker(w, 0.5);
+    state = S.PLAY;
+    held = false;
+    standSound();
   }
   function showResult() {
     state = S.RESULT;
@@ -292,7 +309,7 @@
 
   function doShare() {
     /* ▼SHARE: 共有リンクは share.js が付ける。 */
-    window.zResultActions.x({ text: scoreText + " #100歳ウォーク" });
+    window.zResultActions.x({ text: "大往生 " + scoreText + " #100歳ウォーク" });
   }
 
   /* ============ 描画 ============ */
@@ -316,7 +333,11 @@
       ctx.fillStyle = "#f6c7a2";
       ctx.fillRect(0, 0, W, H);
     }
+    // 90歳を過ぎると、だんだん白く飛んでいく。
+    var white = Math.max(0, Math.min(1, (age - WHITE_FROM) / (GOAL_AGE - WHITE_FROM)));
+    if (white > 0) { ctx.fillStyle = "rgba(255,255,255," + (white * white * (3 - 2 * white)) + ")"; ctx.fillRect(0, 0, W, H); }
     if (state === S.PLAY || state === S.DOWN) drawAge();
+    if (state === S.DOWN && !finished) drawSetback();
     if (state === S.RESULT) drawResult();
   }
 
@@ -339,10 +360,59 @@
     ctx.restore();
   }
 
+  /* 転んでいる間、真ん中に「挫折」。 */
+  function drawSetback() {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, downT / 0.15);
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 12;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "800 96px sans-serif";
+    ctx.fillText("挫折", W / 2, H * 0.36);
+    ctx.restore();
+  }
+
+  /* 人生の進みのグラフ。横が時間、縦が年齢（0〜100歳）。転んだところに「挫折」。 */
+  function drawLife(x, y, w, h) {
+    var end = life[life.length - 1][0] || 1;
+    function px(t) { return x + w * t / end; }
+    function py(a) { return y + h - h * a / GOAL_AGE; }
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.35)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.lineTo(x, y + h); ctx.lineTo(x + w, y + h);
+    ctx.stroke();
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 5;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    life.forEach(function (p, i) { if (i) ctx.lineTo(px(p[0]), py(p[1])); else ctx.moveTo(px(p[0]), py(p[1])); });
+    ctx.stroke();
+    ctx.font = "800 22px sans-serif";
+    ctx.textAlign = "center";
+    setbacks.forEach(function (p, i) {
+      var cx = px(p[0]), cy = py(p[1]);
+      ctx.fillStyle = "#ff5a4e";
+      ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
+      // 近くの挫折と重ならないよう、上と下に交互に出す。
+      var below = i % 2 === 1 && cy < y + h - 40, ly = below ? cy + 32 : cy - 16;
+      ctx.fillStyle = "#fff";
+      ctx.shadowColor = "rgba(0,0,0,.7)";
+      ctx.shadowBlur = 6;
+      ctx.fillText("挫折", Math.max(x + 24, Math.min(x + w - 24, cx)), ly);
+      ctx.shadowBlur = 0;
+    });
+    ctx.restore();
+  }
+
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.7;
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -371,10 +441,17 @@
     var uw = ctx.measureText(unit).width;
     ctx.textAlign = "left";
     ctx.font = "800 108px sans-serif";
-    ctx.fillText(num, W / 2 - (nw + uw + 6) / 2, H * 0.45);
+    ctx.fillText(num, W / 2 - (nw + uw + 6) / 2, H * 0.42);
     ctx.font = "800 48px sans-serif";
-    ctx.fillText(unit, W / 2 - (nw + uw + 6) / 2 + nw + 6, H * 0.45);
+    ctx.fillText(unit, W / 2 - (nw + uw + 6) / 2 + nw + 6, H * 0.42);
+    ctx.textAlign = "center";
+    // 「大往生」は縦書き。
+    ctx.font = "800 72px sans-serif";
+    ctx.textBaseline = "middle";
+    "大往生".split("").forEach(function (ch, i) { ctx.fillText(ch, W / 2, H * 0.09 + i * 80); });
+    ctx.textBaseline = "alphabetic";
     ctx.restore();
+    drawLife(W * 0.14, H * 0.47, W * 0.72, H * 0.17);
     resultButtons().forEach(function (b) {
       ctx.save();
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
@@ -398,7 +475,7 @@
       return { state: state, score: score, scoreText: scoreText, W: W, H: H, T: T, age: age, form: walker && walker.form, cane: walker ? walker.cane : false, floor: walker ? walker.floorAt(walker.x()) : 0, stairs: !!stairs, scale: walker ? walker.scale : 0,
         x: walker ? walker.x() : 0, side: walker ? walker.side : 0, pressed: walker ? walker.pressed : false,
         landed: walker ? !walker.side || !!(walker.near || {})[(walker.form === "baby" ? "arm" : "foot") + (walker.side < 0 ? "L" : "R")] : false,
-        fallen: walker ? walker.fallen() : false, finished: finished, has3d: !!view3d, length: LENGTH };
+        fallen: walker ? walker.fallen() : false, finished: finished, falls: falls, setbacks: setbacks ? setbacks.length : 0, lifePoints: life ? life.length : 0, has3d: !!view3d, length: LENGTH };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(1 / 60); } },
     reset: function () { newRound(); }

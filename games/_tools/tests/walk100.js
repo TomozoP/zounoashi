@@ -6,8 +6,8 @@
    ・開始画面では歩かない。スペースを離すと0歳（ハイハイ）から始まる
    ・押さなければ転ばずにその場にいる（赤ちゃん・幼児・大人・杖の老人）
    ・進むほど年をとる。1歳で立ち、背が伸び、70歳で杖をつく
-   ・見ながら押す人のまねで、大人の年齢まで歩ける。20歳からは階段を上り、50歳を越えることもある
-   ・歩き続けないと転ぶ（一歩で止まると体の流れを止めきれない）。転ぶとその年齢（歳）が結果になる
+   ・見ながら押す人のまねで、20歳からの階段を上り、100歳（大往生）まで歩ける。かかった時間（秒）が結果
+   ・歩き続けないと転ぶ（一歩で止まると体の流れを止めきれない）。転んでもその場で同じ年齢のまま起き上がる
    ・Esc で最初から */
 
 var load = require("../harness");
@@ -45,7 +45,7 @@ function play(delay, hold, limit) {
   var frames = 0, pressedAt = -1, landedAt = -1, seen = { stood: false, cane: false, floor: 0 }, k = 1;
   while (frames < limit * 60) {
     n = g.probe.now();
-    if (n.state !== "play") break;
+    if (n.state === "result") break;
     if (n.form === "biped") seen.stood = true;
     if (n.cane) seen.cane = true;
     seen.floor = Math.max(seen.floor, n.floor || 0);
@@ -62,13 +62,12 @@ function play(delay, hold, limit) {
   return { n: g.probe.now(), seen: seen };
 }
 var results = [[0, 0.3], [0.1, 0.35], [0.05, 0.2], [0.15, 0.4]].map(function (r) { return play(r[0], r[1], 200); });
-results.forEach(function (r, i) { console.log("    リズム" + i + ": " + r.n.state + " " + r.n.scoreText + " " + r.n.T.toFixed(1) + "秒"); });
-ok("見ながら押せば大人まで歩ける", results.every(function (r) { return r.n.score >= 20; }));
-ok("階段でも上の年齢まで行けることがある", results.some(function (r) { return r.n.score >= 50; }));
+results.forEach(function (r, i) { console.log("    リズム" + i + ": " + r.n.state + " " + Math.floor(r.n.age) + "歳 " + r.n.scoreText + " 転んだ" + r.n.falls + "回"); });
+ok("見ながら押せば100歳まで歩ける", results.every(function (r) { return r.n.finished && r.n.state === "result"; }));
 ok("20歳から階段を上る", results.some(function (r) { return r.seen.floor > 0.5; }), results.map(function (r) { return r.seen.floor.toFixed(2) + "m"; }).join(" "));
 ok("途中で立つ", results.every(function (r) { return r.seen.stood; }));
-ok("結果は歳", results.every(function (r) { return /^\d+歳$/.test(r.n.scoreText) && r.n.state === "result"; }));
-ok("100歳を超えない", results.every(function (r) { return r.n.score <= 100; }));
+ok("結果は秒", results.every(function (r) { return /^\d+\.\d秒$/.test(r.n.scoreText); }));
+ok("100歳を超えない", results.every(function (r) { return r.n.age <= 100; }));
 
 // 一歩だけ出して止まると、体の流れを止めきれずに転ぶか。
 g.probe.reset();
@@ -76,10 +75,11 @@ g.probe.jump(30);
 g.key(" "); g.step(18); g.key(" ", true);
 g.step(60 * 6);
 n = g.probe.now();
-ok("一歩で止まると転ぶ", n.state === "down" || n.state === "result", n.state);
-g.step(150);
+ok("一歩で止まると転ぶ", n.falls >= 1, n.state + " " + n.falls);
+var fellAge = n.age;
+g.step(60 * 2);
 n = g.probe.now();
-ok("転ぶと年齢が結果になる", n.state === "result" && /^3\d歳$/.test(n.scoreText), n.scoreText);
+ok("転んでもその場で起き上がって続く", n.state === "play" && !n.fallen && Math.abs(n.age - fellAge) < 1, n.state + " " + n.age.toFixed(1) + "歳");
 
 g.press("Escape");
 g.step(2);
