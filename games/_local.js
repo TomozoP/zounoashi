@@ -47,5 +47,6 @@ window.DRAFT_GAMES = [
     "play": "games/_brute-escape/index.html",
     "full": true,
     "catch": ""
-  }
+  },
+  {"type":"lab","tags":[],"id":"sphinx-run","title":"スフィンクスラン","year":2026,"date":"2026-09-30","plays":null,"url":"","img":"games/_sphinx-run/img/thumb.webp","play":"games/_sphinx-run/index.html","full":true,"catch":""},
 ];
