@@ -33,6 +33,7 @@ var ZLifeWalk = (function (C) {
   var DAMP = ["hipKd", "kneeKd", "ankleKd", "torsoKd"];
   var CANE_AGE = 70;
   var FOOT = { len: 0.25 };
+  var STAIR = { liftHip: 0.3, liftKnee: -0.5, reachHip: 0.3, reachKnee: -0.6 };
   // 転びにくくする手助け。hold・damp は引き戻す強さ（体重に対する割合）、ahead はつま先より前へ許す幅（大人の m）、old は年をとって弱める割合。
   var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15 };
   // 体の大きさ s による縮め方（s の何乗か）。重力も s 倍にすると、小さい体も大人と同じ間合いで倒れ、同じ押し方で歩ける。
@@ -109,7 +110,9 @@ var ZLifeWalk = (function (C) {
     ground.addShape(new C.Box(new C.Vec3(2000, 0.5, 3)));
     ground.position.set(0, -0.5, 0);
     this.world.addBody(ground);
+    ground.isFloor = true;
     this.ground = ground;
+    this.steps = [];
     this.parts = {};
     this.list = [];
     this.joints = {};
@@ -119,11 +122,13 @@ var ZLifeWalk = (function (C) {
     this.limp = false;
     this.impacts = [];
     this.touch = {};
+    this.stairs = opts.stairs || (opts.from && opts.from.stairs) || null;
     if (form === "baby") this.buildBaby(x || 0); else this.buildBiped(x || 0, opts.from);
     this.mass = this.list.reduce(function (m, b) { return m + b.mass; }, 0);
+    if (this.stairs) this.setStairs(this.stairs);
     var self = this;
     this.world.addEventListener("beginContact", function (e) {
-      var b = e.bodyA === ground ? e.bodyB : e.bodyB === ground ? e.bodyA : null;
+      var b = e.bodyA.isFloor ? e.bodyB : e.bodyB.isFloor ? e.bodyA : null;
       if (!b || !b.part) return;
       var v = Math.abs(b.velocity.y) + Math.abs(b.velocity.x) * 0.3;
       if (v > 0.2) self.impacts.push({ part: b.part, strength: Math.min(1, v / 2.5) });
@@ -236,7 +241,7 @@ var ZLifeWalk = (function (C) {
       pts["footC" + k] = [fx, fy];
       [-1, 1].forEach(function (e) { lowNew = Math.min(lowNew, fy + e * d.foot / 2 * Math.sin(a) - fh * Math.cos(a)); });
     });
-    var target = from && from.form === "biped" ? Math.max(0, lowest(from)) : 0;
+    var target = from && from.form === "biped" ? Math.max(0, lowest(from)) : Math.max(floorAt(this.stairs, hip[0] - 0.15 * s), floorAt(this.stairs, hip[0] + 0.25 * s));
     var lift = target - lowNew;
     Object.keys(pts).forEach(function (k) { pts[k] = [pts[k][0], pts[k][1] + lift]; });
     hip = pts.hip; neck = pts.neck;
@@ -418,8 +423,10 @@ var ZLifeWalk = (function (C) {
       // 体が前へ流れているほど、振り出す脚を遠くへ出す（転びそうな側へ足を出す反射）。
       var st = p["foot" + stances[0]], d = trunk.position.x - st.position.x, v = trunk.velocity.x;
       var reach = clamp(c.placeD * d + c.placeV * v, 0.5);
-      swingT = this.pdWorld("thigh" + sw, (lift ? c.liftHip : c.reachHip) + reach, c.hipKp, c.hipKd, c.hip);
-      this.pd("shin" + sw, lift ? c.liftKnee : -0.05, c.kneeKp * 0.5, c.kneeKd * 0.5, c.knee);
+      // 階段では腿を高く上げ、膝を曲げたまま次の段へ置く（段の角につまずかない）。
+      var up = this.stairs && p["foot" + sw].position.x > this.stairs.x0 - 0.4 * this.scale ? 1 : 0;
+      swingT = this.pdWorld("thigh" + sw, (lift ? c.liftHip + STAIR.liftHip * up : c.reachHip + STAIR.reachHip * up) + reach, c.hipKp, c.hipKd, c.hip);
+      this.pd("shin" + sw, lift ? c.liftKnee + STAIR.liftKnee * up : -0.05 + STAIR.reachKnee * up, c.kneeKp * 0.5, c.kneeKd * 0.5, c.knee);
       this.pd("foot" + sw, 0.1, c.ankleKp * 0.5, c.ankleKd * 0.5, c.ankle);
     }
     stances.forEach(function (s) {
@@ -452,9 +459,47 @@ var ZLifeWalk = (function (C) {
   };
   Walker.prototype.release = function () { this.pressed = false; };
 
+  // 上り階段。stairs = { x0: 一段目の手前の端, run: 奥行き, rise: 高さ }。
+  // 段は体の近くの数段だけを置き、進むにつれて前へ付け替える（全部置くと当たり判定が重い）。
+  var STEP_POOL = 8;
+  Walker.prototype.setStairs = function (st) {
+    if (!st || this.steps.length) return;
+    this.stairs = st;
+    for (var i = 0; i < STEP_POOL; i++) {
+      var b = new C.Body({ mass: 0, material: this.groundMat, collisionFilterGroup: G_GROUND, collisionFilterMask: G_BODY });
+      b.addShape(new C.Box(new C.Vec3(st.run / 2, 1, 3)));
+      b.isFloor = true;
+      b.index = null;
+      this.world.addBody(b);
+      this.steps.push(b);
+    }
+    this.placeSteps();
+  };
+  Walker.prototype.placeSteps = function () {
+    var st = this.stairs;
+    if (!st) return;
+    var first = Math.floor((this.parts.trunk.position.x - st.x0) / st.run) - 3;
+    this.steps.forEach(function (b, k) {
+      var i = first + k;
+      if (b.index === i) return;
+      b.index = i;
+      // 上の面が段の高さに来る、背の高い箱。手前の段より前は地面の下へしまう。
+      if (i < 0) b.position.set(st.x0 - 10 - k, -5, 0);
+      else b.position.set(st.x0 + (i + 0.5) * st.run, (i + 1) * st.rise - 1, 0);
+      b.aabbNeedsUpdate = true;
+    });
+  };
+  // x の場所の床の高さ。
+  function floorAt(st, x) {
+    if (!st || x < st.x0) return 0;
+    return (Math.floor((x - st.x0) / st.run) + 1) * st.rise;
+  }
+  Walker.prototype.floorAt = function (x) { return floorAt(this.stairs, x); };
+
   Walker.prototype.step = function (dt) {
     var n = Math.max(1, Math.round(dt / STEP));
     for (var i = 0; i < n; i++) {
+      this.placeSteps();
       this.control();
       this.world.step(STEP);
       this.time += STEP;
@@ -462,9 +507,9 @@ var ZLifeWalk = (function (C) {
     }
   };
   Walker.prototype.contacts = function () {
-    var touch = {}, g = this.ground, last = this.lastTouch || (this.lastTouch = {}), now = this.time;
+    var touch = {}, last = this.lastTouch || (this.lastTouch = {}), now = this.time;
     this.world.contacts.forEach(function (eq) {
-      var b = eq.bi === g ? eq.bj : eq.bj === g ? eq.bi : null;
+      var b = eq.bi.isFloor ? eq.bj : eq.bj.isFloor ? eq.bi : null;
       if (b && b.part) { touch[b.part] = true; last[b.part] = now; }
     });
     // 一瞬離れただけなら、ついているままとみなす。
@@ -472,7 +517,7 @@ var ZLifeWalk = (function (C) {
     for (var k in last) if (now - last[k] < 0.08) this.near[k] = true;
     var t = this.parts.trunk, head = t.pointToWorldFrame(new C.Vec3(0, t.headOffset, 0));
     this.head = head;
-    if (head.y < t.headR + 0.02) touch.head = true;
+    if (head.y < floorAt(this.stairs, head.x) + t.headR + 0.02) touch.head = true;
     this.touch = touch;
   };
   // 転んだか。頭がつく、ハイハイで裏返る、立ち歩きで胴・腿・腕が地面につく。
@@ -486,6 +531,6 @@ var ZLifeWalk = (function (C) {
   Walker.prototype.takeImpacts = function () { var r = this.impacts; this.impacts = []; return r; };
   Walker.prototype.angle = function (name) { return angleOf(this.parts[name]); };
 
-  return { Walker: Walker, BABY: BABY, ADULT: ADULT, ELDER: ELDER, heightAt: heightAt, ageAt: ageAt, distanceAt: distanceAt, LIFE: LIFE, params: params, CANE_AGE: CANE_AGE, FOOT: FOOT, HELP: HELP, SIZE: SIZE, KID: KID, angleOf: angleOf, STEP: STEP };
+  return { Walker: Walker, BABY: BABY, ADULT: ADULT, ELDER: ELDER, heightAt: heightAt, ageAt: ageAt, distanceAt: distanceAt, LIFE: LIFE, params: params, CANE_AGE: CANE_AGE, floorAt: floorAt, FOOT: FOOT, STAIR: STAIR, HELP: HELP, SIZE: SIZE, KID: KID, angleOf: angleOf, STEP: STEP };
 })(CANNON);
 if (typeof module !== "undefined") module.exports = ZLifeWalk;

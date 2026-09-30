@@ -53,6 +53,12 @@
 
   /* ============ 人生 ============ 進んだ距離がそのまま年齢になる（walk.js の LIFE） */
   var LW = ZLifeWalk, GOAL_AGE = 100, LENGTH = LW.distanceAt(GOAL_AGE);
+  // 20歳からは上り階段。段の奥行きと高さ（m）。
+  var STAIRS = { age: 20, run: 0.4, rise: 0.1 };
+  // 20歳になる場所から始まる階段。x は今いる場所、b は今の進み（背の高さで割った距離）。
+  function stairsFrom(x, b, scale) {
+    return { x0: x + (LW.distanceAt(STAIRS.age) - b) * scale, run: STAIRS.run, rise: STAIRS.rise };
+  }
 
   var view3d = null;
   try {
@@ -140,7 +146,7 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", DOWN: "down", RESULT: "result" };
-  var state, score, scoreText, T, held, walker, age, downT, finished, snap, best, bestX;
+  var state, score, scoreText, T, held, walker, age, downT, finished, snap, best, bestX, stairs;
 
   // morph 秒かけて、前の体の姿から新しい体へ見た目を移す。
   function setWalker(w, morph) {
@@ -158,15 +164,24 @@
     finished = false;
     best = 0;
     age = 0;
+    setStairs(null);
     setWalker(new LW.Walker("baby", 0));
     bestX = walker.x();
     snap = true;
+  }
+
+  function setStairs(st) {
+    stairs = st;
+    if (st && walker) walker.setStairs(st);
+    if (view3d) view3d.setStairs(st);
   }
 
   // 年齢を進める。背が伸びた・杖を持つ年になったら、同じ姿勢のまま体を作り直す。
   function grow() {
     age = Math.min(GOAL_AGE, LW.ageAt(best));
     walker.setAge(age);
+    // 20歳の少し手前で、20歳になる場所から始まる階段を置く。
+    if (!stairs && age >= STAIRS.age - 1) setStairs(stairsFrom(bestX, best, walker.scale));
     if (!walker.outgrown(age)) return;
     var stood = walker.form === "baby";
     // ハイハイから立つときは、四つんばいの姿から起き上がるように見せる。
@@ -295,7 +310,7 @@
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
     if (view3d && walker) {
-      view3d.draw(ctx, W, H, { x: walker.x(), form: walker.form, scale: walker.scale, progress: age / GOAL_AGE, snap: snap, dt: dt });
+      view3d.draw(ctx, W, H, { x: walker.x(), floor: walker.floorAt(walker.x()), form: walker.form, scale: walker.scale, progress: age / GOAL_AGE, snap: snap, dt: dt });
       snap = false;
     } else {
       ctx.fillStyle = "#f6c7a2";
@@ -380,7 +395,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
   window.__probe = {
     now: function () {
-      return { state: state, score: score, scoreText: scoreText, W: W, H: H, T: T, age: age, form: walker && walker.form, cane: walker ? walker.cane : false, scale: walker ? walker.scale : 0,
+      return { state: state, score: score, scoreText: scoreText, W: W, H: H, T: T, age: age, form: walker && walker.form, cane: walker ? walker.cane : false, floor: walker ? walker.floorAt(walker.x()) : 0, stairs: !!stairs, scale: walker ? walker.scale : 0,
         x: walker ? walker.x() : 0, side: walker ? walker.side : 0, pressed: walker ? walker.pressed : false,
         landed: walker ? !walker.side || !!(walker.near || {})[(walker.form === "baby" ? "arm" : "foot") + (walker.side < 0 ? "L" : "R")] : false,
         fallen: walker ? walker.fallen() : false, finished: finished, has3d: !!view3d, length: LENGTH };
@@ -397,7 +412,9 @@
       newRound();
       best = LW.distanceAt(setup.age);
       age = setup.age;
-      setWalker(setup.age < 1 ? new LW.Walker("baby", best) : new LW.Walker("biped", best, { age: age, cane: age >= LW.CANE_AGE }), false);
+      var st = age >= STAIRS.age - 1 ? stairsFrom(best, best, LW.heightAt(age)) : null;
+      setWalker(setup.age < 1 ? new LW.Walker("baby", best) : new LW.Walker("biped", best, { age: age, cane: age >= LW.CANE_AGE, stairs: st }), false);
+      setStairs(st);
       bestX = walker.x();
       snap = true;
     }

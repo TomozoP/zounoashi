@@ -294,7 +294,7 @@ var ZLifeScene = (function () {
 
 
     this.figure = null;
-    this.look = { x: 0, y: 0.3, d: 2.6 };
+    this.look = { x: 0, y: 0.3, d: 2.6, f: 0 };
     this.w = 540; this.h = 960;
   }
 
@@ -308,6 +308,29 @@ var ZLifeScene = (function () {
     this.figure = walker ? new Figure(walker, this.scene, from, morph || 0.6) : null;
   };
 
+  // 上り階段を置く（null で外す）。st = { x0, run, rise }。段は地面から積み上げた石の箱。
+  Scene.prototype.setStairs = function (st) {
+    if (this.stairs) {
+      this.scene.remove(this.stairs);
+      this.stairs.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
+      this.stairs = null;
+    }
+    this.stairInfo = st || null;
+    if (!st) return;
+    var g = new T.Group(), top = mat(0xd9d2c3, 0.9), side = mat(0xb8ae9c, 1);
+    for (var i = 0; i < STAIR_COUNT; i++) {
+      var h = (i + 1) * st.rise;
+      var b = new T.Mesh(new T.BoxGeometry(st.run, h, 1.3), [side, side, top, side, side, side]);
+      b.position.set(st.x0 + (i + 0.5) * st.run, h / 2, 0);
+      b.castShadow = true;
+      b.receiveShadow = true;
+      g.add(b);
+    }
+    this.stairs = g;
+    this.scene.add(g);
+  };
+  var STAIR_COUNT = 160;
+
   Scene.prototype.resize = function (w, h) {
     this.w = w; this.h = h;
     this.renderer.setSize(w, h, false);
@@ -315,7 +338,7 @@ var ZLifeScene = (function () {
     this.camera.updateProjectionMatrix();
   };
 
-  // s = { x, form, scale, progress, snap, dt }
+  // s = { x, floor, form, scale, progress, snap, dt }。floor は足もとの高さ（階段）。
   Scene.prototype.draw = function (ctx, W, H, s) {
     if (this.figure) this.figure.update(s.dt);
     var sky = skyAt(s.progress);
@@ -330,17 +353,18 @@ var ZLifeScene = (function () {
     this.look.x += (s.x - this.look.x) * a;
     this.look.y += (targetY - this.look.y) * Math.min(1, a * 0.6);
     this.look.d += (targetD - this.look.d) * Math.min(1, a * 0.6);
+    this.look.f += ((s.floor || 0) - this.look.f) * Math.min(1, s.snap ? 1 : a * 0.8);
     var L = this.look, tall = Math.max(0, Math.min(1, (H / W - 1.45) / 0.9));
     this.camera.fov = 44 + tall * 10;
     this.camera.updateProjectionMatrix();
-    this.camera.position.set(L.x + L.d * 0.32, L.y + L.d * 0.2, L.d);
-    this.camera.lookAt(L.x + L.d * 0.08, L.y * 0.85, 0);
+    this.camera.position.set(L.x + L.d * 0.32, L.f + L.y + L.d * 0.2, L.d);
+    this.camera.lookAt(L.x + L.d * 0.08, L.f + L.y * 0.85, 0);
     // 太陽は左の低い所から昇り、真上を通って右へ沈む。
     var ang = Math.PI * (0.06 + 0.88 * s.progress);
     var dir = new T.Vector3(-Math.cos(ang), Math.sin(ang) * 0.9 + 0.08, -0.45).normalize();
-    this.sunBall.position.set(L.x - Math.cos(ang) * 160, 6 + Math.sin(ang) * 90, -200);
-    this.sun.target.position.set(L.x, 0, 0);
-    this.sun.position.set(L.x + dir.x * 20, Math.max(2, dir.y * 20), dir.z * 20 + 6);
+    this.sunBall.position.set(L.x - Math.cos(ang) * 160, L.f + 6 + Math.sin(ang) * 90, -200);
+    this.sun.target.position.set(L.x, L.f, 0);
+    this.sun.position.set(L.x + dir.x * 20, L.f + Math.max(2, dir.y * 20), dir.z * 20 + 6);
     this.renderer.render(this.scene, this.camera);
     ctx.drawImage(this.renderer.domElement, 0, 0, W, H);
   };
