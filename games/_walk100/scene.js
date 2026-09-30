@@ -14,73 +14,93 @@ var ZLifeScene = (function () {
   function ball(r, m) { var s = new T.Mesh(new T.SphereGeometry(r, 18, 14), m); s.castShadow = true; return s; }
   function box(w, h, d, m) { var b = new T.Mesh(new T.BoxGeometry(w, h, d), m); b.castShadow = true; return b; }
 
-  // 年齢ごとの色と、手足を左右へずらす幅。右は手前（カメラ側）。
-  var BABY_LOOK = { skin: 0xffd3b5, body: 0xfff0a0, leg: 0xfff0a0, shin: 0xffd3b5, shoe: null, hair: 0x6b4a2b, hairSize: 0.45, diaper: 1, chest: 1, legZ: 0.06, armZ: 0.08 };
-  // 服は子ども・大人・老人の色を年齢で混ぜる。
-  var CLOTHES = [
-    { age: 1, body: 0xfff0a0, leg: 0xfff0a0, shoe: 0xffd3b5, skin: 0xffd3b5 },
-    { age: 4, body: 0xf2a33a, leg: 0x3b6fb6, shoe: 0xd8322e, skin: 0xffcfae },
-    { age: 12, body: 0xe8584a, leg: 0x2f4f86, shoe: 0x33383f, skin: 0xf4c29c },
-    { age: 25, body: 0x3f7fd0, leg: 0x2c3344, shoe: 0x3a2a20, skin: 0xe9b38c },
-    { age: 55, body: 0x4f7a5a, leg: 0x3a3a40, shoe: 0x3a2a20, skin: 0xe6b394 },
-    { age: 80, body: 0x8a6a4c, leg: 0x6d7076, shoe: 0x3b2c22, skin: 0xe6b394 }
+  // 年代ごとの服。age の間は前後の服を混ぜ、同じ服の間は変えない。
+  // shorts: すねが素足（1）か服か（0）、long: 袖が長い（1）か半袖（0）、tie: ネクタイ、pack: ランドセル。
+  var ERAS = [
+    { age: 0, body: 0xfff0a0, leg: 0xfff0a0, shoe: 0xffd3b5, shorts: 1, long: 0, tie: 0, pack: 0 },     // ロンパース
+    { age: 2.5, body: 0xfff0a0, leg: 0xfff0a0, shoe: 0xffd3b5, shorts: 1, long: 0, tie: 0, pack: 0 },
+    { age: 3.5, body: 0x8fc7ea, leg: 0x2f4f86, shoe: 0xf2f2f2, shorts: 1, long: 1, tie: 0, pack: 0 },     // 園児のスモック
+    { age: 5.5, body: 0x8fc7ea, leg: 0x2f4f86, shoe: 0xf2f2f2, shorts: 1, long: 1, tie: 0, pack: 0 },
+    { age: 6.5, body: 0xe8584a, leg: 0x2f4f86, shoe: 0xf2f2f2, shorts: 1, long: 0, tie: 0, pack: 1 },     // 小学生とランドセル
+    { age: 11.5, body: 0xe8584a, leg: 0x2f4f86, shoe: 0xf2f2f2, shorts: 1, long: 0, tie: 0, pack: 1 },
+    { age: 12.5, body: 0x1e2430, leg: 0x1e2430, shoe: 0xf2f2f2, shorts: 0, long: 1, tie: 0, pack: 0 },    // 学生服
+    { age: 18, body: 0x1e2430, leg: 0x1e2430, shoe: 0xf2f2f2, shorts: 0, long: 1, tie: 0, pack: 0 },
+    { age: 19, body: 0x5f8f6a, leg: 0x3b5a8a, shoe: 0xd8d2c4, shorts: 0, long: 1, tie: 0, pack: 0 },     // 私服
+    { age: 22, body: 0x5f8f6a, leg: 0x3b5a8a, shoe: 0xd8d2c4, shorts: 0, long: 1, tie: 0, pack: 0 },
+    { age: 23, body: 0x27324a, leg: 0x27324a, shoe: 0x1e1a18, shorts: 0, long: 1, tie: 1, pack: 0 },     // 背広
+    { age: 60, body: 0x27324a, leg: 0x27324a, shoe: 0x1e1a18, shorts: 0, long: 1, tie: 1, pack: 0 },
+    { age: 62, body: 0xd7c49a, leg: 0x6b5a48, shoe: 0x3b2c22, shorts: 0, long: 0, tie: 0, pack: 0 },     // 退職後のポロシャツ
+    { age: 75, body: 0xd7c49a, leg: 0x6b5a48, shoe: 0x3b2c22, shorts: 0, long: 0, tie: 0, pack: 0 },
+    { age: 77, body: 0x8a6a4c, leg: 0x6d7076, shoe: 0x3b2c22, shorts: 0, long: 1, tie: 0, pack: 0 }      // カーディガン
   ];
-  var HAIR = [[0, 0x6b4a2b], [20, 0x2d2118], [45, 0x2d2118], [65, 0x8d8a86], [85, 0xeeeeea]];
-  function lerpTable(t, x, k) {
-    if (x <= t[0].age) return new T.Color(t[0][k]);
-    for (var i = 1; i < t.length; i++) if (x <= t[i].age) return new T.Color(t[i - 1][k]).lerp(new T.Color(t[i][k]), (x - t[i - 1].age) / (t[i].age - t[i - 1].age));
-    return new T.Color(t[t.length - 1][k]);
+  var SKIN = [{ age: 0, v: 0xffd3b5 }, { age: 6, v: 0xffcfae }, { age: 20, v: 0xe9b38c }, { age: 70, v: 0xe6b394 }];
+  var HAIR = [{ age: 0, v: 0x6b4a2b }, { age: 20, v: 0x2d2118 }, { age: 45, v: 0x2d2118 }, { age: 65, v: 0x8d8a86 }, { age: 85, v: 0xeeeeea }];
+  function at(t, x) {
+    if (x <= t[0].age) return { a: t[0], b: t[0], u: 0 };
+    for (var i = 1; i < t.length; i++) if (x <= t[i].age) return { a: t[i - 1], b: t[i], u: (x - t[i - 1].age) / (t[i].age - t[i - 1].age) };
+    return { a: t[t.length - 1], b: t[t.length - 1], u: 0 };
   }
+  function color(t, x, k) { var p = at(t, x); return new T.Color(p.a[k]).lerp(new T.Color(p.b[k]), p.u); }
+  function num(t, x, k) { var p = at(t, x); return p.a[k] + (p.b[k] - p.a[k]) * p.u; }
   function smooth(a, b, x) { var u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); }
-  function looks(walker) {
-    if (walker.form === "baby") return BABY_LOOK;
-    var age = walker.age, s = walker.scale;
-    function c(k) { return lerpTable(CLOTHES, age, k).getHex(); }
+  // 年齢 age の見た目。色は THREE.Color、ほかは数。
+  function looks(age) {
+    var skin = color(SKIN, age, "v"), body = color(ERAS, age, "body"), leg = color(ERAS, age, "leg");
     return {
-      skin: c("skin"), body: c("body"), leg: c("leg"), shoe: c("shoe"),
-      // 幼いうちは素足。すねの色を肌から服へ少しずつ移す。
-      shin: new T.Color(c("skin")).lerp(new T.Color(c("leg")), smooth(1, 4, age)).getHex(),
+      skin: skin, body: body, leg: leg, shoe: color(ERAS, age, "shoe"),
+      shin: leg.clone().lerp(skin, num(ERAS, age, "shorts")),
+      lower: skin.clone().lerp(body, num(ERAS, age, "long")),
+      hair: color(HAIR, age, "v"),
+      tie: num(ERAS, age, "tie"), pack: num(ERAS, age, "pack"),
       diaper: 1 - smooth(1.5, 3, age), chest: 1 + 0.35 * smooth(1, 6, age),
-      hair: lerpTable(HAIR.map(function (h) { return { age: h[0], v: h[1] }; }), age, "v").getHex(),
-      hairSize: age < 6 ? 0.45 + 0.11 * (age - 1) : age > 75 ? 1 - Math.min(0.25, (age - 75) / 60) : 1,
-      legZ: 0.1 * s, armZ: 0.2 * s
+      hairSize: age < 1 ? 0.45 : age < 6 ? 0.45 + 0.11 * (age - 1) : age > 75 ? 1 - Math.min(0.25, (age - 75) / 60) : 1
     };
   }
 
   // from に前の姿（各部位の位置と角度）を渡すと、dur 秒かけてそこから今の体へ移る。
+  // 服と髪の色、ネクタイ・ランドセルは、毎コマ今の年齢に合わせる（作り直しを待たない）。
   function Figure(walker, scene, from, dur) {
     this.walker = walker;
     this.form = walker.form;
     this.from = from || null;
     this.dur = dur || 0;
     this.t = 0;
-    var L = looks(walker), c = walker.cfg, self = this, sc = walker.scale || 0.5;
+    this.paint = [];
+    var baby = walker.form === "baby", L = looks(walker.age), c = walker.cfg, self = this, sc = walker.scale || 0.5;
+    var legZ = baby ? 0.06 : 0.1 * sc, armZ = baby ? 0.08 : 0.2 * sc;
+    this.L = L;
     this.root = new T.Group();
     scene.add(this.root);
     this.meshes = [];
+    // 年齢で色が変わる材質。role は looks の名前、k は奥の手足を暗くする割合。
+    this.mat = function (role, k, rough) {
+      var m = mat(L[role].clone().multiplyScalar(k || 1), rough);
+      self.paint.push({ m: m, role: role, k: k || 1 });
+      return m;
+    };
     Object.keys(walker.parts).forEach(function (name) {
       var b = walker.parts[name], g = new T.Group(), side = name.slice(-1), far = side === "L" && name !== "trunk";
       var z = 0;
-      if (/^(arm|cane)/.test(name)) z = (side === "L" ? -1 : 1) * L.armZ;
-      if (/^(thigh|shin|foot)/.test(name)) z = (side === "L" ? -1 : 1) * L.legZ;
-      if (name === "cane") z = L.armZ + 0.03 * sc;
+      if (/^(arm|cane)/.test(name)) z = (side === "L" ? -1 : 1) * armZ;
+      if (/^(thigh|shin|foot)/.test(name)) z = (side === "L" ? -1 : 1) * legZ;
+      if (name === "cane") z = armZ + 0.03 * sc;
       var k = far ? 0.78 : 1;
       if (name === "trunk") self.trunk(g, b, L, c);
       else if (/^arm/.test(name)) {
-        var up = capsule(b.r * 1.15, b.len * 0.45, mat(shade(L.body, k)));
+        var up = capsule(b.r * 1.15, b.len * 0.45, self.mat("body", k));
         up.position.y = b.len * 0.22;
-        var low = capsule(b.r, b.len * 0.5, mat(shade(L.skin, k)));
+        var low = capsule(b.r, b.len * 0.5, self.mat("lower", k));
         low.position.y = -b.len * 0.2;
-        var hand = ball(b.r * 1.35, mat(shade(L.skin, k)));
+        var hand = ball(b.r * 1.35, self.mat("skin", k));
         hand.position.y = -b.len / 2;
         g.add(up, low, hand);
       } else if (/^thigh/.test(name)) {
-        g.add(capsule(b.r, b.len, mat(shade(L.leg, k))));
+        g.add(capsule(b.r, b.len, self.mat("leg", k)));
       } else if (/^shin/.test(name)) {
-        g.add(capsule(b.r * (walker.form === "baby" ? 1 : 0.95), b.len, mat(shade(L.shin, k))));
-        if (walker.form === "baby") { var foot = ball(b.r * 1.3, mat(shade(L.skin, k))); foot.position.y = -b.len / 2; foot.scale.set(1, 1.4, 1); g.add(foot); }
+        g.add(capsule(b.r * (baby ? 1 : 0.95), b.len, self.mat("shin", k)));
+        if (baby) { var foot = ball(b.r * 1.3, self.mat("skin", k)); foot.position.y = -b.len / 2; foot.scale.set(1, 1.4, 1); g.add(foot); }
       } else if (/^foot/.test(name)) {
-        var f = box(b.len, 0.07 * sc, 0.11 * sc, mat(shade(L.shoe, k), 0.6));
+        var f = box(b.len, 0.07 * sc, 0.11 * sc, self.mat("shoe", k, 0.6));
         f.position.y = 0.005 * sc;
         g.add(f);
       } else if (name === "cane") {
@@ -102,23 +122,33 @@ var ZLifeScene = (function () {
   }
   Figure.prototype.trunk = function (g, b, L, c) {
     var baby = this.form === "baby", len = b.len, half = b.half, sc = this.walker.scale || 0.5;
-    var torso = capsule(half, len - half * 0.6, mat(L.body));
+    var torso = capsule(half, len - half * 0.6, this.mat("body"));
     torso.scale.z = L.chest;
     g.add(torso);
+    // ネクタイ（胸の前）とランドセル（背中）。年代で大きさを 0〜1 に変えて出し入れする。
+    var tie = box(0.025 * sc, len * 0.42, 0.06 * sc, mat(0xc23b3b, 0.6));
+    tie.position.set(half + 0.01 * sc, len * 0.12, 0);
+    var pack = new T.Group(), bag = box(0.12 * sc, len * 0.5, half * 2.1, mat(0xc0282d, 0.5));
+    bag.position.x = -0.06 * sc;
+    pack.add(bag);
+    pack.position.set(-half, len * 0.12, 0);
+    g.add(tie, pack);
+    this.tie = tie; this.pack = pack;
     if (L.diaper > 0.02) {
       // おむつのふくらみ。育つにつれて小さくなる。
-      var diaper = ball(half * (0.95 + 0.2 * L.diaper), mat(0xffffff));
+      var diaper = ball(half * 1.15, mat(0xffffff));
       diaper.scale.setScalar(L.diaper);
+      this.diaper = diaper;
       diaper.position.y = -len / 2 + half * 0.5;
       g.add(diaper);
     }
-    var neck = capsule(0.045 * sc, 0.06 * sc, mat(L.skin));
+    var neck = capsule(0.045 * sc, 0.06 * sc, this.mat("skin"));
     neck.position.y = len / 2 + 0.02 * sc;
     if (!baby) g.add(neck);
     var head = new T.Group(), r = b.headR;
     head.position.y = b.headOffset;
     this.head = head;
-    head.add(ball(r, mat(L.skin)));
+    head.add(ball(r, this.mat("skin")));
     // 顔は進む向き（大人は体の前、赤ちゃんは頭の先）。
     var ahead = baby ? new T.Vector3(0.35, 0.94, 0).normalize() : new T.Vector3(1, 0.05, 0).normalize();
     var eyeM = new T.MeshBasicMaterial({ color: 0x1d1a18 });
@@ -129,18 +159,23 @@ var ZLifeScene = (function () {
       if (!baby) e.position.y += r * 0.12;
       head.add(e);
     });
-    var ear = ball(r * 0.22, mat(L.skin));
+    var ear = ball(r * 0.22, this.mat("skin"));
     ear.position.set(baby ? 0.02 : -0.01, baby ? 0 : 0.01, r * 0.95);
     head.add(ear);
     // 髪。赤ちゃんは頭頂に少し、大人は後頭部を覆う。
-    var hair = new T.Mesh(new T.SphereGeometry(r * 1.06, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55 * L.hairSize), mat(L.hair, 1));
+    var hair = new T.Mesh(new T.SphereGeometry(r * 1.06, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55 * L.hairSize), this.mat("hair", 1, 1));
     hair.castShadow = true;
     hair.rotation.z = baby ? 1.9 : 0.38;
     head.add(hair);
     g.add(head);
   };
   Figure.prototype.update = function (dt) {
-    var from = this.from, e = 1;
+    var from = this.from, e = 1, L = looks(this.walker.age);
+    this.paint.forEach(function (p) { p.m.color.copy(L[p.role]).multiplyScalar(p.k); });
+    function show(o, v) { if (!o) return; o.visible = v > 0.01; o.scale.setScalar(Math.max(0.01, v)); }
+    show(this.tie, L.tie);
+    show(this.pack, L.pack);
+    show(this.diaper, L.diaper);
     if (from) {
       this.t += dt || 0;
       var u = Math.min(1, this.t / this.dur);
@@ -257,26 +292,17 @@ var ZLifeScene = (function () {
       this.scene.add(h);
     }, this);
 
-    // 境目と、ゴールの柱とテープ。
-    var postM = mat(0xf2efe6, 0.7), tapeM = mat(0xd8322e, 0.6);
-    this.goal = new T.Group();
-    [-0.9, 0.9].forEach(function (z) { var p = new T.Mesh(new T.CylinderGeometry(0.04, 0.04, 1.3, 10), postM); p.position.set(0, 0.65, z); p.castShadow = true; this.goal.add(p); }, this);
-    this.tape = new T.Mesh(new T.BoxGeometry(0.02, 0.05, 1.8), tapeM);
-    this.tape.position.set(0, 1.0, 0);
-    this.goal.add(this.tape);
-    this.goal.position.x = end;
-    this.scene.add(this.goal);
 
     this.figure = null;
     this.look = { x: 0, y: 0.3, d: 2.6 };
     this.w = 540; this.h = 960;
   }
 
-  // morph 秒かけて、前の体の姿から新しい体へ移る（0 ならすぐ入れ替える）。
+  // morph 秒かけて、前の体の姿から新しい体へ移る（0 ならすぐ入れ替える。false なら杖もすぐ出す）。
   Scene.prototype.setWalker = function (walker, morph) {
     var from = null;
     if (this.figure) {
-      if (morph || (walker && walker.cane && !this.figure.walker.cane)) from = this.figure.pose();
+      if (morph || (morph !== false && walker && walker.cane && !this.figure.walker.cane)) from = this.figure.pose();
       this.figure.dispose();
     }
     this.figure = walker ? new Figure(walker, this.scene, from, morph || 0.6) : null;

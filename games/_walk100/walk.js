@@ -1,6 +1,6 @@
 /* 100歳まで歩く体の剛体計算。0歳はハイハイ、1歳で立ち、背が伸び、年をとると前かがみになって杖をつく。
-   cannon-es の剛体を縦の面（前後と上下）に限って動かす。前へ押す力や姿勢を起こす外力は加えず、
-   関節の回転の力（隣り合う体に同じ大きさで逆向き）だけで歩く。 */
+   cannon-es の剛体を縦の面（前後と上下）に限って動かす。前へ押す力は加えず、関節の回転の力
+   （隣り合う体に同じ大きさで逆向き）で歩く。外からの力は、腰が足の上から大きく外れたときに少し引き戻す手助けだけ。 */
 var ZLifeWalk = (function (C) {
   "use strict";
 
@@ -32,6 +32,11 @@ var ZLifeWalk = (function (C) {
   var TORQUE = ["hip", "hipKp", "knee", "kneeKp", "ankle", "ankleKp", "standKp", "torsoKp", "tipKp", "caneKp", "caneSoft"];
   var DAMP = ["hipKd", "kneeKd", "ankleKd", "torsoKd"];
   var CANE_AGE = 70;
+  var FOOT = { len: 0.25 };
+  // 転びにくくする手助け。hold・damp は引き戻す強さ（体重に対する割合）、ahead はつま先より前へ許す幅（大人の m）、old は年をとって弱める割合。
+  var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15 };
+  // 体の大きさ s による縮め方（s の何乗か）。重力も s 倍にすると、小さい体も大人と同じ間合いで倒れ、同じ押し方で歩ける。
+  var SIZE = { torque: 5, damp: 5, v: 1, g: 1 };
   var GROW_STEP = 0.005;   // 背がこれだけ変わるたびに体を作り直す（小さいほど途切れなく育つ）
   var KID = { until: [2, 8], lean: 0.6, ankle: 1, stand: 1 };
 
@@ -43,8 +48,8 @@ var ZLifeWalk = (function (C) {
     return t[t.length - 1][1];
   }
   function heightAt(age) { return table(HEIGHT, age); }
-  // 進んだ距離（m）と年齢。ハイハイで1歳、子どものうちに背が伸び、年をとると一歩が重くなる。
-  var LIFE = [[0, 0], [2.5, 1], [14.5, 18], [40.5, 70], [50.5, 100]];
+  // 進んだ距離と年齢。距離は背の高さで割った値（大人の1m）。ハイハイで1歳、子どものうちに背が伸び、年をとると一歩が重くなる。
+  var LIFE = [[0, 0], [2, 1], [8.5, 18], [27, 70], [35, 100]];
   function ageAt(x) { return table(LIFE, Math.max(0, x)); }
   function distanceAt(age) { return table(LIFE.map(function (p) { return [p[1], p[0]]; }), age); }
   function smooth(a, b, x) { var u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); }
@@ -56,7 +61,7 @@ var ZLifeWalk = (function (C) {
       trunk: { len: 0.56 * s, half: 0.13 * s, mass: 32 * m }, head: { r: 0.12 * Math.pow(s, 0.3), mass: 5 * Math.pow(s, 1.8) },
       arm: { len: 0.62 * s, r: 0.045 * s, mass: 3.4 * m },
       thigh: { len: 0.45 * s, r: 0.07 * s, mass: 8 * m }, shin: { len: 0.44 * s, r: 0.05 * s, mass: 4 * m },
-      foot: 0.25 * s, footMass: 2 * s * s, cane: { mass: 0.6 * s }
+      foot: FOOT.len * s, footMass: 2 * s * s, cane: { mass: 0.6 * s }
     };
   }
   // 年齢 age、大きさ s の体の筋力と動かし方。
@@ -73,11 +78,11 @@ var ZLifeWalk = (function (C) {
     c.ankle *= 1 + KID.ankle * kid;
     c.standKp *= 1 + KID.stand * kid;
     c.tipKp *= 1 + KID.ankle * kid;
-    var r = Math.pow(s, 4), rd = Math.pow(s, 4.5);
+    var r = Math.pow(s, SIZE.torque), rd = Math.pow(s, SIZE.damp);
     TORQUE.forEach(function (k) { c[k] *= r; });
     DAMP.forEach(function (k) { c[k] *= rd; });
     c.placeD /= s;
-    c.placeV /= Math.sqrt(s);
+    c.placeV /= Math.pow(s, SIZE.v);
     return c;
   }
 
@@ -94,7 +99,7 @@ var ZLifeWalk = (function (C) {
     this.cane = !!opts.cane;
     if (form === "baby") this.cfg = BABY;
     else { this.scale = heightAt(this.age); this.dims = dims(this.scale); this.cfg = params(this.age, this.scale); }
-    this.world = new C.World({ gravity: new C.Vec3(0, -9.81, 0) });
+    this.world = new C.World({ gravity: new C.Vec3(0, -9.81 * (form === "baby" ? 1 : Math.pow(this.scale, SIZE.g)), 0) });
     this.world.solver.iterations = 30;
     this.world.solver.tolerance = 1e-6;
     this.groundMat = new C.Material("地面");
@@ -115,6 +120,7 @@ var ZLifeWalk = (function (C) {
     this.impacts = [];
     this.touch = {};
     if (form === "baby") this.buildBaby(x || 0); else this.buildBiped(x || 0, opts.from);
+    this.mass = this.list.reduce(function (m, b) { return m + b.mass; }, 0);
     var self = this;
     this.world.addEventListener("beginContact", function (e) {
       var b = e.bodyA === ground ? e.bodyB : e.bodyB === ground ? e.bodyA : null;
@@ -360,6 +366,22 @@ var ZLifeWalk = (function (C) {
       return;
     }
     this.upright();
+    // 見えない手助け：腰が着いている足の上（つま先より少し前まで）から外れたら、外から少しだけ引き戻す。
+    var near = this.near || {}, lo = Infinity, hi = -Infinity, parts = this.parts;
+    ["footL", "footR"].forEach(function (n) {
+      if (!near[n]) return;
+      var f = parts[n];
+      lo = Math.min(lo, f.position.x - f.len / 2); hi = Math.max(hi, f.position.x + f.len / 2);
+    });
+    if (HELP.hold > 0 && lo < hi) {
+      hi += HELP.ahead * this.scale;
+      var tr = p.trunk, hx = tr.position.x, out = hx < lo ? hx - lo : hx > hi ? hx - hi : 0;
+      var weak = 1 - HELP.old * smooth(60, 100, this.age), mg = this.mass * 9.81 * Math.pow(this.scale, SIZE.g);
+      if (out) {
+        tr.force.x -= HELP.hold * mg * weak * clamp(out / (0.1 * this.scale), 1);
+        tr.force.x -= HELP.damp * this.mass * weak * (out > 0 ? Math.max(0, tr.velocity.x) : Math.min(0, tr.velocity.x));
+      }
+    }
   };
 
   // 関節の回転の力を、子へ +t、親へ -t で加える。
@@ -386,7 +408,8 @@ var ZLifeWalk = (function (C) {
   Walker.prototype.upright = function () {
     var self = this, p = this.parts, c = this.cfg, near = this.near || {}, trunk = p.trunk;
     var sw = this.side === -1 ? "L" : this.side === 1 ? "R" : null;
-    var both = !sw || (!this.pressed && near["foot" + sw]);
+    var lift = this.pressed;
+    var both = !sw || (!lift && near["foot" + sw]);
     var stances = both ? ["L", "R"] : [sw === "L" ? "R" : "L"];
     var grounded = stances.filter(function (s) { return near["foot" + s]; });
     var torso = c.torsoKp * wrap(-c.lean - angleOf(trunk)) - c.torsoKd * trunk.angularVelocity.z;
@@ -395,8 +418,8 @@ var ZLifeWalk = (function (C) {
       // 体が前へ流れているほど、振り出す脚を遠くへ出す（転びそうな側へ足を出す反射）。
       var st = p["foot" + stances[0]], d = trunk.position.x - st.position.x, v = trunk.velocity.x;
       var reach = clamp(c.placeD * d + c.placeV * v, 0.5);
-      swingT = this.pdWorld("thigh" + sw, (this.pressed ? c.liftHip : c.reachHip) + reach, c.hipKp, c.hipKd, c.hip);
-      this.pd("shin" + sw, this.pressed ? c.liftKnee : -0.05, c.kneeKp * 0.5, c.kneeKd * 0.5, c.knee);
+      swingT = this.pdWorld("thigh" + sw, (lift ? c.liftHip : c.reachHip) + reach, c.hipKp, c.hipKd, c.hip);
+      this.pd("shin" + sw, lift ? c.liftKnee : -0.05, c.kneeKp * 0.5, c.kneeKd * 0.5, c.knee);
       this.pd("foot" + sw, 0.1, c.ankleKp * 0.5, c.ankleKd * 0.5, c.ankle);
     }
     stances.forEach(function (s) {
@@ -415,7 +438,7 @@ var ZLifeWalk = (function (C) {
     });
     if (this.cane) {
       // 杖は左脚と一緒に前へ出す。つくと力を抜き、体が前へ出るのに合わせて傾く。
-      var lifting = sw === "L" && this.pressed;
+      var lifting = sw === "L" && lift;
       this.pdWorld("armR", 0.55, 200, 12, 160);
       this.pdWorld("cane", lifting ? c.canePlant + c.caneLift : c.canePlant, lifting ? c.caneKp : c.caneSoft, 2, 80);
     }
@@ -463,6 +486,6 @@ var ZLifeWalk = (function (C) {
   Walker.prototype.takeImpacts = function () { var r = this.impacts; this.impacts = []; return r; };
   Walker.prototype.angle = function (name) { return angleOf(this.parts[name]); };
 
-  return { Walker: Walker, BABY: BABY, ADULT: ADULT, ELDER: ELDER, heightAt: heightAt, ageAt: ageAt, distanceAt: distanceAt, LIFE: LIFE, params: params, CANE_AGE: CANE_AGE, KID: KID, angleOf: angleOf, STEP: STEP };
+  return { Walker: Walker, BABY: BABY, ADULT: ADULT, ELDER: ELDER, heightAt: heightAt, ageAt: ageAt, distanceAt: distanceAt, LIFE: LIFE, params: params, CANE_AGE: CANE_AGE, FOOT: FOOT, HELP: HELP, SIZE: SIZE, KID: KID, angleOf: angleOf, STEP: STEP };
 })(CANNON);
 if (typeof module !== "undefined") module.exports = ZLifeWalk;

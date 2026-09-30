@@ -7,7 +7,7 @@
    ・押さなければ転ばずにその場にいる（赤ちゃん・幼児・大人・杖の老人）
    ・進むほど年をとる。1歳で立ち、背が伸び、70歳で杖をつく
    ・見ながら押す人のまねで、大人の年齢まで歩ける。100歳まで歩けることもある
-   ・押しっぱなしで転ぶ。転ぶとその年齢（歳）が結果になる
+   ・歩き続けないと転ぶ（一歩で止まると体の流れを止めきれない）。転ぶとその年齢（歳）が結果になる
    ・Esc で最初から */
 
 var load = require("../harness");
@@ -40,7 +40,6 @@ ok("0歳のハイハイから始まる", n.state === "play" && n.form === "baby"
 });
 
 // 見ながら押す人のまね。振り出した手足が着いてから少し待って押し、決めた時間だけ押す。
-// 立ってからは、小さい体ほど動きが速いので、待つ・押す時間を背の高さの平方根で縮める。
 function play(delay, hold, limit) {
   g.probe.reset();
   var frames = 0, pressedAt = -1, landedAt = -1, seen = { stood: false, cane: false }, k = 1;
@@ -49,7 +48,6 @@ function play(delay, hold, limit) {
     if (n.state !== "play") break;
     if (n.form === "biped") seen.stood = true;
     if (n.cane) seen.cane = true;
-    k = n.form === "biped" ? Math.sqrt(n.scale) : 1;
     if (pressedAt >= 0 && frames - pressedAt >= hold * k * 60) { g.key(" ", true); pressedAt = -1; }
     if (pressedAt < 0) {
       if (!n.landed) landedAt = -1;
@@ -70,14 +68,13 @@ ok("途中で立ち、杖をつく", results.some(function (r) { return r.seen.s
 ok("結果は歳", results.every(function (r) { return /^\d+歳$/.test(r.n.scoreText) && r.n.state === "result"; }));
 ok("100歳を超えない", results.every(function (r) { return r.n.score <= 100; }));
 
-// 押しっぱなしで転ぶか。
+// 一歩だけ出して止まると、体の流れを止めきれずに転ぶか。
 g.probe.reset();
 g.probe.jump(30);
-g.key(" ");
+g.key(" "); g.step(18); g.key(" ", true);
 g.step(60 * 6);
 n = g.probe.now();
-ok("押しっぱなしだと転ぶ", n.state === "down" || n.state === "result", n.state);
-g.key(" ", true);
+ok("一歩で止まると転ぶ", n.state === "down" || n.state === "result", n.state);
 g.step(150);
 n = g.probe.now();
 ok("転ぶと年齢が結果になる", n.state === "result" && /^3\d歳$/.test(n.scoreText), n.scoreText);
