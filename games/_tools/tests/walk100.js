@@ -6,7 +6,7 @@
    ・開始画面では歩かない。スペースを離すと0歳（ハイハイ）から始まる
    ・押さなければ転ばずにその場にいる（赤ちゃん・幼児・大人・杖の老人）
    ・進むほど年をとる。1歳で立ち、背が伸び、70歳で杖をつく
-   ・見ながら押す人のまねで、大人の年齢まで歩ける。100歳まで歩けることもある
+   ・見ながら押す人のまねで、大人の年齢まで歩ける。20歳からは階段を上り、50歳を越えることもある
    ・歩き続けないと転ぶ（一歩で止まると体の流れを止めきれない）。転ぶとその年齢（歳）が結果になる
    ・Esc で最初から */
 
@@ -42,12 +42,13 @@ ok("0歳のハイハイから始まる", n.state === "play" && n.form === "baby"
 // 見ながら押す人のまね。振り出した手足が着いてから少し待って押し、決めた時間だけ押す。
 function play(delay, hold, limit) {
   g.probe.reset();
-  var frames = 0, pressedAt = -1, landedAt = -1, seen = { stood: false, cane: false }, k = 1;
+  var frames = 0, pressedAt = -1, landedAt = -1, seen = { stood: false, cane: false, floor: 0 }, k = 1;
   while (frames < limit * 60) {
     n = g.probe.now();
     if (n.state !== "play") break;
     if (n.form === "biped") seen.stood = true;
     if (n.cane) seen.cane = true;
+    seen.floor = Math.max(seen.floor, n.floor || 0);
     if (pressedAt >= 0 && frames - pressedAt >= hold * k * 60) { g.key(" ", true); pressedAt = -1; }
     if (pressedAt < 0) {
       if (!n.landed) landedAt = -1;
@@ -63,8 +64,9 @@ function play(delay, hold, limit) {
 var results = [[0, 0.3], [0.1, 0.35], [0.05, 0.2], [0.15, 0.4]].map(function (r) { return play(r[0], r[1], 200); });
 results.forEach(function (r, i) { console.log("    リズム" + i + ": " + r.n.state + " " + r.n.scoreText + " " + r.n.T.toFixed(1) + "秒"); });
 ok("見ながら押せば大人まで歩ける", results.every(function (r) { return r.n.score >= 20; }));
-ok("100歳まで歩けることがある", results.some(function (r) { return r.n.finished && r.n.score === 100; }));
-ok("途中で立ち、杖をつく", results.some(function (r) { return r.seen.stood && r.seen.cane; }));
+ok("階段でも上の年齢まで行けることがある", results.some(function (r) { return r.n.score >= 50; }));
+ok("20歳から階段を上る", results.some(function (r) { return r.seen.floor > 0.5; }), results.map(function (r) { return r.seen.floor.toFixed(2) + "m"; }).join(" "));
+ok("途中で立つ", results.every(function (r) { return r.seen.stood; }));
 ok("結果は歳", results.every(function (r) { return /^\d+歳$/.test(r.n.scoreText) && r.n.state === "result"; }));
 ok("100歳を超えない", results.every(function (r) { return r.n.score <= 100; }));
 

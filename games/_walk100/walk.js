@@ -33,7 +33,7 @@ var ZLifeWalk = (function (C) {
   var DAMP = ["hipKd", "kneeKd", "ankleKd", "torsoKd"];
   var CANE_AGE = 70;
   var FOOT = { len: 0.25 };
-  var STAIR = { liftHip: 0.767, liftKnee: -0.534, reachHip: 0.094, reachKnee: -0.343, arm: -0.121, caneLift: 0.505, canePlant: -0.106, lip: 0.725, ramp: 0 };
+  var STAIR = { liftHip: 0.423, liftKnee: -0.572, reachHip: 0.601, reachKnee: -0.54, arm: 0.166, caneLift: 0.277, canePlant: 0.04, lip: 0.783, ramp: 0 };
   // 転びにくくする手助け。hold・damp は引き戻す強さ（体重に対する割合）、ahead はつま先より前へ許す幅（大人の m）、old は年をとって弱める割合。
   var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15 };
   // 体の大きさ s による縮め方（s の何乗か）。重力も s 倍にすると、小さい体も大人と同じ間合いで倒れ、同じ押し方で歩ける。
@@ -264,7 +264,7 @@ var ZLifeWalk = (function (C) {
     });
     if (this.cane) {
       // 右手の杖。手首でつなぎ、先が地面をつく長さにする。
-      var hand = pts.handR, len = (hand[1] - 0.02) / Math.cos(A.cane);
+      var hand = pts.handR, len = (hand[1] - floorAt(this.stairs, hand[0] + 0.1 * s) - 0.02) / Math.cos(A.cane);
       if (from && from.cane) len = from.parts.cane.len * s / from.scale;
       var cane = this.segment("cane", hand, down(hand, A.cane, len), 0.02 * s, d.cane.mass);
       this.hinge(this.parts.armR, cane, hand);
