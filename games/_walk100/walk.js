@@ -25,15 +25,15 @@ var ZLifeWalk = (function (C) {
   };
   var ELDER = {
     hip: 260, hipKp: 280, hipKd: 24, knee: 240, kneeKp: 300, kneeKd: 20, ankle: 110, ankleKp: 92, ankleKd: 4, standKp: 650,
-    torsoKp: 595, torsoKd: 70, tip: 0.22, tipKp: 58, placeD: 0.467, placeV: 0.021,
-    lean: 0.251, liftHip: 0.676, liftKnee: -1.1, reachHip: 0.36,
+    torsoKp: 646, torsoKd: 70, tip: 0.22, tipKp: 58, placeD: 0.445, placeV: 0.021,
+    lean: 0.211, liftHip: 0.676, liftKnee: -1.1, reachHip: 0.36,
     caneLift: 0.681, canePlant: 0.04, caneKp: 89, caneSoft: 4.8
   };
   var TORQUE = ["hip", "hipKp", "knee", "kneeKp", "ankle", "ankleKp", "standKp", "torsoKp", "tipKp", "caneKp", "caneSoft"];
   var DAMP = ["hipKd", "kneeKd", "ankleKd", "torsoKd"];
   var CANE_AGE = 70;
   var FOOT = { len: 0.25 };
-  var STAIR = { liftHip: 0.574, liftKnee: -1.033, reachHip: 0.63, reachKnee: -0.687, arm: 0, caneLift: 0, canePlant: 0 };
+  var STAIR = { liftHip: 0.574, liftKnee: -1.033, reachHip: 0.63, reachKnee: -0.687, arm: -0.177, caneLift: 0.314, canePlant: -0.114, lip: 0, ramp: 0 };
   // 転びにくくする手助け。hold・damp は引き戻す強さ（体重に対する割合）、ahead はつま先より前へ許す幅（大人の m）、old は年をとって弱める割合。
   var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15 };
   // 体の大きさ s による縮め方（s の何乗か）。重力も s 倍にすると、小さい体も大人と同じ間合いで倒れ、同じ押し方で歩ける。
@@ -466,9 +466,27 @@ var ZLifeWalk = (function (C) {
   Walker.prototype.setStairs = function (st) {
     if (!st || this.steps.length) return;
     this.stairs = st;
+    if (STAIR.ramp) {
+      // 当たりは段の角を結んだ坂にする（見た目は段）。
+      var th = Math.atan2(st.rise, st.run), L = 200, rb = new C.Body({ mass: 0, material: this.groundMat, collisionFilterGroup: G_GROUND, collisionFilterMask: G_BODY });
+      rb.addShape(new C.Box(new C.Vec3(L, 1, 3)));
+      var ox = st.x0 + STAIR.ramp * st.run;
+      rb.position.set(ox + L * Math.cos(th) + Math.sin(th), L * Math.sin(th) - Math.cos(th), 0);
+      rb.quaternion.setFromEuler(0, 0, th);
+      rb.isFloor = true;
+      this.world.addBody(rb);
+      this.steps.push(rb);
+      return;
+    }
     for (var i = 0; i < STEP_POOL; i++) {
       var b = new C.Body({ mass: 0, material: this.groundMat, collisionFilterGroup: G_GROUND, collisionFilterMask: G_BODY });
       b.addShape(new C.Box(new C.Vec3(st.run / 2, 1, 3)));
+      if (STAIR.lip > 0) {
+        // 段の手前の角に斜めの面をつける（つま先が段に当たっても滑って上がれる）。
+        var r = st.rise * STAIR.lip, q = new C.Quaternion();
+        q.setFromEuler(0, 0, Math.PI / 4);
+        b.addShape(new C.Box(new C.Vec3(r / Math.SQRT2, r / Math.SQRT2, 3)), new C.Vec3(-st.run / 2, 1 - r, 0), q);
+      }
       b.isFloor = true;
       b.index = null;
       this.world.addBody(b);
@@ -478,7 +496,7 @@ var ZLifeWalk = (function (C) {
   };
   Walker.prototype.placeSteps = function () {
     var st = this.stairs;
-    if (!st) return;
+    if (!st || STAIR.ramp) return;
     var first = Math.floor((this.parts.trunk.position.x - st.x0) / st.run) - 3;
     this.steps.forEach(function (b, k) {
       var i = first + k;
@@ -492,6 +510,7 @@ var ZLifeWalk = (function (C) {
   };
   // x の場所の床の高さ。
   function floorAt(st, x) {
+    if (st && STAIR.ramp) return Math.max(0, (x - st.x0 - STAIR.ramp * st.run) * st.rise / st.run);
     if (!st || x < st.x0) return 0;
     return (Math.floor((x - st.x0) / st.run) + 1) * st.rise;
   }
