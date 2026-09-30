@@ -369,13 +369,22 @@ var ZLifeScene = (function () {
     this.stairInfo = st || null;
     if (!st) return;
     var g = new T.Group(), top = mat(0xd9d2c3, 0.9), side = mat(0xb8ae9c, 1);
-    for (var i = 0; i < STAIR_COUNT; i++) {
+    var count = st.n || STAIR_COUNT;
+    for (var i = 0; i < count; i++) {
       var h = (i + 1) * st.rise;
       var b = new T.Mesh(new T.BoxGeometry(st.run, h, 1.3), [side, side, top, side, side, side]);
       b.position.set(st.x0 + (i + 0.5) * st.run, h / 2, 0);
       b.castShadow = true;
       b.receiveShadow = true;
       g.add(b);
+    }
+    if (st.n) {
+      // 上りきった先は平らな道（最後の段と同じ高さの台）。
+      var far = 60, top2 = st.n * st.rise, x1 = st.x0 + st.n * st.run;
+      var deck = new T.Mesh(new T.BoxGeometry(far, top2, 1.3), [side, side, top, side, side, side]);
+      deck.position.set(x1 + far / 2, top2 / 2, 0);
+      deck.receiveShadow = true;
+      g.add(deck);
     }
     this.stairs = g;
     this.scene.add(g);

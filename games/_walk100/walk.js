@@ -470,7 +470,7 @@ var ZLifeWalk = (function (C) {
   };
   Walker.prototype.release = function () { this.pressed = false; };
 
-  // 上り階段。stairs = { x0: 一段目の手前の端, run: 奥行き, rise: 高さ }。
+  // 上り階段。stairs = { x0: 一段目の手前の端, run: 奥行き, rise: 高さ, n: 段の数（その先は平ら） }。
   // 段は体の近くの数段だけを置き、進むにつれて前へ付け替える（全部置くと当たり判定が重い）。
   var STEP_POOL = 8;
   Walker.prototype.setStairs = function (st) {
@@ -514,7 +514,7 @@ var ZLifeWalk = (function (C) {
       b.index = i;
       // 上の面が段の高さに来る、背の高い箱。手前の段より前は地面の下へしまう。
       if (i < 0) b.position.set(st.x0 - 10 - k, -5, 0);
-      else b.position.set(st.x0 + (i + 0.5) * st.run, (i + 1) * st.rise - 1, 0);
+      else b.position.set(st.x0 + (i + 0.5) * st.run, Math.min(i + 1, st.n || Infinity) * st.rise - 1, 0);
       b.aabbNeedsUpdate = true;
     });
   };
@@ -522,7 +522,7 @@ var ZLifeWalk = (function (C) {
   function floorAt(st, x) {
     if (st && STAIR.ramp) return Math.max(0, (x - st.x0 - STAIR.ramp * st.run) * st.rise / st.run);
     if (!st || x < st.x0) return 0;
-    return (Math.floor((x - st.x0) / st.run) + 1) * st.rise;
+    return Math.min(Math.floor((x - st.x0) / st.run) + 1, st.n || Infinity) * st.rise;
   }
   Walker.prototype.floorAt = function (x) { return floorAt(this.stairs, x); };
 
