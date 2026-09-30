@@ -24,18 +24,19 @@ var ZLifeWalk = (function (C) {
     caneLift: 0.26, canePlant: 0.12, caneKp: 58, caneSoft: 14
   };
   var ELDER = {
-    hip: 260, hipKp: 280, hipKd: 24, knee: 240, kneeKp: 300, kneeKd: 20, ankle: 110, ankleKp: 92, ankleKd: 4, standKp: 650,
-    torsoKp: 646, torsoKd: 70, tip: 0.22, tipKp: 58, placeD: 0.445, placeV: 0.021,
-    lean: 0.211, liftHip: 0.676, liftKnee: -1.1, reachHip: 0.36,
-    caneLift: 0.681, canePlant: 0.04, caneKp: 89, caneSoft: 4.8
+    hip: 260, hipKp: 280, hipKd: 24, knee: 240, kneeKp: 300, kneeKd: 20, ankle: 110, ankleKp: 167.9, ankleKd: 4, standKp: 650,
+    torsoKp: 686.84, torsoKd: 106.519, tip: 0.292, tipKp: 156.169, placeD: 0.459, placeV: 0.05,
+    lean: 0.334, liftHip: 0.812, liftKnee: -0.855, reachHip: 0.261,
+    caneLift: 0.45, canePlant: 0.02, caneKp: 48.81, caneSoft: 11.118
   };
   var TORQUE = ["hip", "hipKp", "knee", "kneeKp", "ankle", "ankleKp", "standKp", "torsoKp", "tipKp", "caneKp", "caneSoft"];
   var DAMP = ["hipKd", "kneeKd", "ankleKd", "torsoKd"];
   var CANE_AGE = 70;
   var FOOT = { len: 0.25 };
-  var STAIR = { liftHip: 0.423, liftKnee: -0.572, reachHip: 0.601, reachKnee: -0.54, arm: 0.166, caneLift: 0.277, canePlant: 0.04, lip: 0.783, ramp: 0 };
+  var STAIR = { liftHip: 0.423, liftKnee: -0.572, reachHip: 0.601, reachKnee: -0.54, arm: 0.166, caneLift: 0.22, canePlant: -0.009, lip: 0.783, ramp: 0 };
   // 転びにくくする手助け。hold・damp は引き戻す強さ（体重に対する割合）、ahead はつま先より前へ許す幅（大人の m）、old は年をとって弱める割合。
-  var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15 };
+  // cane は杖をついている間の支え：杖の先も足場に数え、胴の回る速さを spin だけ抑える（体重×背の高さに対する割合）。
+  var HELP = { old: 0, hold: 0.45, damp: 3, ahead: 0.15, cane: 1, spin: 3.23 };
   // 体の大きさ s による縮め方（s の何乗か）。重力も s 倍にすると、小さい体も大人と同じ間合いで倒れ、同じ押し方で歩ける。
   var SIZE = { torque: 5, damp: 5, v: 1, g: 1 };
   var GROW_STEP = 0.005;   // 背がこれだけ変わるたびに体を作り直す（小さいほど途切れなく育つ）
@@ -380,6 +381,8 @@ var ZLifeWalk = (function (C) {
       var f = parts[n];
       lo = Math.min(lo, f.position.x - f.len / 2); hi = Math.max(hi, f.position.x + f.len / 2);
     });
+    var caned = this.cane && near.cane;
+    if (caned && HELP.cane && lo < hi) { var cx = parts.cane.position.x; lo = Math.min(lo, cx); hi = Math.max(hi, cx); }
     if (HELP.hold > 0 && lo < hi) {
       hi += HELP.ahead * this.scale;
       var tr = p.trunk, hx = tr.position.x, out = hx < lo ? hx - lo : hx > hi ? hx - hi : 0;
@@ -389,6 +392,7 @@ var ZLifeWalk = (function (C) {
         tr.force.x -= HELP.damp * this.mass * weak * (out > 0 ? Math.max(0, tr.velocity.x) : Math.min(0, tr.velocity.x));
       }
     }
+    if (caned && HELP.spin) p.trunk.torque.z -= HELP.spin * this.mass * this.scale * this.scale * p.trunk.angularVelocity.z;
   };
 
   // 関節の回転の力を、子へ +t、親へ -t で加える。
