@@ -277,4 +277,6 @@
     if(started)stop();else show();
   },true);
   if(remote&&new URLSearchParams(location.search).get('rec')==='1')mark('録画');
+  /* 固定リンクのヘッダーの録画ボタンから開く。録画中なら止める */
+  window.zRecorder={toggle:function(){if(started&&!saving)stop();else if(!preparing&&!saving)show();}};
 })();

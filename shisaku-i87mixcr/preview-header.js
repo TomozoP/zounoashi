@@ -1,5 +1,5 @@
 /* 制作中の固定リンクだけ。上部の「プレビュー」表示に、
-   ハッシュタグと本番の共有ページのURLをまとめて写すボタンを付ける。
+   ハッシュタグと本番の共有ページのURLをまとめて写すボタンと、録画パネルを開くボタンを付ける。
    タグは題名から「【プレビュー】」と空白・中黒などを除いて作る。 */
 (function () {
   "use strict";
@@ -44,7 +44,10 @@
     "#preview-copy{position:absolute;right:6px;top:50%;transform:translateY(-50%);pointer-events:auto;" +
     "padding:2px 10px;border:0;border-radius:999px;background:#fff;color:#e8443a;" +
     "font:bold 12px sans-serif;letter-spacing:0;cursor:pointer;touch-action:manipulation}" +
-    "#preview-copy:focus-visible{outline:2px solid #16202e;outline-offset:2px}";
+    "#preview-copy:focus-visible,#preview-rec:focus-visible{outline:2px solid #16202e;outline-offset:2px}" +
+    "#preview-rec{position:absolute;left:6px;top:50%;transform:translateY(-50%);pointer-events:auto;" +
+    "padding:2px 10px;border:0;border-radius:999px;background:#fff;color:#e8443a;" +
+    "font:bold 12px sans-serif;letter-spacing:0;cursor:pointer;touch-action:manipulation}";
   document.head.appendChild(style);
 
   var button = document.createElement("button");
@@ -54,10 +57,23 @@
   button.setAttribute("aria-label", "ハッシュタグと共有リンクをコピー");
   label.appendChild(button);
 
+  var rec = document.createElement("button");
+  rec.id = "preview-rec";
+  rec.type = "button";
+  rec.textContent = "録画";
+  rec.setAttribute("aria-label", "録画パネルを開く");
+  label.appendChild(rec);
+  rec.addEventListener("click", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (window.zRecorder) window.zRecorder.toggle();
+    rec.blur();
+  });
+
   /* 開始待ちのタップやゲームの操作に流さない。window で先に受け止める */
   ["pointerdown", "pointerup", "touchstart", "touchend", "mousedown", "mouseup"].forEach(function (name) {
     window.addEventListener(name, function (e) {
-      if (e.target === button) e.stopImmediatePropagation();
+      if (e.target === button || e.target === rec) e.stopImmediatePropagation();
     }, true);
   });
 
