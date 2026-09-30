@@ -2,16 +2,16 @@
 <html lang="ja">
 <head>
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="shredder-1790679464413">
+<meta name="preview-version" content="walk100-1790773300077">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>【プレビュー】シュレッダー・エージェント</title>
+<title>【プレビュー】人生ウォーカー</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
   #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
   #wrap { position: relative; touch-action: none; }
-  canvas { display: block; background: #4a3a2c; }
+  canvas { display: block; background: #f6c7a2; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
@@ -22,6 +22,8 @@
   /* 制作中の確認ページであることを常に見せる。canvasの外なので録画には入らない */
   #preview-label { position:fixed; left:0; right:0; top:0; z-index:10; padding:4px 0; background:#e8443a; color:#fff; font:bold 14px sans-serif; text-align:center; letter-spacing:.2em; pointer-events:none; }
 </style>
+<!-- ゲームのOGP：道具で更新 -->
+<!-- ゲームのOGPここまで -->
 </head>
 <body>
 <div id="preview-label">プレビュー</div>
@@ -30,23 +32,23 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/start.js?v=shredder-1790679464413"></script>
-<script src="../games/random-bowling/vendor/three.min.js?v=shredder-1790679464413"></script>
-<script src="./shredder-scene.js?v=shredder-1790679464413"></script>
-<script src="../games/view.js?v=shredder-1790679464413"></script>
-<script src="../games/audio.js?v=shredder-1790679464413"></script>
-<script src="../games/share.js?v=shredder-1790679464413"></script>
-<script src="../games/result-actions.js?v=shredder-1790679464413"></script>
-<script src="../games/action-icons.js?v=shredder-1790679464413"></script>
-<script src="../games/pad.js?v=shredder-1790679464413"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/start.js?v=walk100-1790773300077"></script>
+<script src="../games/random-bowling/vendor/three.min.js?v=walk100-1790773300077"></script>
+<script src="../games/random-bowling/vendor/cannon.js?v=walk100-1790773300077"></script>
+<script src="../games/walk100/walk.js?v=walk100-1790773300077"></script>
+<script src="../games/walk100/scene.js?v=walk100-1790773300077"></script>
+<script src="../games/view.js?v=walk100-1790773300077"></script>
+<script src="../games/audio.js?v=walk100-1790773300077"></script>
+<script src="../games/share.js?v=walk100-1790773300077"></script>
+<script src="../games/result-actions.js?v=walk100-1790773300077"></script>
+<script src="../games/action-icons.js?v=walk100-1790773300077"></script>
+<script src="../games/pad.js?v=walk100-1790773300077"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
-/* シュレッダー・エージェント（英語では Shredder Agent）
+/* 人生ウォーカー
 
-   シュレッダーで縦に細く切られた書類を、手で並べ替えて元に戻す。
-     ・紙片をつかんで左右へ動かすと、その位置に差し込まれる
-     ・紙片を軽くタップすると上下が入れ替わる（逆さまの紙片がまざっている）
-     ・全部の順番と向きがそろったら完成。かかった秒数が結果になる
-   キーでは ← → で選び、スペースでつかむ・置く、↑ ↓ で上下を入れ替える。 */
+   物理で歩くほど年をとる。0歳はハイハイ、1歳で立ち、背が伸び、年をとると前かがみになって杖をつく。
+   押す（タップ・スペース・ジョイパッド）たびに左右が入れ替わって一歩。押している間は足を上げ、離すと前へ伸ばして着く。
+   ← → は左右を選んで押す。転んでもその場で起き上がって続き、100歳（大往生）でゴール。かかった時間が記録。 */
 (function () {
   "use strict";
 
@@ -56,11 +58,21 @@
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
 
-  /* 背景の机（3D）。使えない環境では2Dの机を描く */
+  /* ============ 人生 ============ 進んだ距離がそのまま年齢になる（walk.js の LIFE） */
+  var LW = ZLifeWalk, GOAL_AGE = 100, LENGTH = LW.distanceAt(GOAL_AGE);
+  // 20歳からは上り階段。段の奥行きと高さ（m）。
+  var STAIRS = { age: 20, run: 0.35, rise: 0.08 };
+  // 20歳になる場所から始まる階段。x は今いる場所、b は今の進み（背の高さで割った距離）。
+  function stairsFrom(x, b, scale) {
+    // 杖をつき始める年（70歳）になる場所で上りきり、その先は平らな道。
+    var n = Math.round((LW.distanceAt(LW.CANE_AGE) - LW.distanceAt(STAIRS.age)) * scale / STAIRS.run);
+    return { x0: x + (LW.distanceAt(STAIRS.age) - b) * scale, run: STAIRS.run, rise: STAIRS.rise, n: n };
+  }
+
   var view3d = null;
   try {
-    view3d = (window.WebGLRenderingContext && typeof ZShredScene !== "undefined" && typeof THREE !== "undefined")
-      ? new ZShredScene() : null;
+    view3d = (window.WebGLRenderingContext && typeof ZLifeScene !== "undefined" && typeof THREE !== "undefined")
+      ? new ZLifeScene({ length: LENGTH }) : null;
   } catch (e) { view3d = null; }
 
   /* ============ 画面 ============ */
@@ -68,18 +80,15 @@
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
-    place();
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
-    if (view3d) view3d.resize(canvas.width, canvas.height, W, H, { x: docX, y: docY, w: DW * sc, h: dh });
+    if (view3d) view3d.resize(canvas.width, canvas.height);
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
 
-  /* ============ 音 ============ */
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
   var AC = null, NOISE = null;
-  function resumeAudio() {
-    window.zAudioResume(AC);
-  }
+  function resumeAudio() { window.zAudioResume(AC); }
   wrap.addEventListener("touchstart", audioOn, { passive: true });
   wrap.addEventListener("touchend", resumeAudio, { passive: true });
   wrap.addEventListener("pointerup", resumeAudio, true);
@@ -113,648 +122,302 @@
     var f = AC.createBiquadFilter();
     f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
     var g = AC.createGain(), n = AC.currentTime + (delay || 0);
-    g.gain.setValueAtTime(0.0001, n);
-    g.gain.exponentialRampToValueAtTime(vol, n + 0.008);
+    g.gain.setValueAtTime(vol, n);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
     s.connect(f); f.connect(g); g.connect(AC.destination);
-    s.start(n, Math.random() * 1.5); s.stop(n + dur + 0.05);
-  }
-  /* 紙の音。つかむ＝かさっ、置く＝ぱさっ、裏返す＝しゃらっ */
-  function sndGrab() { noiseHit(0.09, 3200, 0.16, 0.8); }
-  function sndDrop() { noiseHit(0.07, 1500, 0.2, 0.9); noiseHit(0.05, 4200, 0.06, 1); }
-  function sndFlip() { noiseHit(0.05, 2600, 0.12, 1); noiseHit(0.08, 3600, 0.12, 0.8, 0.06); }
-  /* 計画阻止：どしんと印を押し、警報が下がって止まり、明るい和音 */
-  function sndStop() {
-    if (!AC) return;
-    tone(880, 1.2, 0.08, "sawtooth", 180, 0);
-    noiseHit(0.3, 160, 0.7, 0.6, 0.5);
-    tone(70, 0.5, 0.5, "sine", 35, 0.5);
-  }
-  /* カメラが夜空へ向くときの風切り音と、兵器の爆発 */
-  function sndRise() {
-    if (!AC || !NOISE) return;
-    var s = AC.createBufferSource(); s.buffer = NOISE; s.loop = true;
-    var f = AC.createBiquadFilter(); f.type = "bandpass"; f.Q.value = 1.2;
-    var g = AC.createGain(), n = AC.currentTime;
-    f.frequency.setValueAtTime(300, n); f.frequency.exponentialRampToValueAtTime(2400, n + 1.6);
-    g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.18, n + 0.8); g.gain.exponentialRampToValueAtTime(0.0001, n + 2.2);
-    s.connect(f); f.connect(g); g.connect(AC.destination);
-    s.start(n); s.stop(n + 2.3);
-    tone(55, 3, 0.12, "sawtooth", 40, 1.0);          /* 落ちてくる兵器のうなり */
-  }
-  function sndBoom() {
-    noiseHit(2.4, 120, 0.9, 0.5);
-    noiseHit(1.2, 600, 0.35, 0.7);
-    tone(60, 1.6, 0.6, "sine", 22);
-    noiseHit(0.8, 2500, 0.08, 1, 0.3);
-    [523, 659, 784, 1047, 1319].forEach(function (f, i) { tone(f, 1.8, 0.06, "triangle", 0, 1.2 + i * 0.09); });
-  }
-  function sndDone() {
-    noiseHit(0.12, 300, 0.5, 0.7);            /* ハンコの「どん」 */
-    tone(90, 0.18, 0.35, "sine", 50);
-    tone(784, 0.16, 0.1, "triangle", 0, 0.25);
-    tone(1175, 0.3, 0.1, "triangle", 0, 0.37);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
   }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
     else { try { AC.resume(); } catch (e) {} }
   });
-
-  /* ============ 書類 ============
-     毎回ちがう書類を描いて、縦に N 本へ切る。 */
-  /* ステージごとの紙片の本数と、逆さまの本数。書類は順に DOCS の1枚目・2枚目・3枚目 */
-  var STAGES = [{ n: 6, flips: 0 }, { n: 10, flips: 3 }, { n: 15, flips: 5 }];
-  var N = STAGES[0].n;                          /* 今のステージの紙片の本数 */
-  var DW = 480, DH = 680;                       /* 書類の大きさ（ゲーム座標、縮小前） */
-  var RES = 2;                                  /* 書類の絵の細かさ */
-  var paper = document.createElement("canvas");
-  paper.width = DW * RES; paper.height = DH * RES;
-  var pc = paper.getContext("2d");
-
-  var seed = 1;
-  function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
-  function rr(a, b) { return a + (b - a) * rnd(); }
-
-  /* 書類の中身（英語）。3枚を通して、架空の会社がとんでもない兵器「Project Elephant」を
-     作ろうとしている、という筋。会社・人物・数字はすべて架空。
-     1枚目：技術者の極秘施設への異動 → 2枚目：建造の日程 → 3枚目：兵器の設計図 */
-  var SERIF = '"Times New Roman","Times","Liberation Serif","Georgia",serif';
-  var SANS = '"Helvetica Neue","Helvetica","Arial","Liberation Sans",sans-serif';
-  var INK = "#23252b", RED = "#c8262c";
-  var DOCS = [
-    {
-      ref: "Ref. EST/HR/0917", date: "September 17, 2026",
-      to: "All Department Heads", from: "Robert Hayes, Director of Human Resources",
-      subject: "Staff Transfer to the Project Elephant Facility",
-      body: "The following engineers will be transferred to the Project Elephant facility, effective October 1, 2026. The location of the facility is classified. Staff must not disclose the nature of their new assignment to anyone, including their families.",
-      table: [["Name", "Specialty", "Assignment"], ["Dr. Kevin Walsh", "Structures", "Chief Designer"], ["Laura Bennett", "Hydraulics", "Leg Assembly"], ["Daniel Ortiz", "Orbital Mech.", "Launch Systems"]],
-      photo: "Dr. Kevin Walsh",
-      notes: ["Report to Gate 7 of the facility with this memo.", "Personal phones will be collected on arrival.", "Shred this memo immediately after reading."],
-      hide: [0, 2]
-    },
-    {
-      ref: "Ref. EST/CP/2026-044", date: "September 3, 2026",
-      to: "Board of Directors", from: "Margaret Cole, Head of Corporate Planning",
-      subject: "Project Elephant: Construction Schedule",
-      body: "Construction of Project Elephant is proceeding as outlined below. Once complete, the device will be able to reach any city on Earth within 40 minutes of launch. Handle this information with the utmost care.",
-      chart: true,
-      notes: ["Final assembly: April 2027", "Total budget: $8.4 billion", "First test drop: Pacific Ocean, June 2027", "The existence of this project must never be disclosed."],
-      hide: [1, 2]
-    },
-    { blueprint: true }
+  // 地面に触れた音。砂を踏む足、ぺたっと着く手、杖の先。
+  function contactSound(part, strength) {
+    if (/^cane/.test(part)) { tone(1500, 0.05, 0.05 + 0.08 * strength, "triangle", 900); noiseHit(0.04, 3000, 0.05 * strength, 3); return; }
+    if (walker.form === "baby" && /^arm/.test(part)) { noiseHit(0.07, 1300, 0.08 + 0.12 * strength, 1.2); return; }
+    if (/^(foot|shin|arm)/.test(part)) { noiseHit(0.1, 420 + 200 * Math.random(), 0.1 + 0.25 * strength, 1.1); noiseHit(0.06, 2400, 0.03 + 0.05 * strength, 2); return; }
+    noiseHit(0.22, 160, 0.2 + 0.35 * strength, 0.8);
+    tone(90, 0.18, 0.12 + 0.2 * strength, "sine", 50);
+  }
+  // 立ち上がったとき。
+  /* BGM。曲の進みは歩いた距離に合わせる（速く歩けば速く、止まれば止まる）。100歳でちょうど終わる。
+     1小節8コマ（8分音符）×32小節。4つの時期（子ども・若いころ・働き盛り・老い）で8小節ずつ。
+     旋律は音名（"." は休み）、和音は小節の根音（2つあれば前半・後半）。 */
+  var SONG = [
+    ["E5 . G5 . C6 . G5 .", "C"], ["D5 . G5 . B5 . G5 .", "G"], ["C5 . E5 . A5 . E5 .", "A"], ["B4 . E5 . G5 . E5 .", "E"],
+    ["A4 . C5 . F5 . A5 .", "F"], ["G5 . E5 . C5 . E5 .", "C"], ["F5 . D5 . G5 . B4 .", "D G"], ["C5 . . . . . . .", "C"],
+    ["E5 G5 C6 G5 E5 G5 C6 D6", "C"], ["E6 . D6 C6 A5 . C6 .", "A"], ["F5 A5 C6 A5 F5 A5 C6 A5", "F"], ["B5 . A5 G5 D5 . G5 .", "G"],
+    ["E5 G5 C6 G5 E5 G5 C6 D6", "C"], ["E6 . G6 . E6 . C6 .", "A"], ["D6 . C6 . B5 . D6 .", "F G"], ["C6 . . . G5 . . .", "C"],
+    ["A5 . . A5 G5 . F5 .", "F"], ["G5 . . . D5 . . .", "G"], ["E5 . . G5 B5 . A5 G5", "E"], ["A5 . . . E5 . . .", "A"],
+    ["F5 . . F5 E5 . D5 .", "D"], ["D5 . E5 . F5 . G5 .", "G"], ["E5 . . . G5 . C6 .", "C"], ["C6 . . . . . . .", "C"],
+    ["A5 . . . . . . .", "F"], ["G5 . . . E5 . . .", "C"], ["D5 . . . B4 . . .", "G"], ["C5 . . . E5 . . .", "A"],
+    ["F5 . . . A5 . . .", "F"], ["G5 . . . E5 . . .", "C"], ["D5 . . . . . B4 .", "G"], ["C5 . . . . . . .", "C"]
   ];
-
-  function drawPaper() {
-    pc.setTransform(RES, 0, 0, RES, 0, 0);
-    var d = DOCS[stage % DOCS.length];
-    if (d.blueprint) { drawBlueprint(); return; }
-    pc.fillStyle = "#f7f6f1";
-    pc.fillRect(0, 0, DW, DH);
-    /* コピー機のくすみ */
-    for (var i = 0; i < 60; i++) {
-      pc.fillStyle = "rgba(90,90,80," + rr(0.006, 0.02) + ")";
-      pc.beginPath(); pc.arc(rr(0, DW), rr(0, DH), rr(20, 110), 0, Math.PI * 2); pc.fill();
-    }
-    var L = 38, R = DW - 38, y = 34;
-    pc.textBaseline = "alphabetic";
-
-    /* 左上の区分、右上の文書番号と日付 */
-    pc.strokeStyle = RED; pc.fillStyle = RED; pc.lineWidth = 1.6;
-    pc.strokeRect(L, y - 2, 118, 22);
-    pc.font = "700 13px " + SANS; pc.textAlign = "center";
-    pc.fillText("CONFIDENTIAL", L + 59, y + 14);
-    pc.fillStyle = INK; pc.font = "9.5px " + SERIF; pc.textAlign = "right";
-    pc.fillText(d.ref, R, y + 6);
-    pc.fillText(d.date, R, y + 20);
-    y += 52;
-
-    /* 社名と題 */
-    pc.textAlign = "left";
-    pc.font = "700 11px " + SANS;
-    pc.fillText("ELEPHANT STAR TRADING CO., LTD.", L, y);
-    pc.font = "700 25px " + SERIF;
-    pc.fillText("MEMORANDUM", L, y + 30);
-    pc.fillRect(L, y + 40, R - L, 2);
-    y += 62;
-
-    /* 宛先など */
-    var head = [["TO:", d.to], ["FROM:", d.from], ["DATE:", d.date], ["SUBJECT:", d.subject]];
-    head.forEach(function (h) {
-      pc.font = "700 10px " + SANS; pc.fillText(h[0], L, y);
-      pc.font = (h[0] === "SUBJECT:" ? "700 " : "") + "11px " + SERIF; pc.fillText(h[1], L + 64, y);
-      y += 17;
-    });
-    pc.fillRect(L, y - 6, R - L, 0.8);
-    y += 14;
-
-    pc.font = "11px " + SERIF;
-    y = para(d.body, L, y, R - L, 16);
-    y += 14;
-
-    if (d.table) y = table(d.table, L, y, d.photo ? R - L - 108 : R - L);
-    if (d.photo) { photo(R - 96, y - 4 * 25 - 10, 96, 124, d.photo); y += 20; }
-    if (d.chart) y = chart(L, y, R - L, 110);
-    y += 30;
-
-    pc.textAlign = "left"; pc.font = "11px " + SERIF;
-    var redact = [];
-    d.notes.forEach(function (t, k) {
-      pc.fillText((k + 1) + ".", L + 4, y);
-      var y0 = y;
-      y = para(t, L + 20, y, R - L - 20, 16);
-      if (d.hide.indexOf(k) >= 0) redact.push([L + 20 + rr(60, 160), y0 - 10, rr(70, 150), 13]);
-      y += 6;
-    });
-
-    /* 承認欄。署名は手書きの線 */
-    var roles = ["President", "Director", "Manager"];
-    var sw3 = (R - L - 180) / 3, sy = DH - 92;
-    pc.font = "700 9px " + SANS; pc.textAlign = "left";
-    pc.fillText("APPROVED BY", L + 180, sy - 40);
-    roles.forEach(function (role, k) {
-      var x = L + 180 + k * sw3;
-      pc.fillStyle = INK; pc.fillRect(x + 6, sy, sw3 - 12, 0.8);
-      pc.font = "9px " + SANS; pc.textAlign = "center";
-      pc.fillText(role, x + sw3 / 2, sy + 12);
-      if (k === 0 && rnd() < 0.5) return;               /* まだ回っていない */
-      signature(x + 14, sy - 8, sw3 - 28);
-    });
-
-    /* 下の注意書きと頁 */
-    pc.fillStyle = INK; pc.font = "8.5px " + SANS; pc.textAlign = "left";
-    pc.fillText("Do not copy or distribute. Unauthorized disclosure is strictly prohibited.", L, DH - 30);
-    pc.textAlign = "right";
-    pc.fillText("Page 1 of 1", R, DH - 30);
-    pc.fillRect(L, DH - 44, R - L, 0.8);
-
-    /* 墨消し */
-    pc.fillStyle = "#101010";
-    redact.forEach(function (r) { pc.fillRect(r[0], r[1], Math.min(r[2], R - r[0]), r[3]); });
-
-    /* 大きな「TOP SECRET」の印 */
-    pc.save();
-    pc.translate(rr(L + 70, L + 100), rr(DH - 110, DH - 85)); pc.rotate(rr(-0.3, -0.12));
-    pc.globalAlpha = 0.78;
-    pc.strokeStyle = RED; pc.fillStyle = RED;
-    pc.lineWidth = 4.5; pc.strokeRect(-86, -24, 172, 48);
-    pc.lineWidth = 1.5; pc.strokeRect(-80, -18, 160, 36);
-    pc.font = "900 23px " + SANS; pc.textAlign = "center"; pc.textBaseline = "middle";
-    pc.fillText("TOP SECRET", 0, 2);
-    pc.restore();
-
-    /* 赤ペンの丸 */
-    pc.save();
-    pc.strokeStyle = "rgba(200,30,30,.75)"; pc.lineWidth = 2.2; pc.lineCap = "round";
-    var ax = rr(L + 60, R - 120), ay = rr(DH * 0.45, DH * 0.62);
-    pc.beginPath(); pc.ellipse(ax, ay, rr(55, 80), 15, rr(-0.1, 0.1), 0.3, Math.PI * 2.15); pc.stroke();
-    pc.restore();
-    pc.textBaseline = "alphabetic";
+  var SONG_STEPS = SONG.length * 8, songAt = 0;
+  function noteFreq(n) {
+    var i = { C: -9, D: -7, E: -5, F: -4, G: -2, A: 0, B: 2 }[n[0]];
+    return 440 * Math.pow(2, (i + (+n[1] - 4) * 12) / 12);
   }
-
-  /* 3枚目：兵器「Project Elephant」の設計図。軌道上から落とす巨大な機械の象の足 */
-  function drawBlueprint() {
-    var BG = "#1d4f8c", LINE = "rgba(235,244,255,.92)", FAINT = "rgba(220,235,255,.16)";
-    pc.fillStyle = BG; pc.fillRect(0, 0, DW, DH);
-    var g = pc.createRadialGradient(DW / 2, DH / 2, 60, DW / 2, DH / 2, DH * 0.7);
-    g.addColorStop(0, "rgba(255,255,255,.05)"); g.addColorStop(1, "rgba(0,0,0,.18)");
-    pc.fillStyle = g; pc.fillRect(0, 0, DW, DH);
-    /* 方眼 */
-    pc.strokeStyle = FAINT; pc.lineWidth = 0.6;
-    for (var x = 10; x < DW; x += 20) { pc.beginPath(); pc.moveTo(x, 0); pc.lineTo(x, DH); pc.stroke(); }
-    for (var y = 10; y < DH; y += 20) { pc.beginPath(); pc.moveTo(0, y); pc.lineTo(DW, y); pc.stroke(); }
-    pc.strokeStyle = LINE; pc.lineWidth = 1.5;
-    pc.strokeRect(14, 14, DW - 28, DH - 28);
-    pc.lineWidth = 0.6; pc.strokeRect(19, 19, DW - 38, DH - 38);
-
-    pc.fillStyle = LINE; pc.textBaseline = "alphabetic"; pc.textAlign = "left";
-    pc.font = "700 11px " + SANS;
-    pc.fillText("PROJECT ELEPHANT", 34, 46);
-    pc.font = "900 24px " + SANS;
-    pc.fillText("ORBITAL STOMPER", 34, 72);
-    pc.font = "9px " + SANS;
-    pc.fillText("GENERAL ARRANGEMENT — FRONT ELEVATION", 34, 88);
-
-    var cx = 212, top = 190, bot = 520, w = 230;          /* 足の本体 */
-    pc.lineJoin = "round"; pc.lineCap = "round";
-
-    /* 上の機械：軌道推進器・噴射口・アンテナ */
-    pc.lineWidth = 1.6; pc.strokeStyle = LINE;
-    pc.strokeRect(cx - 95, top - 50, 190, 50);
-    for (var k = 0; k < 4; k++) {
-      var nx = cx - 75 + k * 50;
-      pc.beginPath(); pc.moveTo(nx - 12, top - 50); pc.lineTo(nx - 18, top - 78); pc.lineTo(nx + 18, top - 78); pc.lineTo(nx + 12, top - 50); pc.closePath(); pc.stroke();
-    }
-    pc.beginPath(); pc.moveTo(cx + 70, top - 78); pc.lineTo(cx + 70, top - 108); pc.stroke();
-    pc.beginPath(); pc.arc(cx + 70, top - 112, 5, 0, Math.PI * 2); pc.stroke();
-    pc.lineWidth = 0.7;
-    for (var r = 0; r < 5; r++) { pc.beginPath(); pc.moveTo(cx - 95, top - 42 + r * 9); pc.lineTo(cx + 95, top - 42 + r * 9); pc.stroke(); }
-
-    /* 足の輪郭。下へ少し広がる柱 */
-    pc.lineWidth = 2.2;
-    pc.beginPath();
-    pc.moveTo(cx - w / 2 + 14, top);
-    pc.bezierCurveTo(cx - w / 2 + 4, top + 120, cx - w / 2 - 8, bot - 90, cx - w / 2 - 14, bot - 20);
-    pc.quadraticCurveTo(cx - w / 2 - 12, bot + 8, cx - w / 2 + 20, bot + 10);
-    pc.lineTo(cx + w / 2 - 20, bot + 10);
-    pc.quadraticCurveTo(cx + w / 2 + 12, bot + 8, cx + w / 2 + 14, bot - 20);
-    pc.bezierCurveTo(cx + w / 2 + 8, bot - 90, cx + w / 2 - 4, top + 120, cx + w / 2 - 14, top);
-    pc.closePath(); pc.stroke();
-
-    /* しわ（装甲板の継ぎ目） */
-    pc.lineWidth = 0.9;
-    for (var s = 0; s < 7; s++) {
-      var sy = top + 40 + s * 40, sw2 = w / 2 - 6 + s * 2;
-      pc.beginPath(); pc.moveTo(cx - sw2, sy);
-      pc.quadraticCurveTo(cx, sy + 14 + (s % 2) * 6, cx + sw2, sy); pc.stroke();
-    }
-    /* 油圧の柱4本 */
-    pc.lineWidth = 1.2;
-    for (k = 0; k < 4; k++) {
-      var px = cx - 75 + k * 50;
-      pc.strokeRect(px - 7, top + 20, 14, 150);
-      pc.strokeRect(px - 4, top + 170, 8, 90);
-      pc.beginPath(); pc.arc(px, top + 20, 7, Math.PI, 0); pc.stroke();
-    }
-    /* 爪 */
-    pc.lineWidth = 1.8;
-    for (k = 0; k < 5; k++) {
-      var tx = cx - 96 + k * 48;
-      pc.beginPath(); pc.moveTo(tx - 18, bot + 10);
-      pc.bezierCurveTo(tx - 18, bot - 26, tx + 18, bot - 26, tx + 18, bot + 10); pc.stroke();
-      pc.lineWidth = 0.8;
-      pc.beginPath(); pc.moveTo(tx - 10, bot + 2); pc.quadraticCurveTo(tx, bot - 12, tx + 10, bot + 2); pc.stroke();
-      pc.lineWidth = 1.8;
-    }
-    /* 足の裏の中心線 */
-    pc.setLineDash([10, 4, 2, 4]); pc.lineWidth = 0.7;
-    pc.beginPath(); pc.moveTo(cx, top - 120); pc.lineTo(cx, bot + 40); pc.stroke();
-    pc.setLineDash([]);
-
-    /* 寸法線 */
-    function dim(x1, y1, x2, y2, label, vertical) {
-      pc.lineWidth = 0.8; pc.strokeStyle = LINE; pc.fillStyle = LINE;
-      pc.beginPath(); pc.moveTo(x1, y1); pc.lineTo(x2, y2); pc.stroke();
-      [[x1, y1, 1], [x2, y2, -1]].forEach(function (e) {
-        pc.beginPath();
-        if (vertical) { pc.moveTo(e[0] - 4, e[1] + 7 * e[2]); pc.lineTo(e[0], e[1]); pc.lineTo(e[0] + 4, e[1] + 7 * e[2]); }
-        else { pc.moveTo(e[0] + 7 * e[2], e[1] - 4); pc.lineTo(e[0], e[1]); pc.lineTo(e[0] + 7 * e[2], e[1] + 4); }
-        pc.stroke();
-      });
-      pc.font = "700 10px " + SANS; pc.textAlign = "center";
-      if (vertical) {
-        pc.save(); pc.translate(x1 - 8, (y1 + y2) / 2); pc.rotate(-Math.PI / 2); pc.fillText(label, 0, 0); pc.restore();
-      } else pc.fillText(label, (x1 + x2) / 2, y1 - 6);
-    }
-    dim(cx - w / 2 - 14, bot + 34, cx + w / 2 + 14, bot + 34, "480 m", false);
-    dim(58, top - 78, 58, bot + 10, "1,200 m", true);
-
-    /* 引き出し線と注記 */
-    function note(x1, y1, x2, y2, t) {
-      pc.lineWidth = 0.8; pc.strokeStyle = LINE; pc.fillStyle = LINE;
-      pc.beginPath(); pc.arc(x1, y1, 2.5, 0, Math.PI * 2); pc.fill();
-      pc.beginPath(); pc.moveTo(x1, y1); pc.lineTo(x2, y2); pc.lineTo(x2 + 8, y2); pc.stroke();
-      pc.font = "700 9px " + SANS; pc.textAlign = "left";
-      t.split("\n").forEach(function (s, i) { pc.fillText(s, x2 + 11, y2 + 3 + i * 11); });
-    }
-    note(cx + 60, top - 64, 336, 118, "RE-ENTRY THRUSTER\n×4");
-    note(cx + 25, top + 90, 336, 250, "HYDRAULIC RAM\n×4");
-    note(cx + 60, top + 205, 336, 380, "ARMOR PLATE\n(TITANIUM)");
-    note(cx + 96, bot - 6, 336, 470, "TOENAIL\n×5");
-
-    /* 表題欄 */
-    var bx = 250, by = DH - 118, bw = DW - 34 - bx, bh = 84;
-    pc.lineWidth = 1.2; pc.strokeRect(bx, by, bw, bh);
-    pc.lineWidth = 0.6;
-    [22, 42, 62].forEach(function (yy) { pc.beginPath(); pc.moveTo(bx, by + yy); pc.lineTo(bx + bw, by + yy); pc.stroke(); });
-    pc.beginPath(); pc.moveTo(bx + 80, by + 22); pc.lineTo(bx + 80, by + bh); pc.stroke();
-    pc.font = "700 9px " + SANS; pc.textAlign = "left";
-    pc.fillText("ELEPHANT STAR TRADING CO., LTD.", bx + 8, by + 15);
-    pc.font = "8px " + SANS;
-    [["DWG No.", "PE-001"], ["SCALE", "1 : 5000"], ["DRAWN", "K. WALSH"]].forEach(function (row, i) {
-      pc.fillText(row[0], bx + 8, by + 36 + i * 20);
-      pc.font = "700 10px " + SANS; pc.fillText(row[1], bx + 88, by + 36 + i * 20); pc.font = "8px " + SANS;
-    });
-
-    /* 左下の性能表 */
-    pc.font = "700 9px " + SANS; pc.textAlign = "left";
-    var spec = ["MASS  .......  3.2 MILLION t", "DROP ALTITUDE  ....  400 km", "IMPACT RADIUS  ....  6 km", "TARGET  .......  [REDACTED]"];
-    spec.forEach(function (s, i) { pc.fillText(s, 34, DH - 96 + i * 16); });
-
-    /* 赤ペンと「TOP SECRET」 */
-    pc.save();
-    pc.strokeStyle = "rgba(255,90,80,.9)"; pc.lineWidth = 2.4; pc.lineCap = "round";
-    pc.beginPath(); pc.ellipse(92, DH - 44, 70, 13, -0.05, 0.3, Math.PI * 2.15); pc.stroke();
-    pc.restore();
-    pc.save();
-    pc.translate(368, 58); pc.rotate(-0.14);
-    pc.globalAlpha = 0.85; pc.strokeStyle = "#ff5a50"; pc.fillStyle = "#ff5a50";
-    pc.lineWidth = 3.5; pc.strokeRect(-70, -19, 140, 38);
-    pc.font = "900 20px " + SANS; pc.textAlign = "center"; pc.textBaseline = "middle";
-    pc.fillText("TOP SECRET", 0, 1);
-    pc.restore();
-    pc.textBaseline = "alphabetic";
+  // 歩いた距離 best まで曲を進め、通り過ぎたコマの音を鳴らす（一度に大きく進んでも鳴らすのは最後の数コマだけ）。
+  function music() {
+    var to = Math.min(SONG_STEPS, Math.floor(best / LENGTH * SONG_STEPS + 1e-6));
+    if (to - songAt > 3) songAt = to - 3;
+    for (; songAt < to; songAt++) playStep(songAt);
+    if (to >= SONG_STEPS && songAt === SONG_STEPS) { songAt++; lastChord(); }
   }
-
-  /* 単語ごとに測って折り返す */
-  function para(text, x, y, w, lh) {
-    var words = text.split(" "), line = "";
-    for (var i = 0; i < words.length; i++) {
-      var next = line ? line + " " + words[i] : words[i];
-      if (line && pc.measureText(next).width > w) { pc.fillText(line, x, y); y += lh; line = words[i]; }
-      else line = next;
+  function playStep(k) {
+    var bar = SONG[Math.floor(k / 8)], i = k % 8, note = bar[0].split(" ")[i], roots = bar[1].split(" ");
+    var old = k >= 24 * 8, len = old ? 1.1 : 0.45;
+    if (note !== ".") tone(noteFreq(note), len, 0.055, "triangle");
+    if (i === 0 || (i === 4 && !old)) {
+      var r = roots.length > 1 && i >= 4 ? roots[1] : roots[0];
+      tone(noteFreq(r + "3"), old ? 1.4 : 0.5, 0.08, "triangle");
     }
-    if (line) { pc.fillText(line, x, y); y += lh; }
-    return y;
   }
-  function table(rows, x, y, w) {
-    var rh = 25, cw = [w * 0.28, w * 0.36, w * 0.36];
-    pc.fillStyle = "#e3e3de"; pc.fillRect(x, y, w, rh);
-    pc.strokeStyle = INK; pc.lineWidth = 0.9;
-    pc.strokeRect(x, y, w, rh * rows.length);
-    for (var r = 1; r < rows.length; r++) { pc.beginPath(); pc.moveTo(x, y + rh * r); pc.lineTo(x + w, y + rh * r); pc.stroke(); }
-    var cx = x;
-    for (var c = 0; c < 3; c++) {
-      if (c) { pc.beginPath(); pc.moveTo(cx, y); pc.lineTo(cx, y + rh * rows.length); pc.stroke(); }
-      for (r = 0; r < rows.length; r++) {
-        pc.fillStyle = INK;
-        pc.font = r ? "10px " + SERIF : "700 9.5px " + SANS; pc.textAlign = r ? "left" : "center";
-        pc.fillText(rows[r][c], r ? cx + 6 : cx + cw[c] / 2, y + rh * r + 16);
-      }
-      cx += cw[c];
-    }
-    return y + rh * rows.length;
+  function lastChord() {
+    ["C4", "E4", "G4", "C5"].forEach(function (n, i) { tone(noteFreq(n), 2.6, 0.06, "triangle", null, i * 0.04); });
+    tone(noteFreq("C3"), 2.8, 0.09, "triangle");
   }
-  function chart(x, y, w, h) {
-    pc.fillStyle = INK; pc.font = "700 9px " + SANS; pc.textAlign = "left";
-    pc.fillText("CONSTRUCTION PROGRESS (%)", x, y);
-    y += 10;
-    pc.strokeStyle = "#9a9a94"; pc.lineWidth = 0.6;
-    for (var i = 0; i <= 4; i++) { pc.beginPath(); pc.moveTo(x + 28, y + h * i / 4); pc.lineTo(x + w, y + h * i / 4); pc.stroke(); }
-    pc.textAlign = "right"; pc.font = "8px " + SANS;
-    for (i = 0; i <= 4; i++) pc.fillText(String(100 - i * 25), x + 24, y + h * i / 4 + 3);
-    var n = 12, bw = (w - 28) / n, v = 0.15;
-    var mon = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-    pc.textAlign = "center";
-    for (var k = 0; k < n; k++) {
-      v = Math.min(0.95, v + rr(0.02, 0.12));
-      pc.fillStyle = "#5c5f66";
-      pc.fillRect(x + 28 + bw * k + bw * 0.2, y + h * (1 - v), bw * 0.6, h * v);
-      pc.fillStyle = INK;
-      pc.fillText(mon[k], x + 28 + bw * (k + 0.5), y + h + 11);
-    }
-    return y + h + 14;
+  function standSound() {
+    [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.35, 0.09, "triangle", null, i * 0.07); });
   }
-  function photo(x, y, w, h, name) {
-    pc.fillStyle = "#fff"; pc.fillRect(x, y, w, h);
-    pc.strokeStyle = INK; pc.lineWidth = 0.8; pc.strokeRect(x, y, w, h);
-    var px = x + 8, py = y + 8, pw = w - 16, ph = h - 28;
-    var g = pc.createLinearGradient(px, py, px, py + ph);
-    g.addColorStop(0, "#c9ccd0"); g.addColorStop(1, "#9ea3a9");
-    pc.fillStyle = g; pc.fillRect(px, py, pw, ph);
-    var cx = px + pw / 2;
-    pc.save();
-    pc.beginPath(); pc.rect(px, py, pw, ph); pc.clip();
-    pc.fillStyle = "#2c2e33";                                   /* 背広 */
-    pc.beginPath(); pc.ellipse(cx, py + ph * 1.05, pw * 0.52, ph * 0.33, 0, Math.PI, Math.PI * 2); pc.fill();
-    pc.fillStyle = "#eceae6";                                   /* シャツ */
-    pc.beginPath(); pc.moveTo(cx - 10, py + ph * 0.74); pc.lineTo(cx + 10, py + ph * 0.74); pc.lineTo(cx, py + ph); pc.fill();
-    pc.fillStyle = "#4a4d55";                                   /* ネクタイ */
-    pc.beginPath(); pc.moveTo(cx - 3, py + ph * 0.76); pc.lineTo(cx + 3, py + ph * 0.76); pc.lineTo(cx + 5, py + ph); pc.lineTo(cx - 5, py + ph); pc.fill();
-    pc.fillStyle = "#b9aea4";                                   /* 首 */
-    pc.fillRect(cx - 8, py + ph * 0.55, 16, ph * 0.2);
-    pc.fillStyle = "#26272b";                                   /* 髪 */
-    pc.beginPath(); pc.ellipse(cx, py + ph * 0.36, pw * 0.26, ph * 0.24, 0, 0, Math.PI * 2); pc.fill();
-    pc.fillStyle = "#b9aea4";                                   /* 顔 */
-    pc.beginPath(); pc.ellipse(cx, py + ph * 0.45, pw * 0.22, ph * 0.21, 0, 0, Math.PI * 2); pc.fill();
-    pc.fillStyle = "#26272b";                                   /* 前髪 */
-    pc.beginPath(); pc.ellipse(cx + pw * 0.04, py + ph * 0.29, pw * 0.22, ph * 0.08, -0.15, 0, Math.PI * 2); pc.fill();
-    pc.fillStyle = "#101010";                                   /* 目隠し */
-    pc.fillRect(cx - pw * 0.3, py + ph * 0.37, pw * 0.6, ph * 0.08);
-    for (var i = 0; i < 260; i++) {                             /* 刷りのざらつき */
-      pc.fillStyle = "rgba(0,0,0," + rr(0.03, 0.12) + ")";
-      pc.fillRect(px + rr(0, pw), py + rr(0, ph), 1, 1);
-    }
-    pc.restore();
-    pc.fillStyle = INK; pc.font = "9px " + SERIF; pc.textAlign = "center";
-    pc.fillText(name, x + w / 2, y + h - 7);
-  }
-  function signature(x, y, w) {
-    pc.save();
-    pc.strokeStyle = "#1f3a8a"; pc.lineWidth = 1.6; pc.lineCap = "round"; pc.lineJoin = "round";
-    pc.beginPath(); pc.moveTo(x, y);
-    var n = 7;
-    for (var k = 1; k <= n; k++) pc.quadraticCurveTo(x + w * (k - 0.5) / n, y + rr(-18, 8), x + w * k / n, y + rr(-5, 4));
-    pc.stroke();
-    pc.restore();
+  function fallSound() {
+    noiseHit(0.35, 140, 0.45, 0.7);
+    tone(70, 0.3, 0.3, "sine", 40);
   }
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", DONE: "done", RESULT: "result" };
-  var state, T, doneT, held, keyMode = false, stage = 0;
-  var pieces = [];            /* 左から順に並んだ紙片。{ i: 元の位置, flip: 逆さまか, x: 表示中の位置, rot: 表示中の回転, dy: ずれ } */
-  var grab = null;            /* つかんでいる紙片 { p, sx, sy, off, x, y, moved } */
-  var cur = 0;                /* キー操作の選択位置 */
-  var keyHold = false;        /* キーでつかんでいる */
+  var S = { INTRO: "intro", PLAY: "play", DOWN: "down", RESULT: "result" };
+  var state, score, scoreText, T, held, walker, age, downT, finished, snap, best, bestX, stairs, falls, life, setbacks, wheel, chairX, chairX0, chairV, pushT;
 
-  var sc, sw, dh, docX, docY;
-  function place() {
-    var top = 70, bottom = 100;
-    sc = Math.min(1, (H - top - bottom) / DH, (W - 40) / DW);
-    sw = DW * sc / N; dh = DH * sc;
-    docX = (W - DW * sc) / 2;
-    docY = top + Math.max(0, (H - top - bottom - dh) / 2);
-  }
-
-  function shuffle() {
-    var ord, tries = 0;
-    do {
-      ord = [];
-      for (var i = 0; i < N; i++) ord.push(i);
-      for (i = N - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = ord[i]; ord[i] = ord[j]; ord[j] = t; }
-      var near = 0;
-      for (i = 1; i < N; i++) if (ord[i] === ord[i - 1] + 1 || ord[i] === ord[i - 1] - 1) near++;
-    } while (near > 0 && ++tries < 200);
-    var flips = {};
-    while (Object.keys(flips).length < STAGES[stage].flips) flips[Math.floor(Math.random() * N)] = true;
-    pieces = ord.map(function (i, k) {
-      return { i: i, flip: !!flips[i], x: k, rot: flips[i] ? Math.PI : 0, dy: (Math.random() * 2 - 1) * 10, tilt: (Math.random() * 2 - 1) * 0.012 };
-    });
+  // morph 秒かけて、前の体の姿から新しい体へ見た目を移す。
+  function setWalker(w, morph) {
+    walker = w;
+    if (view3d) view3d.setWalker(walker, morph);
   }
 
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
-    T = 0;
-    startStage(0);
-  }
-  function startStage(n) {
-    stage = n;
-    N = STAGES[stage].n;
-    place();
     state = S.PLAY;
-    doneT = 0;
-    held = false; grab = null; keyHold = false; cur = 0;
-    seed = 1 + Math.floor(Math.random() * 2147483640);
-    drawPaper();
-    shuffle();
+    score = 0; scoreText = "";
+    T = 0;
+    held = false;
+    finished = false;
+    falls = 0;
+    songAt = 0;
+    camStop = null;
+    wheel = false; chairV = 0; pushT = 1;
+    life = [[0, 0]];
+    setbacks = [];
+    best = 0;
+    age = 0;
+    setStairs(null);
+    setWalker(new LW.Walker("baby", 0));
+    bestX = walker.x();
+    snap = true;
   }
 
-  function solved() {
-    for (var k = 0; k < N; k++) if (pieces[k].i !== k || pieces[k].flip) return false;
-    return true;
+  function setStairs(st) {
+    stairs = st;
+    if (st && walker) walker.setStairs(st);
+    if (view3d) view3d.setStairs(st);
   }
-  function checkDone() {
-    if (state === S.PLAY && solved()) {
-      state = S.DONE; doneT = 0; grab = null; keyHold = false;
-      if (stage === STAGES.length - 1) sndStop(); else sndDone();
-    }
+
+  // 年齢を進める。背が伸びた・杖を持つ年になったら、同じ姿勢のまま体を作り直す。
+  function grow() {
+    age = Math.min(GOAL_AGE, LW.ageAt(best));
+    walker.setAge(age);
+    // 20歳の少し手前で、20歳になる場所から始まる階段を置く。
+    if (!stairs && age >= STAIRS.age - 1) setStairs(stairsFrom(bestX, best, walker.scale));
+    if (!walker.outgrown(age)) return;
+    var stood = walker.form === "baby";
+    // ハイハイから立つときは、四つんばいの姿から起き上がるように見せる。
+    setWalker(walker.grow(age), stood ? 0.8 : 0);
+    if (stood) { held = false; standSound(); }
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
-    var k = Math.min(1, dt * 16);
-    pieces.forEach(function (p, idx) {
-      if (!grab || grab.p !== p) p.x += (idx - p.x) * k;
-      var want = p.flip ? Math.PI : 0;
-      p.rot += (want - p.rot) * Math.min(1, dt * 18);
-      if (state === S.DONE || state === S.RESULT) { p.dy *= 1 - k; p.tilt *= 1 - k; }
-    });
-    if (state === S.PLAY) T += dt;
-    if (state === S.DONE) {
-      var was = doneT;
-      doneT += dt;
-      if (stopping()) {
-        if (was < CAM_AT && doneT >= CAM_AT) sndRise();
-        if (was < BOOM_AT && doneT >= BOOM_AT) sndBoom();
-      }
-      if (doneT > (stage === STAGES.length - 1 ? STOP_END : 1.4)) {
-        if (stage < STAGES.length - 1) startStage(stage + 1);
-        else state = S.RESULT;
-      }
+    if (state === S.INTRO) { if (walker) walker.step(dt); return; }
+    if (state !== S.PLAY && state !== S.DOWN) return;
+    if (!wheel) walker.step(dt);
+    walker.takeImpacts().forEach(function (hit) { contactSound(hit.part, hit.strength); });
+    T += dt;
+    if (wheel) { rollChair(dt); return; }
+    if (state === S.DOWN) {
+      downT += dt;
+      if (finished) { if (downT > 1.6) showResult(); }
+      else if (downT > RISE_AFTER) getUp();
+      return;
+    }
+    // 進んだ最長の距離を、背の高さで割って足していく（小さい体は歩幅も小さいので、同じ歩数で同じだけ育つ）。
+    var x = walker.x();
+    if (x > bestX) { best += (x - bestX) / (walker.form === "baby" ? 1 : walker.scale); bestX = x; }
+    if (walker.fallen()) {
+      // 転んだら力を抜いて倒れるにまかせる。
+      walker.limp = true;
+      walker.release();
+      held = false;
+      state = S.DOWN;
+      downT = 0;
+      falls++;
+      setbacks.push([T, age]);
+      life.push([T, age]);
+      fallSound();
+      return;
+    }
+    grow();
+    if (age >= WHEEL_AGE) sitDown();
+    music();
+    // 結果のグラフ用に、時間と年齢を少しずつ残す。
+    if (T - life[life.length - 1][0] >= 0.25 || age >= GOAL_AGE) life.push([T, age]);
+    if (age >= GOAL_AGE) {
+      // 大往生。
+      end();
+      state = S.DOWN;
+      downT = 0.4;
+      walker.release();
     }
   }
-
-  /* ============ 入力 ============ */
-  function slotAt(x) { return Math.max(0, Math.min(N - 1, Math.floor((x - docX) / sw))); }
-  function onPaper(x, y) { return x >= docX - 10 && x <= docX + DW * sc + 10 && y >= docY - 30 && y <= docY + dh + 30; }
-
-  /* クリアの覗き穴（確認用）。今のステージの紙片を正しい順と向きにそろえて完成させる。
-     PCは F2、スマホは上の「1/3」のあたりを素早く3回タップ */
-  var debugTaps = [];
-  function debugClear() {
-    if (state !== S.PLAY) return;
-    pieces.sort(function (a, b) { return a.i - b.i; });
-    pieces.forEach(function (p) { p.flip = false; });
-    grab = null; held = false; keyHold = false;
-    checkDone();
+  // 100歳まで歩いた時間が記録。
+  function end() {
+    finished = true;
+    score = Math.round(T * 10) / 10;
+    scoreText = score.toFixed(1) + "秒";
   }
-  function debugTap(x, y) {
-    if (state !== S.PLAY || y > docY - 6 || Math.abs(x - W / 2) > 80) return false;
-    var now = performance.now();
-    debugTaps = debugTaps.filter(function (t) { return now - t < 700; });
-    debugTaps.push(now);
-    if (debugTaps.length >= 3) { debugTaps = []; debugClear(); }
-    return true;
+  // 転んだら、その場で同じ年齢のまま起き上がる（倒れた姿から立ち姿へ見た目を寄せる）。
+  var RISE_AFTER = 1.2, WHITE_FROM = 90, SEE_OFF = 90, camStop = null;
+  function getUp() {
+    var x = walker.x(), w = walker.form === "baby" ? new LW.Walker("baby", x - 0.13, { age: age })
+      : new LW.Walker("biped", x, { age: age, cane: age >= LW.CANE_AGE, stairs: stairs });
+    setWalker(w, 0.5);
+    state = S.PLAY;
+    held = false;
+    standSound();
+  }
+  /* デバッグ：7キー、または画面上の年齢のあたりを素早く3回タップで70歳へ飛ぶ。 */
+  var taps = [];
+  function debugTap(y) {
+    if (y > 150) { taps = []; return; }
+    var now = Date.now();
+    taps = taps.filter(function (t) { return now - t < 600; });
+    taps.push(now);
+    if (taps.length >= 3) { taps = []; jumpTo(70); }
+  }
+  function jumpTo(a) {
+    if (state !== S.PLAY && state !== S.DOWN) return;
+    if (finished || age >= a) return;
+    // 今の場所から、その年齢になる距離だけ先（階段の上）へ置き直す。
+    var sc = walker.form === "baby" ? 1 : walker.scale, st = stairs || stairsFrom(walker.x(), best, sc);
+    var x = walker.x() + (LW.distanceAt(a) - best) * sc;
+    best = LW.distanceAt(a);
+    age = a;
+    var w = new LW.Walker("biped", x, { age: a, cane: a >= LW.CANE_AGE, stairs: st });
+    setStairs(st);
+    setWalker(w, false);
+    bestX = walker.x();
+    life.push([T, age]);
+    state = S.PLAY;
+    held = false;
+    snap = true;
+  }
+  /* 85歳からは車いす。押すたびに前へ押し出し、あとは少しずつ止まる（転ばない）。 */
+  var WHEEL_AGE = 85, CHAIR = { kick: 0.45, max: 1.3, slow: 1.1 };
+  function sitDown() {
+    wheel = true;
+    chairX = chairX0 = walker.x();
+    chairV = 0.2;
+    pushT = 1;
+    walker.release();
+    walker.sit(chairX, walker.floorAt(chairX), 0);
+    held = false;
+  }
+  function rollChair(dt) {
+    if (state === S.DOWN) { downT += dt; if (downT > 1.6) showResult(); walker.sit(chairX, walker.floorAt(chairX), 0); return; }
+    chairV *= Math.exp(-CHAIR.slow * dt);
+    var dx = chairV * dt;
+    chairX += dx;
+    pushT += dt;
+    walker.sit(chairX, walker.floorAt(chairX), Math.max(0, 1 - Math.abs(pushT - 0.2) / 0.2));
+    best += dx / walker.scale;
+    bestX = chairX;
+    age = Math.min(GOAL_AGE, LW.ageAt(best));
+    walker.age = age;
+    music();
+    if (T - life[life.length - 1][0] >= 0.25 || age >= GOAL_AGE) life.push([T, age]);
+    if (age >= GOAL_AGE) { end(); state = S.DOWN; downT = 0.4; }
+  }
+  function showResult() {
+    state = S.RESULT;
+    shareButton.hidden = false;
   }
 
-  function down(x, y) {
+  /* ============ 入力 ============
+     タップとスペースキーで同じことができる。押すたびに左右が入れ替わる。 */
+  function down(x, y, side) {
     if (state === S.INTRO) return;
     audioOn();
-    if (x != null && debugTap(x, y)) return;
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
       if (hit === "retry") newRound();
       return;
     }
     if (state !== S.PLAY) return;
-    if (x == null) {                           /* スペース：つかむ・置く */
-      keyHold = !keyHold;
-      if (keyHold) sndGrab(); else { sndDrop(); checkDone(); }
-      return;
-    }
-    keyHold = false;
-    if (!onPaper(x, y)) return;
+    if (wheel) { chairV = Math.min(CHAIR.max, chairV + CHAIR.kick); pushT = 0; return; }
     held = true;
-    var p = pieces[slotAt(x)];
-    grab = { p: p, sx: x, sy: y, off: x - (docX + p.x * sw), x: x, y: y, moved: false };
-  }
-  function move(x, y) {
-    if (state !== S.PLAY || !held || !grab) return;
-    grab.x = x; grab.y = y;
-    if (!grab.moved && Math.abs(x - grab.sx) > 8) { grab.moved = true; sndGrab(); }
-    if (!grab.moved) return;
-    var p = grab.p;
-    p.x = (x - grab.off - docX) / sw;
-    var to = Math.max(0, Math.min(N - 1, Math.round(p.x)));
-    var from = pieces.indexOf(p);
-    if (to !== from) { pieces.splice(from, 1); pieces.splice(to, 0, p); }
+    walker.press(side);
   }
   function up() {
     if (!held) return;
     held = false;
-    if (!grab || state !== S.PLAY) { grab = null; return; }
-    var g = grab; grab = null;
-    if (g.moved) sndDrop();
-    else { g.p.flip = !g.p.flip; sndFlip(); }
-    checkDone();
-  }
-  function keyMove(d) {
-    if (state !== S.PLAY) return;
-    var to = Math.max(0, Math.min(N - 1, cur + d));
-    if (keyHold) {
-      var p = pieces[cur];
-      pieces.splice(cur, 1); pieces.splice(to, 0, p);
-      if (to !== cur) noiseHit(0.05, 2400, 0.08, 1);
-    }
-    cur = to;
-  }
-  function keyFlip() {
-    if (state !== S.PLAY) return;
-    pieces[cur].flip = !pieces[cur].flip; sndFlip();
-    if (!keyHold) checkDone();
+    if (walker) walker.release();
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  var pointers = 0;
   wrap.addEventListener("pointerdown", function (e) {
-    e.preventDefault(); keyMode = false;
+    e.preventDefault();
+    if (!e.isPrimary && pointers) return;
+    pointers++;
     var p = atCanvas(e); down(p.x, p.y);
+    debugTap(p.y);
   });
-  wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
-  });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { if (grab) grab.moved = true; up(); });
-  window.addEventListener("blur", function () { if (grab) grab.moved = true; up(); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); pointers = 0; up(); });
+  wrap.addEventListener("pointercancel", function () { pointers = 0; up(); });
+  window.addEventListener("blur", function () { up(); });
 
+  var keySide = null;
   window.addEventListener("keydown", function (e) {
-    if (e.key === "F2") { e.preventDefault(); if (!e.repeat) debugClear(); return; }
+    if (e.key === "7" && !e.repeat) { jumpTo(70); return; }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
     var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
     var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
-    var flip = e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "w" || e.key === "W" || e.key === "s" || e.key === "S";
-    if (!esc && !go && !left && !right && !flip) return;
+    if (!esc && !go && !left && !right) return;
     e.preventDefault();
-    if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
-    if (left || right) { keyMove(left ? -1 : 1); return; }
-    if (flip) { if (!e.repeat) keyFlip(); return; }
-    if (e.repeat) return;
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    if (left || right) {
+      if (state !== S.PLAY) return;
+      keySide = left ? -1 : 1;
+      down(null, null, keySide);
+      return;
+    }
     down();
   });
   window.addEventListener("keyup", function (e) {
-    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (go) { if (state === S.INTRO) startButton.click(); else up(); }
+    if ((left && keySide === -1) || (right && keySide === 1)) { keySide = null; up(); }
   });
 
-  function secText() { return (Math.floor(T * 10) / 10).toFixed(1); }
   function doShare() {
-    /* ▼SHARE */
-    /* 端末の言語が日本語以外なら英語の文と英語の題名のハッシュタグにする */
-    var ja = /^ja/i.test((window.navigator && window.navigator.language) || "ja");
-    window.zResultActions.x({ text: ja
-      ? "シュレッダーにかけられた機密文書を" + secText() + "秒で復元した！ #シュレッダーエージェント"
-      : "I restored shredded top-secret documents in " + secText() + " seconds! #ShredderAgent" });
+    /* ▼SHARE: 共有リンクは share.js が付ける。 */
+    window.zResultActions.x({ text: "大往生しました #人生ウォーカー" });
   }
 
   /* ============ 描画 ============ */
@@ -768,124 +431,100 @@
     ctx.closePath();
   }
 
-  function drawDesk() {
-    var g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#5a4636"); g.addColorStop(1, "#3e2f24");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = "rgba(0,0,0,.12)"; ctx.lineWidth = 2;
-    for (var y = 30; y < H; y += 46) {
-      ctx.beginPath(); ctx.moveTo(0, y);
-      ctx.bezierCurveTo(W * 0.3, y + 8, W * 0.6, y - 8, W, y + 3); ctx.stroke();
-    }
-  }
-
-  function drawPiece(p, x, y, lift) {
-    var src = p.i * (DW / N) * RES, sws = (DW / N) * RES;
-    ctx.save();
-    ctx.translate(x + sw / 2, y + dh / 2);
-    ctx.rotate(p.rot + p.tilt);
-    if (lift) { ctx.scale(1.05, 1.02); }
-    ctx.shadowColor = "rgba(0,0,0," + (lift ? 0.5 : 0.28) + ")";
-    ctx.shadowBlur = lift ? 16 : 5;
-    ctx.shadowOffsetY = lift ? 10 : 2;
-    ctx.fillStyle = "#f6f3ea";
-    ctx.fillRect(-sw / 2, -dh / 2, sw, dh);
-    ctx.shadowColor = "transparent";
-    ctx.drawImage(paper, src, 0, sws, DH * RES, -sw / 2, -dh / 2, sw, dh);
-    /* 切り口 */
-    ctx.strokeStyle = "rgba(0,0,0,.14)"; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(-sw / 2 + 0.5, -dh / 2); ctx.lineTo(-sw / 2 + 0.5, dh / 2);
-    ctx.moveTo(sw / 2 - 0.5, -dh / 2); ctx.lineTo(sw / 2 - 0.5, dh / 2); ctx.stroke();
-    ctx.restore();
-  }
-
-  /* 最後のステージを完成させたときの演出。STOP_AT 秒で印が落ちる */
-  /* 印 → カメラが窓の夜空へ向く → 兵器が爆発 → 結果 */
-  var STOP_AT = 0.55, CAM_AT = 1.9, BOOM_AT = CAM_AT + 3.0, STOP_END = CAM_AT + 6.4;
-  function ending() {
-    if (stopping()) return doneT >= CAM_AT ? doneT - CAM_AT : null;
-    return state === S.RESULT && stage === STAGES.length - 1 ? STOP_END - CAM_AT : null;
-  }
-  function docAway() {                           /* 書類が画面の下へ外れていく割合 */
-    var e = ending();
-    if (e == null) return 0;
-    var k = Math.min(1, e / 1.2);
-    return k * k;
-  }
-  function stopping() { return state === S.DONE && stage === STAGES.length - 1; }
-  function drawStopStamp(t) {
-    var k = Math.min(1, t / 0.16), s = 2.4 - 1.4 * (1 - Math.pow(1 - k, 3));
-    ctx.save();
-    ctx.translate(W / 2, docY + dh * 0.46);
-    ctx.rotate(-0.16);
-    ctx.scale(s, s);
-    ctx.globalAlpha = Math.min(1, k * 1.5) * 0.92;
-    ctx.strokeStyle = "#e0262c"; ctx.fillStyle = "#e0262c";
-    ctx.lineWidth = 7; roundRect(-190, -62, 380, 124, 10); ctx.stroke();
-    ctx.lineWidth = 2.5; roundRect(-178, -50, 356, 100, 6); ctx.stroke();
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.font = "900 22px sans-serif"; ctx.fillText("PROJECT ELEPHANT", 0, -24);
-    ctx.font = "900 50px sans-serif"; ctx.fillText("TERMINATED", 0, 18);
-    ctx.restore();
-    ctx.textBaseline = "alphabetic";
-  }
-
-  function draw() {
+  function draw(dt) {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
-    var shake = stopping() && doneT > STOP_AT && doneT < STOP_AT + 0.35 ? (STOP_AT + 0.35 - doneT) * 40 : 0;
-    if (stopping() && doneT > BOOM_AT && doneT < BOOM_AT + 0.7) shake = (BOOM_AT + 0.7 - doneT) * 22;
-    var away = docAway();
-    ctx.save();
-    if (shake) ctx.translate((Math.random() * 2 - 1) * shake, (Math.random() * 2 - 1) * shake);
-    if (view3d) view3d.draw(ctx, W, H, state === S.DONE ? Math.max(0, 1 - doneT) : 0, ending());
-    else drawDesk();
-    ctx.save();
-    ctx.translate(0, away * (H - docY + 40));
-
-    var gap = state === S.PLAY || state === S.INTRO ? 2 : Math.max(0, 2 - doneT * 6);
-    var inner = sw - gap;
-    if (away < 1) pieces.forEach(function (p) {
-      if (grab && grab.moved && grab.p === p) return;
-      var lift = keyHold && pieces[cur] === p;
-      drawPiece(p, docX + p.x * sw + gap / 2 - (sw - inner) / 2, docY + p.dy - (lift ? 14 : 0), lift);
-    });
-    if (grab && grab.moved) {
-      drawPiece(grab.p, grab.x - grab.off, docY + grab.p.dy - 14, true);
+    if (view3d && walker) {
+      // 90歳でカメラをその場に止め、歩いていく背中を見送る。
+      if (camStop == null && age >= SEE_OFF) camStop = walker.x();
+      var cx = camStop == null ? walker.x() : camStop;
+      view3d.draw(ctx, W, H, { x: cx, floor: walker.floorAt(cx), form: walker.form, scale: walker.scale, progress: age / GOAL_AGE, chair: wheel ? { x: chairX, f: walker.floorAt(chairX), dist: chairX - chairX0, scale: walker.scale } : null, turn: Math.min(age, SEE_OFF) / GOAL_AGE, snap: snap, dt: dt });
+      snap = false;
+    } else {
+      ctx.fillStyle = "#f6c7a2";
+      ctx.fillRect(0, 0, W, H);
     }
-    if (keyMode && state === S.PLAY) {
-      ctx.strokeStyle = "#f7cc71"; ctx.lineWidth = 3;
-      ctx.strokeRect(docX + cur * sw - 2, docY - (keyHold ? 18 : 4), sw + 4, dh + 8);
-    }
-
-    if (stopping() && doneT > STOP_AT) drawStopStamp(doneT - STOP_AT);
-    ctx.restore();
-
-    /* ステージの進み具合 */
-    if ((state === S.PLAY || state === S.DONE) && !away) {
-      ctx.save();
-      ctx.fillStyle = "#fff"; ctx.shadowColor = "rgba(0,0,0,.7)"; ctx.shadowBlur = 8;
-      ctx.font = "800 30px sans-serif"; ctx.textAlign = "center";
-      ctx.fillText((stage + 1) + "/" + STAGES.length, W / 2, Math.min(48, docY - 16));
-      ctx.restore();
-    }
-
-    if (state === S.DONE) {
-      var a = Math.max(0, 0.5 - doneT * 1.2);
-      if (a > 0) { ctx.fillStyle = "rgba(255,255,255," + a + ")"; ctx.fillRect(0, 0, W, H); }
-    }
-    if (stopping() && doneT > STOP_AT) {
-      var fl = Math.max(0, 0.55 - (doneT - STOP_AT) * 2.2);
-      if (doneT > BOOM_AT) fl = Math.max(fl, 0.8 - (doneT - BOOM_AT) * 1.6);
-      if (fl > 0) { ctx.fillStyle = "rgba(255,240,230," + fl + ")"; ctx.fillRect(0, 0, W, H); }
-    }
-    ctx.restore();
+    // 90歳を過ぎると、だんだん白く飛んでいく。
+    var white = Math.max(0, Math.min(1, (age - WHITE_FROM) / (GOAL_AGE - WHITE_FROM)));
+    if (white > 0) { ctx.fillStyle = "rgba(255,255,255," + (white * white * (3 - 2 * white)) + ")"; ctx.fillRect(0, 0, W, H); }
+    if (state === S.PLAY || state === S.DOWN) drawAge();
+    if (state === S.DOWN && age < GOAL_AGE) drawSetback();
     if (state === S.RESULT) drawResult();
   }
 
+  /* 上に今の年齢。 */
+  function drawAge() {
+    // 1歳になるまでは月で数える。
+    var num = age < 1 ? String(Math.floor(age * 12)) : String(Math.floor(age)), unit = age < 1 ? "ヵ月" : "歳";
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.55)";
+    ctx.shadowBlur = 8;
+    ctx.textAlign = "left";
+    ctx.font = "800 72px sans-serif";
+    var nw = ctx.measureText(num).width;
+    ctx.font = "800 34px sans-serif";
+    var uw = ctx.measureText(unit).width, x = W / 2 - (nw + uw + 4) / 2, y = 108;
+    ctx.font = "800 72px sans-serif";
+    ctx.fillText(num, x, y);
+    ctx.font = "800 34px sans-serif";
+    ctx.fillText(unit, x + nw + 4, y);
+    ctx.restore();
+  }
+
+  /* 転んでいる間、真ん中に「挫折」。 */
+  function drawSetback() {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, downT / 0.15);
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 12;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "800 96px sans-serif";
+    ctx.fillText("挫折", W / 2, H * 0.36);
+    ctx.restore();
+  }
+
+  /* 人生の進みのグラフ。横が時間、縦が年齢（0〜100歳）。転んだところに「挫折」。 */
+  function drawLife(x, y, w, h) {
+    var end = life[life.length - 1][0] || 1;
+    function px(t) { return x + w * t / end; }
+    function py(a) { return y + h - h * a / GOAL_AGE; }
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.35)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.lineTo(x, y + h); ctx.lineTo(x + w, y + h);
+    ctx.stroke();
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 5;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    life.forEach(function (p, i) { if (i) ctx.lineTo(px(p[0]), py(p[1])); else ctx.moveTo(px(p[0]), py(p[1])); });
+    ctx.stroke();
+    ctx.font = "800 22px sans-serif";
+    ctx.textAlign = "center";
+    setbacks.forEach(function (p, i) {
+      var cx = px(p[0]), cy = py(p[1]);
+      ctx.fillStyle = "#ff5a4e";
+      ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
+      // 近くの挫折と重ならないよう、上と下に交互に出す。
+      var below = i % 2 === 1 && cy < y + h - 40, ly = below ? cy + 32 : cy - 16;
+      ctx.fillStyle = "#fff";
+      ctx.shadowColor = "rgba(0,0,0,.7)";
+      ctx.shadowBlur = 6;
+      ctx.fillText("挫折", Math.max(x + 24, Math.min(x + w - 24, cx)), ly);
+      ctx.shadowBlur = 0;
+    });
+    ctx.restore();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.72;
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -907,18 +546,13 @@
     ctx.shadowColor = "rgba(0,0,0,.6)";
     ctx.shadowBlur = 10;
     ctx.textAlign = "center";
-    ctx.font = "800 108px sans-serif";
-    var num = secText();
-    var nw = ctx.measureText(num).width;
-    ctx.font = "800 60px sans-serif";
-    var uw = ctx.measureText("s").width;
-    var left = W / 2 - (nw + 4 + uw) / 2;
-    ctx.textAlign = "left";
-    ctx.font = "800 108px sans-serif";
-    ctx.fillText(num, left, H * 0.45);
-    ctx.font = "800 60px sans-serif";
-    ctx.fillText("s", left + nw + 4, H * 0.45);
+    // 「大往生」は縦書き。時間は出さない。
+    ctx.font = "800 84px sans-serif";
+    ctx.textBaseline = "middle";
+    "大往生".split("").forEach(function (ch, i) { ctx.fillText(ch, W / 2, H * 0.1 + i * 90); });
+    ctx.textBaseline = "alphabetic";
     ctx.restore();
+    drawLife(W * 0.14, H * 0.1 + 250, W * 0.72, H * 0.62 - (H * 0.1 + 250) - 30);
     resultButtons().forEach(function (b) {
       ctx.save();
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
@@ -935,51 +569,58 @@
     });
   }
 
-  /* ============ 覗き穴 ============ */
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
   window.__probe = {
     now: function () {
-      return {
-        state: state, stage: stage, T: T, endLen: STOP_END, W: W, H: H, N: N,
-        order: pieces.map(function (p) { return p.i; }),
-        flips: pieces.map(function (p) { return p.flip; }),
-        doc: { x: docX, y: docY, sw: sw, h: dh }, cur: cur, keyHold: keyHold, has3d: !!view3d
-      };
+      return { state: state, score: score, scoreText: scoreText, W: W, H: H, T: T, age: age, form: walker && walker.form, cane: walker ? walker.cane : false, floor: walker ? walker.floorAt(walker.x()) : 0, stairs: !!stairs, scale: walker ? walker.scale : 0,
+        x: walker ? walker.x() : 0, side: walker ? walker.side : 0, pressed: walker ? walker.pressed : false,
+        landed: wheel ? true : walker ? !walker.side || !!(walker.near || {})[(walker.form === "baby" ? "arm" : "foot") + (walker.side < 0 ? "L" : "R")] : false,
+        fallen: walker && !wheel ? walker.fallen() : false, wheel: wheel, finished: finished, falls: falls, setbacks: setbacks ? setbacks.length : 0, lifePoints: life ? life.length : 0, has3d: !!view3d, length: LENGTH };
     },
-    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
-    reset: function () { newRound(); }
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(1 / 60); } },
+    reset: function () { newRound(); },
+    walker: function () { return walker; }
   };
 
-  /* ============ 手元用の動画撮影 ============
-     キー操作で一本ずつ正しい位置へ運び、向きを直す。 */
+  /* サムネ撮影用。setup.age の年齢の体から始める。 */
+  window.__thumbnail = function (setup) {
+    setup = setup || {};
+    if (setup.age != null) {
+      if (!(setup.age >= 0 && setup.age < GOAL_AGE)) throw Error("age は 0〜" + (GOAL_AGE - 1));
+      newRound();
+      best = LW.distanceAt(setup.age);
+      age = setup.age;
+      var st = age >= STAIRS.age - 1 ? stairsFrom(best, best, LW.heightAt(age)) : null;
+      setWalker(setup.age < 1 ? new LW.Walker("baby", best) : new LW.Walker("biped", best, { age: age, cane: age >= LW.CANE_AGE, stairs: st }), false);
+      setStairs(st);
+      bestX = walker.x();
+      snap = true;
+      if (age >= WHEEL_AGE) sitDown();
+    }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
-      await r.wait(800);
+      await r.wait(1000);
       r.key();
-      await r.wait(800);
-      function key(k) { window.dispatchEvent(new KeyboardEvent("keydown", { key: k })); window.dispatchEvent(new KeyboardEvent("keyup", { key: k })); }
-      for (var st = 0; st < STAGES.length; st++) {
-        if (!await r.until(function () { return state === S.PLAY && stage === st; }, 10)) throw Error("次のステージにならない");
-        await r.wait(400);
-        for (var want = 0; want < N && state === S.PLAY; want++) {
-          var at = pieces.findIndex(function (p) { return p.i === want; });
-          while (cur < at && state === S.PLAY) { key("ArrowRight"); await r.wait(60); }
-          while (cur > at && state === S.PLAY) { key("ArrowLeft"); await r.wait(60); }
-          if (at !== want) {
-            key(" "); await r.wait(150);
-            while (cur > want) { key("ArrowLeft"); await r.wait(90); }
-            key(" "); await r.wait(150);
-          }
-          if (pieces[want].flip) { key("ArrowUp"); await r.wait(200); }
-        }
+      var o = { key: " ", code: "Space", bubbles: true };
+      for (var i = 0; i < 200 && state === S.PLAY; i++) {
+        await r.wait(250);
+        window.dispatchEvent(new KeyboardEvent("keydown", o));
+        await r.wait(300);
+        window.dispatchEvent(new KeyboardEvent("keyup", o));
       }
-      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("完成しない");
+      await r.until(function () { return state === S.RESULT; }, 10);
       await r.wait(1500);
     }
   };
 
   /* ============ ループ ============ */
   var startButton = document.getElementById("start");
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
 
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
@@ -988,23 +629,30 @@
   layout();
   var last = performance.now();
   function loop(now) {
-    var dt = Math.min(0.033, (now - last) / 1000);
+    var dt = Math.min(0.033, (now - last) / 1000);   /* 戻ってきたとき飛ばないように上限 */
     last = now;
-    if (!window.__recordManual) { update(dt); draw(); }
+    if (!window.__recordManual) { update(dt); draw(dt); }
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
 })();
 </script>
 <script>
-/* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
-if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=shredder-1790679464413" : "./recorder-ui.js?v=shredder-1790679464413";
+  recorderScript.src = "../_tools/recorder-ui.js";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=shredder-1790679464413"></script>
-<script src="./preview-header.js?v=shredder-1790679464413"></script>
+<script>
+/* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
+if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=walk100-1790773300077" : "./recorder-ui.js?v=walk100-1790773300077";
+  document.head.appendChild(recorderScript);
+}
+</script>
+<script src="./auto-reload.js?v=walk100-1790773300077"></script>
+<script src="./preview-header.js?v=walk100-1790773300077"></script>
 </body>
 </html>
