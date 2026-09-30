@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>矢じりシューター</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #2a2433; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 矢じりシューター
+
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+
+    place();                                   /* 高さが決まってから置き直す */
+
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null;
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+  var stroke, arrows, foes, bits, fizz, spawnT, overT;
+
+  var ZT;                                      /* 描く場所の上端 */
+  function place() {
+    ZT = Math.round(H * 0.68);
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden=true;
+    state = S.PLAY;
+    score = 0;
+    T = 0;
+    held = false;
+    stroke = null; arrows = []; foes = []; bits = []; fizz = [];
+    spawnT = 0.6; overT = 0;
+  }
+
+  /* ============ 矢じりの読み取り ============
+     描いた線の両端を結んだ線から、いちばん遠い点を先端とみなす。
+     両端の真ん中から先端へ向かう向きに飛ぶ。 */
+  function readShape(pts) {
+    if (pts.length < 3) return null;
+    var s = pts[0], e = pts[pts.length - 1];
+    var cx = e.x - s.x, cy = e.y - s.y, cl = Math.hypot(cx, cy);
+    var best = -1, bi = 0;
+    for (var i = 1; i < pts.length - 1; i++) {
+      var p = pts[i], d;
+      if (cl < 1) d = Math.hypot(p.x - s.x, p.y - s.y);
+      else d = Math.abs((p.x - s.x) * cy - (p.y - s.y) * cx) / cl;
+      if (d > best) { best = d; bi = i; }
+    }
+    var a = pts[bi];
+    var l1 = Math.hypot(s.x - a.x, s.y - a.y), l2 = Math.hypot(e.x - a.x, e.y - a.y);
+    if (best < 18 || l1 < 25 || l2 < 25) return null;
+    var dot = ((s.x - a.x) * (e.x - a.x) + (s.y - a.y) * (e.y - a.y)) / (l1 * l2);
+    var ang = Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI;
+    if (ang > 150) return null;
+    var mx = (s.x + e.x) / 2, my = (s.y + e.y) / 2;
+    var dx = a.x - mx, dy = a.y - my, dl = Math.hypot(dx, dy) || 1;
+    return { ax: a.x, ay: a.y, dx: dx / dl, dy: dy / dl, size: Math.max(l1, l2) };
+  }
+
+  function shoot(pts) {
+    var r = readShape(pts);
+    if (!r) {
+      fizz.push({ pts: pts, t: 0 });
+      tone(180, 0.12, 0.08, "triangle", 120);
+      return;
+    }
+    var rel = pts.map(function (p) { return { x: p.x - r.ax, y: p.y - r.ay }; });
+    arrows.push({ x: r.ax, y: r.ay, vx: r.dx * 1000, vy: r.dy * 1000, pts: rel,
+      reach: Math.min(34, 8 + r.size * 0.18), hit: {} });
+    noiseHit(0.18, 2400, 0.25, 0.8);
+    tone(900, 0.12, 0.06, "sine", 1500);
+  }
+
+  function spawn() {
+    var bat = T > 8 && Math.random() < Math.min(0.45, 0.1 + T * 0.006);
+    var r = bat ? 24 : 30 + Math.random() * 16;
+    var sp = Math.min(210, 55 + T * 2.2) * (bat ? 1.35 : 1);
+    foes.push({ id: Math.random(), bat: bat, r: r, x0: r + 20 + Math.random() * (W - 2 * r - 40), x: 0,
+      y: -r, vy: sp, ph: Math.random() * 6.28, sw: bat ? 60 : 14 + Math.random() * 20, t: 0 });
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    bits.forEach(function (b) { b.t += dt; b.x += b.vx * dt; b.y += b.vy * dt; b.vy += 600 * dt; });
+    bits = bits.filter(function (b) { return b.t < b.life; });
+    fizz.forEach(function (f) { f.t += dt; });
+    fizz = fizz.filter(function (f) { return f.t < 0.4; });
+    if (state === S.RESULT) return;
+    if (state === S.PLAY && overT > 0) {
+      overT += dt;
+      if (overT > 0.7) { state = S.RESULT; held = false; stroke = null; tone(140, 0.5, 0.15, "sawtooth", 60); }
+      return;
+    }
+    if (state !== S.PLAY) return;
+    T += dt;
+
+    spawnT -= dt;
+    if (spawnT <= 0) { spawn(); spawnT = Math.max(0.42, 1.5 - T * 0.02) * (0.7 + Math.random() * 0.6); }
+
+    foes.forEach(function (f) {
+      f.t += dt; f.y += f.vy * dt;
+      f.x = Math.max(f.r, Math.min(W - f.r, f.x0 + Math.sin(f.t * (f.bat ? 3 : 1.4) + f.ph) * f.sw));
+      if (f.y + f.r >= ZT && !overT) { overT = 0.0001; f.bad = true; }
+    });
+
+    arrows.forEach(function (a) {
+      var px = a.x, py = a.y;
+      a.x += a.vx * dt; a.y += a.vy * dt;
+      foes.forEach(function (f) {
+        if (f.dead || a.hit[f.id]) return;
+        /* この1コマで先端が通った線分と、的の中心との距離 */
+        var sx = a.x - px, sy = a.y - py, L = sx * sx + sy * sy || 1;
+        var k = Math.max(0, Math.min(1, ((f.x - px) * sx + (f.y - py) * sy) / L));
+        var d = Math.hypot(px + sx * k - f.x, py + sy * k - f.y);
+        if (d < f.r + a.reach) {
+          a.hit[f.id] = 1; f.dead = true; score++;
+          burst(f);
+        }
+      });
+    });
+    foes = foes.filter(function (f) { return !f.dead; });
+    arrows = arrows.filter(function (a) { return a.x > -200 && a.x < W + 200 && a.y > -200 && a.y < H + 200; });
+  }
+
+  function burst(f) {
+    for (var i = 0; i < 16; i++) {
+      var an = Math.random() * 6.28, sp = 120 + Math.random() * 260;
+      bits.push({ x: f.x, y: f.y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp - 100, t: 0,
+        life: 0.5 + Math.random() * 0.3, c: f.bat ? "#3a2b4a" : (i % 2 ? "#e2383f" : "#fff") });
+    }
+    tone(520 + Math.min(score, 40) * 12, 0.1, 0.12, "square", 1040);
+    noiseHit(0.12, 900, 0.2, 1.5);
+  }
+
+  /* ============ 入力 ============
+     タップとスペースキーで同じことができるようにする。
+     x が null のときはキー操作（場所を指さない）。 */
+  function down(x, y) {
+    if(state===S.INTRO)return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (overT) return;
+    if (x == null) {
+      /* キーは真上へ */
+      var cx = W / 2, cy = ZT + (H - ZT) * 0.45;
+      shoot([{ x: cx - 50, y: cy + 50 }, { x: cx - 25, y: cy + 25 }, { x: cx, y: cy }, { x: cx + 25, y: cy + 25 }, { x: cx + 50, y: cy + 50 }]);
+      return;
+    }
+    if (y < ZT) return;
+    held = true;
+    stroke = [{ x: x, y: y }];
+  }
+  function move(x, y) {
+    if (state !== S.PLAY || !held || !stroke) return;
+    var l = stroke[stroke.length - 1];
+    if (Math.hypot(x - l.x, y - l.y) >= 3) stroke.push({ x: x, y: y });
+  }
+  function up() {
+    if (!held) return;
+    held = false;
+    if (stroke && state === S.PLAY && !overT) shoot(stroke);
+    stroke = null;
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  /* 本番以外（手元・確認用ページ・制作中の固定リンク）だけ、数字キーで場面を飛ばせる。
+     本番（www.zounoashi.com/games/ 以下）では効かない。 */
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    /* 1: 30秒ぶん速くする  2: 敵を5体出す  3: 負けにする */
+    if (state !== S.PLAY || overT) return;
+    if (n === 1) T += 30;
+    if (n === 2) for (var i = 0; i < 5; i++) { spawn(); foes[foes.length - 1].y -= i * 90; }
+    if (n === 3 && foes.length) foes[0].y = ZT;
+    if (n === 3 && !foes.length) { spawn(); foes[0].y = ZT; }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (!esc && !go && !left && !right) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (left || right) {
+      if (state !== S.PLAY) return;
+      /* ▼UPDATE: 左右キー（選ぶものがあるとき。目印は keyMode のときだけ出す） */
+      return;
+    }
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
+  });
+
+  function doShare() {
+    /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
+       URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
+    window.zResultActions.x({ text: score + "体撃ち落としました #矢じりシューター" });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+
+    var g = ctx.createLinearGradient(0, 0, 0, ZT);
+    g.addColorStop(0, "#1b2a4a"); g.addColorStop(1, "#4b5f8c");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, ZT);
+    ctx.fillStyle = "#2a2433"; ctx.fillRect(0, ZT, W, H - ZT);
+    ctx.fillStyle = overT ? "#e2383f" : "#f2c14e";
+    ctx.fillRect(0, ZT - 3, W, 6);
+
+    foes.forEach(drawFoe);
+
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    fizz.forEach(function (f) {
+      ctx.globalAlpha = 1 - f.t / 0.4;
+      line(f.pts, 0, 0, "#8a8196", 8);
+    });
+    ctx.globalAlpha = 1;
+    arrows.forEach(function (a) { line(a.pts, a.x, a.y, "#fff", 9); });
+    if (stroke) line(stroke, 0, 0, "#f2c14e", 9);
+
+    bits.forEach(function (b) {
+      ctx.globalAlpha = 1 - b.t / b.life;
+      ctx.fillStyle = b.c; ctx.fillRect(b.x - 4, b.y - 4, 8, 8);
+    });
+    ctx.globalAlpha = 1;
+
+    if (state === S.PLAY) {
+      ctx.fillStyle = "#fff";
+      ctx.font = "800 56px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(String(score), W / 2, 76);
+    }
+
+    if (state === S.RESULT) drawResult();
+  }
+  function line(pts, ox, oy, col, w) {
+    if (!pts.length) return;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x + ox, pts[0].y + oy);
+    for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x + ox, pts[i].y + oy);
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke();
+  }
+  function drawFoe(f) {
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    if (f.bat) {
+      var fl = Math.sin(f.t * 16) * 10;
+      ctx.fillStyle = f.bad ? "#e2383f" : "#1a1224";
+      ctx.beginPath();
+      ctx.moveTo(-6, -4); ctx.lineTo(-f.r * 1.9, -12 + fl); ctx.lineTo(-f.r * 1.2, 6); ctx.lineTo(-f.r * 0.7, 2); ctx.closePath();
+      ctx.moveTo(6, -4); ctx.lineTo(f.r * 1.9, -12 + fl); ctx.lineTo(f.r * 1.2, 6); ctx.lineTo(f.r * 0.7, 2); ctx.closePath();
+      ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, 0, f.r * 0.7, f.r * 0.8, 0, 0, 6.29); ctx.fill();
+      ctx.fillStyle = "#ffe066";
+      ctx.beginPath(); ctx.arc(-6, -3, 3.5, 0, 6.29); ctx.arc(6, -3, 3.5, 0, 6.29); ctx.fill();
+    } else {
+      var cs = f.bad ? ["#e2383f", "#e2383f"] : ["#e2383f", "#fff"];
+      for (var i = 0; i < 4; i++) {
+        ctx.fillStyle = cs[i % 2];
+        ctx.beginPath(); ctx.arc(0, 0, f.r * (1 - i * 0.24), 0, 6.29); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx,b.label,0,1,30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
+     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
+  window.__probe = {
+    now: function () { return { state: state, score: score, W: W, H: H, ZT: ZT, foes: foes.length, arrows: arrows.length }; },
+    read: readShape,
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============
+     record.js が呼ぶ自動操作。ゲームに合わせて run の中だけ書き換える。 */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      for (var i = 0; i < 12; i++) { await r.wait(700); r.key(); }
+      if (!await r.until(function () { return state === S.RESULT; }, 60)) throw Error("勝敗が出ない");
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  newRound();state=S.INTRO;startButton.hidden=false;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000);   /* 戻ってきたとき飛ばないように上限 */
+    last = now;
+    if (!window.__recordManual) { update(dt); draw(); }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
