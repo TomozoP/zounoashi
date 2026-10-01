@@ -48,7 +48,7 @@
     /* 脚：細いカプセルと白い足先 */
     c.legs = [[-34, 10], [-28, -10], [30, 10], [36, -10]].map(function (p) {
       var pivot = new T.Group(); pivot.position.set(p[0], 52, p[1]); g.add(pivot);
-      part(pivot, self.leg, 0, -24, 0, 1, 1, 1);
+      pivot.userData.leg = part(pivot, new T.CapsuleGeometry(5.5, 38, 8, 20), 0, -24, 0, 1, 1, 1);
       part(pivot, self.ball, 2, -49, 0, 8, 4.5, 7, "light");
       return pivot;
     });
@@ -63,7 +63,13 @@
     c.shag = [
       shaggy(c.torso, function (n) { return Math.max(0, Math.min(1, (n.x + 0.3) / 0.8)); }),
       shaggy(c.skull, function (n) { return Math.max(0, Math.min(1, (0.4 - n.x) / 0.6)) * Math.max(0, Math.min(1, (n.y + 0.6) / 0.6)); })
-    ];
+    ].concat(c.legs.map(function (l) {
+      /* 脚は実寸の形なので押し出しも実寸で。足先近くは控えめに */
+      var sh = shaggy(l.userData.leg, function () { return 1; }, 7);
+      var pa = l.userData.leg.geometry.attributes.position;
+      for (var q = 0; q < pa.count; q++) sh.w[q] = Math.max(0, Math.min(1, (pa.getY(q) + 18) / 20));
+      return sh;
+    }));
     /* 口：頭の表面に貼った薄い楕円。上のふちを固定して下へ開き、牙はそのふちに付ける */
     var ma = -0.4;
     c.mouthG = new T.Group(); c.mouthG.position.set(24 * Math.cos(ma), 24 * Math.sin(ma), 0); c.mouthG.rotation.z = ma; c.head.add(c.mouthG);
@@ -92,7 +98,7 @@
     return c;
   };
 
-  function shaggy(mesh, weightOf) {
+  function shaggy(mesh, weightOf, unit) {
     var T = global.THREE, geo = mesh.geometry, pos = geo.attributes.position, nrm = geo.attributes.normal;
     var base = new Float32Array(pos.array), w = new Float32Array(pos.count), h = new Float32Array(pos.count), n = new T.Vector3();
     var seen = {};
@@ -104,14 +110,14 @@
       if (seen[key] == null) { var r = Math.sin(i * 12.9898 + 78.233) * 43758.5453; seen[key] = r - Math.floor(r); }
       h[i] = seen[key];
     }
-    return { mesh: mesh, base: base, w: w, h: h, nrm: new Float32Array(nrm.array), level: -1 };
+    return { mesh: mesh, base: base, w: w, h: h, nrm: new Float32Array(nrm.array), level: -1, unit: unit || 1 };
   }
   function ruffle(sh, amount, t) {
     if (amount < 0.01 && sh.level === 0) return;
     var pos = sh.mesh.geometry.attributes.position, a = pos.array, b = sh.base, nr = sh.nrm;
     for (var i = 0; i < pos.count; i++) {
-      var h = sh.h[i], spike = 0.06 + 0.5 * h * h * h;
-      var d = amount * sh.w[i] * spike * (1 + 0.12 * Math.sin(t * 35 + h * 40));
+      var h = sh.h[i], spike = 0.1 + 0.85 * h * h * h;
+      var d = amount * sh.w[i] * spike * sh.unit * (1 + 0.12 * Math.sin(t * 35 + h * 40));
       a[i * 3] = b[i * 3] + nr[i * 3] * d;
       a[i * 3 + 1] = b[i * 3 + 1] + nr[i * 3 + 1] * d;
       a[i * 3 + 2] = b[i * 3 + 2] + nr[i * 3 + 2] * d;
@@ -155,8 +161,7 @@
     g.rotation.y = face > 0 ? -0.45 : Math.PI + 0.45;
     var puff = s.puff, arch = run ? 0 : puff;
     var bristle = run ? 0 : (s.fur || 0);
-    ruffle(c.shag[0], bristle, s.t);
-    ruffle(c.shag[1], bristle * 0.8, s.t);
+    c.shag.forEach(function (sh, i) { ruffle(sh, bristle * (i === 1 ? 0.85 : 1), s.t); });
     c.torso.position.y = 62 + arch * 4;
     c.torso.scale.set(21 + puff * 4, 30, 20 + puff * 4);
     var legPh = run ? Math.sin(s.run * 30) : 0;
@@ -176,6 +181,8 @@
     if (c.tailMesh) { c.tailMesh.geometry.dispose(); g.remove(c.tailMesh); }
     c.tailMesh = new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts), 24, rad, 10, false), this.mat(c.bodyHex));
     g.add(c.tailMesh);
+    /* しっぽも毛羽立たせる（毎コマ作り直すので、その都度押し出す） */
+    if (bristle > 0.01) ruffle(shaggy(c.tailMesh, function () { return 1; }, rad * 1.1), bristle, s.t);
     c.tailTip.position.copy(pts[6]); c.tailTip.scale.setScalar(rad);
     c.head.position.y = run ? 80 : 90 + arch * 4;
     c.head.scale.setScalar(s.head || 1);          /* 有利不利は顔の大きさで見せる */
