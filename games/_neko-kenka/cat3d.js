@@ -161,7 +161,8 @@
     g.rotation.y = face > 0 ? -0.45 : Math.PI + 0.45;
     var puff = s.puff, arch = run ? 0 : puff;
     var bristle = run ? 0 : (s.fur || 0);
-    c.shag.forEach(function (sh, i) { ruffle(sh, bristle * (i === 1 ? 0.85 : 1), s.t); });
+    /* 0:胴（強め） 1:頭（立てない） 2〜:脚 */
+    c.shag.forEach(function (sh, i) { ruffle(sh, bristle * (i === 0 ? 1.8 : i === 1 ? 0 : 1), s.t); });
     c.torso.position.y = 62 + arch * 4;
     c.torso.scale.set(21 + puff * 4, 30, 20 + puff * 4);
     var legPh = run ? Math.sin(s.run * 30) : 0;
