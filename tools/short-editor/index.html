@@ -143,9 +143,7 @@ aside .sec>h3:before{content:none}
 #postBox .acts button{white-space:nowrap}
 #ov .box h4{margin:0 0 10px}
 #postBox{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
-#postText,#postTitle,#postMain{width:100%;resize:vertical}
-#postMain{margin-bottom:6px}
-#postTitle{margin-bottom:6px}
+#postBox textarea,#postBox input{width:100%;resize:vertical;margin-bottom:6px}
 #ov .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
 #toast{position:fixed;left:50%;bottom:220px;transform:translateX(-50%);background:#000c;padding:8px 14px;border-radius:8px;display:none;z-index:60}
 /* 制作中のゲーム（固定リンク）を中に開く。スマホではこれだけを出す */
@@ -1377,57 +1375,57 @@ function showExported(blob, ext) {
   $('ovTitle').textContent = '書き出し完了';
   $('ovMsg').textContent = `${(blob.size / 1e6).toFixed(1)} MB（${ext.toUpperCase()}）`;
   $('ovActs').innerHTML = '';
-  const a = document.createElement('a'); a.href = url; a.download = 'short_' + new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '') + '.' + ext;
-  let saved = false; const save = () => { if (!saved) { saved = true; a.click(); } };
+  // ファイル名は「ゲーム名_日付-時刻」（ゲーム名が取れないときは short_）
+  const d = new Date(), p2 = n => String(n).padStart(2, '0');
+  const stamp = d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
+  const info = postInfo();
+  const a = document.createElement('a'); a.href = url; a.download = 'short_' + stamp + '.' + ext;
+  info.then(g => { if (g.title) a.download = g.title.replace(/[\\/:*?"<>|\s]/g, '') + '_' + stamp + '.' + ext; });
+  let saved = false; const save = async () => { if (!saved) { saved = true; await info; document.body.appendChild(a); a.click(); a.remove(); } };
   const b1 = document.createElement('button'); b1.className = 'primary'; b1.textContent = '保存'; b1.onclick = () => { saved = false; save(); };
   const b2 = document.createElement('button'); b2.textContent = '閉じる'; b2.onclick = () => { $('ov').classList.remove('on'); resetOv(); };
   $('ovActs').append(b2, b1);
   // 投稿：投稿文を直せる欄と、各サービスの投稿画面を開くボタン。動画は先に保存しておき、開いた画面へドラッグする
   const box = document.createElement('div'); box.id = 'postBox';
-  // X は「本文＋動画」を投稿し、そのツリーに「#ゲーム名＋リンク」を付ける形
-  const main = document.createElement('textarea'); main.id = 'postMain'; main.rows = 2; main.placeholder = '本文（動画と一緒に投稿）'; main.value = ' #gamedev';
-  const text = document.createElement('textarea'); text.id = 'postText'; text.rows = 2; text.placeholder = 'ツリーに付ける文（#ゲーム名とリンク）';
+  const xText = document.createElement('textarea'); xText.id = 'postX'; xText.rows = 2; xText.placeholder = 'X の投稿文';
   const ytTitle = document.createElement('input'); ytTitle.type = 'text'; ytTitle.id = 'postTitle'; ytTitle.placeholder = 'YouTube の題名';
-  postText().then(t => { if (!text.value) text.value = t; if (!ytTitle.value) ytTitle.value = (t.split('\n')[0] || '').replace(/^#/, ''); });
+  const ytText = document.createElement('textarea'); ytText.id = 'postYt'; ytText.rows = 2; ytText.placeholder = 'YouTube の説明文';
+  info.then(g => {
+    if (!g.title) return;
+    // X：「題名 #gamedev #題名 リンク」、YouTube：題名はそのまま、説明文は遊べる場所とXのリンク
+    if (!xText.value) xText.value = g.title + ' #gamedev #' + g.tag + ' ' + g.url;
+    if (!ytTitle.value) ytTitle.value = g.title;
+    if (!ytText.value) ytText.value = '【ここで遊べます】' + g.url + '\n【X】 https://x.com/TomozoP';
+  });
   const row = document.createElement('div'); row.className = 'acts';
-  const file = new File([blob], a.download, { type: blob.type });
+  const fileOf = () => new File([blob], a.download, { type: blob.type });
+  const file = fileOf();
   if (navigator.canShare && navigator.canShare({ files: [file] }) && matchMedia('(pointer:coarse)').matches) {
     const sh = document.createElement('button'); sh.textContent = '共有（X・YouTubeのアプリへ）';
-    sh.onclick = () => navigator.share({ files: [file], text: main.value.trim() }).catch(() => {});
-    row.append(sh);
+    sh.onclick = () => navigator.share({ files: [fileOf()], text: xText.value }).catch(() => {});
+    row.append(sh); box.append(xText);
   } else {
     const x = document.createElement('button'); x.textContent = 'Xに投稿';
-    x.onclick = () => { save(); open('https://x.com/intent/post?text=' + encodeURIComponent(main.value.trim()), '_blank'); toast('動画を保存しました。開いた投稿画面へドラッグして投稿し、ポストのリンクをコピーしてから「ツリーにリンク」を押してください', 8000); };
-    const tree = document.createElement('button'); tree.textContent = 'ツリーにリンク';
-    tree.onclick = async () => {
-      // 投稿したポストのリンク（…/status/数字）をクリップボードから読む。読めなければ貼ってもらう
-      let link = '';
-      try { link = await navigator.clipboard.readText(); } catch (e) {}
-      if (!/\/status\/\d+/.test(link)) link = prompt('投稿したポストのリンクを貼ってください') || '';
-      const id = (/\/status\/(\d+)/.exec(link) || [])[1];
-      if (!id) { toast('ポストのリンクが見つかりませんでした'); return; }
-      open('https://x.com/intent/post?in_reply_to=' + id + '&text=' + encodeURIComponent(text.value), '_blank');
-    };
+    x.onclick = () => { save(); open('https://x.com/intent/post?text=' + encodeURIComponent(xText.value), '_blank'); toast('動画を保存しました。開いた投稿画面へドラッグしてください', 5000); };
     const y = document.createElement('button'); y.textContent = 'YouTubeに投稿';
     if (YT_CLIENT_ID) {
       // 審査前のアプリから上げた動画は非公開に固定されるので、非公開で上げて YouTube Studio を開く
       y.textContent = 'YouTubeに上げる（非公開）'; loadGoogle();
-      y.onclick = () => ytUpload(file, ytTitle.value || 'ゲーム', [main.value.trim(), text.value].filter(Boolean).join('\n\n'), y);
-      box.append(ytTitle);
-    } else y.onclick = () => { save(); copyText([main.value.trim(), text.value].filter(Boolean).join('\n\n')); open('https://www.youtube.com/upload', '_blank'); toast('動画を保存し、投稿文をコピーしました。開いた画面へ動画をドラッグしてください', 5000); };
-    row.append(x, tree, y);
+      y.onclick = () => ytUpload(fileOf(), ytTitle.value || 'ゲーム', ytText.value, y);
+    } else y.onclick = () => { save(); copyText(ytText.value); open('https://www.youtube.com/upload', '_blank'); toast('動画を保存し、説明文をコピーしました。開いた画面へ動画をドラッグしてください', 5000); };
+    row.append(x, y); box.append(xText, ytTitle, ytText);
   }
-  box.append(main, text, row); $('ovActs').after(box);
+  box.append(row); $('ovActs').after(box);
 }
-// 投稿文：制作中のゲームの題名からハッシュタグと、本番の共有ページのリンクを作る（プレビューのリンクは出さない）
-async function postText() {
+// 制作中のゲームの題名・ハッシュタグ・本番の共有ページのリンク（プレビューのリンクは出さない）
+async function postInfo() {
   try {
     const html = await (await fetch('../../shisaku-i87mixcr/?_post=' + Date.now(), { cache: 'no-store' })).text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
-    const title = doc.title.replace(/【プレビュー】/g, '').replace(/[\s・･·•、，,.。]/g, '');
+    const title = doc.title.replace(/【プレビュー】/g, '').trim();
     const v = doc.querySelector('meta[name="preview-version"]'), id = v && /^([a-z0-9-]+?)-\d+$/.exec(v.content || '');
-    return [title && '#' + title, id && 'https://www.zounoashi.com/share/' + id[1] + '/?card=square2'].filter(Boolean).join('\n');
-  } catch (e) { return ''; }
+    return { title, tag: title.replace(/[\s・･·•、，,.。]/g, ''), url: id ? 'https://www.zounoashi.com/share/' + id[1] + '/?card=square2' : '' };
+  } catch (e) { return {}; }
 }
 // ---------- YouTube へ直接アップロード ----------
 let googleReady = null, ytToken = null;
