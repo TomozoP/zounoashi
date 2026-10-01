@@ -139,10 +139,12 @@ aside .sec>h3:before{content:none}
 /* overlay */
 #ov{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50}
 #ov.on{display:flex}
-#ov .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;width:340px}
+#ov .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;width:min(460px,92vw)}
+#postBox .acts button{white-space:nowrap}
 #ov .box h4{margin:0 0 10px}
 #postBox{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
-#postText,#postTitle{width:100%;resize:vertical}
+#postText,#postTitle,#postMain{width:100%;resize:vertical}
+#postMain{margin-bottom:6px}
 #postTitle{margin-bottom:6px}
 #ov .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
 #toast{position:fixed;left:50%;bottom:220px;transform:translateX(-50%);background:#000c;padding:8px 14px;border-radius:8px;display:none;z-index:60}
@@ -1382,28 +1384,40 @@ function showExported(blob, ext) {
   $('ovActs').append(b2, b1);
   // 投稿：投稿文を直せる欄と、各サービスの投稿画面を開くボタン。動画は先に保存しておき、開いた画面へドラッグする
   const box = document.createElement('div'); box.id = 'postBox';
-  const text = document.createElement('textarea'); text.id = 'postText'; text.rows = 3; text.placeholder = '投稿文';
+  // X は「本文＋動画」を投稿し、そのツリーに「#ゲーム名＋リンク」を付ける形
+  const main = document.createElement('textarea'); main.id = 'postMain'; main.rows = 2; main.placeholder = '本文（動画と一緒に投稿）'; main.value = ' #gamedev';
+  const text = document.createElement('textarea'); text.id = 'postText'; text.rows = 2; text.placeholder = 'ツリーに付ける文（#ゲーム名とリンク）';
   const ytTitle = document.createElement('input'); ytTitle.type = 'text'; ytTitle.id = 'postTitle'; ytTitle.placeholder = 'YouTube の題名';
   postText().then(t => { if (!text.value) text.value = t; if (!ytTitle.value) ytTitle.value = (t.split('\n')[0] || '').replace(/^#/, ''); });
   const row = document.createElement('div'); row.className = 'acts';
   const file = new File([blob], a.download, { type: blob.type });
   if (navigator.canShare && navigator.canShare({ files: [file] }) && matchMedia('(pointer:coarse)').matches) {
     const sh = document.createElement('button'); sh.textContent = '共有（X・YouTubeのアプリへ）';
-    sh.onclick = () => navigator.share({ files: [file], text: text.value }).catch(() => {});
+    sh.onclick = () => navigator.share({ files: [file], text: main.value.trim() }).catch(() => {});
     row.append(sh);
   } else {
     const x = document.createElement('button'); x.textContent = 'Xに投稿';
-    x.onclick = () => { save(); open('https://x.com/intent/post?text=' + encodeURIComponent(text.value), '_blank'); toast('動画を保存しました。開いた投稿画面へドラッグしてください', 5000); };
+    x.onclick = () => { save(); open('https://x.com/intent/post?text=' + encodeURIComponent(main.value.trim()), '_blank'); toast('動画を保存しました。開いた投稿画面へドラッグして投稿し、ポストのリンクをコピーしてから「ツリーにリンク」を押してください', 8000); };
+    const tree = document.createElement('button'); tree.textContent = 'ツリーにリンク';
+    tree.onclick = async () => {
+      // 投稿したポストのリンク（…/status/数字）をクリップボードから読む。読めなければ貼ってもらう
+      let link = '';
+      try { link = await navigator.clipboard.readText(); } catch (e) {}
+      if (!/\/status\/\d+/.test(link)) link = prompt('投稿したポストのリンクを貼ってください') || '';
+      const id = (/\/status\/(\d+)/.exec(link) || [])[1];
+      if (!id) { toast('ポストのリンクが見つかりませんでした'); return; }
+      open('https://x.com/intent/post?in_reply_to=' + id + '&text=' + encodeURIComponent(text.value), '_blank');
+    };
     const y = document.createElement('button'); y.textContent = 'YouTubeに投稿';
     if (YT_CLIENT_ID) {
       // 審査前のアプリから上げた動画は非公開に固定されるので、非公開で上げて YouTube Studio を開く
       y.textContent = 'YouTubeに上げる（非公開）'; loadGoogle();
-      y.onclick = () => ytUpload(file, ytTitle.value || 'ゲーム', text.value, y);
+      y.onclick = () => ytUpload(file, ytTitle.value || 'ゲーム', [main.value.trim(), text.value].filter(Boolean).join('\n\n'), y);
       box.append(ytTitle);
-    } else y.onclick = () => { save(); copyText(text.value); open('https://www.youtube.com/upload', '_blank'); toast('動画を保存し、投稿文をコピーしました。開いた画面へ動画をドラッグしてください', 5000); };
-    row.append(x, y);
+    } else y.onclick = () => { save(); copyText([main.value.trim(), text.value].filter(Boolean).join('\n\n')); open('https://www.youtube.com/upload', '_blank'); toast('動画を保存し、投稿文をコピーしました。開いた画面へ動画をドラッグしてください', 5000); };
+    row.append(x, tree, y);
   }
-  box.append(text, row); $('ovActs').after(box);
+  box.append(main, text, row); $('ovActs').after(box);
 }
 // 投稿文：制作中のゲームの題名からハッシュタグと、本番の共有ページのリンクを作る（プレビューのリンクは出さない）
 async function postText() {
