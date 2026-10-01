@@ -165,7 +165,7 @@
   }
 
   function cat() {
-    return { p: 0.3, sp: 0.3, on: false, open: 0, onT: 0, x: 0, run: 0, jit: 0, jitT: 0 };
+    return { p: 0.3, sp: 0.3, on: false, open: 0, onT: 0, x: 0, run: 0, jit: 0, jitT: 0, offT: 1, hurt: 0, flinch: 0 };
   }
   function newRound() {
     shareButton.hidden = true;
@@ -187,6 +187,7 @@
     foe.base = 190 + (level % 3) * 18;
     foe.power = Math.min(1.15, 0.45 + 0.07 * level);
     foe.wait = 0.9;
+    foe.mode = "wait";
     foe.x = 395;
     phase = "enter"; phaseT = 0;
     bal = 0;
@@ -211,8 +212,12 @@
 
     /* 自分の声 */
     var want = held && !tired && (phase === "fight" || phase === "enter");
+    var started = want && !me.on && me.offT >= 0.25;
     if (want && !me.on) me.onT = 0;
     me.on = want;
+    me.offT = me.on ? 0 : (me.offT || 0) + dt;
+    if (me.hurt > 0) me.hurt -= dt;
+    if (foe.flinch > 0) foe.flinch -= dt;
     var prev = me.sp;
     me.p += (aim - me.p) * Math.min(1, dt * 18);
     me.sp = me.p;
@@ -229,15 +234,44 @@
 
     /* 相手の声 */
     if (phase === "fight") {
-      if (foe.on) {
+      /* 駆け引き1：息を吸っている相手（または鳴きはじめ）に被せると、出鼻をくじける */
+      if (started && (foe.mode === "inhale" || (foe.mode === "yowl" && foe.t < 0.3))) {
+        foe.mode = "wait"; foe.on = false; foe.wait = 1.0; foe.flinch = 0.45;
+        bal += 0.18;
+        yelp(VOICES && VOICES.foe, foe.base);
+      }
+      if (foe.mode === "yowl") {
         foe.t += dt; foe.onT += dt;
         var u = foe.t / foe.dur;
         foe.sp = foe.base0 + foe.rise * Math.sin(Math.PI * Math.min(1, u * 1.15)) + foe.wob * Math.sin(foe.t * foe.wf * Math.PI * 2);
         foe.sp = Math.max(0, Math.min(1, foe.sp));
-        if (foe.t >= foe.dur) { foe.on = false; foe.wait = Math.max(0.35, 1.3 - level * 0.09) * (0.7 + Math.random() * 0.6); }
-      } else {
+        if (foe.t >= foe.dur) { foe.on = false; foe.mode = "wait"; foe.wait = Math.max(0.35, 1.3 - level * 0.09) * (0.7 + Math.random() * 0.6); }
+      } else if (foe.mode === "wait") {
         foe.wait -= dt;
-        if (foe.wait <= 0) foePhrase();
+        if (foe.wait <= 0) {
+          foe.t = 0;
+          if (Math.random() < Math.min(0.45, 0.2 + 0.04 * level)) foe.mode = "paw";
+          else { foe.mode = "inhale"; noiseHit(0.55, 700, 0.12, 0.8); }
+        }
+      } else if (foe.mode === "inhale") {
+        /* 鳴く前に胸をふくらませて頭を上げる（ここが被せどき） */
+        foe.t += dt;
+        if (foe.t >= 0.6) { foePhrase(); foe.mode = "yowl"; }
+      } else if (foe.mode === "paw") {
+        /* 駆け引き2：前足を上げて溜める。振り下ろす瞬間に鳴いていると叩かれ、黙っていれば空振り */
+        foe.t += dt;
+        if (foe.t >= 0.8 && !foe.struck) {
+          foe.struck = true;
+          if (me.on) {
+            bal -= 0.3; breath = Math.max(0, breath - 0.3); me.hurt = 0.4;
+            noiseHit(0.14, 1400, 0.9, 0.7);
+            yelp(VOICES && VOICES.me, 210);
+          } else {
+            bal += 0.1;
+            noiseHit(0.3, 500, 0.3, 0.5);
+          }
+        }
+        if (foe.t >= 1.15) { foe.mode = "wait"; foe.struck = false; foe.wait = 0.5; }
       }
 
       var mine = me.on ? 0.3 + 0.7 * Math.min(1, me.warble / 2.4) : 0;
@@ -248,7 +282,7 @@
     } else if (phase === "enter") {
       foe.x = 395 + Math.max(0, 1 - phaseT / 1.1) * 260;
       if (phaseT > 1.1 && !foe.hissed) { foe.hissed = true; hiss(); }
-      if (phaseT > 1.6) { phase = "fight"; phaseT = 0; foe.wait = 0.5; }
+      if (phaseT > 1.6) { phase = "fight"; phaseT = 0; foe.wait = 0.5; foe.mode = "wait"; }
     } else if (phase === "win") {
       foe.run = phaseT;
       if (phaseT > 1.4) { score++; level++; nextFoe(); }
@@ -292,6 +326,14 @@
     v.set(hz(1.1, base), 1, 0.75, 0);
     hiss();
     setTimeout(function () { v.set(hz(0.6, base), 0.5, 0, 0); c.screamT = null; }, 280);
+  }
+  /* 出鼻をくじかれた・叩かれたときの短い「ミャッ」 */
+  function yelp(v, base) {
+    if (!v) return;
+    var c = v === VOICES.me ? me : foe;
+    c.screamT = 0;
+    v.set(hz(0.95, base), 0.8, 0.45, 0);
+    setTimeout(function () { v.set(hz(0.5, base), 0.3, 0, 0); c.screamT = null; }, 120);
   }
   /* 息切れの裏返り */
   function crack(v) {
@@ -341,6 +383,8 @@
     if (state !== S.PLAY) return;
     if (n === 1 && phase === "fight") bal = 0.999;      /* 1: 相手が逃げる直前 */
     if (n === 2 && phase === "fight") bal = -0.999;     /* 2: 自分が逃げる直前 */
+    if (n === 4 && phase === "fight") { foe.mode = "paw"; foe.t = 0; foe.on = false; foe.struck = false; }   /* 4: 猫パンチの溜め */
+    if (n === 5 && phase === "fight") { foe.mode = "inhale"; foe.t = 0; foe.on = false; }                    /* 5: 息吸い */
     if (n === 3) { level += 3; foe.power = Math.min(1.15, 0.45 + 0.07 * level); } /* 3: 相手を3段強く */
   }
 
@@ -405,7 +449,8 @@
   }
 
   /* 横向きの猫。f=向き(1:右)、s=大きさ、puff=毛の逆立ち、open=口、run=逃げる時間 */
-  function drawCat(x, y, f, s, puff, open, col, run) {
+  function drawCat(x, y, f, s, puff, open, col, run, pose) {
+    pose = pose || {};
     ctx.save();
     ctx.translate(x, y);
     if (run > 0) { f = -f; ctx.translate(-f * -1 * 0, 0); }
@@ -415,7 +460,8 @@
     ctx.fillStyle = col.body;
     ctx.strokeStyle = col.line; ctx.lineWidth = 2.5;
     /* 脚 */
-    [[-38, 1], [-24, -1], [26, 1], [40, -1]].forEach(function (l) {
+    [[-38, 1], [-24, -1], [26, 1], [40, -1]].forEach(function (l, i) {
+      if (i === 3 && pose.paw) return;
       var sw = legPh * 14 * l[1];
       ctx.beginPath();
       ctx.moveTo(l[0] - 6, -40); ctx.lineTo(l[0] + 6, -40);
@@ -446,7 +492,7 @@
     ctx.fillStyle = col.body; ctx.fill();
     ctx.strokeStyle = col.line; ctx.lineWidth = 2.5; ctx.stroke();
     /* 頭 */
-    var hx = 66, hy = -78 + (run > 0 ? 10 : 0);
+    var hx = 66, hy = -78 + (run > 0 ? 10 : 0) - (pose.inhale || 0) * 12 + (pose.paw ? 6 : 0);
     var ear = open > 0.05 ? 0.9 : 0;   /* 鳴くと耳を伏せる */
     ctx.fillStyle = col.body;
     [[-14, 1], [10, -1]].forEach(function (e) {
@@ -476,6 +522,20 @@
     /* ひげ */
     ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.lineWidth = 1.5;
     for (var k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(hx + 18, hy + 4); ctx.lineTo(hx + 50, hy + 2 + k * 7); ctx.stroke(); }
+    if (pose.paw) {
+      /* 上げた前足。lift=溜め、reach=振り下ろし */
+      var lift = Math.min(1, pose.paw / 0.3), reach = pose.paw >= 0.8 && pose.paw < 1.0 ? 1 : 0;
+      ctx.lineCap = "round";
+      var ex = reach ? 150 : 84 + lift * 6, ey = reach ? -70 : -70 - lift * 70;
+      [[col.line, 19], [col.body, 13]].forEach(function (st) {
+        ctx.strokeStyle = st[0]; ctx.lineWidth = st[1];
+        ctx.beginPath(); ctx.moveTo(40, -46); ctx.quadraticCurveTo(70, -60, ex, ey); ctx.stroke();
+      });
+      if (reach) {
+        ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 3;
+        for (var c = 0; c < 3; c++) { ctx.beginPath(); ctx.moveTo(ex - 10, ey - 30 + c * 14); ctx.lineTo(ex + 20, ey - 10 + c * 14); ctx.stroke(); }
+      }
+    }
     ctx.restore();
   }
 
@@ -516,14 +576,6 @@
   }
 
   function drawHud() {
-    /* 押し合い */
-    var bx = 40, bw = W - 80, by = 70, bh = 18;
-    var mid = bx + bw * (0.5 + bal * 0.5);
-    roundRect(bx, by, bw, bh, 9); ctx.save(); ctx.clip();
-    ctx.fillStyle = ME_COLOR.body; ctx.fillRect(bx, by, mid - bx, bh);
-    ctx.fillStyle = foe.color.body === "#26262c" ? "#55556a" : foe.color.body; ctx.fillRect(mid, by, bx + bw - mid, bh);
-    ctx.restore();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; roundRect(bx, by, bw, bh, 9); ctx.stroke();
     /* 得点 */
     ctx.fillStyle = "#fff"; ctx.font = "800 40px sans-serif"; ctx.textAlign = "center";
     ctx.fillText(String(score), W / 2, 52);
@@ -541,13 +593,18 @@
     ctx.clearRect(0, 0, W, H);
     drawScene();
     var shake = (me.on && foe.on) ? 1.5 : 0;
-    var mx = 145 + bal * 40 - me.run * 420, mS = 0.95 + 0.12 * Math.max(0, bal);
-    var fx = (phase === "enter" ? foe.x : 395) + bal * 40 + foe.run * 420, fS = 0.95 + 0.12 * Math.max(0, -bal);
+    /* 有利な方が大きく前へ、不利な方は小さく後ろへ */
+    var mS = 1 + 0.25 * bal, fS = 1 - 0.25 * bal;
+    var mx = 145 + bal * 60 - me.run * 420 - (me.hurt > 0 ? me.hurt * 40 : 0);
+    var fx = (phase === "enter" ? foe.x : 395) + bal * 60 + foe.run * 420 + (foe.flinch > 0 ? foe.flinch * 50 : 0);
     var mp = me.on ? 0.6 + 0.4 * Math.min(1, me.warble / 2.4) : 0.3;
     var fp = foe.on ? 0.5 + 0.5 * foe.power : 0.3;
+    var fInhale = foe.mode === "inhale" ? Math.min(1, foe.t / 0.4) : 0;
+    fp += fInhale * 0.5;
     if (state !== S.INTRO) {
       drawCat(mx + (Math.random() - 0.5) * shake, WALL + 4, 1, mS, mp, me.open, ME_COLOR, me.run);
-      drawCat(fx + (Math.random() - 0.5) * shake, WALL + 4, -1, fS, fp, foe.open, foe.color, foe.run);
+      drawCat(fx + (Math.random() - 0.5) * shake, WALL + 4, -1, fS, fp, foe.open, foe.color, foe.run,
+        { inhale: fInhale, paw: phase === "fight" && foe.mode === "paw" ? Math.max(0.001, foe.t) : 0 });
       drawWaves(mx + 96 * mS, WALL - 70 * mS, 1, me, ME_COLOR.line);
       drawWaves(fx - 96 * fS, WALL - 70 * fS, -1, foe, foe.color.eye);
       drawTrail();
