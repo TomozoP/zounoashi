@@ -153,6 +153,7 @@
     g.add(c.tailMesh);
     c.tailTip.position.copy(pts[6]); c.tailTip.scale.setScalar(rad);
     c.head.position.y = run ? 80 : 90 + arch * 4;
+    c.head.scale.setScalar(s.head || 1);          /* 有利不利は顔の大きさで見せる */
     c.head.rotation.z = run ? -0.15 : s.open * 0.22;
     c.head.rotation.y = run ? 0 : (face > 0 ? -0.35 : 0.35);   /* 顔を少しこちらへ向ける */
     var my = 1 + s.open * 7;
