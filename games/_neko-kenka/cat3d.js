@@ -45,20 +45,6 @@
     c.torso = part(g, this.torso, 0, 64, 0, 22, 30, 21);
     c.torso.rotation.z = Math.PI / 2;
     c.bib = part(g, this.ball, 34, 60, 0, 16, 19, 17, "light");
-    /* 逆立つ毛：胴の上半分に細い円すいを並べ、表面の向きに立てる */
-    c.fur = [];
-    var up = new T.Vector3(0, 1, 0);
-    for (var i = 0; i < 12; i++) {
-      for (var j = 0; j < 7; j++) {
-        var fx = -46 + i * 8.4 + (j % 2) * 4, th = -1.35 + j * 0.45;
-        var hx = Math.max(0, Math.abs(fx) - 30) * Math.sign(fx);     /* 両端は丸みに沿って傾ける */
-        var n = new T.Vector3(hx / 22, Math.cos(th), Math.sin(th)).normalize();
-        var sp = part(g, this.fang, 0, 0, 0, 3, 1, 3);
-        sp.quaternion.setFromUnitVectors(up, n);
-        sp.userData.x = fx; sp.userData.n = n;
-        c.fur.push(sp);
-      }
-    }
     /* 脚：細いカプセルと白い足先 */
     c.legs = [[-34, 10], [-28, -10], [30, 10], [36, -10]].map(function (p) {
       var pivot = new T.Group(); pivot.position.set(p[0], 52, p[1]); g.add(pivot);
@@ -135,14 +121,6 @@
     var puff = s.puff, arch = run ? 0 : puff;
     c.torso.position.y = 62 + arch * 4;
     c.torso.scale.set(21 + puff * 4, 30, 20 + puff * 4);
-    var bristle = run ? 0 : (s.fur || 0), rr = 21 + puff * 4;
-    c.fur.forEach(function (sp) {
-      var n = sp.userData.n, len = 4 + bristle * 16 + Math.sin(s.t * 40 + sp.userData.x) * bristle * 1.5;
-      sp.visible = bristle > 0.05;
-      var r = rr - 3 + len / 2;
-      sp.position.set(sp.userData.x + n.x * 6, c.torso.position.y + n.y * r, n.z * r);
-      sp.scale.set(2 + bristle * 0.6, len, 2 + bristle * 0.6);
-    });
     var legPh = run ? Math.sin(s.run * 30) : 0;
     c.legs.forEach(function (l, i) {
       l.position.y = 52 + arch * 3;
