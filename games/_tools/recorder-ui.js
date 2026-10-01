@@ -152,7 +152,7 @@
   async function begin() {
     if (started || saving || preparing) return;
     preparing=true;window.__recordingActive=true;mark('録画準備中');
-    if(!remote)try {
+    if(!remote&&!cakeCut())try {
       var health=await fetch('http://127.0.0.1:8736/health');
       if(!health.ok)throw Error();
     }catch(e){throw Error('MP4保存係を起動してください：node games/_tools/record-server.js');}
@@ -233,7 +233,7 @@
     /* 固定リンクではフォルダ名が shisaku-i87mixcr なので、版の名前からゲームを見分ける */
     var version=document.querySelector('meta[name="preview-version"]');
     if(version)id=version.content.replace(/-\d+$/,'')||id;
-    if(remote){
+    if(remote||cakeCut()){
       var names=[download(raw,id+'-'+takeId)];
       if(separateDone)names.push(download(await separateDone,id+'-'+takeId+'-audio'));
       started=false;saving=false;mark(new URLSearchParams(location.search).get('rec')==='1'?'録画':'');frames=[];
@@ -255,9 +255,13 @@
     }
     started=false;saving=false;mark('');frames=[];if(!panel)build();status.textContent=result.message||'保存しました';panel.style.display='grid';
   }
+  function cakeCut(){try{if(parent!==window&&parent.zCakeCut&&parent.zCakeCut.take)return parent.zCakeCut;}catch(e){}return null;}
   /* 保存係のない場所では、録れたものをそのままファイルとして渡す */
   function download(blob,stem){
     var name=stem+((blob.type||'').indexOf('mp4')>=0?'.mp4':'.webm');
+    /* Cake Cut の中で開いているときは、ファイルにせず編集の並びへ渡す */
+    var cake=cakeCut();
+    if(cake){cake.take(blob,name);return name+'（Cake Cutの並びへ）';}
     var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
     document.body.appendChild(a);a.click();a.remove();
     setTimeout(function(){URL.revokeObjectURL(a.href);},60000);
