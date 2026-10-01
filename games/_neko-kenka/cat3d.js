@@ -64,9 +64,10 @@
     /* 頭 */
     c.head = new T.Group(); c.head.position.set(66, 92, 0); g.add(c.head);
     part(c.head, this.ball, 0, 0, 0, 24, 24, 24);                     /* 頭は球ひとつ */
+    c.nose = part(c.head, this.ball, 23.6, -2, 0, 2.6, 2.2, 3.6, "nose");
     c.mouth = part(c.head, this.ball, 20, -9, 0, 5, 1, 8, "mouth");
     c.tongue = part(c.head, this.ball, 20.5, -11, 0, 3.5, 1.5, 5, "nose");
-    c.fangs = [-4, 4].map(function (z) { var f = part(c.head, self.fang, 22.5, -6, z, 1.4, 4, 1.4, "fang"); f.rotation.z = Math.PI; return f; });
+    c.fangs = [-4, 4].map(function (z) { var f = part(c.head, self.fang, 23.6, -6, z * 0.9, 1.4, 4, 1.4, "fang"); f.rotation.z = Math.PI; return f; });
     c.ears = [-11, 11].map(function (z) {
       var pivot = new T.Group(); pivot.position.set(-3, 17, z); pivot.rotation.x = z > 0 ? 0.25 : -0.25; c.head.add(pivot);
       part(pivot, self.ear, 0, 11, 0, 10, 22, 5);
@@ -77,6 +78,14 @@
       var eye = new T.Group(); eye.position.set(20, 5, z); c.head.add(eye);
       part(eye, self.ball, 0, 0, 0, 3.5, 5.5, 3.5, "pupil");   /* 黒い丸ひとつ */
       return eye;
+    });
+    /* ひげ */
+    var wm = new T.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 });
+    [-1, 1].forEach(function (side) {
+      for (var k = -1; k <= 1; k++) {
+        var geo = new T.BufferGeometry().setFromPoints([new T.Vector3(20, -4, side * 9), new T.Vector3(42, -2 + k * 5, side * 22)]);
+        c.head.add(new T.Line(geo, wm));
+      }
     });
     return c;
   };
@@ -148,7 +157,9 @@
     c.mouth.position.y = -9 - s.open * 3;
     c.tongue.visible = s.open > 0.2;
     c.tongue.position.y = -10 - s.open * 5;
-    c.fangs.forEach(function (f) { f.visible = s.open > 0.3; });
+    /* 牙は開いた口の上のふちから下向きに */
+    var mouthTop = c.mouth.position.y + c.mouth.scale.y;
+    c.fangs.forEach(function (f) { f.visible = s.open > 0.3; f.position.y = mouthTop - 2.2; });
     c.ears.forEach(function (e) { e.rotation.z = s.open > 0.05 || puff > 0.6 ? 0.55 : 0.1; });
     c.eyes.forEach(function (e) { e.scale.y = 1 - s.open * 0.35; });
   };
