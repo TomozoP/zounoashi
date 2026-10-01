@@ -1,5 +1,6 @@
 /* 制作中の固定リンクだけ。上部の「プレビュー」表示に、
    ハッシュタグと本番の共有ページのURLをまとめて写すボタンと、録画パネルを開くボタンを付ける。
+   Cake Cut の中では帯を出さない。
    タグは題名から「【プレビュー】」と空白・中黒などを除いて作る。 */
 (function () {
   "use strict";
@@ -38,6 +39,12 @@
     area.remove();
     if (!done) throw new Error("copy");
   }
+
+  window.zPreviewCopy = { text: text, copy: copy };
+  /* Cake Cut の中で開いたときは、プレビューなのが明らかなので帯ごと消す。録画とコピーは Cake Cut 側のボタンから呼ぶ */
+  var embedded = false;
+  try { embedded = parent !== window && "__cakeGameOnly" in parent; } catch (e) {}
+  if (embedded) { label.remove(); return; }
 
   var style = document.createElement("style");
   style.textContent =
@@ -90,5 +97,4 @@
     button.blur();
   });
 
-  window.zPreviewCopy = { text: text };
 })();
