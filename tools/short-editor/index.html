@@ -141,6 +141,8 @@ aside .sec>h3:before{content:none}
 #ov.on{display:flex}
 #ov .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;width:340px}
 #ov .box h4{margin:0 0 10px}
+#postBox{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+#postText{width:100%;resize:vertical}
 #ov .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
 #toast{position:fixed;left:50%;bottom:220px;transform:translateX(-50%);background:#000c;padding:8px 14px;border-radius:8px;display:none;z-index:60}
 /* 制作中のゲーム（固定リンク）を中に開く。スマホではこれだけを出す */
@@ -1371,9 +1373,41 @@ function showExported(blob, ext) {
   $('ovMsg').textContent = `${(blob.size / 1e6).toFixed(1)} MB（${ext.toUpperCase()}）`;
   $('ovActs').innerHTML = '';
   const a = document.createElement('a'); a.href = url; a.download = 'short_' + new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '') + '.' + ext;
-  const b1 = document.createElement('button'); b1.className = 'primary'; b1.textContent = '保存'; b1.onclick = () => a.click();
+  let saved = false; const save = () => { if (!saved) { saved = true; a.click(); } };
+  const b1 = document.createElement('button'); b1.className = 'primary'; b1.textContent = '保存'; b1.onclick = () => { saved = false; save(); };
   const b2 = document.createElement('button'); b2.textContent = '閉じる'; b2.onclick = () => { $('ov').classList.remove('on'); resetOv(); };
   $('ovActs').append(b2, b1);
+  // 投稿：投稿文を直せる欄と、各サービスの投稿画面を開くボタン。動画は先に保存しておき、開いた画面へドラッグする
+  const box = document.createElement('div'); box.id = 'postBox';
+  const text = document.createElement('textarea'); text.id = 'postText'; text.rows = 3; text.placeholder = '投稿文';
+  postText().then(t => { if (!text.value) text.value = t; });
+  const row = document.createElement('div'); row.className = 'acts';
+  const file = new File([blob], a.download, { type: blob.type });
+  if (navigator.canShare && navigator.canShare({ files: [file] }) && matchMedia('(pointer:coarse)').matches) {
+    const sh = document.createElement('button'); sh.textContent = '共有（X・YouTubeのアプリへ）';
+    sh.onclick = () => navigator.share({ files: [file], text: text.value }).catch(() => {});
+    row.append(sh);
+  } else {
+    const x = document.createElement('button'); x.textContent = 'Xに投稿';
+    x.onclick = () => { save(); open('https://x.com/intent/post?text=' + encodeURIComponent(text.value), '_blank'); toast('動画を保存しました。開いた投稿画面へドラッグしてください', 5000); };
+    const y = document.createElement('button'); y.textContent = 'YouTubeに投稿';
+    y.onclick = () => { save(); copyText(text.value); open('https://www.youtube.com/upload', '_blank'); toast('動画を保存し、投稿文をコピーしました。開いた画面へ動画をドラッグしてください', 5000); };
+    row.append(x, y);
+  }
+  box.append(text, row); $('ovActs').after(box);
+}
+// 投稿文：制作中のゲームの題名からハッシュタグと、本番の共有ページのリンクを作る（プレビューのリンクは出さない）
+async function postText() {
+  try {
+    const html = await (await fetch('../../shisaku-i87mixcr/?_post=' + Date.now(), { cache: 'no-store' })).text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const title = doc.title.replace(/【プレビュー】/g, '').replace(/[\s・･·•、，,.。]/g, '');
+    const v = doc.querySelector('meta[name="preview-version"]'), id = v && /^([a-z0-9-]+?)-\d+$/.exec(v.content || '');
+    return [title && '#' + title, id && 'https://www.zounoashi.com/share/' + id[1] + '/?card=square2'].filter(Boolean).join('\n');
+  } catch (e) { return ''; }
+}
+function copyText(v) {
+  if (navigator.clipboard && isSecureContext) return navigator.clipboard.writeText(v).catch(() => {});
 }
 async function startExport() {
   if (totalDur() <= 0) { toast('先に動画を追加してください'); return; }
@@ -1407,7 +1441,7 @@ function finishExport() {
 }
 function resetOv() {
   $('ovTitle').textContent = '書き出し中'; $('ovMsg').textContent = 'このタブを表示したままにしてください'; $('ovBar').style.width = '0';
-  $('ovActs').innerHTML = '<button id="ovCancel">中止</button>';
+  $('ovActs').innerHTML = '<button id="ovCancel">中止</button>'; $('postBox') && $('postBox').remove();
   $('ovCancel').onclick = () => { xCanceled = true; pause(); if (recorder && recorder.state !== 'inactive') { recorder.stop(); exporting = false; } };
 }
 $('exportBtn').onclick = startExport;
