@@ -160,12 +160,12 @@
   var WALL, TR0, TR1;
   function place() {
     WALL = Math.round(H * 0.5);
-    TR0 = Math.round(H * 0.66);
-    TR1 = Math.round(H * 0.93);
+    TR0 = WALL + 70;                           /* 声の枠（ここだけで声の高さを動かす） */
+    TR1 = H - 30;
   }
 
   function cat() {
-    return { p: 0.3, sp: 0.3, on: false, open: 0, onT: 0, x: 0, run: 0, jit: 0, jitT: 0, offT: 1, hurt: 0, flinch: 0 };
+    return { p: 0.3, sp: 0.3, on: false, open: 0, onT: 0, x: 0, run: 0, jit: 0, jitT: 0 };
   }
   function newRound() {
     shareButton.hidden = true;
@@ -185,24 +185,36 @@
     foe = cat();
     foe.color = COLORS[level % COLORS.length];
     foe.base = 190 + (level % 3) * 18;
-    foe.power = Math.min(1.15, 0.45 + 0.07 * level);
-    foe.wait = 0.9;
-    foe.mode = "wait";
+      /* 揺らしのうまさ */
+    foe.lung = 1 + Math.min(0.8, level * 0.1);      /* 息の長さ */
+    foe.breath = 1; foe.mode = "rest"; foe.restTo = 0.9; foe.p = 0.3;
     foe.x = 395;
     phase = "enter"; phaseT = 0;
     bal = 0;
     me.run = 0;
   }
 
-  /* 相手の鳴き方：「ウゥ〜ワァ〜オ〜」と上がって下がる。強い相手ほど揺らしが大きく間が短い。 */
+  /* 相手の一声。こちらの声の少し上へついてくるか、決めた高さで張るか。
+     強い相手ほど、ついてくるのが速い。 */
   function foePhrase() {
-    foe.dur = Math.min(4.2, 1.4 + Math.random() * 1.6 + level * 0.12);
-    foe.base0 = 0.12 + Math.random() * 0.18;
-    foe.rise = 0.4 + Math.random() * 0.35;
-    foe.wob = Math.min(0.2, 0.06 + level * 0.02);
-    foe.wf = 1.5 + Math.random() * 1.8;
-    foe.t = 0; foe.on = true; foe.onT = 0;
+    foe.follow = Math.random() < Math.min(0.85, 0.45 + 0.08 * level);
+    foe.goal = 0.2 + Math.random() * 0.6;
+    foe.react = Math.min(6, 1.6 + 0.6 * level);
+    foe.stopAt = 0.05 + Math.random() * 0.3;
+    foe.feint = Math.random() < 0.35 ? 0.6 + Math.random() * 1.2 : -1;
+    foe.t = 0; foe.on = true; foe.onT = 0; foe.mode = "yowl";
   }
+
+  /* 両方鳴いているとき、どちらが押すか。
+     相手の少し上（差0.3まで）を取った方が勝ち。離れすぎて上ずると逆に負ける。 */
+  function clash(a, b) {
+    var x = Math.abs(a - b);
+    if (x < 0.02) return 0;
+    var g = x < 0.3 ? 1 : (x < 0.5 ? 1 - (x - 0.3) / 0.1 : -1);
+    return (a > b ? 1 : -1) * g;
+  }
+  /* 息の減りは高いほど速い */
+  function drain(p) { return 0.08 + 0.32 * p * p; }
 
   /* ============ 進行 ============ */
   function update(dt) {
@@ -212,12 +224,8 @@
 
     /* 自分の声 */
     var want = held && !tired && (phase === "fight" || phase === "enter");
-    var started = want && !me.on && me.offT >= 0.25;
     if (want && !me.on) me.onT = 0;
     me.on = want;
-    me.offT = me.on ? 0 : (me.offT || 0) + dt;
-    if (me.hurt > 0) me.hurt -= dt;
-    if (foe.flinch > 0) foe.flinch -= dt;
     var prev = me.sp;
     me.p += (aim - me.p) * Math.min(1, dt * 18);
     me.sp = me.p;
@@ -225,7 +233,7 @@
     me.warble = (me.warble || 0) + (vel - (me.warble || 0)) * Math.min(1, dt * 2.5);
     if (me.on) {
       me.onT += dt;
-      breath -= dt * 0.2;
+      breath -= dt * drain(me.sp);
       if (breath <= 0) {
         breath = 0; tired = true; me.on = false;
         crack(VOICES && VOICES.me);
@@ -234,55 +242,29 @@
 
     /* 相手の声 */
     if (phase === "fight") {
-      /* 駆け引き1：息を吸っている相手（または鳴きはじめ）に被せると、出鼻をくじける */
-      if (started && (foe.mode === "inhale" || (foe.mode === "yowl" && foe.t < 0.3))) {
-        foe.mode = "wait"; foe.on = false; foe.wait = 1.0; foe.flinch = 0.45;
-        bal += 0.18;
-        yelp(VOICES && VOICES.foe, foe.base);
-      }
       if (foe.mode === "yowl") {
         foe.t += dt; foe.onT += dt;
-        var u = foe.t / foe.dur;
-        foe.sp = foe.base0 + foe.rise * Math.sin(Math.PI * Math.min(1, u * 1.15)) + foe.wob * Math.sin(foe.t * foe.wf * Math.PI * 2);
-        foe.sp = Math.max(0, Math.min(1, foe.sp));
-        if (foe.t >= foe.dur) { foe.on = false; foe.mode = "wait"; foe.wait = Math.max(0.35, 1.3 - level * 0.09) * (0.7 + Math.random() * 0.6); }
-      } else if (foe.mode === "wait") {
-        foe.wait -= dt;
-        if (foe.wait <= 0) {
-          foe.t = 0;
-          if (Math.random() < Math.min(0.45, 0.2 + 0.04 * level)) foe.mode = "paw";
-          else { foe.mode = "inhale"; noiseHit(0.55, 700, 0.12, 0.8); }
-        }
-      } else if (foe.mode === "inhale") {
-        /* 鳴く前に胸をふくらませて頭を上げる（ここが被せどき） */
-        foe.t += dt;
-        if (foe.t >= 0.6) { foePhrase(); foe.mode = "yowl"; }
-      } else if (foe.mode === "paw") {
-        /* 駆け引き2：前足を上げて溜める。振り下ろす瞬間に鳴いていると叩かれ、黙っていれば空振り */
-        foe.t += dt;
-        if (foe.t >= 0.8 && !foe.struck) {
-          foe.struck = true;
-          if (me.on) {
-            bal -= 0.3; breath = Math.max(0, breath - 0.3); me.hurt = 0.4;
-            noiseHit(0.14, 1400, 0.9, 0.7);
-            yelp(VOICES && VOICES.me, 210);
-          } else {
-            bal += 0.1;
-            noiseHit(0.3, 500, 0.3, 0.5);
-          }
-        }
-        if (foe.t >= 1.15) { foe.mode = "wait"; foe.struck = false; foe.wait = 0.5; }
+        if (foe.feint > 0 && foe.t >= foe.feint) { foe.feint = -1; foe.follow = false; foe.goal = foe.sp > 0.5 ? 0.1 + Math.random() * 0.2 : 0.75 + Math.random() * 0.2; foe.react = 8; }
+        var tgt = foe.follow ? (me.on ? me.sp + 0.12 : 0.5) : foe.goal;
+        tgt += 0.03 * Math.sin(foe.t * 9);
+        foe.p += (tgt - foe.p) * Math.min(1, dt * foe.react);
+        foe.sp = Math.max(0, Math.min(1, foe.p));
+        foe.breath -= dt * drain(foe.sp) / foe.lung;
+        if (foe.breath <= foe.stopAt) { foe.on = false; foe.mode = "rest"; foe.restTo = 0.5 + Math.random() * 0.5; }
+      } else {
+        foe.breath = Math.min(1, foe.breath + dt * 0.45);
+        if (foe.breath >= foe.restTo) foePhrase();
       }
 
-      var mine = me.on ? 0.3 + 0.7 * Math.min(1, me.warble / 2.4) : 0;
-      var theirs = foe.on ? foe.power : 0;
-      bal += dt * 0.5 * (mine - theirs);
+      if (me.on && foe.on) bal += dt * 0.4 * clash(me.sp, foe.sp);
+      else if (me.on) bal += dt * 0.25;
+      else if (foe.on) bal -= dt * 0.25;
       if (bal >= 1) { bal = 1; phase = "win"; phaseT = 0; foe.on = false; me.on = false; screech(VOICES && VOICES.foe, foe.base); }
       else if (bal <= -1) { bal = -1; phase = "lose"; phaseT = 0; foe.on = false; me.on = false; screech(VOICES && VOICES.me, 210); }
     } else if (phase === "enter") {
       foe.x = 395 + Math.max(0, 1 - phaseT / 1.1) * 260;
       if (phaseT > 1.1 && !foe.hissed) { foe.hissed = true; hiss(); }
-      if (phaseT > 1.6) { phase = "fight"; phaseT = 0; foe.wait = 0.5; foe.mode = "wait"; }
+      if (phaseT > 1.6) { phase = "fight"; phaseT = 0; foe.mode = "rest"; }
     } else if (phase === "win") {
       foe.run = phaseT;
       if (phaseT > 1.4) { score++; level++; nextFoe(); }
@@ -327,14 +309,6 @@
     hiss();
     setTimeout(function () { v.set(hz(0.6, base), 0.5, 0, 0); c.screamT = null; }, 280);
   }
-  /* 出鼻をくじかれた・叩かれたときの短い「ミャッ」 */
-  function yelp(v, base) {
-    if (!v) return;
-    var c = v === VOICES.me ? me : foe;
-    c.screamT = 0;
-    v.set(hz(0.95, base), 0.8, 0.45, 0);
-    setTimeout(function () { v.set(hz(0.5, base), 0.3, 0, 0); c.screamT = null; }, 120);
-  }
   /* 息切れの裏返り */
   function crack(v) {
     if (!v) return;
@@ -344,7 +318,10 @@
   }
 
   /* ============ 入力 ============ */
-  function aimAt(y) { aim = Math.max(0, Math.min(1, 1 - (y - H * 0.08) / (H * 0.84))); }
+  var PX0 = 20, PX1 = W - 20, NOWX = W - 90;
+  function pitchY(v) { return TR1 - 18 - v * (TR1 - TR0 - 36); }
+  function aimAt(y) { aim = Math.max(0, Math.min(1, (TR1 - 18 - y) / (TR1 - TR0 - 36))); }
+  function inPanel(x, y) { return y >= TR0 - 10 && y <= TR1 + 10 && x >= PX0 - 10 && x <= PX1 + 10; }
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
@@ -353,6 +330,7 @@
       if (hit === "retry") newRound();
       return;
     }
+    if (y != null && !inPanel(x, y)) return;   /* 声の枠の外は触っても鳴かない */
     held = true;
     if (y != null) aimAt(y);
   }
@@ -383,9 +361,7 @@
     if (state !== S.PLAY) return;
     if (n === 1 && phase === "fight") bal = 0.999;      /* 1: 相手が逃げる直前 */
     if (n === 2 && phase === "fight") bal = -0.999;     /* 2: 自分が逃げる直前 */
-    if (n === 4 && phase === "fight") { foe.mode = "paw"; foe.t = 0; foe.on = false; foe.struck = false; }   /* 4: 猫パンチの溜め */
-    if (n === 5 && phase === "fight") { foe.mode = "inhale"; foe.t = 0; foe.on = false; }                    /* 5: 息吸い */
-    if (n === 3) { level += 3; foe.power = Math.min(1.15, 0.45 + 0.07 * level); } /* 3: 相手を3段強く */
+    if (n === 3) { level += 3; foe.lung = 1 + Math.min(0.8, level * 0.1); } /* 3: 相手を3段強く */
   }
 
   window.addEventListener("keydown", function (e) {
@@ -449,8 +425,7 @@
   }
 
   /* 横向きの猫。f=向き(1:右)、s=大きさ、puff=毛の逆立ち、open=口、run=逃げる時間 */
-  function drawCat(x, y, f, s, puff, open, col, run, pose) {
-    pose = pose || {};
+  function drawCat(x, y, f, s, puff, open, col, run) {
     ctx.save();
     ctx.translate(x, y);
     if (run > 0) { f = -f; ctx.translate(-f * -1 * 0, 0); }
@@ -461,7 +436,6 @@
     ctx.strokeStyle = col.line; ctx.lineWidth = 2.5;
     /* 脚 */
     [[-38, 1], [-24, -1], [26, 1], [40, -1]].forEach(function (l, i) {
-      if (i === 3 && pose.paw) return;
       var sw = legPh * 14 * l[1];
       ctx.beginPath();
       ctx.moveTo(l[0] - 6, -40); ctx.lineTo(l[0] + 6, -40);
@@ -492,7 +466,7 @@
     ctx.fillStyle = col.body; ctx.fill();
     ctx.strokeStyle = col.line; ctx.lineWidth = 2.5; ctx.stroke();
     /* 頭 */
-    var hx = 66, hy = -78 + (run > 0 ? 10 : 0) - (pose.inhale || 0) * 12 + (pose.paw ? 6 : 0);
+    var hx = 66, hy = -78 + (run > 0 ? 10 : 0);
     var ear = open > 0.05 ? 0.9 : 0;   /* 鳴くと耳を伏せる */
     ctx.fillStyle = col.body;
     [[-14, 1], [10, -1]].forEach(function (e) {
@@ -522,20 +496,6 @@
     /* ひげ */
     ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.lineWidth = 1.5;
     for (var k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(hx + 18, hy + 4); ctx.lineTo(hx + 50, hy + 2 + k * 7); ctx.stroke(); }
-    if (pose.paw) {
-      /* 上げた前足。lift=溜め、reach=振り下ろし */
-      var lift = Math.min(1, pose.paw / 0.3), reach = pose.paw >= 0.8 && pose.paw < 1.0 ? 1 : 0;
-      ctx.lineCap = "round";
-      var ex = reach ? 150 : 84 + lift * 6, ey = reach ? -70 : -70 - lift * 70;
-      [[col.line, 19], [col.body, 13]].forEach(function (st) {
-        ctx.strokeStyle = st[0]; ctx.lineWidth = st[1];
-        ctx.beginPath(); ctx.moveTo(40, -46); ctx.quadraticCurveTo(70, -60, ex, ey); ctx.stroke();
-      });
-      if (reach) {
-        ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 3;
-        for (var c = 0; c < 3; c++) { ctx.beginPath(); ctx.moveTo(ex - 10, ey - 30 + c * 14); ctx.lineTo(ex + 20, ey - 10 + c * 14); ctx.stroke(); }
-      }
-    }
     ctx.restore();
   }
 
@@ -556,23 +516,59 @@
     ctx.restore();
   }
 
+  /* 声の枠。左へ流れる2本の線（自分・相手）と、いまの高さのつまみ */
   function drawTrail() {
-    ctx.fillStyle = "rgba(0,0,0,.35)";
-    roundRect(20, TR0, W - 40, TR1 - TR0, 16); ctx.fill();
-    var x0 = 30, dx = (W - 60) / 179;
-    [[0, ME_COLOR.line], [1, foe.color.eye]].forEach(function (k) {
-      ctx.strokeStyle = k[1]; ctx.lineWidth = 4; ctx.lineJoin = "round";
+    ctx.fillStyle = "rgba(6,8,20,.72)";
+    roundRect(PX0, TR0, PX1 - PX0, TR1 - TR0, 18); ctx.fill();
+    ctx.strokeStyle = held ? ME_COLOR.line : "rgba(255,255,255,.55)"; ctx.lineWidth = 3;
+    roundRect(PX0, TR0, PX1 - PX0, TR1 - TR0, 18); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,.08)"; ctx.lineWidth = 1;
+    for (var g = 1; g < 4; g++) { var gy = pitchY(g / 4); ctx.beginPath(); ctx.moveTo(PX0 + 10, gy); ctx.lineTo(PX1 - 10, gy); ctx.stroke(); }
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.beginPath(); ctx.moveTo(NOWX, TR0 + 8); ctx.lineTo(NOWX, TR1 - 8); ctx.stroke();
+    var dx = (NOWX - PX0 - 14) / 179;
+    function sx(i) { return NOWX - (trail.length - 1 - i) * dx; }
+    /* 両方鳴いているところは、上を取った側の色で間を塗る */
+    for (var i = 0; i < trail.length; i++) {
+      var a = trail[i][0], b = trail[i][1];
+      if (a == null || b == null) continue;
+      var w = clash(a, b);
+      if (!w) continue;
+      ctx.strokeStyle = w > 0 ? "rgba(255,179,107,.4)" : hexA(foe.color.eye, 0.4);
+      ctx.lineWidth = dx + 0.6;
+      ctx.beginPath(); ctx.moveTo(sx(i), pitchY(a)); ctx.lineTo(sx(i), pitchY(b)); ctx.stroke();
+    }
+    [[1, foe.color.eye], [0, ME_COLOR.line]].forEach(function (k) {
+      ctx.strokeStyle = k[1]; ctx.lineWidth = 5; ctx.lineJoin = "round"; ctx.lineCap = "round";
       ctx.beginPath();
       var pen = false;
       for (var i = 0; i < trail.length; i++) {
         var v = trail[i][k[0]];
         if (v == null) { pen = false; continue; }
-        var x = x0 + (180 - trail.length + i) * dx, y = TR1 - 10 - v * (TR1 - TR0 - 20);
-        if (pen) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        if (pen) ctx.lineTo(sx(i), pitchY(v)); else ctx.moveTo(sx(i), pitchY(v));
         pen = true;
       }
       ctx.stroke();
     });
+    /* 相手のいまの高さ */
+    if (foe.on) {
+      ctx.fillStyle = foe.color.eye;
+      ctx.beginPath(); ctx.arc(NOWX, pitchY(foe.sp), 9, 0, Math.PI * 2); ctx.fill();
+    }
+    /* 自分のつまみ。触っていないときは脈打って、触る場所を示す */
+    var ky = pitchY(held ? me.sp : aim);
+    var pulse = held ? 0 : (Math.sin(T * 5) + 1) / 2;
+    ctx.fillStyle = held ? ME_COLOR.body : "rgba(226,136,60,.55)";
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(NOWX, ky, 22 + pulse * 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 3; ctx.lineCap = "round";
+    [-1, 1].forEach(function (d) {
+      ctx.beginPath(); ctx.moveTo(NOWX - 7, ky + d * 36); ctx.lineTo(NOWX, ky + d * 44); ctx.lineTo(NOWX + 7, ky + d * 36); ctx.stroke();
+    });
+  }
+  function hexA(h, a) {
+    var n = parseInt(h.slice(1), 16);
+    return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
   }
 
   function drawHud() {
@@ -581,7 +577,7 @@
     ctx.fillText(String(score), W / 2, 52);
   }
 
-  function drawBreath(x, y) {
+  function drawBreath(x, y, breath, tired) {
     var w = 110;
     ctx.fillStyle = "rgba(0,0,0,.5)"; roundRect(x - w / 2, y, w, 10, 5); ctx.fill();
     ctx.fillStyle = tired ? "#e0584a" : "#bfe8ff";
@@ -595,21 +591,19 @@
     var shake = (me.on && foe.on) ? 1.5 : 0;
     /* 有利な方が大きく前へ、不利な方は小さく後ろへ */
     var mS = 1 + 0.25 * bal, fS = 1 - 0.25 * bal;
-    var mx = 145 + bal * 60 - me.run * 420 - (me.hurt > 0 ? me.hurt * 40 : 0);
-    var fx = (phase === "enter" ? foe.x : 395) + bal * 60 + foe.run * 420 + (foe.flinch > 0 ? foe.flinch * 50 : 0);
-    var mp = me.on ? 0.6 + 0.4 * Math.min(1, me.warble / 2.4) : 0.3;
-    var fp = foe.on ? 0.5 + 0.5 * foe.power : 0.3;
-    var fInhale = foe.mode === "inhale" ? Math.min(1, foe.t / 0.4) : 0;
-    fp += fInhale * 0.5;
+    var mx = 145 + bal * 60 - me.run * 420;
+    var fx = (phase === "enter" ? foe.x : 395) + bal * 60 + foe.run * 420;
+    var mp = (me.on ? 0.5 : 0.2) + 0.4 * Math.max(0, bal);
+    var fp = (foe.on ? 0.5 : 0.2) + 0.4 * Math.max(0, -bal);
     if (state !== S.INTRO) {
       drawCat(mx + (Math.random() - 0.5) * shake, WALL + 4, 1, mS, mp, me.open, ME_COLOR, me.run);
-      drawCat(fx + (Math.random() - 0.5) * shake, WALL + 4, -1, fS, fp, foe.open, foe.color, foe.run,
-        { inhale: fInhale, paw: phase === "fight" && foe.mode === "paw" ? Math.max(0.001, foe.t) : 0 });
+      drawCat(fx + (Math.random() - 0.5) * shake, WALL + 4, -1, fS, fp, foe.open, foe.color, foe.run);
       drawWaves(mx + 96 * mS, WALL - 70 * mS, 1, me, ME_COLOR.line);
       drawWaves(fx - 96 * fS, WALL - 70 * fS, -1, foe, foe.color.eye);
       drawTrail();
       drawHud();
-      drawBreath(mx, WALL + 22);
+      drawBreath(mx, WALL + 22, breath, tired);
+      drawBreath(fx, WALL + 22, foe.breath, false);
     } else {
       drawCat(145, WALL + 4, 1, 0.95, 0.3, 0, ME_COLOR, 0);
       drawCat(395, WALL + 4, -1, 0.95, 0.3, 0, COLORS[0], 0);
@@ -662,7 +656,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, phase: phase, bal: bal, breath: breath, tired: tired, level: level, W: W, H: H }; },
+    now: function () { return { state: state, score: score, phase: phase, bal: bal, breath: breath, foeOn: foe.on, foeP: foe.sp, foeBreath: foe.breath, tired: tired, level: level, W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
