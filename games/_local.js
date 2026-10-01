@@ -47,6 +47,5 @@ window.DRAFT_GAMES = [
     "play": "games/_brute-escape/index.html",
     "full": true,
     "catch": ""
-  },
-  {"type":"lab","tags":[],"id":"yajiri","title":"矢じりシューター","year":2026,"date":"2026-09-30","plays":null,"url":"","img":"games/_yajiri/img/thumb.webp","play":"games/_yajiri/index.html","full":true,"catch":"矢じりを描いて撃つ"},
+  }
 ];
