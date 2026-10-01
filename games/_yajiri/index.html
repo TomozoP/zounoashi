@@ -118,6 +118,8 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
   var stroke, arrows, foes, bits, fizz, spawnT, overT;
+  /* フィーバー：倒すとゲージがたまり、満タンで数秒間すべて金の矢・貫通し放題・的が大量 */
+  var gauge, fever, GAUGE_MAX = 14, FEVER_TIME = 6;
 
   var ZT;                                      /* 描く場所の上端 */
   function place() {
@@ -132,7 +134,7 @@
     T = 0;
     held = false;
     stroke = null; arrows = []; foes = []; bits = []; fizz = [];
-    spawnT = 0.6; overT = 0;
+    spawnT = 0.6; overT = 0; gauge = 0; fever = 0;
   }
 
   /* ============ 矢じりの読み取り ============
@@ -191,6 +193,7 @@
       range: (1400 - 1180 * k) * m, pierce: Math.round(5 - 4 * k), went: 0, fade: 0,
       dmg: dmgOf(r.size), bw: boomWidth(r.size), reach: Math.min(34, 8 + r.size * 0.18), hit: {} });
     var A = arrows[arrows.length - 1];
+    if (fever > 0) { A.dmg = 3; A.pierce = 99; A.range = Math.max(A.range, 1500); A.v0 = Math.max(A.v0, 1400); k = 0; }
     A.tier = A.dmg; A.sharp = 1 - k; A.trail = [];
     launchSound(A.tier, A.sharp);
   }
@@ -240,13 +243,31 @@
     if (state !== S.PLAY) return;
     T += dt;
 
+    if (fever > 0) {
+      fever -= dt;
+      if (Math.floor((fever + dt) * 4) !== Math.floor(fever * 4)) tone(fever * 4 % 2 < 1 ? 880 : 1320, 0.05, 0.05, "square");
+      if (fever <= 0) {
+        /* 終わったらフィーバーの的は消える */
+        foes.forEach(function (f) { if (f.fev) { f.dead = true; puff(f); } });
+        tone(660, 0.2, 0.08, "triangle", 330);
+      }
+    }
     spawnT -= dt;
-    if (spawnT <= 0) { spawn(); spawnT = Math.max(0.42, 1.5 - T * 0.02) * (0.7 + Math.random() * 0.6); }
+    if (spawnT <= 0) {
+      if (fever > 0) {
+        spawn(); var nf = foes[foes.length - 1];
+        nf.fev = true; nf.bat = false; nf.iron = false; nf.hp = nf.hp0 = 1; nf.vy = 90 + Math.random() * 60; nf.r = 26 + Math.random() * 10;
+        spawnT = 0.12;
+      } else { spawn(); spawnT = Math.max(0.42, 1.5 - T * 0.02) * (0.7 + Math.random() * 0.6); }
+    }
 
     foes.forEach(function (f) {
       f.t += dt; f.y += f.vy * dt; f.flash = Math.max(0, f.flash - dt);
       f.x = Math.max(f.r, Math.min(W - f.r, f.x0 + Math.sin(f.t * (f.bat ? 3 : 1.4) + f.ph) * f.sw));
-      if (f.y + f.r >= ZT && !overT) { overT = 0.0001; f.bad = true; }
+      if (f.y + f.r >= ZT && !overT) {
+        if (fever > 0) { f.dead = true; puff(f); }          /* フィーバー中は線に届いても負けない */
+        else { overT = 0.0001; f.bad = true; }
+      }
     });
 
     arrows.forEach(function (a) {
@@ -265,7 +286,12 @@
         var d = Math.hypot(px + sx * k - f.x, py + sy * k - f.y);
         if (d < f.r + a.reach) {
           a.hit[f.id] = 1; f.hp -= a.dmg; lastHitTier = a.tier; a.pierce--;
-          if (f.hp <= 0) { f.dead = true; score++; burst(f); }
+          if (f.hp <= 0) {
+            f.dead = true; score++; burst(f);
+            a.kills = (a.kills || 0) + 1;
+            /* 1本で2体目からは多めにたまる */
+            if (fever <= 0) { gauge += a.kills > 1 ? 2 : 1; if (gauge >= GAUGE_MAX) startFever(); }
+          }
           else {
             /* 倒しきれないと矢は弾かれて止まる */
             f.flash = 0.15; f.y -= 14; a.went = a.range; a.pierce = 0;
@@ -279,6 +305,16 @@
     arrows = arrows.filter(function (a) { return a.fade < 0.3 && a.x > -200 && a.x < W + 200 && a.y > -200 && a.y < H + 200; });
   }
 
+  function startFever() {
+    gauge = 0; fever = FEVER_TIME; spawnT = 0.3;
+    [523, 659, 784, 1047, 1319].forEach(function (f, i) { tone(f, 0.18, 0.08, "square", null, i * 0.07); });
+  }
+  function puff(f) {
+    for (var i = 0; i < 6; i++) {
+      var an = Math.random() * 6.28;
+      bits.push({ x: f.x, y: f.y, vx: Math.cos(an) * 80, vy: Math.sin(an) * 80 - 60, t: 0, life: 0.35, c: "rgba(255,255,255,.6)" });
+    }
+  }
   var lastHitTier = 0;
   function burst(f) {
     for (var i = 0; i < 16; i++) {
@@ -347,7 +383,8 @@
      本番（www.zounoashi.com/games/ 以下）では効かない。 */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    /* 1: 30秒ぶん速くする  2: 敵を5体出す  3: 負けにする */
+    /* 1: 30秒ぶん速くする  2: 敵を5体出す  3: 負けにする  4: フィーバー */
+    if (n === 4 && state === S.PLAY && !overT) { startFever(); return; }
     if (state !== S.PLAY || overT) return;
     if (n === 1) T += 30;
     if (n === 2) for (var i = 0; i < 5; i++) { spawn(); foes[foes.length - 1].y -= i * 90; }
@@ -399,11 +436,25 @@
     ctx.clearRect(0, 0, W, H);
 
     var g = ctx.createLinearGradient(0, 0, 0, ZT);
-    g.addColorStop(0, "#1b2a4a"); g.addColorStop(1, "#4b5f8c");
+    if (fever > 0) {
+      /* フィーバー中は空の色が巡る */
+      var hu = (performance.now() / 8) % 360;
+      g.addColorStop(0, "hsl(" + hu + ",70%,28%)"); g.addColorStop(1, "hsl(" + ((hu + 60) % 360) + ",80%,50%)");
+    } else { g.addColorStop(0, "#1b2a4a"); g.addColorStop(1, "#4b5f8c"); }
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, ZT);
     ctx.fillStyle = "#2a2433"; ctx.fillRect(0, ZT, W, H - ZT);
-    ctx.fillStyle = overT ? "#e2383f" : "#f2c14e";
-    ctx.fillRect(0, ZT - 3, W, 6);
+    /* 線がゲージ。真ん中から両側へたまる。フィーバー中は虹色で残り時間 */
+    if (overT) { ctx.fillStyle = "#e2383f"; ctx.fillRect(0, ZT - 3, W, 6); }
+    else if (fever > 0) {
+      var fw = W * fever / FEVER_TIME, lg = ctx.createLinearGradient(W / 2 - fw / 2, 0, W / 2 + fw / 2, 0);
+      for (var ci = 0; ci <= 6; ci++) lg.addColorStop(ci / 6, "hsl(" + ((ci * 60 + performance.now() / 3) % 360) + ",90%,60%)");
+      ctx.fillStyle = "#6b5a2c"; ctx.fillRect(0, ZT - 3, W, 6);
+      ctx.fillStyle = lg; ctx.fillRect(W / 2 - fw / 2, ZT - 5, fw, 10);
+    } else {
+      var gw = W * gauge / GAUGE_MAX;
+      ctx.fillStyle = "#6b5a2c"; ctx.fillRect(0, ZT - 3, W, 6);
+      ctx.fillStyle = "#ffd75a"; ctx.fillRect(W / 2 - gw / 2, ZT - 4, gw, 8);
+    }
 
     foes.forEach(drawFoe);
 
