@@ -284,8 +284,9 @@
   if(remote&&new URLSearchParams(location.search).get('rec')==='1')mark('録画');
   /* 固定リンクのヘッダーの録画ボタンから開く。録画中なら止める */
   window.zRecorder={toggle:function(){if(started&&!saving)stop();else if(!preparing&&!saving)show();},
-    /* Cake Cut の「録画」：今の設定ですぐ録り始め、録画中なら止める。「録画設定」はパネルだけ開く */
-    record:function(){if(started&&!saving){stop();return;}if(preparing||saving)return;if(!panel)build();panel.style.display='none';begin().catch(fail);},
+    /* Cake Cut の「録画」：渡された設定（なければ今の設定）ですぐ録り始め、録画中なら止める。「録画設定」はパネルだけ開く */
+    record:function(options){if(started&&!saving){stop();return;}if(preparing||saving)return;if(!panel)build();panel.style.display='none';
+      if(options)Object.keys(options).forEach(function(k){var s=panel.querySelector('[name='+k+']');if(s&&options[k]!=null)s.value=options[k];});begin().catch(fail);},
     settings:function(){if(!started&&!preparing&&!saving)show();},
     state:function(){return started&&!saving?'recording':preparing?'preparing':saving?'saving':'';}};
 })();
