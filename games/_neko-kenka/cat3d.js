@@ -64,9 +64,12 @@
     /* 頭 */
     c.head = new T.Group(); c.head.position.set(66, 92, 0); g.add(c.head);
     part(c.head, this.ball, 0, 0, 0, 24, 24, 24);                     /* 頭は球ひとつ */
-    c.mouth = part(c.head, this.ball, 20, -9, 0, 5, 1, 8, "mouth");
-    c.tongue = part(c.head, this.ball, 20.5, -11, 0, 3.5, 1.5, 5, "nose");
-    c.fangs = [-4, 4].map(function (z) { var f = part(c.head, self.fang, 23.2, -8, z * 0.9, 1.4, 4, 1.4, "fang"); f.rotation.z = Math.PI; return f; });
+    /* 口：頭の表面に貼った薄い楕円。上のふちを固定して下へ開き、牙はそのふちに付ける */
+    var ma = -0.4;
+    c.mouthG = new T.Group(); c.mouthG.position.set(24 * Math.cos(ma), 24 * Math.sin(ma), 0); c.mouthG.rotation.z = ma; c.head.add(c.mouthG);
+    c.mouth = part(c.mouthG, this.ball, 0, 0, 0, 2, 1, 7, "mouth");
+    c.tongue = part(c.mouthG, this.ball, 0.8, 0, 0, 1.2, 1.5, 4.5, "nose");
+    c.fangs = [-3.6, 3.6].map(function (z) { var f = part(c.mouthG, self.fang, 1.6, 0, z, 1.3, 4, 1.3, "fang"); f.rotation.z = Math.PI; return f; });
     c.ears = [-11, 11].map(function (z) {
       var pivot = new T.Group(); pivot.position.set(-3, 17, z); pivot.rotation.x = z > 0 ? 0.25 : -0.25; c.head.add(pivot);
       part(pivot, self.ear, 0, 11, 0, 10, 22, 5);
@@ -152,11 +155,12 @@
     c.head.position.y = run ? 80 : 90 + arch * 4;
     c.head.rotation.z = run ? -0.15 : s.open * 0.22;
     c.head.rotation.y = run ? 0 : (face > 0 ? -0.35 : 0.35);   /* 顔を少しこちらへ向ける */
-    c.mouth.scale.set(5, 1 + s.open * 7, 8);
-    c.mouth.position.y = -6 - c.mouth.scale.y;   /* 上のふち（y=-6）は動かさず、下へ開く */
+    var my = 1 + s.open * 7;
+    c.mouth.scale.set(2, my, 7);
+    c.mouth.position.y = 3 - my;                  /* 上のふち（y=3）は動かさない */
     c.tongue.visible = s.open > 0.2;
-    c.tongue.position.y = -7 - c.mouth.scale.y * 1.6;
-    c.fangs.forEach(function (f) { f.visible = s.open > 0.3; });   /* 牙は口の上のふちに固定 */
+    c.tongue.position.y = 3 - my * 1.6;
+    c.fangs.forEach(function (f) { f.visible = s.open > 0.3; f.position.y = 1; });
     c.ears.forEach(function (e) { e.rotation.z = s.open > 0.05 || puff > 0.6 ? 0.55 : 0.1; });
     c.eyes.forEach(function (e) { e.scale.y = 1 - s.open * 0.35; });
   };
