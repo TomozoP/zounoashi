@@ -160,6 +160,21 @@
     return { ax: a.x, ay: a.y, dx: dx / dl, dy: dy / dl, size: Math.max(l1, l2), ang: ang, side: l1 > l2 ? 1 : -1 };
   }
 
+  /* 角を丸めてなめらかにする（角を少しずつ切り落とす） */
+  function smooth(pts) {
+    for (var n = 0; n < 3 && pts.length > 2; n++) {
+      var o = [pts[0]];
+      for (var i = 0; i < pts.length - 1; i++) {
+        var a = pts[i], b = pts[i + 1];
+        o.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 });
+        o.push({ x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+      }
+      o.push(pts[pts.length - 1]);
+      pts = o;
+    }
+    return pts;
+  }
+
   function shoot(pts) {
     var r = readShape(pts);
     if (!r) {
@@ -180,7 +195,7 @@
     arrows.push({ ox: gx, oy: gy, x: gx, y: gy, dx: r.dx, dy: r.dy, R: reachOut,
       wide: reachOut * 0.32 * r.side, th: 0, dur: 0.7 + reachOut / 700, rot: 0, pts: rel,
       pierce: Math.round(5 - 4 * k), fade: 0,
-      reach: Math.min(40, 10 + r.size * 0.3), hit: {} });
+      bw: boomWidth(r.size), reach: Math.min(40, 10 + r.size * 0.3), hit: {} });
     noiseHit(0.18, 2400, 0.25, 0.8);
     tone(900, 0.12, 0.06, "sine", 1500);
   }
@@ -277,13 +292,15 @@
   }
   function move(x, y) {
     if (state !== S.PLAY || !held || !stroke) return;
+    /* 手ぶれ補正：指の位置を少し遅れて追いかけた点を足す */
     var l = stroke[stroke.length - 1];
-    if (Math.hypot(x - l.x, y - l.y) >= 3) stroke.push({ x: x, y: y });
+    var nx = l.x + (x - l.x) * 0.45, ny = l.y + (y - l.y) * 0.45;
+    if (Math.hypot(nx - l.x, ny - l.y) >= 4) stroke.push({ x: nx, y: ny });
   }
   function up() {
     if (!held) return;
     held = false;
-    if (stroke && state === S.PLAY && !overT) shoot(stroke);
+    if (stroke && state === S.PLAY && !overT) shoot(smooth(stroke));
     stroke = null;
   }
 
@@ -372,12 +389,11 @@
     arrows.forEach(function (a) {
       ctx.globalAlpha = 1 - a.fade / 0.3;
       ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.rot);
-      line(a.pts, 0, 0, "#5a3415", 15);
-      line(a.pts, 0, 0, "#d8a05a", 10);
+      boom(a.pts, a.bw, 1);
       ctx.restore();
     });
     ctx.globalAlpha = 1;
-    if (stroke) line(stroke, 0, 0, "#f2c14e", 9);
+    if (stroke) { var sp = smooth(stroke); boom(sp, boomWidth(sizeOf(sp)), 0.85); }
 
     bits.forEach(function (b) {
       ctx.globalAlpha = 1 - b.t / b.life;
@@ -393,6 +409,36 @@
     }
 
     if (state === S.RESULT) drawResult();
+  }
+  function sizeOf(pts) {
+    var s = pts[0], e = pts[pts.length - 1], m = 0;
+    pts.forEach(function (p) { m = Math.max(m, Math.hypot(p.x - s.x, p.y - s.y), Math.hypot(p.x - e.x, p.y - e.y)); });
+    return m;
+  }
+  function boomWidth(size) { return Math.max(14, Math.min(28, size * 0.17)); }
+  /* ブーメランの絵：縁取り・木の色・つや。真ん中の曲がりが太く、両端は丸く細め */
+  function boom(pts, w, alpha) {
+    if (pts.length < 2) return;
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    var n = pts.length - 1;
+    function pass(col, add, mul, ox, oy) {
+      ctx.strokeStyle = col;
+      for (var i = 0; i < n; i++) {
+        var t = (i + 0.5) / n;
+        ctx.lineWidth = (w * (0.62 + 0.38 * Math.sin(Math.PI * t))) * mul + add;
+        ctx.beginPath();
+        ctx.moveTo(pts[i].x + ox, pts[i].y + oy);
+        ctx.lineTo(pts[i + 1].x + ox, pts[i + 1].y + oy);
+        ctx.stroke();
+      }
+    }
+    pass("#4a2a10", 5, 1, 0, 0);
+    pass("#c98a45", 0, 1, 0, 0);
+    pass("#e2ad6b", 0, 0.55, -w * 0.12, -w * 0.12);
+    pass("#f6d6a0", 0, 0.16, -w * 0.2, -w * 0.2);
+    ctx.restore();
   }
   function line(pts, ox, oy, col, w) {
     if (!pts.length) return;
