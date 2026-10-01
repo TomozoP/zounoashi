@@ -15,6 +15,7 @@
   var separateRecorder=null, separateDone=null, separateMode="combined", takeId="";
   var remote=!/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
   function mark(label){
+    if(cakeCut())return;   /* Cake Cut の中では Cake Cut の「録画」ボタンが状態を出す */
     if(!badge){
       var host=document;
       try{if(parent!==window&&parent.location.origin===location.origin)host=parent.document;}catch(e){}
@@ -227,7 +228,7 @@
     cancelAnimationFrame(paintId);window.__recordingActive=false;
     recorder.stream.getTracks().filter(function(t){return t.kind==='video';}).forEach(function(t){t.stop();});
     if(silence){silence.stop();silence.disconnect();silence=null;}
-    status.textContent=remote?'動画を書き出し中':'MP4に変換中';panel.style.display='grid';
+    status.textContent=remote?'動画を書き出し中':'MP4に変換中';if(!cakeCut())panel.style.display='grid';
     var raw=new Blob(chunks,{type:recorder.mimeType});
     var id=(location.pathname.split('/').filter(Boolean).slice(-2)[0]||'game').replace(/^_/,'');
     /* 固定リンクではフォルダ名が shisaku-i87mixcr なので、版の名前からゲームを見分ける */
@@ -237,7 +238,7 @@
       var names=[download(raw,id+'-'+takeId)];
       if(separateDone)names.push(download(await separateDone,id+'-'+takeId+'-audio'));
       started=false;saving=false;mark(new URLSearchParams(location.search).get('rec')==='1'?'録画':'');frames=[];
-      status.textContent='書き出しました：'+names.join(' ／ ');panel.style.display='grid';
+      status.textContent='書き出しました：'+names.join(' ／ ');if(!cakeCut())panel.style.display='grid';
       return;
     }
     var response=await fetch('http://127.0.0.1:8736/convert?game='+encodeURIComponent(id)+'&take='+takeId,{method:'POST',body:raw});
@@ -282,5 +283,9 @@
   },true);
   if(remote&&new URLSearchParams(location.search).get('rec')==='1')mark('録画');
   /* 固定リンクのヘッダーの録画ボタンから開く。録画中なら止める */
-  window.zRecorder={toggle:function(){if(started&&!saving)stop();else if(!preparing&&!saving)show();}};
+  window.zRecorder={toggle:function(){if(started&&!saving)stop();else if(!preparing&&!saving)show();},
+    /* Cake Cut の「録画」：今の設定ですぐ録り始め、録画中なら止める。「録画設定」はパネルだけ開く */
+    record:function(){if(started&&!saving){stop();return;}if(preparing||saving)return;if(!panel)build();panel.style.display='none';begin().catch(fail);},
+    settings:function(){if(!started&&!preparing&&!saving)show();},
+    state:function(){return started&&!saving?'recording':preparing?'preparing':saving?'saving':'';}};
 })();
