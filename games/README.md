@@ -127,7 +127,7 @@ SVGのサムネは事前に `node games/_tools/img.js games/_hoge/img/thumb.svg 
 
 持ち主に渡すリンクは、本番と Cake Cut（https://www.zounoashi.com/tools/short-editor/）の2つだけにします。
 Cake Cut は固定リンクを中に開きます。スマホではゲームだけを出し（録画はファイルで保存）、
-PCでは「ゲーム」で横に出して、録れた動画をそのまま編集の並びに入れます。`?mode=game` / `?mode=edit` で切り替えられます。
+PCでは真ん中の画面を「編集／ゲーム」のタブで切り替えてその場で遊び、録れた動画をそのまま編集の並びに入れます。`?mode=game` / `?mode=edit` で切り替えられます。
 固定リンクのURLそのものは渡しません。
 
 1. ゲームごとの原本は `games/_<id>/` に残し、変更の動作を確認する。
