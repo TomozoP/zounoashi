@@ -165,7 +165,7 @@
   }
 
   function cat() {
-    return { p: 0.3, sp: 0.3, on: false, open: 0, onT: 0, x: 0, run: 0, jit: 0, jitT: 0 };
+    return { p: 0.3, sp: 0.3, th: -Math.PI / 2, goal: -Math.PI / 2, on: false, open: 0, onT: 0, x: 0, run: 0, jit: 0, jitT: 0 };
   }
   function newRound() {
     shareButton.hidden = true;
@@ -176,7 +176,7 @@
     held = false;
     level = 0;
     me = cat();
-    aim = 0.4;
+    aim = -Math.PI / 2; me.th = aim;
     trail = [];
     nextFoe();
   }
@@ -191,21 +191,27 @@
     me.run = 0;
   }
 
-  /* 相手の一声。どれかの段に陣取ってうねりながら鳴く */
+  /* 相手の一声 */
   function foePhrase() {
-    foe.goalBand = Math.floor(Math.random() * 3);
-    foe.react = Math.min(6, 2.2 + 0.4 * level);
     foe.dur = 2.5 + Math.random() * 2.5;
-    foe.lose = 0; foe.hold = 0.8 + Math.random() * 1.2;
+    foe.lose = 0; foe.think = 0;
     foe.t = 0; foe.on = true; foe.onT = 0; foe.mode = "yowl";
   }
 
-  /* シームレスじゃんけん：枠を高・中・低の3段に分ける。
-     高は中に、中は低に、低は高に勝つ。段の移動は間の段を通る。 */
-  var BAND_COLORS = ["#4aa8ff", "#f2c14a", "#ff5a5a"];   /* 低・中・高 */
-  function band(p) { return p < 1 / 3 ? 0 : (p < 2 / 3 ? 1 : 2); }
-  function beats(a, b) { return (a === 2 && b === 1) || (a === 1 && b === 0) || (a === 0 && b === 2); }
-  function judge(a, b) { var x = band(a), y = band(b); return beats(x, y) ? 1 : (beats(y, x) ? -1 : 0); }
+  /* 三角じゃんけん：三角形の角が 高い声・中くらい・低い唸り。
+     指の向きで三角形のふちを回る。時計回りに 高→中→低→高 の順で、前の角が次の角に勝つ。
+     角と角の間もなめらかにつながっていて、相手より 1/3 周 手前にいるほど強い。 */
+  var TAU = Math.PI * 2, THIRD = TAU / 3;
+  var CORNERS = [-Math.PI / 2, -Math.PI / 2 + THIRD, -Math.PI / 2 + 2 * THIRD];   /* 高・中・低 */
+  var CORNER_COLORS = ["#ff5a5a", "#f2c14a", "#4aa8ff"];
+  var CORNER_P = [0.9, 0.5, 0.15];
+  function wrapA(a) { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; }
+  function pitchOf(th) {
+    var t = ((th + Math.PI / 2) % TAU + TAU) % TAU / THIRD, k = Math.floor(t) % 3, f = t - Math.floor(t);
+    return CORNER_P[k] + (CORNER_P[(k + 1) % 3] - CORNER_P[k]) * f;
+  }
+  function judge(a, b) { return Math.sin(b - a); }       /* 自分a・相手b。正なら自分が押す */
+  function turn(from, to, max) { var d = wrapA(to - from); return from + Math.max(-max, Math.min(max, d)); }
   /* ============ 進行 ============ */
   function update(dt) {
     if (state !== S.PLAY) return;
@@ -216,30 +222,28 @@
     var want = held && (phase === "fight" || phase === "enter");
     if (want && !me.on) me.onT = 0;
     me.on = want;
-    var prev = me.sp;
-    me.p += (aim - me.p) * Math.min(1, dt * 18);
-    me.sp = me.p;
-    var vel = Math.abs(me.sp - prev) / Math.max(dt, 1e-3);
-    me.warble = (me.warble || 0) + (vel - (me.warble || 0)) * Math.min(1, dt * 2.5);
+    /* つまみは一瞬では飛ばず、決まった速さで三角形のふちを回る */
+    me.th = wrapA(turn(me.th, aim, dt * 4.5));
+    me.sp = pitchOf(me.th);
     if (me.on) me.onT += dt;
 
     /* 相手の声 */
     if (phase === "fight") {
       if (foe.mode === "yowl") {
         foe.t += dt; foe.onT += dt;
-        /* 負けている段からは少し遅れて動く。強い相手ほど早く、こちらの段に勝つ段を選びやすい */
-        foe.hold -= dt;
-        if (me.on && judge(me.sp, foe.sp) > 0) foe.lose += dt; else foe.lose = 0;
-        if (foe.lose > Math.max(0.3, 0.9 - 0.07 * level) || foe.hold <= 0) {
-          foe.lose = 0; foe.hold = 0.8 + Math.random() * 1.6;
-          var mb = band(me.sp), nb;
-          if (me.on && Math.random() < Math.min(0.85, 0.35 + 0.1 * level)) nb = [1, 2, 0][mb];   /* こちらに勝つ段 */
-          else { nb = Math.floor(Math.random() * 3); if (nb === band(foe.sp)) nb = (nb + 1 + Math.floor(Math.random() * 2)) % 3; }
-          foe.goalBand = nb;
+        /* 押されていると少し遅れて回り込む。強い相手ほど速く、こちらに勝つ位置を狙いやすい */
+        foe.think -= dt;
+        if (me.on && judge(me.th, foe.th) > 0.3) foe.lose += dt; else foe.lose = 0;
+        if (foe.lose > Math.max(0.25, 0.8 - 0.06 * level) || foe.think <= 0) {
+          foe.lose = 0; foe.think = 0.9 + Math.random() * 1.4;
+          foe.chase = me.on && Math.random() < Math.min(0.85, 0.35 + 0.1 * level);
+          if (!foe.chase) foe.goal = CORNERS[Math.floor(Math.random() * 3)];
         }
-        var tgt = (foe.goalBand + 0.5) / 3 + 0.09 * Math.sin(foe.t * 2.6);
-        foe.p += (tgt - foe.p) * Math.min(1, dt * foe.react);
-        foe.sp = Math.max(0, Math.min(1, foe.p));
+        /* 追いかけるときは、少し遅れて見たこちらの位置の 1/3 周手前を狙い続ける */
+        foe.seen = wrapA((foe.seen == null ? me.th : foe.seen) + wrapA(me.th - (foe.seen == null ? me.th : foe.seen)) * Math.min(1, dt * Math.min(8, 2.5 + 0.5 * level)));
+        if (foe.chase) foe.goal = foe.seen - THIRD;
+        foe.th = wrapA(turn(foe.th, foe.goal + 0.15 * Math.sin(foe.t * 2.6), dt * Math.min(5, 2.2 + 0.35 * level)));
+        foe.sp = pitchOf(foe.th);
         if (foe.t >= foe.dur) { foe.on = false; foe.mode = "rest"; foe.rest = Math.max(0.25, 0.9 - level * 0.08) * (0.6 + Math.random() * 0.8); }
       } else {
         foe.rest -= dt;
@@ -247,7 +251,7 @@
       }
 
       /* 勝っている段の側が押す。黙っている間は押される */
-      if (me.on && foe.on) { var j = judge(me.sp, foe.sp); bal += dt * 0.35 * j * (j < 0 ? 1 + 0.12 * level : 1); }
+      if (me.on && foe.on) { var j = judge(me.th, foe.th); bal += dt * 0.35 * j * (j < 0 ? 1 + 0.12 * level : 1); }
       else if (me.on) bal += dt * 0.15;
       else if (foe.on) bal -= dt * 0.25;
       if (bal >= 1) { bal = 1; phase = "win"; phaseT = 0; foe.on = false; me.on = false; screech(VOICES && VOICES.foe, foe.base); }
@@ -273,8 +277,8 @@
       c.jit += ((c.jitGoal || 0) - c.jit) * Math.min(1, dt * 10);
     });
 
-    trail.push([me.on ? me.sp : null, foe.on ? foe.sp : null]);
-    if (trail.length > 180) trail.shift();
+    trail.push([me.on ? me.th : null, foe.on ? foe.th : null]);
+    if (trail.length > 30) trail.shift();
 
     sound();
   }
@@ -301,9 +305,9 @@
     setTimeout(function () { v.set(hz(0.6, base), 0.5, 0, 0); c.screamT = null; }, 280);
   }
   /* ============ 入力 ============ */
-  var PX0 = 20, PX1 = W - 20, NOWX = W - 90;
-  function pitchY(v) { return TR1 - 18 - v * (TR1 - TR0 - 36); }
-  function aimAt(y) { aim = Math.max(0, Math.min(1, (TR1 - 18 - y) / (TR1 - TR0 - 36))); }
+  var PX0 = 20, PX1 = W - 20;
+  function triC() { return { x: W / 2, y: (TR0 + TR1) / 2 + 14, r: Math.min((TR1 - TR0) / 2 - 10, 210) }; }
+  function aimAt(x, y) { var c = triC(); if (Math.hypot(x - c.x, y - c.y) > 8) aim = Math.atan2(y - c.y, x - c.x); }
   function inPanel(x, y) { return y >= TR0 - 10 && y <= TR1 + 10 && x >= PX0 - 10 && x <= PX1 + 10; }
   function down(x, y) {
     if (state === S.INTRO) return;
@@ -315,11 +319,11 @@
     }
     if (y != null && !inPanel(x, y)) return;   /* 声の枠の外は触っても鳴かない */
     held = true;
-    if (y != null) aimAt(y);
+    if (y != null) aimAt(x, y);
   }
   function move(x, y) {
     if (state !== S.PLAY) return;
-    if (held && y != null) aimAt(y);
+    if (held && y != null) aimAt(x, y);
   }
   function up() {
     if (!held) return;
@@ -356,7 +360,7 @@
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
-    if (upK || dnK) { aim = Math.max(0, Math.min(1, aim + (upK ? 0.12 : -0.12))); return; }
+    if (upK || dnK) { aim = wrapA(aim + (upK ? -0.5 : 0.5)); return; }
     if (e.repeat) return;
     down();
   });
@@ -498,64 +502,77 @@
     ctx.restore();
   }
 
-  /* 声の枠。左へ流れる2本の線（自分・相手）と、いまの高さのつまみ */
+  /* 三角形のふちの点 */
+  function triPt(th) {
+    var c = triC(), f = ((th + Math.PI / 2) % THIRD + THIRD) % THIRD - THIRD / 2;
+    var r = c.r * 0.5 / Math.cos(f);
+    return { x: c.x + Math.cos(th) * r, y: c.y + Math.sin(th) * r };
+  }
+  /* 声の枠。三角形の角が 高（赤）・中（黄）・低（青）。辺の矢印は 勝つ側→負ける側 */
   function drawTrail() {
     ctx.fillStyle = "rgba(6,8,20,.72)";
     roundRect(PX0, TR0, PX1 - PX0, TR1 - TR0, 18); ctx.fill();
     ctx.strokeStyle = held ? ME_COLOR.line : "rgba(255,255,255,.55)"; ctx.lineWidth = 3;
     roundRect(PX0, TR0, PX1 - PX0, TR1 - TR0, 18); ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,.08)"; ctx.lineWidth = 1;
-    for (var g = 1; g < 4; g++) { var gy = pitchY(g / 4); ctx.beginPath(); ctx.moveTo(PX0 + 10, gy); ctx.lineTo(PX1 - 10, gy); ctx.stroke(); }
-    ctx.strokeStyle = "rgba(255,255,255,.18)";
-    ctx.beginPath(); ctx.moveTo(NOWX, TR0 + 8); ctx.lineTo(NOWX, TR1 - 8); ctx.stroke();
-    var dx = (NOWX - PX0 - 14) / 179;
-    function sx(i) { return NOWX - (trail.length - 1 - i) * dx; }
-    /* 3段の色分けと、勝ち負けの向き（高→中→低→高） */
-    var bh = (TR1 - TR0 - 36) / 3;
+    var v = CORNERS.map(triPt), c = triC();
     for (var k = 0; k < 3; k++) {
-      ctx.fillStyle = hexA(BAND_COLORS[k], 0.24);
-      ctx.fillRect(PX0 + 3, pitchY((k + 1) / 3), PX1 - PX0 - 6, bh);
+      var a = v[k], b = v[(k + 1) % 3];
+      var g = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+      g.addColorStop(0, CORNER_COLORS[k]); g.addColorStop(1, CORNER_COLORS[(k + 1) % 3]);
+      ctx.strokeStyle = g; ctx.lineWidth = 10; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      /* 辺の真ん中に矢じり */
+      var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, ang = Math.atan2(b.y - a.y, b.x - a.x);
+      var nx = c.x - mx, ny = c.y - my, nl = Math.hypot(nx, ny);
+      mx += nx / nl * 26; my += ny / nl * 26;
+      ctx.save(); ctx.translate(mx, my); ctx.rotate(ang);
+      ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      for (var q = -1; q <= 1; q += 2) { ctx.beginPath(); ctx.moveTo(-8 + q * 9, -11); ctx.lineTo(4 + q * 9, 0); ctx.lineTo(-8 + q * 9, 11); ctx.stroke(); }
+      ctx.restore();
     }
-    ctx.fillStyle = "rgba(255,255,255,.55)";
-    [2, 1].forEach(function (k) {
-      var y = pitchY(k / 3);
-      ctx.beginPath(); ctx.moveTo(PX0 + 22, y - 8); ctx.lineTo(PX0 + 36, y - 8); ctx.lineTo(PX0 + 29, y + 4); ctx.fill();
-    });
-    ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(PX0 + 16, pitchY(1 / 6)); ctx.lineTo(PX0 + 12, pitchY(1 / 6)); ctx.lineTo(PX0 + 12, pitchY(5 / 6)); ctx.lineTo(PX0 + 22, pitchY(5 / 6)); ctx.stroke();
-    ctx.beginPath(); var ay = pitchY(5 / 6);
-    ctx.moveTo(PX0 + 18, ay - 5); ctx.lineTo(PX0 + 25, ay); ctx.lineTo(PX0 + 18, ay + 5); ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.fill();
-    [[1, foe.color.eye], [0, ME_COLOR.line]].forEach(function (k) {
-      ctx.strokeStyle = k[1]; ctx.lineWidth = 5; ctx.lineJoin = "round"; ctx.lineCap = "round";
-      ctx.beginPath();
-      var pen = false;
+    for (k = 0; k < 3; k++) {
+      ctx.fillStyle = CORNER_COLORS[k];
+      ctx.beginPath(); ctx.arc(v[k].x, v[k].y, 16, 0, TAU); ctx.fill();
+    }
+    /* 通ったあと */
+    [[1, foe.color.eye], [0, ME_COLOR.line]].forEach(function (q) {
       for (var i = 0; i < trail.length; i++) {
-        var v = trail[i][k[0]];
-        if (v == null) { pen = false; continue; }
-        if (pen) ctx.lineTo(sx(i), pitchY(v)); else ctx.moveTo(sx(i), pitchY(v));
-        pen = true;
+        var th = trail[i][q[0]];
+        if (th == null) continue;
+        var pt = triPt(th);
+        ctx.globalAlpha = (i / trail.length) * 0.5;
+        ctx.fillStyle = q[1];
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 6, 0, TAU); ctx.fill();
       }
-      ctx.stroke();
+      ctx.globalAlpha = 1;
     });
-    /* 相手のいまの高さ */
-    if (foe.on) {
+    /* 相手のつまみ */
+    if (state === S.PLAY && phase === "fight") {
+      var fpnt = triPt(foe.th);
+      ctx.globalAlpha = foe.on ? 1 : 0.35;
+      ctx.fillStyle = foe.color.body; ctx.strokeStyle = foe.color.eye; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(fpnt.x, fpnt.y, 17, 0, TAU); ctx.fill(); ctx.stroke();
       ctx.fillStyle = foe.color.eye;
-      ctx.beginPath(); ctx.arc(NOWX, pitchY(foe.sp), 9, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(fpnt.x, fpnt.y, 5, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
     }
     /* 自分のつまみ。触っていないときは脈打って、触る場所を示す */
-    var ky = pitchY(held ? me.sp : aim);
+    var kp = triPt(me.th);
     var pulse = held ? 0 : (Math.sin(T * 5) + 1) / 2;
-    ctx.fillStyle = held ? BAND_COLORS[band(me.sp)] : "rgba(226,136,60,.55)";
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.arc(NOWX, ky, 22 + pulse * 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    if (held && foe.on && judge(me.sp, foe.sp) > 0) {
+    if (held && foe.on && judge(me.th, foe.th) > 0.3) {
       ctx.strokeStyle = "rgba(255,220,150," + (0.5 + 0.5 * Math.sin(T * 20)) + ")"; ctx.lineWidth = 6;
-      ctx.beginPath(); ctx.arc(NOWX, ky, 32, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(kp.x, kp.y, 32, 0, TAU); ctx.stroke();
     }
-    ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 3; ctx.lineCap = "round";
+    ctx.fillStyle = held ? ME_COLOR.body : "rgba(226,136,60,.7)";
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(kp.x, kp.y, 22 + pulse * 5, 0, TAU); ctx.fill(); ctx.stroke();
+    /* 回せることを示す、まわりの小さな矢じり */
+    ctx.save(); ctx.translate(kp.x, kp.y); ctx.rotate(me.th + Math.PI / 2);
+    ctx.fillStyle = "rgba(255,255,255,.85)";
     [-1, 1].forEach(function (d) {
-      ctx.beginPath(); ctx.moveTo(NOWX - 7, ky + d * 36); ctx.lineTo(NOWX, ky + d * 44); ctx.lineTo(NOWX + 7, ky + d * 36); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(d * 44, 0); ctx.lineTo(d * 34, -8); ctx.lineTo(d * 34, 8); ctx.closePath(); ctx.fill();
     });
+    ctx.restore();
   }
   function hexA(h, a) {
     var n = parseInt(h.slice(1), 16);
@@ -638,7 +655,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, phase: phase, bal: bal, foeOn: foe.on, foeP: foe.sp, level: level, W: W, H: H }; },
+    now: function () { return { state: state, score: score, phase: phase, bal: bal, foeOn: foe.on, foeP: foe.sp, foeTh: foe.th, meTh: me.th, level: level, W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
