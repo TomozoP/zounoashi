@@ -190,8 +190,25 @@
     arrows.push({ x: r.ax, y: r.ay, dx: r.dx, dy: r.dy, v0: (1150 - 450 * k) * m, pts: rel,
       range: (1400 - 1180 * k) * m, pierce: Math.round(5 - 4 * k), went: 0, fade: 0,
       dmg: dmgOf(r.size), bw: boomWidth(r.size), reach: Math.min(34, 8 + r.size * 0.18), hit: {} });
-    noiseHit(0.18, 2400, 0.25, 0.8);
-    tone(900, 0.12, 0.06, "sine", 1500);
+    var A = arrows[arrows.length - 1];
+    A.tier = A.dmg; A.sharp = 1 - k; A.trail = [];
+    launchSound(A.tier, A.sharp);
+  }
+
+  /* 威力が耳でわかる音：重いほど高く澄んだ音、尖りほど長く鋭い風切り */
+  function launchSound(tier, sharp) {
+    noiseHit(0.08 + 0.3 * sharp, 1200 + 2400 * sharp, 0.12 + 0.2 * sharp, 0.6 + sharp);
+    if (tier === 1) { tone(220, 0.12, 0.12, "triangle", 150); noiseHit(0.1, 300, 0.25, 1); }
+    if (tier === 2) { tone(660, 0.14, 0.09, "square", 990); }
+    if (tier === 3) { tone(1320, 0.25, 0.08, "triangle", 2640); tone(1980, 0.3, 0.05, "sine", 3960, 0.05); }
+  }
+  /* 描いている途中の見積もり。威力の段が変わったら小さく鳴らす */
+  var lastTier = 0;
+  function judge(pts) {
+    var r = readShape(pts);
+    if (!r) return null;
+    var k = Math.max(0, Math.min(1, (r.ang - 25) / 115));
+    return { tier: dmgOf(r.size), sharp: 1 - k };
   }
 
   /* 小さく描くほど高ダメージ（3〜1）。大きいと太くて当てやすいが弱い */
@@ -238,6 +255,8 @@
       if (left <= 0) { a.fade += dt; return; }
       var v = a.v0 * Math.min(1, left / (a.range * 0.4) + 0.12);
       a.x += a.dx * v * dt; a.y += a.dy * v * dt; a.went += v * dt;
+      a.trail.push({ x: a.x, y: a.y });
+      if (a.trail.length > 3 + Math.round(a.sharp * 14)) a.trail.shift();
       foes.forEach(function (f) {
         if (f.dead || a.hit[f.id] || a.pierce <= 0) return;
         /* この1コマで先端が通った線分と、的の中心との距離 */
@@ -245,7 +264,7 @@
         var k = Math.max(0, Math.min(1, ((f.x - px) * sx + (f.y - py) * sy) / L));
         var d = Math.hypot(px + sx * k - f.x, py + sy * k - f.y);
         if (d < f.r + a.reach) {
-          a.hit[f.id] = 1; f.hp -= a.dmg; a.pierce--;
+          a.hit[f.id] = 1; f.hp -= a.dmg; lastHitTier = a.tier; a.pierce--;
           if (f.hp <= 0) { f.dead = true; score++; burst(f); }
           else {
             /* 倒しきれないと矢は弾かれて止まる */
@@ -260,6 +279,7 @@
     arrows = arrows.filter(function (a) { return a.fade < 0.3 && a.x > -200 && a.x < W + 200 && a.y > -200 && a.y < H + 200; });
   }
 
+  var lastHitTier = 0;
   function burst(f) {
     for (var i = 0; i < 16; i++) {
       var an = Math.random() * 6.28, sp = 120 + Math.random() * 260;
@@ -267,6 +287,7 @@
         life: 0.5 + Math.random() * 0.3, c: f.bat ? "#3a2b4a" : f.iron ? (i % 2 ? "#6b7684" : "#c4ccd6") : (i % 2 ? "#e2383f" : "#fff") });
     }
     tone(520 + Math.min(score, 40) * 12, 0.1, 0.12, "square", 1040);
+    if (lastHitTier === 3) tone(2093, 0.18, 0.06, "triangle", 3136);
     noiseHit(0.12, 900, 0.2, 1.5);
   }
 
@@ -290,14 +311,18 @@
     }
     if (y < ZT) return;
     held = true;
-    stroke = [{ x: x, y: y }];
+    stroke = [{ x: x, y: y }]; lastTier = 0;
   }
   function move(x, y) {
     if (state !== S.PLAY || !held || !stroke) return;
     /* 手ぶれ補正：指の位置を少し遅れて追いかけた点を足す */
     var l = stroke[stroke.length - 1];
     var nx = l.x + (x - l.x) * 0.45, ny = l.y + (y - l.y) * 0.45;
-    if (Math.hypot(nx - l.x, ny - l.y) >= 4) stroke.push({ x: nx, y: ny });
+    if (Math.hypot(nx - l.x, ny - l.y) >= 4) {
+      stroke.push({ x: nx, y: ny });
+      var jg = judge(stroke), tr = jg ? jg.tier : 0;
+      if (tr !== lastTier) { if (tr) tone([0, 330, 660, 1320][tr], 0.06, 0.05, "sine"); lastTier = tr; }
+    }
   }
   function up() {
     if (!held) return;
@@ -390,12 +415,24 @@
     ctx.globalAlpha = 1;
     arrows.forEach(function (a) {
       ctx.globalAlpha = 1 - a.fade / 0.3;
+      /* 尖っているほど長い光の尾 */
+      var tc = TIER[a.tier][2], n = a.trail.length;
+      for (var i = 1; i < n; i++) {
+        ctx.globalAlpha = (1 - a.fade / 0.3) * (i / n) * (0.25 + 0.5 * a.sharp);
+        ctx.strokeStyle = tc; ctx.lineWidth = a.bw * (0.3 + 0.6 * i / n);
+        ctx.beginPath(); ctx.moveTo(a.trail[i - 1].x, a.trail[i - 1].y); ctx.lineTo(a.trail[i].x, a.trail[i].y); ctx.stroke();
+      }
+      ctx.globalAlpha = 1 - a.fade / 0.3;
       ctx.save(); ctx.translate(a.x, a.y);
-      boom(a.pts, a.bw, 1);
+      boom(a.pts, a.bw, 1, a.tier, a.sharp);
       ctx.restore();
     });
     ctx.globalAlpha = 1;
-    if (stroke) { var sp = smooth(stroke); boom(sp, boomWidth(sizeOf(sp)), 0.85); }
+    if (stroke) {
+      var sp = smooth(stroke), jg = judge(sp);
+      if (jg) boom(sp, boomWidth(sizeOf(sp)), 0.9, jg.tier, jg.sharp);
+      else boom(sp, boomWidth(sizeOf(sp)), 0.6, 0, 0);
+    }
 
     bits.forEach(function (b) {
       ctx.globalAlpha = 1 - b.t / b.life;
@@ -419,10 +456,21 @@
   }
   function boomWidth(size) { return Math.max(14, Math.min(28, size * 0.17)); }
   /* ブーメランの絵：縁取り・木の色・つや。真ん中の曲がりが太く、両端は丸く細め */
-  function boom(pts, w, alpha) {
+  /* 威力の段ごとの色：0=飛ばない形(灰) 1=木 2=銀 3=金 */
+  var TIER = [
+    ["#2e2a35", "#77707f", "#958d9c", "#b3acb9"],
+    ["#4a2a10", "#c98a45", "#e2ad6b", "#f6d6a0"],
+    ["#262c35", "#9aa6b4", "#d4dde8", "#ffffff"],
+    ["#5e3d00", "#f2b62e", "#ffe28a", "#fffbe0"]
+  ];
+  function boom(pts, w, alpha, tier, sharp) {
     if (pts.length < 2) return;
+    var C = TIER[tier == null ? 1 : tier];
+    sharp = sharp || 0;
     ctx.save();
     ctx.globalAlpha *= alpha;
+    /* 尖っているほど強く光る */
+    if (sharp > 0.05) { ctx.shadowColor = C[2]; ctx.shadowBlur = 2 + 14 * sharp; }
     ctx.lineCap = "round"; ctx.lineJoin = "round";
     var n = pts.length - 1;
     function pass(col, add, mul, ox, oy) {
@@ -436,10 +484,11 @@
         ctx.stroke();
       }
     }
-    pass("#4a2a10", 5, 1, 0, 0);
-    pass("#c98a45", 0, 1, 0, 0);
-    pass("#e2ad6b", 0, 0.55, -w * 0.12, -w * 0.12);
-    pass("#f6d6a0", 0, 0.16, -w * 0.2, -w * 0.2);
+    pass(C[0], 5, 1, 0, 0);
+    ctx.shadowBlur = 0;
+    pass(C[1], 0, 1, 0, 0);
+    pass(C[2], 0, 0.55, -w * 0.12, -w * 0.12);
+    pass(C[3], 0, 0.16, -w * 0.2, -w * 0.2);
     ctx.restore();
   }
   function line(pts, ox, oy, col, w) {
