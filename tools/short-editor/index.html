@@ -142,7 +142,8 @@ aside .sec>h3:before{content:none}
 #ov .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;width:340px}
 #ov .box h4{margin:0 0 10px}
 #postBox{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
-#postText{width:100%;resize:vertical}
+#postText,#postTitle{width:100%;resize:vertical}
+#postTitle{margin-bottom:6px}
 #ov .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
 #toast{position:fixed;left:50%;bottom:220px;transform:translateX(-50%);background:#000c;padding:8px 14px;border-radius:8px;display:none;z-index:60}
 /* 制作中のゲーム（固定リンク）を中に開く。スマホではこれだけを出す */
@@ -436,6 +437,8 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
 <script>
 'use strict';
 let W = 1080, H = 1920; const FPS = 30;
+// YouTube へ直接上げるための Google のクライアントID（公開してよい値）。空のときは、アップロード画面を開くだけにする
+const YT_CLIENT_ID = '';
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 let uid = 1; const nid = () => uid++;
@@ -1380,7 +1383,8 @@ function showExported(blob, ext) {
   // 投稿：投稿文を直せる欄と、各サービスの投稿画面を開くボタン。動画は先に保存しておき、開いた画面へドラッグする
   const box = document.createElement('div'); box.id = 'postBox';
   const text = document.createElement('textarea'); text.id = 'postText'; text.rows = 3; text.placeholder = '投稿文';
-  postText().then(t => { if (!text.value) text.value = t; });
+  const ytTitle = document.createElement('input'); ytTitle.type = 'text'; ytTitle.id = 'postTitle'; ytTitle.placeholder = 'YouTube の題名';
+  postText().then(t => { if (!text.value) text.value = t; if (!ytTitle.value) ytTitle.value = (t.split('\n')[0] || '').replace(/^#/, ''); });
   const row = document.createElement('div'); row.className = 'acts';
   const file = new File([blob], a.download, { type: blob.type });
   if (navigator.canShare && navigator.canShare({ files: [file] }) && matchMedia('(pointer:coarse)').matches) {
@@ -1391,7 +1395,12 @@ function showExported(blob, ext) {
     const x = document.createElement('button'); x.textContent = 'Xに投稿';
     x.onclick = () => { save(); open('https://x.com/intent/post?text=' + encodeURIComponent(text.value), '_blank'); toast('動画を保存しました。開いた投稿画面へドラッグしてください', 5000); };
     const y = document.createElement('button'); y.textContent = 'YouTubeに投稿';
-    y.onclick = () => { save(); copyText(text.value); open('https://www.youtube.com/upload', '_blank'); toast('動画を保存し、投稿文をコピーしました。開いた画面へ動画をドラッグしてください', 5000); };
+    if (YT_CLIENT_ID) {
+      // 審査前のアプリから上げた動画は非公開に固定されるので、非公開で上げて YouTube Studio を開く
+      y.textContent = 'YouTubeに上げる（非公開）'; loadGoogle();
+      y.onclick = () => ytUpload(file, ytTitle.value || 'ゲーム', text.value, y);
+      box.append(ytTitle);
+    } else y.onclick = () => { save(); copyText(text.value); open('https://www.youtube.com/upload', '_blank'); toast('動画を保存し、投稿文をコピーしました。開いた画面へ動画をドラッグしてください', 5000); };
     row.append(x, y);
   }
   box.append(text, row); $('ovActs').after(box);
@@ -1405,6 +1414,43 @@ async function postText() {
     const v = doc.querySelector('meta[name="preview-version"]'), id = v && /^([a-z0-9-]+?)-\d+$/.exec(v.content || '');
     return [title && '#' + title, id && 'https://www.zounoashi.com/share/' + id[1] + '/?card=square2'].filter(Boolean).join('\n');
   } catch (e) { return ''; }
+}
+// ---------- YouTube へ直接アップロード ----------
+let googleReady = null, ytToken = null;
+function loadGoogle() {
+  return googleReady ||= new Promise((ok, ng) => { const sc = document.createElement('script'); sc.src = 'https://accounts.google.com/gsi/client'; sc.onload = ok; sc.onerror = () => { googleReady = null; ng(new Error('Google のログインを読み込めませんでした')); }; document.head.appendChild(sc); });
+}
+// ボタンを押した流れのままログイン画面を出す（先に読み込みを済ませておく）
+function ytLogin() {
+  return new Promise((ok, ng) => {
+    if (!window.google || !google.accounts) return ng(new Error('Google のログインを読み込み中です。もう一度押してください'));
+    if (ytToken && ytToken.until > Date.now() + 60000) return ok(ytToken.value);
+    google.accounts.oauth2.initTokenClient({ client_id: YT_CLIENT_ID, scope: 'https://www.googleapis.com/auth/youtube.upload',
+      callback: r => r.access_token ? ok((ytToken = { value: r.access_token, until: Date.now() + r.expires_in * 1000 }).value) : ng(new Error('ログインできませんでした')),
+      error_callback: () => ng(new Error('ログインを中止しました')) }).requestAccessToken();
+  });
+}
+async function ytUpload(file, title, description, button) {
+  const label = button.textContent;
+  try {
+    const token = await ytLogin();
+    button.disabled = true;
+    const meta = { snippet: { title: title.slice(0, 100), description, categoryId: '20' }, status: { privacyStatus: 'private', selfDeclaredMadeForKids: false } };
+    const start = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': file.type, 'X-Upload-Content-Length': String(file.size) }, body: JSON.stringify(meta) });
+    if (!start.ok) throw new Error('アップロードを始められませんでした（' + start.status + '）');
+    const url = start.headers.get('Location');
+    const video = await new Promise((ok, ng) => {
+      const x = new XMLHttpRequest(); x.open('PUT', url); x.setRequestHeader('Content-Type', file.type);
+      x.upload.onprogress = e => { if (e.total) button.textContent = 'アップロード中 ' + Math.round(e.loaded / e.total * 100) + '%'; };
+      x.onload = () => x.status < 300 ? ok(JSON.parse(x.responseText)) : ng(new Error('アップロードに失敗しました（' + x.status + '）'));
+      x.onerror = () => ng(new Error('アップロードに失敗しました'));
+      x.send(file);
+    });
+    button.textContent = '上げました（非公開）';
+    open('https://studio.youtube.com/video/' + video.id + '/edit', '_blank');
+    toast('非公開で上げました。開いた YouTube Studio で公開にしてください', 6000);
+  } catch (e) { button.textContent = label; button.disabled = false; toast(e.message, 5000); }
 }
 function copyText(v) {
   if (navigator.clipboard && isSecureContext) return navigator.clipboard.writeText(v).catch(() => {});
