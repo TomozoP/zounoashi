@@ -47,7 +47,7 @@
     c.bib = part(g, this.ball, 34, 60, 0, 16, 19, 17, "light");
     /* 脚：細いカプセルと白い足先 */
     c.legs = [[-34, 10], [-28, -10], [30, 10], [36, -10]].map(function (p) {
-      var pivot = new T.Group(); pivot.position.set(p[0], 52, p[1]); g.add(pivot);
+      var pivot = new T.Group(); pivot.position.set(p[0], 52, p[1]); pivot.userData.base = [p[0], p[1]]; g.add(pivot);
       pivot.userData.leg = part(pivot, new T.CapsuleGeometry(5.5, 38, 8, 20), 0, -24, 0, 1, 1, 1);
       part(pivot, self.ball, 2, -49, 0, 8, 4.5, 7, "light");
       return pivot;
@@ -213,6 +213,26 @@
     c.fangs.forEach(function (f) { f.visible = s.open > 0.3; f.position.y = 1; });
     c.ears.forEach(function (e) { e.rotation.z = s.open > 0.05 || puff > 0.6 ? 0.55 : 0.1; });
     c.eyes.forEach(function (e) { e.scale.y = 1 - s.open * 0.35; });
+    /* 取っ組み合い中は、胴・頭・脚・しっぽがバラバラに飛び散って、最後にまた集まる */
+    c.torso.position.x = 0; c.torso.position.z = 0; c.torso.rotation.set(0, 0, Math.PI / 2);
+    c.head.position.z = 0;
+    c.legs.forEach(function (l) { l.position.x = l.userData.base[0]; l.position.z = l.userData.base[1]; });
+    if (bt) {
+      var amp = Math.min(1, bt / 0.2) * Math.max(0, Math.min(1, (1.6 - bt) / 0.3));
+      var fly = function (obj, k, dist, spin) {
+        var dx = Math.sin(k * 2.1 + sd * 3), dy = Math.cos(k * 1.7 + sd * 5), dz = Math.sin(k * 3.3 + sd);
+        var wob = Math.sin(bt * (9 + k) + k);
+        obj.position.x += (dx * dist + wob * 12) * amp;
+        obj.position.y += (dy * dist + Math.cos(bt * (8 + k)) * 12) * amp;
+        obj.position.z += dz * dist * amp;
+        if (spin) { obj.rotation.x += bt * spin * amp; obj.rotation.y += bt * spin * 0.7 * amp; }
+      };
+      fly(c.torso, 1, 35, 6);
+      fly(c.head, 2, 70, 9);
+      c.legs.forEach(function (l, i) { fly(l, 3 + i, 75, 12); });
+      fly(c.tailMesh, 8, 70, 0);
+      fly(c.tailTip, 8, 70, 0);
+    }
   };
 
   CatScene.prototype.render = function (ctx, canvas, W, H, cats) {
