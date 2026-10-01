@@ -158,7 +158,13 @@
     g.position.set(s.x, -s.y, 0);
     g.scale.setScalar(s.size);
     var face = run ? -s.face : s.face;
-    g.rotation.y = face > 0 ? -0.45 : Math.PI + 0.45;
+    g.rotation.set(0, face > 0 ? -0.45 : Math.PI + 0.45, 0);
+    var bt = s.brawl || 0, sd = s.seed || 0;
+    if (bt) {
+      /* 取っ組み合い：全身がぐるぐる転げ回る */
+      g.rotation.set(Math.sin(bt * 17 + sd) * 1.3, g.rotation.y + bt * 11 * (sd ? 1 : -1), Math.sin(bt * 13 + sd * 2) * 1.6);
+      g.position.y += Math.abs(Math.sin(bt * 11 + sd)) * 45;
+    }
     var puff = s.puff, arch = run ? 0 : puff;
     var bristle = run ? 0 : (s.fur || 0);
     /* 0:胴（強め） 1:頭（立てない） 2〜:脚 */
@@ -168,7 +174,8 @@
     var legPh = run ? Math.sin(s.run * 30) : 0;
     c.legs.forEach(function (l, i) {
       l.position.y = 52 + arch * 3;
-      l.rotation.z = legPh * 0.8 * (i % 2 ? 1 : -1);
+      l.rotation.z = bt ? Math.sin(bt * 40 + i * 2 + sd) * 1.6 : legPh * 0.8 * (i % 2 ? 1 : -1);
+      l.rotation.x = bt ? Math.cos(bt * 33 + i + sd) * 1.2 : 0;
     });
     /* しっぽ：逃げるときは後ろへ流し、威嚇中は高く立てて太らせる */
     var pts = [];
@@ -176,6 +183,7 @@
       var u2 = k / 6, x, y;
       if (run) { x = -50 - u2 * 70; y = 66 - u2 * 6 + Math.sin(s.t * 20 + u2 * 4) * 6; }
       else { x = -52 - Math.sin(u2 * 1.7) * 30 + u2 * u2 * 14; y = 70 + u2 * (78 + puff * 18) + Math.sin(s.t * 3 + u2 * 3) * 3; }
+      if (bt) { x += Math.sin(bt * 25 + u2 * 5 + sd) * 35 * u2; y += Math.cos(bt * 21 + u2 * 4 + sd) * 35 * u2; }
       pts.push(new T.Vector3(x, y, 0));
     }
     var rad = 5.5 + puff * 5;
@@ -189,6 +197,14 @@
     c.head.scale.setScalar(s.head || 1);          /* 有利不利は顔の大きさで見せる */
     c.head.rotation.z = run ? -0.15 : s.open * 0.22;
     c.head.rotation.y = run ? 0 : (face > 0 ? -0.35 : 0.35);   /* 顔を少しこちらへ向ける */
+    c.head.position.x = 66;
+    if (bt) {
+      /* 部品がばらけたように頭が跳ね回る */
+      c.head.position.x = 66 + Math.sin(bt * 29 + sd) * 18;
+      c.head.position.y += Math.cos(bt * 23 + sd) * 16;
+      c.head.rotation.x = Math.sin(bt * 31 + sd) * 1.5;
+      c.head.rotation.z = Math.cos(bt * 27 + sd) * 1.2;
+    } else c.head.rotation.x = 0;
     var my = 1 + s.open * 7;
     c.mouth.scale.set(2, my, 7);
     c.mouth.position.y = 3 - my;                  /* 上のふち（y=3）は動かさない */

@@ -149,7 +149,7 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
-  var phase, phaseT, bal, aim, me, foe, level, trail;
+  var phase, phaseT, bal, winner, dbgEnd = 0, aim, me, foe, level, trail;
   var COLORS = [
     { body: "#26262c", eye: "#e8e04a", line: "#b9b7c6" },
     { body: "#8c8d96", eye: "#7fd0ff", line: "#c9ccd8" },
@@ -256,8 +256,15 @@
       if (me.on && foe.on) { var j = judge(me.th, foe.th); bal += dt * 0.35 * j * (j < 0 ? 1 + 0.12 * level : 1); }
       else if (me.on) bal += dt * 0.15;
       else if (foe.on) bal -= dt * 0.25;
-      if (bal >= 1) { bal = 1; phase = "win"; phaseT = 0; foe.on = false; me.on = false; screech(VOICES && VOICES.foe, foe.base); }
-      else if (bal <= -1) { bal = -1; phase = "lose"; phaseT = 0; foe.on = false; me.on = false; screech(VOICES && VOICES.me, 210); }
+      if (dbgEnd) { bal = dbgEnd; dbgEnd = 0; }
+      /* 決着したら、まず取っ組み合い */
+      if (bal >= 1 || bal <= -1) { winner = bal > 0 ? "me" : "foe"; bal = bal > 0 ? 1 : -1; phase = "brawl"; phaseT = 0; foe.on = false; me.on = false; hiss(); }
+    } else if (phase === "brawl") {
+      if (phaseT > 1.7) {
+        phaseT = 0;
+        if (winner === "me") { phase = "win"; screech(VOICES && VOICES.foe, foe.base); }
+        else { phase = "lose"; screech(VOICES && VOICES.me, 210); }
+      }
     } else if (phase === "enter") {
       foe.x = 395 + Math.max(0, 1 - phaseT / 1.1) * 260;
       if (phaseT > 1.1 && !foe.hissed) { foe.hissed = true; hiss(); }
@@ -285,9 +292,21 @@
     sound();
   }
 
+  var brawlT = 0;
   function sound() {
     if (!VOICES) return;
     if (state !== S.PLAY) { VOICES.me.set(200, 0, 0, 0); VOICES.foe.set(200, 0, 0, 0); return; }
+    if (phase === "brawl") {
+      /* 取っ組み合い中は、2匹とも裏返った声でギャーギャー鳴き続ける */
+      brawlT = (brawlT || 0) - 1 / 60;
+      if (brawlT <= 0) {
+        brawlT = 0.06 + Math.random() * 0.1;
+        VOICES.me.set(hz(0.5 + Math.random() * 0.7, 210), 0.6 + Math.random() * 0.4, 0.45, Math.random() * 0.5);
+        VOICES.foe.set(hz(0.5 + Math.random() * 0.7, foe.base), 0.6 + Math.random() * 0.4, 0.45, Math.random() * 0.5);
+        if (Math.random() < 0.5) noiseHit(0.12, 800 + Math.random() * 2500, 0.35, 0.8);
+      }
+      return;
+    }
     voice(VOICES.me, me, 210);
     voice(VOICES.foe, foe, foe.base);
   }
@@ -347,8 +366,8 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (state !== S.PLAY) return;
-    if (n === 1 && phase === "fight") bal = 0.999;      /* 1: 相手が逃げる直前 */
-    if (n === 2 && phase === "fight") bal = -0.999;     /* 2: 自分が逃げる直前 */
+    if (n === 1 && phase === "fight") dbgEnd = 1;      /* 1: 相手が逃げる直前 */
+    if (n === 2 && phase === "fight") dbgEnd = -1;     /* 2: 自分が逃げる直前 */
     if (n === 3) { level += 3; } /* 3: 相手を3段強く */
   }
 
@@ -498,6 +517,29 @@
     ctx.restore();
   }
 
+  /* 取っ組み合いの土ぼこり */
+  function drawDust(x, y, t) {
+    ctx.save();
+    for (var i = 0; i < 14; i++) {
+      var a = i * 2.4 + t * (i % 2 ? 3 : -2), r = 50 + 40 * Math.sin(t * 7 + i);
+      var px = x + Math.cos(a) * r * 1.3, py = y + Math.sin(a) * r * 0.6;
+      ctx.globalAlpha = 0.35 + 0.25 * Math.sin(t * 9 + i);
+      ctx.fillStyle = i % 3 ? "#c9c2b8" : "#a59e94";
+      ctx.beginPath(); ctx.arc(px, py, 22 + 12 * Math.sin(t * 5 + i * 1.3), 0, Math.PI * 2); ctx.fill();
+    }
+    /* ぶつかった火花 */
+    ctx.globalAlpha = 1; ctx.strokeStyle = "#fff6c0"; ctx.lineWidth = 4; ctx.lineCap = "round";
+    var f = Math.floor(t * 12);
+    for (var k = 0; k < 3; k++) {
+      var sx = x + Math.sin(f * 7.1 + k * 3) * 70, sy = y + Math.cos(f * 5.3 + k * 2) * 40;
+      for (var j = 0; j < 4; j++) {
+        var b = j * Math.PI / 2 + f;
+        ctx.beginPath(); ctx.moveTo(sx + Math.cos(b) * 6, sy + Math.sin(b) * 6); ctx.lineTo(sx + Math.cos(b) * 18, sy + Math.sin(b) * 18); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
   /* 口から出る声の輪 */
   function drawWaves(x, y, f, c, color) {
     if (!c.on) return;
@@ -611,13 +653,21 @@
     var fx = (phase === "enter" ? foe.x : 395) + bal * 60 + foe.run * 420;
     var mp = (me.on ? 0.5 : 0.2) + 0.4 * Math.max(0, bal);
     var fp = (foe.on ? 0.5 : 0.2) + 0.4 * Math.max(0, -bal);
+    var brawl = phase === "brawl" ? phaseT : 0;
+    if (brawl) {
+      /* 真ん中に寄って、ぐちゃぐちゃに転げ回る */
+      var cx = 270 + bal * 30, k = Math.min(1, brawl / 0.15);
+      mx = mx + (cx - 40 - mx) * k + Math.sin(brawl * 23) * 30;
+      fx = fx + (cx + 40 - fx) * k + Math.sin(brawl * 19 + 1) * 30;
+    }
     if (state !== S.INTRO) {
       drawCats([
-        { x: mx, y: WALL + 4, face: 1, size: mB, head: mS, fur: fur(me), puff: mp, open: me.open, run: me.run, col: ME_COLOR },
-        { x: fx, y: WALL + 4, face: -1, size: fB, head: fS, fur: fur(foe), puff: fp, open: foe.open, run: foe.run, col: foe.color }
+        { x: mx, y: WALL + 4, face: 1, size: mB, head: mS, fur: brawl ? 1 : fur(me), brawl: brawl, seed: 0, puff: mp, open: brawl ? 0.7 + 0.3 * Math.sin(brawl * 30) : me.open, run: me.run, col: ME_COLOR },
+        { x: fx, y: WALL + 4, face: -1, size: fB, head: fS, fur: brawl ? 1 : fur(foe), brawl: brawl, seed: 1.7, puff: fp, open: brawl ? 0.7 + 0.3 * Math.sin(brawl * 26) : foe.open, run: foe.run, col: foe.color }
       ]);
       drawWaves(mx + (62 + 24 * mS) * mB, WALL - (76 + 8 * mS) * mB, 1, me, ME_COLOR.line);
       drawWaves(fx - (62 + 24 * fS) * fB, WALL - (76 + 8 * fS) * fB, -1, foe, foe.color.eye);
+      if (brawl) drawDust(270 + bal * 30, WALL - 60, brawl);
       drawTrail();
       drawHud();
     } else {
