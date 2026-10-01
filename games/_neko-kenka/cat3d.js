@@ -41,10 +41,9 @@
       m.userData.role = role || "body";
       parent.add(m); c.parts.push(m); return m;
     }
-    /* 胴：横に寝かせたカプセル。背中のふくらみで弓なりにする */
+    /* 胴：横に寝かせたカプセル */
     c.torso = part(g, this.torso, 0, 64, 0, 22, 30, 21);
     c.torso.rotation.z = Math.PI / 2;
-    c.hump = part(g, this.ball, -2, 70, 0, 36, 18, 19);
     c.bib = part(g, this.ball, 34, 60, 0, 16, 19, 17, "light");
     /* 逆立つ毛 */
     c.spikes = [];
@@ -78,10 +77,8 @@
       return pivot;
     });
     c.eyes = [-9.5, 9.5].map(function (z) {
-      var eye = new T.Group(); eye.position.set(17, 4, z); c.head.add(eye);
-      part(eye, self.ball, 0, 0, 0, 6, 7.5, 6, "eye");
-      part(eye, self.ball, 4.6, 0, z * 0.04, 1.3, 6, 1.8, "pupil");
-      part(eye, self.ball, 5, 3, z * 0.08, 1.3, 1.3, 1.3, "shine");
+      var eye = new T.Group(); eye.position.set(19.5, 4, z); c.head.add(eye);
+      part(eye, self.ball, 0, 0, 0, 3.5, 5.5, 3.5, "pupil");   /* 黒い丸ひとつ */
       return eye;
     });
     /* ひげ */
@@ -105,11 +102,13 @@
     c.color = col;
     var self = this, body = parseInt(col.body.slice(1), 16), eye = parseInt(col.eye.slice(1), 16);
     var light = lighten(body, 0.55);
+    var dark = ((body >> 16) + ((body >> 8) & 255) + (body & 255)) / 3 < 80;
+    var dot = dark ? eye : 0x0c0c0c;                       /* 黒い猫は目を明るい色に */
     c.bodyHex = body;
     c.parts.forEach(function (m) {
       var r = m.userData.role;
       m.material = r === "mouth" ? self.mat(0x2a0a10) : r === "fang" || r === "shine" ? self.mat(0xffffff, true)
-        : r === "nose" ? self.mat(0xe48a96) : r === "eye" ? self.mat(eye, true) : r === "pupil" ? self.mat(0x0c0c0c, true)
+        : r === "nose" ? self.mat(0xe48a96) : r === "eye" ? self.mat(eye, true) : r === "pupil" ? self.mat(dot, true)
         : r === "light" ? self.mat(light) : self.mat(body);
     });
     if (c.tailMesh) c.tailMesh.material = self.mat(body);
@@ -128,12 +127,10 @@
     var puff = s.puff, arch = run ? 0 : puff;
     c.torso.position.y = 62 + arch * 4;
     c.torso.scale.set(21 + puff * 4, 30, 20 + puff * 4);
-    c.hump.position.y = 70 + arch * 14;
-    c.hump.scale.set(34, 16 + arch * 8, 18 + puff * 4);
     c.spikes.forEach(function (sp) {
       var i = sp.userData.i, u = (i - 5) / 5;
       sp.visible = !run && puff > 0.45;
-      sp.position.y = 78 + arch * 22 * (1 - u * u);
+      sp.position.y = 78 + arch * 4 + puff * 4 * (1 - u * u);
       sp.scale.set(4, 4 + (puff - 0.45) * 26, 4);
       sp.rotation.z = -u * 0.6;
     });
