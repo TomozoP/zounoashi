@@ -66,7 +66,7 @@
     part(c.head, this.ball, 0, 0, 0, 24, 24, 24);                     /* 頭は球ひとつ */
     c.mouth = part(c.head, this.ball, 20, -9, 0, 5, 1, 8, "mouth");
     c.tongue = part(c.head, this.ball, 20.5, -11, 0, 3.5, 1.5, 5, "nose");
-    c.fangs = [-4, 4].map(function (z) { var f = part(c.head, self.fang, 23.6, -6, z * 0.9, 1.4, 4, 1.4, "fang"); f.rotation.z = Math.PI; return f; });
+    c.fangs = [-4, 4].map(function (z) { var f = part(c.head, self.fang, 23.2, -8, z * 0.9, 1.4, 4, 1.4, "fang"); f.rotation.z = Math.PI; return f; });
     c.ears = [-11, 11].map(function (z) {
       var pivot = new T.Group(); pivot.position.set(-3, 17, z); pivot.rotation.x = z > 0 ? 0.25 : -0.25; c.head.add(pivot);
       part(pivot, self.ear, 0, 11, 0, 10, 22, 5);
@@ -153,12 +153,10 @@
     c.head.rotation.z = run ? -0.15 : s.open * 0.22;
     c.head.rotation.y = run ? 0 : (face > 0 ? -0.35 : 0.35);   /* 顔を少しこちらへ向ける */
     c.mouth.scale.set(5, 1 + s.open * 7, 8);
-    c.mouth.position.y = -9 - s.open * 3;
+    c.mouth.position.y = -6 - c.mouth.scale.y;   /* 上のふち（y=-6）は動かさず、下へ開く */
     c.tongue.visible = s.open > 0.2;
-    c.tongue.position.y = -10 - s.open * 5;
-    /* 牙は開いた口の上のふちから下向きに */
-    var mouthTop = c.mouth.position.y + c.mouth.scale.y;
-    c.fangs.forEach(function (f) { f.visible = s.open > 0.3; f.position.y = mouthTop - 2.2; });
+    c.tongue.position.y = -7 - c.mouth.scale.y * 1.6;
+    c.fangs.forEach(function (f) { f.visible = s.open > 0.3; });   /* 牙は口の上のふちに固定 */
     c.ears.forEach(function (e) { e.rotation.z = s.open > 0.05 || puff > 0.6 ? 0.55 : 0.1; });
     c.eyes.forEach(function (e) { e.scale.y = 1 - s.open * 0.35; });
   };
