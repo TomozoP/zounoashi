@@ -123,6 +123,9 @@
     for (var z = zMin; z < zMax; z += 3) flat(self, w, 0.16, 1.6, (s.LEFT + s.ROAD) / 2, 0.01, z + 0.8, 0xf2efe6, { basic: true });
     flat(self, w, s.CURB - s.ROAD, 0.12, (s.ROAD + s.CURB) / 2, 0.012, -0.05, 0xf2efe6, { basic: true });
     flat(self, w, s.CURB - s.ROAD, 0.12, (s.ROAD + s.CURB) / 2, 0.012, s.G - 0.07, 0xf2efe6, { basic: true });
+    /* 空きの中も、普通の車1台分（約6m）ずつ区切る */
+    var stalls = Math.max(1, Math.round(s.G / 6));
+    for (var i = 1; i < stalls; i++) flat(self, w, s.CURB - s.ROAD, 0.12, (s.ROAD + s.CURB) / 2, 0.012, s.G * i / stalls, 0xf2efe6, { basic: true });
     this.slot = flat(self, w, s.CURB - s.ROAD, s.G, (s.ROAD + s.CURB) / 2, 0.006, s.G / 2, 0x5adc78, { opacity: 0, basic: true });
     /* 止まっている車 */
     s.parked.forEach(function (p) {
