@@ -47,5 +47,6 @@ window.DRAFT_GAMES = [
     "play": "games/_brute-escape/index.html",
     "full": true,
     "catch": ""
-  }
+  },
+  {"type":"lab","tags":[],"id":"nobi-parking","title":"のびる縦列駐車","year":2026,"date":"2026-10-02","plays":null,"url":"","img":"games/_nobi-parking/img/thumb.webp","play":"games/_nobi-parking/index.html","full":true,"catch":"車がどんどん長くなる縦列駐車"},
 ];
