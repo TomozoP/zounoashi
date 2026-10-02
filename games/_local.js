@@ -48,5 +48,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": ""
   },
-  {"type":"lab","tags":[],"id":"neko-kenka","title":"猫の喧嘩シミュレーター","year":2026,"date":"2026-10-01","plays":null,"url":"","img":"games/_neko-kenka/img/thumb.webp","play":"games/_neko-kenka/index.html","full":true,"catch":"唸り合いで追い払う"},
+  {"type":"lab","tags":[],"id":"neko-kenka","title":"キャットファイター","year":2026,"date":"2026-10-01","plays":null,"url":"","img":"games/_neko-kenka/img/thumb.webp","play":"games/_neko-kenka/index.html","full":true,"catch":"唸り合いで追い払う"},
 ];
