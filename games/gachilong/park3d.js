@@ -67,8 +67,8 @@
     return m;
   }
 
-  /* 車。前は -z。長いほど窓の柱が増える。前輪は steer で向きを変える */
-  ParkScene.prototype.makeCar = function (len, color, carW, overhang) {
+  /* 車。前は -z。joined なら横の窓が前から後ろまで1本につながる（自分の車）。前輪は steer で向きを変える */
+  ParkScene.prototype.makeCar = function (len, color, carW, overhang, joined) {
     var T = global.THREE, self = this;
     var g = new T.Group(), body = new T.Group();
     g.add(body);
@@ -77,8 +77,10 @@
     var cabin = Math.max(1.2, len - 2.3), cz = 0.25;
     rbox(self, body, carW * 0.84, 0.56, cabin, 0, 1.1, cz, 0x26313d, 0.16);
     rbox(self, body, carW * 0.78, 0.12, cabin - 0.3, 0, 1.38, cz, color, 0.05);
-    var n = Math.max(1, Math.round(cabin / 1.35));
-    for (var i = 1; i < n; i++) box(self, body, carW * 0.86, 0.5, 0.14, 0, 1.09, cz - cabin / 2 + cabin * i / n, color);
+    if (!joined) {
+      var n = Math.max(1, Math.round(cabin / 1.35));
+      for (var i = 1; i < n; i++) box(self, body, carW * 0.86, 0.5, 0.14, 0, 1.09, cz - cabin / 2 + cabin * i / n, color);
+    }
     box(self, body, carW * 0.86, 0.5, 0.12, 0, 1.09, cz - cabin / 2, color);
     box(self, body, carW * 0.86, 0.5, 0.12, 0, 1.09, cz + cabin / 2, color);
     [-1, 1].forEach(function (s) {
@@ -134,7 +136,7 @@
       w.add(c.g);
     });
     /* 自分の車 */
-    this.player = this.makeCar(s.L, s.color, s.carW, Math.min(1.0, s.L * 0.2));
+    this.player = this.makeCar(s.L, s.color, s.carW, Math.min(1.0, s.L * 0.2), true);
     w.add(this.player.g);
     this.fit = null;
   };
