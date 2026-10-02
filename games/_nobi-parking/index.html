@@ -123,7 +123,18 @@
   var CAR_W = 1.8;
   var LEFT = 0, stage, L, prevL, G, phase, phaseT, car, best, rects, crashAt, parkedT, beepT;
   var view = { k: 40, ox: 0, oy: 0 };
-  var joy = { on: false, ox: 0, oy: 0, x: 0, y: 0 };
+  /* 画面下の操作盤：左にハンドル、右にバックとアクセル */
+  var PANEL = 230, WMAX = 2.5;
+  var wheel = 0, pedal = { acc: false, back: false }, touches = {};
+  function panelGeo() {
+    var top = H - PANEL, cy = top + PANEL / 2;
+    return {
+      top: top,
+      wheel: { x: 125, y: cy, r: 92 },
+      back: { x: 290, y: top + 32, w: 100, h: PANEL - 64 },
+      acc: { x: 410, y: top + 32, w: 100, h: PANEL - 64 }
+    };
+  }
   var keys = { up: false, down: false, left: false, right: false };
   var COLORS = ["#3d7bd9", "#e8e4dc", "#2f3540", "#58a368", "#d9a23d", "#8a5bc4", "#c9ccd1"];
   var parkedColor = ["#3d7bd9", "#e8e4dc"];
@@ -143,10 +154,10 @@
     var g = gapOf(L);
     var top = -0.6 - L - 1.5, bottom = g + PARK_L + 1.2;
     var left = LEFT - 1.5, right = CURB + 1.4;
-    var k = Math.min(W / (right - left), (H * 0.84) / (bottom - top));
+    var k = Math.min(W / (right - left), ((H - PANEL) * 0.9) / (bottom - top));
     view.k = k;
     view.ox = W / 2 - (left + right) / 2 * k;
-    view.oy = H * 0.52 - (top + bottom) / 2 * k;
+    view.oy = (H - PANEL) * 0.52 - (top + bottom) / 2 * k;
   }
 
   function startStage(n) {
@@ -168,7 +179,8 @@
     parkedT = 0;
     beepT = 0;
     crashAt = null;
-    joy.on = false;
+    releaseAll();
+    wheel = 0;
     fitView();
     if (n > 0) {
       tone(220, 0.7, 0.12, "sawtooth", 660);
@@ -231,14 +243,8 @@
   /* ============ 進行 ============ */
   function control() {
     var thr = 0, st = 0;
-    if (joy.on) {
-      var dx = (joy.x - joy.ox) / 70, dy = -(joy.y - joy.oy) / 70;
-      thr = Math.abs(dy) < 0.15 ? 0 : Math.max(-1, Math.min(1, dy));
-      st = Math.abs(dx) < 0.1 ? 0 : Math.max(-1, Math.min(1, dx));
-    } else {
-      thr = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
-      st = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
-    }
+    thr = ((pedal.acc || keys.up) ? 1 : 0) - ((pedal.back || keys.down) ? 1 : 0);
+    st = wheel / WMAX;
     return { thr: thr, st: st };
   }
 
@@ -264,6 +270,8 @@
       return;
     }
 
+    if (keys.left) wheel = Math.max(-WMAX, wheel - 4 * dt);
+    if (keys.right) wheel = Math.min(WMAX, wheel + 4 * dt);
     var c = control();
     var vmax = 2.2 + L * 0.1;
     var target = c.thr * vmax;
@@ -314,13 +322,19 @@
 
   function finish() {
     state = S.RESULT;
-    joy.on = false;
+    releaseAll();
   }
 
   /* ============ 入力 ============
-     指を置いた所から、上へずらすと前進・下で後退・左右でハンドル。
-     キーは矢印（またはWASD）。 */
-  function down(x, y) {
+     画面下のハンドルを回して曲がり、右のアクセル・バックを押している間だけ進む。
+     ハンドルとペダルは別の指で同時に触れる。キーは矢印（またはWASD）。 */
+  function inBox(x, y, b) { return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
+  function releaseAll() { touches = {}; pedal.acc = pedal.back = false; held = false; }
+  function syncPedals() {
+    pedal.acc = pedal.back = false;
+    for (var id in touches) { if (touches[id].kind === "acc") pedal.acc = true; if (touches[id].kind === "back") pedal.back = true; }
+  }
+  function down(x, y, id) {
     if (state === S.INTRO) return;
     audioOn();
     if (state === S.RESULT) {
@@ -329,29 +343,48 @@
       return;
     }
     if (x == null) return;
+    var g = panelGeo(), kind = null;
+    if (inBox(x, y, { x: g.acc.x - 10, y: g.acc.y - 20, w: g.acc.w + 30, h: g.acc.h + 40 })) kind = "acc";
+    else if (inBox(x, y, { x: g.back.x - 10, y: g.back.y - 20, w: g.back.w + 20, h: g.back.h + 40 })) kind = "back";
+    else if (Math.hypot(x - g.wheel.x, y - g.wheel.y) < g.wheel.r + 50) kind = "wheel";
+    if (!kind) return;
+    touches[id] = { kind: kind, ang: Math.atan2(y - g.wheel.y, x - g.wheel.x) };
     held = true;
-    joy.on = true; joy.ox = joy.x = x; joy.oy = joy.y = y;
+    syncPedals();
   }
-  function move(x, y) {
-    if (state !== S.PLAY || !held) return;
-    joy.x = x; joy.y = y;
+  function move(x, y, id) {
+    var t = touches[id];
+    if (state !== S.PLAY || !t) return;
+    if (t.kind === "wheel") {
+      var g = panelGeo(), ang = Math.atan2(y - g.wheel.y, x - g.wheel.x);
+      var d = ang - t.ang;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      if (Math.hypot(x - g.wheel.x, y - g.wheel.y) > 18) wheel = Math.max(-WMAX, Math.min(WMAX, wheel + d));
+      t.ang = ang;
+    } else {
+      /* 指がペダルから外れたら離したことにする */
+      var b = panelGeo()[t.kind];
+      if (!inBox(x, y, { x: b.x - 30, y: b.y - 40, w: b.w + 60, h: b.h + 80 })) { delete touches[id]; syncPedals(); }
+    }
   }
-  function up() {
-    if (!held) return;
-    held = false;
-    joy.on = false;
+  function up(id) {
+    if (id == null) { releaseAll(); return; }
+    delete touches[id];
+    syncPedals();
+    held = Object.keys(touches).length > 0;
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y);
+    var p = atCanvas(e); down(p.x, p.y, e.pointerId);
   });
   wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
+    var p = atCanvas(e); move(p.x, p.y, e.pointerId);
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { up(); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(e.pointerId); });
+  wrap.addEventListener("pointercancel", function (e) { up(e.pointerId); });
   window.addEventListener("blur", function () { up(); keys.up = keys.down = keys.left = keys.right = false; });
 
   /* 本番以外（手元・確認用ページ・制作中の固定リンク）だけ、数字キーで場面を飛ばせる。
@@ -516,17 +549,54 @@
       ctx.textAlign = "center";
       ctx.fillText(String(score), W / 2, 58);
       ctx.restore();
-      if (joy.on) {
-        var dx = joy.x - joy.ox, dy = joy.y - joy.oy, m = Math.hypot(dx, dy);
-        if (m > 70) { dx *= 70 / m; dy *= 70 / m; }
-        ctx.fillStyle = "rgba(255,255,255,.16)";
-        ctx.beginPath(); ctx.arc(joy.ox, joy.oy, 70, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "rgba(255,255,255,.55)";
-        ctx.beginPath(); ctx.arc(joy.ox + dx, joy.oy + dy, 28, 0, Math.PI * 2); ctx.fill();
-      }
     }
+    drawPanel();
 
     if (state === S.RESULT) drawResult();
+  }
+
+  /* 操作盤 */
+  function drawPedal(b, on, dir) {
+    ctx.save();
+    ctx.translate(b.x + b.w / 2, b.y + b.h / 2 + (on ? 4 : 0));
+    ctx.fillStyle = "rgba(0,0,0,.45)";
+    roundRect(-b.w / 2 + 3, -b.h / 2 + 6, b.w, b.h, 18); ctx.fill();
+    ctx.fillStyle = on ? "#7c8591" : "#4a525d";
+    roundRect(-b.w / 2, -b.h / 2, b.w, b.h, 18); ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.lineWidth = 4;
+    for (var i = -2; i <= 2; i++) {
+      ctx.beginPath(); ctx.moveTo(-b.w / 2 + 18, i * 26); ctx.lineTo(b.w / 2 - 18, i * 26); ctx.stroke();
+    }
+    ctx.fillStyle = on ? "#fff" : "#e6e9ee";
+    ctx.beginPath();
+    ctx.moveTo(0, -30 * dir); ctx.lineTo(28, 14 * dir); ctx.lineTo(-28, 14 * dir); ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  function drawPanel() {
+    var g = panelGeo();
+    ctx.fillStyle = "#23272d";
+    ctx.fillRect(0, g.top, W, PANEL);
+    ctx.fillStyle = "#3a4048";
+    ctx.fillRect(0, g.top, W, 4);
+    /* ハンドル */
+    var w = g.wheel;
+    ctx.save();
+    ctx.translate(w.x, w.y);
+    ctx.rotate(wheel);
+    ctx.lineWidth = 22; ctx.strokeStyle = "#5b6470";
+    ctx.beginPath(); ctx.arc(0, 0, w.r - 11, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 14; ctx.strokeStyle = "#4a525c";
+    [Math.PI / 2, Math.PI / 2 + Math.PI * 2 / 3, Math.PI / 2 - Math.PI * 2 / 3].forEach(function (a) {
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * (w.r - 14), Math.sin(a) * (w.r - 14)); ctx.stroke();
+    });
+    ctx.fillStyle = "#2b3038";
+    ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#e2483c";
+    ctx.fillRect(-5, -w.r, 10, 22);
+    ctx.restore();
+    drawPedal(g.back, pedal.back || keys.down, -1);
+    drawPedal(g.acc, pedal.acc || keys.up, 1);
   }
 
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
