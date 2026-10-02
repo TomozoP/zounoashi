@@ -2,6 +2,7 @@
 
      zT("点でした", "points")   // 今の言語の文字を返す
      zLang                       // "ja" か "en"
+     zSetLang("en")              // 切り替えて覚える（読み込み直す）
 
    確かめるときは URL に ?lang=en / ?lang=ja を付ける。
    サイトの中で開いたゲームは、サイト側の指定を引き継ぐ。
@@ -23,6 +24,10 @@
         if (parent) return parent;
       }
     } catch (e) {}
+    try {
+      var saved = global.localStorage.getItem("zLang");
+      if (saved === "ja" || saved === "en") return saved;
+    } catch (e) {}
     var n = global.navigator || {};
     var first = (n.languages && n.languages[0]) || n.language || "ja";
     return /^ja\b/i.test(first) ? "ja" : "en";
@@ -30,6 +35,15 @@
 
   var lang = detect();
   global.zLang = lang;
+  global.zSetLang = function (next) {
+    try { global.localStorage.setItem("zLang", next); } catch (e) {}
+    /* URL の指定が残っていると切り替わらないので外す */
+    var url = new URL(global.location.href);
+    url.searchParams.delete("lang");
+    var hash = url.hash.replace(/([?&])lang=(ja|en)&?/, "$1").replace(/[?&]$/, "");
+    try { global.history.replaceState(null, "", url.pathname + url.search + hash); } catch (e) {}
+    global.location.reload();
+  };
   global.zT = function (ja, en) { return lang === "ja" || en == null ? ja : en; };
   var doc = global.document;
   if (doc && doc.documentElement) doc.documentElement.lang = lang;
