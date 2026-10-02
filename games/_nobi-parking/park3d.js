@@ -40,6 +40,24 @@
     parent.add(m);
     return m;
   }
+  /* 角を丸く面取りした箱。底面の角丸を押し出し、上下の縁にも丸みを付ける */
+  function rbox(self, parent, w, h, d, x, y, z, color, r) {
+    var T = global.THREE;
+    r = Math.min(r, w / 2 - 0.01, d / 2 - 0.01, h / 2 - 0.01);
+    var hw = w / 2 - r, hd = d / 2 - r, sh = new T.Shape();
+    sh.moveTo(-hw, -hd - 0.0001);
+    sh.absarc(hw, -hd, 0.0001, -Math.PI / 2, 0, false);
+    sh.absarc(hw, hd, 0.0001, 0, Math.PI / 2, false);
+    sh.absarc(-hw, hd, 0.0001, Math.PI / 2, Math.PI, false);
+    sh.absarc(-hw, -hd, 0.0001, Math.PI, Math.PI * 1.5, false);
+    var geo = new T.ExtrudeGeometry(sh, { depth: Math.max(0.001, h - 2 * r), bevelEnabled: true, bevelThickness: r, bevelSize: r, bevelSegments: 4, curveSegments: 6 });
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, -(h - 2 * r) / 2, 0);
+    var m = new T.Mesh(geo, self.mat(color));
+    m.position.set(x, y, z);
+    parent.add(m);
+    return m;
+  }
   function flat(self, parent, w, d, x, y, z, color, opts) {
     var T = global.THREE;
     var m = new T.Mesh(new T.PlaneGeometry(w, d), self.mat(color, opts));
@@ -55,10 +73,10 @@
     var g = new T.Group(), body = new T.Group();
     g.add(body);
     flat(self, g, carW + 0.35, len + 0.35, 0, 0.02, 0, 0x000000, { opacity: 0.3, basic: true });
-    box(self, body, carW, 0.62, len, 0, 0.53, 0, color);
+    rbox(self, body, carW, 0.66, len, 0, 0.55, 0, color, 0.2);
     var cabin = Math.max(1.2, len - 2.3), cz = 0.25;
-    box(self, body, carW * 0.84, 0.5, cabin, 0, 1.09, cz, 0x26313d);
-    box(self, body, carW * 0.8, 0.06, cabin - 0.3, 0, 1.37, cz, color);
+    rbox(self, body, carW * 0.84, 0.56, cabin, 0, 1.1, cz, 0x26313d, 0.16);
+    rbox(self, body, carW * 0.78, 0.12, cabin - 0.3, 0, 1.38, cz, color, 0.05);
     var n = Math.max(1, Math.round(cabin / 1.35));
     for (var i = 1; i < n; i++) box(self, body, carW * 0.86, 0.5, 0.14, 0, 1.09, cz - cabin / 2 + cabin * i / n, color);
     box(self, body, carW * 0.86, 0.5, 0.12, 0, 1.09, cz - cabin / 2, color);
@@ -106,16 +124,6 @@
     flat(self, w, s.CURB - s.ROAD, 0.12, (s.ROAD + s.CURB) / 2, 0.012, -0.05, 0xf2efe6, { basic: true });
     flat(self, w, s.CURB - s.ROAD, 0.12, (s.ROAD + s.CURB) / 2, 0.012, s.G - 0.07, 0xf2efe6, { basic: true });
     this.slot = flat(self, w, s.CURB - s.ROAD, s.G, (s.ROAD + s.CURB) / 2, 0.006, s.G / 2, 0x5adc78, { opacity: 0, basic: true });
-    /* 街路樹 */
-    for (z = -60; z < 90; z += 9) {
-      [s.LEFT - 1.6, s.CURB + 1.6].forEach(function (x, i) {
-        var zz = z + (i ? 4.5 : 0);
-        box(self, w, 0.22, 2.2, 0.22, x, 1.25, zz, 0x7a5a3c);
-        var leaf = new T.Mesh(new T.IcosahedronGeometry(1.25, 0), self.mat(0x5f9e58));
-        leaf.position.set(x, 3.0, zz);
-        w.add(leaf);
-      });
-    }
     /* 止まっている車 */
     s.parked.forEach(function (p) {
       var c = self.makeCar(p.len, p.color, s.carW, Math.min(1.0, p.len * 0.2));
