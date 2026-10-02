@@ -37,6 +37,10 @@
   global.zLang = lang;
   global.zSetLang = function (next) {
     try { global.localStorage.setItem("zLang", next); } catch (e) {}
+    /* サイトの中で開いたゲームからは、サイトごと切り替える（上のバーや一覧も揃える） */
+    try {
+      if (global.parent && global.parent !== global && global.parent.zSetLang) { global.parent.zSetLang(next); return; }
+    } catch (e) {}
     /* URL の指定が残っていると切り替わらないので外す */
     var url = new URL(global.location.href);
     url.searchParams.delete("lang");
