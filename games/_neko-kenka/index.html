@@ -191,7 +191,7 @@
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    score = 0; cleared = false;
+    score = 0; cleared = false; fanId++;
     T = 0;
     held = false;
     level = 0;
@@ -290,7 +290,7 @@
       if (phaseT > 1.6) { phase = "fight"; phaseT = 0; foe.mode = "rest"; foe.rest = 0.4; }
     } else if (phase === "win") {
       foe.run = phaseT;
-      if (phaseT > 1.4) { score++; level++; if (score >= CLEAR_N) { cleared = true; state = S.RESULT; } else nextFoe(); }
+      if (phaseT > 1.4) { score++; level++; if (score >= CLEAR_N) { cleared = true; state = S.RESULT; celebrate(); } else nextFoe(); }
     } else if (phase === "lose") {
       me.run = phaseT;
       if (phaseT > 1.4) { state = S.RESULT; }
@@ -338,6 +338,41 @@
     var rise = 0.72 + 0.28 * Math.min(1, c.onT / 0.32);
     var w = (c.vc || ME_VOICE).wb, wob = 1 + 0.03 * Math.sin(c.onT * 2.3 * w) + 0.018 * Math.sin(c.onT * 5.1 * w + 1);
     v.set(hz(c.sp, base) * rise * wob * (1 + c.jit), c.open, 0.5, g);
+  }
+  /* 地域最強：ニャーの声でファンファーレと紙吹雪 */
+  var confetti = [], confLast = 0, fanId = 0;
+  function celebrate() {
+    confetti = [];
+    var cols = ["#ff5a5a", "#f2c14a", "#4aa8ff", "#8fe07a", "#ffffff", "#e2883c"];
+    for (var i = 0; i < 140; i++) {
+      confetti.push({ x: Math.random() * W, y: -Math.random() * H * 0.9 - 20, vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 160,
+        a: Math.random() * TAU, va: (Math.random() - 0.5) * 12, w: 8 + Math.random() * 8, h: 5 + Math.random() * 6, c: cols[i % cols.length], ph: Math.random() * TAU });
+    }
+    confLast = performance.now();
+    if (!VOICES) return;
+    var v = VOICES.me, v2 = VOICES.foe;
+    v2.trait(ME_VOICE);
+    /* タタタ ターン ターン ターン タ タ ターーン */
+    var notes = [[0, 523, 0.11], [0.15, 523, 0.11], [0.3, 523, 0.11], [0.45, 523, 0.5], [1.0, 415, 0.45], [1.5, 466, 0.45], [2.0, 523, 0.2], [2.3, 466, 0.1], [2.45, 523, 1.0]];
+    var id = ++fanId;
+    notes.forEach(function (n) {
+      setTimeout(function () { if (id !== fanId || state !== S.RESULT) return; meow(v, n[1], n[2]); meow(v2, n[1] * 0.75, n[2]); }, n[0] * 1000);
+    });
+  }
+  function meow(v, f, dur) {
+    v.set(f * 0.8, 0.25, 0.5, 0);
+    setTimeout(function () { v.set(f, 1, 0.55, 0); }, 45);
+    setTimeout(function () { v.set(f * 0.8, 0.3, 0, 0); }, dur * 1000);
+  }
+  function drawConfetti() {
+    var now = performance.now(), dt = Math.min(0.05, (now - confLast) / 1000);
+    confLast = now;
+    confetti.forEach(function (p) {
+      p.ph += dt * 3; p.x += (p.vx + Math.sin(p.ph) * 40) * dt; p.y += p.vy * dt; p.a += p.va * dt;
+      if (p.y > H + 20) { p.y = -20; p.x = Math.random() * W; }
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a); ctx.scale(1, Math.cos(p.ph * 1.7));
+      ctx.fillStyle = p.c; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); ctx.restore();
+    });
   }
   /* 負けた側の「ギャッ」 */
   function screech(v, base) {
@@ -750,6 +785,7 @@
   function drawResult() {
     ctx.fillStyle = "rgba(10,8,6,.66)";
     ctx.fillRect(0, 0, W, H);
+    if (cleared) drawConfetti();
     ctx.save();
     ctx.fillStyle = "#fff";
     ctx.shadowColor = "rgba(0,0,0,.6)";
@@ -800,9 +836,14 @@
   layout();
   var last = performance.now();
   function loop(now) {
-    var dt = Math.min(0.033, (now - last) / 1000);
+    /* 描画が重くて間が空いても、ゲームの時間は実際の時間どおり進める（遅い端末でスローにならない）。
+       タブを離れたあとの大きな空白だけは切り捨てる */
+    var dt = Math.min(0.25, (now - last) / 1000);
     last = now;
-    if (!window.__recordManual) { update(dt); draw(); }
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var s = Math.min(1 / 60, dt); update(s); dt -= s; }
+      draw();
+    }
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
