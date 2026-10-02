@@ -79,6 +79,7 @@
     MASTER = AC.createGain(); MASTER.gain.value = 0.9;
     MASTER.connect(comp); comp.connect(AC.destination);
     VOICES = { me: makeVoice(-0.35), foe: makeVoice(0.35) };
+    VOICES.me.trait(ME_VOICE); if (foe && foe.vc) VOICES.foe.trait(foe.vc);
   }
 
   /* 猫の声。のこぎり波2本を少しずらして濁らせ、
@@ -110,14 +111,20 @@
     if (AC.createStereoPanner) { var p = AC.createStereoPanner(); p.pan.value = pan; env.connect(p); out = p; }
     out.connect(MASTER);
     [o1, o2, vib, gr].forEach(function (o) { o.start(); });
+    var fm = 1, vd = 0.035;
     return {
+      /* 個体ごとの声のくせ：響きの高さ・揺れの速さと深さ・ざらつき */
+      trait: function (t) {
+        fm = t.fm; vd = t.vd;
+        vib.frequency.value = t.vr; o2.detune.value = t.dt;
+      },
       set: function (f0, open, vol, growl) {
         var n = AC.currentTime, k = 0.03;
         o1.frequency.setTargetAtTime(f0, n, k);
         o2.frequency.setTargetAtTime(f0, n, k);
-        vibG.gain.setTargetAtTime(f0 * 0.035, n, 0.1);
-        f1.frequency.setTargetAtTime(600 + 900 * open, n, 0.06);
-        f2.frequency.setTargetAtTime(1500 + 1700 * open, n, 0.06);
+        vibG.gain.setTargetAtTime(f0 * vd, n, 0.1);
+        f1.frequency.setTargetAtTime((600 + 900 * open) * fm, n, 0.06);
+        f2.frequency.setTargetAtTime((1500 + 1700 * open) * fm, n, 0.06);
         grG.gain.setTargetAtTime(growl * 0.5, n, 0.05);
         am.gain.setTargetAtTime(1 - growl * 0.5, n, 0.05);
         env.gain.setTargetAtTime(vol, n, vol > 0 ? 0.05 : 0.11);
@@ -144,7 +151,7 @@
   });
 
   /* 声の高さ（0〜1）を周波数に */
-  var ME_BASE = 270;
+  var ME_BASE = 270;   /* = ME_VOICE.base */
   function hz(p, base) { return base * Math.pow(2, p * 1.7); }
 
   /* ============ 状態 ============ */
@@ -158,6 +165,15 @@
     { body: "#26262c", eye: "#e8e04a", line: "#b9b7c6" },
     { body: "#6b5240", eye: "#f2b84a", line: "#c8a080" },
     { body: "#3c3f58", eye: "#ff7a6a", line: "#9aa0d0" }
+  ];
+  /* 声のくせ。base 高さ / fm 響き / vr・vd 揺れの速さ・深さ / dt ざらつき / wb うねりの速さ */
+  var ME_VOICE = { base: 270, fm: 1, vr: 4.3, vd: 0.035, dt: 16, wb: 1 };
+  var FOE_VOICES = [
+    { base: 250, fm: 0.95, vr: 3.6, vd: 0.03, dt: 12, wb: 0.8 },   /* 灰：落ち着いた中くらい */
+    { base: 320, fm: 1.15, vr: 5.6, vd: 0.045, dt: 10, wb: 1.4 },  /* 白：高くてよく震える */
+    { base: 215, fm: 0.85, vr: 3.0, vd: 0.025, dt: 28, wb: 0.7 },  /* 黒：低くて太く、ざらつく */
+    { base: 285, fm: 1.05, vr: 6.5, vd: 0.06, dt: 18, wb: 1.8 },   /* 茶：せわしなく大きく揺れる */
+    { base: 240, fm: 0.9, vr: 4.0, vd: 0.04, dt: 22, wb: 1.1 }     /* 紺：低めでうねる */
   ];
   var ME_COLOR = { body: "#e2883c", eye: "#8fe07a", line: "#ffb36b" };
 
@@ -187,7 +203,8 @@
   function nextFoe() {
     foe = cat();
     foe.color = COLORS[level % COLORS.length];
-    foe.base = 250 + (level % 3) * 22;
+    foe.vc = FOE_VOICES[level % FOE_VOICES.length]; foe.base = foe.vc.base;
+    if (VOICES) VOICES.foe.trait(foe.vc);
     foe.mode = "rest"; foe.rest = 0.6; foe.p = 0.3;
     foe.x = 395;
     phase = "enter"; phaseT = 0;
@@ -319,7 +336,7 @@
     var g = Math.pow(1 - c.sp, 2) * 0.7;
     /* 鳴きはじめは低い「ンア」からしゃくり上げ、のばす間はうねうねと揺れる */
     var rise = 0.72 + 0.28 * Math.min(1, c.onT / 0.32);
-    var wob = 1 + 0.03 * Math.sin(c.onT * 2.3) + 0.018 * Math.sin(c.onT * 5.1 + 1);
+    var w = (c.vc || ME_VOICE).wb, wob = 1 + 0.03 * Math.sin(c.onT * 2.3 * w) + 0.018 * Math.sin(c.onT * 5.1 * w + 1);
     v.set(hz(c.sp, base) * rise * wob * (1 + c.jit), c.open, 0.5, g);
   }
   /* 負けた側の「ギャッ」 */
