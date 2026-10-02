@@ -32,6 +32,8 @@
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="park3d.js"></script>
 <script>
 /* のびる縦列駐車
 
@@ -185,6 +187,7 @@
     releaseAll();
     wheel = 0;
     fitView();
+    setup3d();
     tone(220, 0.7, 0.12, "sawtooth", 660);
     tone(330, 0.7, 0.06, "square", 990);
   }
@@ -530,20 +533,44 @@
     }
   }
 
+  /* 立体の場面。three.js が使えないときは上から見た絵のまま */
+  var scene3d = null;
+  try { if (window.THREE && window.ParkScene) scene3d = new window.ParkScene(); } catch (e) { scene3d = null; }
+  function setup3d() {
+    if (!scene3d) return;
+    try {
+      scene3d.setup({
+        LEFT: LEFT, ROAD: ROAD, CURB: CURB, G: G, L: L, carW: CAR_W, parkL: PARK_L, color: "#e2483c",
+        parked: rects.slice(2).map(function (r) { return { x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2, len: PARK_L, color: parkedColor[r.car] }; })
+      });
+    } catch (e) { scene3d = null; }
+  }
+  function toScreen(x, y) {
+    if (scene3d) return scene3d.toScreen(x, y, W, H - PANEL);
+    return { x: sx(x), y: sy(y) };
+  }
+
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
     ctx.save();
     if (phase === "crash" && phaseT < 0.35) ctx.translate((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14);
-    drawWorld();
-    drawCar(car.x, car.y, car.th, car.len, "#e2483c", car.d);
+    var drawn3d = false;
+    if (scene3d) {
+      try { scene3d.render(ctx, W, H - PANEL, { car: car, parked: phase === "parked" }); drawn3d = true; }
+      catch (e) { scene3d = null; }
+    }
+    if (!drawn3d) {
+      drawWorld();
+      drawCar(car.x, car.y, car.th, car.len, "#e2483c", car.d);
+    }
     if (crashAt) {
-      var rr = (16 + phaseT * 40) * (state === S.RESULT ? 1 : 1);
+      var rr = 16 + phaseT * 40, cp = toScreen(crashAt.x, crashAt.y);
       ctx.fillStyle = "rgba(255,210,60,.85)";
       ctx.beginPath();
       for (var i = 0; i < 16; i++) {
         var ang = i / 16 * Math.PI * 2, rad = i % 2 ? rr * 0.45 : rr;
-        ctx.lineTo(sx(crashAt.x) + Math.cos(ang) * rad, sy(crashAt.y) + Math.sin(ang) * rad);
+        ctx.lineTo(cp.x + Math.cos(ang) * rad, cp.y + Math.sin(ang) * rad);
       }
       ctx.closePath(); ctx.fill();
     }
@@ -655,7 +682,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, phase: phase, stage: stage, score: score, best: best, L: L, G: G, car: { x: car.x, y: car.y, th: car.th, v: car.v, d: car.d }, W: W, H: H }; },
+    now: function () { return { threeD: !!scene3d, state: state, phase: phase, stage: stage, score: score, best: best, L: L, G: G, car: { x: car.x, y: car.y, th: car.th, v: car.v, d: car.d }, W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
