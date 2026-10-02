@@ -1396,17 +1396,41 @@ async function readWebm(src) {
   webmCache.set(src, p);
   return p;
 }
+// 色の変換の式は、動画の中に書かれていないと読み解き側と表示側で食い違い、色がずれる。
+// 最初の絵を両方の式で読み解き、編集画面（video 要素）の色に近いほうを使う
+async function pickColorSpace(clip, w) {
+  const spaces = [{ matrix: 'smpte170m', primaries: 'smpte170m', transfer: 'smpte170m', fullRange: false }, { matrix: 'bt709', primaries: 'bt709', transfer: 'bt709', fullRange: false }];
+  try {
+    const x = w.blocks[0];
+    await seekExport(clip, x.ts / 1e6 + 1e-3);
+    if (xv.readyState < 2 || !xv.videoWidth) return spaces[0];
+    const cw = 64, ch = Math.max(1, Math.round(64 * xv.videoHeight / xv.videoWidth)), c = new OffscreenCanvas(cw, ch), cx = c.getContext('2d', { willReadFrequently: true });
+    const grab = el => { cx.drawImage(el, 0, 0, cw, ch); return cx.getImageData(0, 0, cw, ch).data; };
+    const ref = grab(xv);
+    let best = spaces[0], bestD = Infinity;
+    for (const cs of spaces) {
+      let d = Infinity;
+      const dec = new VideoDecoder({ output: v => { if (d === Infinity) { const p = grab(v); d = 0; for (let i = 0; i < p.length; i += 4) d += Math.abs(p[i] - ref[i]) + Math.abs(p[i + 1] - ref[i + 1]) + Math.abs(p[i + 2] - ref[i + 2]); } v.close(); }, error: () => {} });
+      dec.configure({ ...w.config, colorSpace: cs });
+      dec.decode(new EncodedVideoChunk({ type: 'key', timestamp: x.ts, data: x.data }));
+      await dec.flush(); dec.close();
+      if (d < bestD) { bestD = d; best = cs; }
+    }
+    return best;
+  } catch (e) { return spaces[0]; }
+}
 // f から end の手前までのコマを出し、出し終えたコマ番号を返す（読めなければ f のまま）
 async function decodeExport(clip, f, end, emit, stop) {
   const w = await readWebm(clip.src);
   if (!w) return f;
+  if (!w.colorSpace) w.colorSpace = await pickColorSpace(clip, w);
   const src = i => Math.round((clip.in + i / FPS - clip.at) * 1e6), half = 5e5 / FPS;
   let k = 0; for (let i = 0; i < w.blocks.length; i++) { if (w.blocks[i].ts > src(f) + half) break; if (w.blocks[i].key) k = i; }
   const ready = []; let err = null, wake = null;
   const dec = new VideoDecoder({ output: v => { ready.push(v); if (wake) wake(); }, error: e => { err = e; if (wake) wake(); } });
   const wait = () => new Promise(r => { wake = () => { wake = null; r(); }; });
   try {
-    dec.configure(w.config);
+    dec.configure({ ...w.config, colorSpace: w.colorSpace });
     let flushed = false;
     while (f < end && !stop()) {
       const T = src(f) + half;
