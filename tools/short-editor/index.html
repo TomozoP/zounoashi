@@ -698,8 +698,9 @@ const vids = [$('vA'), $('vB')];
 let curV = 0; const vState = [{ clip: null }, { clip: null }];
 
 function drawVideoFrame(el) {
-  if (!el.videoWidth) return;
-  const vw = el.videoWidth, vh = el.videoHeight, ah = H - BAND;
+  // el は video 要素か、書き出しで読み解いた1コマ（VideoFrame）
+  const vw = el.videoWidth || el.displayWidth, vh = el.videoHeight || el.displayHeight, ah = H - BAND;
+  if (!vw) return;
   bg.fillStyle = '#000'; bg.fillRect(0, 0, W, H);
   // 背景のぼかし（映像を収めるときと、ヘッダー帯の背景に使う）
   if (style.fit === 'blur' || (BAND && style.headBg === 'blur')) {
@@ -1337,6 +1338,98 @@ function seekExport(clip, time) {
     xv.currentTime = time;
   });
 }
+// 録画した webm は区切りの絵が少なく、1コマずつ頭出しすると毎回はじめから読み直して遅い。
+// webm の中身を自分で読み、はじめから順に1回だけ読み解いて使う
+const webmCache = new Map();
+async function readWebm(src) {
+  if (webmCache.has(src)) return webmCache.get(src);
+  const p = (async () => {
+    const s = sources.get(src); if (!s) return null;
+    const b = new Uint8Array(await (await fetch(s.url)).arrayBuffer());
+    if (b[0] !== 0x1A || b[1] !== 0x45 || b[2] !== 0xDF || b[3] !== 0xA3) return null;
+    const vint = (i, keep) => {
+      let n = 1, m = 0x80; while (n <= 8 && !(b[i] & m)) { n++; m >>= 1; }
+      if (n > 8) throw Error('webm');
+      let v = keep ? b[i] : b[i] & (m - 1), all = (b[i] & (m - 1)) === m - 1;
+      for (let k = 1; k < n; k++) { v = v * 256 + b[i + k]; all = all && b[i + k] === 255; }
+      return { v, n, all };
+    };
+    const uint = (i, n) => { let v = 0; for (let k = 0; k < n; k++) v = v * 256 + b[i + k]; return v; };
+    // 中に入る入れ物：Segment, Info, Tracks, TrackEntry, Video, Cluster, BlockGroup
+    const boxes = new Set([0x18538067, 0x1549A966, 0x1654AE6B, 0xAE, 0xE0, 0x1F43B675, 0xA0]);
+    const tracks = []; let scale = 1e6, cluster = 0, vt = null; const blocks = [];
+    for (let i = 0; i < b.length;) {
+      const id = vint(i, true); i += id.n; if (i >= b.length) break;
+      const sz = vint(i); i += sz.n;
+      if (boxes.has(id.v)) { if (id.v === 0xAE) tracks.push({}); continue; }
+      const len = sz.all ? b.length - i : sz.v, t = tracks[tracks.length - 1];
+      if (id.v === 0x2AD7B1) scale = uint(i, len);
+      else if (id.v === 0xE7) cluster = uint(i, len);
+      else if (t && id.v === 0xD7) t.num = uint(i, len);
+      else if (t && id.v === 0x83) t.type = uint(i, len);
+      else if (t && id.v === 0x86) t.codec = new TextDecoder().decode(b.subarray(i, i + len));
+      else if (t && id.v === 0x63A2) t.priv = b.slice(i, i + len);
+      else if (t && id.v === 0xB0) t.w = uint(i, len);
+      else if (t && id.v === 0xBA) t.h = uint(i, len);
+      else if (id.v === 0xA3 || id.v === 0xA1) {
+        vt = vt || tracks.find(x => x.type === 1);
+        const tn = vint(i);
+        if (vt && tn.v === vt.num) {
+          const j = i + tn.n, rel = (b[j] << 24 >> 16) | b[j + 1], flags = b[j + 2];
+          if (flags & 0x06) return null; // 束ねた書き方は扱わない
+          blocks.push({ ts: Math.round((cluster + rel) * scale / 1000), key: id.v === 0xA3 ? !!(flags & 0x80) : null, data: b.subarray(j + 3, i + len) });
+        }
+      }
+      i += len;
+    }
+    if (!vt || !blocks.length) return null;
+    const codec = { V_VP8: 'vp8', V_VP9: 'vp09.00.10.08' }[vt.codec]
+      || (vt.codec === 'V_MPEG4/ISO/AVC' && vt.priv ? 'avc1.' + [...vt.priv.subarray(1, 4)].map(x => x.toString(16).padStart(2, '0')).join('') : null);
+    if (!codec || !window.VideoDecoder) return null;
+    const config = { codec, codedWidth: vt.w, codedHeight: vt.h, ...(codec.startsWith('avc1') ? { description: vt.priv } : {}) };
+    try { if (!(await VideoDecoder.isConfigSupported(config)).supported) return null; } catch (e) { return null; }
+    if (blocks[0].key === null) blocks[0].key = true;
+    blocks.forEach(x => { if (x.key === null) x.key = false; });
+    return { config, blocks };
+  })().catch(() => null);
+  webmCache.set(src, p);
+  return p;
+}
+// f から end の手前までのコマを出し、出し終えたコマ番号を返す（読めなければ f のまま）
+async function decodeExport(clip, f, end, emit, stop) {
+  const w = await readWebm(clip.src);
+  if (!w) return f;
+  const src = i => Math.round((clip.in + i / FPS - clip.at) * 1e6), half = 5e5 / FPS;
+  let k = 0; for (let i = 0; i < w.blocks.length; i++) { if (w.blocks[i].ts > src(f) + half) break; if (w.blocks[i].key) k = i; }
+  const ready = []; let err = null, wake = null;
+  const dec = new VideoDecoder({ output: v => { ready.push(v); if (wake) wake(); }, error: e => { err = e; if (wake) wake(); } });
+  const wait = () => new Promise(r => { wake = () => { wake = null; r(); }; });
+  try {
+    dec.configure(w.config);
+    let flushed = false;
+    while (f < end && !stop()) {
+      const T = src(f) + half;
+      // 次の絵がこのコマの時刻を越えるまで読み進める（ready[0] がこのコマに使う絵）
+      for (;;) {
+        while (ready.length >= 2 && ready[1].timestamp <= T) ready.shift().close();
+        if (err || ready.length >= 2 || flushed) break;
+        if (k < w.blocks.length) {
+          const x = w.blocks[k++];
+          dec.decode(new EncodedVideoChunk({ type: x.key ? 'key' : 'delta', timestamp: x.ts, data: x.data }));
+          if (dec.decodeQueueSize > 3) await Promise.race([wait(), new Promise(r => setTimeout(r, 20))]);
+        } else { await dec.flush(); flushed = true; }
+      }
+      if (err || !ready.length) break;
+      while (ready.length >= 2 && ready[1].timestamp <= T) ready.shift().close();
+      drawVideoFrame(ready[0]);
+      await emit(f++);
+    }
+  } catch (e) { err = e; }
+  ready.forEach(v => v.close());
+  try { dec.close(); } catch (e) {}
+  if (err) console.warn('動画を読み解けなかったので頭出しに切り替えます', err);
+  return f;
+}
 // Opus は 44.1kHz を扱えないので、必要なら 48kHz に直した音で試す
 async function resampleMix(buf, sr) {
   const off = new OfflineAudioContext(2, Math.ceil(buf.duration * sr), sr), s = off.createBufferSource();
@@ -1370,16 +1463,28 @@ async function exportFrames() {
     aenc.encode(ad); ad.close();
   }
   const drain = () => venc.encodeQueueSize > 4 ? new Promise(r => venc.addEventListener('dequeue', r, { once: true })).then(drain) : null;
+  // 今の bg の絵に字幕を重ねて f コマ目として符号化する
+  const emit = async f => {
+    const t = f / FPS;
+    g.drawImage(base, 0, 0); drawSubs(g, t);
+    const vf = new VideoFrame(view, { timestamp: Math.round(f * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+    venc.encode(vf, { keyFrame: f % (FPS * 2) === 0 }); vf.close();
+    await drain();
+    if (f % 3 === 0) { $('ovBar').style.width = (f / frames * 100).toFixed(1) + '%'; playhead = t; updateTime(); }
+  };
+  const stop = () => xCanceled || fail;
   try {
-    for (let f = 0; f < frames && !xCanceled && !fail; f++) {
-      const t = f / FPS, h = clipAt(t);
-      if (h) { await seekExport(h.c, h.c.in + h.local + 1e-3); if (xv.readyState >= 2) drawVideoFrame(xv); }
-      else { bg.fillStyle = '#000'; bg.fillRect(0, 0, W, H); }
-      g.drawImage(base, 0, 0); drawSubs(g, t);
-      const vf = new VideoFrame(view, { timestamp: Math.round(f * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
-      venc.encode(vf, { keyFrame: f % (FPS * 2) === 0 }); vf.close();
-      await drain();
-      if (f % 3 === 0) { $('ovBar').style.width = (f / frames * 100).toFixed(1) + '%'; playhead = t; updateTime(); }
+    let f = 0;
+    while (f < frames && !stop()) {
+      const h = clipAt(f / FPS);
+      if (!h) { bg.fillStyle = '#000'; bg.fillRect(0, 0, W, H); await emit(f++); continue; }
+      // 同じ動画が続くコマをまとめて、動画を直接読み解いて出す。読めない形式なら1コマずつ頭出しする
+      let end = f + 1; while (end < frames) { const n = clipAt(end / FPS); if (!n || n.c !== h.c) break; end++; }
+      f = await decodeExport(h.c, f, end, emit, stop);
+      for (; f < end && !stop(); f++) {
+        await seekExport(h.c, h.c.in + f / FPS - h.c.at + 1e-3); if (xv.readyState >= 2) drawVideoFrame(xv);
+        await emit(f);
+      }
     }
     if (!xCanceled && !fail) { await venc.flush(); await aenc.flush(); }
   } catch (e) { fail = fail || e; }
