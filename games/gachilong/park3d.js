@@ -40,16 +40,17 @@
     parent.add(m);
     return m;
   }
-  /* 角を丸く面取りした箱。底面の角丸を押し出し、上下の縁にも丸みを付ける */
-  function rbox(self, parent, w, h, d, x, y, z, color, r) {
+  /* 角を丸く面取りした箱。上から見た角を pr で丸め、上下の縁にも r の丸みを付ける */
+  function rbox(self, parent, w, h, d, x, y, z, color, r, pr) {
     var T = global.THREE;
     r = Math.min(r, w / 2 - 0.01, d / 2 - 0.01, h / 2 - 0.01);
     var hw = w / 2 - r, hd = d / 2 - r, sh = new T.Shape();
-    sh.moveTo(-hw, -hd - 0.0001);
-    sh.absarc(hw, -hd, 0.0001, -Math.PI / 2, 0, false);
-    sh.absarc(hw, hd, 0.0001, 0, Math.PI / 2, false);
-    sh.absarc(-hw, hd, 0.0001, Math.PI / 2, Math.PI, false);
-    sh.absarc(-hw, -hd, 0.0001, Math.PI, Math.PI * 1.5, false);
+    var q = Math.max(0.0001, Math.min(pr || 0, hw - 0.01, hd - 0.01));
+    sh.moveTo(-hw + q, -hd);
+    sh.absarc(hw - q, -hd + q, q, -Math.PI / 2, 0, false);
+    sh.absarc(hw - q, hd - q, q, 0, Math.PI / 2, false);
+    sh.absarc(-hw + q, hd - q, q, Math.PI / 2, Math.PI, false);
+    sh.absarc(-hw + q, -hd + q, q, Math.PI, Math.PI * 1.5, false);
     var geo = new T.ExtrudeGeometry(sh, { depth: Math.max(0.001, h - 2 * r), bevelEnabled: true, bevelThickness: r, bevelSize: r, bevelSegments: 4, curveSegments: 6 });
     geo.rotateX(-Math.PI / 2);
     geo.translate(0, -(h - 2 * r) / 2, 0);
@@ -73,16 +74,21 @@
     var g = new T.Group(), body = new T.Group();
     g.add(body);
     flat(self, g, carW + 0.35, len + 0.35, 0, 0.02, 0, 0x000000, { opacity: 0.3, basic: true });
-    rbox(self, body, carW, 0.66, len, 0, 0.55, 0, color, 0.2);
-    var cabin = Math.max(1.2, len - 2.3), cz = 0.25;
-    rbox(self, body, carW * 0.84, 0.56, cabin, 0, 1.1, cz, 0x26313d, 0.16);
-    rbox(self, body, carW * 0.78, 0.12, cabin - 0.3, 0, 1.38, cz, color, 0.05);
-    if (!joined) {
-      var n = Math.max(1, Math.round(cabin / 1.35));
-      for (var i = 1; i < n; i++) box(self, body, carW * 0.86, 0.5, 0.14, 0, 1.09, cz - cabin / 2 + cabin * i / n, color);
-    }
-    box(self, body, carW * 0.86, 0.5, 0.12, 0, 1.09, cz - cabin / 2, color);
-    box(self, body, carW * 0.86, 0.5, 0.12, 0, 1.09, cz + cabin / 2, color);
+    /* 車体。上から見ても角が丸い */
+    rbox(self, body, carW, 0.62, len, 0, 0.52, 0, color, 0.14, 0.42);
+    /* 窓（ガラス）。ボンネットとトランクの長さは決まっていて、伸びるのは窓のところ */
+    var hood = 1.25, trunk = 0.85, cabin = Math.max(1.4, len - hood - trunk), cz = (hood - trunk) / 2;
+    rbox(self, body, carW * 0.84, 0.5, cabin, 0, 1.05, cz, 0x26313d, 0.14, 0.32);
+    /* 屋根。前の窓と後ろの窓、横の窓が見えるよう一回り小さく */
+    var wind = 0.62, back = 0.42;
+    rbox(self, body, carW * 0.68, 0.1, cabin - wind - back, 0, 1.33, cz + (wind - back) / 2, color, 0.04, 0.22);
+    if (!joined) box(self, body, carW * 0.85, 0.46, 0.14, 0, 1.05, cz + 0.15, color);
+    /* ドアミラーとバンパー */
+    [-1, 1].forEach(function (s) {
+      box(self, body, 0.2, 0.1, 0.14, s * (carW / 2 + 0.08), 0.92, cz - cabin / 2 + 0.25, color);
+    });
+    rbox(self, body, carW * 0.94, 0.18, 0.18, 0, 0.32, -len / 2 + 0.04, 0x2a2d33, 0.06, 0.08);
+    rbox(self, body, carW * 0.94, 0.18, 0.18, 0, 0.32, len / 2 - 0.04, 0x2a2d33, 0.06, 0.08);
     [-1, 1].forEach(function (s) {
       box(self, body, 0.4, 0.14, 0.06, s * (carW / 2 - 0.3), 0.62, -len / 2 - 0.01, 0xfff3b0, { basic: true });
       box(self, body, 0.4, 0.14, 0.06, s * (carW / 2 - 0.3), 0.62, len / 2 + 0.01, 0xd8263a, { basic: true });
