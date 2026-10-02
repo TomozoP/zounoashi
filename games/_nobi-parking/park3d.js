@@ -142,7 +142,7 @@
     cam.aspect = aspect;
     cam.updateProjectionMatrix();
     var cx = ((s.LEFT + s.CURB) / 2 + (s.ROAD + s.CURB) / 2) / 2, zFar = -s.parkL - 0.4, zNear = s.G + s.parkL + 0.4;
-    var el = 52 * Math.PI / 180, v = new T.Vector3();
+    var el = 68 * Math.PI / 180, v = new T.Vector3();
     function place(d, zt) {
       cam.position.set(cx, Math.sin(el) * d, zt + Math.cos(el) * d);
       cam.lookAt(cx, 0, zt);
