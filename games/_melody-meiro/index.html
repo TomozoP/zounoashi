@@ -222,7 +222,11 @@
   var S = { INTRO: "intro", PLAY: "play", GOAL: "goal", RESULT: "result" };
   var fresh = false;            /* 待機画面で見せた迷路は、最初の1回はそのまま使う */
   var state, T, cell, best, time = 0, misses = 0;
-  var line = [0], grow = 1;      /* 今たどっている線（引き返すと縮む）。grow は先端が伸びる途中 */
+  var line = [0], grow = 1;      /* 今たどっている線（引き返すと縮む）。grow は1マス動く途中の進み 0〜1 */
+  var shrinking = false;
+  /* 一定のテンポで1拍に1マス進む。なぞった向き（want）へ曲がれるところで曲がり、
+     曲がれなければまっすぐ、壁なら止まる */
+  var BEAT = 0.32, dir = null, want = null;
   var BX = 0, BY = 0;
   var acc = { x: 0, y: 0 };
   var bump = { x: 0, y: 0, t: 0 };
@@ -247,6 +251,9 @@
     misses = 0;
     line = [0];
     grow = 1;
+    shrinking = false;
+    dir = null;
+    want = null;
     glow = [];
     acc = { x: 0, y: 0 };
     playStep(0);
@@ -272,7 +279,7 @@
     }
     var next = idx(X, Y);
     cell = next;
-    if (line.length > 1 && line[line.length - 2] === next) { line.pop(); grow = 1; return; }
+    if (line.length > 1 && line[line.length - 2] === next) { shrinking = true; grow = 0; return; }
     line.push(next);
     grow = 0;
     var k = onPath[next];
@@ -286,6 +293,10 @@
     playStep(k);
     if (k === path.length - 1) win();
   }
+  function canGo(d) {
+    var x = cell % NX + d[0], y = ((cell / NX) | 0) + d[1];
+    return x >= 0 && y >= 0 && x < NX && y < NY && open(cell, idx(x, y));
+  }
   function win() {
     state = S.GOAL;
     T = 0;
@@ -296,7 +307,17 @@
   /* ============ 進行 ============ */
   function update(dt) {
     glow.forEach(function (g) { g.t += dt; });
-    grow = Math.min(1, grow + dt / 0.09);
+    grow += dt / BEAT;
+    if (grow >= 1) {
+      var over = grow - 1;                    /* 拍がずれないよう、はみ出した分は次のマスへ持ち越す */
+      grow = 1;
+      if (shrinking) { line.pop(); shrinking = false; }
+      if (state === S.PLAY) {
+        if (want && canGo(want)) dir = want;
+        if (dir && canGo(dir)) { step(dir[0], dir[1]); grow = Math.min(over, 0.99); }
+        else dir = null;
+      }
+    }
     if (bump.t > 0) bump.t = Math.max(0, bump.t - dt);
     if (state === S.PLAY) time += dt;
     if (state === S.GOAL) {
@@ -324,13 +345,11 @@
     if (!held || !lastP) return;
     acc.x += x - lastP.x; acc.y += y - lastP.y;
     lastP = { x: x, y: y };
-    var th = B * 0.55;
-    for (var guard = 0; guard < 4; guard++) {
-      if (Math.abs(acc.x) >= Math.abs(acc.y) && Math.abs(acc.x) > th) {
-        var sx = Math.sign(acc.x); acc.x -= sx * th; acc.y *= 0.5; step(sx, 0);
-      } else if (Math.abs(acc.y) > th) {
-        var sy = Math.sign(acc.y); acc.y -= sy * th; acc.x *= 0.5; step(0, sy);
-      } else break;
+    /* なぞった向きを覚えておき、次の拍で曲がる */
+    var th = 18;
+    if (Math.max(Math.abs(acc.x), Math.abs(acc.y)) > th) {
+      want = Math.abs(acc.x) > Math.abs(acc.y) ? [Math.sign(acc.x), 0] : [0, Math.sign(acc.y)];
+      acc = { x: 0, y: 0 };
     }
   }
   function up() { held = false; lastP = null; }
@@ -369,7 +388,7 @@
     if (!esc && !go && !dir) return;
     e.preventDefault();
     if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
-    if (dir) { step(dir[0], dir[1]); return; }
+    if (dir) { want = dir; return; }
     if (e.repeat) return;
     down();
   });
@@ -417,7 +436,7 @@
     var head = null;
     for (var i = 1; i < line.length; i++) {
       var a0 = center(line[i - 1]), b0 = center(line[i]);
-      if (i === line.length - 1) { b0 = { x: a0.x + (b0.x - a0.x) * grow, y: a0.y + (b0.y - a0.y) * grow }; head = b0; }
+      if (i === line.length - 1) { var f = shrinking ? 1 - grow : grow; b0 = { x: a0.x + (b0.x - a0.x) * f, y: a0.y + (b0.y - a0.y) * f }; head = b0; }
       var gr = ctx.createLinearGradient(a0.x, a0.y, b0.x, b0.y);
       gr.addColorStop(0, colorOf(line[i - 1]));
       gr.addColorStop(1, colorOf(line[i]));
@@ -461,7 +480,7 @@
 
     /* 自分 */
     var px = (cell % NX + 0.5) * B, py = (((cell / NX) | 0) + 0.5) * B;
-    if (head && line[line.length - 1] === cell) { px = head.x; py = head.y; }
+    if (head && grow < 1) { px = head.x; py = head.y; }
     ctx.beginPath();
     ctx.arc(px, py, B * 0.26, 0, Math.PI * 2);
     ctx.fillStyle = "#fff"; ctx.fill();
