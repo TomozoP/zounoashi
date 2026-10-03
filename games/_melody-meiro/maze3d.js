@@ -39,7 +39,7 @@
   }
   var R = 0.3;                  /* 足もとの影の大きさの目安 */
   var HOP = 0.55;               /* 跳ぶ高さ */
-  var BODY = 0xf4efe6;           /* ふだんの体の色。歌うとその音の色に染まる */
+  var BODY = 0x2b2b36;           /* ふだんの色は楽譜のインクの色。鳴るとその音の色に染まる */
 
   function MazeScene() {
     var T = global.THREE;
@@ -96,7 +96,7 @@
     ground.position.set(m.NX / 2, 0, m.NY / 2);
     world.add(ground);
 
-    var wallMat = new T.MeshLambertMaterial({ color: 0xe8ecf4 });
+    var wallMat = new T.MeshLambertMaterial({ color: 0x3b4560 });   /* 白い床で見えるよう濃い色 */
     var TH = 0.1, HT = 0.34;
     function wall(x0, z0, x1, z1) {
       var w = Math.abs(x1 - x0) + TH, d = Math.abs(z1 - z0) + TH;
