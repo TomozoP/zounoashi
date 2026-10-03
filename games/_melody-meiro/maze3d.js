@@ -37,7 +37,6 @@
     g.yaw = inner;                       /* 向きを変えるのはこの組 */
     return g;
   }
-  var VIEW = 11;                /* 画面に収める行の数 */
   var R = 0.3;                  /* 足もとの影の大きさの目安 */
   var HOP = 0.55;               /* 跳ぶ高さ */
   var BODY = 0xf4efe6;           /* ふだんの体の色。歌うとその音の色に染まる */
@@ -114,7 +113,6 @@
     }
     this.scene.add(world);
     this.roll = null;
-    this.camZ = null;
     this.place(m.start % m.NX, (m.start / m.NX) | 0);
     this.aspect = 0;
   };
@@ -144,7 +142,6 @@
     if (this.pend !== null) { this.target.set(this.pend); this.pend = null; }
   };
   MazeScene.prototype.update = function (dt) {
-    this.camT = (this.camT || 0) + dt;
     if (this.roll) {
       this.roll.t += dt;
       if (this.roll.t >= this.roll.dur) this.finish();
@@ -170,9 +167,8 @@
     var T = global.THREE, cam = this.camera;
     cam.aspect = aspect;
     cam.updateProjectionMatrix();
-    /* 縦に長い迷路は、VIEW 行ぶんが収まる距離にして、カメラが音符を追いかける */
-    var view = Math.min(this.ny, VIEW), cx = this.nx / 2, cz = view / 2, tilt = 62 * Math.PI / 180;
-    var corners = [[0, 0], [this.nx, 0], [0, view], [this.nx, view]];
+    var cx = this.nx / 2, cz = this.ny / 2, tilt = 62 * Math.PI / 180;
+    var corners = [[0, 0], [this.nx, 0], [0, this.ny], [this.nx, this.ny]];
     for (var dist = 8; dist < 80; dist += 0.25) {
       cam.position.set(cx, Math.sin(tilt) * dist, cz + Math.cos(tilt) * dist);
       cam.lookAt(cx, 0, cz + 0.2);
@@ -183,25 +179,6 @@
       });
       if (ok) break;
     }
-    this.dist = dist;
-    this.tilt = tilt;
-    /* カメラを寄せてよい範囲：板の奥の端が画面の上端より上、手前の端が下端より下にあるあいだ（板の外の空きを見せない）。
-       板が画面に収まるときは真ん中に固定 */
-    var self = this, P = new T.Vector3();
-    function edge(c, z, y) { self.aim(c); cam.updateMatrixWorld(); return P.set(cx, y, z).project(cam).y; }
-    var lo = null, hi = null;
-    for (var c = -6; c <= this.ny + 6; c += 0.05) {
-      if (lo === null && edge(c, 0, 0.35) >= 0.92) lo = c;
-      if (edge(c, this.ny, 0) <= -0.92) hi = c;
-    }
-    if (lo === null || hi === null || hi < lo) lo = hi = this.ny / 2;
-    this.camLo = lo; this.camHi = hi;
-  };
-  /* カメラを、縦の位置 cz を中心に置く */
-  MazeScene.prototype.aim = function (cz) {
-    var cam = this.camera, cx = this.nx / 2;
-    cam.position.set(cx, Math.sin(this.tilt) * this.dist, cz + Math.cos(this.tilt) * this.dist);
-    cam.lookAt(cx, 0, cz + 0.2);
   };
 
   MazeScene.prototype.render = function (ctx, W, Hv) {
@@ -212,7 +189,7 @@
       this.renderer.setSize(w, h, false);
       this.w = w; this.h = h;
     }
-    if (this.aspect !== W / Hv) { this.aspect = W / Hv; this.fit(this.aspect); this.camZ = null; }
+    if (this.aspect !== W / Hv) { this.aspect = W / Hv; this.fit(this.aspect); }
     this.tex.needsUpdate = true;
 
     /* 音符。山なりに跳び、着地でつぶれる */
@@ -233,11 +210,6 @@
     this.shadow.position.set(this.cube.position.x, 0.01, this.cube.position.z);
     this.shadow.scale.setScalar(R * 3.2 * (1 - lift * 0.5));
 
-    /* 音符の縦位置へカメラを寄せる（端では止める） */
-    var want = Math.max(this.camLo, Math.min(this.camHi, this.cube.position.z));
-    this.camZ = this.camZ == null ? want : this.camZ + (want - this.camZ) * (1 - Math.exp(-8 * this.camT));
-    this.camT = 0;
-    this.aim(this.camZ);
     this.renderer.render(this.scene, this.camera);
     ctx.drawImage(this.renderer.domElement, 0, 0, W, Hv);
   };
