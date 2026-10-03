@@ -87,75 +87,25 @@
     try { AC = new C(); } catch (e) { return; }
     resumeAudio();
   }
-  /* バイオリンのような音。少しずらしたのこぎり波2本を、胴鳴りの帯域だけ通して弓でこする揺れ（ビブラート）を付ける */
-  function strings(freq, out, bright) {
-    var f = AC.createBiquadFilter();
-    f.type = "lowpass"; f.frequency.value = bright || 2600; f.Q.value = 1.2;
-    var body = AC.createBiquadFilter();
-    body.type = "peaking"; body.frequency.value = 900; body.Q.value = 1; body.gain.value = 5;
-    var lfo = AC.createOscillator(), depth = AC.createGain();
-    lfo.frequency.value = 5.6;
-    depth.gain.setValueAtTime(0, AC.currentTime);
-    depth.gain.setTargetAtTime(freq * 0.006, AC.currentTime + 0.15, 0.12);
-    lfo.connect(depth);
-    var oscs = [0.998, 1.003].map(function (d) {
-      var o = AC.createOscillator();
-      o.type = "sawtooth";
-      o.frequency.value = freq * d;
-      depth.connect(o.frequency);
-      o.connect(f);
-      return o;
-    });
-    f.connect(body); body.connect(out);
-    return { oscs: oscs, lfo: lfo, depth: depth, filter: f,
-      start: function (t) { lfo.start(t); oscs.forEach(function (o) { o.start(t); }); },
-      stop: function (t) { lfo.stop(t); oscs.forEach(function (o) { o.stop(t); }); } };
-  }
-  /* 1音ずつ弾く音（伴奏・和音） */
-  function note(freq, dur, vol, delay, bright) {
+  /* ピアノのような音。基音と倍音を重ねて、すぐ減衰させる */
+  function note(freq, dur, vol, delay) {
     if (!AC) return;
-    var n = AC.currentTime + (delay || 0), g = AC.createGain();
-    g.gain.setValueAtTime(0.0001, n);
-    g.gain.linearRampToValueAtTime(vol, n + 0.08);
-    g.gain.setTargetAtTime(vol * 0.7, n + 0.1, 0.2);
-    g.gain.setTargetAtTime(0.0001, n + dur, 0.12);
-    g.connect(out());
-    var v = strings(freq, g, bright);
-    v.start(n); v.stop(n + dur + 0.6);
-  }
-  /* 旋律は1本の弦で弾き続ける。次の音へは指をすべらせるようにつなぎ、止まると弓を離す */
-  var lead = null, leadEnd = 0;
-  function melody(freq, vol) {
-    if (!AC) return;
-    var n = AC.currentTime;
-    if (!lead || n > leadEnd) {
-      var g = AC.createGain();
-      g.gain.value = 0.0001;
-      g.connect(out());
-      lead = strings(freq, g);
-      lead.gain = g;
-      lead.start(n);
-    }
-    lead.oscs.forEach(function (o, i) {
-      o.frequency.cancelScheduledValues(n);
-      o.frequency.setTargetAtTime(freq * (i ? 1.003 : 0.998), n, 0.025);
+    var n = AC.currentTime + (delay || 0);
+    [[1, 1], [2, 0.35], [3, 0.12]].forEach(function (h) {
+      var o = AC.createOscillator(), g = AC.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(freq * h[0], n);
+      g.gain.setValueAtTime(0.0001, n);
+      g.gain.exponentialRampToValueAtTime(vol * h[1], n + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+      o.connect(g); g.connect(out());
+      o.start(n); o.stop(n + dur + 0.05);
     });
-    lead.depth.gain.cancelScheduledValues(n);
-    lead.depth.gain.setValueAtTime(0, n);
-    lead.depth.gain.setTargetAtTime(freq * 0.006, n + 0.18, 0.12);
-    var g2 = lead.gain.gain;
-    g2.cancelScheduledValues(n);
-    g2.setTargetAtTime(vol, n, 0.03);
-    g2.setTargetAtTime(vol * 0.75, n + 0.12, 0.25);
-    g2.setTargetAtTime(0.0001, n + 1.0, 0.15);
-    leadEnd = n + 1.9;
-    lead.stop(leadEnd);
   }
-  /* 間違った道の音。旋律を止めて、木の箱をこつんと叩いたような短く低い音にする（不協和音は使わない） */
+  /* 間違った道の音。木の箱をこつんと叩いたような短く低い音にする（不協和音は使わない） */
   function knock() {
     if (!AC) return;
     var n = AC.currentTime;
-    if (lead) { lead.gain.gain.cancelScheduledValues(n); lead.gain.gain.setTargetAtTime(0.0001, n, 0.05); }
     [[180, 0.18], [372, 0.06]].forEach(function (h) {
       var o = AC.createOscillator(), g = AC.createGain();
       o.type = "sine";
@@ -291,9 +241,9 @@
   function playStep(i) {
     var nn = SONG[i % SONG.length];
     panTo(path[i]);
-    melody(HZ[nn], 0.11);
+    note(HZ[nn], 0.9, 0.16);
     if (scene3d) scene3d.sing(NOTE_COLOR[nn]);
-    if (i % 4 === 0) note(BASS[(i / 4 | 0) % BASS.length], 1.3, 0.05, 0, 1200);
+    if (i % 4 === 0) note(BASS[(i / 4 | 0) % BASS.length], 1.4, 0.09);
     glow.push({ c: path[i], t: 0 });
   }
 
@@ -334,7 +284,7 @@
     state = S.GOAL;
     T = 0;
     /* 最後に和音 */
-    [130.81, 261.63, 329.63, 392.0, 523.25].forEach(function (f, i) { note(f, 2.2, i ? 0.05 : 0.06, 0.25 + i * 0.03, i ? 2600 : 1200); });
+    [261.63, 329.63, 392.0, 523.25].forEach(function (f, i) { note(f, 1.8, 0.1, 0.25 + i * 0.03); });
   }
 
   /* ============ 進行 ============ */
