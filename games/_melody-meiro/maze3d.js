@@ -9,20 +9,30 @@
   /* 前の球を玉にした音符（八分音符）。下端が y=0。玉・棒・旗を同じ色で組む。玉の側（-x）が前 */
   function noteMesh(T, mat) {
     var g = new T.Group(), inner = new T.Group();
-    var HR = 0.3, SR = 0.045, sx = -0.05 + HR - SR, top = 1.08;
+    var HR = 0.3, SR = 0.045, sx = -0.05 + HR - SR, top = 1.2;
     var head = new T.Mesh(new T.SphereGeometry(HR, 40, 24), mat);
     head.position.set(-0.05, HR, 0);
     inner.add(head);
     var stem = new T.Mesh(new T.CylinderGeometry(SR, SR, top - HR, 16), mat);
     stem.position.set(sx, HR + (top - HR) / 2, 0);
     inner.add(stem);
-    var curve = new T.QuadraticBezierCurve3(new T.Vector3(sx, top, 0), new T.Vector3(sx + 0.06, 0.86, 0), new T.Vector3(sx + 0.26, 0.68, 0));
-    inner.add(new T.Mesh(new T.TubeGeometry(curve, 24, SR, 12, false), mat));
-    [[sx, top], [sx + 0.26, 0.68]].forEach(function (p) {
-      var cap = new T.Mesh(new T.SphereGeometry(SR, 12, 8), mat);
-      cap.position.set(p[0], p[1], 0);
-      inner.add(cap);
-    });
+    /* 旗：棒の上から外へ張り出して垂れる、幅のある形。厚みを付けて角を丸める */
+    var fl = new T.Shape(), L = sx - SR;
+    fl.moveTo(L, top);
+    fl.quadraticCurveTo(L + 0.10, top - 0.02, L + 0.24, top - 0.16);
+    fl.quadraticCurveTo(L + 0.38, top - 0.30, L + 0.30, top - 0.50);
+    fl.quadraticCurveTo(L + 0.29, top - 0.34, L + 0.09, top - 0.26);
+    fl.lineTo(L, top - 0.26);
+    fl.closePath();
+    var FD = 0.06, FB = 0.025;
+    var flag = new T.Mesh(new T.ExtrudeGeometry(fl, { depth: FD, bevelEnabled: true, bevelThickness: FB, bevelSize: FB, bevelSegments: 3, curveSegments: 16 }), mat);
+    flag.geometry.translate(-L, -top, 0);
+    flag.position.set(L, top, -FD / 2);
+    flag.scale.set(1.45, 1.45, 1);
+    inner.add(flag);
+    var cap = new T.Mesh(new T.SphereGeometry(SR, 12, 8), mat);
+    cap.position.set(sx, top, 0);
+    inner.add(cap);
     g.add(inner);
     g.yaw = inner;                       /* 向きを変えるのはこの組 */
     return g;
