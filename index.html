@@ -309,25 +309,33 @@ body.play-full .fullplay { position: fixed; inset: 0; }
 .site-head { position: sticky; top: 0; z-index: 50; }
 /* 右上の日英切り替え。目立たせず、文字だけ置く */
 .lang-switch { display: inline-flex; align-items: center; }
-/* 右上のメニュー（説明と日英切り替えをしまう） */
+/* 左上のメニュー（三本線）と、左から出るサイドバー */
 .fullplay-head:not(.site-head) { position: relative; z-index: 50; }
-.menu-wrap { justify-self: end; }
 .menu-btn {
-  width: 44px; height: 44px; padding: 0; border: 0; background: transparent; cursor: pointer;
+  justify-self: start; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; cursor: pointer;
   display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
   -webkit-tap-highlight-color: transparent;
 }
 .menu-btn span { display: block; width: 22px; height: 2.5px; border-radius: 2px; background: var(--ink); }
 .menu-btn:hover { opacity: .7; }
-.menu-panel {
-  position: absolute; top: calc(100% + 6px); right: max(12px, env(safe-area-inset-right, 0px));
-  width: min(300px, calc(100vw - 24px)); padding: 16px 18px 10px;
-  background: var(--card); border: 2px solid var(--ink); border-radius: 12px;
-  box-shadow: 3px 3px 0 rgba(27,42,65,.18); text-align: center;
+.side-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.35); }
+.side-backdrop[hidden] { display: none; }
+.side {
+  position: fixed; top: 0; bottom: 0; left: 0; z-index: 1001; width: min(300px, 82vw);
+  display: flex; flex-direction: column; gap: 14px; overflow-y: auto;
+  padding: calc(18px + env(safe-area-inset-top, 0px)) 20px calc(20px + env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
+  background: var(--card); border-right: 2px solid var(--ink);
+  transform: translateX(-105%); transition: transform .2s ease; visibility: hidden;
 }
-.menu-panel[hidden] { display: none; }
-.menu-note { font-size: 13px; line-height: 1.9; color: var(--ink); margin: 0 0 8px; }
-.menu-panel .lang-switch { justify-content: center; }
+.side.open { transform: none; visibility: visible; }
+.side-link { color: var(--ink); text-decoration: none; font-weight: 700; font-size: 16px; padding: 8px 0; }
+.side-link:hover { color: var(--stamp); }
+.side-search input {
+  width: 100%; font: inherit; font-size: 16px; padding: 10px 16px; color: var(--ink);
+  border: 2px solid var(--ink); border-radius: 999px; background: var(--paper);
+}
+.side .lang-switch { margin-left: -5px; }
+.side-note { margin-top: auto; font-size: 12.5px; line-height: 1.8; color: var(--ink-soft); }
 .lang-switch button {
   border: 0; background: transparent; color: var(--ink-soft); opacity: .55; cursor: pointer;
   font: inherit; font-size: 12px; padding: 8px 5px; min-height: 36px; letter-spacing: .04em;
@@ -586,8 +594,8 @@ var WORK_NOTE =
   'こちらのゲームに関するお問い合わせは' +
   '<a href="https://www.kayac.com/team/meguro-shoki" target="_blank" rel="noopener">カヤック</a>' +
   'へお願いします';
-var LAB_NOTE = 'おきらくに足されていくショートゲーム集<br>SNSシェア・実況配信等OK';
-var GRID_NOTES = { work: WORK_NOTE };   /* LAB_NOTE は右上のメニューの中に出す */
+var LAB_NOTE = 'このサイト内で遊べるゲームはSNSシェア・実況配信等OK';
+var GRID_NOTES = { work: WORK_NOTE };   /* LAB_NOTE は左上のメニュー（サイドバー）に出す */
 
 /* --------------------------------------------------------------
    4. 「トモぞヴP」ページ（プロフィール・年表・リンク）
@@ -692,7 +700,8 @@ var EN = {
   workNote: '*These are games TomozoP made as an employee of KAYAC.<br>' +
     'For questions about them, please contact ' +
     '<a href="https://www.kayac.com/team/meguro-shoki" target="_blank" rel="noopener">KAYAC</a>.',
-  labNote: 'Short games, added casually<br>Sharing on social media and streaming are OK',
+  labNote: 'Games playable on this site are OK to share on social media and to stream',
+  top: "Top", search: "Search", menu: "Menu",
   profile: 'Joined KAYAC Inc. as a new graduate in 2019 and made games such as "Ketsu Battler". ' +
     'Also makes browser games and PC games such as "The Strongest TOFU" independently.',
   history: [
@@ -895,9 +904,16 @@ var EN = {
   }
 
   /* ---------------- ゲーム一覧 ---------------- */
-  var state = { filter: "lab", labSort: "release" };
+  var state = { filter: "lab", labSort: "release", query: "" };
 
   function filtered() {
+    /* 検索中は、タブに関係なく名前（日本語・英語）で探す */
+    if (state.query) {
+      var q = state.query.toLowerCase();
+      return GAMES.filter(function (g) {
+        return (g.title + " " + (EN.titles[g.id] || EN.titles[g.title] || "")).toLowerCase().indexOf(q) >= 0;
+      }).sort(byNew);
+    }
     var order = state.filter === "lab" && state.labSort === "plays" ? byPlays : byNew;
     var list = GAMES.filter(function (g) { return g.type === state.filter; }).sort(order);
     var secondTitle = PINNED_SECOND[state.filter];
@@ -912,14 +928,17 @@ var EN = {
   }
 
   function paintGrid() {
-    $("#labSort").hidden = state.filter !== "lab";
+    $("#labSort").hidden = state.filter !== "lab" || !!state.query;
+    document.querySelectorAll(".tab").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(!state.query && b.dataset.filter === state.filter));
+    });
     $("#labSortOrder").value = state.labSort;
     var g = $("#grid");
     g.innerHTML = gridHtml(filtered());
     freezeGifs(g);
     var note = $("#gridNote");
     if (note) {
-      var text = ENG ? { work: EN.workNote }[state.filter] : GRID_NOTES[state.filter];
+      var text = state.query ? "" : ENG ? { work: EN.workNote }[state.filter] : GRID_NOTES[state.filter];
       note.innerHTML = text || "";
       note.hidden = !text;
     }
@@ -930,6 +949,7 @@ var EN = {
     document.querySelectorAll(".tab").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var v = btn.dataset.filter;
+        state.query = "";
         if (v === "about") { location.hash = "#/about"; return; }
         state.filter = v;
         if (!isHome) { location.hash = "#/"; return; }
@@ -976,29 +996,53 @@ var EN = {
                ((ENG ? "en" : "ja") === l[0]) + '">' + l[1] + '</button>';
       }).join('') + '</div>';
   }
-  /* 右上のメニュー。中にショートの説明と日英切り替え */
-  function menu() {
-    return '<div class="menu-wrap">' +
-      '<button class="menu-btn" type="button" aria-label="' + esc(T("メニュー", "Menu")) + '" aria-expanded="false">' +
-        '<span></span><span></span><span></span></button>' +
-      '<div class="menu-panel" hidden>' +
-        '<p class="menu-note">' + T(LAB_NOTE, EN.labNote) + '</p>' + langSwitch() +
-      '</div></div>';
+  /* 左上のメニュー（三本線）。押すと左からサイドバーが出る */
+  function menuBtn() {
+    return '<button class="menu-btn" type="button" aria-label="' + esc(T("メニュー", EN.menu)) +
+      '" aria-expanded="false" aria-controls="side"><span></span><span></span><span></span></button>';
+  }
+  /* サイドバー本体。ページを描き直しても作り直さず、言語と検索の文字だけ合わせる */
+  function sideBar() {
+    if ($("#side")) return;
+    var back = document.createElement("div");
+    back.className = "side-backdrop"; back.hidden = true;
+    var side = document.createElement("nav");
+    side.className = "side"; side.id = "side"; side.setAttribute("aria-label", T("メニュー", EN.menu));
+    side.innerHTML =
+      '<a class="side-link" href="#/">' + esc(T("トップ", EN.top)) + '</a>' +
+      '<form class="side-search" role="search"><input type="search" enterkeyhint="search" placeholder="' +
+        esc(T("検索", EN.search)) + '" aria-label="' + esc(T("検索", EN.search)) + '"></form>' +
+      langSwitch() +
+      '<p class="side-note">' + esc(T(LAB_NOTE, EN.labNote)) + '</p>';
+    document.body.appendChild(back);
+    document.body.appendChild(side);
+    back.addEventListener("click", function () { openSide(false); });
+    side.querySelector(".side-link").addEventListener("click", function () {
+      state.query = ""; openSide(false);
+      if ((location.hash || "#/") === "#/") render();
+    });
+    side.querySelector("form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var q = side.querySelector("input").value.trim();
+      state.query = q; openSide(false);
+      try { side.querySelector("input").blur(); } catch (err) {}
+      if ((location.hash || "#/") === "#/" || location.hash === "#") render(); else location.hash = "#/";
+    });
+    addEventListener("keydown", function (e) { if (e.key === "Escape") openSide(false); });
+  }
+  function openSide(open) {
+    var side = $("#side"), back = $(".side-backdrop"), btn = $(".menu-btn");
+    if (!side) return;
+    side.classList.toggle("open", open);
+    back.hidden = !open;
+    if (btn) btn.setAttribute("aria-expanded", String(open));
+    if (open) side.querySelector("input").value = state.query || "";
   }
   function bindMenu() {
-    var btn = $(".menu-btn"), panel = $(".menu-panel");
-    if (!btn || !panel) return;
-    function set(open) { panel.hidden = !open; btn.setAttribute("aria-expanded", String(open)); }
-    btn.addEventListener("click", function (e) { e.stopPropagation(); set(panel.hidden); });
-    panel.addEventListener("click", function (e) { e.stopPropagation(); });
+    sideBar();
+    var btn = $(".menu-btn");
+    if (btn) btn.addEventListener("click", function () { openSide(true); });
   }
-  /* メニューの外を押したら閉じる（ページを描き直しても1つだけ） */
-  function closeMenu() {
-    var panel = $(".menu-panel"), btn = $(".menu-btn");
-    if (panel && !panel.hidden) { panel.hidden = true; btn.setAttribute("aria-expanded", "false"); }
-  }
-  document.addEventListener("click", closeMenu);
-  addEventListener("blur", closeMenu);   /* ゲームの中を押したときも閉じる */
   function bindLang() {
     bindMenu();
     document.querySelectorAll(".lang-switch button").forEach(function (b) {
@@ -1009,9 +1053,9 @@ var EN = {
   }
   /* ゲーム中と同じ上のバーを、一覧やプロフィールにも出す */
   function siteHead() {
-    return '<div class="fullplay-head site-head">' + homeBtn() +
+    return '<div class="fullplay-head site-head">' + menuBtn() +
       '<p class="head-title">' +
-      esc(siteName()) + '</p>' + menu() + '</div>';
+      esc(siteName()) + '</p><span></span></div>';
   }
 
   /* ---------------- 個別ゲーム（サイト内で遊ぶ） ---------------- */
@@ -1034,9 +1078,9 @@ var EN = {
     if (g.full) {
       return '<main class="fullplay">' +
         '<div class="fullplay-head' + (g.hideBack ? ' solo' : '') + '">' +
-          (g.hideBack ? '' : homeBtn()) +
+          (g.hideBack ? '' : menuBtn()) +
           '<h1>' + esc(titleOf(g)) + '</h1>' +
-          (g.hideBack ? '' : menu()) +
+          (g.hideBack ? '' : '<span></span>') +
         '</div>' +
         '<div class="player-shell fullplay-shell">' +
           '<iframe class="player-frame fullplay-frame" src="' + esc(g.play + query) +
