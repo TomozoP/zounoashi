@@ -6,25 +6,26 @@
 (function (global) {
   "use strict";
 
-  /* 音符（八分音符）の形を厚みのある板にする。下端が y=0、左右と前後の中心が 0 */
-  function noteGeometry(T) {
-    var head = new T.Shape();
-    head.absellipse(0, 0.15, 0.19, 0.14, 0, Math.PI * 2, false, 0.4);
-    var stem = new T.Shape();
-    stem.moveTo(0.11, 0.17); stem.lineTo(0.19, 0.17); stem.lineTo(0.19, 0.78); stem.lineTo(0.11, 0.78); stem.closePath();
-    var flag = new T.Shape();
-    flag.moveTo(0.12, 0.78); flag.lineTo(0.19, 0.78);
-    flag.quadraticCurveTo(0.22, 0.64, 0.36, 0.56);
-    flag.quadraticCurveTo(0.44, 0.44, 0.37, 0.32);
-    flag.quadraticCurveTo(0.37, 0.48, 0.19, 0.56);
-    flag.lineTo(0.12, 0.56); flag.closePath();
-    var D = 0.12, BV = 0.03;
-    var geo = new T.ExtrudeGeometry([head, stem, flag], { depth: D, bevelEnabled: true, bevelThickness: BV, bevelSize: BV, bevelSegments: 3, curveSegments: 20 });
-    geo.translate(-0.09, BV + 0.01, -D / 2);
-    geo.scale(1.35, 1.35, 1.35);
-    geo.rotateX(-0.45);              /* 上から見下ろすカメラへ少し向ける */
-    geo.computeVertexNormals();
-    return geo;
+  /* 前の球を玉にした音符（八分音符）。下端が y=0。玉・棒・旗を同じ色で組む。玉の側（-x）が前 */
+  function noteMesh(T, mat) {
+    var g = new T.Group(), inner = new T.Group();
+    var HR = 0.3, SR = 0.045, sx = -0.05 + HR - SR, top = 1.08;
+    var head = new T.Mesh(new T.SphereGeometry(HR, 40, 24), mat);
+    head.position.set(-0.05, HR, 0);
+    inner.add(head);
+    var stem = new T.Mesh(new T.CylinderGeometry(SR, SR, top - HR, 16), mat);
+    stem.position.set(sx, HR + (top - HR) / 2, 0);
+    inner.add(stem);
+    var curve = new T.QuadraticBezierCurve3(new T.Vector3(sx, top, 0), new T.Vector3(sx + 0.06, 0.86, 0), new T.Vector3(sx + 0.26, 0.68, 0));
+    inner.add(new T.Mesh(new T.TubeGeometry(curve, 24, SR, 12, false), mat));
+    [[sx, top], [sx + 0.26, 0.68]].forEach(function (p) {
+      var cap = new T.Mesh(new T.SphereGeometry(SR, 12, 8), mat);
+      cap.position.set(p[0], p[1], 0);
+      inner.add(cap);
+    });
+    g.add(inner);
+    g.yaw = inner;                       /* 向きを変えるのはこの組 */
+    return g;
   }
   var R = 0.3;                  /* 足もとの影の大きさの目安 */
   var HOP = 0.55;               /* 跳ぶ高さ */
@@ -46,12 +47,13 @@
 
     /* 跳ねる音符。着地すると音が鳴り、その音の色に染まってつぶれる */
     this.bodyMat = new T.MeshLambertMaterial({ color: BODY });
-    this.cube = new T.Mesh(noteGeometry(T), this.bodyMat);
+    this.cube = noteMesh(T, this.bodyMat);
     this.scene.add(this.cube);
     this.tint = new T.Color(BODY);      /* 今の体の色 */
     this.target = new T.Color(BODY);
     this.squash = 0;                    /* 着地したときのつぶれ */
     this.pend = null;                   /* 着地したら染まる色 */
+    this.yaw = 0; this.yawTo = 0;       /* 向き */
     /* 足もとの影 */
     var sh = document.createElement("canvas");
     sh.width = sh.height = 64;
@@ -114,6 +116,11 @@
   MazeScene.prototype.rollTo = function (x0, y0, x1, y1, dur) {
     this.finish();
     this.roll = { x0: x0 + 0.5, z0: y0 + 0.5, dx: x1 - x0, dz: y1 - y0, t: 0, dur: dur };
+    /* 進む向きを向く（いちばん近い回り方で） */
+    var a = Math.atan2(y1 - y0, -(x1 - x0));
+    while (a - this.yaw > Math.PI) a -= Math.PI * 2;
+    while (a - this.yaw < -Math.PI) a += Math.PI * 2;
+    this.yawTo = a;
   };
   MazeScene.prototype.finish = function () {
     var r = this.roll;
@@ -130,6 +137,7 @@
       if (this.roll.t >= this.roll.dur) this.finish();
     }
     this.squash = Math.max(0, this.squash - dt * 4);
+    this.yaw += (this.yawTo - this.yaw) * Math.min(1, dt * 25);
     this.tint.lerp(this.target, Math.min(1, dt * 10));
     this.target.lerp(new global.THREE.Color(BODY), Math.min(1, dt * 1.2));
   };
@@ -187,6 +195,7 @@
       this.cube.scale.set(1 + sq * 0.6, 1 - sq, 1 + sq * 0.6);
       this.cube.position.set(this.at.x, 0, this.at.z);
     }
+    this.cube.yaw.rotation.y = this.yaw;
     this.bodyMat.color.copy(this.tint);
     this.shadow.position.set(this.cube.position.x, 0.01, this.cube.position.z);
     this.shadow.scale.setScalar(R * 3.2 * (1 - lift * 0.5));
