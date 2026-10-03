@@ -6,7 +6,7 @@
 (function (global) {
   "use strict";
 
-  var SIZE = 0.62;              /* キューブの一辺 */
+  var SIZE = 0.88;              /* キューブの一辺（壁の厚みを除いてマスいっぱい） */
   var FACE = [0xff7a7a, 0xffb26b, 0xffe36b, 0x7be08a, 0x6bd5ff, 0xb59cff];
 
   function MazeScene() {

@@ -38,7 +38,7 @@
 <script>
 /* メロディ迷路
 
-   正しい道を1マス進むごとに、曲が1音進む。行き止まりへ向かう道では不協和音が鳴る（戻れば続けられる）。
+   正しい道を1マス進むごとに、曲が1音進む。行き止まりへ向かう道では曲が止まり、こつんと鳴る（戻れば続けられる）。
    出口までの秒数が結果。
    曲はベートーヴェン「歓喜の歌」（作曲者の没後に保護期間が切れている）。 */
 (function () {
@@ -98,7 +98,7 @@
       start: function (t) { lfo.start(t); oscs.forEach(function (o) { o.start(t); }); },
       stop: function (t) { lfo.stop(t); oscs.forEach(function (o) { o.stop(t); }); } };
   }
-  /* 1音ずつ弾く音（伴奏・和音・不協和音） */
+  /* 1音ずつ弾く音（伴奏・和音） */
   function note(freq, dur, vol, delay, bright) {
     if (!AC) return;
     var n = AC.currentTime + (delay || 0), g = AC.createGain();
@@ -138,10 +138,22 @@
     leadEnd = n + 1.9;
     lead.stop(leadEnd);
   }
-  /* 間違った道の音。今の音に半音ずつずれた音を、弓を強く当てたような荒い音で重ねる */
-  function clash(base) {
-    if (lead && AC) { lead.gain.gain.cancelScheduledValues(AC.currentTime); lead.gain.gain.setTargetAtTime(0.0001, AC.currentTime, 0.05); }
-    [1, 1.0595, 1.4142, 0.5].forEach(function (r, i) { note(base * r, 0.45, i === 3 ? 0.05 : 0.06, 0, 5000); });
+  /* 間違った道の音。旋律を止めて、木の箱をこつんと叩いたような短く低い音にする（不協和音は使わない） */
+  function knock() {
+    if (!AC) return;
+    var n = AC.currentTime;
+    if (lead) { lead.gain.gain.cancelScheduledValues(n); lead.gain.gain.setTargetAtTime(0.0001, n, 0.05); }
+    [[180, 0.18], [372, 0.06]].forEach(function (h) {
+      var o = AC.createOscillator(), g = AC.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(h[0] * 1.15, n);
+      o.frequency.exponentialRampToValueAtTime(h[0], n + 0.03);
+      g.gain.setValueAtTime(0.0001, n);
+      g.gain.exponentialRampToValueAtTime(h[1], n + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, n + 0.16);
+      o.connect(g); g.connect(AC.destination);
+      o.start(n); o.stop(n + 0.2);
+    });
   }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
@@ -271,7 +283,7 @@
   }
 
   /* 1マス動く。壁なら動かない。ひとつ前のマスへ戻ると線が縮む。
-     正しい道へ進むと曲が鳴り、行き止まりへ向かう道では不協和音 */
+     正しい道へ進むと曲が鳴り、行き止まりへ向かう道ではこつんと鳴る */
   function step(dx, dy) {
     if (state !== S.PLAY) return;
     var x = cell % NX, y = (cell / NX) | 0, X = x + dx, Y = y + dy;
@@ -289,7 +301,7 @@
     var k = onPath[next];
     if (k < 0) {
       misses++;
-      clash(HZ[SONG[Math.max(0, best) % SONG.length]]);
+      knock();
       glow.push({ c: next, t: 0, bad: true });
       return;
     }
@@ -399,8 +411,8 @@
 
   function doShare() {
     var s = secText();
-    var ja = "迷路を歩いて「歓喜の歌」を" + s + "秒で弾ききった" + (misses ? "（不協和音" + misses + "回）" : "（不協和音なし）");
-    var en = "Played \"Ode to Joy\" by walking a maze in " + s + "s" + (misses ? " (" + misses + " sour notes)" : " (no sour notes)");
+    var ja = "迷路を歩いて「歓喜の歌」を" + s + "秒で弾ききった" + (misses ? "（寄り道" + misses + "マス）" : "（寄り道なし）");
+    var en = "Played \"Ode to Joy\" by walking a maze in " + s + "s" + (misses ? " (" + misses + " detour steps)" : " (no detours)");
     window.zResultActions.x({ text: zT(ja, en) + zT(" #メロディ迷路", " #MelodyMaze") });
   }
 
