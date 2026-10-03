@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>QRコード迷路</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1b2230; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #word { position:absolute; box-sizing:border-box; border:3px solid #16202e; border-radius:999px; background:#fff; color:#16202e; font:bold 22px sans-serif; text-align:center; padding:0 18px; outline:none; -webkit-user-select:text; user-select:text; }
+  #word[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+  <input id="word" type="text" maxlength="60" autocomplete="off" spellcheck="false" aria-label="QRコードにする文字">
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* QRコードを作る（自作。バイト方式、誤り訂正M、型番1〜10）。
+
+     var q = zQR.make("文字", 0〜7 のマスク);   // マスクを省くと見栄えのよいものを選ぶ
+     q.size          // 一辺のマス数
+     q.dark[y][x]    // true = 黒
+     q.fixed[y][x]   // true = 位置合わせなどの決まった模様
+
+   規格どおりに作るので、8種類のどのマスクでも読み取れる。 */
+(function (global) {
+  "use strict";
+
+  var EC_PER_BLOCK = [-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26];
+  var NUM_BLOCKS = [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
+
+  function rawModules(ver) {
+    var r = (16 * ver + 128) * ver + 64;
+    if (ver >= 2) {
+      var na = Math.floor(ver / 7) + 2;
+      r -= (25 * na - 10) * na - 55;
+      if (ver >= 7) r -= 36;
+    }
+    return r;
+  }
+  function dataCodewords(ver) {
+    return Math.floor(rawModules(ver) / 8) - EC_PER_BLOCK[ver] * NUM_BLOCKS[ver];
+  }
+
+  /* 有限体 GF(256) の掛け算 */
+  function mul(x, y) {
+    var z = 0;
+    for (var i = 7; i >= 0; i--) {
+      z = (z << 1) ^ ((z >>> 7) * 0x11D);
+      z ^= ((y >>> i) & 1) * x;
+    }
+    return z & 0xFF;
+  }
+  function divisor(degree) {
+    var r = [];
+    for (var i = 0; i < degree - 1; i++) r.push(0);
+    r.push(1);
+    var root = 1;
+    for (i = 0; i < degree; i++) {
+      for (var j = 0; j < r.length; j++) {
+        r[j] = mul(r[j], root);
+        if (j + 1 < r.length) r[j] ^= r[j + 1];
+      }
+      root = mul(root, 0x02);
+    }
+    return r;
+  }
+  function remainder(data, div) {
+    var r = div.map(function () { return 0; });
+    data.forEach(function (b) {
+      var f = b ^ r.shift();
+      r.push(0);
+      div.forEach(function (c, i) { r[i] ^= mul(c, f); });
+    });
+    return r;
+  }
+
+  function utf8(s) {
+    var out = [];
+    var e = unescape(encodeURIComponent(s));
+    for (var i = 0; i < e.length; i++) out.push(e.charCodeAt(i));
+    return out;
+  }
+
+  function make(text, mask) {
+    var bytes = utf8(text);
+    var ver, cap;
+    for (ver = 1; ver <= 10; ver++) {
+      cap = dataCodewords(ver) * 8;
+      if (4 + (ver < 10 ? 8 : 16) + bytes.length * 8 <= cap) break;
+    }
+    if (ver > 10) return null;
+
+    /* 文字を並べる */
+    var bits = [];
+    function put(v, n) { for (var i = n - 1; i >= 0; i--) bits.push((v >>> i) & 1); }
+    put(4, 4);
+    put(bytes.length, ver < 10 ? 8 : 16);
+    bytes.forEach(function (b) { put(b, 8); });
+    put(0, Math.min(4, cap - bits.length));
+    put(0, (8 - bits.length % 8) % 8);
+    for (var pad = 0xEC; bits.length < cap; pad ^= 0xEC ^ 0x11) put(pad, 8);
+    var data = [];
+    for (var i = 0; i < bits.length; i += 8) {
+      var v = 0;
+      for (var j = 0; j < 8; j++) v = (v << 1) | bits[i + j];
+      data.push(v);
+    }
+
+    /* 誤り訂正を足して、ブロックを交互に並べる */
+    var nb = NUM_BLOCKS[ver], ecl = EC_PER_BLOCK[ver];
+    var raw = Math.floor(rawModules(ver) / 8);
+    var nShort = nb - raw % nb, shortLen = Math.floor(raw / nb);
+    var div = divisor(ecl), blocks = [], k = 0;
+    for (i = 0; i < nb; i++) {
+      var dat = data.slice(k, k + shortLen - ecl + (i < nShort ? 0 : 1));
+      k += dat.length;
+      var ecc = remainder(dat, div);
+      if (i < nShort) dat.push(0);
+      blocks.push(dat.concat(ecc));
+    }
+    var words = [];
+    for (i = 0; i < blocks[0].length; i++) {
+      for (j = 0; j < blocks.length; j++) {
+        if (i !== shortLen - ecl || j >= nShort) words.push(blocks[j][i]);
+      }
+    }
+
+    var size = ver * 4 + 17;
+    var dark = [], fixed = [];
+    for (i = 0; i < size; i++) {
+      dark.push(new Array(size).fill(false));
+      fixed.push(new Array(size).fill(false));
+    }
+    function setF(x, y, d) { dark[y][x] = d; fixed[y][x] = true; }
+
+    /* 決まった模様 */
+    for (i = 0; i < size; i++) { setF(6, i, i % 2 === 0); setF(i, 6, i % 2 === 0); }
+    [[3, 3], [size - 4, 3], [3, size - 4]].forEach(function (c) {
+      for (var dy = -4; dy <= 4; dy++) for (var dx = -4; dx <= 4; dx++) {
+        var x = c[0] + dx, y = c[1] + dy;
+        if (x < 0 || y < 0 || x >= size || y >= size) continue;
+        var d = Math.max(Math.abs(dx), Math.abs(dy));
+        setF(x, y, d !== 2 && d !== 4);
+      }
+    });
+    if (ver >= 2) {
+      var na = Math.floor(ver / 7) + 2;
+      var step = Math.ceil((ver * 4 + 4) / (na * 2 - 2)) * 2;
+      var pos = [6];
+      for (var p = size - 7; pos.length < na; p -= step) pos.splice(1, 0, p);
+      for (i = 0; i < na; i++) for (j = 0; j < na; j++) {
+        if ((i === 0 && j === 0) || (i === 0 && j === na - 1) || (i === na - 1 && j === 0)) continue;
+        for (var ay = -2; ay <= 2; ay++) for (var ax = -2; ax <= 2; ax++) {
+          setF(pos[i] + ax, pos[j] + ay, Math.max(Math.abs(ax), Math.abs(ay)) !== 1);
+        }
+      }
+    }
+    function drawFormat(m) {
+      var d = (0 << 3) | m, r = d;              /* 誤り訂正M = 0 */
+      for (var t = 0; t < 10; t++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+      var b = ((d << 10) | r) ^ 0x5412;
+      function bit(n) { return ((b >>> n) & 1) !== 0; }
+      for (var t2 = 0; t2 <= 5; t2++) setF(8, t2, bit(t2));
+      setF(8, 7, bit(6)); setF(8, 8, bit(7)); setF(7, 8, bit(8));
+      for (t2 = 9; t2 < 15; t2++) setF(14 - t2, 8, bit(t2));
+      for (t2 = 0; t2 < 8; t2++) setF(size - 1 - t2, 8, bit(t2));
+      for (t2 = 8; t2 < 15; t2++) setF(8, size - 15 + t2, bit(t2));
+      setF(8, size - 8, true);
+    }
+    drawFormat(0);
+    if (ver >= 7) {
+      var r2 = ver;
+      for (i = 0; i < 12; i++) r2 = (r2 << 1) ^ ((r2 >>> 11) * 0x1F25);
+      var vb = (ver << 12) | r2;
+      for (i = 0; i < 18; i++) {
+        var on = ((vb >>> i) & 1) !== 0, a = size - 11 + i % 3, c = Math.floor(i / 3);
+        setF(a, c, on); setF(c, a, on);
+      }
+    }
+
+    /* データを右下からジグザグに置く */
+    var n = 0;
+    for (var right = size - 1; right >= 1; right -= 2) {
+      if (right === 6) right = 5;
+      for (var vert = 0; vert < size; vert++) for (j = 0; j < 2; j++) {
+        var x = right - j, up = ((right + 1) & 2) === 0, y = up ? size - 1 - vert : vert;
+        if (!fixed[y][x] && n < words.length * 8) {
+          dark[y][x] = ((words[n >>> 3] >>> (7 - (n & 7))) & 1) !== 0;
+          n++;
+        }
+      }
+    }
+
+    function applyMask(m) {
+      for (var y = 0; y < size; y++) for (var x = 0; x < size; x++) {
+        if (fixed[y][x]) continue;
+        var inv;
+        switch (m) {
+          case 0: inv = (x + y) % 2 === 0; break;
+          case 1: inv = y % 2 === 0; break;
+          case 2: inv = x % 3 === 0; break;
+          case 3: inv = (x + y) % 3 === 0; break;
+          case 4: inv = (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0; break;
+          case 5: inv = x * y % 2 + x * y % 3 === 0; break;
+          case 6: inv = (x * y % 2 + x * y % 3) % 2 === 0; break;
+          default: inv = ((x + y) % 2 + x * y % 3) % 2 === 0;
+        }
+        if (inv) dark[y][x] = !dark[y][x];
+      }
+    }
+    mask = mask == null ? 0 : mask;
+    applyMask(mask);
+    drawFormat(mask);
+    return { size: size, version: ver, mask: mask, dark: dark, fixed: fixed };
+  }
+
+  global.zQR = { make: make };
+})(window);
+</script>
+<script>
+/* QRコード迷路
+
+   入れた文字をQRコードにして、黒いマスを壁にする。白いマスがつながっているところで
+   いちばん長い道の両端を入口と出口にする。QRコードは規格どおりなので、そのまま読み取れる。
+   マスクの8種類はどれでも正しく読めるので、いちばん道が長くなるものを選ぶ。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  var word = document.getElementById("word");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* 何も入れないときは、このゲームの共有ページのQRコード */
+  var HOME = "https://www.zounoashi.com/share/qr-meiro/";
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+    var scale = Math.min(view.width / W, view.height / H);
+    word.style.fontSize = Math.max(16, Math.round(24 * scale)) + "px";   /* 16px 未満だとiPhoneで拡大される */
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 迷路 ============ */
+  var qr = null, n = 21, B = 24;
+  var dist = null;            /* 入口からの歩数（作る演出と、道のりの長さ） */
+  var startCell = 0, goalCell = 0, pathLen = 0;
+
+  function bfs(q, s) {
+    var size = q.size, d = new Int32Array(size * size).fill(-1), list = [s], far = s;
+    d[s] = 0;
+    for (var h = 0; h < list.length; h++) {
+      var c = list[h], x = c % size, y = (c / size) | 0;
+      if (d[c] > d[far]) far = c;
+      for (var k = 0; k < 4; k++) {
+        var X = x + (k === 0) - (k === 1), Y = y + (k === 2) - (k === 3);
+        if (X < 0 || Y < 0 || X >= size || Y >= size || q.dark[Y][X]) continue;
+        var m = Y * size + X;
+        if (d[m] >= 0) continue;
+        d[m] = d[c] + 1;
+        list.push(m);
+      }
+    }
+    return { d: d, far: far, cells: list };
+  }
+  /* 白マスのかたまりごとに、いちばん長い道（両端からの幅優先探索）を測る */
+  function longest(q) {
+    var size = q.size, seen = new Uint8Array(size * size), best = null;
+    for (var i = 0; i < size * size; i++) {
+      if (seen[i] || q.dark[(i / size) | 0][i % size]) continue;
+      var r = bfs(q, i);
+      r.cells.forEach(function (c) { seen[c] = 1; });
+      var r2 = bfs(q, r.far), len = r2.d[r2.far];
+      if (!best || len > best.len) best = { len: len, a: r.far, b: r2.far, d: r2.d };
+    }
+    return best;
+  }
+
+  function textNow() { return word.value.trim() || HOME; }
+  function buildMaze() {
+    var text = textNow(), best = null;
+    for (var m = 0; m < 8; m++) {
+      var q = window.zQR.make(text, m);
+      if (!q) return false;
+      var l = longest(q);
+      if (!best || l.len > best.l.len) best = { q: q, l: l };
+    }
+    qr = best.q;
+    n = qr.size;
+    B = Math.floor(510 / n);
+    /* 上にあるほうを入口に */
+    var a = best.l.a, b = best.l.b;
+    if (((a / n) | 0) + (a % n) * 0.01 > ((b / n) | 0) + (b % n) * 0.01) { var t = a; a = b; b = t; }
+    startCell = a; goalCell = b;
+    dist = bfs(qr, a).d;
+    pathLen = best.l.len;
+    place();
+    return true;
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", BUILD: "build", PLAY: "play", GOAL: "goal", RESULT: "result" };
+  var state, T, held = false, time = 0, lastBlip = -1;
+  var player = { x: 0, y: 0 }, trail = [];
+  var keys = { l: 0, r: 0, u: 0, d: 0 };
+  var BX = 0, BY = 0, BOARD = 0, R_PLAYER = 6, BUILD_TIME = 1.6;
+
+  function place() {
+    BOARD = n * B;
+    BX = Math.round((W - BOARD) / 2);
+    BY = Math.round(Math.max(150, (H - BOARD) / 2 - 30));
+  }
+  function wordRect() { return { x: 40, y: BY - B * 2 - 84, w: W - 80, h: 64 }; }
+
+  function newRound() {
+    shareButton.hidden = true;
+    word.blur();
+    document.getElementById("start").hidden = true;
+    if (!buildMaze()) { word.value = ""; buildMaze(); }
+    state = S.BUILD;
+    T = 0;
+    time = 0;
+    held = false;
+    lastBlip = -1;
+    keys = { l: 0, r: 0, u: 0, d: 0 };
+    R_PLAYER = B * 0.3;
+    player.x = (startCell % n + 0.5) * B;
+    player.y = (((startCell / n) | 0) + 0.5) * B;
+    trail = [{ x: player.x, y: player.y }];
+  }
+
+  function wallAt(bx, by) {
+    if (bx < 0 || by < 0 || bx >= n || by >= n) return true;
+    return qr.dark[by][bx];
+  }
+  function hits(x, y) {
+    var r = R_PLAYER;
+    var x0 = Math.floor((x - r) / B), x1 = Math.floor((x + r - 0.001) / B);
+    var y0 = Math.floor((y - r) / B), y1 = Math.floor((y + r - 0.001) / B);
+    for (var by = y0; by <= y1; by++) for (var bx = x0; bx <= x1; bx++) if (wallAt(bx, by)) return true;
+    return false;
+  }
+  /* 角で引っかからないよう、ぶつかったら通路の真ん中へ寄せる */
+  function moveAxis(dx, dy) {
+    if (!hits(player.x + dx, player.y + dy)) { player.x += dx; player.y += dy; return; }
+    var amt = Math.abs(dx + dy);
+    if (dx) {
+      var cy = (Math.floor(player.y / B) + 0.5) * B, ahead = Math.floor((player.x + Math.sign(dx) * (R_PLAYER + 1)) / B);
+      if (!wallAt(ahead, Math.floor(player.y / B)) && Math.abs(cy - player.y) > 0.01) {
+        var ny = player.y + Math.sign(cy - player.y) * Math.min(amt, Math.abs(cy - player.y));
+        if (!hits(player.x, ny)) player.y = ny;
+      }
+    } else {
+      var cx = (Math.floor(player.x / B) + 0.5) * B, below = Math.floor((player.y + Math.sign(dy) * (R_PLAYER + 1)) / B);
+      if (!wallAt(Math.floor(player.x / B), below) && Math.abs(cx - player.x) > 0.01) {
+        var nx = player.x + Math.sign(cx - player.x) * Math.min(amt, Math.abs(cx - player.x));
+        if (!hits(nx, player.y)) player.x = nx;
+      }
+    }
+  }
+  function moveBy(dx, dy) {
+    if (state !== S.PLAY) return;
+    var steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / 2));
+    for (var i = 0; i < steps; i++) { moveAxis(dx / steps, 0); moveAxis(0, dy / steps); }
+    var last = trail[trail.length - 1];
+    if (Math.hypot(player.x - last.x, player.y - last.y) > 3) trail.push({ x: player.x, y: player.y });
+    var gx = (goalCell % n + 0.5) * B, gy = (((goalCell / n) | 0) + 0.5) * B;
+    if (Math.abs(player.x - gx) < B * 0.3 && Math.abs(player.y - gy) < B * 0.3) goal();
+  }
+  function goal() {
+    state = S.GOAL;
+    T = 0;
+    tone(523, 0.12, 0.14, "triangle");
+    tone(659, 0.12, 0.14, "triangle", null, 0.1);
+    tone(784, 0.3, 0.16, "triangle", null, 0.2);
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    if (state === S.BUILD) {
+      T += dt;
+      if (T >= BUILD_TIME) { state = S.PLAY; T = 0; tone(880, 0.1, 0.1, "square"); }
+      return;
+    }
+    if (state === S.GOAL) {
+      T += dt;
+      if (T > 0.9) { state = S.RESULT; shareButton.hidden = false; }
+      return;
+    }
+    if (state !== S.PLAY) return;
+    time += dt;
+    var sp = 7 * B * dt;
+    if (keys.l || keys.r || keys.u || keys.d) moveBy((keys.r - keys.l) * sp, (keys.d - keys.u) * sp);
+  }
+
+  /* ============ 入力 ============
+     指をすべらせた分だけ玉が動く（どこをなぞってもよい） */
+  var lastP = null;
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") toIntro();
+      return;
+    }
+    held = true;
+    lastP = x == null ? null : { x: x, y: y };
+  }
+  function move(x, y) {
+    if (!held || !lastP) return;
+    var dx = x - lastP.x, dy = y - lastP.y;
+    lastP = { x: x, y: y };
+    moveBy(dx * 1.1, dy * 1.1);
+  }
+  function up() { held = false; lastP = null; }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    if (e.target === word) return;
+    e.preventDefault();
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { if (e.target !== word) e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); keys = { l: 0, r: 0, u: 0, d: 0 }; });
+
+  /* 文字を変えたら、その場でQRコードを作り直す */
+  word.addEventListener("input", function () { if (!buildMaze()) word.value = word.value.slice(0, -1); });
+  ["pointerdown", "pointerup"].forEach(function (k) { word.addEventListener(k, function (e) { e.stopPropagation(); }); });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(k) {
+    if (k === 1 && state === S.PLAY) {                     /* 出口の手前へ */
+      var c = goalCell;
+      for (var i = 0; i < 3; i++) {
+        var x = c % n, y = (c / n) | 0, next = c;
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (v) {
+          var X = x + v[0], Y = y + v[1];
+          if (X >= 0 && Y >= 0 && X < n && Y < n && dist[Y * n + X] === dist[c] - 1) next = Y * n + X;
+        });
+        c = next;
+      }
+      player.x = (c % n + 0.5) * B; player.y = (((c / n) | 0) + 0.5) * B;
+    }
+    if (k === 2 && state === S.PLAY) { time += 5; goal(); }  /* クリア */
+  }
+
+  var KEYMAP = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r", ArrowUp: "u", w: "u", W: "u", ArrowDown: "d", s: "d", S: "d" };
+  window.addEventListener("keydown", function (e) {
+    if (e.target === word) {                               /* 文字を打っている間はゲームを動かさない */
+      if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); startButton.click(); }
+      return;
+    }
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var dir = KEYMAP[e.key];
+    if (!esc && !go && !dir) return;
+    e.preventDefault();
+    if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
+    if (dir) { keys[dir] = 1; return; }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.target === word) return;
+    var dir = KEYMAP[e.key];
+    if (dir) { keys[dir] = 0; return; }
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function secText() { return (Math.floor(time * 10) / 10).toFixed(1); }
+  function doShare() {
+    var w = word.value.trim(), s = secText();
+    var ja = w ? "「" + w + "」のQRコードの中を" + s + "秒で歩き抜けた" : "QRコードの中を" + s + "秒で歩き抜けた";
+    var en = w ? "Walked through the QR code for \"" + w + "\" in " + s + "s" : "Walked through a QR code in " + s + "s";
+    window.zResultActions.x({ text: zT(ja, en) + zT(" #QRコード迷路", " #QRCodeMaze") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(word, wordRect(), W, H, state === S.INTRO);
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#1b2230";
+    ctx.fillRect(0, 0, W, H);
+    if (!qr) return;
+
+    /* 白い台紙（読み取りに要る余白も含めて） */
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(BX - B * 2, BY - B * 2, BOARD + B * 4, BOARD + B * 4);
+
+    ctx.save();
+    ctx.translate(BX, BY);
+    /* 道が見つかっていく演出：入口から近い順に白マスが色づく */
+    if (state !== S.INTRO) {
+      var reach = state === S.BUILD ? Math.min(1, T / (BUILD_TIME * 0.8)) * pathLen * 1.15 : Infinity;
+      var fade = state === S.BUILD ? 1 : Math.max(0, 1 - time / 0.5);
+      if (state === S.BUILD) {
+        var blip = Math.floor(reach / 4);
+        if (blip !== lastBlip && reach <= pathLen) { lastBlip = blip; tone(400 + reach * 8, 0.04, 0.05, "square"); }
+      }
+      if (state === S.BUILD || (state === S.PLAY && fade > 0)) {
+        for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) {
+          var d = dist[y * n + x];
+          if (d < 0 || d > reach) continue;
+          ctx.fillStyle = "rgba(255,214,74," + (0.55 * fade).toFixed(3) + ")";
+          ctx.fillRect(x * B, y * B, B, B);
+        }
+      }
+    }
+    ctx.fillStyle = "#111";
+    for (var yy = 0; yy < n; yy++) for (var xx = 0; xx < n; xx++) {
+      if (qr.dark[yy][xx]) ctx.fillRect(xx * B, yy * B, B + 0.5, B + 0.5);
+    }
+
+    if (state !== S.INTRO) {
+      /* 入口と出口 */
+      var gx = goalCell % n, gy = (goalCell / n) | 0;
+      ctx.fillStyle = "#2ec27e";
+      ctx.fillRect(gx * B + 2, gy * B + 2, B - 4, B - 4);
+      var sx = startCell % n, sy = (startCell / n) | 0;
+      ctx.fillStyle = "rgba(255,51,85,.25)";
+      ctx.fillRect(sx * B + 2, sy * B + 2, B - 4, B - 4);
+      if (state !== S.BUILD) {
+        ctx.strokeStyle = "rgba(255,51,85,.6)";
+        ctx.lineWidth = Math.max(2, B * 0.18);
+        ctx.lineCap = ctx.lineJoin = "round";
+        ctx.beginPath();
+        trail.forEach(function (p, i) { if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+        ctx.lineTo(player.x, player.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, R_PLAYER + 1, 0, Math.PI * 2);
+        ctx.fillStyle = "#ff3355"; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    if (state === S.PLAY || state === S.GOAL) {
+      ctx.fillStyle = "#fff";
+      ctx.font = "800 44px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(secText(), W / 2, BY - B * 2 - 30);
+    }
+    if (state === S.RESULT) drawResult();
+  }
+
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(secText() + zT("秒", "s"), W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, time: time, player: { x: player.x, y: player.y }, n: n, B: B, pathLen: pathLen, W: W, H: H }; },
+    maze: function () { return { n: n, B: B, dark: qr.dark, start: startCell, goal: goalCell }; },
+    step: function (k) { for (var i = 0; i < (k || 1); i++) { update(1 / 60); draw(); } },
+    move: function (dx, dy) { moveBy(dx, dy); },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(4000);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  /* 文字を入れる欄を押したときは始めない */
+  var onWord = false;
+  window.addEventListener("pointerdown", function (e) { onWord = e.target === word; }, true);
+  window.zStartTap(function () { return state === S.INTRO && !onWord && document.activeElement !== word; }, function () { startButton.click(); });
+  /* 文字を打ち終わって欄の外を押したら、キーボードを閉じるだけにする */
+  document.addEventListener("pointerdown", function (e) { if (e.target !== word && document.activeElement === word) word.blur(); });
+
+  ["pointerdown", "pointerup"].forEach(function (k) { startButton.addEventListener(k, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  function toIntro() {
+    state = S.INTRO;
+    shareButton.hidden = true;
+    startButton.hidden = false;
+  }
+  buildMaze();
+  toIntro();
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
