@@ -6,32 +6,9 @@
 (function (global) {
   "use strict";
 
-  var SIZE = 0.88;              /* キューブの一辺（壁の厚みを除いてマスいっぱい） */
+  var R = 0.3;                  /* ボールの半径 */
+  var HOP = 0.55;               /* 跳ぶ高さ */
   var BODY = 0xf4efe6;           /* ふだんの体の色。歌うとその音の色に染まる */
-
-  /* 角を少し丸めた箱。細かく割った箱の点を、内側の小さな箱から半径 r の位置へ寄せる */
-  function roundBox(T, size, r) {
-    var S = 14, K = 4, h = size / 2;
-    var geo = new T.BoxGeometry(1, 1, 1, S, S, S);
-    var pos = geo.attributes.position, nor = geo.attributes.normal;
-    /* 丸める帯に点を多めに置く */
-    function remap(u) {
-      var i = Math.round((u + 0.5) * S);
-      if (i <= K) return -h + r * (i / K);
-      if (i >= S - K) return h - r * ((S - i) / K);
-      return -h + r + (2 * (h - r)) * ((i - K) / (S - 2 * K));
-    }
-    var v = new T.Vector3(), c = new T.Vector3(), n = new T.Vector3();
-    for (var k = 0; k < pos.count; k++) {
-      v.set(remap(pos.getX(k)), remap(pos.getY(k)), remap(pos.getZ(k)));
-      c.set(Math.max(-h + r, Math.min(h - r, v.x)), Math.max(-h + r, Math.min(h - r, v.y)), Math.max(-h + r, Math.min(h - r, v.z)));
-      n.subVectors(v, c).normalize();
-      v.copy(c).addScaledVector(n, r);
-      pos.setXYZ(k, v.x, v.y, v.z);
-      nor.setXYZ(k, n.x, n.y, n.z);
-    }
-    return geo;
-  }
 
   function MazeScene() {
     var T = global.THREE;
@@ -47,13 +24,14 @@
     this.world = null;
     this.w = 0; this.h = 0; this.aspect = 0;
 
-    /* 歌うキューブ。鳴った音の色に染まって、ぽよんと弾む */
+    /* 跳ねるボール。着地すると音が鳴り、その音の色に染まってつぶれる */
     this.bodyMat = new T.MeshLambertMaterial({ color: BODY });
-    this.cube = new T.Mesh(roundBox(T, SIZE, 0.09), this.bodyMat);
+    this.cube = new T.Mesh(new T.SphereGeometry(R, 40, 24), this.bodyMat);
     this.scene.add(this.cube);
     this.tint = new T.Color(BODY);      /* 今の体の色 */
     this.target = new T.Color(BODY);
-    this.squash = 0;                    /* 歌ったときの弾み */
+    this.squash = 0;                    /* 着地したときのつぶれ */
+    this.pend = null;                   /* 着地したら染まる色 */
     /* 足もとの影 */
     var sh = document.createElement("canvas");
     sh.width = sh.height = 64;
@@ -64,8 +42,7 @@
     this.shadow.rotation.x = -Math.PI / 2;
     this.scene.add(this.shadow);
 
-    this.base = new T.Quaternion();   /* 転がり終わった向き */
-    this.roll = null;                 /* 転がっている途中 {from, to, t, dur} */
+    this.roll = null;                 /* 跳んでいる途中 {x0, z0, dx, dz, t, dur} */
     this.at = { x: 0.5, z: 0.5 };
   }
 
@@ -103,7 +80,6 @@
       if (m.wallD[k]) wall(x, y + 1, x + 1, y + 1);
     }
     this.scene.add(world);
-    this.base.identity();
     this.roll = null;
     this.place(m.start % m.NX, (m.start / m.NX) | 0);
     this.aspect = 0;
@@ -114,7 +90,7 @@
     this.at = { x: x + 0.5, z: y + 0.5 };
   };
 
-  /* 1マス転がす。(x0,y0) から (x1,y1) へ、dur 秒で */
+  /* 1マス跳ぶ。(x0,y0) から (x1,y1) へ、dur 秒で */
   MazeScene.prototype.rollTo = function (x0, y0, x1, y1, dur) {
     this.finish();
     this.roll = { x0: x0 + 0.5, z0: y0 + 0.5, dx: x1 - x0, dz: y1 - y0, t: 0, dur: dur };
@@ -122,11 +98,11 @@
   MazeScene.prototype.finish = function () {
     var r = this.roll;
     if (!r) return;
-    var T = global.THREE;
-    var q = new T.Quaternion().setFromAxisAngle(new T.Vector3(r.dz, 0, -r.dx), Math.PI / 2);
-    this.base.identity();               /* 箱は形が同じなので向きを戻しても見た目は変わらない */
     this.at = { x: r.x0 + r.dx, z: r.z0 + r.dz };
     this.roll = null;
+    /* 着地 */
+    this.squash = 1;
+    if (this.pend !== null) { this.target.set(this.pend); this.pend = null; }
   };
   MazeScene.prototype.update = function (dt) {
     if (this.roll) {
@@ -138,14 +114,14 @@
     this.target.lerp(new global.THREE.Color(BODY), Math.min(1, dt * 1.2));
   };
 
-  /* 歌う：体をその音の色に染めて弾む */
+  /* 鳴った音の色に染まる。跳んでいる途中なら着地したときに */
   MazeScene.prototype.sing = function (color) {
-    this.squash = 1;
-    this.target.set(color);
+    if (this.roll) this.pend = color;
+    else { this.squash = 1; this.target.set(color); }
   };
   /* 寄り道したとき：灰色になる */
   MazeScene.prototype.oops = function () {
-    this.target.set(0xb9b2a8);
+    this.sing(0xb9b2a8);
   };
 
   /* 板が画面に収まるよう、カメラの距離を決める */
@@ -178,31 +154,22 @@
     if (this.aspect !== W / Hv) { this.aspect = W / Hv; this.fit(this.aspect); }
     this.tex.needsUpdate = true;
 
-    /* キューブ。底の辺を軸にして転がす */
-    var half = SIZE / 2, r = this.roll;
+    /* ボール。山なりに跳び、着地でつぶれる */
+    var r = this.roll, lift = 0;
     if (r) {
       var f = Math.min(1, r.t / r.dur);
-      f = f * f * (3 - 2 * f);
-      var ang = f * Math.PI / 2;
-      var axis = new T.Vector3(r.dz, 0, -r.dx);
-      var q = new T.Quaternion().setFromAxisAngle(axis, ang);
-      /* キューブは1マスより小さいので、転がりながら足りない分だけ前へすべらせる */
-      var slide = (1 - SIZE) * f;
-      var pivot = new T.Vector3(r.x0 + r.dx * (half + slide), 0, r.z0 + r.dz * (half + slide));
-      var off = new T.Vector3(-r.dx * half, half, -r.dz * half).applyQuaternion(q);
-      this.cube.position.copy(pivot).add(off);
-      this.cube.quaternion.copy(this.base).premultiply(q);
+      lift = HOP * 4 * f * (1 - f);
+      var st = 0.08 * Math.sin(f * Math.PI);   /* 空中では少し縦に伸びる */
+      this.cube.scale.set(1 - st * 0.5, 1 + st, 1 - st * 0.5);
+      this.cube.position.set(r.x0 + r.dx * f, R + lift, r.z0 + r.dz * f);
     } else {
-      /* 歌うと、ぽよんと縦に伸び縮みする */
-      var sq = Math.sin(this.squash * Math.PI) * 0.12 * this.squash;
-      this.cube.scale.set(1 - sq * 0.5, 1 + sq, 1 - sq * 0.5);
-      this.cube.position.set(this.at.x, half * (1 + sq), this.at.z);
-      this.cube.quaternion.copy(this.base);
+      var sq = Math.sin(this.squash * Math.PI) * 0.22 * this.squash;
+      this.cube.scale.set(1 + sq * 0.6, 1 - sq, 1 + sq * 0.6);
+      this.cube.position.set(this.at.x, R * (1 - sq), this.at.z);
     }
-    if (r) this.cube.scale.set(1, 1, 1);
     this.bodyMat.color.copy(this.tint);
     this.shadow.position.set(this.cube.position.x, 0.01, this.cube.position.z);
-    this.shadow.scale.setScalar(SIZE * 1.6);
+    this.shadow.scale.setScalar(R * 3.2 * (1 - lift * 0.5));
 
     this.renderer.render(this.scene, this.camera);
     ctx.drawImage(this.renderer.domElement, 0, 0, W, Hv);
