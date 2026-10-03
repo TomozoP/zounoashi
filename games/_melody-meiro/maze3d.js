@@ -9,6 +9,30 @@
   var SIZE = 0.88;              /* キューブの一辺（壁の厚みを除いてマスいっぱい） */
   var BODY = 0xf4efe6;           /* ふだんの体の色。歌うとその音の色に染まる */
 
+  /* 角を少し丸めた箱。細かく割った箱の点を、内側の小さな箱から半径 r の位置へ寄せる */
+  function roundBox(T, size, r) {
+    var S = 14, K = 4, h = size / 2;
+    var geo = new T.BoxGeometry(1, 1, 1, S, S, S);
+    var pos = geo.attributes.position, nor = geo.attributes.normal;
+    /* 丸める帯に点を多めに置く */
+    function remap(u) {
+      var i = Math.round((u + 0.5) * S);
+      if (i <= K) return -h + r * (i / K);
+      if (i >= S - K) return h - r * ((S - i) / K);
+      return -h + r + (2 * (h - r)) * ((i - K) / (S - 2 * K));
+    }
+    var v = new T.Vector3(), c = new T.Vector3(), n = new T.Vector3();
+    for (var k = 0; k < pos.count; k++) {
+      v.set(remap(pos.getX(k)), remap(pos.getY(k)), remap(pos.getZ(k)));
+      c.set(Math.max(-h + r, Math.min(h - r, v.x)), Math.max(-h + r, Math.min(h - r, v.y)), Math.max(-h + r, Math.min(h - r, v.z)));
+      n.subVectors(v, c).normalize();
+      v.copy(c).addScaledVector(n, r);
+      pos.setXYZ(k, v.x, v.y, v.z);
+      nor.setXYZ(k, n.x, n.y, n.z);
+    }
+    return geo;
+  }
+
   function MazeScene() {
     var T = global.THREE;
     this.renderer = new T.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -25,9 +49,7 @@
 
     /* 歌うキューブ。鳴った音の色に染まって、ぽよんと弾む */
     this.bodyMat = new T.MeshLambertMaterial({ color: BODY });
-    this.cube = new T.Mesh(new T.BoxGeometry(SIZE, SIZE, SIZE), this.bodyMat);
-    var edges = new T.LineSegments(new T.EdgesGeometry(this.cube.geometry), new T.LineBasicMaterial({ color: 0x16202e }));
-    this.cube.add(edges);
+    this.cube = new T.Mesh(roundBox(T, SIZE, 0.09), this.bodyMat);
     this.scene.add(this.cube);
     this.tint = new T.Color(BODY);      /* 今の体の色 */
     this.target = new T.Color(BODY);
