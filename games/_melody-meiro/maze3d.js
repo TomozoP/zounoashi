@@ -9,7 +9,7 @@
   /* 前の球を玉にした音符（八分音符）。下端が y=0。玉・棒・旗を同じ色で組む。玉の側（-x）が前 */
   function noteMesh(T, mat) {
     var g = new T.Group(), inner = new T.Group();
-    var HR = 0.3, SR = 0.045, sx = -0.05 + HR - SR, top = 1.2;
+    var HR = 0.3, SR = 0.045, sx = -0.05 + HR - SR, top = 1.12;
     var head = new T.Mesh(new T.SphereGeometry(HR, 40, 24), mat);
     head.position.set(-0.05, HR, 0);
     inner.add(head);
@@ -28,7 +28,7 @@
     var flag = new T.Mesh(new T.ExtrudeGeometry(fl, { depth: FD, bevelEnabled: true, bevelThickness: FB, bevelSize: FB, bevelSegments: 3, curveSegments: 16 }), mat);
     flag.geometry.translate(-L, -top, 0);
     flag.position.set(L, top, -FD / 2);
-    flag.scale.set(1.45, 1.45, 1);
+    flag.scale.set(1.15, 1.15, 1);
     inner.add(flag);
     var cap = new T.Mesh(new T.SphereGeometry(SR, 12, 8), mat);
     cap.position.set(sx, top, 0);
