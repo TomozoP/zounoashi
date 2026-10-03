@@ -225,9 +225,8 @@
   var line = [0], grow = 1;      /* 今たどっている線（引き返すと縮む）。grow は1マス動く途中の進み 0〜1 */
   var shrinking = false;
   var MOVE = 0.12;                /* 1マス動く見た目の時間 */
-  /* フリックした向きへ、一定のテンポ（1拍ごと）に1マスずつ進む。
-     曲がり角は道なりに曲がり、分かれ道か行き止まりで止まる。進んでいる途中のフリックは次の拍で効く */
-  var BEAT = 0.3, beatT = BEAT, run = null, queued = null;
+  /* 1回フリックすると1マス進む。続けてはじいた分は順番にためて、一定のテンポ（1拍ごと）で進む */
+  var BEAT = 0.3, beatT = BEAT, queue = [];
   var BX = 0, BY = 0;
   var acc = { x: 0, y: 0 };
   var bump = { x: 0, y: 0, t: 0 };
@@ -253,7 +252,7 @@
     line = [0];
     grow = 1;
     shrinking = false;
-    beatT = BEAT; run = null; queued = null;
+    beatT = BEAT; queue = [];
     glow = [];
     acc = { x: 0, y: 0 };
     playStep(0);
@@ -294,14 +293,6 @@
     playStep(k);
     if (k === path.length - 1) win();
   }
-  /* 来た向きを除いた出口がひとつだけなら、その向きへ続ける。分かれ道・行き止まりなら止まる */
-  function onward(d) {
-    if (state !== S.PLAY) return null;
-    var outs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(function (o) {
-      return !(o[0] === -d[0] && o[1] === -d[1]) && canGo(o);
-    });
-    return outs.length === 1 ? outs[0] : null;
-  }
   function canGo(d) {
     var x = cell % NX + d[0], y = ((cell / NX) | 0) + d[1];
     return x >= 0 && y >= 0 && x < NX && y < NY && open(cell, idx(x, y));
@@ -320,13 +311,11 @@
     if (grow >= 1 && shrinking) { line.pop(); shrinking = false; }
     beatT = Math.min(BEAT, beatT + dt);
     if (state === S.PLAY && beatT >= BEAT) {
-      if (queued && canGo(queued)) run = queued;
-      queued = null;
-      if (run && canGo(run)) {
-        beatT -= BEAT;
-        step(run[0], run[1]);
-        run = onward(run);
-      } else run = null;
+      var d = queue.shift();
+      if (d) {
+        if (canGo(d)) { beatT -= BEAT; step(d[0], d[1]); }
+        else queue = [];                          /* 壁に当たったら、ためた分は捨てる */
+      }
     }
     if (bump.t > 0) bump.t = Math.max(0, bump.t - dt);
     if (state === S.PLAY) time += dt;
@@ -354,7 +343,7 @@
     if (!held || !lastP) return;
     var dx = x - lastP.x, dy = y - lastP.y;
     if (Math.hypot(dx, dy) > 28) {
-      queued = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
+      if (queue.length < 3) queue.push(Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)]);
       lastP = { x: x, y: y };                    /* 指を離さず続けてはじいても効くように */
     }
   }
@@ -394,7 +383,7 @@
     if (!esc && !go && !dir) return;
     e.preventDefault();
     if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
-    if (dir) { if (!e.repeat) queued = dir; return; }
+    if (dir) { if (queue.length < 3) queue.push(dir); return; }
     if (e.repeat) return;
     down();
   });
