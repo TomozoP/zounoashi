@@ -118,6 +118,19 @@
       o.start(n); o.stop(n + 0.2);
     });
   }
+  /* 休符のマスを通った音。紙をとんと叩いたような、高く小さく短い音 */
+  function tick(delay) {
+    if (!AC) return;
+    var n = AC.currentTime + (delay || 0), o = AC.createOscillator(), g = AC.createGain();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(1400, n);
+    o.frequency.exponentialRampToValueAtTime(900, n + 0.04);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(0.05, n + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + 0.07);
+    o.connect(g); g.connect(out());
+    o.start(n); o.stop(n + 0.1);
+  }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -292,7 +305,7 @@
     if (!isRest(nn)) {
       note(hzOf(nn), 0.9, 0.16, land);
       if (scene3d) scene3d.sing(colorOfNote(nn));
-    }
+    } else tick(land);                                     /* 休符のマスは、通ったとわかる小さな音だけ */
     if (i % 4 === 0) note(BASS[(i / 4 | 0) % BASS.length], 1.4, 0.09, land);
     if (!isRest(nn)) glow.push({ c: path[i], t: -(land || 0) });
   }
@@ -331,11 +344,26 @@
     var x = cell % NX + d[0], y = ((cell / NX) | 0) + d[1];
     return x >= 0 && y >= 0 && x < NX && y < NY && open(cell, idx(x, y));
   }
+  /* ゴールしたら、できあがった楽譜を頭から通しで演奏してから結果を出す */
+  var REPLAY_AT = 0.8, REPLAY_STEP = 0.24, replayed = 0;
   function win() {
     state = S.GOAL;
     T = 0;
-    /* 最後に和音 */
-    [261.63, 329.63, 392.0, 523.25].forEach(function (f, i) { note(f, 1.8, 0.1, 0.25 + i * 0.03); });
+    replayed = 0;
+  }
+  function replayEnd() { return REPLAY_AT + path.length * REPLAY_STEP; }
+  function updateReplay() {
+    while (replayed < path.length && T >= REPLAY_AT + replayed * REPLAY_STEP) {
+      var i = replayed++, nn = SONG[i % SONG.length];
+      if (i % 4 === 0) note(BASS[(i / 4 | 0) % BASS.length], 1.4, 0.09);
+      if (!isRest(nn)) {                                   /* 演奏では休符は鳴らさない */
+        panTo(path[i]);
+        note(hzOf(nn), 0.9, 0.16);
+        glow.push({ c: path[i], t: 0 });
+      }
+      /* 最後に和音 */
+      if (replayed === path.length) [261.63, 329.63, 392.0, 523.25].forEach(function (f, j) { note(f, 1.8, 0.1, REPLAY_STEP + j * 0.03); });
+    }
   }
 
   /* ============ 進行 ============ */
@@ -357,7 +385,8 @@
     if (state === S.PLAY) time += dt;
     if (state === S.GOAL) {
       T += dt;
-      if (T > 2.2) { state = S.RESULT; shareButton.hidden = false; }
+      updateReplay();
+      if (T > replayEnd() + 1.6) { state = S.RESULT; shareButton.hidden = false; }
     }
   }
 
@@ -367,6 +396,8 @@
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
+    /* 演奏中にタップすると結果へ飛ばす */
+    if (state === S.GOAL) { if (T > REPLAY_AT + 0.5) { replayed = path.length; T = replayEnd() + 1.6; } return; }
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
       if (hit === "retry") newRound();
