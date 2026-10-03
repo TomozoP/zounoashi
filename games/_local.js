@@ -47,5 +47,6 @@ window.DRAFT_GAMES = [
     "play": "games/_brute-escape/index.html",
     "full": true,
     "catch": ""
-  }
+  },
+  {"type":"lab","tags":[],"id":"gazou-meiro","title":"画像迷路","year":2026,"date":"2026-10-03","plays":null,"url":"","img":"games/_gazou-meiro/img/thumb.webp","play":"games/_gazou-meiro/index.html","full":true,"catch":"画像の線から迷路を作る"},
 ];
