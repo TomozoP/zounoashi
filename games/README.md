@@ -246,11 +246,11 @@ g.until(function () { return g.probe.now().state === "result"; });
 
 ```js
 ctx.fillText(zT("時間切れ", "Time up"), W / 2, 300);
-window.zResultActions.x({ text: zT(score + "点でした", score + " points") + " #ゲーム名" });
+window.zResultActions.x({ text: zT(score + "点でした", score + " points") + zT(" #ゲーム名", " #EnglishTitle") });
 ```
 
 - 確かめるときは URL に `?lang=en` / `?lang=ja`。サイトの中で開いたゲームはサイト側の指定を引き継ぐ。
-- シェア文のハッシュタグは英語でも日本語のゲーム名のまま（タグを1つに揃える）。
+- シェア文のハッシュタグは、英語のときは英語のゲーム名（`EN.titles` の名前から空白・記号を除く）にする。
 - 「Xでシェア」「もう一度」「次」の読み上げ名は `lang.js` が英語にするので、ゲーム側は日本語のままでよい。
 - サイトの一覧に出す英語のゲーム名は、トップの `index.html` の `EN.titles` に id ごとに書く。
 
