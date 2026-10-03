@@ -6,7 +6,27 @@
 (function (global) {
   "use strict";
 
-  var R = 0.3;                  /* ボールの半径 */
+  /* 音符（八分音符）の形を厚みのある板にする。下端が y=0、左右と前後の中心が 0 */
+  function noteGeometry(T) {
+    var head = new T.Shape();
+    head.absellipse(0, 0.15, 0.19, 0.14, 0, Math.PI * 2, false, 0.4);
+    var stem = new T.Shape();
+    stem.moveTo(0.11, 0.17); stem.lineTo(0.19, 0.17); stem.lineTo(0.19, 0.78); stem.lineTo(0.11, 0.78); stem.closePath();
+    var flag = new T.Shape();
+    flag.moveTo(0.12, 0.78); flag.lineTo(0.19, 0.78);
+    flag.quadraticCurveTo(0.22, 0.64, 0.36, 0.56);
+    flag.quadraticCurveTo(0.44, 0.44, 0.37, 0.32);
+    flag.quadraticCurveTo(0.37, 0.48, 0.19, 0.56);
+    flag.lineTo(0.12, 0.56); flag.closePath();
+    var D = 0.12, BV = 0.03;
+    var geo = new T.ExtrudeGeometry([head, stem, flag], { depth: D, bevelEnabled: true, bevelThickness: BV, bevelSize: BV, bevelSegments: 3, curveSegments: 20 });
+    geo.translate(-0.09, BV + 0.01, -D / 2);
+    geo.scale(1.35, 1.35, 1.35);
+    geo.rotateX(-0.45);              /* 上から見下ろすカメラへ少し向ける */
+    geo.computeVertexNormals();
+    return geo;
+  }
+  var R = 0.3;                  /* 足もとの影の大きさの目安 */
   var HOP = 0.55;               /* 跳ぶ高さ */
   var BODY = 0xf4efe6;           /* ふだんの体の色。歌うとその音の色に染まる */
 
@@ -24,9 +44,9 @@
     this.world = null;
     this.w = 0; this.h = 0; this.aspect = 0;
 
-    /* 跳ねるボール。着地すると音が鳴り、その音の色に染まってつぶれる */
+    /* 跳ねる音符。着地すると音が鳴り、その音の色に染まってつぶれる */
     this.bodyMat = new T.MeshLambertMaterial({ color: BODY });
-    this.cube = new T.Mesh(new T.SphereGeometry(R, 40, 24), this.bodyMat);
+    this.cube = new T.Mesh(noteGeometry(T), this.bodyMat);
     this.scene.add(this.cube);
     this.tint = new T.Color(BODY);      /* 今の体の色 */
     this.target = new T.Color(BODY);
@@ -154,18 +174,18 @@
     if (this.aspect !== W / Hv) { this.aspect = W / Hv; this.fit(this.aspect); }
     this.tex.needsUpdate = true;
 
-    /* ボール。山なりに跳び、着地でつぶれる */
+    /* 音符。山なりに跳び、着地でつぶれる */
     var r = this.roll, lift = 0;
     if (r) {
       var f = Math.min(1, r.t / r.dur);
       lift = HOP * 4 * f * (1 - f);
       var st = 0.08 * Math.sin(f * Math.PI);   /* 空中では少し縦に伸びる */
       this.cube.scale.set(1 - st * 0.5, 1 + st, 1 - st * 0.5);
-      this.cube.position.set(r.x0 + r.dx * f, R + lift, r.z0 + r.dz * f);
+      this.cube.position.set(r.x0 + r.dx * f, lift, r.z0 + r.dz * f);
     } else {
       var sq = Math.sin(this.squash * Math.PI) * 0.22 * this.squash;
       this.cube.scale.set(1 + sq * 0.6, 1 - sq, 1 + sq * 0.6);
-      this.cube.position.set(this.at.x, R * (1 - sq), this.at.z);
+      this.cube.position.set(this.at.x, 0, this.at.z);
     }
     this.bodyMat.color.copy(this.tint);
     this.shadow.position.set(this.cube.position.x, 0.01, this.cube.position.z);

@@ -202,6 +202,7 @@
   var line = [0], grow = 1;      /* 今たどっている線（引き返すと縮む）。grow は1マス動く途中の進み 0〜1 */
   var shrinking = false;
   var MOVE = 0.16;                /* 1マス跳ぶ時間 */
+  var SPREAD = 0.18, landT = 9;   /* 着地してから床の色が広がりきるまでの時間と、跳んでからの経過 */
   /* 1回フリックすると1マス跳ぶ（指を離すまで次は数えない）。続けてはじいた分は順番にためて、一定のテンポ（1拍ごと）で進む */
   var BEAT = 0.2, beatT = BEAT, queue = [];
   var BX = 0, BY = 0;
@@ -245,7 +246,7 @@
     note(HZ[nn], 0.9, 0.16, land);
     if (scene3d) scene3d.sing(NOTE_COLOR[nn]);
     if (i % 4 === 0) note(BASS[(i / 4 | 0) % BASS.length], 1.4, 0.09, land);
-    glow.push({ c: path[i], t: 0 });
+    glow.push({ c: path[i], t: -(land || 0) });
   }
 
   /* 1マス動く。壁なら動かない。ひとつ前のマスへ戻ると線が縮む。
@@ -264,13 +265,14 @@
     if (line.length > 1 && line[line.length - 2] === next) { shrinking = true; grow = 0; return; }
     line.push(next);
     grow = 0;
+    landT = 0;
     var k = onPath[next];
     if (k < 0) {
       misses++;
       panTo(next);
       knock(MOVE);
       if (scene3d) scene3d.oops();
-      glow.push({ c: next, t: 0, bad: true });
+      glow.push({ c: next, t: -MOVE, bad: true });
       return;
     }
     best = Math.max(best, k);
@@ -292,6 +294,7 @@
   function update(dt) {
     glow.forEach(function (g) { g.t += dt; });
     grow = Math.min(1, grow + dt / MOVE);
+    landT += dt;
     if (scene3d) scene3d.update(dt);
     if (grow >= 1 && shrinking) { line.pop(); shrinking = false; }
     beatT = Math.min(BEAT, beatT + dt);
@@ -408,12 +411,26 @@
     g.lineWidth = B;
     var head = null;
     for (var i = 1; i < line.length; i++) {
-      var a0 = center(line[i - 1]), b0 = center(line[i]);
-      if (i === line.length - 1) { var f = shrinking ? 1 - grow : grow; b0 = { x: a0.x + (b0.x - a0.x) * f, y: a0.y + (b0.y - a0.y) * f }; head = b0; }
+      var a0 = center(line[i - 1]), b0 = center(line[i]), last = i === line.length - 1;
+      if (last) {
+        var f = shrinking ? 1 - grow : grow;
+        head = { x: a0.x + (b0.x - a0.x) * f, y: a0.y + (b0.y - a0.y) * f };
+      }
       var gr = g.createLinearGradient(a0.x, a0.y, b0.x, b0.y);
       gr.addColorStop(0, colorOf(line[i - 1]));
       gr.addColorStop(1, colorOf(line[i]));
       g.strokeStyle = gr;
+      if (last) {
+        /* いちばん新しいマスは、着地したところから円く広がって塗られる（引き返すと縮んで消える） */
+        var sp = shrinking ? 1 - grow : Math.max(0, Math.min(1, (landT - MOVE) / SPREAD));
+        if (sp <= 0) continue;
+        sp = 1 - (1 - sp) * (1 - sp);
+        g.save();
+        g.beginPath(); g.arc(b0.x, b0.y, B * 0.75 * sp, 0, Math.PI * 2); g.clip();
+        g.beginPath(); g.moveTo(a0.x, a0.y); g.lineTo(b0.x, b0.y); g.stroke();
+        g.restore();
+        continue;
+      }
       g.beginPath(); g.moveTo(a0.x, a0.y); g.lineTo(b0.x, b0.y); g.stroke();
     }
     if (line.length === 1) {
@@ -423,7 +440,7 @@
     }
     /* 鳴ったばかりのマスが光る */
     glow.forEach(function (gl) {
-      if (gl.t > 0.5) return;
+      if (gl.t > 0.5 || gl.t < 0) return;
       var c = center(gl.c), k = 1 - gl.t / 0.5;
       g.fillStyle = (gl.bad ? "rgba(255,60,70," : "rgba(255,255,255,") + (0.5 * k).toFixed(3) + ")";
       g.beginPath(); g.arc(c.x, c.y, B * (0.25 + (1 - k) * 0.45), 0, Math.PI * 2); g.fill();
