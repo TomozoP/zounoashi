@@ -224,9 +224,7 @@
   var state, T, cell, best, time = 0, misses = 0;
   var line = [0], grow = 1;      /* 今たどっている線（引き返すと縮む）。grow は1マス動く途中の進み 0〜1 */
   var shrinking = false;
-  /* 一定のテンポで1拍に1マス進む。なぞった向き（want）へ曲がれるところで曲がり、
-     曲がれなければまっすぐ、壁なら止まる */
-  var BEAT = 0.32, dir = null, want = null;
+  var MOVE = 0.09;                /* 1マス動く見た目の時間 */
   var BX = 0, BY = 0;
   var acc = { x: 0, y: 0 };
   var bump = { x: 0, y: 0, t: 0 };
@@ -252,8 +250,6 @@
     line = [0];
     grow = 1;
     shrinking = false;
-    dir = null;
-    want = null;
     glow = [];
     acc = { x: 0, y: 0 };
     playStep(0);
@@ -278,6 +274,7 @@
       return;
     }
     var next = idx(X, Y);
+    if (shrinking) { line.pop(); shrinking = false; }   /* 前の動きの途中でも、先に片付ける */
     cell = next;
     if (line.length > 1 && line[line.length - 2] === next) { shrinking = true; grow = 0; return; }
     line.push(next);
@@ -307,17 +304,8 @@
   /* ============ 進行 ============ */
   function update(dt) {
     glow.forEach(function (g) { g.t += dt; });
-    grow += dt / BEAT;
-    if (grow >= 1) {
-      var over = grow - 1;                    /* 拍がずれないよう、はみ出した分は次のマスへ持ち越す */
-      grow = 1;
-      if (shrinking) { line.pop(); shrinking = false; }
-      if (state === S.PLAY) {
-        if (want && canGo(want)) dir = want;
-        if (dir && canGo(dir)) { step(dir[0], dir[1]); grow = Math.min(over, 0.99); }
-        else dir = null;
-      }
-    }
+    grow = Math.min(1, grow + dt / MOVE);
+    if (grow >= 1 && shrinking) { line.pop(); shrinking = false; }
     if (bump.t > 0) bump.t = Math.max(0, bump.t - dt);
     if (state === S.PLAY) time += dt;
     if (state === S.GOAL) {
@@ -345,11 +333,13 @@
     if (!held || !lastP) return;
     acc.x += x - lastP.x; acc.y += y - lastP.y;
     lastP = { x: x, y: y };
-    /* なぞった向きを覚えておき、次の拍で曲がる */
-    var th = 18;
-    if (Math.max(Math.abs(acc.x), Math.abs(acc.y)) > th) {
-      want = Math.abs(acc.x) > Math.abs(acc.y) ? [Math.sign(acc.x), 0] : [0, Math.sign(acc.y)];
-      acc = { x: 0, y: 0 };
+    var th = B * 0.55;
+    for (var guard = 0; guard < 4; guard++) {
+      if (Math.abs(acc.x) >= Math.abs(acc.y) && Math.abs(acc.x) > th) {
+        var sx = Math.sign(acc.x); acc.x -= sx * th; acc.y *= 0.5; step(sx, 0);
+      } else if (Math.abs(acc.y) > th) {
+        var sy = Math.sign(acc.y); acc.y -= sy * th; acc.x *= 0.5; step(0, sy);
+      } else break;
     }
   }
   function up() { held = false; lastP = null; }
@@ -388,7 +378,7 @@
     if (!esc && !go && !dir) return;
     e.preventDefault();
     if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
-    if (dir) { want = dir; return; }
+    if (dir) { step(dir[0], dir[1]); return; }
     if (e.repeat) return;
     down();
   });
