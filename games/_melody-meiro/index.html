@@ -224,7 +224,9 @@
   var state, T, cell, best, time = 0, misses = 0;
   var line = [0], grow = 1;      /* 今たどっている線（引き返すと縮む）。grow は1マス動く途中の進み 0〜1 */
   var shrinking = false;
-  var MOVE = 0.09;                /* 1マス動く見た目の時間 */
+  var MOVE = 0.12;                /* 1マス動く見た目の時間 */
+  /* 押さえている向きへ、一定のテンポ（1拍ごと）に1マスずつ進む */
+  var BEAT = 0.3, beatT = BEAT, padDir = null, keyDir = null, queued = null;   /* queued: 短く押しただけでも1マスは進む */
   var BX = 0, BY = 0;
   var acc = { x: 0, y: 0 };
   var bump = { x: 0, y: 0, t: 0 };
@@ -250,6 +252,7 @@
     line = [0];
     grow = 1;
     shrinking = false;
+    beatT = BEAT; padDir = null; keyDir = null; queued = null;
     glow = [];
     acc = { x: 0, y: 0 };
     playStep(0);
@@ -306,6 +309,12 @@
     glow.forEach(function (g) { g.t += dt; });
     grow = Math.min(1, grow + dt / MOVE);
     if (grow >= 1 && shrinking) { line.pop(); shrinking = false; }
+    beatT = Math.min(BEAT, beatT + dt);
+    var d = keyDir || padDir || queued;
+    if (state === S.PLAY && d && beatT >= BEAT) {
+      queued = null;
+      if (canGo(d)) { beatT -= BEAT; step(d[0], d[1]); }
+    }
     if (bump.t > 0) bump.t = Math.max(0, bump.t - dt);
     if (state === S.PLAY) time += dt;
     if (state === S.GOAL) {
@@ -326,23 +335,17 @@
       return;
     }
     held = true;
-    lastP = x == null ? null : { x: x, y: y };
-    acc = { x: 0, y: 0 };
+    lastP = x == null ? null : { x: x, y: y };   /* 押した点からの向きで進む（スティックのように） */
+    padDir = null;
   }
   function move(x, y) {
     if (!held || !lastP) return;
-    acc.x += x - lastP.x; acc.y += y - lastP.y;
-    lastP = { x: x, y: y };
-    var th = B * 0.55;
-    for (var guard = 0; guard < 4; guard++) {
-      if (Math.abs(acc.x) >= Math.abs(acc.y) && Math.abs(acc.x) > th) {
-        var sx = Math.sign(acc.x); acc.x -= sx * th; acc.y *= 0.5; step(sx, 0);
-      } else if (Math.abs(acc.y) > th) {
-        var sy = Math.sign(acc.y); acc.y -= sy * th; acc.x *= 0.5; step(0, sy);
-      } else break;
-    }
+    var dx = x - lastP.x, dy = y - lastP.y, len = Math.hypot(dx, dy);
+    if (len > 24) queued = padDir = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
+    /* 指が遠くへ行っても、すぐ向きを変えられるよう基準の点を引き寄せる */
+    if (len > 60) { lastP.x = x - dx / len * 60; lastP.y = y - dy / len * 60; }
   }
-  function up() { held = false; lastP = null; }
+  function up() { held = false; lastP = null; padDir = null; }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
@@ -354,7 +357,7 @@
   });
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
   wrap.addEventListener("pointercancel", function () { up(); });
-  window.addEventListener("blur", function () { up(); });
+  window.addEventListener("blur", function () { up(); keyDir = null; });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(k) {
@@ -378,11 +381,13 @@
     if (!esc && !go && !dir) return;
     e.preventDefault();
     if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
-    if (dir) { step(dir[0], dir[1]); return; }
+    if (dir) { if (!e.repeat) queued = dir; keyDir = dir; return; }
     if (e.repeat) return;
     down();
   });
   window.addEventListener("keyup", function (e) {
+    var kd = DIRS[e.key];
+    if (kd) { if (keyDir && keyDir[0] === kd[0] && keyDir[1] === kd[1]) keyDir = null; return; }
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
   });
 
