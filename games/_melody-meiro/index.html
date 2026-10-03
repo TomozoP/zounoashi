@@ -451,40 +451,69 @@
   /* 床の模様：たどっている線（マスごとの音の色をグラデーションでつなぐ）・光・出口。
      g に、1マス B の大きさで描く */
   function drawFloor(g, B) {
-    function colorOf(c) { var k = onPath[c]; return k < 0 ? "#e5484d" : colorOfNote(SONG[k % SONG.length]); }
     function center(c) { return { x: (c % NX + 0.5) * B, y: (((c / NX) | 0) + 0.5) * B }; }
-    /* 通ったマスは床ごと塗る（太さ1マス・角を四角に） */
-    g.lineCap = "square";
-    g.lineJoin = "miter";
-    g.lineWidth = B;
-    var head = null;
-    for (var i = 1; i < line.length; i++) {
-      var a0 = center(line[i - 1]), b0 = center(line[i]), last = i === line.length - 1;
-      if (last) {
-        var f = shrinking ? 1 - grow : grow;
-        head = { x: a0.x + (b0.x - a0.x) * f, y: a0.y + (b0.y - a0.y) * f };
-      }
-      var gr = g.createLinearGradient(a0.x, a0.y, b0.x, b0.y);
-      gr.addColorStop(0, colorOf(line[i - 1]));
-      gr.addColorStop(1, colorOf(line[i]));
-      g.strokeStyle = gr;
-      if (last) {
-        /* いちばん新しいマスは、着地したところから円く広がって塗られる（引き返すと縮んで消える） */
-        var sp = shrinking ? 1 - grow : Math.max(0, Math.min(1, (landT - MOVE) / SPREAD));
-        if (sp <= 0) continue;
-        sp = 1 - (1 - sp) * (1 - sp);
+    var S5 = B * 0.12, LW = Math.max(1, B * 0.025), INK = "#2b2b36", PAPER = "#f4efe6";
+    /* 通った道を五線譜にする：紙の帯（1マス幅）の上に、太さを変えて重ね塗りして5本の線を道なりに引く */
+    function staff(pts) {
+      if (pts.length < 2) return;
+      g.beginPath();
+      g.moveTo(pts[0].x, pts[0].y);
+      for (var i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
+      g.lineJoin = "miter";
+      g.lineCap = "square";
+      g.lineWidth = B; g.strokeStyle = PAPER; g.stroke();
+      g.lineCap = "butt";
+      [[4 * S5 + LW, INK], [4 * S5 - LW, PAPER], [2 * S5 + LW, INK], [2 * S5 - LW, PAPER], [LW, INK]].forEach(function (w) {
+        g.lineWidth = w[0]; g.strokeStyle = w[1]; g.stroke();
+      });
+    }
+    /* 音符の玉。上向きは横の道なら画面の上、縦の道なら画面の右 */
+    var STEP = { C: 0, D: 1, E: 2, F: 3, G: 4, A: 5, B: 6 };
+    function noteHead(i, k) {
+      var c = line[i], o = center(c), from = i > 0 ? line[i - 1] : (line.length > 1 ? c - (line[1] - c) : c - 1);
+      var vert = Math.abs(c - from) === NX, ux = vert ? 1 : 0, uy = vert ? 0 : -1;
+      var nn = SONG[k % SONG.length];
+      var p = STEP[nn[0]] + (+nn[nn.length - 1]) * 7 - (2 + 4 * 7);   /* ミ4（下の線）が0、1つ上がるごとに半間 */
+      var off = (p - 4) * S5 / 2;
+      g.save();
+      g.translate(o.x + ux * off, o.y + uy * off);
+      g.rotate(vert ? Math.PI / 2 : 0);
+      g.fillStyle = g.strokeStyle = INK;
+      /* 五線の外は加線 */
+      g.lineWidth = LW;
+      for (var q = -2; q >= p; q -= 2) { var d = (p - q) * S5 / 2; g.beginPath(); g.moveTo(-S5 * 1.1, d); g.lineTo(S5 * 1.1, d); g.stroke(); }
+      for (var q2 = 10; q2 <= p; q2 += 2) { var d2 = (p - q2) * S5 / 2; g.beginPath(); g.moveTo(-S5 * 1.1, d2); g.lineTo(S5 * 1.1, d2); g.stroke(); }
+      g.rotate(-0.35);
+      g.beginPath(); g.ellipse(0, 0, S5 * 0.85, S5 * 0.6, 0, 0, Math.PI * 2); g.fill();
+      g.restore();
+    }
+    var pts = line.map(center), head = null, n = line.length;
+    var sp = 1;
+    if (n > 1) {
+      var a0 = pts[n - 2], b0 = pts[n - 1], f = shrinking ? 1 - grow : grow;
+      head = { x: a0.x + (b0.x - a0.x) * f, y: a0.y + (b0.y - a0.y) * f };
+      /* いちばん新しいマスは、着地したところから円く広がって現れる（引き返すと縮んで消える） */
+      sp = shrinking ? 1 - grow : Math.max(0, Math.min(1, (landT - MOVE) / SPREAD));
+      sp = 1 - (1 - sp) * (1 - sp);
+      staff(pts.slice(0, n - 1));
+      if (n === 2) { g.fillStyle = PAPER; g.fillRect(pts[0].x - B / 2, pts[0].y - B / 2, B, B); staff(pts.slice(0, 1).concat([{ x: pts[0].x + (pts[1].x - pts[0].x) * 0.001, y: pts[0].y + (pts[1].y - pts[0].y) * 0.001 }])); }
+      if (sp > 0) {
         g.save();
         g.beginPath(); g.arc(b0.x, b0.y, B * 0.75 * sp, 0, Math.PI * 2); g.clip();
-        g.beginPath(); g.moveTo(a0.x, a0.y); g.lineTo(b0.x, b0.y); g.stroke();
+        staff(pts.slice(Math.max(0, n - 3)));
         g.restore();
-        continue;
       }
-      g.beginPath(); g.moveTo(a0.x, a0.y); g.lineTo(b0.x, b0.y); g.stroke();
+    } else {
+      g.fillStyle = PAPER; g.fillRect(pts[0].x - B / 2, pts[0].y - B / 2, B, B);
+      staff([{ x: pts[0].x - B * 0.5, y: pts[0].y }, { x: pts[0].x + B * 0.5, y: pts[0].y }]);
     }
-    if (line.length === 1) {
-      var s0 = center(line[0]);
-      g.fillStyle = colorOf(line[0]);
-      g.fillRect(s0.x - B / 2, s0.y - B / 2, B, B);
+    /* 寄り道したマスは赤くかぶせる */
+    for (var i = 0; i < n; i++) {
+      if (i === n - 1 && sp <= 0) continue;
+      var k = onPath[line[i]], o = pts[i];
+      if (k < 0) { g.fillStyle = "rgba(229,72,77,.45)"; g.fillRect(o.x - B / 2, o.y - B / 2, B, B); continue; }
+      if (i === n - 1 && sp < 0.6) continue;
+      noteHead(i, k);
     }
     /* 鳴ったばかりのマスが光る */
     glow.forEach(function (gl) {
