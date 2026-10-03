@@ -50,4 +50,5 @@ window.DRAFT_GAMES = [
   },
   {"type":"lab","tags":[],"id":"gazou-meiro","title":"画像迷路","year":2026,"date":"2026-10-03","plays":null,"url":"","img":"games/_gazou-meiro/img/thumb.webp","play":"games/_gazou-meiro/index.html","full":true,"catch":"画像の線から迷路を作る"},
   {"type":"lab","tags":[],"id":"qr-meiro","title":"QRコード迷路","year":2026,"date":"2026-10-03","plays":null,"url":"","img":"games/_qr-meiro/img/thumb.webp","play":"games/_qr-meiro/index.html","full":true,"catch":"QRコードの中を歩いて抜ける"},
+  {"type":"lab","tags":[],"id":"melody-meiro","title":"メロディ迷路","year":2026,"date":"2026-10-03","plays":null,"url":"","img":"games/_melody-meiro/img/thumb.webp","play":"games/_melody-meiro/index.html","full":true,"catch":"正しい道を進むと曲が進む"},
 ];

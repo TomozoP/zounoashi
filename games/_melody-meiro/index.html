@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>メロディ迷路</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #172033; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* メロディ迷路
+
+   正しい道を1マス進むごとに、曲が1音進む。行き止まりへ向かう道に入ったら、そこで終わり。
+   曲はベートーヴェン「歓喜の歌」（作曲者の没後に保護期間が切れている）。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+  }
+  /* オルゴールのような音。基音と1オクターブ上を重ねて、すぐ減衰させる */
+  function note(freq, dur, vol, delay) {
+    if (!AC) return;
+    var n = AC.currentTime + (delay || 0);
+    [[1, 1], [2, 0.35], [3, 0.12]].forEach(function (h) {
+      var o = AC.createOscillator(), g = AC.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(freq * h[0], n);
+      g.gain.setValueAtTime(0.0001, n);
+      g.gain.exponentialRampToValueAtTime(vol * h[1], n + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+      o.connect(g); g.connect(AC.destination);
+      o.start(n); o.stop(n + dur + 0.05);
+    });
+  }
+  function buzz() {
+    if (!AC) return;
+    var n = AC.currentTime;
+    [110, 116.5].forEach(function (f) {
+      var o = AC.createOscillator(), g = AC.createGain();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(f, n);
+      o.frequency.exponentialRampToValueAtTime(f * 0.6, n + 0.6);
+      g.gain.setValueAtTime(0.12, n);
+      g.gain.exponentialRampToValueAtTime(0.0001, n + 0.7);
+      o.connect(g); g.connect(AC.destination);
+      o.start(n); o.stop(n + 0.75);
+    });
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 曲 ============ */
+  var HZ = { G3: 196.0, C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.0 };
+  var SONG = ("E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4 " +
+              "E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4 C4 C4 " +
+              "D4 D4 E4 C4 D4 E4 F4 E4 C4 D4 E4 F4 E4 D4 C4 D4 G3 " +
+              "E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4 C4 C4").split(" ");
+  /* 伴奏の和音（1小節4音ごと）。根音だけを低く鳴らす */
+  var BASS = [130.81, 98.0, 130.81, 98.0, 130.81, 98.0, 130.81, 98.0];
+
+  /* ============ 迷路 ============
+     横 NX × 縦 NY のマス。壁はマスの間の線。入口は左上、出口は右下 */
+  var NX = 8, NY = 11, B = 60;
+  var wallR, wallD;            /* wallR[i]: マスiの右に壁, wallD[i]: 下に壁 */
+  var path = [], onPath, pathIdx;
+
+  function idx(x, y) { return y * NX + x; }
+  function open(a, b) {
+    var ax = a % NX, ay = (a / NX) | 0, bx = b % NX, by = (b / NX) | 0;
+    if (by === ay && bx === ax + 1) return !wallR[a];
+    if (by === ay && bx === ax - 1) return !wallR[b];
+    if (bx === ax && by === ay + 1) return !wallD[a];
+    if (bx === ax && by === ay - 1) return !wallD[b];
+    return false;
+  }
+  function generate() {
+    var total = NX * NY, keep = null;
+    for (var tries = 0; tries < 400; tries++) {
+      wallR = new Uint8Array(total).fill(1);
+      wallD = new Uint8Array(total).fill(1);
+      /* 穴を掘り進んで、行き止まりで戻る作り方（長くうねる道になる） */
+      var seen = new Uint8Array(total), stack = [0];
+      seen[0] = 1;
+      while (stack.length) {
+        var c0 = stack[stack.length - 1], x0 = c0 % NX, y0 = (c0 / NX) | 0, nb = [];
+        if (x0 + 1 < NX && !seen[c0 + 1]) nb.push(c0 + 1);
+        if (x0 > 0 && !seen[c0 - 1]) nb.push(c0 - 1);
+        if (y0 + 1 < NY && !seen[c0 + NX]) nb.push(c0 + NX);
+        if (y0 > 0 && !seen[c0 - NX]) nb.push(c0 - NX);
+        if (!nb.length) { stack.pop(); continue; }
+        var nx0 = nb[Math.floor(Math.random() * nb.length)];
+        var a0 = Math.min(c0, nx0), b0 = Math.max(c0, nx0);
+        if (b0 === a0 + 1) wallR[a0] = 0; else wallD[a0] = 0;
+        seen[nx0] = 1;
+        stack.push(nx0);
+      }
+      /* 入口から出口までの道 */
+      var prev = new Int32Array(total).fill(-1), q = [0];
+      prev[0] = 0;
+      for (var h = 0; h < q.length; h++) {
+        var c = q[h], cx = c % NX, cy = (c / NX) | 0;
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
+          var X = cx + d[0], Y = cy + d[1];
+          if (X < 0 || Y < 0 || X >= NX || Y >= NY) return;
+          var m = idx(X, Y);
+          if (prev[m] >= 0 || !open(c, m)) return;
+          prev[m] = c; q.push(m);
+        });
+      }
+      path = [];
+      for (var k = total - 1; k !== 0; k = prev[k]) path.unshift(k);
+      path.unshift(0);
+      /* 出口でちょうど曲が終わる長さ（62マス）の迷路を探す。なければいちばん近いもの */
+      var diff = Math.abs(path.length - SONG.length);
+      if (!keep || diff < keep.diff) keep = { diff: diff, wallR: wallR, wallD: wallD, path: path };
+      if (diff === 0) break;
+    }
+    wallR = keep.wallR; wallD = keep.wallD; path = keep.path;
+    onPath = new Int32Array(total).fill(-1);
+    path.forEach(function (c, i) { onPath[c] = i; });
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", MISS: "miss", GOAL: "goal", RESULT: "result" };
+  var fresh = false;            /* 待機画面で見せた迷路は、最初の1回はそのまま使う */
+  var state, T, cell, best, missCell, flash;
+  var BX = 0, BY = 0;
+  var acc = { x: 0, y: 0 };
+  var bump = { x: 0, y: 0, t: 0 };
+  var glow = [];                /* 鳴らしたマスの光 */
+
+  function place() {
+    BX = Math.round((W - NX * B) / 2);
+    BY = Math.round((H - NY * B) / 2);
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    T = 0;
+    if (fresh) generate();
+    fresh = true;
+    cell = 0;
+    best = 0;
+    pathIdx = 0;
+    missCell = -1;
+    flash = 0;
+    glow = [];
+    acc = { x: 0, y: 0 };
+    playStep(0);
+  }
+
+  function score() { return Math.round(best / (path.length - 1) * 100); }
+
+  function playStep(i) {
+    var nn = SONG[i % SONG.length];
+    note(HZ[nn], 0.9, 0.16);
+    if (i % 4 === 0) note(BASS[(i / 4 | 0) % BASS.length], 1.4, 0.09);
+    glow.push({ c: path[i], t: 0 });
+  }
+
+  /* 1マス動く。壁なら動かない。道の外に入ったら終わり */
+  function step(dx, dy) {
+    if (state !== S.PLAY) return;
+    var x = cell % NX, y = (cell / NX) | 0, X = x + dx, Y = y + dy;
+    if (X < 0 || Y < 0 || X >= NX || Y >= NY || !open(cell, idx(X, Y))) {
+      bump = { x: dx, y: dy, t: 0.12 };
+      return;
+    }
+    var next = idx(X, Y);
+    cell = next;
+    var k = onPath[next];
+    if (k < 0) { miss(); return; }
+    if (k > best) {
+      best = k;
+      playStep(k);
+      if (k === path.length - 1) win();
+    }
+  }
+  function miss() {
+    state = S.MISS;
+    T = 0;
+    missCell = cell;
+    buzz();
+  }
+  function win() {
+    state = S.GOAL;
+    T = 0;
+    /* 最後に和音 */
+    [261.63, 329.63, 392.0, 523.25].forEach(function (f, i) { note(f, 1.8, 0.1, 0.25 + i * 0.03); });
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    glow.forEach(function (g) { g.t += dt; });
+    if (bump.t > 0) bump.t = Math.max(0, bump.t - dt);
+    if (state === S.MISS || state === S.GOAL) {
+      T += dt;
+      if (T > (state === S.GOAL ? 2.2 : 1.2)) { state = S.RESULT; shareButton.hidden = false; }
+    }
+  }
+
+  /* ============ 入力 ============
+     指をすべらせた向きへ1マスずつ進む（どこをなぞってもよい）。キーは矢印 */
+  var held = false, lastP = null;
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    held = true;
+    lastP = x == null ? null : { x: x, y: y };
+    acc = { x: 0, y: 0 };
+  }
+  function move(x, y) {
+    if (!held || !lastP) return;
+    acc.x += x - lastP.x; acc.y += y - lastP.y;
+    lastP = { x: x, y: y };
+    var th = B * 0.55;
+    for (var guard = 0; guard < 4; guard++) {
+      if (Math.abs(acc.x) >= Math.abs(acc.y) && Math.abs(acc.x) > th) {
+        var sx = Math.sign(acc.x); acc.x -= sx * th; acc.y *= 0.5; step(sx, 0);
+      } else if (Math.abs(acc.y) > th) {
+        var sy = Math.sign(acc.y); acc.y -= sy * th; acc.x *= 0.5; step(0, sy);
+      } else break;
+    }
+  }
+  function up() { held = false; lastP = null; }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(k) {
+    if (state !== S.PLAY) return;
+    if (k === 1) {                                       /* 正しい道を1マス自動で進む */
+      var nx = path[best + 1];
+      if (cell !== path[best]) return;
+      step(nx % NX - cell % NX, ((nx / NX) | 0) - ((cell / NX) | 0));
+    }
+    if (k === 2) { cell = path[path.length - 2]; best = path.length - 2; }   /* 出口の手前へ */
+    if (k === 3) {                                       /* わざと間違える */
+      for (var c = 0; c < NX * NY; c++) if (onPath[c] < 0) { cell = c; miss(); return; }
+    }
+  }
+
+  var DIRS = { ArrowLeft: [-1, 0], a: [-1, 0], A: [-1, 0], ArrowRight: [1, 0], d: [1, 0], D: [1, 0],
+               ArrowUp: [0, -1], w: [0, -1], W: [0, -1], ArrowDown: [0, 1], s: [0, 1], S: [0, 1] };
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var dir = DIRS[e.key];
+    if (!esc && !go && !dir) return;
+    e.preventDefault();
+    if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
+    if (dir) { step(dir[0], dir[1]); return; }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function doShare() {
+    var s = score();
+    var ja = s >= 100 ? "迷路を歩いて「歓喜の歌」を最後まで弾ききった" : "迷路を歩いて「歓喜の歌」を" + s + "%まで弾いた";
+    var en = s >= 100 ? "Played all of \"Ode to Joy\" by walking a maze" : "Played " + s + "% of \"Ode to Joy\" by walking a maze";
+    window.zResultActions.x({ text: zT(ja, en) + zT(" #メロディ迷路", " #MelodyMaze") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  var NOTE_COLOR = { G3: "#8fb3ff", C4: "#ff7a7a", D4: "#ffb26b", E4: "#ffe36b", F4: "#7be08a", G4: "#6bd5ff" };
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#172033";
+    ctx.fillRect(0, 0, W, H);
+    if (!path.length) return;
+
+    ctx.save();
+    ctx.translate(BX, BY);
+    if (bump.t > 0) ctx.translate(bump.x * bump.t * 30, bump.y * bump.t * 30);
+
+    /* 通った正しい道。音の高さで色を変える */
+    for (var i = 0; i <= best; i++) {
+      var c = path[i], x = c % NX, y = (c / NX) | 0;
+      ctx.fillStyle = NOTE_COLOR[SONG[i % SONG.length]];
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(x * B + 4, y * B + 4, B - 8, B - 8);
+    }
+    ctx.globalAlpha = 1;
+    /* 鳴ったばかりのマスが光る */
+    glow.forEach(function (g) {
+      if (g.t > 0.5) return;
+      var x = g.c % NX, y = (g.c / NX) | 0, k = 1 - g.t / 0.5;
+      ctx.fillStyle = "rgba(255,255,255," + (0.7 * k).toFixed(3) + ")";
+      var e = (1 - k) * 8;
+      ctx.fillRect(x * B - e, y * B - e, B + e * 2, B + e * 2);
+    });
+    glow = glow.filter(function (g) { return g.t <= 0.5; });
+
+    /* 出口 */
+    var gx = (NX - 1) * B, gy = (NY - 1) * B;
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(gx + 10, gy + 10, B - 20, B - 20);
+
+    /* 間違えたマス */
+    if (missCell >= 0) {
+      var mx = missCell % NX, my = (missCell / NX) | 0;
+      ctx.fillStyle = "#e5484d";
+      ctx.fillRect(mx * B + 4, my * B + 4, B - 8, B - 8);
+    }
+
+    /* 壁 */
+    ctx.strokeStyle = "#e8ecf4";
+    ctx.lineWidth = 6;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(0, 0); ctx.lineTo(NX * B, 0);
+    ctx.moveTo(0, 0); ctx.lineTo(0, NY * B);
+    for (var yy = 0; yy < NY; yy++) for (var xx = 0; xx < NX; xx++) {
+      var k2 = idx(xx, yy);
+      if (wallR[k2] && !(xx === NX - 1 && yy === NY - 1)) { ctx.moveTo((xx + 1) * B, yy * B); ctx.lineTo((xx + 1) * B, (yy + 1) * B); }
+      if (wallD[k2]) { ctx.moveTo(xx * B, (yy + 1) * B); ctx.lineTo((xx + 1) * B, (yy + 1) * B); }
+    }
+    ctx.stroke();
+
+    /* 自分 */
+    var px = (cell % NX + 0.5) * B, py = (((cell / NX) | 0) + 0.5) * B;
+    ctx.beginPath();
+    ctx.arc(px, py, B * 0.26, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.lineWidth = 4; ctx.strokeStyle = "#16202e"; ctx.stroke();
+    ctx.restore();
+
+    if (state === S.RESULT) drawResult();
+  }
+
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(score() + "%", W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, cell: cell, best: best, pathLen: path.length, score: path.length ? score() : 0, W: W, H: H }; },
+    path: function () { return path.slice(); },
+    step: function (k) { for (var i = 0; i < (k || 1); i++) { update(1 / 60); draw(); } },
+    go: function (dx, dy) { step(dx, dy); },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(4000);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (k) { startButton.addEventListener(k, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  /* 待機画面にも迷路を見せておく（START を押すと新しく作り直す） */
+  generate();
+  cell = 0; best = -1; missCell = -1;
+  state = S.INTRO;
+  startButton.hidden = false;
+  shareButton.hidden = true;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
