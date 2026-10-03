@@ -171,7 +171,8 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", GOAL: "goal", RESULT: "result" };
   var fresh = false;            /* 待機画面で見せた迷路は、最初の1回はそのまま使う */
-  var state, T, cell, best, time = 0, misses = 0, wrong = {};
+  var state, T, cell, best, time = 0, misses = 0;
+  var line = [0], grow = 1;      /* 今たどっている線（引き返すと縮む）。grow は先端が伸びる途中 */
   var BX = 0, BY = 0;
   var acc = { x: 0, y: 0 };
   var bump = { x: 0, y: 0, t: 0 };
@@ -194,7 +195,8 @@
     pathIdx = 0;
     time = 0;
     misses = 0;
-    wrong = {};
+    line = [0];
+    grow = 1;
     glow = [];
     acc = { x: 0, y: 0 };
     playStep(0);
@@ -209,7 +211,8 @@
     glow.push({ c: path[i], t: 0 });
   }
 
-  /* 1マス動く。壁なら動かない。道の外に入ったら終わり */
+  /* 1マス動く。壁なら動かない。ひとつ前のマスへ戻ると線が縮む。
+     正しい道へ進むと曲が鳴り、行き止まりへ向かう道では不協和音 */
   function step(dx, dy) {
     if (state !== S.PLAY) return;
     var x = cell % NX, y = (cell / NX) | 0, X = x + dx, Y = y + dy;
@@ -219,19 +222,19 @@
     }
     var next = idx(X, Y);
     cell = next;
+    if (line.length > 1 && line[line.length - 2] === next) { line.pop(); grow = 1; return; }
+    line.push(next);
+    grow = 0;
     var k = onPath[next];
     if (k < 0) {
       misses++;
-      clash(HZ[SONG[best % SONG.length]]);
-      wrong[next] = 1;
+      clash(HZ[SONG[Math.max(0, best) % SONG.length]]);
       glow.push({ c: next, t: 0, bad: true });
       return;
     }
-    if (k > best) {
-      best = k;
-      playStep(k);
-      if (k === path.length - 1) win();
-    }
+    best = Math.max(best, k);
+    playStep(k);
+    if (k === path.length - 1) win();
   }
   function win() {
     state = S.GOAL;
@@ -243,6 +246,7 @@
   /* ============ 進行 ============ */
   function update(dt) {
     glow.forEach(function (g) { g.t += dt; });
+    grow = Math.min(1, grow + dt / 0.09);
     if (bump.t > 0) bump.t = Math.max(0, bump.t - dt);
     if (state === S.PLAY) time += dt;
     if (state === S.GOAL) {
@@ -297,11 +301,11 @@
   function debugKey(k) {
     if (state !== S.PLAY) return;
     if (k === 1) {                                       /* 正しい道を1マス自動で進む */
-      var nx = path[best + 1];
-      if (cell !== path[best]) return;
+      if (onPath[cell] < 0) return;
+      var nx = path[onPath[cell] + 1];
       step(nx % NX - cell % NX, ((nx / NX) | 0) - ((cell / NX) | 0));
     }
-    if (k === 2) { cell = path[path.length - 2]; best = path.length - 2; }   /* 出口の手前へ */
+    if (k === 2) { cell = path[path.length - 2]; best = path.length - 2; line = path.slice(0, -1); }   /* 出口の手前へ */
 
   }
 
@@ -354,21 +358,33 @@
     ctx.translate(BX, BY);
     if (bump.t > 0) ctx.translate(bump.x * bump.t * 30, bump.y * bump.t * 30);
 
-    /* 通った正しい道。音の高さで色を変える */
-    for (var i = 0; i <= best; i++) {
-      var c = path[i], x = c % NX, y = (c / NX) | 0;
-      ctx.fillStyle = NOTE_COLOR[SONG[i % SONG.length]];
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(x * B + 4, y * B + 4, B - 8, B - 8);
+    /* たどっている線。マスごとの音の色を、つなぎ目なくグラデーションでつなぐ */
+    function colorOf(c) { var k = onPath[c]; return k < 0 ? "#e5484d" : NOTE_COLOR[SONG[k % SONG.length]]; }
+    function center(c) { return { x: (c % NX + 0.5) * B, y: (((c / NX) | 0) + 0.5) * B }; }
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = B * 0.42;
+    var head = null;
+    for (var i = 1; i < line.length; i++) {
+      var a0 = center(line[i - 1]), b0 = center(line[i]);
+      if (i === line.length - 1) { b0 = { x: a0.x + (b0.x - a0.x) * grow, y: a0.y + (b0.y - a0.y) * grow }; head = b0; }
+      var gr = ctx.createLinearGradient(a0.x, a0.y, b0.x, b0.y);
+      gr.addColorStop(0, colorOf(line[i - 1]));
+      gr.addColorStop(1, colorOf(line[i]));
+      ctx.strokeStyle = gr;
+      ctx.beginPath(); ctx.moveTo(a0.x, a0.y); ctx.lineTo(b0.x, b0.y); ctx.stroke();
     }
-    ctx.globalAlpha = 1;
+    if (line.length === 1) {
+      var s0 = center(line[0]);
+      ctx.fillStyle = colorOf(line[0]);
+      ctx.beginPath(); ctx.arc(s0.x, s0.y, B * 0.21, 0, Math.PI * 2); ctx.fill();
+    }
     /* 鳴ったばかりのマスが光る */
     glow.forEach(function (g) {
       if (g.t > 0.5) return;
-      var x = g.c % NX, y = (g.c / NX) | 0, k = 1 - g.t / 0.5;
-      ctx.fillStyle = (g.bad ? "rgba(255,60,70," : "rgba(255,255,255,") + (0.7 * k).toFixed(3) + ")";
-      var e = (1 - k) * 8;
-      ctx.fillRect(x * B - e, y * B - e, B + e * 2, B + e * 2);
+      var c = center(g.c), k = 1 - g.t / 0.5;
+      ctx.fillStyle = (g.bad ? "rgba(255,60,70," : "rgba(255,255,255,") + (0.5 * k).toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(c.x, c.y, B * (0.25 + (1 - k) * 0.45), 0, Math.PI * 2); ctx.fill();
     });
     glow = glow.filter(function (g) { return g.t <= 0.5; });
 
@@ -378,12 +394,6 @@
     ctx.lineWidth = 3;
     ctx.strokeRect(gx + 10, gy + 10, B - 20, B - 20);
 
-    /* 間違った道に入ったマス */
-    ctx.fillStyle = "rgba(229,72,77,.45)";
-    Object.keys(wrong).forEach(function (c) {
-      var mx = c % NX, my = (c / NX) | 0;
-      ctx.fillRect(mx * B + 4, my * B + 4, B - 8, B - 8);
-    });
 
     /* 壁 */
     ctx.strokeStyle = "#e8ecf4";
@@ -401,6 +411,7 @@
 
     /* 自分 */
     var px = (cell % NX + 0.5) * B, py = (((cell / NX) | 0) + 0.5) * B;
+    if (head && line[line.length - 1] === cell) { px = head.x; py = head.y; }
     ctx.beginPath();
     ctx.arc(px, py, B * 0.26, 0, Math.PI * 2);
     ctx.fillStyle = "#fff"; ctx.fill();
