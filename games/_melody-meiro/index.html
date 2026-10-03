@@ -225,8 +225,9 @@
   var line = [0], grow = 1;      /* 今たどっている線（引き返すと縮む）。grow は1マス動く途中の進み 0〜1 */
   var shrinking = false;
   var MOVE = 0.12;                /* 1マス動く見た目の時間 */
-  /* 押さえている向きへ、一定のテンポ（1拍ごと）に1マスずつ進む */
-  var BEAT = 0.3, beatT = BEAT, padDir = null, keyDir = null, queued = null;   /* queued: 短く押しただけでも1マスは進む */
+  /* フリックした向きへ、一定のテンポ（1拍ごと）に1マスずつ進む。
+     曲がり角は道なりに曲がり、分かれ道か行き止まりで止まる。進んでいる途中のフリックは次の拍で効く */
+  var BEAT = 0.3, beatT = BEAT, run = null, queued = null;
   var BX = 0, BY = 0;
   var acc = { x: 0, y: 0 };
   var bump = { x: 0, y: 0, t: 0 };
@@ -252,7 +253,7 @@
     line = [0];
     grow = 1;
     shrinking = false;
-    beatT = BEAT; padDir = null; keyDir = null; queued = null;
+    beatT = BEAT; run = null; queued = null;
     glow = [];
     acc = { x: 0, y: 0 };
     playStep(0);
@@ -293,6 +294,14 @@
     playStep(k);
     if (k === path.length - 1) win();
   }
+  /* 来た向きを除いた出口がひとつだけなら、その向きへ続ける。分かれ道・行き止まりなら止まる */
+  function onward(d) {
+    if (state !== S.PLAY) return null;
+    var outs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(function (o) {
+      return !(o[0] === -d[0] && o[1] === -d[1]) && canGo(o);
+    });
+    return outs.length === 1 ? outs[0] : null;
+  }
   function canGo(d) {
     var x = cell % NX + d[0], y = ((cell / NX) | 0) + d[1];
     return x >= 0 && y >= 0 && x < NX && y < NY && open(cell, idx(x, y));
@@ -310,10 +319,14 @@
     grow = Math.min(1, grow + dt / MOVE);
     if (grow >= 1 && shrinking) { line.pop(); shrinking = false; }
     beatT = Math.min(BEAT, beatT + dt);
-    var d = keyDir || padDir || queued;
-    if (state === S.PLAY && d && beatT >= BEAT) {
+    if (state === S.PLAY && beatT >= BEAT) {
+      if (queued && canGo(queued)) run = queued;
       queued = null;
-      if (canGo(d)) { beatT -= BEAT; step(d[0], d[1]); }
+      if (run && canGo(run)) {
+        beatT -= BEAT;
+        step(run[0], run[1]);
+        run = onward(run);
+      } else run = null;
     }
     if (bump.t > 0) bump.t = Math.max(0, bump.t - dt);
     if (state === S.PLAY) time += dt;
@@ -335,17 +348,17 @@
       return;
     }
     held = true;
-    lastP = x == null ? null : { x: x, y: y };   /* 押した点からの向きで進む（スティックのように） */
-    padDir = null;
+    lastP = x == null ? null : { x: x, y: y };   /* 押した点からはじいた向きへ進む */
   }
   function move(x, y) {
     if (!held || !lastP) return;
-    var dx = x - lastP.x, dy = y - lastP.y, len = Math.hypot(dx, dy);
-    if (len > 24) queued = padDir = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
-    /* 指が遠くへ行っても、すぐ向きを変えられるよう基準の点を引き寄せる */
-    if (len > 60) { lastP.x = x - dx / len * 60; lastP.y = y - dy / len * 60; }
+    var dx = x - lastP.x, dy = y - lastP.y;
+    if (Math.hypot(dx, dy) > 28) {
+      queued = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
+      lastP = { x: x, y: y };                    /* 指を離さず続けてはじいても効くように */
+    }
   }
-  function up() { held = false; lastP = null; padDir = null; }
+  function up() { held = false; lastP = null; }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
@@ -357,7 +370,7 @@
   });
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
   wrap.addEventListener("pointercancel", function () { up(); });
-  window.addEventListener("blur", function () { up(); keyDir = null; });
+  window.addEventListener("blur", function () { up(); });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(k) {
@@ -381,13 +394,12 @@
     if (!esc && !go && !dir) return;
     e.preventDefault();
     if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
-    if (dir) { if (!e.repeat) queued = dir; keyDir = dir; return; }
+    if (dir) { if (!e.repeat) queued = dir; return; }
     if (e.repeat) return;
     down();
   });
   window.addEventListener("keyup", function (e) {
-    var kd = DIRS[e.key];
-    if (kd) { if (keyDir && keyDir[0] === kd[0] && keyDir[1] === kd[1]) keyDir = null; return; }
+    if (DIRS[e.key]) return;
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
   });
 
