@@ -36,7 +36,8 @@
 <script>
 /* メロディ迷路
 
-   正しい道を1マス進むごとに、曲が1音進む。行き止まりへ向かう道に入ったら、そこで終わり。
+   正しい道を1マス進むごとに、曲が1音進む。行き止まりへ向かう道では不協和音が鳴る（戻れば続けられる）。
+   出口までの秒数が結果。
    曲はベートーヴェン「歓喜の歌」（作曲者の没後に保護期間が切れている）。 */
 (function () {
   "use strict";
@@ -86,19 +87,9 @@
       o.start(n); o.stop(n + dur + 0.05);
     });
   }
-  function buzz() {
-    if (!AC) return;
-    var n = AC.currentTime;
-    [110, 116.5].forEach(function (f) {
-      var o = AC.createOscillator(), g = AC.createGain();
-      o.type = "sawtooth";
-      o.frequency.setValueAtTime(f, n);
-      o.frequency.exponentialRampToValueAtTime(f * 0.6, n + 0.6);
-      g.gain.setValueAtTime(0.12, n);
-      g.gain.exponentialRampToValueAtTime(0.0001, n + 0.7);
-      o.connect(g); g.connect(AC.destination);
-      o.start(n); o.stop(n + 0.75);
-    });
+  /* 間違った道の音。今の音に半音ずつずれた音を重ねる */
+  function clash(base) {
+    [1, 1.0595, 1.4142, 0.5].forEach(function (r, i) { note(base * r, 0.6, i === 3 ? 0.08 : 0.1); });
   }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
@@ -178,9 +169,9 @@
   }
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", MISS: "miss", GOAL: "goal", RESULT: "result" };
+  var S = { INTRO: "intro", PLAY: "play", GOAL: "goal", RESULT: "result" };
   var fresh = false;            /* 待機画面で見せた迷路は、最初の1回はそのまま使う */
-  var state, T, cell, best, missCell, flash;
+  var state, T, cell, best, time = 0, misses = 0, wrong = {};
   var BX = 0, BY = 0;
   var acc = { x: 0, y: 0 };
   var bump = { x: 0, y: 0, t: 0 };
@@ -201,14 +192,15 @@
     cell = 0;
     best = 0;
     pathIdx = 0;
-    missCell = -1;
-    flash = 0;
+    time = 0;
+    misses = 0;
+    wrong = {};
     glow = [];
     acc = { x: 0, y: 0 };
     playStep(0);
   }
 
-  function score() { return Math.round(best / (path.length - 1) * 100); }
+  function secText() { return (Math.floor(time * 10) / 10).toFixed(1); }
 
   function playStep(i) {
     var nn = SONG[i % SONG.length];
@@ -228,18 +220,18 @@
     var next = idx(X, Y);
     cell = next;
     var k = onPath[next];
-    if (k < 0) { miss(); return; }
+    if (k < 0) {
+      misses++;
+      clash(HZ[SONG[best % SONG.length]]);
+      wrong[next] = 1;
+      glow.push({ c: next, t: 0, bad: true });
+      return;
+    }
     if (k > best) {
       best = k;
       playStep(k);
       if (k === path.length - 1) win();
     }
-  }
-  function miss() {
-    state = S.MISS;
-    T = 0;
-    missCell = cell;
-    buzz();
   }
   function win() {
     state = S.GOAL;
@@ -252,9 +244,10 @@
   function update(dt) {
     glow.forEach(function (g) { g.t += dt; });
     if (bump.t > 0) bump.t = Math.max(0, bump.t - dt);
-    if (state === S.MISS || state === S.GOAL) {
+    if (state === S.PLAY) time += dt;
+    if (state === S.GOAL) {
       T += dt;
-      if (T > (state === S.GOAL ? 2.2 : 1.2)) { state = S.RESULT; shareButton.hidden = false; }
+      if (T > 2.2) { state = S.RESULT; shareButton.hidden = false; }
     }
   }
 
@@ -309,9 +302,7 @@
       step(nx % NX - cell % NX, ((nx / NX) | 0) - ((cell / NX) | 0));
     }
     if (k === 2) { cell = path[path.length - 2]; best = path.length - 2; }   /* 出口の手前へ */
-    if (k === 3) {                                       /* わざと間違える */
-      for (var c = 0; c < NX * NY; c++) if (onPath[c] < 0) { cell = c; miss(); return; }
-    }
+
   }
 
   var DIRS = { ArrowLeft: [-1, 0], a: [-1, 0], A: [-1, 0], ArrowRight: [1, 0], d: [1, 0], D: [1, 0],
@@ -333,9 +324,9 @@
   });
 
   function doShare() {
-    var s = score();
-    var ja = s >= 100 ? "迷路を歩いて「歓喜の歌」を最後まで弾ききった" : "迷路を歩いて「歓喜の歌」を" + s + "%まで弾いた";
-    var en = s >= 100 ? "Played all of \"Ode to Joy\" by walking a maze" : "Played " + s + "% of \"Ode to Joy\" by walking a maze";
+    var s = secText();
+    var ja = "迷路を歩いて「歓喜の歌」を" + s + "秒で弾ききった" + (misses ? "（不協和音" + misses + "回）" : "（不協和音なし）");
+    var en = "Played \"Ode to Joy\" by walking a maze in " + s + "s" + (misses ? " (" + misses + " sour notes)" : " (no sour notes)");
     window.zResultActions.x({ text: zT(ja, en) + zT(" #メロディ迷路", " #MelodyMaze") });
   }
 
@@ -375,7 +366,7 @@
     glow.forEach(function (g) {
       if (g.t > 0.5) return;
       var x = g.c % NX, y = (g.c / NX) | 0, k = 1 - g.t / 0.5;
-      ctx.fillStyle = "rgba(255,255,255," + (0.7 * k).toFixed(3) + ")";
+      ctx.fillStyle = (g.bad ? "rgba(255,60,70," : "rgba(255,255,255,") + (0.7 * k).toFixed(3) + ")";
       var e = (1 - k) * 8;
       ctx.fillRect(x * B - e, y * B - e, B + e * 2, B + e * 2);
     });
@@ -387,12 +378,12 @@
     ctx.lineWidth = 3;
     ctx.strokeRect(gx + 10, gy + 10, B - 20, B - 20);
 
-    /* 間違えたマス */
-    if (missCell >= 0) {
-      var mx = missCell % NX, my = (missCell / NX) | 0;
-      ctx.fillStyle = "#e5484d";
+    /* 間違った道に入ったマス */
+    ctx.fillStyle = "rgba(229,72,77,.45)";
+    Object.keys(wrong).forEach(function (c) {
+      var mx = c % NX, my = (c / NX) | 0;
       ctx.fillRect(mx * B + 4, my * B + 4, B - 8, B - 8);
-    }
+    });
 
     /* 壁 */
     ctx.strokeStyle = "#e8ecf4";
@@ -444,7 +435,7 @@
     ctx.shadowBlur = 10;
     ctx.font = "800 108px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(score() + "%", W / 2, H * 0.45);
+    ctx.fillText(secText() + zT("秒", "s"), W / 2, H * 0.45);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
@@ -464,7 +455,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, cell: cell, best: best, pathLen: path.length, score: path.length ? score() : 0, W: W, H: H }; },
+    now: function () { return { state: state, cell: cell, best: best, pathLen: path.length, time: time, misses: misses, W: W, H: H }; },
     path: function () { return path.slice(); },
     step: function (k) { for (var i = 0; i < (k || 1); i++) { update(1 / 60); draw(); } },
     go: function (dx, dy) { step(dx, dy); },
@@ -488,7 +479,7 @@
   startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
   /* 待機画面にも迷路を見せておく（START を押すと新しく作り直す） */
   generate();
-  cell = 0; best = -1; missCell = -1;
+  cell = 0; best = -1;
   state = S.INTRO;
   startButton.hidden = false;
   shareButton.hidden = true;
