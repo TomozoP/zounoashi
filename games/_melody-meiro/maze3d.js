@@ -23,28 +23,15 @@
     this.world = null;
     this.w = 0; this.h = 0; this.aspect = 0;
 
-    /* 歌うキューブ。上の面に顔（カメラから正面に見える向き）。
-       転がり終わるたびに向きを戻すので、顔はいつも上に来る */
-    this.faceCanvas = document.createElement("canvas");
-    this.faceCanvas.width = this.faceCanvas.height = 128;
-    this.faceTex = new T.CanvasTexture(this.faceCanvas);
-    this.faceTex.colorSpace = T.SRGBColorSpace;
+    /* 歌うキューブ。鳴った音の色に染まって、ぽよんと弾む */
     this.bodyMat = new T.MeshLambertMaterial({ color: BODY });
-    this.faceMat = new T.MeshLambertMaterial({ color: BODY, map: this.faceTex });
-    var bm = this.bodyMat, fm = this.faceMat;
-    this.cube = new T.Mesh(new T.BoxGeometry(SIZE, SIZE, SIZE), [bm, bm, fm, bm, bm, bm]);
+    this.cube = new T.Mesh(new T.BoxGeometry(SIZE, SIZE, SIZE), this.bodyMat);
     var edges = new T.LineSegments(new T.EdgesGeometry(this.cube.geometry), new T.LineBasicMaterial({ color: 0x16202e }));
     this.cube.add(edges);
     this.scene.add(this.cube);
     this.tint = new T.Color(BODY);      /* 今の体の色 */
     this.target = new T.Color(BODY);
-    this.mouth = 0;                     /* 口の開き 0〜1 */
     this.squash = 0;                    /* 歌ったときの弾み */
-    this.sad = 0;                       /* 寄り道したときの顔 */
-    this.blink = 2;                     /* 次のまばたきまで */
-    this.faceKey = "";
-    this.notes = [];                    /* 口から出る音符 */
-    this.noteTex = {};
     /* 足もとの影 */
     var sh = document.createElement("canvas");
     sh.width = sh.height = 64;
@@ -115,7 +102,7 @@
     if (!r) return;
     var T = global.THREE;
     var q = new T.Quaternion().setFromAxisAngle(new T.Vector3(r.dz, 0, -r.dx), Math.PI / 2);
-    this.base.identity();               /* 箱は形が同じなので向きを戻しても見た目は変わらず、顔が上に戻る */
+    this.base.identity();               /* 箱は形が同じなので向きを戻しても見た目は変わらない */
     this.at = { x: r.x0 + r.dx, z: r.z0 + r.dz };
     this.roll = null;
   };
@@ -124,97 +111,19 @@
       this.roll.t += dt;
       if (this.roll.t >= this.roll.dur) this.finish();
     }
-    this.mouth = Math.max(0, this.mouth - dt * 1.5);
     this.squash = Math.max(0, this.squash - dt * 4);
-    this.sad = Math.max(0, this.sad - dt);
-    this.blink -= dt;
-    if (this.blink < -0.12) this.blink = 1.5 + Math.random() * 2.5;
     this.tint.lerp(this.target, Math.min(1, dt * 10));
     this.target.lerp(new global.THREE.Color(BODY), Math.min(1, dt * 1.2));
-    var self = this;
-    this.notes = this.notes.filter(function (n) {
-      n.t += dt;
-      n.sprite.position.y += dt * 0.9;
-      n.sprite.position.x += Math.sin(n.t * 6 + n.ph) * dt * 0.25;
-      n.sprite.material.opacity = Math.min(1, Math.max(0, (1.3 - n.t) / 0.5));
-      if (n.t < 1.3) return true;
-      self.scene.remove(n.sprite);
-      n.sprite.material.dispose();
-      return false;
-    });
   };
 
-  /* 歌う：口を開けて、体をその音の色に染め、音符を出す */
+  /* 歌う：体をその音の色に染めて弾む */
   MazeScene.prototype.sing = function (color) {
-    var T = global.THREE;
-    this.mouth = 1;
     this.squash = 1;
-    this.sad = 0;
     this.target.set(color);
-    var key = color;
-    if (!this.noteTex[key]) {
-      var c = document.createElement("canvas");
-      c.width = c.height = 64;
-      var g = c.getContext("2d");
-      /* 音符（八分音符）を図形で描く */
-      g.fillStyle = color; g.strokeStyle = "#16202e"; g.lineWidth = 3;
-      g.beginPath(); g.ellipse(24, 46, 11, 8, -0.4, 0, Math.PI * 2); g.fill(); g.stroke();
-      g.fillRect(32, 10, 5, 36); g.strokeRect(32, 10, 5, 36);
-      g.beginPath(); g.moveTo(37, 10); g.quadraticCurveTo(54, 18, 50, 32); g.quadraticCurveTo(48, 22, 37, 20); g.closePath(); g.fill(); g.stroke();
-      var tx = new T.CanvasTexture(c);
-      tx.colorSpace = T.SRGBColorSpace;
-      this.noteTex[key] = tx;
-    }
-    var sp = new T.Sprite(new T.SpriteMaterial({ map: this.noteTex[key], transparent: true, depthWrite: false }));
-    sp.scale.set(0.75, 0.75, 1);
-    /* 転がった先（今いるマス）の上から出す */
-    var r = this.roll, px = r ? r.x0 + r.dx : this.at.x, pz = r ? r.z0 + r.dz : this.at.z;
-    sp.position.set(px + (Math.random() - 0.5) * 0.4, SIZE + 0.3, pz - 0.2);
-    this.scene.add(sp);
-    this.notes.push({ sprite: sp, t: 0, ph: Math.random() * 6 });
   };
-  /* 寄り道したとき：歌うのをやめて、困った顔 */
+  /* 寄り道したとき：灰色になる */
   MazeScene.prototype.oops = function () {
-    this.mouth = 0;
-    this.sad = 0.7;
     this.target.set(0xb9b2a8);
-  };
-
-  /* 顔を描く。変わったときだけ描き直す */
-  MazeScene.prototype.drawFace = function () {
-    var open = Math.round(this.mouth * 6) / 6, shut = this.blink < 0, sad = this.sad > 0;
-    var key = open + "/" + shut + "/" + sad;
-    if (key === this.faceKey) return;
-    this.faceKey = key;
-    var g = this.faceCanvas.getContext("2d");
-    g.fillStyle = "#fff";
-    g.fillRect(0, 0, 128, 128);
-    g.fillStyle = g.strokeStyle = "#16202e";
-    g.lineWidth = 7; g.lineCap = "round"; g.lineJoin = "round";
-    if (sad) {
-      /* > < の目と、への字の口 */
-      g.beginPath(); g.moveTo(30, 40); g.lineTo(46, 50); g.lineTo(30, 60); g.stroke();
-      g.beginPath(); g.moveTo(98, 40); g.lineTo(82, 50); g.lineTo(98, 60); g.stroke();
-      g.beginPath(); g.moveTo(50, 92); g.quadraticCurveTo(64, 80, 78, 92); g.stroke();
-    } else {
-      if (shut) {
-        g.beginPath(); g.moveTo(30, 50); g.lineTo(48, 50); g.moveTo(80, 50); g.lineTo(98, 50); g.stroke();
-      } else {
-        g.beginPath(); g.ellipse(39, 50, 7, 10, 0, 0, Math.PI * 2); g.fill();
-        g.beginPath(); g.ellipse(89, 50, 7, 10, 0, 0, Math.PI * 2); g.fill();
-      }
-      /* 頬 */
-      g.fillStyle = "rgba(255,120,120,.45)";
-      g.beginPath(); g.ellipse(24, 70, 9, 6, 0, 0, Math.PI * 2); g.fill();
-      g.beginPath(); g.ellipse(104, 70, 9, 6, 0, 0, Math.PI * 2); g.fill();
-      g.fillStyle = "#16202e";
-      if (open > 0.05) {
-        g.beginPath(); g.ellipse(64, 84, 9 + open * 5, 3 + open * 15, 0, 0, Math.PI * 2); g.fill();
-      } else {
-        g.beginPath(); g.moveTo(54, 80); g.quadraticCurveTo(64, 90, 74, 80); g.stroke();
-      }
-    }
-    this.faceTex.needsUpdate = true;
   };
 
   /* 板が画面に収まるよう、カメラの距離を決める */
@@ -269,9 +178,7 @@
       this.cube.quaternion.copy(this.base);
     }
     if (r) this.cube.scale.set(1, 1, 1);
-    this.drawFace();
     this.bodyMat.color.copy(this.tint);
-    this.faceMat.color.copy(this.tint);
     this.shadow.position.set(this.cube.position.x, 0.01, this.cube.position.z);
     this.shadow.scale.setScalar(SIZE * 1.6);
 
