@@ -48,6 +48,9 @@
     this.w = 0; this.h = 0;
     this.makeParts();
     this.makeShop();
+    /* どんぶりとその上のものはまとめて動かせるようにする（最後に下の段のカウンターへ置く） */
+    this.dish = new T.Group();
+    this.scene.add(this.dish);
     this.makeBowl();
     this.makeSky();
     this.makeSteam();
@@ -88,7 +91,7 @@
     for (var i = 0; i < 18; i++) {
       var m = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0 }));
       m.userData.t = i / 18; m.userData.a = Math.random() * 6.28; m.userData.r = 1.0 + Math.random() * 0.9;
-      this.scene.add(m); this.steam.push(m);
+      this.dish.add(m); this.steam.push(m);
     }
   };
   RamenScene.prototype.stepSteam = function (time) {
@@ -275,9 +278,20 @@
     var top = new T.Mesh(new T.BoxGeometry(60, 0.25, 7), new T.MeshPhysicalMaterial({ color: 0xc81e1a, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 }));
     top.position.set(0, -1.63, 0);
     s.add(top);
-    var front = new T.Mesh(new T.BoxGeometry(60, 6, 0.3), new T.MeshStandardMaterial({ color: 0x8e1410, roughness: 0.6 }));
-    front.position.set(0, -4.7, 3.4);
+    /* 作る台（上の段）の前の赤い壁と、客の前のカウンター（下の段） */
+    var red = new T.MeshPhysicalMaterial({ color: 0xc81e1a, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
+    var front = new T.Mesh(new T.BoxGeometry(60, 2.8, 0.3), new T.MeshStandardMaterial({ color: 0xb01a16, roughness: 0.5 }));
+    front.position.set(0, -2.9, 3.4);
     s.add(front);
+    var low = new T.Mesh(new T.BoxGeometry(60, 0.25, 7.5), red);
+    low.position.set(0, -4.425, 7.3);
+    s.add(low);
+    var edge = new T.Mesh(new T.BoxGeometry(60, 0.12, 7.6), new T.MeshStandardMaterial({ color: 0x2a2624, roughness: 0.6 }));
+    edge.position.set(0, -4.6, 7.3);
+    s.add(edge);
+    var under = new T.Mesh(new T.BoxGeometry(60, 10, 0.3), new T.MeshStandardMaterial({ color: 0x3a3532, roughness: 0.8 }));
+    under.position.set(0, -9.7, 10.9);
+    s.add(under);
     /* コップとレンゲ立て（小物） */
     var glass = new T.Mesh(new T.CylinderGeometry(0.32, 0.27, 0.9, 20, 1, true), new T.MeshStandardMaterial({ color: 0xcfe6f2, transparent: true, opacity: 0.35, roughness: 0.05, side: T.DoubleSide }));
     glass.position.set(3.1, -1.05, 0.6);
@@ -333,7 +347,7 @@
 
   /* ============ どんぶり ============ */
   RamenScene.prototype.makeBowl = function () {
-    var s = this.scene;
+    var s = this.dish;
     var pts = [], prof = [[0, -1.5], [1.0, -1.5], [1.04, -1.42], [1.0, -1.3], [1.2, -1.25], [1.55, -1.0], [1.85, -0.55], [2.05, 0.0], [2.14, 0.3], [2.18, 0.34], [2.12, 0.35], [2.04, 0.2], [1.8, -0.4], [1.2, -1.0], [0, -1.12]];
     prof.forEach(function (p) { pts.push(new T.Vector2(p[0], p[1])); });
     var bowl = new T.Mesh(new T.LatheGeometry(pts, 64), new T.MeshPhysicalMaterial({ color: 0xe6eef6, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.08, side: T.DoubleSide }));
@@ -447,7 +461,7 @@
     fm.frustumCulled = km.frustumCulled = false;
     g.add(fm); g.add(km);
     g.visible = false;
-    this.scene.add(g);
+    this.dish.add(g);
   };
 
   /* ============ 空 ============ */
@@ -513,7 +527,7 @@
       var g = this.clump(L.w, L.kind, i);
       g.position.set(L.x / M, (i - 1) * LAYER / M, 0);
       if (i === 0) g.visible = false;           /* 0段目は見えない土台 */
-      s.add(g);
+      this.dish.add(g);
       this.layers.push(g);
     }
     /* カメラ：2Dの見え方（画面の H*0.62 に camY、1m = 100*zoom）に合わせる */
@@ -566,6 +580,9 @@
     }
     this.chashu.visible = st.chashu >= 0;
     if (st.chashu >= 0) { var ct = st.chashu; this.chashu.position.set(0, (1 - ct * ct) * 8, 0); }
+    /* 完成したら、上の段から手前の下の段へドンと置く（少し持ち上げてから落とす） */
+    var pl = st.place > 0 ? st.place : 0, pe = pl * pl;
+    this.dish.position.set(0, -2.8 * pe + Math.sin(Math.PI * Math.min(1, pl * 1.3)) * 1.2, 6.0 * Math.min(1, pl * 1.25));
     /* 持っている山 */
     var topY = (st.layers.length - 1) * LAYER;
     var showHand = !st.ending && !st.intro, hx = st.handX;
