@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>1ピクセル迷路</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #16202e; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 1ピクセル迷路
+
+   画面の実際の画素1つを、迷路の1マスにする。
+   画素の細かい端末ほど迷路が大きくなり、むずかしくなる。
+   動かしかたは画像迷路と同じで、どこをなぞっても、なぞった分だけ進む。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============
+     見た目の寸法は他のゲームと同じ 540 幅。
+     ただし絵の画素数は、端末の画素比をそのまま使う（上限をかけない）。 */
+  var W = 540, H = 960, K = 1;   /* K = ゲーム座標1あたりの画素数 */
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+    var dpr = window.devicePixelRatio || 1;
+    var cssW = parseFloat(canvas.style.width) || W, cssH = parseFloat(canvas.style.height) || H;
+    canvas.width = Math.max(9, Math.round(cssW * dpr));
+    canvas.height = Math.max(9, Math.round(cssH * dpr));
+    K = canvas.width / W;
+    if (state === S.INTRO) generate();
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 迷路 ============
+     画面の画素 GW×GH がそのままマス目。壁も1マスなので、部屋は奇数の位置だけ。 */
+  var GW = 0, GH = 0, PW = 0, OX = 0, OY = 0;
+  var open = new Uint8Array(0);     /* 1 = 通路 */
+  var order = new Int32Array(0);    /* 掘った順（出てくる演出用） */
+  var carved = 0, painted = 0;
+  var layer = null, lctx = null, img = null, px32 = null, dirty = false;
+  var WALL = 0xff2e2016, PATH = 0xffe6eff4;   /* 色（並びは A B G R） */
+
+  function generate() {
+    PW = canvas.width;
+    GW = canvas.width % 2 ? canvas.width : canvas.width - 1;
+    GH = canvas.height % 2 ? canvas.height : canvas.height - 1;
+    OX = (canvas.width - GW) >> 1; OY = (canvas.height - GH) >> 1;
+    var NX = (GW - 1) >> 1, NY = (GH - 1) >> 1, n = NX * NY;
+    open = new Uint8Array(GW * GH);
+    order = new Int32Array(n * 2 + 2);
+    carved = 0;
+    function carve(i) { open[i] = 1; order[carved++] = i; }
+    /* 新しい部屋から伸ばすことが多く、ときどき途中から枝を出す（長い道と枝道がまざる） */
+    var seen = new Uint8Array(n), act = new Int32Array(n), len = 0;
+    var DX = [1, -1, 0, 0], DY = [0, 0, 1, -1];
+    carve(1);                                  /* 入口（左上） */
+    seen[0] = 1; carve(GW + 1); act[len++] = 0;
+    while (len) {
+      var ai = Math.random() < 0.75 ? len - 1 : (Math.random() * len) | 0;
+      var c = act[ai], cx = c % NX, cy = (c / NX) | 0, r = (Math.random() * 4) | 0, k, found = -1;
+      for (k = 0; k < 4; k++) {
+        var d = (r + k) & 3, nx = cx + DX[d], ny = cy + DY[d];
+        if (nx < 0 || ny < 0 || nx >= NX || ny >= NY || seen[ny * NX + nx]) continue;
+        found = d; break;
+      }
+      if (found < 0) { act[ai] = act[--len]; continue; }
+      var nb = (cy + DY[found]) * NX + cx + DX[found];
+      seen[nb] = 1;
+      carve((cy * 2 + 1 + DY[found]) * GW + cx * 2 + 1 + DX[found]);
+      carve((cy * 2 + 1 + DY[found] * 2) * GW + cx * 2 + 1 + DX[found] * 2);
+      act[len++] = nb;
+    }
+    carve((GH - 1) * GW + GW - 2);             /* 出口（右下） */
+    layer = document.createElement("canvas");
+    layer.width = GW; layer.height = GH;
+    lctx = layer.getContext && layer.getContext("2d");
+    img = lctx && lctx.createImageData ? lctx.createImageData(GW, GH) : null;
+    px32 = img && img.data && img.data.buffer ? new Uint32Array(img.data.buffer) : null;
+    if (px32) px32.fill(WALL);
+    painted = 0;
+    paintTo(carved);
+  }
+
+  /* 掘った順に、通路の画素を塗る */
+  function paintTo(m) {
+    if (px32) for (var i = painted; i < m; i++) px32[order[i]] = PATH;
+    painted = m;
+    dirty = true;
+  }
+  function flush() {
+    if (dirty && img && lctx) lctx.putImageData(img, 0, 0);
+    dirty = false;
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", BUILD: "build", PLAY: "play", GOAL: "goal", RESULT: "result" };
+  var state = S.INTRO, T = 0, held = false, keyMode = false, time = 0, lastTick = -1;
+  var player = { x: 1, y: 0 }, lastDir = 2, acc = { x: 0, y: 0 };
+  var keys = { l: 0, r: 0, u: 0, d: 0 };
+  var BUILD_TIME = 1.4;
+  var SENS = 1.6;          /* なぞった画素に対して進む画素 */
+  var KEY_SPEED = 360;     /* キーで進む速さ（画素/秒） */
+  var DX = [1, -1, 0, 0], DY = [0, 0, 1, -1], BACK = [1, 0, 3, 2];
+
+  function newRound(fresh) {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    if (fresh || GW !== (canvas.width % 2 ? canvas.width : canvas.width - 1)) generate();
+    if (px32) px32.fill(WALL);
+    painted = 0;
+    state = S.BUILD;
+    T = 0;
+    time = 0;
+    held = false;
+    lastTick = -1;
+    keys = { l: 0, r: 0, u: 0, d: 0 };
+    acc.x = acc.y = 0;
+    player.x = 1; player.y = 0; lastDir = 2;
+  }
+
+  function isOpen(x, y) { return x >= 0 && y >= 0 && x < GW && y < GH && open[y * GW + x] === 1; }
+  function stepDir(d) {
+    player.x += DX[d]; player.y += DY[d];
+    lastDir = d;
+    /* 通った画素を赤く */
+    if (px32) px32[player.y * GW + player.x] = 0xff5533ff;
+    dirty = true;
+  }
+
+  /* なぞった分だけ1画素ずつ進む。
+     行き止まりでなく曲がるだけの角は、そのまま道なりに曲がる。 */
+  function drive(ax, ay) {
+    if (state !== S.PLAY) return;
+    acc.x += ax; acc.y += ay;
+    var lim = 4000;
+    while (lim-- > 0) {
+      var mx = Math.abs(acc.x), my = Math.abs(acc.y);
+      if (Math.max(mx, my) < 1) break;
+      var horiz = mx >= my;
+      var pd = horiz ? (acc.x > 0 ? 0 : 1) : (acc.y > 0 ? 2 : 3);
+      var sv = horiz ? acc.y : acc.x;
+      var sd = Math.abs(sv) > 0.3 ? (horiz ? (sv > 0 ? 2 : 3) : (sv > 0 ? 0 : 1)) : -1;
+      var go = -1;
+      if (isOpen(player.x + DX[pd], player.y + DY[pd])) go = pd;
+      else if (sd >= 0 && isOpen(player.x + DX[sd], player.y + DY[sd])) go = sd;
+      else {
+        var only = -1, cnt = 0;
+        for (var d = 0; d < 4; d++) {
+          if (d === BACK[lastDir]) continue;
+          if (isOpen(player.x + DX[d], player.y + DY[d])) { only = d; cnt++; }
+        }
+        if (cnt === 1) go = only;
+      }
+      if (go < 0) { if (horiz) acc.x = 0; else acc.y = 0; continue; }
+      if (horiz) acc.x -= acc.x > 0 ? 1 : -1; else acc.y -= acc.y > 0 ? 1 : -1;
+      stepDir(go);
+      if (player.y === GH - 1) { goal(); return; }
+    }
+    acc.x = Math.max(-2, Math.min(2, acc.x)); acc.y = Math.max(-2, Math.min(2, acc.y));
+  }
+  function goal() {
+    state = S.GOAL;
+    T = 0;
+    held = false;
+    tone(523, 0.12, 0.14, "triangle");
+    tone(659, 0.12, 0.14, "triangle", null, 0.1);
+    tone(784, 0.3, 0.16, "triangle", null, 0.2);
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    if (state === S.BUILD) {
+      T += dt;
+      var k = Math.min(1, T / BUILD_TIME);
+      paintTo(Math.floor(carved * k * k));
+      var tick = Math.floor(k * 24);
+      if (tick !== lastTick) { lastTick = tick; if (tick > 0 && tick < 24) tone(300 + tick * 26, 0.04, 0.04, "square"); }
+      if (T >= BUILD_TIME) { paintTo(carved); if (px32) px32[player.y * GW + player.x] = 0xff5533ff; state = S.PLAY; T = 0; tone(880, 0.1, 0.1, "square"); }
+      return;
+    }
+    if (state === S.GOAL) {
+      T += dt;
+      if (T > 0.9) { state = S.RESULT; shareButton.hidden = false; }
+      return;
+    }
+    if (state !== S.PLAY) return;
+    time += dt;
+    var sp = KEY_SPEED * dt;
+    if (keys.l || keys.r || keys.u || keys.d) drive((keys.r - keys.l) * sp, (keys.d - keys.u) * sp);
+  }
+
+  /* ============ 入力 ============
+     指をすべらせた分だけ進む（指で迷路が隠れないよう、どこをなぞってもよい） */
+  var lastP = null;
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound(true);
+      return;
+    }
+    held = true;
+    lastP = x == null ? null : { x: x, y: y };
+  }
+  function move(x, y) {
+    if (!held || !lastP) return;
+    var dx = x - lastP.x, dy = y - lastP.y;
+    lastP = { x: x, y: y };
+    var s = K * SENS * PW / canvas.width;   /* 画素に直す */
+    drive(dx * s, dy * s);
+  }
+  function up() { held = false; lastP = null; }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); keys = { l: 0, r: 0, u: 0, d: 0 }; });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    if (n === 2 && state === S.PLAY) { player.x = GW - 2; player.y = GH - 2; lastDir = 2; }   /* ゴール目前へ */
+    if (n === 3 && state === S.PLAY) { time += 3; goal(); }                                  /* クリア */
+  }
+
+  var KEYMAP = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r", ArrowUp: "u", w: "u", W: "u", ArrowDown: "d", s: "d", S: "d" };
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var dir = KEYMAP[e.key];
+    if (!esc && !go && !dir) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat && state !== S.INTRO) newRound(true); return; }
+    if (dir) { keys[dir] = 1; return; }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    var dir = KEYMAP[e.key];
+    if (dir) { keys[dir] = 0; return; }
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function secText() { return (Math.floor(time * 10) / 10).toFixed(1); }
+  function doShare() {
+    var size = GW + "×" + GH;
+    /* 英語のときのハッシュタグは英語のゲーム名にする */
+    window.zResultActions.x({ text: zT(size + "ピクセルの迷路を" + secText() + "秒で抜けた", "Escaped a " + size + " pixel maze in " + secText() + "s") + zT(" #1ピクセル迷路", " #1PixelMaze") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  /* 迷路の画素 → ゲーム座標 */
+  function gx(x) { return (OX + x + 0.5) * (canvas.width / Math.max(1, PW)) / K; }
+  function gy(y) { return (OY + y + 0.5) * (canvas.width / Math.max(1, PW)) / K; }
+
+  function ring(x, y, r, color) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.lineWidth = 6; ctx.strokeStyle = "#fff"; ctx.stroke();
+    ctx.lineWidth = 3; ctx.strokeStyle = color; ctx.stroke();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    flush();
+    /* 迷路は画面の画素にそのまま1対1で描く */
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#16202e";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (layer) {
+      ctx.imageSmoothingEnabled = false;
+      var sc = canvas.width / Math.max(1, PW);
+      ctx.drawImage(layer, OX * sc, OY * sc, GW * sc, GH * sc);
+      ctx.imageSmoothingEnabled = true;
+    }
+    ctx.setTransform(K, 0, 0, K, 0, 0);
+
+    if (state !== S.INTRO && state !== S.BUILD) {
+      ring(gx(GW - 2), gy(GH - 1), 12, "#2ec27e");   /* 出口 */
+      ring(gx(player.x), gy(player.y), 9, "#ff3355");
+    }
+
+    /* 経過時間 */
+    if (state === S.PLAY || state === S.GOAL) {
+      ctx.save();
+      ctx.font = "800 44px sans-serif";
+      ctx.textAlign = "center";
+      ctx.lineWidth = 8; ctx.strokeStyle = "#16202e"; ctx.lineJoin = "round";
+      ctx.strokeText(secText(), W / 2, 64);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(secText(), W / 2, 64);
+      ctx.restore();
+    }
+    if (state === S.RESULT) drawResult();
+  }
+
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    var t = secText() + zT("秒", "s");
+    if (t.length > 7) ctx.font = "800 " + Math.floor(108 * 7 / t.length) + "px sans-serif";
+    ctx.fillText(t, W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, time: time, player: { x: player.x, y: player.y }, W: W, H: H, GW: GW, GH: GH }; },
+    maze: function () { return { GW: GW, GH: GH, open: open }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    drive: function (dx, dy) { drive(dx, dy); },
+    reset: function () { newRound(true); }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(4000);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(false); });
+  startButton.hidden = false;
+  shareButton.hidden = true;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
