@@ -115,6 +115,9 @@
   /* ============ 画素の壁 ============
      画面の上のほう（ゲーム座標 FY0〜FY1）に、画素を1つずつ並べる */
   var FY0 = 0, FY1R = 0.6;
+  /* はねる版（?bound）。画素は画面の下側で、玉がはねながら上から削っていく */
+  var BOUND = !!window.GASO_BOUND || /[?&]bound(&|$)/.test(location.search);
+  var BY0R = 0.38;
   var PW = 0, PH = 0, FX = 0, FY = 0, FW = 0, FH = 0;   /* 画素での位置と大きさ */
   var field = null, img = null, px32 = null, layer = null, lctx = null;
   var total = 0, broken = 0, PUNCH = 1000;
@@ -131,6 +134,7 @@
     PW = canvas.width; PH = canvas.height;
     FX = 0; FW = PW;
     FY = Math.round(FY0 * K); FH = Math.max(1, Math.round(H * FY1R * K) - FY);
+    if (BOUND) { FY = Math.round(H * BY0R * K); FH = Math.max(1, PH - FY); }
     field = new Uint8Array(FW * FH).fill(1);
     total = FW * FH; broken = 0;
     PUNCH = Math.max(200, Math.round(total * 0.006));
@@ -181,7 +185,7 @@
   var LIMIT = 30;
   var paddle = { x: W / 2, w: 120 };
   var balls = [];
-  var R = 7, SPEED = 400;
+  var R = BOUND ? 10 : 7, SPEED = 400;
   var keys = { l: 0, r: 0 };
   var crunchT = 0, eatFrame = 0;
 
@@ -206,10 +210,12 @@
     paddle.x = W / 2;
     items = []; beams = []; slashes = []; blasts = [];
     fx = { big: 0, laser: 0, drill: 0, bomb: false };
-    nextDrop = Math.round(total * DROP_RATE * 0.5); lastKind = "";
+    nextDrop = Math.round(total * DROP_RATE * (BOUND ? 0.2 : 0.5)); lastKind = "";
     serve();
   }
+  var GRAV = 2400, HOP = 1100, CRATER = 50;   /* はねる版：重力、はね上がる速さ、着地で削る半径 */
   function serve() {
+    if (BOUND) { balls = [{ x: W / 2, y: H * 0.12, vx: 0, vy: 0, on: false, wait: 0, punch: 1 }]; return; }
     balls = [{ x: paddle.x, y: paddleY() - R - 2, vx: 0, vy: 0, on: true, wait: 0.5, punch: PUNCH }];
   }
   function aim(ball, deg) {
@@ -250,11 +256,14 @@
     var k;
     do { k = KINDS[(Math.random() * KINDS.length) | 0]; } while (k === lastKind);
     lastKind = k;
-    items.push({ x: Math.max(24, Math.min(W - 24, (cx + FX) / K)), y: (cy + FY) / K, kind: k });
+    var it = { x: Math.max(24, Math.min(W - 24, (cx + FX) / K)), y: (cy + FY) / K, kind: k };
+    if (BOUND) { it.vx = (Math.random() - 0.5) * 500; it.vy = -500 - Math.random() * 300; }
+    items.push(it);
   }
 
   /* 玉のまわりの画素をくずす。掘れる量を使いきったら下へ戻る */
   function eat(ball) {
+    if (BOUND) { bounceEat(ball); return; }
     if (ball.punch <= 0) return;
     var cx = ball.x * K - FX, cy = ball.y * K - FY, r = R * K * 1.6 * (fx.big > 0 ? 3 : 1);
     var n = eatShape(cx, cy, r, r, true, ball.vx, ball.vy, "");
@@ -269,6 +278,25 @@
     if (fx.drill > 0) return;
     ball.punch -= n;
     if (ball.punch <= 0) { ball.vy = Math.abs(ball.vy); ball.punch = 0; }
+  }
+
+  /* はねる版：画素に触れたら、その場を丸く削ってはね上がる */
+  function bounceEat(ball) {
+    var big = fx.big > 0 ? 3 : 1;
+    var cx = ball.x * K - FX, cy = ball.y * K - FY, r = R * K * 1.2 * big;
+    var n = eatShape(cx, cy, r, r, true, 0, ball.vy, "");
+    if (!n || ball.vy <= 0) return;
+    if (fx.bomb) {
+      fx.bomb = false;
+      blasts.push({ x: ball.x, y: ball.y, t: 0 });
+      eatShape(cx, cy, 95 * K, 95 * K, true, 0, 0, "blast");
+      tone(90, 0.5, 0.25, "sawtooth", 40); crunch(0.5);
+    }
+    if (fx.drill > 0) return;   /* 掘り放題の間は、はねずに突き抜ける */
+    eatShape(cx, cy, CRATER * big * K, CRATER * big * K, true, 0, 0, "blast");
+    blasts.push({ x: ball.x, y: ball.y, t: 0.2 });
+    ball.vy = -HOP;
+    tone(200 + Math.random() * 60, 0.08, 0.1, "triangle", 120);
   }
 
   function take(kind) {
@@ -301,6 +329,7 @@
     if (time >= LIMIT || broken >= total) { time = Math.min(time, LIMIT); finish(); return; }
     var kv = (keys.r - keys.l) * 600 * dt;
     if (kv) paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, paddle.x + kv));
+    if (kv && BOUND) balls.forEach(function (b) { b.x = Math.max(R, Math.min(W - R, b.x + kv)); });
     fx.big = Math.max(0, fx.big - dt); fx.laser = Math.max(0, fx.laser - dt); fx.drill = Math.max(0, fx.drill - dt);
     var py = paddleY();
     for (var bi = balls.length - 1; bi >= 0; bi--) {
@@ -309,6 +338,15 @@
         ball.x = paddle.x; ball.y = py - R - 2;
         ball.wait -= dt;
         if (ball.wait <= 0) { ball.on = false; aim(ball, -90 + (Math.random() * 30 - 15)); }
+        continue;
+      }
+      if (BOUND) {
+        var m = Math.max(1, Math.ceil(Math.abs(ball.vy) * dt * K));   /* 1画素ずつ進める */
+        for (var q = 0; q < m; q++) {
+          ball.vy += GRAV * dt / m; ball.y += ball.vy * dt / m;
+          if (ball.y > H - R) { ball.y = H - R; ball.vy = -HOP; }
+          eat(ball);
+        }
         continue;
       }
       var n = Math.max(1, Math.ceil(SPEED * dt * K));   /* 1画素ずつ進める */
@@ -334,6 +372,16 @@
     /* 落ちてくるアイテム */
     for (var j = items.length - 1; j >= 0; j--) {
       var it = items[j];
+      if (BOUND) {
+        /* はねる版：削った所から飛び出して、しばらく宙に浮く。玉で触れると取れる */
+        it.vy = (it.vy || 0) * Math.pow(0.05, dt); it.vx = (it.vx || 0) * Math.pow(0.05, dt);
+        it.x = Math.max(20, Math.min(W - 20, it.x + it.vx * dt)); it.y += it.vy * dt;
+        it.life = (it.life || 0) + dt;
+        var b0 = balls[0], rr = R * (fx.big > 0 ? 3 : 1) + 18;
+        if (b0 && Math.hypot(b0.x - it.x, b0.y - it.y) < rr) { take(it.kind); items.splice(j, 1); continue; }
+        if (it.life > 6) items.splice(j, 1);
+        continue;
+      }
       it.y += 230 * dt;
       if (it.y + 14 >= py && it.y - 14 <= py + 16 && Math.abs(it.x - paddle.x) <= paddle.w / 2 + 20) { take(it.kind); items.splice(j, 1); continue; }
       if (it.y > H + 30) items.splice(j, 1);
@@ -341,6 +389,13 @@
     /* 光線。受け皿の両端から上へ、画素を縦にくずして抜ける */
     if (fx.laser > 0) {
       beamT -= dt;
+      if (beamT <= 0 && BOUND && balls[0]) {
+        /* はねる版：玉から真下へ */
+        beamT = 0.1;
+        beams.push({ x: balls[0].x - 8, y: balls[0].y, dir: 1 });
+        beams.push({ x: balls[0].x + 8, y: balls[0].y, dir: 1 });
+        tone(1800, 0.05, 0.03, "square", 900);
+      }
       if (beamT <= 0) {
         beamT = 0.1;
         beams.push({ x: paddle.x - paddle.w / 2 + 10, y: py });
@@ -349,10 +404,10 @@
       }
     }
     for (var b2 = beams.length - 1; b2 >= 0; b2--) {
-      var bm = beams[b2], ny = bm.y - 1500 * dt;
-      eatShape(bm.x * K - FX, ((bm.y + ny) / 2) * K - FY, 2.5 * K, (bm.y - ny) / 2 * K, false, 0, -300, "");
+      var bm = beams[b2], dir = bm.dir || -1, ny = bm.y + dir * 1500 * dt;
+      eatShape(bm.x * K - FX, ((bm.y + ny) / 2) * K - FY, 2.5 * K, Math.abs(bm.y - ny) / 2 * K, false, 0, dir * 300, "");
       bm.y = ny;
-      if (bm.y < -20) beams.splice(b2, 1);
+      if (bm.y < -20 || bm.y > H + 40) beams.splice(b2, 1);
     }
     /* 横一閃。左から右へ帯をくずしていく */
     for (var s2 = slashes.length - 1; s2 >= 0; s2--) {
@@ -400,6 +455,7 @@
     var dx = x - lastP.x;
     lastP = { x: x, y: y };
     paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, paddle.x + dx * 1.3));
+    if (BOUND) balls.forEach(function (b) { b.x = Math.max(R, Math.min(W - R, b.x + dx * 1.3)); });
   }
   function up() { held = false; lastP = null; }
 
@@ -418,7 +474,7 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (n === 1 && state === S.PLAY) time = LIMIT - 3;                 /* 残り3秒へ */
-    if (n === 2 && state === S.PLAY) { var k = KINDS[(KINDS.indexOf(lastKind) + 1) % KINDS.length]; lastKind = k; items.push({ x: paddle.x, y: paddleY() - 60, kind: k }); }   /* アイテムを順に落とす */
+    if (n === 2 && state === S.PLAY) { var k = KINDS[(KINDS.indexOf(lastKind) + 1) % KINDS.length]; lastKind = k; items.push(BOUND && balls[0] ? { x: balls[0].x, y: balls[0].y - 40, kind: k } : { x: paddle.x, y: paddleY() - 60, kind: k }); }   /* アイテムを順に落とす */
     if (n === 3 && state === S.PLAY) { broken = total; }               /* 全部くずした */
   }
 
@@ -483,11 +539,13 @@
 
     if (state !== S.INTRO) {
       /* 受け皿 */
-      roundRect(paddle.x - paddle.w / 2, paddleY(), paddle.w, 16, 8);
-      ctx.fillStyle = "#fff"; ctx.fill();
+      if (!BOUND) {
+        roundRect(paddle.x - paddle.w / 2, paddleY(), paddle.w, 16, 8);
+        ctx.fillStyle = "#fff"; ctx.fill();
+      }
       /* 玉。掘りきって戻ってくる間は暗く */
       /* 光線の砲台 */
-      if (fx.laser > 0) {
+      if (fx.laser > 0 && !BOUND) {
         ctx.fillStyle = KIND_COLOR.laser;
         ctx.fillRect(paddle.x - paddle.w / 2 + 6, paddleY() - 10, 8, 10);
         ctx.fillRect(paddle.x + paddle.w / 2 - 14, paddleY() - 10, 8, 10);
@@ -588,6 +646,7 @@
     now: function () { return { state: state, time: time, broken: broken, total: total, punch: PUNCH, sand: sand.length, balls: balls.map(function (b) { return { x: b.x, y: b.y, vy: b.vy }; }), paddle: paddle.x, W: W, H: H, PW: PW, PH: PH }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     paddle: function (x) { paddle.x = x; },
+    ballX: function (x) { if (balls[0]) balls[0].x = x; },
     items: function () { return items.length; },
     take: function (k) { take(k); },
     reset: function () { newRound(); }
