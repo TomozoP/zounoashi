@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="kodama-meiro-1791092485811">
+<meta name="preview-version" content="kodama-meiro-1791093203266">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>【プレビュー】こだま迷路</title>
@@ -32,21 +32,22 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/start.js?v=kodama-meiro-1791092485811"></script>
-<script src="../games/view.js?v=kodama-meiro-1791092485811"></script>
-<script src="../games/audio.js?v=kodama-meiro-1791092485811"></script>
-<script src="../games/lang.js?v=kodama-meiro-1791092485811"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=kodama-meiro-1791092485811"></script>
-<script src="../games/result-actions.js?v=kodama-meiro-1791092485811"></script>
-<script src="../games/action-icons.js?v=kodama-meiro-1791092485811"></script>
-<script src="../games/pad.js?v=kodama-meiro-1791092485811"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/start.js?v=kodama-meiro-1791093203266"></script>
+<script src="../games/view.js?v=kodama-meiro-1791093203266"></script>
+<script src="../games/audio.js?v=kodama-meiro-1791093203266"></script>
+<script src="../games/lang.js?v=kodama-meiro-1791093203266"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=kodama-meiro-1791093203266"></script>
+<script src="../games/result-actions.js?v=kodama-meiro-1791093203266"></script>
+<script src="../games/action-icons.js?v=kodama-meiro-1791093203266"></script>
+<script src="../games/pad.js?v=kodama-meiro-1791093203266"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* こだま迷路
 
-   真っ暗な迷路。声を出すと、玉から音の波が通路づたいに広がり、波が当たった壁が光る。
+   真っ暗な迷路。玉には向きがあり、声を出すと、その声が高くなって玉の前方へ飛んでいく。
+   音は粒になって進み、壁で跳ね返りながら届いた所の壁だけが光る（エコーロケーション）。
    大きな声ほど遠くまで届く。光った壁はすぐ暗くなり、うっすら跡だけ残る。
-   波が行き止まりに届くと「コン」、出口に届くと「キン」と、その方向から鳴る。
-   マイクが使えないときは、タップ（スペース）でも波を出せる。
+   音の粒が出口に届くと「キン」と、その方向から鳴る。
+   マイクが使えないときは、タップ（スペース）でも高い音を出せる。
    迷路の作りと操作は画像迷路と同じ（指をすべらせた分だけ玉が動く）。結果は出口までの秒数。 */
 (function () {
   "use strict";
@@ -105,7 +106,10 @@
 
   /* ============ マイク ============ */
   var mic = null, micSource = null, analyser = null, samples = null, micPending = false, micError = false;
+  /* 声を高くして鳴らすため、マイクの音を直近2秒ぶん貯めておく */
+  var tape = null, tapeLen = 0, tapePos = 0, tapeNode = null, tapeMute = null;
   function stopMic() {
+    if (tapeNode) { try { tapeNode.disconnect(); tapeMute.disconnect(); } catch (e) {} tapeNode = null; }
     if (micSource) { try { micSource.disconnect(); } catch (e) {} }
     if (mic) mic.getTracks().forEach(function (t) { t.stop(); });
     mic = micSource = analyser = null;
@@ -120,6 +124,17 @@
       mic = stream; analyser = AC.createAnalyser(); analyser.fftSize = 1024;
       samples = new Float32Array(analyser.fftSize);
       micSource = AC.createMediaStreamSource(stream); micSource.connect(analyser);
+      if (AC.createScriptProcessor) {
+        tapeLen = AC.sampleRate * 2; tape = new Float32Array(tapeLen); tapePos = 0;
+        tapeNode = AC.createScriptProcessor(2048, 1, 1);
+        tapeMute = AC.createGain(); tapeMute.gain.value = 0;
+        tapeNode.onaudioprocess = function (ev) {
+          var d = ev.inputBuffer.getChannelData(0);
+          for (var i = 0; i < d.length; i++) tape[(tapePos + i) % tapeLen] = d[i];
+          tapePos += d.length;
+        };
+        micSource.connect(tapeNode); tapeNode.connect(tapeMute); tapeMute.connect(AC.destination);
+      }
       stream.getTracks().forEach(function (t) { t.onended = function () { stopMic(); micError = true; }; });
     } catch (e) { stopMic(); micError = true; }
     finally { micPending = false; }
@@ -129,6 +144,27 @@
     if (document.hidden) stopMic();
     else if ((state === S.PLAY || state === S.BUILD) && !micError) requestMic();
   });
+  /* 貯めた声のうち、from〜to（tapePos の値）を高くして鳴らす。鳴り終わる秒数を返す */
+  var RATE = 1.75;
+  function playHigh(from, to, vol) {
+    if (!AC || !tape) return 0;
+    from = Math.max(from, tapePos - tapeLen + 1);
+    var n = to - from;
+    if (n < AC.sampleRate * 0.05) return 0;
+    var buf = AC.createBuffer(1, n, AC.sampleRate), d = buf.getChannelData(0), peak = 0.0001;
+    for (var i = 0; i < n; i++) { d[i] = tape[(from + i) % tapeLen]; peak = Math.max(peak, Math.abs(d[i])); }
+    for (var k = 0; k < n; k++) d[k] = d[k] / peak;   /* 大きさをそろえる */
+    var len = n / AC.sampleRate / RATE;
+    /* 本人の声のあと、小さくなりながら2回こだまする */
+    [[0, 1], [0.28, 0.35], [0.56, 0.12]].forEach(function (e) {
+      var src = AC.createBufferSource(), g = AC.createGain();
+      src.buffer = buf; src.playbackRate.value = RATE;
+      g.gain.value = vol * e[1];
+      src.connect(g); g.connect(AC.destination);
+      src.start(AC.currentTime + e[0]);
+    });
+    return len + 0.56;
+  }
   /* 声の大きさ 0〜1 */
   function readVoice() {
     if (!analyser) return 0;
@@ -204,53 +240,61 @@
     return n;
   }
 
-  /* ============ 音の波 ============
-     玉のマスから通路づたいに広がる。届く距離（マス）は声の大きさで決まる */
-  var WAVE_SPEED = 32, WAVE_MIN = 4, WAVE_MAX = 26, GLOW_FADE = 1.1, TRACE = 0.14;
-  var waves = [], hitsQ = [], clock = 0;
+  /* ============ 音の粒 ============
+     玉の向きを中心に扇形に飛ぶ。壁に当たると跳ね返り、当たった壁が光る。
+     跳ね返るたびに弱くなり、届く距離（マス）は声の大きさで決まる */
+  var SPEED = 30 * B, CONE = 0.55, RAYS = 70, REACH_MIN = 6, REACH_MAX = 34, BOUNCE_KEEP = 0.9, GLOW_FADE = 1.1, TRACE = 0.12;
+  var rays = [], clock = 0, exitHeard = false;
   function ping(level) {
-    var start = Math.floor(player.y / B) * G + Math.floor(player.x / B);
-    if (!open[start]) return;
-    var R = level >= 9 ? G * G : WAVE_MIN + (WAVE_MAX - WAVE_MIN) * Math.max(0, Math.min(1, level));
-    var dist = new Map(), q = [start], cells = [], ends = [];
-    dist.set(start, 0);
-    for (var h = 0; h < q.length; h++) {
-      var c = q[h], d = dist.get(c), cx = c % G, cy = (c / G) | 0;
-      cells.push(c, d);
-      if (c === EXIT) ends.push({ c: c, d: d, exit: true });
-      else if (d > 0 && c !== 1 && degree(c) === 1) ends.push({ c: c, d: d });
-      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (v) {
-        var X = cx + v[0], Y = cy + v[1];
-        if (X < 0 || Y < 0 || X >= G || Y >= G) return;
-        var m = Y * G + X;
-        if (open[m]) {
-          if (!dist.has(m) && d + 1 <= R) { dist.set(m, d + 1); q.push(m); }
-        } else hitsQ.push({ c: m, at: clock + (d + 0.5) / WAVE_SPEED });
-      });
+    level = Math.max(0, level);
+    var reach = level >= 9 ? 400 : REACH_MIN + (REACH_MAX - REACH_MIN) * Math.min(1, level);
+    var cone = level >= 9 ? Math.PI : CONE, count = level >= 9 ? 360 : RAYS;
+    for (var i = 0; i < count; i++) {
+      var a = facing + (count === 1 ? 0 : (i / (count - 1) * 2 - 1) * cone);
+      rays.push({ x: player.x, y: player.y, vx: Math.cos(a), vy: Math.sin(a), d: 0, max: reach * B, e: 1, hit: 0 });
     }
-    hitsQ.sort(function (a, b) { return a.at - b.at; });
-    waves.push({ t0: clock, R: Math.min(R, G * 2), cells: cells });
-    /* 出す音と、届いた先からの返事（近い行き止まり4つと出口） */
-    tone(520 + 380 * Math.min(1, level), 0.18, 0.07, "triangle", 300);
-    ends.sort(function (a, b) { return (b.exit ? 1 : 0) - (a.exit ? 1 : 0) || a.d - b.d; });
-    ends.slice(0, 5).forEach(function (e) {
-      var pan = ((e.c % G) + 0.5 - player.x / B) / 10, vol = Math.max(0.015, 0.09 * (1 - e.d / (WAVE_MAX + 6)));
-      var at = e.d / WAVE_SPEED * 2;   /* 行って返ってくる時間 */
-      if (e.exit) { tone(1568, 0.6, vol * 1.3, "sine", null, at, pan); tone(2093, 0.5, vol * 0.8, "sine", null, at + 0.06, pan); }
-      else tone(980, 0.09, vol, "square", 700, at, pan);
-    });
+    exitHeard = false;
     shouts++;
   }
+  function cellOf(x, y) { var bx = Math.floor(x / B), by = Math.floor(y / B); return (bx < 0 || by < 0 || bx >= G || by >= G) ? -1 : by * G + bx; }
+  function solid(c) { return c < 0 || !open[c]; }
+  function glow(c, e) { if (c >= 0) { light[c] = Math.max(light[c], e); seen[c] = 1; } }
+  function stepRays(dt) {
+    var go = SPEED * dt, sub = B / 3;
+    rays.forEach(function (r) {
+      for (var left = go; left > 0 && r.e > 0; left -= sub) {
+        var s = Math.min(sub, left), fade = Math.max(0, 1 - r.d / r.max);
+        var nx = r.x + r.vx * s, cx = cellOf(nx, r.y);
+        if (solid(cx)) { glow(cx, Math.min(1, 0.3 + r.e) * fade); r.vx = -r.vx; r.e *= BOUNCE_KEEP; r.hit++; }
+        else r.x = nx;
+        var ny = r.y + r.vy * s, cy = cellOf(r.x, ny);
+        if (solid(cy)) { glow(cy, Math.min(1, 0.3 + r.e) * fade); r.vy = -r.vy; r.e *= BOUNCE_KEEP; r.hit++; }
+        else r.y = ny;
+        r.d += s;
+        if (r.d > r.max || r.e < 0.05) r.e = 0;
+        if (!exitHeard && cellOf(r.x, r.y) === EXIT && state === S.PLAY) {
+          exitHeard = true;
+          var pan = (r.x - player.x) / (B * 10), vol = Math.max(0.02, 0.1 * fade);
+          tone(1568, 0.6, vol, "sine", null, 0, pan); tone(2093, 0.5, vol * 0.7, "sine", null, 0.06, pan);
+        }
+      }
+    });
+    rays = rays.filter(function (r) { return r.e > 0; });
+  }
+
+  /* マイクの代わりの高い声 */
+  function chirp() { tone(1400, 0.16, 0.08, "triangle", 2200); tone(1400, 0.16, 0.03, "triangle", 2200, 0.28); }
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", BUILD: "build", PLAY: "play", GOAL: "goal", RESULT: "result" };
   var state, T, held = false, keyMode = false, time = 0;
   var player = { x: 0, y: 0 };
-  var shouts = 0, voice = 0, talking = false, talkT = 0, talkPeak = 0, quietT = 0, nextPing = 0;
+  var shouts = 0, voice = 0, talking = false, talkT = 0, talkPeak = 0, quietT = 0, talkFrom = 0, deaf = 0;
+  var facing = Math.PI / 2;                   /* 玉の向き（はじめは下） */
   var keys = { l: 0, r: 0, u: 0, d: 0 };
   var BX = 0, BY = 0;                         /* 迷路の左上 */
   var R_PLAYER = 3.5, BUILD_TIME = 0.4;
-  var VOICE_ON = 0.16, VOICE_OFF = 0.07, REPING = 0.55;
+  var VOICE_ON = 0.16, VOICE_OFF = 0.07, TALK_MAX = 1.0;
 
   function place() {
     BX = Math.round((W - BOARD) / 2);
@@ -266,8 +310,9 @@
     held = false;
     keys = { l: 0, r: 0, u: 0, d: 0 };
     player.x = 1.5 * B; player.y = 0.5 * B;
-    shouts = 0; talking = false; voice = 0;
-    waves = []; hitsQ = [];
+    shouts = 0; talking = false; voice = 0; deaf = 0;
+    facing = Math.PI / 2;
+    rays = [];
     light.fill(0); seen.fill(0);
     buildMaze();
     if (!micError) requestMic();
@@ -316,6 +361,11 @@
   function moveBy(dx, dy) {
     if (state !== S.PLAY) return;
     var n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / 2));
+    if (Math.abs(dx) + Math.abs(dy) > 0.3) {
+      /* 向きは動いた方へ少しずつ回る */
+      var want = Math.atan2(dy, dx), diff = Math.atan2(Math.sin(want - facing), Math.cos(want - facing));
+      facing += diff * Math.min(1, (Math.abs(dx) + Math.abs(dy)) / 6);
+    }
     for (var i = 0; i < n; i++) { moveAxis(dx / n, 0); moveAxis(0, dy / n); }
     if (player.y > (G - 1) * B + B * 0.3) goal();
   }
@@ -326,6 +376,7 @@
     stopMic();
     ping(99);
     shouts--;
+    exitHeard = true;
     [523.25, 659.25, 783.99, 1046.5].forEach(function (f, j) { tone(f, 1.4, 0.07, "triangle", null, 0.1 + j * 0.09); });
   }
 
@@ -333,12 +384,11 @@
   function update(dt) {
     clock += dt;
     bumpCool -= dt;
-    while (hitsQ.length && hitsQ[0].at <= clock) { var h = hitsQ.shift(); light[h.c] = 1; seen[h.c] = 1; }
+    stepRays(dt);
     for (var i = 0; i < light.length; i++) if (light[i] > 0) light[i] = Math.max(0, light[i] - dt / GLOW_FADE);
-    waves = waves.filter(function (w) { return (clock - w.t0) * WAVE_SPEED < w.R + 2; });
     if (state === S.BUILD) {
       T += dt;
-      if (T >= BUILD_TIME) { state = S.PLAY; T = 0; ping(0.5); shouts = 0; }
+      if (T >= BUILD_TIME) { state = S.PLAY; T = 0; ping(0.3); shouts = 0; }
       return;
     }
     if (state === S.GOAL) {
@@ -348,16 +398,23 @@
     }
     if (state !== S.PLAY) return;
     time += dt;
-    /* 声。出し始めて少ししたら、それまでで一番大きい声の分だけ波を出す。出し続けると何度も出る */
-    var v = readVoice();
+    /* 声。言い終わったら（長くても1秒で区切る）、その声を高くして鳴らし、一番大きかった分だけ音の粒を飛ばす。
+       自分の鳴らした声をマイクが拾わないよう、鳴っている間は聞かない */
+    deaf -= dt;
+    var v = deaf > 0 ? 0 : readVoice();
     voice += (v - voice) * Math.min(1, dt * 20);
-    if (!talking && v > VOICE_ON) { talking = true; talkT = 0; talkPeak = v; quietT = 0; nextPing = 0.1; }
+    if (!talking && v > VOICE_ON) { talking = true; talkT = 0; talkPeak = v; quietT = 0; talkFrom = tapePos - Math.floor((AC ? AC.sampleRate : 44100) * 0.08); }
     if (talking) {
       talkT += dt;
       talkPeak = Math.max(talkPeak, v);
-      if (talkT >= nextPing) { ping(talkPeak); talkPeak = 0; nextPing = talkT + REPING; }
       quietT = v < VOICE_OFF ? quietT + dt : 0;
-      if (quietT > 0.12) talking = false;
+      if (quietT > 0.12 || talkT > TALK_MAX) {
+        talking = false;
+        var len = playHigh(talkFrom, tapePos, 0.5);
+        if (!len) chirp();
+        deaf = (len || 0.3) + 0.15;
+        ping(talkPeak);
+      }
     }
     var sp = 200 * dt;
     if (keys.l || keys.r || keys.u || keys.d) moveBy((keys.r - keys.l) * sp, (keys.d - keys.u) * sp);
@@ -374,7 +431,7 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (x == null) { if (state === S.PLAY) ping(0.55); return; }
+    if (x == null) { if (state === S.PLAY) chirp(); ping(0.55); return; }
     held = true;
     lastP = { x: x, y: y };
     downAt = clock; moved = 0;
@@ -387,7 +444,7 @@
     moveBy(dx * 1.1, dy * 1.1);
   }
   function up() {
-    if (held && lastP && moved < 8 && clock - downAt < 0.3 && state === S.PLAY) ping(0.55);
+    if (held && lastP && moved < 8 && clock - downAt < 0.3 && state === S.PLAY) { chirp(); ping(0.55); }
     held = false; lastP = null;
   }
 
@@ -475,17 +532,14 @@
         ctx.fillStyle = "rgba(200,230,255," + a.toFixed(3) + ")";
         ctx.fillRect((c % G) * B, ((c / G) | 0) * B, B, B);
       }
-      /* 通路を進む波 */
-      waves.forEach(function (w) {
-        var front = (clock - w.t0) * WAVE_SPEED;
-        for (var i = 0; i < w.cells.length; i += 2) {
-          var d = w.cells[i + 1], k = front - d;
-          if (k < 0 || k > 2.5) continue;
-          var al = 0.55 * (1 - k / 2.5) * (1 - 0.6 * d / (w.R + 1));
-          ctx.fillStyle = "rgba(120,200,255," + al.toFixed(3) + ")";
-          ctx.fillRect((w.cells[i] % G) * B, ((w.cells[i] / G) | 0) * B, B, B);
-        }
+      /* 飛んでいく音の粒 */
+      ctx.fillStyle = "rgba(150,215,255,.75)";
+      rays.forEach(function (r) {
+        var sz = 2 + 1.5 * r.e;
+        ctx.globalAlpha = Math.max(0.15, r.e * (1 - r.d / r.max));
+        ctx.fillRect(r.x - sz / 2, r.y - sz / 2, sz, sz);
       });
+      ctx.globalAlpha = 1;
       /* 玉。声の大きさで輪が広がる */
       if (state === S.PLAY && voice > 0.03) {
         ctx.beginPath();
@@ -496,6 +550,14 @@
       ctx.beginPath();
       ctx.arc(player.x, player.y, R_PLAYER + 1.5, 0, Math.PI * 2);
       ctx.fillStyle = "#fff"; ctx.fill();
+      /* 向き */
+      ctx.save();
+      ctx.translate(player.x, player.y);
+      ctx.rotate(facing);
+      ctx.beginPath();
+      ctx.moveTo(R_PLAYER + 6.5, 0); ctx.lineTo(R_PLAYER + 2, -3.5); ctx.lineTo(R_PLAYER + 2, 3.5); ctx.closePath();
+      ctx.fill();
+      ctx.restore();
     }
     ctx.restore();
 
@@ -547,7 +609,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, time: time, player: { x: player.x, y: player.y }, W: W, H: H, shouts: shouts, mic: !!mic, micError: micError, waves: waves.length }; },
+    now: function () { return { state: state, time: time, player: { x: player.x, y: player.y }, W: W, H: H, shouts: shouts, mic: !!mic, micError: micError, rays: rays.length, facing: facing }; },
     maze: function () { return { G: G, B: B, open: Array.prototype.slice.call(open) }; },
     seen: function () { var n = 0; for (var i = 0; i < seen.length; i++) n += seen[i]; return n; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
@@ -594,11 +656,11 @@
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=kodama-meiro-1791092485811" : "./recorder-ui.js?v=kodama-meiro-1791092485811";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=kodama-meiro-1791093203266" : "./recorder-ui.js?v=kodama-meiro-1791093203266";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=kodama-meiro-1791092485811"></script>
-<script src="./preview-header.js?v=kodama-meiro-1791092485811"></script>
+<script src="./auto-reload.js?v=kodama-meiro-1791093203266"></script>
+<script src="./preview-header.js?v=kodama-meiro-1791093203266"></script>
 </body>
 </html>
