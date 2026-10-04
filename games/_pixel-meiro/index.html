@@ -162,11 +162,10 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", BUILD: "build", PLAY: "play", GOAL: "goal", RESULT: "result" };
   var state = S.INTRO, T = 0, held = false, keyMode = false, time = 0, lastTick = -1;
-  var player = { x: 1, y: 0 }, lastDir = 2, acc = { x: 0, y: 0 };
-  var keys = { l: 0, r: 0, u: 0, d: 0 };
+  var player = { x: 1, y: 0 }, lastDir = 2, running = -1, runAcc = 0;
   var BUILD_TIME = 1.4;
-  var SENS = 1.6;          /* なぞった画素に対して進む画素 */
-  var KEY_SPEED = 360;     /* キーで進む速さ（画素/秒） */
+  var RUN_SPEED = 1200;    /* 走る速さ（画素/秒） */
+  var FLICK = 22;          /* これだけなぞったらフリック（ゲーム座標） */
   var DX = [1, -1, 0, 0], DY = [0, 0, 1, -1], BACK = [1, 0, 3, 2];
 
   function newRound(fresh) {
@@ -180,8 +179,7 @@
     time = 0;
     held = false;
     lastTick = -1;
-    keys = { l: 0, r: 0, u: 0, d: 0 };
-    acc.x = acc.y = 0;
+    running = -1; runAcc = 0;
     player.x = 1; player.y = 0; lastDir = 2;
   }
 
@@ -194,36 +192,28 @@
     dirty = true;
   }
 
-  /* なぞった分だけ1画素ずつ進む。
-     行き止まりでなく曲がるだけの角は、そのまま道なりに曲がる。 */
-  function drive(ax, ay) {
+  /* フリックした向きへ走り出す。曲がるだけの角は道なりに進み、分かれ道か行き止まりで止まる */
+  function flick(d) {
     if (state !== S.PLAY) return;
-    acc.x += ax; acc.y += ay;
-    var lim = 4000;
-    while (lim-- > 0) {
-      var mx = Math.abs(acc.x), my = Math.abs(acc.y);
-      if (Math.max(mx, my) < 1) break;
-      var horiz = mx >= my;
-      var pd = horiz ? (acc.x > 0 ? 0 : 1) : (acc.y > 0 ? 2 : 3);
-      var sv = horiz ? acc.y : acc.x;
-      var sd = Math.abs(sv) > 0.3 ? (horiz ? (sv > 0 ? 2 : 3) : (sv > 0 ? 0 : 1)) : -1;
-      var go = -1;
-      if (isOpen(player.x + DX[pd], player.y + DY[pd])) go = pd;
-      else if (sd >= 0 && isOpen(player.x + DX[sd], player.y + DY[sd])) go = sd;
-      else {
-        var only = -1, cnt = 0;
-        for (var d = 0; d < 4; d++) {
-          if (d === BACK[lastDir]) continue;
-          if (isOpen(player.x + DX[d], player.y + DY[d])) { only = d; cnt++; }
-        }
-        if (cnt === 1) go = only;
+    if (!isOpen(player.x + DX[d], player.y + DY[d])) { tone(140, 0.05, 0.05, "square"); return; }
+    running = d; runAcc = 0;
+    tone(520, 0.04, 0.05, "triangle");
+  }
+  function runStep() {
+    var go = -1;
+    if (running >= 0) { go = running; running = -2; }   /* 走り出しの1歩はフリックの向き */
+    else {
+      var cnt = 0;
+      for (var d = 0; d < 4; d++) {
+        if (d === BACK[lastDir]) continue;
+        if (isOpen(player.x + DX[d], player.y + DY[d])) { go = d; cnt++; }
       }
-      if (go < 0) { if (horiz) acc.x = 0; else acc.y = 0; continue; }
-      if (horiz) acc.x -= acc.x > 0 ? 1 : -1; else acc.y -= acc.y > 0 ? 1 : -1;
-      stepDir(go);
-      if (player.y === GH - 1) { goal(); return; }
+      if (cnt !== 1) go = -1;
     }
-    acc.x = Math.max(-2, Math.min(2, acc.x)); acc.y = Math.max(-2, Math.min(2, acc.y));
+    if (go < 0) { running = -1; return false; }
+    stepDir(go);
+    if (player.y === GH - 1) { running = -1; goal(); return false; }
+    return true;
   }
   function goal() {
     state = S.GOAL;
@@ -252,12 +242,14 @@
     }
     if (state !== S.PLAY) return;
     time += dt;
-    var sp = KEY_SPEED * dt;
-    if (keys.l || keys.r || keys.u || keys.d) drive((keys.r - keys.l) * sp, (keys.d - keys.u) * sp);
+    if (running !== -1) {
+      runAcc += RUN_SPEED * dt;
+      while (runAcc >= 1 && running !== -1) { runAcc -= 1; runStep(); }
+    }
   }
 
   /* ============ 入力 ============
-     指をすべらせた分だけ進む（指で迷路が隠れないよう、どこをなぞってもよい） */
+     どこをなぞってもよい。上下左右にはじくと、その向きへ走る */
   var lastP = null;
   function down(x, y) {
     if (state === S.INTRO) return;
@@ -273,9 +265,9 @@
   function move(x, y) {
     if (!held || !lastP) return;
     var dx = x - lastP.x, dy = y - lastP.y;
-    lastP = { x: x, y: y };
-    var s = K * SENS * PW / canvas.width;   /* 画素に直す */
-    drive(dx * s, dy * s);
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < FLICK) return;
+    held = false;   /* 1回なぞるごとに1回 */
+    flick(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 0 : 1) : (dy > 0 ? 2 : 3));
   }
   function up() { held = false; lastP = null; }
 
@@ -289,7 +281,7 @@
   });
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
   wrap.addEventListener("pointercancel", function () { up(); });
-  window.addEventListener("blur", function () { up(); keys = { l: 0, r: 0, u: 0, d: 0 }; });
+  window.addEventListener("blur", function () { up(); });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
@@ -297,23 +289,23 @@
     if (n === 3 && state === S.PLAY) { time += 3; goal(); }                                  /* クリア */
   }
 
-  var KEYMAP = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r", ArrowUp: "u", w: "u", W: "u", ArrowDown: "d", s: "d", S: "d" };
+  var KEYMAP = { ArrowLeft: 1, a: 1, A: 1, ArrowRight: 0, d: 0, D: 0, ArrowUp: 3, w: 3, W: 3, ArrowDown: 2, s: 2, S: 2 };
   window.addEventListener("keydown", function (e) {
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
     var dir = KEYMAP[e.key];
-    if (!esc && !go && !dir) return;
+    if (!esc && !go && dir == null) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat && state !== S.INTRO) newRound(true); return; }
-    if (dir) { keys[dir] = 1; return; }
+    if (dir != null) { if (!e.repeat) flick(dir); return; }
     if (e.repeat) return;
     down();
   });
   window.addEventListener("keyup", function (e) {
     var dir = KEYMAP[e.key];
-    if (dir) { keys[dir] = 0; return; }
+    if (dir != null) return;
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
   });
 
@@ -465,7 +457,8 @@
     now: function () { return { state: state, time: time, player: { x: player.x, y: player.y }, W: W, H: H, GW: GW, GH: GH }; },
     maze: function () { return { GW: GW, GH: GH, open: open }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
-    drive: function (dx, dy) { drive(dx, dy); },
+    flick: function (d) { flick(d); },
+    running: function () { return running; },
     reset: function () { newRound(true); }
   };
 
