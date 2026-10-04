@@ -33,6 +33,8 @@
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="ramen3d.js"></script>
 <script>
 /* 無限マシマシ
 
@@ -125,6 +127,10 @@
   function cm() { return Math.round((layers.length - 1) * LAYER / PX_CM); }
   function speed() { return Math.min(640, 250 + 7 * (layers.length - 1)); }
 
+  /* 立体の場面。three.js が使えないときは平面の絵のまま */
+  var scene3d = null, uid = 0;
+  try { if (window.THREE && window.RamenScene) scene3d = new window.RamenScene(); } catch (e) { scene3d = null; }
+
   var seed = 1;
   function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
 
@@ -140,13 +146,14 @@
     falling = null; spills = []; combo = 0;
     ending = false; endT = 0; endFrom = null;
     zoom = 1; camY = H * 0.1; shake = 0; flash = 0;
+    if (scene3d) { try { scene3d.reset(); } catch (e) { scene3d = null; } }
   }
 
   /* ============ ヤサイの山（一段ずつ絵にしておく） ============ */
   var KINDS = ["yasai", "yasai", "kyabetsu", "yasai", "ninniku", "yasai", "abura", "yasai", "kyabetsu", "abura", "yasai", "ninniku"];
   function addLayer(x, w, i) {
     var kind = i === 0 ? "yasai" : KINDS[i % KINDS.length];
-    var L = { x: x, w: w, kind: kind, img: makeClump(w, kind, i), pop: i ? 1 : 0 };
+    var L = { x: x, w: w, kind: kind, img: scene3d ? null : makeClump(w, kind, i), pop: i ? 1 : 0 };
     layers.push(L);
     return L;
   }
@@ -268,8 +275,8 @@
   function drop() {
     if (ending || falling) return;
     var L = top();
-    falling = { x: handX, w: L.w, y: topY() + HAND_UP, vy: 0, kind: KINDS[layers.length % KINDS.length] };
-    falling.img = makeClump(L.w, falling.kind, layers.length);
+    falling = { id: ++uid, x: handX, w: L.w, y: topY() + HAND_UP, vy: 0, kind: KINDS[layers.length % KINDS.length] };
+    if (!scene3d) falling.img = makeClump(L.w, falling.kind, layers.length);
     tone(300, 0.1, 0.05, "triangle", 160);
   }
 
@@ -280,7 +287,7 @@
     var hi = Math.min(f.x + f.w / 2, L.x + L.w / 2);
     if (hi - lo <= 4) {
       /* 外れ */
-      spills.push({ x: f.x, y: topY(), vx: (f.x - L.x) * 1.5, vy: 0, r: 0, vr: (f.x > L.x ? -1 : 1) * 2, img: f.img });
+      spills.push({ id: ++uid, w: f.w, kind: f.kind, x: f.x, y: topY(), vx: (f.x - L.x) * 1.5, vy: 0, r: 0, vr: (f.x > L.x ? -1 : 1) * 2, img: f.img });
       ending = true; endT = 0; shake = 1;
       score = cm();
       noiseHit(0.5, 260, 0.5, 0.7);
@@ -301,7 +308,7 @@
       /* はみ出した分がこぼれる */
       var cutW = f.w - w;
       var cx = dx > 0 ? hi + cutW / 2 : lo - cutW / 2;
-      spills.push({ x: cx, y: topY(), vx: (dx > 0 ? 1 : -1) * (60 + rnd() * 80), vy: -120, r: 0, vr: (dx > 0 ? 1 : -1) * 3, img: makeClump(cutW, f.kind, layers.length + 500) });
+      spills.push({ id: ++uid, w: cutW, kind: f.kind, x: cx, y: topY(), vx: (dx > 0 ? 1 : -1) * (60 + rnd() * 80), vy: -120, r: 0, vr: (dx > 0 ? 1 : -1) * 3, img: scene3d ? null : makeClump(cutW, f.kind, layers.length + 500) });
     }
     noiseHit(0.18, 700, 0.35, 0.8);
     noiseHit(0.12, 2400, 0.12, 1.2, 0.03);
@@ -563,6 +570,7 @@
   }
 
   function drawClump(img, x, yBase, scaleY, rot) {
+    if (!img) return;
     var w = img.w * zoom, h = img.h * zoom;
     ctx.save();
     ctx.translate(sx(x), sy(yBase));
@@ -609,20 +617,29 @@
     ctx.clearRect(0, 0, W, H);
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 10 * shake, (Math.random() - 0.5) * 6 * shake);
-    drawBack();
-    drawCounter();
-    drawBowlBack();
-    drawPile();
-    drawBowlFront();
-    if (falling) drawClump(falling.img, falling.x, falling.y, 1);
-    for (var i = 0; i < spills.length; i++) {
-      var s = spills[i];
-      drawClump(s.img, s.x, s.y, 1, s.r);
+    var drawn3d = false;
+    if (scene3d) {
+      try {
+        scene3d.render(ctx, W, H, { layers: layers, camY: camY, zoom: zoom, handX: handX, handUp: HAND_UP, holdW: top().w, holdKind: KINDS[layers.length % KINDS.length], n: layers.length, falling: falling, spills: spills, ending: ending, intro: state === S.INTRO });
+        drawn3d = true;
+      } catch (e) { scene3d = null; }
     }
-    if (state !== S.INTRO) drawHand();
+    if (!drawn3d) {
+      drawBack();
+      drawCounter();
+      drawBowlBack();
+      drawPile();
+      drawBowlFront();
+      if (falling) drawClump(falling.img, falling.x, falling.y, 1);
+      for (var i = 0; i < spills.length; i++) {
+        var s = spills[i];
+        drawClump(s.img, s.x, s.y, 1, s.r);
+      }
+      if (state !== S.INTRO) drawHand();
+    }
     ctx.restore();
 
-    if (flash > 0 && state === S.PLAY) {
+    if (!drawn3d && flash > 0 && state === S.PLAY) {
       var L = top();
       ctx.strokeStyle = "rgba(255,255,255," + flash + ")";
       ctx.lineWidth = 4;
@@ -698,7 +715,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, layers: layers.length, w: top().w, handX: handX, falling: !!falling, ending: ending, W: W, H: H }; },
+    now: function () { return { threeD: !!scene3d, state: state, score: score, layers: layers.length, w: top().w, handX: handX, falling: !!falling, ending: ending, W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
