@@ -42,7 +42,8 @@
    音の粒が出口に届くと「キン」と、その方向から鳴る。
    マイクが使えないときは、タップ（スペース）でも高い音を出せる。
    迷路には楽器が5つ置いてある。触れると、その楽器がその場所から自分のパートを鳴らし続ける
-   （近いほど大きく、左右はその方向から）。ゴールすると全パートがそろって曲が完成する。
+   （近いほど大きく、左右はその方向から）。鳴っている楽器からも拍ごとに音の粒が広がり、まわりの道が見える。
+   ゴールすると全パートがそろって曲が完成する。
    迷路の作りは画像迷路と同じ。触った所に出るジョイスティックで玉を動かす。結果は出口までの秒数。 */
 (function () {
   "use strict";
@@ -302,13 +303,16 @@
     if (st === 0 || st === 8) ch.forEach(function (c) { note(2, hz(c - 12), at, STEP * 7.5, 0.06, "triangle"); });  /* 和音 */
     if (MELODY[n] >= 0) note(3, hz(MELODY[n]), at, STEP * 2.5, 0.09, "square");                                    /* 旋律 */
     if (st % 2 === 1) note(4, hz(ch[(st >> 1) % 3] + 24), at, STEP * 1.5, 0.05, "sine");                            /* きらきら */
-    insts.forEach(function (it, i) { if (it.got && ((i === 1 && st % 4 === 0) || (i !== 1 && st % 8 === 0))) it.pulseAt = at; });
+    insts.forEach(function (it, i) { if (it.got && st % 8 === (i * 2) % 8) it.pulseAt = at; });   /* 楽器ごとに少しずらす */
   }
   /* 鳴らす予定を少し先まで入れておく。パートの大きさと左右は、玉からの距離と方向で決める */
   function updateMusic() {
     if (!music) return;
     while (nextStepAt < AC.currentTime + 0.15) { playStep(stepNo, nextStepAt); nextStepAt += STEP; stepNo = (stepNo + 1) % LOOP; }
     var done = state === S.GOAL || state === S.RESULT;
+    if (state === S.PLAY) insts.forEach(function (it, i) {
+      if (it.got && it.pulseAt != null && it.pulseAt <= AC.currentTime && it.pinged !== it.pulseAt) { it.pinged = it.pulseAt; instPing(it, PARTS[i].color); }
+    });
     insts.forEach(function (it, i) {
       var g = music[i], vol = 0, pan = 0;
       if (done) vol = 1;
@@ -351,24 +355,32 @@
     exitHeard = false;
     shouts++;
   }
+  /* 鳴っている楽器からも、拍ごとに音の粒がまわりへ広がる（楽器のまわりの道が見える） */
+  var INST_RAYS = 40, INST_REACH = 7;
+  function instPing(it, col) {
+    for (var i = 0; i < INST_RAYS; i++) {
+      var a = (i + Math.random() * 0.5) / INST_RAYS * Math.PI * 2;
+      rays.push({ x: it.x, y: it.y, vx: Math.cos(a), vy: Math.sin(a), d: 0, max: INST_REACH * B, e: 0.75, hit: 0, inst: col });
+    }
+  }
   function cellOf(x, y) { var bx = Math.floor(x / B), by = Math.floor(y / B); return (bx < 0 || by < 0 || bx >= G || by >= G) ? -1 : by * G + bx; }
   function solid(c) { return c < 0 || !open[c]; }
   /* 壁の面の点 (x, y) を光らせる。vertical: 縦の面か */
-  function glow(x, y, vertical, e) { if (marks.length < 9000) marks.push({ x: x, y: y, v: vertical, e: e, t: 0 }); }
+  function glow(x, y, vertical, e, col) { if (marks.length < 9000) marks.push({ x: x, y: y, v: vertical, e: e, t: 0, c: col }); }
   function stepRays(dt) {
     var go = SPEED * dt, sub = B / 3;
     rays.forEach(function (r) {
       for (var left = go; left > 0 && r.e > 0; left -= sub) {
         var s = Math.min(sub, left), fade = Math.max(0, 1 - r.d / r.max);
         var nx = r.x + r.vx * s, cx = cellOf(nx, r.y);
-        if (solid(cx)) { glow(r.vx > 0 ? Math.floor(nx / B) * B : (Math.floor(nx / B) + 1) * B, r.y, true, Math.min(1, 0.3 + r.e) * fade); r.vx = -r.vx; r.e *= BOUNCE_KEEP; r.hit++; }
+        if (solid(cx)) { glow(r.vx > 0 ? Math.floor(nx / B) * B : (Math.floor(nx / B) + 1) * B, r.y, true, Math.min(1, 0.3 + r.e) * fade, r.inst); r.vx = -r.vx; r.e *= BOUNCE_KEEP; r.hit++; }
         else r.x = nx;
         var ny = r.y + r.vy * s, cy = cellOf(r.x, ny);
-        if (solid(cy)) { glow(r.x, r.vy > 0 ? Math.floor(ny / B) * B : (Math.floor(ny / B) + 1) * B, false, Math.min(1, 0.3 + r.e) * fade); r.vy = -r.vy; r.e *= BOUNCE_KEEP; r.hit++; }
+        if (solid(cy)) { glow(r.x, r.vy > 0 ? Math.floor(ny / B) * B : (Math.floor(ny / B) + 1) * B, false, Math.min(1, 0.3 + r.e) * fade, r.inst); r.vy = -r.vy; r.e *= BOUNCE_KEEP; r.hit++; }
         else r.y = ny;
         r.d += s;
         if (r.d > r.max || r.e < 0.05) r.e = 0;
-        if (!exitHeard && cellOf(r.x, r.y) === EXIT && state === S.PLAY) {
+        if (!r.inst && !exitHeard && cellOf(r.x, r.y) === EXIT && state === S.PLAY) {
           exitHeard = true;
           var pan = (r.x - player.x) / (B * 10), vol = Math.max(0.02, 0.1 * fade);
           tone(1568, 0.6, vol, "sine", null, 0, pan); tone(2093, 0.5, vol * 0.7, "sine", null, 0.06, pan);
@@ -670,6 +682,7 @@
         var a = m.e * (1 - m.t / GLOW_FADE);
         if (a <= 0.01) return;
         ctx.globalAlpha = Math.min(1, a);
+        ctx.strokeStyle = m.c || "rgb(150,205,255)";
         ctx.beginPath();
         /* 線は当たった壁のマスの中に収める（角からはみ出さない） */
         var k = m.v ? m.y : m.x, lo = Math.floor(k / B) * B, a0 = Math.max(lo, k - hl), a1 = Math.min(lo + B, k + hl);
@@ -680,8 +693,8 @@
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
       /* 飛んでいく音の粒 */
-      ctx.fillStyle = "rgba(150,215,255,.75)";
       rays.forEach(function (r) {
+        ctx.fillStyle = r.inst || "rgba(150,215,255,.75)";
         var sz = 2 + 1.5 * r.e;
         ctx.globalAlpha = Math.max(0.15, r.e * (1 - r.d / r.max));
         ctx.fillRect(r.x - sz / 2, r.y - sz / 2, sz, sz);
