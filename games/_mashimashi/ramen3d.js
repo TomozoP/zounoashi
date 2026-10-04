@@ -478,7 +478,7 @@
   };
   var SKY = [[0x8c, 0xc9, 0xf0], [0x46, 0x78, 0xc8], [0x0c, 0x10, 0x30], [0x02, 0x02, 0x0a]];
   function skyColor(y) {
-    var t = Math.max(0, (y - CEIL) / 9000), i = Math.min(2, Math.floor(t)), f = Math.min(1, t - i);
+    var t = Math.max(0, (y - CEIL) / 9000) || 0, i = Math.min(2, Math.floor(t)), f = Math.min(1, t - i);
     var a = SKY[i], b = SKY[i + 1];
     return new T.Color((a[0] + (b[0] - a[0]) * f) / 255, (a[1] + (b[1] - a[1]) * f) / 255, (a[2] + (b[2] - a[2]) * f) / 255);
   }
@@ -499,6 +499,7 @@
   RamenScene.prototype.render = function (ctx, W, H, st) {
     var dpr = Math.min(1.5, global.devicePixelRatio || 1);
     var w = Math.round(W * dpr), h = Math.round(H * dpr);
+    if (!(w >= 2 && h >= 2)) return false;     /* 画面の大きさが決まる前（0や数でない）は描かない */
     if (w !== this.w || h !== this.h) {
       this.renderer.setSize(w, h, false);
       this.w = w; this.h = h;
@@ -604,6 +605,7 @@
     }
     ctx.fillStyle = this.vig.g;
     ctx.fillRect(0, 0, W, H);
+    return true;
   };
 
   global.RamenScene = RamenScene;

@@ -54,6 +54,8 @@
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
+    /* 開始前に画面の大きさが変わったら（開いた直後は0のことがある）、カメラを置き直す */
+    if ((!state || state === S.INTRO) && isFinite(H) && H > 0) camY = H * 0.1;
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
   }
   window.addEventListener("resize", layout);
@@ -131,8 +133,17 @@
   function speed() { return Math.min(1100, 240 + 16 * (layers.length - 1)); }   /* 高くなるほど速い */
 
   /* 立体の場面。three.js が使えないときは平面の絵のまま */
-  var scene3d = null, uid = 0;
-  try { if (window.THREE && window.RamenScene) scene3d = new window.RamenScene(); } catch (e) { scene3d = null; }
+  /* 開いた直後は画面の大きさが0だったり、立体の描画の準備が間に合わなかったりする。
+     1回の失敗で平面に切り替えず、しばらく作り直し・描き直しを試す */
+  var scene3d = null, uid = 0, tries3d = 0, fails3d = 0, lastTry3d = -1e9;
+  function make3d() {
+    if (scene3d || tries3d >= 20 || !window.THREE || !window.RamenScene) return;
+    var now = performance.now();
+    if (now - lastTry3d < 500) return;
+    lastTry3d = now; tries3d++;
+    try { scene3d = new window.RamenScene(); } catch (e) { scene3d = null; }
+  }
+  make3d();
 
   var seed = 1;
   function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
@@ -638,11 +649,12 @@
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 10 * shake, (Math.random() - 0.5) * 6 * shake);
     var drawn3d = false;
+    if (!scene3d && state === S.INTRO) make3d();
     if (scene3d) {
       try {
-        scene3d.render(ctx, W, H, { layers: layers, camY: camY, zoom: zoom, handX: handX, handUp: HAND_UP, holdW: top().w, holdKind: KINDS[layers.length % KINDS.length], n: layers.length, falling: falling, spills: spills, ending: ending, intro: state === S.INTRO, time: performance.now() / 1000, abura: ending ? Math.min(1, endT / ABURA_T) : -1, chashu: ending && endT > CHASHU_T0 ? Math.min(1, (endT - CHASHU_T0) / (CHASHU_T1 - CHASHU_T0)) : -1 });
-        drawn3d = true;
-      } catch (e) { scene3d = null; }
+        drawn3d = scene3d.render(ctx, W, H, { layers: layers, camY: camY, zoom: zoom, handX: handX, handUp: HAND_UP, holdW: top().w, holdKind: KINDS[layers.length % KINDS.length], n: layers.length, falling: falling, spills: spills, ending: ending, intro: state === S.INTRO, time: performance.now() / 1000, abura: ending ? Math.min(1, endT / ABURA_T) : -1, chashu: ending && endT > CHASHU_T0 ? Math.min(1, (endT - CHASHU_T0) / (CHASHU_T1 - CHASHU_T0)) : -1 });
+        fails3d = 0;
+      } catch (e) { if (++fails3d > 90) scene3d = null; }
     }
     if (!drawn3d) {
       drawBack();
