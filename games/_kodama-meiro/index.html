@@ -43,7 +43,7 @@
    マイクが使えないときは、タップ（スペース）でも高い音を出せる。
    迷路には敵が3体いる。敵は1体ずつ順番にうなり声を出し、その音の粒で敵の居場所とまわりの壁が赤く見える。
    こちらの声を聞きつけると、声のした場所へ急いで寄ってくる。追ってくる間はずっとうなり続ける。捕まると入口に戻される。
-   迷路の作りは画像迷路と同じ。触った所に出るジョイスティックで玉を動かす。結果は出口までの秒数。 */
+   迷路の作りは画像迷路と同じ。迷路は少し縮めて上に置き、下の操作盤のジョイスティックで玉を動かし、ボタンで音を出す。結果は出口までの秒数。 */
 (function () {
   "use strict";
 
@@ -446,9 +446,15 @@
   var R_PLAYER = 3.5, BUILD_TIME = 0.4;
   var VOICE_ON = 0.16, VOICE_OFF = 0.07, TALK_MAX = 1.0;
 
+  /* 迷路は少し縮めて上に置き、下は操作盤（左にジョイスティック、右に音を出すボタン） */
+  var SC = 0.8, PANEL_Y = 0, PAD = { x: 0, y: 0, r: 68 }, SND = { x: 0, y: 0, r: 54 };
   function place() {
-    BX = Math.round((W - BOARD) / 2);
-    BY = Math.round(Math.max(110, (H - BOARD) / 2 - 20));
+    BX = Math.round((W - BOARD * SC) / 2);
+    BY = Math.round(Math.max(60, Math.min(140, (H - 780) / 2 + 60)));
+    PANEL_Y = BY + BOARD * SC + 16;
+    var cy = Math.min((PANEL_Y + H) / 2, PANEL_Y + 190);
+    PAD.x = W * 0.28; PAD.y = cy;
+    SND.x = W * 0.74; SND.y = cy;
   }
 
   function newRound() {
@@ -544,6 +550,7 @@
     clock += dt;
     bumpCool -= dt;
     stepRays(dt);
+    sndPress = Math.max(0, sndPress - dt * 2.5);
     marks.forEach(function (m) { m.t += dt; });
     if (marks.length && marks[0].t > GLOW_FADE) marks = marks.filter(function (m) { return m.t < GLOW_FADE; });
     if (state === S.BUILD) {
@@ -600,10 +607,11 @@
   }
 
   /* ============ 入力 ============
-     触った所にジョイスティックが出て、倒した方へ玉が進み、玉もその方を向く。
-     動かさずにちょんと触ると高い音が出る（マイクの代わり） */
-  var stick = null, downAt = 0, moved = 0, STICK_R = 60, MOVE_SPEED = 90;
-  function down(x, y) {
+     下の操作盤：左のジョイスティックを倒した方へ玉が進み、玉もその方を向く。右のボタンで高い音が出る。
+     ジョイスティックとボタンは別々の指で同時に触れる */
+  var stick = null, STICK_R = 60, MOVE_SPEED = 90, sndPress = 0;
+  function sound() { chirp(); ping(0.55); sndPress = 1; }
+  function down(x, y, id) {
     if (state === S.INTRO) return;
     audioOn();
     if (state === S.RESULT) {
@@ -611,32 +619,28 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (x == null) { if (state === S.PLAY) { chirp(); ping(0.55); } return; }
-    held = true;
-    stick = { on: true, bx: x, by: y, x: x, y: y };
-    downAt = clock; moved = 0;
+    if (state !== S.PLAY) return;
+    if (x == null) { sound(); return; }
+    if (Math.hypot(x - SND.x, y - SND.y) < SND.r + 20) { sound(); return; }
+    if (y > PANEL_Y - 10 && x < W * 0.55) { held = true; stick = { on: true, id: id, bx: PAD.x, by: PAD.y, x: x, y: y }; }
   }
-  function move(x, y) {
-    if (!held || !stick) return;
-    moved += Math.abs(x - stick.x) + Math.abs(y - stick.y);
-    var ox = x - stick.bx, oy = y - stick.by, d = Math.hypot(ox, oy);
-    if (d > STICK_R) { stick.bx = x - ox / d * STICK_R; stick.by = y - oy / d * STICK_R; }   /* 大きく動かしたら台座もついてくる */
+  function move(x, y, id) {
+    if (!stick || stick.id !== id) return;
     stick.x = x; stick.y = y;
   }
-  function up() {
-    if (held && stick && moved < 8 && clock - downAt < 0.3 && state === S.PLAY) { chirp(); ping(0.55); }
-    held = false; stick = null;
+  function up(id) {
+    if (stick && stick.id === id) { held = false; stick = null; }
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y);
+    var p = atCanvas(e); down(p.x, p.y, e.pointerId);
   });
   wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
+    var p = atCanvas(e); move(p.x, p.y, e.pointerId);
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(e.pointerId); });
   wrap.addEventListener("pointercancel", function () { held = false; stick = null; });
   window.addEventListener("blur", function () { held = false; stick = null; keys = { l: 0, r: 0, u: 0, d: 0 }; });
 
@@ -699,6 +703,7 @@
 
     ctx.save();
     ctx.translate(BX, BY);
+    ctx.scale(SC, SC);
     if (state !== S.INTRO) {
       /* 迷路の外枠がかすかに見え、出口はうっすら光る */
       ctx.strokeStyle = "rgba(200,230,255,.08)";
@@ -810,15 +815,35 @@
     /* 捕まったときに赤く光る */
     if (caughtFlash > 0) { ctx.fillStyle = "rgba(224,52,74," + (0.45 * caughtFlash).toFixed(3) + ")"; ctx.fillRect(0, 0, W, H); }
 
-    /* ジョイスティック */
-    if (state === S.PLAY && stick && stick.on) {
-      ctx.beginPath(); ctx.arc(stick.bx, stick.by, STICK_R, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,255,255,.08)"; ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,.3)"; ctx.lineWidth = 2; ctx.stroke();
-      var kx = stick.x - stick.bx, ky = stick.y - stick.by, kd = Math.hypot(kx, ky);
-      if (kd > STICK_R) { kx = kx / kd * STICK_R; ky = ky / kd * STICK_R; }
-      ctx.beginPath(); ctx.arc(stick.bx + kx, stick.by + ky, 26, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,255,255,.45)"; ctx.fill();
+    /* 操作盤：ジョイスティックと音のボタン */
+    if (state === S.PLAY || state === S.BUILD || state === S.GOAL) {
+      ctx.beginPath(); ctx.arc(PAD.x, PAD.y, STICK_R + 8, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,.06)"; ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 2; ctx.stroke();
+      var kx = 0, ky = 0;
+      if (stick && stick.on) {
+        kx = stick.x - stick.bx; ky = stick.y - stick.by;
+        var kd = Math.hypot(kx, ky);
+        if (kd > STICK_R) { kx = kx / kd * STICK_R; ky = ky / kd * STICK_R; }
+      }
+      ctx.beginPath(); ctx.arc(PAD.x + kx, PAD.y + ky, 28, 0, Math.PI * 2);
+      ctx.fillStyle = stick && stick.on ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.3)"; ctx.fill();
+      /* 音のボタン（音叉の絵） */
+      var pr = Math.max(0, sndPress);
+      ctx.beginPath(); ctx.arc(SND.x, SND.y, SND.r * (1 - 0.06 * pr), 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255," + (0.1 + 0.25 * pr).toFixed(3) + ")"; ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,.5)"; ctx.lineWidth = 2; ctx.stroke();
+      ctx.save();
+      ctx.translate(SND.x, SND.y);
+      var wb = pr * 2 * Math.sin(clock * 90);
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 4; ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(0, 26); ctx.lineTo(0, 6);
+      ctx.moveTo(-10 - wb, 6); ctx.lineTo(10 + wb, 6);
+      ctx.moveTo(-10 - wb, 6); ctx.lineTo(-10 - wb, -24);
+      ctx.moveTo(10 + wb, 6); ctx.lineTo(10 + wb, -24);
+      ctx.stroke();
+      ctx.restore();
     }
 
     if (state === S.RESULT) drawResult();
