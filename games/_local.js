@@ -145,5 +145,6 @@ window.DRAFT_GAMES = [
     "play": "games/_meishoku/index.html",
     "full": true,
     "catch": ""
-  }
+  },
+  {"type":"lab","tags":[],"id":"mashimashi","title":"無限マシマシ","year":2026,"date":"2026-10-04","plays":null,"url":"","img":"games/_mashimashi/img/thumb.webp","play":"games/_mashimashi/index.html","full":true,"catch":"二郎系ラーメンを無限にマシ"},
 ];
