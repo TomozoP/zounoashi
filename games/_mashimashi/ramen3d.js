@@ -50,11 +50,9 @@
     this.makeShop();
     this.makeBowl();
     this.makeSky();
-    this.makeTongs();
     this.makeSteam();
     var self = this;
     this.scene.traverse(function (o) { if (o.isMesh && !o.isInstancedMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    this.tongs.traverse(function (o) { o.castShadow = false; });
     this.wall.castShadow = false;
   }
 
@@ -110,11 +108,9 @@
     this.gHead = new T.SphereGeometry(0.034, 5, 4);
     this.gLeaf = new T.SphereGeometry(1, 8, 5);
     this.gCube = new T.BoxGeometry(1, 1, 1);
-    this.gDome = new T.SphereGeometry(1, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2);
     this.mSprout = new T.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0, clearcoat: 0.6, clearcoatRoughness: 0.3, sheen: 0.4, sheenColor: new T.Color(0xfff6d8), emissive: 0x2a2410, emissiveIntensity: 0.6 });
     this.mHead = new T.MeshStandardMaterial({ color: 0xe8cc4a, roughness: 0.4, emissive: 0x2a2000, emissiveIntensity: 0.6 });
     this.mLeaf = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, side: T.DoubleSide, emissive: 0x142008, emissiveIntensity: 0.5 });
-    this.mDome = new T.MeshStandardMaterial({ color: 0xd8cc9c, roughness: 0.6 });
     this.mGarlic = new T.MeshStandardMaterial({ color: 0xeedc94, roughness: 0.8 });
     this.mFat = new T.MeshPhysicalMaterial({ color: 0xfff0d6, roughness: 0.15, clearcoat: 1, transmission: 0.25, thickness: 0.1, emissive: 0x302418, emissiveIntensity: 0.5 });
     this.mKarame = new T.MeshPhysicalMaterial({ color: 0x4a1e06, roughness: 0.05, clearcoat: 1, transparent: true, opacity: 0.85 });
@@ -125,10 +121,6 @@
   RamenScene.prototype.clump = function (w, kind, salt) {
     var g = new T.Group(), r = rng(1000 + salt * 97 + Math.round(w)), d = this.dummy;
     var R = w / 2 / M, H = 0.44;
-    var dome = new T.Mesh(this.gDome, this.mDome);
-    dome.scale.set(R * 0.85, H * 0.7, R * 0.85);
-    dome.position.y = -0.1;
-    g.add(dome);
 
     var n = Math.round(40 + 190 * R * R);
     var sp = new T.InstancedMesh(this.gSprout, this.mSprout, n);
@@ -308,23 +300,7 @@
     var s = this.scene;
     var pts = [], prof = [[0, -1.5], [1.0, -1.5], [1.04, -1.42], [1.0, -1.3], [1.2, -1.25], [1.55, -1.0], [1.85, -0.55], [2.05, 0.0], [2.14, 0.3], [2.18, 0.34], [2.12, 0.35], [2.04, 0.2], [1.8, -0.4], [1.2, -1.0], [0, -1.12]];
     prof.forEach(function (p) { pts.push(new T.Vector2(p[0], p[1])); });
-    var tex = canvasTex(1024, 256, function (g, w, h) {
-      g.fillStyle = "#f7f4ec"; g.fillRect(0, 0, w, h);
-      /* 外側の模様（雷紋っぽい帯）と縁。v は上が縁 */
-      g.fillStyle = "#16202e"; g.fillRect(0, 48, w, 10);
-      g.strokeStyle = "#c0392b"; g.lineWidth = 9; g.lineJoin = "miter";
-      var y0 = 80, s2 = 26;
-      for (var k = 0; k < w / (s2 * 2); k++) {
-        var x = k * s2 * 2;
-        g.beginPath();
-        g.moveTo(x, y0 + s2); g.lineTo(x, y0); g.lineTo(x + s2 * 1.5, y0); g.lineTo(x + s2 * 1.5, y0 + s2 * 0.8);
-        g.lineTo(x + s2 * 0.5, y0 + s2 * 0.8); g.lineTo(x + s2 * 0.5, y0 + s2 * 0.35); g.lineTo(x + s2, y0 + s2 * 0.35);
-        g.stroke();
-      }
-      g.fillStyle = "#c0392b"; g.fillRect(0, 128, w, 6);
-      g.fillStyle = "#16202e"; g.fillRect(0, 0, w, 14);
-    });
-    var bowl = new T.Mesh(new T.LatheGeometry(pts, 64), new T.MeshPhysicalMaterial({ map: tex, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.08, side: T.DoubleSide }));
+    var bowl = new T.Mesh(new T.LatheGeometry(pts, 64), new T.MeshPhysicalMaterial({ color: 0xe6eef6, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.08, side: T.DoubleSide }));
     s.add(bowl);
     /* スープ */
     var soup = new T.Mesh(new T.CircleGeometry(2.02, 48), new T.MeshPhysicalMaterial({ color: 0x4a2008, roughness: 0.08, clearcoat: 1, clearcoatRoughness: 0.02 }));
@@ -378,11 +354,12 @@
     var uv = cg.attributes.uv;
     for (var k = 0; k < uv.count; k++) uv.setY(k, uv.getY(k) / 0.66);
     cg.center();
-    [[-1, 0.2], [1, 0.05]].forEach(function (p) {
+    /* 右側に2枚重ねる（奥の1枚に手前の1枚をずらして重ねる） */
+    [[1.05, 0.62, 0.62, 0.2], [1.25, 0.48, 1.0, 0.32]].forEach(function (p) {
       var m = new T.Mesh(cg, [faceM, side]);
-      m.scale.set(1.15, 1.15, 1.15);
-      m.rotation.set(-0.35, p[0] * 0.35, p[0] * 0.28);
-      m.position.set(p[0] * 1.1, 0.5, 0.9 + p[1]);
+      m.scale.set(1.1, 1.1, 1.1);
+      m.rotation.set(-0.4, 0.3, p[3]);
+      m.position.set(p[0], p[1], p[2]);
       s.add(m);
     });
   };
@@ -419,28 +396,6 @@
     var a = SKY[i], b = SKY[i + 1];
     return new T.Color((a[0] + (b[0] - a[0]) * f) / 255, (a[1] + (b[1] - a[1]) * f) / 255, (a[2] + (b[2] - a[2]) * f) / 255);
   }
-
-  /* ============ トング ============ */
-  RamenScene.prototype.makeTongs = function () {
-    var g = new T.Group(), m = new T.MeshStandardMaterial({ color: 0xd0d6dc, roughness: 0.3, metalness: 0.35 });
-    var arms = [];
-    [-1, 1].forEach(function (s) {
-      var arm = new T.Group();
-      var up = new T.Mesh(new T.BoxGeometry(0.07, 30, 0.12), m);
-      up.position.set(0, 15 + 0.5, 0); arm.add(up);
-      var jaw = new T.Group(); jaw.position.y = 0.5; arm.add(jaw);
-      var low = new T.Mesh(new T.BoxGeometry(0.07, 0.75, 0.16), m);
-      low.position.set(s * 0.13, -0.32, 0); low.rotation.z = -s * 0.3; jaw.add(low);
-      var tip = new T.Mesh(new T.BoxGeometry(0.28, 0.06, 0.2), m);
-      tip.position.set(s * 0.1, -0.66, 0); jaw.add(tip);
-      arm.position.x = s * 0.08;
-      jaw.userData.s = s;
-      g.add(arm); arms.push(jaw);
-    });
-    this.tongs = g; this.arms = arms;
-    g.userData.noShadow = true;
-    this.scene.add(g);
-  };
 
   /* ============ 毎コマ ============ */
   RamenScene.prototype.reset = function () {
@@ -510,14 +465,9 @@
     this.stepSteam(st.time || 0);
     var outside = ty * M > CEIL + 200;
     this.scene.environmentIntensity = outside ? 0.9 : 0.6;
-    /* トングと持っている山 */
+    /* 持っている山 */
     var topY = st.layers.length * LAYER;
-    var showHand = !st.ending && !st.intro;
-    this.tongs.visible = showHand;
-    var hx = st.falling ? st.falling.x : st.handX;
-    this.tongs.position.set(hx / M, (topY + st.handUp) / M + 0.45, 0.1);
-    var open = st.falling ? 0.35 : 0;
-    this.arms.forEach(function (a) { a.rotation.z = a.userData.s * open; });
+    var showHand = !st.ending && !st.intro, hx = st.handX;
     var hkey = showHand && !st.falling ? st.n + ":" + Math.round(st.holdW) : null;
     if (this.heldKey !== hkey) {
       if (this.held) { drop(this.held); this.held = null; }
