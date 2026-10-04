@@ -155,7 +155,7 @@
       var src = AC.createBufferSource(), g = AC.createGain();
       src.buffer = buf; src.playbackRate.value = RATE;
       g.gain.value = vol * e[1];
-      src.connect(g); g.connect(AC.destination);
+      src.connect(g); g.connect(AC.destination); g.connect(reverbIn());
       src.start(AC.currentTime + e[0]);
     });
     return len + 0.56;
@@ -433,7 +433,35 @@
   }
 
   /* マイクの代わりの高い声 */
-  function chirp() { tone(1400, 0.16, 0.08, "triangle", 2200); tone(1400, 0.16, 0.03, "triangle", 2200, 0.28); }
+  /* 音叉の音：ほぼ純音の「キーン」が長く伸び、打った瞬間だけ高い倍音が混ざる。残響つき */
+  function chirp() {
+    if (!AC) return;
+    var n = AC.currentTime, out = reverbIn();
+    [[880, 0.16, 3.2], [880 * 5.8, 0.03, 0.25], [1760, 0.02, 1.2]].forEach(function (p) {
+      var o = AC.createOscillator(), g = AC.createGain();
+      o.type = "sine"; o.frequency.value = p[0];
+      g.gain.setValueAtTime(0.0001, n);
+      g.gain.exponentialRampToValueAtTime(p[1], n + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, n + p[2]);
+      o.connect(g); g.connect(AC.destination); g.connect(out);
+      o.start(n); o.stop(n + p[2] + 0.05);
+    });
+  }
+  /* 残響（洞窟っぽい長めの響き）。作った響きを使い回す */
+  var reverb = null;
+  function reverbIn() {
+    if (reverb) return reverb.input;
+    var len = Math.floor(AC.sampleRate * 2.8), buf = AC.createBuffer(2, len, AC.sampleRate);
+    for (var ch = 0; ch < 2; ch++) {
+      var d = buf.getChannelData(ch);
+      for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6);
+    }
+    var cv = AC.createConvolver(), input = AC.createGain(), wet = AC.createGain();
+    cv.buffer = buf; input.gain.value = 1; wet.gain.value = 0.55;
+    input.connect(cv); cv.connect(wet); wet.connect(AC.destination);
+    reverb = { input: input };
+    return input;
+  }
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", BUILD: "build", PLAY: "play", GOAL: "goal", RESULT: "result" };
