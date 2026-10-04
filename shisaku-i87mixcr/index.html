@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="kodama-meiro-1791099105715">
+<meta name="preview-version" content="kodama-meiro-1791099502666">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>【プレビュー】こだま迷路</title>
@@ -32,14 +32,14 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/start.js?v=kodama-meiro-1791099105715"></script>
-<script src="../games/view.js?v=kodama-meiro-1791099105715"></script>
-<script src="../games/audio.js?v=kodama-meiro-1791099105715"></script>
-<script src="../games/lang.js?v=kodama-meiro-1791099105715"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=kodama-meiro-1791099105715"></script>
-<script src="../games/result-actions.js?v=kodama-meiro-1791099105715"></script>
-<script src="../games/action-icons.js?v=kodama-meiro-1791099105715"></script>
-<script src="../games/pad.js?v=kodama-meiro-1791099105715"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/start.js?v=kodama-meiro-1791099502666"></script>
+<script src="../games/view.js?v=kodama-meiro-1791099502666"></script>
+<script src="../games/audio.js?v=kodama-meiro-1791099502666"></script>
+<script src="../games/lang.js?v=kodama-meiro-1791099502666"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=kodama-meiro-1791099502666"></script>
+<script src="../games/result-actions.js?v=kodama-meiro-1791099502666"></script>
+<script src="../games/action-icons.js?v=kodama-meiro-1791099502666"></script>
+<script src="../games/pad.js?v=kodama-meiro-1791099502666"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* こだま迷路
 
@@ -461,6 +461,7 @@
     shouts = 0; talking = false; voice = 0; deaf = 0;
     facing = Math.PI / 2;
     rays = [];
+    edges = null;
     quietFoes();
     catches = 0; caughtFlash = 0; foes = [];
     marks = [];
@@ -512,14 +513,27 @@
     if (player.y > (G - 1) * B + B * 0.3) goal();
   }
   /* ゴールしたら、迷路ぜんぶに波が広がって全体が見える */
+  /* 通路に面した壁の辺（ゴール後に迷路全体を見せる用） */
+  var edges = null, REVEAL_SPEED = 420;
+  function wallEdges() {
+    var out = [];
+    for (var c = 0; c < G * G; c++) {
+      if (open[c]) continue;
+      var x = c % G, y = (c / G) | 0, X = x * B, Y = y * B;
+      if (x > 0 && open[c - 1]) out.push([X, Y, X, Y + B]);
+      if (x < G - 1 && open[c + 1]) out.push([X + B, Y, X + B, Y + B]);
+      if (y > 0 && open[c - G]) out.push([X, Y, X + B, Y]);
+      if (y < G - 1 && open[c + G]) out.push([X, Y + B, X + B, Y + B]);
+    }
+    return out;
+  }
   function goal() {
     state = S.GOAL;
     quietFoes();
     T = 0;
     stopMic();
-    ping(99);
-    shouts--;
     exitHeard = true;
+    edges = wallEdges();
     [523.25, 659.25, 783.99, 1046.5].forEach(function (f, j) { tone(f, 1.4, 0.07, "triangle", null, 0.1 + j * 0.09); });
   }
 
@@ -537,7 +551,15 @@
     }
     if (state === S.GOAL) {
       T += dt;
-      if (T > 2.2) { state = S.RESULT; shareButton.hidden = false; }
+      /* 光の輪が届いた敵は、パーンとはじけて消える */
+      foes.forEach(function (f) {
+        if (f.popAt != null || Math.hypot(f.x - (G - 1.5) * B, f.y - (G - 0.5) * B) > T * REVEAL_SPEED) return;
+        f.popAt = T;
+        tone(1200, 0.25, 0.08, "triangle", 2400);
+        tone(600, 0.4, 0.05, "square", 1800, 0.02);
+        tone(150, 0.2, 0.08, "sine", 60);
+      });
+      if (T > 2.6) { state = S.RESULT; shareButton.hidden = false; }
       return;
     }
     if (state !== S.PLAY) return;
@@ -687,6 +709,19 @@
       eg.addColorStop(1, "rgba(255,200,110,0)");
       ctx.fillStyle = eg;
       ctx.fillRect(ex - B * 2.4, ey - B * 2.4, B * 4.8, B * 4.8);
+      /* ゴール後：出口から光の輪が広がり、迷路の壁がすべて見えたままになる */
+      if (edges && (state === S.GOAL || state === S.RESULT)) {
+        var ex0 = (G - 1.5) * B, ey0 = (G - 0.5) * B, front = (state === S.RESULT ? 99 : T) * REVEAL_SPEED;
+        ctx.lineWidth = 2;
+        ctx.lineCap = "butt";
+        edges.forEach(function (e) {
+          var d = Math.hypot((e[0] + e[2]) / 2 - ex0, (e[1] + e[3]) / 2 - ey0), k = front - d;
+          if (k < 0) return;
+          var hot = Math.max(0, 1 - k / 60);   /* 光の輪が通った直後は明るい */
+          ctx.strokeStyle = "rgba(" + Math.round(150 + 105 * hot) + "," + Math.round(205 + 40 * hot) + ",255," + (0.6 + 0.4 * hot).toFixed(3) + ")";
+          ctx.beginPath(); ctx.moveTo(e[0], e[1]); ctx.lineTo(e[2], e[3]); ctx.stroke();
+        });
+      }
       /* 音の粒が当たった壁の面（しばらくすると消える） */
       ctx.globalCompositeOperation = "lighter";
       ctx.lineCap = "butt";
@@ -715,8 +750,26 @@
         ctx.fillRect(r.x - sz / 2, r.y - sz / 2, sz, sz);
       });
       ctx.globalAlpha = 1;
-      /* 敵。うなったときと、こちらの音の粒が当たったときに見える */
+      /* 敵。うなったときと、こちらの音の粒が当たったときに見える。ゴール後は光の輪が届くとはじける */
       foes.forEach(function (f) {
+        if (f.popAt != null) {
+          var age = (state === S.RESULT ? 99 : T) - f.popAt;
+          if (age > 0.7) return;
+          var k = age / 0.7;
+          ctx.globalCompositeOperation = "lighter";
+          var bg = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, 10 + 40 * k);
+          bg.addColorStop(0, "rgba(255,240,220," + (1 - k).toFixed(3) + ")");
+          bg.addColorStop(1, "rgba(255,120,130,0)");
+          ctx.fillStyle = bg;
+          ctx.fillRect(f.x - 60, f.y - 60, 120, 120);
+          ctx.fillStyle = "rgba(255,220,200," + (1 - k).toFixed(3) + ")";
+          for (var j = 0; j < 12; j++) {
+            var a = j / 12 * Math.PI * 2 + f.x, r = 6 + 34 * Math.sqrt(k);
+            ctx.fillRect(f.x + Math.cos(a) * r - 1.5, f.y + Math.sin(a) * r - 1.5, 3, 3);
+          }
+          ctx.globalCompositeOperation = "source-over";
+          return;
+        }
         if (f.lit <= 0) return;
         ctx.globalAlpha = Math.min(1, f.lit);
         ctx.beginPath(); ctx.arc(f.x, f.y, 5.5, 0, Math.PI * 2);
@@ -856,11 +909,11 @@
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=kodama-meiro-1791099105715" : "./recorder-ui.js?v=kodama-meiro-1791099105715";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=kodama-meiro-1791099502666" : "./recorder-ui.js?v=kodama-meiro-1791099502666";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=kodama-meiro-1791099105715"></script>
-<script src="./preview-header.js?v=kodama-meiro-1791099105715"></script>
+<script src="./auto-reload.js?v=kodama-meiro-1791099502666"></script>
+<script src="./preview-header.js?v=kodama-meiro-1791099502666"></script>
 </body>
 </html>
