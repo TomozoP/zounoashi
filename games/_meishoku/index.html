@@ -36,8 +36,9 @@
 <script>
 /* 迷色（めいしょく）
 
-   画像迷路と同じ作りと操作の迷路。通ったマスに色が塗られる。
-   入口から出口への正しい道は、きれいなグラデーションの色。寄り道したマスは、にごった色。
+   画像迷路と同じ作りと操作の迷路。最初は迷路が見えず、通ったマスだけが色で塗られる。
+   色は入口からの道のりで決まるグラデーションで、正しい道なら出口に向かってきれいにつながる。
+   行き止まりに着くと、ひとつ前の分かれ道までの色が消える（白く残る）。
    出口までの秒数が結果。色の組み合わせは毎回ひとつ選ぶ。 */
 (function () {
   "use strict";
@@ -101,8 +102,6 @@
     { ja: "虹", en: "Rainbow", c: ["#ff6b6b", "#ffb86b", "#ffe66b", "#7be08a", "#6bc8ff", "#a98cff"] },
     { ja: "真夜中", en: "Midnight", c: ["#a8e6ff", "#8fa8ff", "#7a5cff", "#b34fd1", "#ff6fae"] }
   ];
-  /* 寄り道したマスのにごった色 */
-  var MUD = ["#7d7461", "#6f6a55", "#8a7a62", "#5f6458", "#857563", "#6d5f57"];
   var pal, palNo = -1;
   function pickPalette() {
     palNo = palNo < 0 ? Math.floor(Math.random() * PALETTES.length)
@@ -110,9 +109,9 @@
     pal = PALETTES[palNo];
   }
   function hex(c) { return [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)]; }
-  /* 道の i マス目の色 */
+  /* 入口から i マス目の色（出口より遠いマスは出口の色） */
   function colorAt(i) {
-    var cs = pal.c, f = path.length > 1 ? i / (path.length - 1) : 0, x = f * (cs.length - 1), k = Math.min(cs.length - 2, Math.floor(x)), t = x - k;
+    var cs = pal.c, f = path.length > 1 ? Math.min(1, i / (path.length - 1)) : 0, x = f * (cs.length - 1), k = Math.min(cs.length - 2, Math.floor(x)), t = x - k;
     var a = hex(cs[k]), b = hex(cs[k + 1]);
     return "rgb(" + [0, 1, 2].map(function (j) { return Math.round(a[j] + (b[j] - a[j]) * t); }).join(",") + ")";
   }
@@ -126,10 +125,11 @@
   var strength = new Float32Array(G * G);   /* 掘る順のばらつき */
   var open = new Uint8Array(G * G);         /* 1 = 通路 */
   var carveOrder = [];                      /* 掘った順（作る演出用） */
-  var openAt = new Float32Array(G * G);     /* 演出で通路になる時刻 0〜1 */
   var mazeLayer = null;
   var path = [], onPath = new Int32Array(G * G);   /* 入口から出口への道と、マスごとの道の何番目か（-1 = 道でない） */
-  var painted = new Uint8Array(G * G), paintList = [];
+  var depth = new Int32Array(G * G), parent = new Int32Array(G * G);   /* 入口からのマス数と、入口側のとなり */
+  var painted = new Uint8Array(G * G), paintList = [];   /* painted: 0 = まだ, 1 = 色, 2 = 色が消えた（白） */
+  var erasing = [], eraseClock = 0;
 
   function makeCanvas(w, h) {
     var c = document.createElement("canvas");
@@ -189,11 +189,10 @@
     open[(G - 1) * G + G - 2] = 1;
     carveOrder.unshift(1);
     carveOrder.push((G - 1) * G + G - 2);
-    openAt.fill(2);
-    for (var i = 0; i < carveOrder.length; i++) openAt[carveOrder[i]] = i / carveOrder.length;
     /* 入口から出口への道 */
     var from = new Int32Array(G * G).fill(-1), q = [1], s0 = 1, e0 = (G - 1) * G + G - 2;
     from[s0] = s0;
+    depth.fill(0);
     for (var h = 0; h < q.length; h++) {
       var c = q[h], cx = c % G, cy = (c / G) | 0;
       [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
@@ -201,7 +200,7 @@
         if (X < 0 || Y < 0 || X >= G || Y >= G) return;
         var m = Y * G + X;
         if (!open[m] || from[m] >= 0) return;
-        from[m] = c; q.push(m);
+        from[m] = c; depth[m] = depth[c] + 1; q.push(m);
       });
     }
     path = [];
@@ -209,44 +208,56 @@
     path.unshift(s0);
     onPath.fill(-1);
     path.forEach(function (c2, n) { onPath[c2] = n; });
-    renderMaze(1);
+    parent.set(from);
+    renderMaze();
   }
 
-  /* 迷路の絵。通路は白っぽい紙の色、壁は濃い色。塗ったマスはその色 */
+  /* 迷路の絵。最初は全部暗く、塗ったマスだけその色。色が消えたマスは紙の色 */
   var PAPER = "#f4efe6", INK = "#2b2b36";
-  function renderMaze(t) {
+  function renderMaze() {
     mazeLayer = mazeLayer || makeCanvas(BOARD * 2, BOARD * 2);
     var mc = mazeLayer.getContext && mazeLayer.getContext("2d");
     if (!mc) return;
     mc.setTransform(2, 0, 0, 2, 0, 0);
     mc.fillStyle = INK;
     mc.fillRect(0, 0, BOARD, BOARD);
-    mc.fillStyle = PAPER;
-    for (var y = 0; y < G; y++) for (var x = 0; x < G; x++) {
-      var i = y * G + x;
-      if (open[i] && openAt[i] <= t) mc.fillRect(x * B, y * B, B, B);
-    }
-    paintList.forEach(function (p) { mc.fillStyle = p.col; mc.fillRect(p.x * B, p.y * B, B, B); });
+    paintList.forEach(function (p) { mc.fillStyle = painted[p.i] === 2 ? PAPER : p.col; mc.fillRect(p.x * B, p.y * B, B, B); });
   }
-  /* マスを塗る。塗りの絵にも、すぐ描き足す */
+  function drawCell(i, col) {
+    var mc = mazeLayer && mazeLayer.getContext && mazeLayer.getContext("2d");
+    if (mc) { mc.setTransform(2, 0, 0, 2, 0, 0); mc.fillStyle = col; mc.fillRect((i % G) * B, ((i / G) | 0) * B, B, B); }
+  }
+  function degree(i) {
+    var x = i % G, y = (i / G) | 0, n = 0;
+    if (x > 0 && open[i - 1]) n++;
+    if (x < G - 1 && open[i + 1]) n++;
+    if (y > 0 && open[i - G]) n++;
+    if (y < G - 1 && open[i + G]) n++;
+    return n;
+  }
+  /* マスを塗る。色は入口からの道のりで決まる */
   function paintCell(i) {
     if (painted[i] || !open[i]) return;
     painted[i] = 1;
-    var k = onPath[i], col = k >= 0 ? colorAt(k) : MUD[Math.floor(Math.random() * MUD.length)];
-    var p = { x: i % G, y: (i / G) | 0, col: col, t: 0, bad: k < 0 };
+    var col = colorAt(depth[i]);
+    var p = { i: i, x: i % G, y: (i / G) | 0, col: col, t: 0 };
     paintList.push(p);
     flashes.push(p);
-    if (k < 0) {
+    drawCell(i, col);
+    if (state !== S.PLAY) return;
+    playerColor = col;
+    best = Math.max(best, onPath[i]);
+    var n = Math.min(NOTES - 1, Math.floor(depth[i] * NOTES / Math.max(1, path.length - 1)));
+    if (n !== lastNote) { lastNote = n; tone(hzOfStep(n), 0.5, 0.12, "triangle"); }
+    /* 行き止まり：ひとつ前の分かれ道まで、行き止まりの側から順に色を消す */
+    if (degree(i) === 1 && i !== 1 && i !== (G - 1) * G + G - 2) {
       misses++;
-      if (time - lastKnock > 0.25) { lastKnock = time; knock(); }
-    } else {
-      best = Math.max(best, k);
-      var n = Math.floor(k * NOTES / Math.max(1, path.length - 1));
-      if (n > lastNote) { lastNote = n; tone(hzOfStep(n), 0.5, 0.12, "triangle"); }
-      playerColor = col;
+      knock();
+      tone(700, 0.35, 0.08, "triangle", 260, 0.05);
+      var c = i, k = 0;
+      while (c !== 1 && degree(c) < 3) { erasing.push({ c: c, at: eraseClock + 0.05 + k * 0.025 }); c = parent[c]; k++; }
+      playerColor = colorAt(depth[c]);
     }
-    var mc = mazeLayer && mazeLayer.getContext && mazeLayer.getContext("2d");
-    if (mc) { mc.setTransform(2, 0, 0, 2, 0, 0); mc.fillStyle = col; mc.fillRect(p.x * B, p.y * B, B, B); }
   }
   function knock() {
     tone(180, 0.12, 0.12, "sine", 120);
@@ -255,12 +266,12 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", BUILD: "build", PLAY: "play", GOAL: "goal", RESULT: "result" };
-  var state, T, held = false, keyMode = false, time = 0, lastBuild = -1;
+  var state, T, held = false, keyMode = false, time = 0;
   var player = { x: 0, y: 0 };
-  var misses = 0, best = 0, lastNote = -1, lastKnock = -9, flashes = [], playerColor = "#fff";
+  var misses = 0, best = 0, lastNote = -1, flashes = [], playerColor = "#fff";   /* misses は行き止まりに着いた回数 */
   var keys = { l: 0, r: 0, u: 0, d: 0 };
   var BX = 0, BY = 0;                         /* 迷路の左上 */
-  var R_PLAYER = 3.5, BUILD_TIME = 2.2;
+  var R_PLAYER = 3.5, BUILD_TIME = 0.5;
 
   function place() {
     BX = Math.round((W - BOARD) / 2);
@@ -274,15 +285,14 @@
     T = 0;
     time = 0;
     held = false;
-    lastBuild = -1;
     keys = { l: 0, r: 0, u: 0, d: 0 };
     player.x = 1.5 * B; player.y = 0.5 * B;
-    misses = 0; best = 0; lastNote = -1; lastKnock = -9; flashes = [];
-    painted.fill(0); paintList = [];
+    misses = 0; best = 0; lastNote = -1; flashes = [];
+    painted.fill(0); paintList = []; erasing = [];
     pickPalette();
     playerColor = "#fff";
     buildMaze();
-    renderMaze(0);
+    paintCell(1);
   }
 
   function wallAt(bx, by) {
@@ -329,17 +339,23 @@
     state = S.GOAL;
     T = 0;
     sweptNote = -1;
-    path.forEach(function (c) { paintCell(c); });   /* 塗り残しの道も塗る（ほぼ無いはず） */
+    erasing = [];
+    path.forEach(function (c) { paintCell(c); });   /* 正しい道をぜんぶ見せる */
   }
   function sweepPos() { return Math.max(0, Math.min(1, (T - SWEEP_AT) / SWEEP)); }
 
   /* ============ 進行 ============ */
   function update(dt) {
     flashes.forEach(function (f) { f.t += dt; });
+    eraseClock += dt;
+    while (erasing.length && erasing[0].at <= eraseClock) {
+      var e = erasing.shift();
+      if (painted[e.c] === 1) { painted[e.c] = 2; drawCell(e.c, PAPER); }
+    }
     flashes = flashes.filter(function (f) { return f.t < 0.4; });
     if (state === S.BUILD) {
       T += dt;
-      if (T >= BUILD_TIME) { state = S.PLAY; T = 0; renderMaze(1); tone(880, 0.1, 0.1, "square"); }
+      if (T >= BUILD_TIME) { state = S.PLAY; T = 0; tone(880, 0.1, 0.1, "square"); }
       return;
     }
     if (state === S.GOAL) {
@@ -429,8 +445,8 @@
   function doShare() {
     /* 英語のときのハッシュタグは英語のゲーム名にする */
     var sec = secText();
-    var ja = "迷路を「" + pal.ja + "」色に" + sec + "秒で塗りきった" + (misses ? "（にごり" + misses + "マス）" : "（にごりなし）");
-    var en = "Painted a maze in \"" + pal.en + "\" colors in " + sec + "s" + (misses ? " (" + misses + " muddy cells)" : " (no muddy cells)");
+    var ja = "見えない迷路を「" + pal.ja + "」色に" + sec + "秒で塗りきった" + (misses ? "（行き止まり" + misses + "回）" : "（行き止まりなし）");
+    var en = "Painted a hidden maze in \"" + pal.en + "\" colors in " + sec + "s" + (misses ? " (" + misses + " dead ends)" : " (no dead ends)");
     window.zResultActions.x({ text: zT(ja, en) + zT(" #迷色", " #ColorMaze") });
   }
 
@@ -453,18 +469,25 @@
 
     ctx.save();
     ctx.translate(BX, BY);
-    if (state === S.BUILD) {
-      /* 通路が掘られていく */
-      var k = Math.max(0, Math.min(1, T / (BUILD_TIME - 0.4)));
-      var step = Math.floor(k * 30);
-      if (step !== lastBuild) { lastBuild = step; renderMaze(step / 30); if (step > 0 && step < 30) tone(300 + step * 22, 0.04, 0.04, "square"); }
-    }
     if (mazeLayer) ctx.drawImage(mazeLayer, 0, 0, BOARD, BOARD);
+    if (state === S.PLAY) {
+      /* 玉のまわりだけ、まだ通っていない道がうっすら見える */
+      var pcx = player.x / B, pcy = player.y / B, LR = 2.6;
+      for (var yy = Math.floor(pcy - LR); yy <= Math.ceil(pcy + LR); yy++) for (var xx = Math.floor(pcx - LR); xx <= Math.ceil(pcx + LR); xx++) {
+        if (xx < 0 || yy < 0 || xx >= G || yy >= G) continue;
+        var ci = yy * G + xx;
+        if (!open[ci] || painted[ci]) continue;
+        var dd = Math.hypot(xx + 0.5 - pcx, yy + 0.5 - pcy);
+        if (dd > LR) continue;
+        ctx.fillStyle = "rgba(244,239,230," + (0.5 * (1 - dd / LR)).toFixed(3) + ")";
+        ctx.fillRect(xx * B, yy * B, B, B);
+      }
+    }
     if (state !== S.INTRO && state !== S.BUILD) {
       /* 塗ったばかりのマスが光る */
       flashes.forEach(function (f) {
         var a = 1 - f.t / 0.4;
-        ctx.fillStyle = (f.bad ? "rgba(60,40,20," : "rgba(255,255,255,") + (0.6 * a).toFixed(3) + ")";
+        ctx.fillStyle = "rgba(255,255,255," + (0.6 * a).toFixed(3) + ")";
         ctx.fillRect(f.x * B, f.y * B, B, B);
       });
       /* ゴール後：正しい道を入口から出口へ光が流れる */
@@ -546,6 +569,7 @@
   window.__probe = {
     now: function () { return { state: state, time: time, player: { x: player.x, y: player.y }, W: W, H: H, palette: pal && pal.ja, misses: misses, best: best, pathLen: path.length }; },
     path: function () { return path.slice(); },
+    painted: function () { return Array.prototype.slice.call(painted); },
     maze: function () { return { G: G, B: B, open: Array.prototype.slice.call(open), strength: Array.prototype.slice.call(strength) }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     move: function (dx, dy) { moveBy(dx, dy); },
@@ -573,6 +597,7 @@
   shareButton.hidden = true;
   pickPalette();
   buildMaze();
+  renderMaze();
   layout();
   var last = performance.now();
   function loop(now) {
