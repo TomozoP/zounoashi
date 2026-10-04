@@ -54,6 +54,7 @@
     var self = this;
     this.scene.traverse(function (o) { if (o.isMesh && !o.isInstancedMesh) { o.castShadow = true; o.receiveShadow = true; } });
     this.wall.castShadow = false;
+    this.wall.receiveShadow = false;   /* 壁には影を落とさない（上の照明などの影が浮いて見えるため） */
   }
 
   /* 映り込み用の部屋：暗い店内に、白い蛍光灯と赤い提灯の明かり */
@@ -120,13 +121,13 @@
         var r = rng(300 + cell * 31), ox = (cell % 4) * CW, oy = Math.floor(cell / 4) * CH;
         g.save(); g.beginPath(); g.rect(ox, oy, CW, CH); g.clip();
         var cx = ox + CW / 2, by = oy + CH - 6;
-        function hgt(dx) { var t = dx / (CW * 0.46); return t >= 1 ? 0 : (CH - 22) * Math.sqrt(1 - t * t) * (0.85 + 0.15 * Math.cos(dx * 0.05 + cell)); }
+        function hgt(dx) { var t = dx / (CW * 0.46); return t >= 1 ? 0 : (CH - 70) * Math.sqrt(1 - t * t) * (0.85 + 0.15 * Math.cos(dx * 0.05 + cell)); }
         g.lineCap = "round";
         for (var k = 0; k < 85; k++) {
-          var px = (r() * 2 - 1) * CW * 0.36;
+          var px = (r() * 2 - 1) * (CW * 0.5 - 70);
           var depth = r();                      /* 0 が奥（暗い）、1 が手前（明るい） */
           var py = by - depth * hgt(px) * 0.95 - 4;
-          var a = r() * Math.PI, len = 80 + r() * 50;
+          var a = r() * Math.PI, len = 70 + r() * 50;
           var x1 = cx + px - Math.cos(a) * len / 2, y1 = py - Math.sin(a) * len / 2 * 0.55;
           var x2 = cx + px + Math.cos(a) * len / 2, y2 = py + Math.sin(a) * len / 2 * 0.55;
           var bend = (r() - 0.5) * 26;
@@ -159,9 +160,11 @@
       var cnt = Math.max(1, Math.ceil(span * 2 / (QW * 0.4)));
       for (var k = 0; k < cnt; k++) {
         var t = cnt === 1 ? 0.5 : k / (cnt - 1);
-        var cx = -span + QW * 0.4 + t * Math.max(0, span * 2 - QW * 0.8) + (r() - 0.5) * 0.08;
+        var cx = -span + QW * 0.4 * Math.min(1, span * 2 * 1.15 / QW) + t * Math.max(0, span * 2 - QW * 0.8) + (r() - 0.5) * 0.08;
         var edge = Math.abs(cx) / Math.max(0.01, span);
-        var qw = QW * (0.85 + r() * 0.3), qh = QH * (0.85 + r() * 0.3) * (1 - edge * 0.35);
+        /* 細い段では板も小さくする（絵を引き伸ばさない） */
+        var fit = Math.min(1, span * 2 * 1.15 / QW);
+        var qw = QW * fit * (0.85 + r() * 0.3), qh = QH * fit * (0.85 + r() * 0.3) * (1 - edge * 0.35);
         var cy = -0.12 + lift * (1 - edge * edge * 0.7) + (r() - 0.5) * 0.04;
         var cell = Math.floor(r() * 8), flip = r() < 0.5;
         var u0 = (cell % 4) / 4, v0 = 1 - (Math.floor(cell / 4) + 1) / 2, u1 = u0 + 0.25, v1 = v0 + 0.5;
@@ -199,7 +202,7 @@
     g.add(lm);
     /* ニンニク：てっぺんに刻みの小山 */
     if (kind === "ninniku") {
-      var ng = 36, gm = new T.InstancedMesh(this.gCube, this.mGarlic, ng);
+      var ng = Math.max(4, Math.round(36 * Math.min(1, R / 0.8))), gm = new T.InstancedMesh(this.gCube, this.mGarlic, ng);
       for (i = 0; i < ng; i++) {
         a = r() * Math.PI * 2; u = Math.sqrt(r()) * Math.min(0.35, R * 0.6);
         d.position.set(Math.cos(a) * u, H * 0.72 + (0.35 - u) * 0.25 + r() * 0.03, Math.sin(a) * u);
@@ -212,7 +215,7 @@
     }
     /* アブラとカラメ */
     if (kind === "abura") {
-      var nf = Math.max(6, Math.round(10 * R)), fm = new T.InstancedMesh(this.gCube, this.mFat, nf), km = new T.InstancedMesh(this.gLeaf, this.mKarame, nf);
+      var nf = Math.max(1, Math.round(10 * R)), fm = new T.InstancedMesh(this.gCube, this.mFat, nf), km = new T.InstancedMesh(this.gLeaf, this.mKarame, nf);
       for (i = 0; i < nf; i++) {
         a = r() * Math.PI * 2; u = Math.sqrt(r()) * 0.7;
         var y = H * Math.sqrt(Math.max(0, 1 - u * u)) * 0.82 - 0.04;
