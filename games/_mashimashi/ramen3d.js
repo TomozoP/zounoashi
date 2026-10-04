@@ -102,19 +102,46 @@
 
   /* ============ 共通の部品 ============ */
   RamenScene.prototype.makeParts = function () {
-    /* もやし1本：少し曲がった細い管 */
-    var curve = new T.QuadraticBezierCurve3(new T.Vector3(-0.15, 0, 0), new T.Vector3(0, 0.045, 0), new T.Vector3(0.15, 0, 0));
-    this.gSprout = new T.TubeGeometry(curve, 3, 0.024, 4, false);
-    this.gHead = new T.SphereGeometry(0.034, 5, 4);
     this.gLeaf = new T.SphereGeometry(1, 8, 5);
     this.gCube = new T.BoxGeometry(1, 1, 1);
-    this.mSprout = new T.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0, clearcoat: 0.6, clearcoatRoughness: 0.3, sheen: 0.4, sheenColor: new T.Color(0xfff6d8), emissive: 0x2a2410, emissiveIntensity: 0.6 });
-    this.mHead = new T.MeshStandardMaterial({ color: 0xe8cc4a, roughness: 0.4, emissive: 0x2a2000, emissiveIntensity: 0.6 });
+    this.mSprout = new T.MeshStandardMaterial({ map: this.sproutAtlas(), alphaTest: 0.5, side: T.DoubleSide, roughness: 0.45, metalness: 0, emissive: 0x2a2410, emissiveIntensity: 0.5 });
     this.mLeaf = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, side: T.DoubleSide, emissive: 0x142008, emissiveIntensity: 0.5 });
     this.mGarlic = new T.MeshStandardMaterial({ color: 0xeedc94, roughness: 0.8 });
-    this.mFat = new T.MeshPhysicalMaterial({ color: 0xfff0d6, roughness: 0.15, clearcoat: 1, transmission: 0.25, thickness: 0.1, emissive: 0x302418, emissiveIntensity: 0.5 });
-    this.mKarame = new T.MeshPhysicalMaterial({ color: 0x4a1e06, roughness: 0.05, clearcoat: 1, transparent: true, opacity: 0.85 });
+    this.mFat = new T.MeshStandardMaterial({ color: 0xfff0d6, roughness: 0.12, emissive: 0x302418, emissiveIntensity: 0.5 });
+    this.mKarame = new T.MeshStandardMaterial({ color: 0x4a1e06, roughness: 0.05, transparent: true, opacity: 0.85 });
     this.dummy = new T.Object3D();
+  };
+
+  /* もやしの束の絵を8種類、1枚の画像に並べて描く（4×2マス） */
+  RamenScene.prototype.sproutAtlas = function () {
+    var CW = 256, CH = 160;
+    return canvasTex(CW * 4, CH * 2, function (g) {
+      for (var cell = 0; cell < 8; cell++) {
+        var r = rng(300 + cell * 31), ox = (cell % 4) * CW, oy = Math.floor(cell / 4) * CH;
+        g.save(); g.beginPath(); g.rect(ox, oy, CW, CH); g.clip();
+        var cx = ox + CW / 2, by = oy + CH - 6;
+        function hgt(dx) { var t = dx / (CW * 0.46); return t >= 1 ? 0 : (CH - 22) * Math.sqrt(1 - t * t) * (0.85 + 0.15 * Math.cos(dx * 0.05 + cell)); }
+        g.lineCap = "round";
+        for (var k = 0; k < 85; k++) {
+          var px = (r() * 2 - 1) * CW * 0.36;
+          var depth = r();                      /* 0 が奥（暗い）、1 が手前（明るい） */
+          var py = by - depth * hgt(px) * 0.95 - 4;
+          var a = r() * Math.PI, len = 80 + r() * 50;
+          var x1 = cx + px - Math.cos(a) * len / 2, y1 = py - Math.sin(a) * len / 2 * 0.55;
+          var x2 = cx + px + Math.cos(a) * len / 2, y2 = py + Math.sin(a) * len / 2 * 0.55;
+          var bend = (r() - 0.5) * 26;
+          var lt = 62 + depth * 30 + r() * 6;
+          g.strokeStyle = "hsl(45,25%," + (lt - 34) + "%)"; g.lineWidth = 15;
+          g.beginPath(); g.moveTo(x1, y1); g.quadraticCurveTo(cx + px, py + bend, x2, y2); g.stroke();
+          g.strokeStyle = "hsl(" + (46 + r() * 8) + "," + (30 + r() * 30) + "%," + Math.min(97, lt) + "%)"; g.lineWidth = 11;
+          g.beginPath(); g.moveTo(x1, y1); g.quadraticCurveTo(cx + px, py + bend, x2, y2); g.stroke();
+          g.strokeStyle = "rgba(255,255,255," + (0.25 + depth * 0.5) + ")"; g.lineWidth = 3;
+          g.beginPath(); g.moveTo(x1, y1 - 1.5); g.quadraticCurveTo(cx + px, py + bend - 1.5, x2, y2 - 1.5); g.stroke();
+          if (r() < 0.35) { g.fillStyle = "hsl(50,70%," + (45 + depth * 15) + "%)"; g.beginPath(); g.ellipse(x1, y1, 7, 5.5, a, 0, 7); g.fill(); }
+        }
+        g.restore();
+      }
+    });
   };
 
   /* 一段のヤサイの山。w はゲームの幅 */
@@ -122,31 +149,40 @@
     var g = new T.Group(), r = rng(1000 + salt * 97 + Math.round(w)), d = this.dummy;
     var R = w / 2 / M, H = 0.44;
 
-    var n = Math.round(40 + 190 * R * R);
-    var sp = new T.InstancedMesh(this.gSprout, this.mSprout, n);
-    var heads = [], col = new T.Color(), end = new T.Vector3();
-    for (var i = 0; i < n; i++) {
-      var a = r() * Math.PI * 2, u = Math.pow(r(), 0.35);
-      var px = Math.cos(a) * u * R, pz = Math.sin(a) * u * R;
-      var py = H * Math.sqrt(Math.max(0, 1 - u * u)) * (0.6 + r() * 0.45) - 0.1 - r() * 0.05;
-      d.position.set(px, py, pz);
-      d.rotation.set((r() - 0.5) * 1.6, r() * Math.PI * 2, (r() - 0.5) * 1.2);
-      var s = 0.8 + r() * 0.5;
-      d.scale.set(s, 1, 1);
-      d.updateMatrix();
-      sp.setMatrixAt(i, d.matrix);
-      col.setHSL(0.12 + r() * 0.03, 0.3 + r() * 0.4, 0.8 + r() * 0.16);
-      sp.setColorAt(i, col);
-      if (r() < 0.4) { end.set(r() < 0.5 ? 0.13 : -0.13, 0, 0).applyMatrix4(d.matrix); heads.push(end.clone()); }
+    /* もやし：束を描いた板を、奥・中・手前の列に並べて重ねる（立体の1本ずつより軽い） */
+    var pos = [], uvs = [], nor = [], idx = [], col = new T.Color(), i, a, u;
+    var rows = [[-0.55, 0.06], [-0.2, 0.16], [0.15, 0.12], [0.5, 0.0], [0.8, -0.1]];
+    var QW = 0.85, QH = 0.55;
+    for (var ri = 0; ri < rows.length; ri++) {
+      var z = rows[ri][0] * R, span = R * Math.sqrt(Math.max(0, 1 - rows[ri][0] * rows[ri][0])) * 0.98;
+      var lift = rows[ri][1] + H * 0.35 * Math.sqrt(Math.max(0, 1 - rows[ri][0] * rows[ri][0]));
+      var cnt = Math.max(1, Math.ceil(span * 2 / (QW * 0.4)));
+      for (var k = 0; k < cnt; k++) {
+        var t = cnt === 1 ? 0.5 : k / (cnt - 1);
+        var cx = -span + QW * 0.4 + t * Math.max(0, span * 2 - QW * 0.8) + (r() - 0.5) * 0.08;
+        var edge = Math.abs(cx) / Math.max(0.01, span);
+        var qw = QW * (0.85 + r() * 0.3), qh = QH * (0.85 + r() * 0.3) * (1 - edge * 0.35);
+        var cy = -0.12 + lift * (1 - edge * edge * 0.7) + (r() - 0.5) * 0.04;
+        var cell = Math.floor(r() * 8), flip = r() < 0.5;
+        var u0 = (cell % 4) / 4, v0 = 1 - (Math.floor(cell / 4) + 1) / 2, u1 = u0 + 0.25, v1 = v0 + 0.5;
+        if (flip) { var tmp = u0; u0 = u1; u1 = tmp; }
+        var zz = z + (r() - 0.5) * 0.06, base = pos.length / 3;
+        pos.push(cx - qw / 2, cy, zz, cx + qw / 2, cy, zz, cx + qw / 2, cy + qh, zz, cx - qw / 2, cy + qh, zz);
+        uvs.push(u0, v0, u1, v0, u1, v1, u0, v1);
+        for (var q = 0; q < 4; q++) nor.push(0, 0.35, 1);
+        idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      }
     }
+    var geo = new T.BufferGeometry();
+    geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("uv", new T.Float32BufferAttribute(uvs, 2));
+    geo.setAttribute("normal", new T.Float32BufferAttribute(nor, 3));
+    geo.setIndex(idx);
+    geo.normalizeNormals();
+    var sp = new T.Mesh(geo, this.mSprout);
+    sp.userData.own = true;
     sp.frustumCulled = false;
     g.add(sp);
-    if (heads.length) {
-      var hm = new T.InstancedMesh(this.gHead, this.mHead, heads.length);
-      heads.forEach(function (p, k) { d.position.copy(p); d.rotation.set(0, 0, 0); d.scale.set(1.1, 0.8, 0.8); d.updateMatrix(); hm.setMatrixAt(k, d.matrix); });
-      hm.frustumCulled = false;
-      g.add(hm);
-    }
     /* キャベツ */
     var nc = Math.round((kind === "kyabetsu" ? 14 : 3) * R * R + (kind === "kyabetsu" ? 4 : 1));
     var lm = new T.InstancedMesh(this.gLeaf, this.mLeaf, nc);
@@ -197,7 +233,7 @@
   };
 
   function drop(g) {
-    g.traverse(function (o) { if (o.isInstancedMesh) o.dispose(); });
+    g.traverse(function (o) { if (o.isInstancedMesh) o.dispose(); if (o.userData.own) o.geometry.dispose(); });
     if (g.parent) g.parent.remove(g);
   }
 
@@ -411,7 +447,7 @@
 
   /* st: { layers:[{x,w,kind,pop}], camY, zoom, H, handX, holdW, holdKind, n, falling:{x,y,w,kind,id}, spills:[{x,y,r,w,kind,id}], ending, intro } */
   RamenScene.prototype.render = function (ctx, W, H, st) {
-    var dpr = Math.min(2, global.devicePixelRatio || 1);
+    var dpr = Math.min(1.5, global.devicePixelRatio || 1);
     var w = Math.round(W * dpr), h = Math.round(H * dpr);
     if (w !== this.w || h !== this.h) {
       this.renderer.setSize(w, h, false);
@@ -441,6 +477,12 @@
       var y = i * LAYER / M;
       var vis = y > ty - halfV - 1 && y < ty + halfV + 1;
       this.layers[i].visible = vis;
+      /* 影を落とすのは、てっぺん近くの数段だけ（下の段の影は上の段に隠れて見えない） */
+      var cast = i >= this.layers.length - 6;
+      if (this.layers[i].userData.cast !== cast) {
+        this.layers[i].userData.cast = cast;
+        this.layers[i].traverse(function (o) { if (o.isMesh) o.castShadow = cast; });
+      }
       var pop = st.layers[i].pop || 0;
       if (vis) this.layers[i].scale.set(1 + pop * 0.06, 1 + pop * 0.25, 1 + pop * 0.06);
     }
@@ -463,6 +505,8 @@
     this.rim.position.set(3, ty + 4, -6);
     this.rim.target.position.set(0, ty, 0);
     this.stepSteam(st.time || 0);
+    /* 終わって引きで映す間は影を描き直さない（最後の影をそのまま使う） */
+    this.renderer.shadowMap.autoUpdate = !st.ending;
     var outside = ty * M > CEIL + 200;
     this.scene.environmentIntensity = outside ? 0.9 : 0.6;
     /* 持っている山 */
@@ -490,7 +534,7 @@
       var m = self.spills[p.id];
       if (!m) { m = self.spills[p.id] = self.clump(p.w, p.kind, p.id + 500); s.add(m); }
       m.position.set(p.x / M, p.y / M, p.z || 0);
-      m.rotation.set(p.r * 0.4, p.r * 0.7, p.r);
+      m.rotation.set(0, 0, p.r);
     });
     for (var k in this.spills) if (!seen[k]) { drop(this.spills[k]); delete this.spills[k]; }
 
