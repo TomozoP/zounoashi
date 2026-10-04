@@ -38,7 +38,7 @@
 
    真っ暗な迷路。玉には向きがあり、声を出すと、その声が高くなって玉の前方へ飛んでいく。
    音は粒になって進み、壁で跳ね返りながら届いた所の壁だけが光る（エコーロケーション）。
-   大きな声ほど遠くまで届く。光った壁は1.5秒ほどで暗くなり、見えなくなる。
+   粒が当たった壁の面が線で光り、輪郭が浮かぶ。大きな声ほど遠くまで届く。光は1.5秒ほどで消える。
    音の粒が出口に届くと「キン」と、その方向から鳴る。
    マイクが使えないときは、タップ（スペース）でも高い音を出せる。
    迷路の作りは画像迷路と同じ。触った所に出るジョイスティックで玉を動かす。結果は出口までの秒数。 */
@@ -172,8 +172,7 @@
   var N = 21, G = 2 * N + 1, B = 12, BOARD = G * B;
   var open = new Uint8Array(G * G);         /* 1 = 通路 */
   var EXIT = (G - 1) * G + G - 2;
-  var light = new Float32Array(G * G);      /* 壁の光 0〜1 */
-  var seen = new Uint8Array(G * G);         /* 一度光った壁 */
+  var marks = [];                           /* 音の粒が壁に当たった点。壁の面に沿った短い線として光る */
 
   /* ランダムな強さの低い順に掘る（Prim の最小全域木） */
   function buildMaze() {
@@ -251,17 +250,18 @@
   }
   function cellOf(x, y) { var bx = Math.floor(x / B), by = Math.floor(y / B); return (bx < 0 || by < 0 || bx >= G || by >= G) ? -1 : by * G + bx; }
   function solid(c) { return c < 0 || !open[c]; }
-  function glow(c, e) { if (c >= 0) { light[c] = Math.max(light[c], e); seen[c] = 1; } }
+  /* 壁の面の点 (x, y) を光らせる。vertical: 縦の面か */
+  function glow(x, y, vertical, e) { if (marks.length < 9000) marks.push({ x: x, y: y, v: vertical, e: e, t: 0 }); }
   function stepRays(dt) {
     var go = SPEED * dt, sub = B / 3;
     rays.forEach(function (r) {
       for (var left = go; left > 0 && r.e > 0; left -= sub) {
         var s = Math.min(sub, left), fade = Math.max(0, 1 - r.d / r.max);
         var nx = r.x + r.vx * s, cx = cellOf(nx, r.y);
-        if (solid(cx)) { glow(cx, Math.min(1, 0.3 + r.e) * fade); r.vx = -r.vx; r.e *= BOUNCE_KEEP; r.hit++; }
+        if (solid(cx)) { glow(r.vx > 0 ? Math.floor(nx / B) * B : (Math.floor(nx / B) + 1) * B, r.y, true, Math.min(1, 0.3 + r.e) * fade); r.vx = -r.vx; r.e *= BOUNCE_KEEP; r.hit++; }
         else r.x = nx;
         var ny = r.y + r.vy * s, cy = cellOf(r.x, ny);
-        if (solid(cy)) { glow(cy, Math.min(1, 0.3 + r.e) * fade); r.vy = -r.vy; r.e *= BOUNCE_KEEP; r.hit++; }
+        if (solid(cy)) { glow(r.x, r.vy > 0 ? Math.floor(ny / B) * B : (Math.floor(ny / B) + 1) * B, false, Math.min(1, 0.3 + r.e) * fade); r.vy = -r.vy; r.e *= BOUNCE_KEEP; r.hit++; }
         else r.y = ny;
         r.d += s;
         if (r.d > r.max || r.e < 0.05) r.e = 0;
@@ -306,7 +306,7 @@
     shouts = 0; talking = false; voice = 0; deaf = 0;
     facing = Math.PI / 2;
     rays = [];
-    light.fill(0); seen.fill(0);
+    marks = [];
     buildMaze();
     if (!micError) requestMic();
   }
@@ -324,18 +324,15 @@
   }
   /* ぶつかった壁はかすかに光り、コツと鳴る */
   var bumpCool = 0;
-  function bump(x, y) {
-    var bx = Math.floor(x / B), by = Math.floor(y / B);
-    if (bx < 0 || by < 0 || bx >= G || by >= G) return;
-    var c = by * G + bx;
-    if (open[c]) return;
-    light[c] = Math.max(light[c], 0.45); seen[c] = 1;
+  function bump(dx, dy) {
+    if (dx) glow(dx > 0 ? (Math.floor(player.x / B) + 1) * B : Math.floor(player.x / B) * B, player.y, true, 0.45);
+    else glow(player.x, dy > 0 ? (Math.floor(player.y / B) + 1) * B : Math.floor(player.y / B) * B, false, 0.45);
     if (bumpCool <= 0) { tone(150, 0.07, 0.06, "sine", 110); bumpCool = 0.18; }
   }
   /* 角で引っかからないよう、ぶつかったら通路の真ん中へ寄せる */
   function moveAxis(dx, dy) {
     if (!hits(player.x + dx, player.y + dy)) { player.x += dx; player.y += dy; return; }
-    bump(player.x + Math.sign(dx) * (R_PLAYER + 1), player.y + Math.sign(dy) * (R_PLAYER + 1));
+    bump(dx, dy);
     var amt = Math.abs(dx + dy);
     if (dx) {
       var cy = (Math.floor(player.y / B) + 0.5) * B, ahead = Math.floor((player.x + Math.sign(dx) * (R_PLAYER + 1)) / B);
@@ -373,7 +370,8 @@
     clock += dt;
     bumpCool -= dt;
     stepRays(dt);
-    for (var i = 0; i < light.length; i++) if (light[i] > 0) light[i] = Math.max(0, light[i] - dt / GLOW_FADE);
+    marks.forEach(function (m) { m.t += dt; });
+    if (marks.length && marks[0].t > GLOW_FADE) marks = marks.filter(function (m) { return m.t < GLOW_FADE; });
     if (state === S.BUILD) {
       T += dt;
       if (T >= BUILD_TIME) { state = S.PLAY; T = 0; ping(0.3); shouts = 0; }
@@ -523,13 +521,25 @@
       ctx.strokeRect(0.5, 0.5, BOARD - 1, BOARD - 1);
       ctx.strokeStyle = "rgba(200,230,255,.3)";
       ctx.strokeRect((G - 2) * B + 1.5, (G - 1) * B + 1.5, B - 3, B - 3);
-      /* 光った壁（しばらくすると消える） */
-      for (var c = 0; c < G * G; c++) {
-        if (light[c] <= 0) continue;
-        var a = light[c];
-        ctx.fillStyle = "rgba(200,230,255," + a.toFixed(3) + ")";
-        ctx.fillRect((c % G) * B, ((c / G) | 0) * B, B, B);
-      }
+      /* 音の粒が当たった壁の面（しばらくすると消える） */
+      ctx.globalCompositeOperation = "lighter";
+      ctx.lineCap = "butt";
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgb(150,205,255)";
+      var hl = B * 0.3;
+      marks.forEach(function (m) {
+        var a = m.e * (1 - m.t / GLOW_FADE);
+        if (a <= 0.01) return;
+        ctx.globalAlpha = Math.min(1, a);
+        ctx.beginPath();
+        /* 線は当たった壁のマスの中に収める（角からはみ出さない） */
+        var k = m.v ? m.y : m.x, lo = Math.floor(k / B) * B, a0 = Math.max(lo, k - hl), a1 = Math.min(lo + B, k + hl);
+        if (m.v) { ctx.moveTo(m.x, a0); ctx.lineTo(m.x, a1); }
+        else { ctx.moveTo(a0, m.y); ctx.lineTo(a1, m.y); }
+        ctx.stroke();
+      });
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
       /* 飛んでいく音の粒 */
       ctx.fillStyle = "rgba(150,215,255,.75)";
       rays.forEach(function (r) {
@@ -620,7 +630,7 @@
   window.__probe = {
     now: function () { return { state: state, time: time, player: { x: player.x, y: player.y }, W: W, H: H, shouts: shouts, mic: !!mic, micError: micError, rays: rays.length, facing: facing }; },
     maze: function () { return { G: G, B: B, open: Array.prototype.slice.call(open) }; },
-    seen: function () { var n = 0; for (var i = 0; i < seen.length; i++) n += seen[i]; return n; },
+    marks: function () { return marks.length; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     move: function (dx, dy) { moveBy(dx, dy); },
     stick: function (vx, vy) { stick = { on: vx !== 0 || vy !== 0, bx: 0, by: 0, x: vx * STICK_R, y: vy * STICK_R }; },
