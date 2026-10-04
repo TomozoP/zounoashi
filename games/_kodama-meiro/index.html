@@ -41,8 +41,8 @@
    粒が当たった壁の面が線で光り、輪郭が浮かぶ。大きな声ほど遠くまで届く。光は1.5秒ほどで消える。
    音の粒が出口に届くと「キン」と、その方向から鳴る。
    マイクが使えないときは、タップ（スペース）でも高い音を出せる。
-   迷路には敵が3体いる。敵はときどきうなり声を出し、その音の粒で敵の居場所とまわりの壁が赤く見える。
-   こちらの声を聞きつけると、声のした場所へ急いで寄ってくる。捕まると入口に戻される。
+   迷路には敵が3体いる。敵は1体ずつ順番にうなり声を出し、その音の粒で敵の居場所とまわりの壁が赤く見える。
+   こちらの声を聞きつけると、声のした場所へ急いで寄ってくる。追ってくる間はずっとうなり続ける。捕まると入口に戻される。
    迷路の作りは画像迷路と同じ。触った所に出るジョイスティックで玉を動かす。結果は出口までの秒数。 */
 (function () {
   "use strict";
@@ -283,11 +283,13 @@
   }
 
   /* ============ 敵 ============
-     ふだんはゆっくりうろつき、ときどきうなり声を出す（音の粒が広がって、居場所とまわりの壁が赤く見える）。
-     こちらの声が届く（通路づたいの距離が声の大きさで決まる）と、声のした場所へ急いで向かい、着いたらまたうろつく */
+     ふだんはゆっくりうろつき、1体ずつ順番にうなる（音の粒が広がって、居場所とまわりの壁が赤く見える）。
+     こちらの声が届く（通路づたいの距離が声の大きさで決まる）と、声のした場所へ急いで向かい、着いたらまたうろつく。
+     向かっている間はうなり続け、音の粒も出し続ける */
   var FOES = 3, FOE_WALK = 2 * B, FOE_RUN = 5 * B, HEAR_MIN = 8, HEAR_MAX = 36, FOE_FAR = 24;
-  var GROWL_EVERY = 2.2, GROWL_RAYS = 36, GROWL_REACH = 7, FOE_COLOR = "#ff4d5e";
-  var foes = [], catches = 0, caughtFlash = 0;
+  var GROWL_EVERY = 0.8, GROWL_RAYS = 36, GROWL_REACH = 7, FOE_COLOR = "#ff4d5e";
+  var CHASE_PULSE = 0.3, CHASE_RAYS = 18;
+  var foes = [], catches = 0, caughtFlash = 0, growlClock = 0, growlTurn = 0;
   function nbrs(c) {
     var x = c % G, y = (c / G) | 0, out = [];
     if (x > 0 && open[c - 1]) out.push(c - 1);
@@ -313,8 +315,37 @@
     foes = [];
     for (var i = 0; i < FOES && far.length; i++) {
       var c2 = far.splice(Math.floor(Math.random() * far.length), 1)[0];
-      foes.push({ x: (c2 % G + 0.5) * B, y: (((c2 / G) | 0) + 0.5) * B, at: c2, to: c2, prev: -1, map: null, lit: 0, step: 0, growl: 0.5 + i * GROWL_EVERY / FOES });
+      foes.push({ x: (c2 % G + 0.5) * B, y: (((c2 / G) | 0) + 0.5) * B, at: c2, to: c2, prev: -1, map: null, lit: 0, pulse: 0, voice: null });
     }
+    growlClock = 0.5; growlTurn = 0;
+  }
+  /* 追ってくる間のうなり声（鳴らしっぱなしで、大きさと左右を毎回合わせる） */
+  function chaseVoice(f, on) {
+    if (!AC) return;
+    if (!f.voice) {
+      if (!on) return;
+      var o = AC.createOscillator(), lfo = AC.createOscillator(), lg = AC.createGain(), amp = AC.createGain(), g = AC.createGain(), out = g;
+      o.type = "sawtooth"; o.frequency.value = 82;
+      lfo.frequency.value = 9; lg.gain.value = 0.5; amp.gain.value = 0.5;
+      lfo.connect(lg); lg.connect(amp.gain);
+      g.gain.value = 0;
+      o.connect(amp); amp.connect(g);
+      if (AC.createStereoPanner) { var p = AC.createStereoPanner(); g.connect(p); out = p; g.pan = p; }
+      out.connect(AC.destination);
+      o.start(); lfo.start();
+      f.voice = { o: o, lfo: lfo, g: g };
+    }
+    var near = Math.hypot(f.x - player.x, f.y - player.y) / B;
+    var vol = on ? Math.max(0.01, 0.09 * (1 - near / 40)) : 0;
+    f.voice.g.gain.setTargetAtTime(vol, AC.currentTime, 0.06);
+    if (f.voice.g.pan) f.voice.g.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, (f.x - player.x) / (B * 10))), AC.currentTime, 0.06);
+  }
+  function quietFoes() {
+    foes.forEach(function (f) {
+      if (!f.voice) return;
+      try { f.voice.o.stop(); f.voice.lfo.stop(); f.voice.g.disconnect(); } catch (e) {}
+      f.voice = null;
+    });
   }
   function hear(level) {
     var here = Math.floor(player.y / B) * G + Math.floor(player.x / B);
@@ -323,27 +354,42 @@
     foes.forEach(function (f) {
       if (d[f.at] < 0) return;
       f.map = d;   /* 声のした場所への道しるべ。距離が減る方へ進めば着く */
-      f.growl = Math.min(f.growl, 0.25);   /* 気づいたらすぐうなる */
     });
   }
   /* うなり声。遠いほど小さく、左右はその方向から。音の粒がまわりへ広がる */
-  function growl(f) {
+  function growl(f, rays0) {
     var near = Math.hypot(f.x - player.x, f.y - player.y) / B, pan = (f.x - player.x) / (B * 10);
     var vol = Math.max(0.012, 0.11 * (1 - near / 40));
     tone(f.map ? 95 : 70, 0.5, vol, "sawtooth", f.map ? 140 : 55, 0, pan);
     tone(f.map ? 190 : 140, 0.35, vol * 0.4, "square", 90, 0.03, pan);
     f.lit = 1;
-    for (var i = 0; i < GROWL_RAYS; i++) {
-      var a = (i + Math.random() * 0.5) / GROWL_RAYS * Math.PI * 2;
+    emitFoe(f, GROWL_RAYS);
+  }
+  function emitFoe(f, n) {
+    for (var i = 0; i < n; i++) {
+      var a = (i + Math.random() * 0.5) / n * Math.PI * 2;
       rays.push({ x: f.x, y: f.y, vx: Math.cos(a), vy: Math.sin(a), d: 0, max: GROWL_REACH * B, e: 0.75, hit: 0, col: FOE_COLOR });
     }
   }
   function updateFoes(dt) {
     var px = player.x, py = player.y;
+    /* ふだんのうなり声は、追っていない敵が1体ずつ順番に */
+    growlClock -= dt;
+    if (growlClock <= 0 && foes.length) {
+      growlClock = GROWL_EVERY;
+      for (var k = 0; k < foes.length; k++) {
+        var g = foes[(growlTurn + k) % foes.length];
+        if (!g.map) { growl(g); growlTurn = (growlTurn + k + 1) % foes.length; break; }
+      }
+    }
     foes.forEach(function (f) {
       f.lit = Math.max(0, f.lit - dt / GLOW_FADE);
-      f.growl -= dt;
-      if (f.growl <= 0) { growl(f); f.growl = (f.map ? 0.9 : GROWL_EVERY) * (0.8 + Math.random() * 0.4); }
+      chaseVoice(f, !!f.map);
+      if (f.map) {
+        f.lit = 1;
+        f.pulse -= dt;
+        if (f.pulse <= 0) { f.pulse = CHASE_PULSE; emitFoe(f, CHASE_RAYS); }
+      }
       var tx = (f.to % G + 0.5) * B, ty = (((f.to / G) | 0) + 0.5) * B;
       var dx = tx - f.x, dy = ty - f.y, dd = Math.hypot(dx, dy), sp = (f.map ? FOE_RUN : FOE_WALK) * dt;
       if (dd > sp) { f.x += dx / dd * sp; f.y += dy / dd * sp; }
@@ -371,6 +417,7 @@
     tone(90, 0.8, 0.1, "square", 40, 0.05);
     player.x = 1.5 * B; player.y = 0.5 * B;
     facing = Math.PI / 2;
+    quietFoes();
     placeFoes();
   }
 
@@ -405,6 +452,7 @@
     shouts = 0; talking = false; voice = 0; deaf = 0;
     facing = Math.PI / 2;
     rays = [];
+    quietFoes();
     catches = 0; caughtFlash = 0; foes = [];
     marks = [];
     buildMaze();
@@ -457,6 +505,7 @@
   /* ゴールしたら、迷路ぜんぶに波が広がって全体が見える */
   function goal() {
     state = S.GOAL;
+    quietFoes();
     T = 0;
     stopMic();
     ping(99);
@@ -567,7 +616,7 @@
     }
     if (n === 3 && state === S.PLAY) { time += 3; goal(); }                                /* クリア */
     if (n === 4 && state === S.PLAY) ping(1);                                             /* いちばん大きい声 */
-    if (n === 5 && state === S.PLAY) foes.forEach(growl);                                 /* 敵を全部うならせる */
+    if (n === 5 && state === S.PLAY) foes.forEach(function (f) { growl(f); });           /* 敵を全部うならせる */
   }
 
   var KEYMAP = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r", ArrowUp: "u", w: "u", W: "u", ArrowDown: "d", s: "d", S: "d" };
