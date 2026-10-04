@@ -393,9 +393,13 @@
     var faceM = new T.MeshPhysicalMaterial({ map: face, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 3 });
     side.envMapIntensity = 3;
     /* てりを拾う小さな明かり（チャーシューのそばだけ照らす） */
+    /* 最後に山のてっぺんへ乗せる2枚。てりを拾う小さな明かりも一緒に動かす */
+    var ch = this.chashu = new T.Group();
+    ch.visible = false;
+    s.add(ch);
     var glint = new T.PointLight(0xfff0d8, 6, 3.5, 2);
-    glint.position.set(0.6, 1.9, 2.4);
-    s.add(glint);
+    glint.position.set(-0.5, 1.3, 1.6);
+    ch.add(glint);
     var sh = new T.Shape(), pts2 = [[0.05, 0], [0.55, -0.03], [0.97, 0.02], [1.0, 0.3], [0.96, 0.62], [0.5, 0.66], [0.04, 0.6], [0, 0.3]];
     sh.moveTo(pts2[0][0], pts2[0][1]);
     pts2.forEach(function (q, k) { var n2 = pts2[(k + 1) % pts2.length]; sh.quadraticCurveTo(n2[0] * 0.15 + q[0] * 0.85, n2[1] * 0.15 + q[1] * 0.85, (q[0] + n2[0]) / 2, (q[1] + n2[1]) / 2); });
@@ -404,13 +408,13 @@
     var uv = cg.attributes.uv;
     for (var k = 0; k < uv.count; k++) uv.setY(k, uv.getY(k) / 0.66);
     cg.center();
-    /* 右側に2枚重ねる（奥の1枚に手前の1枚をずらして重ねる） */
-    [[1.05, 0.62, 0.62, 0.2], [1.25, 0.48, 1.0, 0.32]].forEach(function (p) {
+    /* 2枚をずらして重ねる（奥の1枚に手前の1枚） */
+    [[-0.18, 0.12, 0.05, -1.1, 0.1, 0.15], [0.22, 0.3, 0.35, -0.95, -0.15, -0.2]].forEach(function (p) {
       var m = new T.Mesh(cg, [faceM, side]);
       m.scale.set(1.1, 1.1, 1.1);
-      m.rotation.set(-0.4, 0.3, p[3]);
+      m.rotation.set(p[3], p[4], p[5]);
       m.position.set(p[0], p[1], p[2]);
-      s.add(m);
+      ch.add(m);
     });
   };
 
@@ -517,6 +521,12 @@
     this.renderer.shadowMap.autoUpdate = !st.ending;
     var outside = ty * M > CEIL + 200;
     this.scene.environmentIntensity = outside ? 0.9 : 0.6;
+    /* 終わりにチャーシューが落ちてきて、てっぺんに乗る */
+    this.chashu.visible = st.chashu >= 0;
+    if (st.chashu >= 0) {
+      var TL = st.layers[st.layers.length - 1], ct = st.chashu;
+      this.chashu.position.set(TL.x / M, (st.layers.length * LAYER - 14) / M + (1 - ct * ct) * 3.5, 0);
+    }
     /* 持っている山 */
     var topY = st.layers.length * LAYER;
     var showHand = !st.ending && !st.intro, hx = st.handX;
