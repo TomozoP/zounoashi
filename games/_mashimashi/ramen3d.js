@@ -51,6 +51,7 @@
     this.makeBowl();
     this.makeSky();
     this.makeSteam();
+    this.makeAbura();
     var self = this;
     this.scene.traverse(function (o) { if (o.isMesh && !o.isInstancedMesh) { o.castShadow = true; o.receiveShadow = true; } });
     this.wall.castShadow = false;
@@ -398,7 +399,7 @@
     ch.visible = false;
     s.add(ch);
     var glint = new T.PointLight(0xfff0d8, 6, 3.5, 2);
-    glint.position.set(-0.5, 1.3, 1.6);
+    glint.position.set(0.9, 1.9, 2.4);
     ch.add(glint);
     var sh = new T.Shape(), pts2 = [[0.05, 0], [0.55, -0.03], [0.97, 0.02], [1.0, 0.3], [0.96, 0.62], [0.5, 0.66], [0.04, 0.6], [0, 0.3]];
     sh.moveTo(pts2[0][0], pts2[0][1]);
@@ -408,14 +409,37 @@
     var uv = cg.attributes.uv;
     for (var k = 0; k < uv.count; k++) uv.setY(k, uv.getY(k) / 0.66);
     cg.center();
-    /* 2枚をずらして重ねる（奥の1枚に手前の1枚） */
-    [[-0.18, 0.12, 0.05, -1.1, 0.1, 0.15], [0.22, 0.3, 0.35, -0.95, -0.15, -0.2]].forEach(function (p) {
+    /* どんぶりの右側に、2枚をずらして重ねる */
+    [[1.3, 0.62, 0.7, -0.4, 0.3, 0.2], [1.5, 0.48, 1.08, -0.4, 0.3, 0.32]].forEach(function (p) {
       var m = new T.Mesh(cg, [faceM, side]);
       m.scale.set(1.1, 1.1, 1.1);
       m.rotation.set(p[3], p[4], p[5]);
       m.position.set(p[0], p[1], p[2]);
       ch.add(m);
     });
+  };
+
+  /* 終わりにてっぺんへ乗せるアブラの小山（カラメがけ） */
+  RamenScene.prototype.makeAbura = function () {
+    var g = this.abura = new T.Group(), r = rng(77), d = this.dummy, n = 46;
+    var fm = new T.InstancedMesh(this.gCube, this.mFat, n), km = new T.InstancedMesh(this.gLeaf, this.mKarame, 14);
+    for (var i = 0; i < n; i++) {
+      var a = r() * Math.PI * 2, u = Math.sqrt(r()) * 0.7;
+      d.position.set(Math.cos(a) * u, (0.7 - u) * 0.75 + r() * 0.06, Math.sin(a) * u * 0.8);
+      d.rotation.set(r() * 3, r() * 3, r() * 3);
+      var c = 0.15 + r() * 0.09; d.scale.set(c * 1.2, c, c);
+      d.updateMatrix(); fm.setMatrixAt(i, d.matrix);
+    }
+    for (i = 0; i < 14; i++) {
+      a = r() * Math.PI * 2; u = Math.sqrt(r()) * 0.55;
+      d.position.set(Math.cos(a) * u, (0.7 - u) * 0.75 + 0.12, Math.sin(a) * u * 0.8);
+      d.rotation.set(0, r() * 3, 0); d.scale.set(0.16, 0.03, 0.12);
+      d.updateMatrix(); km.setMatrixAt(i, d.matrix);
+    }
+    fm.frustumCulled = km.frustumCulled = false;
+    g.add(fm); g.add(km);
+    g.visible = false;
+    this.scene.add(g);
   };
 
   /* ============ 空 ============ */
@@ -522,11 +546,16 @@
     var outside = ty * M > CEIL + 200;
     this.scene.environmentIntensity = outside ? 0.9 : 0.6;
     /* 終わりにチャーシューが落ちてきて、てっぺんに乗る */
-    this.chashu.visible = st.chashu >= 0;
-    if (st.chashu >= 0) {
-      var TL = st.layers[st.layers.length - 1], ct = st.chashu;
-      this.chashu.position.set(TL.x / M, (st.layers.length * LAYER - 14) / M + (1 - ct * ct) * 3.5, 0);
+    /* 終わりの演出：てっぺんにアブラが落ちて乗り、引いたあとどんぶりにチャーシューが落ちてくる */
+    this.abura.visible = st.abura >= 0;
+    if (st.abura >= 0) {
+      var TL = st.layers[st.layers.length - 1], at = st.abura;
+      this.abura.position.set(TL.x / M, (st.layers.length * LAYER - 12) / M + (1 - at * at) * 3.5, 0);
+      var as = Math.max(0.7, Math.min(1.5, TL.w / M / 1.2));
+      this.abura.scale.set(as, as, as);
     }
+    this.chashu.visible = st.chashu >= 0;
+    if (st.chashu >= 0) { var ct = st.chashu; this.chashu.position.set(0, (1 - ct * ct) * 8, 0); }
     /* 持っている山 */
     var topY = st.layers.length * LAYER;
     var showHand = !st.ending && !st.intro, hx = st.handX;
