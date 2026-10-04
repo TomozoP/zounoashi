@@ -54,4 +54,5 @@ window.DRAFT_GAMES = [
   {"type":"lab","tags":[],"id":"pixel-meiro","title":"1ピクセル迷路","year":2026,"date":"2026-10-04","plays":null,"url":"","img":"games/_pixel-meiro/img/thumb.webp","play":"games/_pixel-meiro/index.html","full":true,"catch":""},
   {"type":"lab","tags":[],"id":"gaso-kuzushi","title":"画素くずし","year":2026,"date":"2026-10-04","plays":null,"url":"","img":"games/_gaso-kuzushi/img/thumb.webp","play":"games/_gaso-kuzushi/index.html","full":true,"catch":""},
   {"type":"lab","tags":[],"id":"gaso-amida","title":"画素あみだ","year":2026,"date":"2026-10-04","plays":null,"url":"","img":"games/_gaso-amida/img/thumb.webp","play":"games/_gaso-amida/index.html","full":true,"catch":""},
+  {"type":"lab","tags":[],"id":"meishoku","title":"迷色","year":2026,"date":"2026-10-04","plays":null,"url":"","img":"games/_meishoku/img/thumb.webp","play":"games/_meishoku/index.html","full":true,"catch":""},
 ];
