@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>画素くずし</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #16202e; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 画素くずし
+
+   画面の実際の画素1つ1つがブロックのブロックくずし。
+   玉は一度に「ひと掘りぶん」の画素をくずしながら進み、掘りきったら下へ戻ってくる。
+   ひと掘りの量は画素の総数に比例するので、画素の細かい端末ほどくずす数が増える。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============
+     見た目の寸法は 540 幅。絵の画素数は端末の画素比をそのまま使う（上限をかけない）。 */
+  var W = 540, H = 960, K = 1;   /* K = ゲーム座標1あたりの画素数 */
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+    var dpr = window.devicePixelRatio || 1;
+    var cssW = parseFloat(canvas.style.width) || W, cssH = parseFloat(canvas.style.height) || H;
+    canvas.width = Math.max(9, Math.round(cssW * dpr));
+    canvas.height = Math.max(9, Math.round(cssH * dpr));
+    K = canvas.width / W;
+    if (state === S.INTRO || !field) makeField();
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, noiseBuf = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  /* 砂がくずれるザッという音 */
+  function crunch(vol) {
+    if (!AC) return;
+    if (!noiseBuf) {
+      noiseBuf = AC.createBuffer(1, Math.floor(AC.sampleRate * 0.12), AC.sampleRate);
+      var d = noiseBuf.getChannelData(0);
+      for (var i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    }
+    var s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+    s.buffer = noiseBuf;
+    f.type = "bandpass"; f.frequency.value = 1800 + Math.random() * 1600; f.Q.value = 0.8;
+    g.gain.value = vol;
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start();
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 画素の壁 ============
+     画面の上のほう（ゲーム座標 FY0〜FY1）に、画素を1つずつ並べる */
+  var FY0 = 130, FY1R = 0.58;
+  var PW = 0, PH = 0, FX = 0, FY = 0, FW = 0, FH = 0;   /* 画素での位置と大きさ */
+  var field = null, img = null, px32 = null, layer = null, lctx = null;
+  var total = 0, broken = 0, PUNCH = 1000;
+  var dirty = null;
+
+  function hsv(h, s, v) {
+    var i = Math.floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+    var r, g, b;
+    switch (((i % 6) + 6) % 6) { case 0: r = v; g = t; b = p; break; case 1: r = q; g = v; b = p; break; case 2: r = p; g = v; b = t; break;
+      case 3: r = p; g = q; b = v; break; case 4: r = t; g = p; b = v; break; default: r = v; g = p; b = q; }
+    return [r * 255 | 0, g * 255 | 0, b * 255 | 0];
+  }
+  function makeField() {
+    PW = canvas.width; PH = canvas.height;
+    FX = 0; FW = PW;
+    FY = Math.round(FY0 * K); FH = Math.max(1, Math.round(H * FY1R * K) - FY);
+    field = new Uint8Array(FW * FH).fill(1);
+    total = FW * FH; broken = 0;
+    PUNCH = Math.max(200, Math.round(total * 0.006));
+    layer = document.createElement("canvas");
+    layer.width = FW; layer.height = FH;
+    lctx = layer.getContext && layer.getContext("2d");
+    img = lctx && lctx.createImageData ? lctx.createImageData(FW, FH) : null;
+    px32 = img && img.data && img.data.buffer ? new Uint32Array(img.data.buffer) : null;
+    if (px32) {
+      /* 段ごとに色が変わる虹。1画素ずつ明るさを少しずらして、画素の粒が見えるように */
+      var rows = 12;
+      for (var y = 0; y < FH; y++) {
+        var band = Math.floor(y / FH * rows);
+        var c = hsv(band / rows, 0.62, 1);
+        for (var x = 0; x < FW; x++) {
+          var k = 0.82 + Math.random() * 0.18;
+          px32[y * FW + x] = 0xff000000 | ((c[2] * k) << 16) | ((c[1] * k) << 8) | (c[0] * k);
+        }
+      }
+    }
+    dirty = { x0: 0, y0: 0, x1: FW, y1: FH };
+  }
+  function flush() {
+    if (!dirty || !img || !lctx) { dirty = null; return; }
+    lctx.putImageData(img, 0, 0, dirty.x0, dirty.y0, dirty.x1 - dirty.x0, dirty.y1 - dirty.y0);
+    dirty = null;
+  }
+  function mark(x, y) {
+    if (!dirty) dirty = { x0: x, y0: y, x1: x + 1, y1: y + 1 };
+    else {
+      if (x < dirty.x0) dirty.x0 = x; if (y < dirty.y0) dirty.y0 = y;
+      if (x + 1 > dirty.x1) dirty.x1 = x + 1; if (y + 1 > dirty.y1) dirty.y1 = y + 1;
+    }
+  }
+
+  /* ============ くずれた砂 ============ */
+  var MAX_SAND = 2600;
+  var sand = [];
+  function addSand(x, y, col, vx, vy) {
+    if (sand.length >= MAX_SAND) sand[(Math.random() * MAX_SAND) | 0] = { x: x, y: y, vx: vx, vy: vy, c: col };
+    else sand.push({ x: x, y: y, vx: vx, vy: vy, c: col });
+  }
+  function colorOf(v) { return "rgb(" + (v & 255) + "," + ((v >> 8) & 255) + "," + ((v >> 16) & 255) + ")"; }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", END: "end", RESULT: "result" };
+  var state = S.INTRO, T = 0, held = false, keyMode = false, time = 0;
+  var LIMIT = 30;
+  var paddle = { x: W / 2, w: 120 };
+  var balls = [], MAX_BALLS = 12;   /* 受け皿で打ち返すたびに1つ増える */
+  var R = 7, SPEED = 560;
+  var keys = { l: 0, r: 0 };
+  var crunchT = 0, eatFrame = 0;
+
+  function paddleY() { return H - 120; }
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    makeField();
+    sand = [];
+    state = S.PLAY;
+    T = 0; time = 0;
+    held = false;
+    keys = { l: 0, r: 0 };
+    paddle.x = W / 2;
+    serve();
+  }
+  function serve() {
+    balls = [{ x: paddle.x, y: paddleY() - R - 2, vx: 0, vy: 0, on: true, wait: 0.5, punch: PUNCH }];
+  }
+  function aim(ball, deg) {
+    var a = deg * Math.PI / 180;
+    ball.vx = Math.cos(a) * SPEED; ball.vy = Math.sin(a) * SPEED;
+  }
+
+  /* 玉のまわりの画素をくずす。掘れる量を使いきったら下へ戻る */
+  function eat(ball) {
+    if (ball.punch <= 0) return;
+    var cx = ball.x * K - FX, cy = ball.y * K - FY, r = R * K * 1.6, r2 = r * r;
+    var x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(FW - 1, Math.ceil(cx + r));
+    var y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(FH - 1, Math.ceil(cy + r));
+    if (x0 > x1 || y0 > y1) return;
+    var n = 0, every = Math.max(1, Math.round(K * K * 1.5));
+    for (var y = y0; y <= y1; y++) {
+      var dy = y + 0.5 - cy;
+      for (var x = x0; x <= x1; x++) {
+        var dx = x + 0.5 - cx, i = y * FW + x;
+        if (!field[i] || dx * dx + dy * dy > r2) continue;
+        field[i] = 0; n++;
+        if (px32) {
+          if ((broken + n) % every === 0) addSand((x + FX) / K, (y + FY) / K, colorOf(px32[i]), ball.vx * 0.15 + (Math.random() - 0.5) * 120, ball.vy * 0.1 + (Math.random() - 0.5) * 120);
+          px32[i] = 0;
+        }
+        mark(x, y);
+      }
+    }
+    if (!n) return;
+    broken += n; ball.punch -= n; eatFrame += n;
+    if (ball.punch <= 0) { ball.vy = Math.abs(ball.vy); ball.punch = 0; }
+  }
+
+  function update(dt) {
+    if (state === S.END) {
+      T += dt; stepSand(dt);
+      if (T > 1.0) { state = S.RESULT; shareButton.hidden = false; }
+      return;
+    }
+    if (state !== S.PLAY) { stepSand(dt); return; }
+    time += dt;
+    if (time >= LIMIT || broken >= total) { time = Math.min(time, LIMIT); finish(); return; }
+    var kv = (keys.r - keys.l) * 600 * dt;
+    if (kv) paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, paddle.x + kv));
+    var py = paddleY(), born = [];
+    for (var bi = balls.length - 1; bi >= 0; bi--) {
+      var ball = balls[bi];
+      if (ball.on) {
+        ball.x = paddle.x; ball.y = py - R - 2;
+        ball.wait -= dt;
+        if (ball.wait <= 0) { ball.on = false; aim(ball, -90 + (Math.random() * 30 - 15)); }
+        continue;
+      }
+      var n = Math.max(1, Math.ceil(SPEED * dt * K));   /* 1画素ずつ進める */
+      for (var i = 0; i < n; i++) {
+        ball.x += ball.vx * dt / n; ball.y += ball.vy * dt / n;
+        if (ball.x < R) { ball.x = R; ball.vx = Math.abs(ball.vx); }
+        if (ball.x > W - R) { ball.x = W - R; ball.vx = -Math.abs(ball.vx); }
+        if (ball.y < FY0 - 6 + R) { ball.y = FY0 - 6 + R; ball.vy = Math.abs(ball.vy); }
+        eat(ball);
+      }
+      /* 受け皿。打ち返すと玉が1つ増える */
+      if (ball.vy > 0 && ball.y + R >= py && ball.y + R <= py + 18 + SPEED * dt && Math.abs(ball.x - paddle.x) <= paddle.w / 2 + R) {
+        var off = (ball.x - paddle.x) / (paddle.w / 2);
+        aim(ball, -90 + off * 60);
+        ball.y = py - R;
+        ball.punch = PUNCH;
+        if (balls.length + born.length < MAX_BALLS) {
+          var nb = { x: ball.x, y: ball.y, vx: 0, vy: 0, on: false, wait: 0, punch: PUNCH };
+          aim(nb, -90 + off * 60 + (off > 0 ? -25 : 25));
+          born.push(nb);
+        }
+        tone(440 + balls.length * 40, 0.06, 0.08, "triangle");
+      }
+      if (ball.y > H + 20) balls.splice(bi, 1);
+    }
+    balls = balls.concat(born);
+    if (!balls.length) { tone(160, 0.2, 0.08, "sawtooth", 80); serve(); }
+    crunchT -= dt;
+    if (eatFrame > 0 && crunchT <= 0) { crunch(Math.min(0.35, 0.08 + eatFrame / PUNCH * 0.4)); crunchT = 0.05; eatFrame = 0; }
+    stepSand(dt);
+  }
+  function stepSand(dt) {
+    for (var i = sand.length - 1; i >= 0; i--) {
+      var s = sand[i];
+      s.vy += 900 * dt; s.x += s.vx * dt; s.y += s.vy * dt;
+      if (s.y > H + 4) { sand[i] = sand[sand.length - 1]; sand.pop(); }
+    }
+  }
+  function finish() {
+    state = S.END; T = 0; held = false;
+    tone(523, 0.12, 0.14, "triangle");
+    tone(659, 0.12, 0.14, "triangle", null, 0.1);
+    tone(784, 0.3, 0.16, "triangle", null, 0.2);
+  }
+
+  /* ============ 入力 ============
+     どこをなぞってもよい。なぞった分だけ受け皿が横に動く */
+  var lastP = null;
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    held = true;
+    lastP = x == null ? null : { x: x, y: y };
+  }
+  function move(x, y) {
+    if (!held || !lastP || state !== S.PLAY) return;
+    var dx = x - lastP.x;
+    lastP = { x: x, y: y };
+    paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, paddle.x + dx * 1.3));
+  }
+  function up() { held = false; lastP = null; }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); keys = { l: 0, r: 0 }; });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    if (n === 1 && state === S.PLAY) time = LIMIT - 3;                 /* 残り3秒へ */
+    if (n === 2 && state === S.PLAY) balls.forEach(function (b) { b.punch = total; });   /* 掘り放題 */
+    if (n === 3 && state === S.PLAY) { broken = total; }               /* 全部くずした */
+  }
+
+  var KEYMAP = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r" };
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var dir = KEYMAP[e.key];
+    if (!esc && !go && !dir) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
+    if (dir) { keys[dir] = 1; return; }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    var dir = KEYMAP[e.key];
+    if (dir) { keys[dir] = 0; return; }
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function numText(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+  function doShare() {
+    /* 英語のときのハッシュタグは英語のゲーム名にする */
+    window.zResultActions.x({ text: zT("スマホの画素を" + numText(broken) + "個くずした", "Smashed " + numText(broken) + " pixels of my screen") + zT(" #画素くずし", " #PixelBreaker") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    flush();
+    /* 画素の壁は画面の画素に1対1で描く */
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#101521";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (layer) {
+      ctx.imageSmoothingEnabled = false;
+      var sc = canvas.width / Math.max(1, PW);
+      ctx.drawImage(layer, FX * sc, FY * sc, FW * sc, FH * sc);
+      ctx.imageSmoothingEnabled = true;
+    }
+    /* 砂は1粒＝1画素（小さすぎて見えないので2画素角） */
+    var sz = Math.max(1, Math.round(K * 0.9));
+    for (var i = 0; i < sand.length; i++) {
+      var s = sand[i];
+      ctx.fillStyle = s.c;
+      ctx.fillRect(Math.round(s.x * K), Math.round(s.y * K), sz, sz);
+    }
+    ctx.setTransform(K, 0, 0, K, 0, 0);
+
+    if (state !== S.INTRO) {
+      /* 受け皿 */
+      roundRect(paddle.x - paddle.w / 2, paddleY(), paddle.w, 16, 8);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      /* 玉。掘りきって戻ってくる間は暗く */
+      balls.forEach(function (ball) {
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, R, 0, Math.PI * 2);
+        ctx.fillStyle = ball.punch > 0 ? "#fff" : "#7d8597"; ctx.fill();
+      });
+    }
+
+    if (state === S.PLAY || state === S.END) {
+      ctx.save();
+      ctx.font = "800 44px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#fff";
+      ctx.fillText(numText(broken), W / 2, 66);
+      /* 残り時間の棒 */
+      var left = Math.max(0, 1 - time / LIMIT);
+      ctx.fillStyle = "rgba(255,255,255,.18)";
+      ctx.fillRect(40, 92, W - 80, 6);
+      ctx.fillStyle = left < 0.2 ? "#ff5a6e" : "#fff";
+      ctx.fillRect(40, 92, (W - 80) * left, 6);
+      ctx.restore();
+    }
+    if (state === S.RESULT) drawResult();
+  }
+
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.textAlign = "center";
+    var t = numText(broken);
+    var size = 108;
+    ctx.font = "800 " + size + "px sans-serif";
+    while (size > 40 && ctx.measureText && ctx.measureText(t).width > W - 60) { size -= 4; ctx.font = "800 " + size + "px sans-serif"; }
+    ctx.fillText(t, W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, time: time, broken: broken, total: total, punch: PUNCH, sand: sand.length, balls: balls.map(function (b) { return { x: b.x, y: b.y, vy: b.vy }; }), paddle: paddle.x, W: W, H: H, PW: PW, PH: PH }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    paddle: function (x) { paddle.x = x; },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(4000);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  startButton.hidden = false;
+  shareButton.hidden = true;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
