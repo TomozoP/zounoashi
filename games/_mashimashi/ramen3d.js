@@ -108,7 +108,7 @@
     this.gCube = new T.BoxGeometry(1, 1, 1);
     this.mSprout = new T.MeshStandardMaterial({ map: this.sproutAtlas(), alphaTest: 0.5, side: T.DoubleSide, roughness: 0.45, metalness: 0, emissive: 0x2a2410, emissiveIntensity: 0.5 });
     this.mLeaf = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, side: T.DoubleSide, emissive: 0x142008, emissiveIntensity: 0.5 });
-    this.mGarlic = new T.MeshStandardMaterial({ color: 0xeedc94, roughness: 0.8 });
+    this.mGarlic = new T.MeshStandardMaterial({ color: 0xf2e2a0, roughness: 0.6, emissive: 0x2a2208, emissiveIntensity: 0.6 });
     this.mFat = new T.MeshStandardMaterial({ color: 0xfff0d6, roughness: 0.12, emissive: 0x302418, emissiveIntensity: 0.5 });
     this.mKarame = new T.MeshStandardMaterial({ color: 0x4a1e06, roughness: 0.05, transparent: true, opacity: 0.85 });
     this.dummy = new T.Object3D();
@@ -271,16 +271,11 @@
     var band2 = new T.Mesh(new T.BoxGeometry(80, 0.08, 0.06), new T.MeshStandardMaterial({ color: 0xb8860b }));
     band2.position.set(0, 5.52, -4.44);
     s.add(band2);
-    /* カウンター */
-    var wood = canvasTex(512, 128, function (g, w, h) {
-      g.fillStyle = "#a8743e"; g.fillRect(0, 0, w, h);
-      for (var i = 0; i < 40; i++) { g.strokeStyle = "rgba(90,50,20," + (0.08 + Math.random() * 0.12) + ")"; g.lineWidth = 1 + Math.random() * 2; var y = Math.random() * h; g.beginPath(); g.moveTo(0, y); g.bezierCurveTo(w * 0.3, y + 6, w * 0.6, y - 6, w, y + 2); g.stroke(); }
-    });
-    wood.wrapS = T.RepeatWrapping; wood.repeat.set(6, 1);
-    var top = new T.Mesh(new T.BoxGeometry(60, 0.25, 7), new T.MeshStandardMaterial({ map: wood, roughness: 0.55 }));
+    /* カウンター：赤い天板 */
+    var top = new T.Mesh(new T.BoxGeometry(60, 0.25, 7), new T.MeshPhysicalMaterial({ color: 0xc81e1a, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 }));
     top.position.set(0, -1.63, 0);
     s.add(top);
-    var front = new T.Mesh(new T.BoxGeometry(60, 6, 0.3), new T.MeshStandardMaterial({ color: 0x5e3b1c, roughness: 0.8 }));
+    var front = new T.Mesh(new T.BoxGeometry(60, 6, 0.3), new T.MeshStandardMaterial({ color: 0x8e1410, roughness: 0.6 }));
     front.position.set(0, -4.7, 3.4);
     s.add(front);
     /* コップとレンゲ立て（小物） */
@@ -355,6 +350,19 @@
       dot.position.set(Math.cos(a) * u, 0.125, Math.sin(a) * u);
       s.add(dot);
     }
+    /* 刻みニンニクの小山：最初から左手前に乗っている */
+    var gn = 220, gm = new T.InstancedMesh(this.gCube, new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, emissive: 0x2a2208, emissiveIntensity: 0.6 }), gn), gc = new T.Color(), d = this.dummy;
+    for (i = 0; i < gn; i++) {
+      var ga = r() * Math.PI * 2, gu = Math.sqrt(r());
+      d.position.set(-1.1 + Math.cos(ga) * gu * 0.55, 0.16 + (1 - gu * gu) * 0.45 + r() * 0.05, 1.0 + Math.sin(ga) * gu * 0.4);
+      d.rotation.set(r() * 3, r() * 3, r() * 3);
+      var gs = 0.08 + r() * 0.06; d.scale.set(gs, gs * (0.7 + r() * 0.5), gs);
+      d.updateMatrix(); gm.setMatrixAt(i, d.matrix);
+      gc.setHSL(0.12 + r() * 0.03, 0.75 + r() * 0.2, 0.62 + r() * 0.14);
+      gm.setColorAt(i, gc);
+    }
+    gm.castShadow = gm.receiveShadow = true;
+    s.add(gm);
     /* 極太麺（ふちから見えるぶん） */
     var nm = new T.MeshPhysicalMaterial({ color: 0xd9a748, roughness: 0.35, clearcoat: 0.7, sheen: 0.5, sheenColor: new T.Color(0xffe0a0) });
     for (i = 0; i < 16; i++) {
@@ -502,7 +510,8 @@
     while (this.layers.length < st.layers.length) {
       var i = this.layers.length, L = st.layers[i];
       var g = this.clump(L.w, L.kind, i);
-      g.position.set(L.x / M, i * LAYER / M, 0);
+      g.position.set(L.x / M, (i - 1) * LAYER / M, 0);
+      if (i === 0) g.visible = false;           /* 0段目は見えない土台 */
       s.add(g);
       this.layers.push(g);
     }
@@ -516,15 +525,15 @@
     this.camera.updateProjectionMatrix();
     var halfV = (H / 2) / (st.zoom * M) + 2;
     for (i = 0; i < this.layers.length; i++) {
-      var y = i * LAYER / M;
-      var vis = y > ty - halfV - 1 && y < ty + halfV + 1;
+      var y = (i - 1) * LAYER / M;
+      var vis = i > 0 && y > ty - halfV - 1 && y < ty + halfV + 1;
       this.layers[i].visible = vis;
       var pop = st.layers[i].pop || 0;
       if (vis) this.layers[i].scale.set(1 + pop * 0.06, 1 + pop * 0.25, 1 + pop * 0.06);
     }
     /* 天井の穴 */
-    if (!this.holeOn && st.layers.length * LAYER > CEIL - 20) {
-      var hi = Math.min(st.layers.length - 1, Math.floor(CEIL / LAYER)), HL = st.layers[hi];
+    if (!this.holeOn && (st.layers.length - 1) * LAYER > CEIL - 20) {
+      var hi = Math.min(st.layers.length - 1, Math.floor(CEIL / LAYER) + 1), HL = st.layers[hi];
       this.buildCeil([HL.x - HL.w / 2 - 30, HL.x + HL.w / 2 + 30]);
       this.holeOn = true;
       this.lamps.forEach(function (l) { l.visible = Math.abs(l.position.x - HL.x / M) > HL.w / M / 2 + 0.6; });
@@ -550,14 +559,14 @@
     this.abura.visible = st.abura >= 0;
     if (st.abura >= 0) {
       var TL = st.layers[st.layers.length - 1], at = st.abura;
-      this.abura.position.set(TL.x / M, (st.layers.length * LAYER - 12) / M + (1 - at * at) * 3.5, 0);
+      this.abura.position.set(TL.x / M, ((st.layers.length - 1) * LAYER - 12) / M + (1 - at * at) * 3.5, 0);
       var as = Math.max(0.7, Math.min(1.5, TL.w / M / 1.2));
       this.abura.scale.set(as, as, as);
     }
     this.chashu.visible = st.chashu >= 0;
     if (st.chashu >= 0) { var ct = st.chashu; this.chashu.position.set(0, (1 - ct * ct) * 8, 0); }
     /* 持っている山 */
-    var topY = st.layers.length * LAYER;
+    var topY = (st.layers.length - 1) * LAYER;
     var showHand = !st.ending && !st.intro, hx = st.handX;
     var hkey = showHand && !st.falling ? st.n + ":" + Math.round(st.holdW) : null;
     if (this.heldKey !== hkey) {
