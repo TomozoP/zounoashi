@@ -115,6 +115,7 @@
   var SWING = 205;             /* トングが揺れる幅（中心から） */
   var HAND_UP = 230;           /* 山の上からトングまで */
   var PERFECT = 7;             /* これ以内のずれはぴったり扱い */
+  var MIN_W = 45;              /* 山がこれより細くなったら終わり */
   var CEIL = 1800;             /* 店の天井 */
   var ANCHOR = 0.62;           /* 画面のこの高さに山の上が来る */
   /* 終わってからの流れ（秒）: てっぺんにアブラ → カメラを引きながらどんぶりにチャーシュー → 結果 */
@@ -285,7 +286,7 @@
       }
       if (endT > ZOOM_T0) {
         if (!endFrom) {
-          var z = Math.min(1, H * 0.62 / (topY() + 220));
+          var z = Math.min(1, H * 0.5 / (topY() + 220));   /* 上の文字と下のボタンの間に収める */
           endFrom = { z0: zoom, c0: camY, z1: z, c1: H * 0.2 / z - 150 };
         }
         var t = Math.min(1, (endT - ZOOM_T0) / (ZOOM_T1 - ZOOM_T0));
@@ -310,7 +311,7 @@
     falling = null;
     var lo = Math.max(f.x - f.w / 2, L.x - L.w / 2);
     var hi = Math.min(f.x + f.w / 2, L.x + L.w / 2);
-    if (hi - lo <= 4) {
+    if (hi - lo < MIN_W) {               /* 外れ、または細くなりすぎたら終わり */
       /* 外れ */
       ending = true; endT = 0; shake = 1;
       score = cm();
@@ -698,7 +699,7 @@
 
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H - h - Math.max(36, H * 0.05);   /* 画面の下 */
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -712,24 +713,42 @@
     }
     return null;
   }
+  /* 結果は数字でなく「ヤサイ」＋積んだ段の数だけの「マシ」で出す。画面の上に、幅に合わせて折り返す */
+  function callText() {
+    var k = Math.max(0, layers.length - 1), t = "ヤサイ";
+    for (var i = 0; i < k; i++) t += "マシ";
+    return t;
+  }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.6)";
-    ctx.fillRect(0, 0, W, H);
+    var text = callText(), top = Math.max(28, H * 0.04), room = H * 0.27, maxW = W - 48;
     ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
     ctx.textAlign = "center";
-    ctx.font = "800 108px sans-serif";
-    var num = String(score), unit = "cm";
-    var nw = ctx.measureText(num).width;
-    ctx.font = "800 54px sans-serif";
-    var uw = ctx.measureText(unit).width;
-    ctx.textAlign = "left";
-    ctx.font = "800 108px sans-serif";
-    ctx.fillText(num, W / 2 - (nw + uw + 6) / 2, H * 0.45);
-    ctx.font = "800 54px sans-serif";
-    ctx.fillText(unit, W / 2 - (nw + uw + 6) / 2 + nw + 6, H * 0.45);
+    ctx.textBaseline = "top";
+    ctx.lineJoin = "round";
+    /* 収まる大きさを探す。小さくしても入らなければ、入るところまでで「……」 */
+    var size = 64, lines;
+    for (;;) {
+      ctx.font = "900 " + size + "px sans-serif";
+      var per = Math.max(1, Math.floor(maxW / ctx.measureText("マ").width));
+      /* 「マシ」の途中で折り返さない */
+      lines = [text.slice(0, 3)];
+      for (var i = 3; i < text.length; i += 2) {
+        if (lines[lines.length - 1].length + 2 > per) lines.push("");
+        lines[lines.length - 1] += "マシ";
+      }
+      if (lines.length * size * 1.15 <= room || size <= 22) break;
+      size -= 2;
+    }
+    var fit = Math.max(1, Math.floor(room / (size * 1.15)));
+    if (lines.length > fit) { lines = lines.slice(0, fit); lines[fit - 1] = lines[fit - 1].slice(0, -1) + "……"; }
+    ctx.lineWidth = Math.max(4, size * 0.16);
+    ctx.strokeStyle = "#16202e";
+    ctx.fillStyle = "#fff";
+    lines.forEach(function (ln, k) {
+      var y = top + k * size * 1.15;
+      ctx.strokeText(ln, W / 2, y);
+      ctx.fillText(ln, W / 2, y);
+    });
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
