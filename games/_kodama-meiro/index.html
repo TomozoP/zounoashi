@@ -41,6 +41,8 @@
    粒が当たった壁の面が線で光り、輪郭が浮かぶ。大きな声ほど遠くまで届く。光は1.5秒ほどで消える。
    音の粒が出口に届くと「キン」と、その方向から鳴る。
    マイクが使えないときは、タップ（スペース）でも高い音を出せる。
+   迷路には楽器が5つ置いてある。触れると、その楽器がその場所から自分のパートを鳴らし続ける
+   （近いほど大きく、左右はその方向から）。ゴールすると全パートがそろって曲が完成する。
    迷路の作りは画像迷路と同じ。触った所に出るジョイスティックで玉を動かす。結果は出口までの秒数。 */
 (function () {
   "use strict";
@@ -222,6 +224,107 @@
     /* 入口は左上、出口は右下 */
     open[1] = 1;
     open[EXIT] = 1;
+    /* 楽器は入口から出口への道の途中に、間をあけて置く */
+    var from = new Int32Array(G * G).fill(-1), q = [1];
+    from[1] = 1;
+    for (var h = 0; h < q.length; h++) {
+      var c = q[h], cx = c % G, cy = (c / G) | 0;
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
+        var X = cx + d[0], Y = cy + d[1];
+        if (X < 0 || Y < 0 || X >= G || Y >= G) return;
+        var m = Y * G + X;
+        if (open[m] && from[m] < 0) { from[m] = c; q.push(m); }
+      });
+    }
+    var path = [];
+    for (var k = EXIT; k !== 1; k = from[k]) path.unshift(k);
+    insts = PARTS.map(function (pt, i) {
+      var c2 = path[Math.floor(path.length * (i + 1) / (PARTS.length + 1))];
+      return { x: (c2 % G + 0.5) * B, y: (((c2 / G) | 0) + 0.5) * B, got: false, beat: 0 };
+    });
+  }
+
+  /* ============ 楽器と曲 ============
+     4小節（C → Am → F → G）を繰り返す。5つのパートは最初は無音で、楽器に触れると鳴り出す */
+  var PARTS = [
+    { color: "#ff8a5c" },   /* ベース */
+    { color: "#ffd75c" },   /* 太鼓 */
+    { color: "#7be08a" },   /* 和音 */
+    { color: "#6bc8ff" },   /* 旋律 */
+    { color: "#c58cff" }    /* きらきら */
+  ];
+  var insts = [], BPM = 100, STEP = 60 / BPM / 4, LOOP = 64;
+  var CHORDS = [[0, 4, 7], [9, 12, 16], [5, 9, 12], [7, 11, 14]];   /* C Am F G（ドからの半音） */
+  var ROOTS = [0, -3, -7, -5];
+  var MELODY = [12, -1, 16, -1, 19, -1, 16, 14, 12, -1, -1, -1, 9, -1, 11, -1,
+                12, -1, 16, -1, 21, -1, 19, -1, 16, -1, -1, -1, 12, -1, -1, -1,
+                17, -1, 16, -1, 14, -1, 12, -1, 9, -1, 12, -1, 14, -1, -1, -1,
+                19, -1, 17, -1, 16, -1, 14, -1, 11, -1, 14, -1, 19, -1, -1, -1];
+  var music = null, nextStepAt = 0, stepNo = 0, noiseBuf = null;
+  function hz(semi) { return 261.63 * Math.pow(2, semi / 12); }
+  function startMusic() {
+    if (!AC || music) return;
+    music = PARTS.map(function () {
+      var g = AC.createGain(), out = g;
+      g.gain.value = 0;
+      if (AC.createStereoPanner) { var p = AC.createStereoPanner(); g.connect(p); out = p; g.pan = p; }
+      out.connect(AC.destination);
+      return g;
+    });
+    var len = Math.floor(AC.sampleRate * 0.3);
+    noiseBuf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = noiseBuf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    nextStepAt = AC.currentTime + 0.1; stepNo = 0;
+  }
+  function note(part, freq, at, dur, vol, type) {
+    var o = AC.createOscillator(), g = AC.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(vol, at + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g); g.connect(music[part]);
+    o.start(at); o.stop(at + dur + 0.05);
+  }
+  function hit(part, at, dur, vol, freq) {
+    var n = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+    n.buffer = noiseBuf; f.type = freq > 3000 ? "highpass" : "bandpass"; f.frequency.value = freq;
+    g.gain.setValueAtTime(vol, at); g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    n.connect(f); f.connect(g); g.connect(music[part]);
+    n.start(at); n.stop(at + dur + 0.02);
+  }
+  function playStep(n, at) {
+    var bar = Math.floor(n / 16), st = n % 16, ch = CHORDS[bar], root = ROOTS[bar];
+    if (st % 4 === 0 || st === 6 || st === 14) note(0, hz(root - 24), at, STEP * 1.8, 0.3, "triangle");            /* ベース */
+    if (st % 8 === 0) { note(1, 120, at, 0.18, 0.5, "sine"); }                                                     /* 太鼓 */
+    if (st % 8 === 4) hit(1, at, 0.14, 0.25, 1800);
+    if (st % 2 === 0) hit(1, at, 0.04, 0.08, 7000);
+    if (st === 0 || st === 8) ch.forEach(function (c) { note(2, hz(c - 12), at, STEP * 7.5, 0.06, "triangle"); });  /* 和音 */
+    if (MELODY[n] >= 0) note(3, hz(MELODY[n]), at, STEP * 2.5, 0.09, "square");                                    /* 旋律 */
+    if (st % 2 === 1) note(4, hz(ch[(st >> 1) % 3] + 24), at, STEP * 1.5, 0.05, "sine");                            /* きらきら */
+    insts.forEach(function (it, i) { if (it.got && ((i === 1 && st % 4 === 0) || (i !== 1 && st % 8 === 0))) it.pulseAt = at; });
+  }
+  /* 鳴らす予定を少し先まで入れておく。パートの大きさと左右は、玉からの距離と方向で決める */
+  function updateMusic() {
+    if (!music) return;
+    while (nextStepAt < AC.currentTime + 0.15) { playStep(stepNo, nextStepAt); nextStepAt += STEP; stepNo = (stepNo + 1) % LOOP; }
+    var done = state === S.GOAL || state === S.RESULT;
+    insts.forEach(function (it, i) {
+      var g = music[i], vol = 0, pan = 0;
+      if (done) vol = 1;
+      else if (it.got) {
+        var d = Math.hypot(it.x - player.x, it.y - player.y) / B;
+        vol = Math.max(0.12, 1 - d / 24);
+        pan = Math.max(-1, Math.min(1, (it.x - player.x) / (B * 10)));
+      }
+      g.gain.setTargetAtTime(vol, AC.currentTime, 0.08);
+      if (g.pan) g.pan.pan.setTargetAtTime(pan, AC.currentTime, 0.08);
+    });
+  }
+  function stopMusic() {
+    if (!music) return;
+    music.forEach(function (g) { try { g.gain.cancelScheduledValues(0); g.gain.value = 0; g.disconnect(); } catch (e) {} });
+    music = null;
   }
   function degree(i) {
     var x = i % G, y = (i / G) | 0, n = 0;
@@ -307,6 +410,7 @@
     facing = Math.PI / 2;
     rays = [];
     marks = [];
+    stopMusic();
     buildMaze();
     if (!micError) requestMic();
   }
@@ -362,7 +466,8 @@
     ping(99);
     shouts--;
     exitHeard = true;
-    [523.25, 659.25, 783.99, 1046.5].forEach(function (f, j) { tone(f, 1.4, 0.07, "triangle", null, 0.1 + j * 0.09); });
+    startMusic();   /* 全パートがそろう */
+    [523.25, 659.25, 783.99, 1046.5].forEach(function (f, j) { tone(f, 1.4, 0.05, "triangle", null, 0.1 + j * 0.09); });
   }
 
   /* ============ 進行 ============ */
@@ -379,11 +484,18 @@
     }
     if (state === S.GOAL) {
       T += dt;
-      if (T > 2.2) { state = S.RESULT; shareButton.hidden = false; }
+      if (T > 3.5) { state = S.RESULT; shareButton.hidden = false; }
       return;
     }
+    updateMusic();
     if (state !== S.PLAY) return;
     time += dt;
+    insts.forEach(function (it) {
+      if (it.got || Math.hypot(it.x - player.x, it.y - player.y) > B * 0.9) return;
+      it.got = true;
+      startMusic();
+      tone(1046.5, 0.5, 0.08, "triangle"); tone(1568, 0.6, 0.05, "triangle", null, 0.08);
+    });
     /* 声。言い終わったら（長くても1秒で区切る）、その声を高くして鳴らし、一番大きかった分だけ音の粒を飛ばす。
        自分の鳴らした声をマイクが拾わないよう、鳴っている間は聞かない */
     deaf -= dt;
@@ -465,6 +577,7 @@
     }
     if (n === 3 && state === S.PLAY) { time += 3; goal(); }                                /* クリア */
     if (n === 4 && state === S.PLAY) ping(1);                                             /* いちばん大きい声 */
+    if (n === 5 && state === S.PLAY) { insts.forEach(function (it) { it.got = true; }); startMusic(); }   /* 楽器を全部 */
   }
 
   var KEYMAP = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r", ArrowUp: "u", w: "u", W: "u", ArrowDown: "d", s: "d", S: "d" };
@@ -526,6 +639,27 @@
       eg.addColorStop(1, "rgba(255,200,110,0)");
       ctx.fillStyle = eg;
       ctx.fillRect(ex - B * 2.4, ey - B * 2.4, B * 4.8, B * 4.8);
+      /* 楽器。まだのものはかすかに、鳴っているものは拍に合わせて光の輪を出す */
+      var now = AC ? AC.currentTime : 0;
+      insts.forEach(function (it, i) {
+        var col = PARTS[i].color, g2 = ctx.createRadialGradient(it.x, it.y, 0, it.x, it.y, B * (it.got ? 2 : 1.3));
+        g2.addColorStop(0, col);
+        g2.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.globalAlpha = it.got ? 0.55 : 0.18;
+        ctx.fillStyle = g2;
+        ctx.fillRect(it.x - B * 2, it.y - B * 2, B * 4, B * 4);
+        ctx.globalAlpha = it.got ? 1 : 0.35;
+        ctx.beginPath(); ctx.arc(it.x, it.y, 3, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+        if (it.got && it.pulseAt != null) {
+          var age = now - it.pulseAt;
+          if (age >= 0 && age < 0.6) {
+            ctx.globalAlpha = 0.7 * (1 - age / 0.6);
+            ctx.beginPath(); ctx.arc(it.x, it.y, 4 + age * 40, 0, Math.PI * 2);
+            ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
+          }
+        }
+        ctx.globalAlpha = 1;
+      });
       /* 音の粒が当たった壁の面（しばらくすると消える） */
       ctx.globalCompositeOperation = "lighter";
       ctx.lineCap = "butt";
@@ -636,6 +770,7 @@
     now: function () { return { state: state, time: time, player: { x: player.x, y: player.y }, W: W, H: H, shouts: shouts, mic: !!mic, micError: micError, rays: rays.length, facing: facing }; },
     maze: function () { return { G: G, B: B, open: Array.prototype.slice.call(open) }; },
     marks: function () { return marks.length; },
+    insts: function () { return insts.map(function (it) { return { x: it.x, y: it.y, got: it.got }; }); },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     move: function (dx, dy) { moveBy(dx, dy); },
     stick: function (vx, vy) { stick = { on: vx !== 0 || vy !== 0, bx: 0, by: 0, x: vx * STICK_R, y: vy * STICK_R }; },
