@@ -294,10 +294,10 @@
     s.add(under);
     /* コップとレンゲ立て（小物） */
     var glass = new T.Mesh(new T.CylinderGeometry(0.32, 0.27, 0.9, 20, 1, true), new T.MeshStandardMaterial({ color: 0xcfe6f2, transparent: true, opacity: 0.35, roughness: 0.05, side: T.DoubleSide }));
-    glass.position.set(3.1, -1.05, 0.6);
+    glass.position.set(3.4, -3.85, 7.6);   /* 手前の下の段に、最初から水 */
     s.add(glass);
     var water = new T.Mesh(new T.CylinderGeometry(0.27, 0.25, 0.6, 20), new T.MeshStandardMaterial({ color: 0xe2f2fa, transparent: true, opacity: 0.4, roughness: 0.05 }));
-    water.position.set(3.1, -1.2, 0.6);
+    water.position.set(3.4, -4.0, 7.6);
     s.add(water);
     /* 天井 */
     this.ceil = new T.Group();
@@ -534,11 +534,24 @@
     var tan = Math.tan(this.camera.fov * Math.PI / 360);
     var D = (H / 2) / (tan * st.zoom * M);
     var ty = (st.camY + 0.12 * H / st.zoom) / M;
-    this.camera.position.set(0, ty + D * 0.18, D);
-    this.camera.lookAt(0, ty, 0);
+    var py = ty + D * 0.18, pz = D, ly = ty;
+    var halfV = (H / 2) / (st.zoom * M) + 2;
+    if (!(st.endCam > 0)) this.camStart = { py: py, pz: pz, ly: ly };
+    else {
+      /* 終わりの引き：下の段に置いたあとのどんぶりの底から、山のてっぺんまでを画面のタテいっぱいに */
+      var yt = (st.layers.length - 1) * LAYER / M + 0.8, zt = 0;
+      var yb = -1.5 - 2.8, zb = 6.0 + 2.2;
+      var a1 = (0.5 - 0.13) * 2 * tan, a2 = (0.87 - 0.5) * 2 * tan;
+      var De = Math.max(zb + 15, (yt - yb + a1 * zt + a2 * zb) / (a1 + a2));
+      var cy = yb + a2 * (De - zb);
+      var e = st.endCam, c0 = this.camStart || { py: py, pz: pz, ly: ly };
+      py = c0.py + (cy - c0.py) * e; pz = c0.pz + (De - c0.pz) * e; ly = c0.ly + (cy - c0.ly) * e;
+      D = pz; ty = ly; halfV = 1e6;
+    }
+    this.camera.position.set(0, py, pz);
+    this.camera.lookAt(0, ly, 0);
     this.camera.near = Math.max(0.5, D * 0.2); this.camera.far = D + 1000;
     this.camera.updateProjectionMatrix();
-    var halfV = (H / 2) / (st.zoom * M) + 2;
     for (i = 0; i < this.layers.length; i++) {
       var y = (i - 1) * LAYER / M;
       var vis = i > 0 && y > ty - halfV - 1 && y < ty + halfV + 1;
@@ -557,7 +570,7 @@
     var c = skyColor(ty * M);
     this.renderer.setClearColor(c, 1);
     /* 照明と影を、見ている高さについていかせる */
-    var sh = Math.max(4, halfV * 1.1);
+    var sh = Math.max(4, Math.min(halfV, D * tan * 1.3) * 1.1);
     this.key.position.set(-2.5, ty + 9, 6);
     this.key.target.position.set(0, ty - 1, 0);
     var sc = this.key.shadow.camera;
