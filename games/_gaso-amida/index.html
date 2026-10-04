@@ -99,39 +99,36 @@
 
   /* ============ あみだ ============
      縦線 i は画素の列 2i+1。横線は行 y で、縦線 i と i+1 の間の画素 2i+2 を埋める。 */
-  var PW = 0, PH = 0, NL = 0, Y0 = 0, Y1 = 0, GAPS = 0;
+  var PW = 0, PH = 0, NL = 0, Y0 = 0, Y1 = 0;
   var rung = null, layer = null, lctx = null, img = null, px32 = null, dirty = false;
   var LINE = 0xffe6dccb, BG = 0xff2e2016, TRACE = 0xff5533ff;   /* 色（並びは A B G R） */
   var TOP = 150, BOTTOM = 110;   /* 上下の余白（ゲーム座標）。上は選ぶところ、下は当たりの印 */
-  var RUNG_P = 0.005;            /* 1行・1すき間あたりの、ばらばらの横線の出やすさ */
-  var STAIR_RATE = 2.6e-3;       /* 階段の数（画素1つあたり） */
+  var RUNG_TRY = 0.03;           /* 1行あたり、縦線の数に対して横線を置こうとする割合 */
+  var RUNG_LEN = 22;             /* 横線がまたぐ縦線の数の平均 */
   var winLine = 0;
 
   function build() {
     PW = canvas.width; PH = canvas.height;
     NL = Math.max(2, Math.floor((PW - 1) / 2));
-    GAPS = NL - 1;
     Y0 = Math.round(TOP * K); Y1 = Math.max(Y0 + 4, PH - Math.round(BOTTOM * K));
     var ROWS = Y1 - Y0;
-    rung = new Uint8Array(ROWS * GAPS);
-    /* 横線は2行おき。となり同士が同じ行でつながらないようにする */
-    function set(y, g) {
-      if (y < 0 || y >= ROWS || g < 0 || g >= GAPS) return false;
-      var r = y * GAPS;
-      if ((g && rung[r + g - 1]) || (g < GAPS - 1 && rung[r + g + 1])) return false;
-      rung[r + g] = 1;
-      return true;
+    /* rung[行 * NL + 縦線] = 渡った先の縦線（なければ -1）。横線は2行おき。
+       横線は何本もの縦線をまたぐ長いものもあり、またいだ縦線とはつながらない（上を渡る） */
+    rung = new Int32Array(ROWS * NL).fill(-1);
+    var used = new Uint8Array(NL);
+    for (var y = 0; y < ROWS; y += 2) {
+      used.fill(0);
+      var tries = Math.max(1, Math.round(NL * RUNG_TRY));
+      for (var t = 0; t < tries; t++) {
+        var len = 1 + Math.floor(-Math.log(1 - Math.random()) * RUNG_LEN);
+        var a = (Math.random() * (NL - 1)) | 0, b2 = Math.min(NL - 1, a + len);
+        var free = true;
+        for (var q = a; q <= b2; q++) if (used[q]) { free = false; break; }
+        if (!free) continue;
+        for (q = a; q <= b2; q++) used[q] = 1;
+        rung[y * NL + a] = b2; rung[y * NL + b2] = a;
+      }
     }
-    /* 斜めに続く階段。乗ると横へ大きく流される。上下いくつかの帯ごとに流れる向きをそろえる */
-    var bands = [];
-    for (var b = 0; b < 5; b++) bands.push(Math.random() < 0.5 ? 1 : -1);
-    var stairs = Math.round(NL * ROWS * STAIR_RATE), len = NL * 0.7;
-    for (var s2 = 0; s2 < stairs; s2++) {
-      var y = 2 * ((Math.random() * ROWS / 2) | 0), g = (Math.random() * GAPS) | 0;
-      var d = bands[Math.min(bands.length - 1, Math.floor(y / ROWS * bands.length))], L = (len * (0.3 + Math.random())) | 0;
-      for (var k = 0; k < L; k++) { if (!set(y, g)) break; y += 2; g += d; }
-    }
-    for (var y2 = 0; y2 < ROWS; y2 += 2) for (var g2 = 0; g2 < GAPS; g2++) if (Math.random() < RUNG_P) set(y2, g2);
     winLine = (Math.random() * NL) | 0;
     layer = document.createElement("canvas");
     layer.width = PW; layer.height = PH;
@@ -141,9 +138,9 @@
     if (px32) {
       px32.fill(BG);
       for (var yy = Y0; yy < Y1; yy++) {
-        var base = yy * PW, r0 = (yy - Y0) * GAPS;
+        var base = yy * PW, r0 = (yy - Y0) * NL;
         for (var i = 0; i < NL; i++) px32[base + 2 * i + 1] = LINE;
-        for (var j = 0; j < GAPS; j++) if (rung[r0 + j]) px32[base + 2 * j + 2] = LINE;
+        for (var j = 0; j < NL; j++) if (rung[r0 + j] > j) for (var xx = 2 * j + 1; xx <= 2 * rung[r0 + j] + 1; xx++) px32[base + xx] = LINE;
       }
     }
     dirty = true;
@@ -154,10 +151,8 @@
   }
   /* 縦線 l の行 y（あみだの中の行）で、横線があれば渡る */
   function stepRow(l, y) {
-    var r0 = y * GAPS;
-    if (l < GAPS && rung[r0 + l]) return l + 1;
-    if (l > 0 && rung[r0 + l - 1]) return l - 1;
-    return l;
+    var to = rung[y * NL + l];
+    return to < 0 ? l : to;
   }
   function endOf(l) { for (var y = 0; y < Y1 - Y0; y++) l = stepRow(l, y); return l; }
 
@@ -192,7 +187,10 @@
         var y = head.y, l = head.l;
         paint(2 * l + 1, Y0 + y);
         var nl = stepRow(l, y);
-        if (nl !== l) { paint(2 * Math.min(l, nl) + 2, Y0 + y); paint(2 * nl + 1, Y0 + y); crossings++; }
+        if (nl !== l) {
+          for (var xx = 2 * Math.min(l, nl) + 1; xx <= 2 * Math.max(l, nl) + 1; xx++) paint(xx, Y0 + y);
+          crossings++;
+        }
         head.l = nl;
         head.y++;
         if (head.y >= Y1 - Y0) { finish(); break; }
