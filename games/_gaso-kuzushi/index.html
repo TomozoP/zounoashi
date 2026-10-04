@@ -118,6 +118,9 @@
   /* はねる版（?bound）。画素は画面の下側で、玉がはねながら上から削っていく */
   var BOUND = !!window.GASO_BOUND || /[?&]bound(&|$)/.test(location.search);
   var BY0R = 0.38;
+  /* 食べる版（?eat）。画面ぜんぶが画素で、画素を食べる生き物をスティックで動かす */
+  var EAT = !BOUND && (!!window.GASO_EAT || /[?&]eat(&|$)/.test(location.search));
+  var FLOAT = BOUND || EAT;   /* アイテムが宙に浮く版 */
   var PW = 0, PH = 0, FX = 0, FY = 0, FW = 0, FH = 0;   /* 画素での位置と大きさ */
   var field = null, img = null, px32 = null, layer = null, lctx = null;
   var total = 0, broken = 0, PUNCH = 1000;
@@ -135,6 +138,7 @@
     FX = 0; FW = PW;
     FY = Math.round(FY0 * K); FH = Math.max(1, Math.round(H * FY1R * K) - FY);
     if (BOUND) { FY = Math.round(H * BY0R * K); FH = Math.max(1, PH - FY); }
+    if (EAT) { FY = 0; FH = PH; }
     field = new Uint8Array(FW * FH).fill(1);
     total = FW * FH; broken = 0;
     PUNCH = Math.max(200, Math.round(total * 0.006));
@@ -186,7 +190,7 @@
   var paddle = { x: W / 2, w: 120 };
   var balls = [];
   var R = BOUND ? 10 : 7, SPEED = 400;
-  var keys = { l: 0, r: 0 };
+  var keys = { l: 0, r: 0, u: 0, d: 0 };
   var crunchT = 0, eatFrame = 0;
 
   /* アイテム。くずした画素がたまるたびに落ちてきて、受け皿で取ると削り方が変わる
@@ -206,15 +210,40 @@
     state = S.PLAY;
     T = 0; time = 0;
     held = false;
-    keys = { l: 0, r: 0 };
+    keys = { l: 0, r: 0, u: 0, d: 0 };
     paddle.x = W / 2;
     items = []; beams = []; slashes = []; blasts = [];
     fx = { big: 0, laser: 0, drill: 0, bomb: false };
     nextDrop = Math.round(total * DROP_RATE * (BOUND ? 0.2 : 0.5)); lastKind = "";
     serve();
   }
+  /* 食べる生き物。食べるほど大きくなる */
+  var mon = { x: 0, y: 0, dir: 0, chomp: 0, size: 0 }, stick = null;
+  var MON_R = 14, MON_GROW = 26, MON_SPEED = 220, STICK_R = 60;
+  function monR() { return (MON_R + MON_GROW * Math.sqrt(broken / Math.max(1, total))) * (fx.big > 0 ? 1.8 : 1); }
+  function monUpdate(dt) {
+    var vx = keys.r - keys.l, vy = keys.d - keys.u;
+    if (stick && stick.on) { vx = (stick.x - stick.bx) / STICK_R; vy = (stick.y - stick.by) / STICK_R; }
+    var m = Math.hypot(vx, vy);
+    if (m > 1) { vx /= m; vy /= m; m = 1; }
+    var sp = MON_SPEED * (fx.drill > 0 ? 2 : 1), r = monR();
+    if (m > 0.05) {
+      var steps = Math.max(1, Math.ceil(sp * m * dt / Math.max(1, r * 0.25)));
+      for (var i = 0; i < steps; i++) {
+        mon.x = Math.max(0, Math.min(W, mon.x + vx * sp * dt / steps));
+        mon.y = Math.max(0, Math.min(H, mon.y + vy * sp * dt / steps));
+        eatShape(mon.x * K - FX, mon.y * K - FY, r * K, r * K, true, vx * sp, vy * sp, "");
+      }
+      /* 向きはなめらかに */
+      var to = Math.atan2(vy, vx), d = Math.atan2(Math.sin(to - mon.dir), Math.cos(to - mon.dir));
+      mon.dir += d * Math.min(1, dt * 14);
+      mon.chomp += dt * 14;
+    } else eatShape(mon.x * K - FX, mon.y * K - FY, r * K, r * K, true, 0, 0, "");
+  }
+
   var GRAV = 2400, HOP = 1100, CRATER = 50;   /* はねる版：重力、はね上がる速さ、着地で削る半径 */
   function serve() {
+    if (EAT) { balls = []; mon.x = W / 2; mon.y = H / 2; mon.dir = -Math.PI / 2; mon.chomp = 0; mon.size = 0; return; }
     if (BOUND) { balls = [{ x: W / 2, y: H * 0.12, vx: 0, vy: 0, on: false, wait: 0, punch: 1 }]; return; }
     balls = [{ x: paddle.x, y: paddleY() - R - 2, vx: 0, vy: 0, on: true, wait: 0.5, punch: PUNCH }];
   }
@@ -257,7 +286,7 @@
     do { k = KINDS[(Math.random() * KINDS.length) | 0]; } while (k === lastKind);
     lastKind = k;
     var it = { x: Math.max(24, Math.min(W - 24, (cx + FX) / K)), y: (cy + FY) / K, kind: k };
-    if (BOUND) { it.vx = (Math.random() - 0.5) * 500; it.vy = -500 - Math.random() * 300; }
+    if (FLOAT) { it.vx = (Math.random() - 0.5) * 500; it.vy = -500 - Math.random() * 300; }
     items.push(it);
   }
 
@@ -304,7 +333,12 @@
     if (kind === "big") fx.big = 6;
     if (kind === "laser") fx.laser = 4;
     if (kind === "drill") { fx.drill = 4; balls.forEach(function (b) { b.punch = Math.max(b.punch, 1); }); }
-    if (kind === "bomb") fx.bomb = true;
+    if (kind === "bomb" && EAT) {
+      /* 食べる版はその場で爆発 */
+      blasts.push({ x: mon.x, y: mon.y, t: 0 });
+      eatShape(mon.x * K - FX, mon.y * K - FY, 110 * K, 110 * K, true, 0, 0, "blast");
+      tone(90, 0.5, 0.25, "sawtooth", 40); crunch(0.5);
+    } else if (kind === "bomb") fx.bomb = true;
     if (kind === "slash") {
       /* 残っている画素の多い高さを横に一閃 */
       var y = H * FY1R / 2, best = -1;
@@ -332,6 +366,7 @@
     if (kv && BOUND) balls.forEach(function (b) { b.x = Math.max(R, Math.min(W - R, b.x + kv)); });
     fx.big = Math.max(0, fx.big - dt); fx.laser = Math.max(0, fx.laser - dt); fx.drill = Math.max(0, fx.drill - dt);
     var py = paddleY();
+    if (EAT) monUpdate(dt);
     for (var bi = balls.length - 1; bi >= 0; bi--) {
       var ball = balls[bi];
       if (ball.on) {
@@ -367,17 +402,17 @@
       }
       if (ball.y > H + 20) balls.splice(bi, 1);
     }
-    if (!balls.length) { tone(160, 0.2, 0.08, "sawtooth", 80); serve(); }
+    if (!balls.length && !EAT) { tone(160, 0.2, 0.08, "sawtooth", 80); serve(); }
 
     /* 落ちてくるアイテム */
     for (var j = items.length - 1; j >= 0; j--) {
       var it = items[j];
-      if (BOUND) {
-        /* はねる版：削った所から飛び出して、しばらく宙に浮く。玉で触れると取れる */
+      if (FLOAT) {
+        /* はねる版・食べる版：削った所から飛び出して、しばらく宙に浮く。玉で触れると取れる */
         it.vy = (it.vy || 0) * Math.pow(0.05, dt); it.vx = (it.vx || 0) * Math.pow(0.05, dt);
         it.x = Math.max(20, Math.min(W - 20, it.x + it.vx * dt)); it.y += it.vy * dt;
         it.life = (it.life || 0) + dt;
-        var b0 = balls[0], rr = R * (fx.big > 0 ? 3 : 1) + 18;
+        var b0 = EAT ? mon : balls[0], rr = EAT ? monR() + 16 : R * (fx.big > 0 ? 3 : 1) + 18;
         if (b0 && Math.hypot(b0.x - it.x, b0.y - it.y) < rr) { take(it.kind); items.splice(j, 1); continue; }
         if (it.life > 6) items.splice(j, 1);
         continue;
@@ -389,6 +424,12 @@
     /* 光線。受け皿の両端から上へ、画素を縦にくずして抜ける */
     if (fx.laser > 0) {
       beamT -= dt;
+      if (beamT <= 0 && EAT) {
+        /* 食べる版：口から向いている方へ */
+        beamT = 0.08;
+        beams.push({ x: mon.x, y: mon.y, ux: Math.cos(mon.dir), uy: Math.sin(mon.dir) });
+        tone(1800, 0.05, 0.03, "square", 900);
+      }
       if (beamT <= 0 && BOUND && balls[0]) {
         /* はねる版：玉から真下へ */
         beamT = 0.1;
@@ -404,7 +445,16 @@
       }
     }
     for (var b2 = beams.length - 1; b2 >= 0; b2--) {
-      var bm = beams[b2], dir = bm.dir || -1, ny = bm.y + dir * 1500 * dt;
+      var bm = beams[b2];
+      if (bm.ux != null) {
+        /* 斜めにも飛ぶ光線。小さな丸を並べてくずす */
+        var len = 1500 * dt;
+        for (var t2 = 0; t2 < len; t2 += 3) eatShape((bm.x + bm.ux * t2) * K - FX, (bm.y + bm.uy * t2) * K - FY, 3 * K, 3 * K, true, bm.ux * 300, bm.uy * 300, "");
+        bm.x += bm.ux * len; bm.y += bm.uy * len;
+        if (bm.x < -20 || bm.x > W + 20 || bm.y < -20 || bm.y > H + 20) beams.splice(b2, 1);
+        continue;
+      }
+      var dir = bm.dir || -1, ny = bm.y + dir * 1500 * dt;
       eatShape(bm.x * K - FX, ((bm.y + ny) / 2) * K - FY, 2.5 * K, Math.abs(bm.y - ny) / 2 * K, false, 0, dir * 300, "");
       bm.y = ny;
       if (bm.y < -20 || bm.y > H + 40) beams.splice(b2, 1);
@@ -449,15 +499,23 @@
     }
     held = true;
     lastP = x == null ? null : { x: x, y: y };
+    if (EAT && x != null) stick = { on: true, bx: x, by: y, x: x, y: y };
   }
   function move(x, y) {
     if (!held || !lastP || state !== S.PLAY) return;
+    if (EAT && stick) {
+      /* 指が台から離れすぎたら、台ごとついてくる */
+      var ox = x - stick.bx, oy = y - stick.by, d = Math.hypot(ox, oy);
+      if (d > STICK_R) { stick.bx = x - ox / d * STICK_R; stick.by = y - oy / d * STICK_R; }
+      stick.x = x; stick.y = y;
+      return;
+    }
     var dx = x - lastP.x;
     lastP = { x: x, y: y };
     paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, paddle.x + dx * 1.3));
     if (BOUND) balls.forEach(function (b) { b.x = Math.max(R, Math.min(W - R, b.x + dx * 1.3)); });
   }
-  function up() { held = false; lastP = null; }
+  function up() { held = false; lastP = null; if (stick) stick.on = false; }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
@@ -469,16 +527,16 @@
   });
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
   wrap.addEventListener("pointercancel", function () { up(); });
-  window.addEventListener("blur", function () { up(); keys = { l: 0, r: 0 }; });
+  window.addEventListener("blur", function () { up(); keys = { l: 0, r: 0, u: 0, d: 0 }; });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (n === 1 && state === S.PLAY) time = LIMIT - 3;                 /* 残り3秒へ */
-    if (n === 2 && state === S.PLAY) { var k = KINDS[(KINDS.indexOf(lastKind) + 1) % KINDS.length]; lastKind = k; items.push(BOUND && balls[0] ? { x: balls[0].x, y: balls[0].y - 40, kind: k } : { x: paddle.x, y: paddleY() - 60, kind: k }); }   /* アイテムを順に落とす */
+    if (n === 2 && state === S.PLAY) { var k = KINDS[(KINDS.indexOf(lastKind) + 1) % KINDS.length]; lastKind = k; items.push(EAT ? { x: mon.x, y: mon.y - monR() - 50, kind: k } : BOUND && balls[0] ? { x: balls[0].x, y: balls[0].y - 40, kind: k } : { x: paddle.x, y: paddleY() - 60, kind: k }); }   /* アイテムを順に落とす */
     if (n === 3 && state === S.PLAY) { broken = total; }               /* 全部くずした */
   }
 
-  var KEYMAP = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r" };
+  var KEYMAP = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r", ArrowUp: "u", w: "u", W: "u", ArrowDown: "d", s: "d", S: "d" };
   window.addEventListener("keydown", function (e) {
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
     var esc = e.key === "Escape";
@@ -539,7 +597,7 @@
 
     if (state !== S.INTRO) {
       /* 受け皿 */
-      if (!BOUND) {
+      if (!FLOAT) {
         roundRect(paddle.x - paddle.w / 2, paddleY(), paddle.w, 16, 8);
         ctx.fillStyle = "#fff"; ctx.fill();
       }
@@ -572,10 +630,57 @@
         ctx.fillStyle = ball.punch <= 0 ? "#7d8597" : fx.bomb ? KIND_COLOR.bomb : fx.drill > 0 ? KIND_COLOR.drill : fx.big > 0 ? KIND_COLOR.big : "#fff";
         ctx.fill();
       });
+      if (EAT) drawMon();
       items.forEach(drawItem);
+      if (EAT && stick && stick.on) {
+        ctx.beginPath(); ctx.arc(stick.bx, stick.by, STICK_R, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,.12)"; ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,.5)"; ctx.stroke();
+        var kx = stick.x - stick.bx, ky = stick.y - stick.by, kd = Math.hypot(kx, ky);
+        if (kd > STICK_R) { kx = kx / kd * STICK_R; ky = ky / kd * STICK_R; }
+        ctx.beginPath(); ctx.arc(stick.bx + kx, stick.by + ky, 26, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fill();
+      }
     }
 
     if (state === S.RESULT) drawResult();
+  }
+
+  /* 食べる生き物。丸い体の前に大きな口があって、歯を見せてぱくぱくする */
+  function drawMon() {
+    var r = monR(), open = 0.25 + 0.75 * Math.abs(Math.sin(mon.chomp));
+    var col = fx.drill > 0 ? KIND_COLOR.drill : fx.big > 0 ? KIND_COLOR.big : fx.laser > 0 ? KIND_COLOR.laser : "#7ee08a";
+    ctx.save();
+    ctx.translate(mon.x, mon.y);
+    ctx.rotate(mon.dir);
+    var flip = Math.cos(mon.dir) < 0 ? -1 : 1;   /* 目が逆さまにならないように */
+    ctx.scale(1, flip);
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = col; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+    /* 口 */
+    ctx.save();
+    ctx.translate(r * 0.42, r * 0.12);
+    ctx.scale(1, open);
+    ctx.beginPath(); ctx.ellipse(0, 0, r * 0.5, r * 0.55, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "#16202e"; ctx.fill();
+    ctx.restore();
+    /* 歯 */
+    ctx.fillStyle = "#fff";
+    var ty = r * 0.12 - r * 0.55 * open, by = r * 0.12 + r * 0.55 * open;
+    for (var t = -1; t <= 1; t += 2) {
+      ctx.beginPath(); ctx.moveTo(r * (0.42 + t * 0.18) - r * 0.08, ty); ctx.lineTo(r * (0.42 + t * 0.18) + r * 0.08, ty); ctx.lineTo(r * (0.42 + t * 0.18), ty + r * 0.16); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(r * (0.42 + t * 0.18) - r * 0.08, by); ctx.lineTo(r * (0.42 + t * 0.18) + r * 0.08, by); ctx.lineTo(r * (0.42 + t * 0.18), by - r * 0.16); ctx.fill();
+    }
+    /* 目 */
+    for (var e = 0; e < 2; e++) {
+      var ex = r * (e ? 0.38 : -0.02), ey = -r * 0.58;
+      ctx.beginPath(); ctx.arc(ex, ey, r * 0.2, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(ex + r * 0.07, ey, r * 0.09, 0, Math.PI * 2);
+      ctx.fillStyle = "#16202e"; ctx.fill();
+    }
+    ctx.restore();
   }
 
   /* アイテムは色つきの丸に、削り方の形の印 */
@@ -647,6 +752,8 @@
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     paddle: function (x) { paddle.x = x; },
     ballX: function (x) { if (balls[0]) balls[0].x = x; },
+    stick: function (vx, vy) { stick = { on: vx !== 0 || vy !== 0, bx: 0, by: 0, x: vx * STICK_R, y: vy * STICK_R }; },
+    mon: function () { return { x: mon.x, y: mon.y, r: monR() }; },
     items: function () { return items.length; },
     take: function (k) { take(k); },
     reset: function () { newRound(); }
