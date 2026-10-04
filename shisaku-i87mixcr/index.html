@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="kodama-meiro-1791093302437">
+<meta name="preview-version" content="kodama-meiro-1791093530704">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>【プレビュー】こだま迷路</title>
@@ -32,14 +32,14 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/start.js?v=kodama-meiro-1791093302437"></script>
-<script src="../games/view.js?v=kodama-meiro-1791093302437"></script>
-<script src="../games/audio.js?v=kodama-meiro-1791093302437"></script>
-<script src="../games/lang.js?v=kodama-meiro-1791093302437"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=kodama-meiro-1791093302437"></script>
-<script src="../games/result-actions.js?v=kodama-meiro-1791093302437"></script>
-<script src="../games/action-icons.js?v=kodama-meiro-1791093302437"></script>
-<script src="../games/pad.js?v=kodama-meiro-1791093302437"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/start.js?v=kodama-meiro-1791093530704"></script>
+<script src="../games/view.js?v=kodama-meiro-1791093530704"></script>
+<script src="../games/audio.js?v=kodama-meiro-1791093530704"></script>
+<script src="../games/lang.js?v=kodama-meiro-1791093530704"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=kodama-meiro-1791093530704"></script>
+<script src="../games/result-actions.js?v=kodama-meiro-1791093530704"></script>
+<script src="../games/action-icons.js?v=kodama-meiro-1791093530704"></script>
+<script src="../games/pad.js?v=kodama-meiro-1791093530704"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* こだま迷路
 
@@ -48,7 +48,7 @@
    大きな声ほど遠くまで届く。光った壁は1.5秒ほどで暗くなり、見えなくなる。
    音の粒が出口に届くと「キン」と、その方向から鳴る。
    マイクが使えないときは、タップ（スペース）でも高い音を出せる。
-   迷路の作りと操作は画像迷路と同じ（指をすべらせた分だけ玉が動く）。結果は出口までの秒数。 */
+   迷路の作りは画像迷路と同じ。触った所に出るジョイスティックで玉を動かす。結果は出口までの秒数。 */
 (function () {
   "use strict";
 
@@ -180,7 +180,7 @@
   var open = new Uint8Array(G * G);         /* 1 = 通路 */
   var EXIT = (G - 1) * G + G - 2;
   var light = new Float32Array(G * G);      /* 壁の光 0〜1 */
-  var seen = new Uint8Array(G * G);         /* 一度光った壁（うっすら跡が残る） */
+  var seen = new Uint8Array(G * G);         /* 一度光った壁 */
 
   /* ランダムな強さの低い順に掘る（Prim の最小全域木） */
   function buildMaze() {
@@ -361,11 +361,6 @@
   function moveBy(dx, dy) {
     if (state !== S.PLAY) return;
     var n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / 2));
-    if (Math.abs(dx) + Math.abs(dy) > 0.3) {
-      /* 向きは動いた方へ少しずつ回る */
-      var want = Math.atan2(dy, dx), diff = Math.atan2(Math.sin(want - facing), Math.cos(want - facing));
-      facing += diff * Math.min(1, (Math.abs(dx) + Math.abs(dy)) / 6);
-    }
     for (var i = 0; i < n; i++) { moveAxis(dx / n, 0); moveAxis(0, dy / n); }
     if (player.y > (G - 1) * B + B * 0.3) goal();
   }
@@ -416,13 +411,23 @@
         ping(talkPeak);
       }
     }
-    var sp = 200 * dt;
-    if (keys.l || keys.r || keys.u || keys.d) moveBy((keys.r - keys.l) * sp, (keys.d - keys.u) * sp);
+    var sp = MOVE_SPEED * dt, vx = keys.r - keys.l, vy = keys.d - keys.u;
+    if (stick && stick.on) {
+      vx = (stick.x - stick.bx) / STICK_R; vy = (stick.y - stick.by) / STICK_R;
+      var m = Math.hypot(vx, vy);
+      if (m > 1) { vx /= m; vy /= m; }
+      if (m < 0.15) vx = vy = 0;
+    }
+    if (vx || vy) {
+      if (Math.hypot(vx, vy) > 0.3) facing = Math.atan2(vy, vx);
+      moveBy(vx * sp, vy * sp);
+    }
   }
 
   /* ============ 入力 ============
-     指をすべらせた分だけ玉が動く。動かさずにちょんと触ると波が出る（マイクの代わり） */
-  var lastP = null, downP = null, downAt = 0, moved = 0;
+     触った所にジョイスティックが出て、倒した方へ玉が進み、玉もその方を向く。
+     動かさずにちょんと触ると高い音が出る（マイクの代わり） */
+  var stick = null, downAt = 0, moved = 0, STICK_R = 60, MOVE_SPEED = 90;
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
@@ -431,21 +436,21 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (x == null) { if (state === S.PLAY) chirp(); ping(0.55); return; }
+    if (x == null) { if (state === S.PLAY) { chirp(); ping(0.55); } return; }
     held = true;
-    lastP = { x: x, y: y };
+    stick = { on: true, bx: x, by: y, x: x, y: y };
     downAt = clock; moved = 0;
   }
   function move(x, y) {
-    if (!held || !lastP) return;
-    var dx = x - lastP.x, dy = y - lastP.y;
-    lastP = { x: x, y: y };
-    moved += Math.abs(dx) + Math.abs(dy);
-    moveBy(dx * 1.1, dy * 1.1);
+    if (!held || !stick) return;
+    moved += Math.abs(x - stick.x) + Math.abs(y - stick.y);
+    var ox = x - stick.bx, oy = y - stick.by, d = Math.hypot(ox, oy);
+    if (d > STICK_R) { stick.bx = x - ox / d * STICK_R; stick.by = y - oy / d * STICK_R; }   /* 大きく動かしたら台座もついてくる */
+    stick.x = x; stick.y = y;
   }
   function up() {
-    if (held && lastP && moved < 8 && clock - downAt < 0.3 && state === S.PLAY) { chirp(); ping(0.55); }
-    held = false; lastP = null;
+    if (held && stick && moved < 8 && clock - downAt < 0.3 && state === S.PLAY) { chirp(); ping(0.55); }
+    held = false; stick = null;
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -457,8 +462,8 @@
     var p = atCanvas(e); move(p.x, p.y);
   });
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { held = false; lastP = null; });
-  window.addEventListener("blur", function () { held = false; lastP = null; keys = { l: 0, r: 0, u: 0, d: 0 }; });
+  wrap.addEventListener("pointercancel", function () { held = false; stick = null; });
+  window.addEventListener("blur", function () { held = false; stick = null; keys = { l: 0, r: 0, u: 0, d: 0 }; });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
@@ -561,6 +566,17 @@
     }
     ctx.restore();
 
+    /* ジョイスティック */
+    if (state === S.PLAY && stick && stick.on) {
+      ctx.beginPath(); ctx.arc(stick.bx, stick.by, STICK_R, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,.08)"; ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,.3)"; ctx.lineWidth = 2; ctx.stroke();
+      var kx = stick.x - stick.bx, ky = stick.y - stick.by, kd = Math.hypot(kx, ky);
+      if (kd > STICK_R) { kx = kx / kd * STICK_R; ky = ky / kd * STICK_R; }
+      ctx.beginPath(); ctx.arc(stick.bx + kx, stick.by + ky, 26, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,.45)"; ctx.fill();
+    }
+
     if (state === S.RESULT) drawResult();
   }
 
@@ -614,6 +630,7 @@
     seen: function () { var n = 0; for (var i = 0; i < seen.length; i++) n += seen[i]; return n; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     move: function (dx, dy) { moveBy(dx, dy); },
+    stick: function (vx, vy) { stick = { on: vx !== 0 || vy !== 0, bx: 0, by: 0, x: vx * STICK_R, y: vy * STICK_R }; },
     ping: function (v) { ping(v); },
     reset: function () { newRound(); }
   };
@@ -656,11 +673,11 @@
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=kodama-meiro-1791093302437" : "./recorder-ui.js?v=kodama-meiro-1791093302437";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=kodama-meiro-1791093530704" : "./recorder-ui.js?v=kodama-meiro-1791093530704";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=kodama-meiro-1791093302437"></script>
-<script src="./preview-header.js?v=kodama-meiro-1791093302437"></script>
+<script src="./auto-reload.js?v=kodama-meiro-1791093530704"></script>
+<script src="./preview-header.js?v=kodama-meiro-1791093530704"></script>
 </body>
 </html>
