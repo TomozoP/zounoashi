@@ -432,7 +432,7 @@
     for (var k = 0; k < uv.count; k++) uv.setY(k, uv.getY(k) / 0.66);
     cg.center();
     /* どんぶりの右側に、2枚をずらして重ねる */
-    [[1.3, 0.62, 0.7, -0.4, 0.3, 0.2], [1.5, 0.48, 1.08, -0.4, 0.3, 0.32]].forEach(function (p) {
+    [[0.95, 0.66, 1.05, -0.45, 0.35, 0.2], [1.15, 0.52, 1.35, -0.45, 0.35, 0.32]].forEach(function (p) {
       var m = new T.Mesh(cg, [faceM, side]);
       m.scale.set(1.1, 1.1, 1.1);
       m.rotation.set(p[3], p[4], p[5]);
@@ -541,13 +541,15 @@
       /* 終わりの引き：下の段に置いたあとのどんぶりの底から、山のてっぺんまでを画面のタテいっぱいに */
       var yt = (st.layers.length - 1) * LAYER / M + 0.8, zt = 0;
       var yb = -1.5 - 2.8, zb = 6.0 + 2.2;
-      var a1 = (0.5 - 0.13) * 2 * tan, a2 = (0.87 - 0.5) * 2 * tan;
+      var a1 = (0.5 - 0.13) * 2 * tan, a2 = (0.83 - 0.5) * 2 * tan;   /* 見下ろす分、下は少し余らせる */
       var De = Math.max(zb + 15, (yt - yb + a1 * zt + a2 * zb) / (a1 + a2));
       var cy = yb + a2 * (De - zb);
       var e = st.endCam, c0 = this.camStart || { py: py, pz: pz, ly: ly };
       py = c0.py + (cy - c0.py) * e; pz = c0.pz + (De - c0.pz) * e; ly = c0.ly + (cy - c0.ly) * e;
       D = pz; ty = ly; halfV = 1e6;
     }
+    /* 終わりは少し上から見下ろす */
+    if (st.endCam > 0) py += pz * 0.22 * st.endCam;
     this.camera.position.set(0, py, pz);
     this.camera.lookAt(0, ly, 0);
     this.camera.near = Math.max(0.5, D * 0.2); this.camera.far = D + 1000;
