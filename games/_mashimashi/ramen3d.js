@@ -580,8 +580,6 @@
     this.rim.position.set(3, ty + 4, -6);
     this.rim.target.position.set(0, ty, 0);
     this.stepSteam(st.time || 0);
-    /* 終わって引きで映す間は影を描き直さない（最後の影をそのまま使う） */
-    this.renderer.shadowMap.autoUpdate = !st.ending;
     var outside = ty * M > CEIL + 200;
     this.scene.environmentIntensity = outside ? 0.9 : 0.6;
     /* 終わりにチャーシューが落ちてきて、てっぺんに乗る */
