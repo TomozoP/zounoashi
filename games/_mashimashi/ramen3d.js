@@ -227,7 +227,8 @@
       fm.frustumCulled = false; km.frustumCulled = false;
       g.add(km); g.add(fm);
     }
-    g.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    /* もやしの山には影を付けない */
+    g.traverse(function (o) { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
     g.userData.R = R;
     return g;
   };
@@ -362,7 +363,7 @@
       s.add(tube);
     }
     /* チャーシュー（豚）：厚切りを山に立てかける */
-    var side = new T.MeshPhysicalMaterial({ color: 0x4a200c, roughness: 0.45, clearcoat: 0.6 });
+    var side = new T.MeshPhysicalMaterial({ color: 0x4a200c, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.03 });
     var face = canvasTex(512, 512, function (g, w, h) {
       /* 豚バラの断面：濃い焼き色の縁、赤身、白い脂の筋 */
       g.fillStyle = "#4a200c"; g.fillRect(0, 0, w, h);
@@ -380,8 +381,18 @@
       var e = g.createLinearGradient(0, 0, 0, h);
       e.addColorStop(0, "rgba(60,25,8,.7)"); e.addColorStop(0.12, "rgba(60,25,8,0)"); e.addColorStop(0.88, "rgba(60,25,8,0)"); e.addColorStop(1, "rgba(60,25,8,.7)");
       g.fillStyle = e; g.fillRect(0, 0, w, h);
+      /* タレがかかった照り */
+      var t = g.createLinearGradient(0, 0, w, h);
+      t.addColorStop(0, "rgba(120,50,10,.25)"); t.addColorStop(0.35, "rgba(255,240,220,0)"); t.addColorStop(0.42, "rgba(255,245,230,.45)"); t.addColorStop(0.5, "rgba(255,240,220,0)"); t.addColorStop(1, "rgba(110,45,10,.3)");
+      g.fillStyle = t; g.fillRect(0, 0, w, h);
     });
-    var faceM = new T.MeshPhysicalMaterial({ map: face, roughness: 0.42, clearcoat: 0.35, clearcoatRoughness: 0.4 });
+    /* タレのてり：表面に強い艶の層 */
+    var faceM = new T.MeshPhysicalMaterial({ map: face, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 3 });
+    side.envMapIntensity = 3;
+    /* てりを拾う小さな明かり（チャーシューのそばだけ照らす） */
+    var glint = new T.PointLight(0xfff0d8, 6, 3.5, 2);
+    glint.position.set(0.6, 1.9, 2.4);
+    s.add(glint);
     var sh = new T.Shape(), pts2 = [[0.05, 0], [0.55, -0.03], [0.97, 0.02], [1.0, 0.3], [0.96, 0.62], [0.5, 0.66], [0.04, 0.6], [0, 0.3]];
     sh.moveTo(pts2[0][0], pts2[0][1]);
     pts2.forEach(function (q, k) { var n2 = pts2[(k + 1) % pts2.length]; sh.quadraticCurveTo(n2[0] * 0.15 + q[0] * 0.85, n2[1] * 0.15 + q[1] * 0.85, (q[0] + n2[0]) / 2, (q[1] + n2[1]) / 2); });
@@ -477,12 +488,6 @@
       var y = i * LAYER / M;
       var vis = y > ty - halfV - 1 && y < ty + halfV + 1;
       this.layers[i].visible = vis;
-      /* 影を落とすのは、てっぺん近くの数段だけ（下の段の影は上の段に隠れて見えない） */
-      var cast = i >= this.layers.length - 6;
-      if (this.layers[i].userData.cast !== cast) {
-        this.layers[i].userData.cast = cast;
-        this.layers[i].traverse(function (o) { if (o.isMesh) o.castShadow = cast; });
-      }
       var pop = st.layers[i].pop || 0;
       if (vis) this.layers[i].scale.set(1 + pop * 0.06, 1 + pop * 0.25, 1 + pop * 0.06);
     }
