@@ -155,36 +155,55 @@
       for (var cell = 0; cell < 4; cell++) {
         var r = rng(700 + cell * 13), ox = cell * CW;
         g.save(); g.beginPath(); g.rect(ox, 0, CW, CH); g.clip();
-        /* 1〜2枚の葉を重ねる */
+        /* ざく切り：包丁で切ったまっすぐな辺と、葉のふちの波打つ辺。1〜2切れを重ねる */
         for (var leaf = 0; leaf < 1 + (cell % 2); leaf++) {
-          var cx = ox + CW / 2 + (leaf ? 30 : -10) + (r() - 0.5) * 20, cy = CH / 2 + (leaf ? 18 : -6);
-          var rx = CW * (0.36 - leaf * 0.08), ry = CH * (0.36 - leaf * 0.08), rot = (r() - 0.5) * 0.8;
-          var pts = [], n = 11;
-          for (var k = 0; k < n; k++) {
-            var a = k / n * Math.PI * 2, rr = 0.75 + r() * 0.3;
-            pts.push([cx + Math.cos(a + rot) * rx * rr, cy + Math.sin(a + rot) * ry * rr]);
+          var cx = ox + CW / 2 + (leaf ? 34 : -14), cy = CH / 2 + (leaf ? 20 : -8);
+          var sz = (leaf ? 0.72 : 1) * CH * 0.46, rot = r() * Math.PI * 2;
+          var nv = 4 + Math.floor(r() * 2), pts = [];
+          for (var k = 0; k < nv; k++) {
+            var a = rot + (k + (r() - 0.5) * 0.5) / nv * Math.PI * 2, rr = sz * (0.8 + r() * 0.35);
+            pts.push([cx + Math.cos(a) * rr * 1.25, cy + Math.sin(a) * rr]);
           }
-          g.beginPath();
-          g.moveTo((pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2);
-          for (k = 1; k <= n; k++) { var p1 = pts[k % n], p2 = pts[(k + 1) % n]; g.quadraticCurveTo(p1[0], p1[1], (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2); }
+          var wavy = Math.floor(r() * nv);
+          g.beginPath(); g.moveTo(pts[0][0], pts[0][1]);
+          for (k = 0; k < nv; k++) {
+            var p1 = pts[k], p2 = pts[(k + 1) % nv];
+            if (k === wavy) {                 /* 葉のふちは細かく波打つ */
+              for (var t = 0.1; t <= 1.0001; t += 0.1) {
+                var nx = p2[1] - p1[1], ny = p1[0] - p2[0], nl = Math.hypot(nx, ny) || 1;
+                var o = Math.sin(t * Math.PI * 5) * 6;
+                g.lineTo(p1[0] + (p2[0] - p1[0]) * t + nx / nl * o, p1[1] + (p2[1] - p1[1]) * t + ny / nl * o);
+              }
+            } else g.lineTo(p2[0], p2[1]);   /* 切り口はまっすぐ */
+          }
           g.closePath();
-          /* 芯に近い淡い色から、ふちの薄い黄緑へ */
-          var gr = g.createRadialGradient(cx - rx * 0.3, cy + ry * 0.2, 4, cx, cy, rx * 1.05);
-          gr.addColorStop(0, "#f2f2d0"); gr.addColorStop(0.55, "#dfe8a8"); gr.addColorStop(1, "#b9d272");
-          g.fillStyle = gr; g.fill();
-          g.strokeStyle = "rgba(150,160,90,.6)"; g.lineWidth = 4; g.stroke();
-          /* 白い葉脈 */
+          g.fillStyle = leaf ? "#e3ebb0" : "#eef2c6"; g.fill();
           g.save(); g.clip();
+          /* しわ：明るい帯と影の筋 */
           g.lineCap = "round";
-          var bx = cx - rx * 0.6, by = cy + ry * 0.5;
-          g.strokeStyle = "rgba(255,255,245,.9)"; g.lineWidth = 9;
-          g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(cx, cy + ry * 0.1, cx + rx * 0.8, cy - ry * 0.5); g.stroke();
-          g.lineWidth = 4;
-          for (k = 0; k < 5; k++) {
-            var t = 0.2 + k * 0.16, sx = bx + (cx + rx * 0.8 - bx) * t, sy = by + (cy - ry * 0.5 - by) * t;
-            g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + (r() - 0.3) * rx * 0.5, sy - ry * (0.4 + r() * 0.3)); g.stroke();
+          for (k = 0; k < 6; k++) {
+            var sx = cx + (r() - 0.5) * sz * 2, sy = cy + (r() - 0.5) * sz * 1.6, an = rot + 0.6 + (r() - 0.5) * 0.6, ln = sz * (0.8 + r() * 0.8);
+            g.strokeStyle = k % 2 ? "rgba(255,255,240,.55)" : "rgba(150,170,80,.35)";
+            g.lineWidth = 6 + r() * 8;
+            g.beginPath(); g.moveTo(sx - Math.cos(an) * ln, sy - Math.sin(an) * ln);
+            g.quadraticCurveTo(sx + (r() - 0.5) * 30, sy + (r() - 0.5) * 30, sx + Math.cos(an) * ln, sy + Math.sin(an) * ln); g.stroke();
+          }
+          /* ところどころ外葉の薄い緑 */
+          if (r() < 0.6) {
+            g.fillStyle = "rgba(170,205,100,.45)";
+            g.beginPath(); g.ellipse(pts[wavy][0], pts[wavy][1], sz * 0.7, sz * 0.5, rot, 0, 7); g.fill();
+          }
+          /* 太い白い芯（軸） */
+          if (r() < 0.7) {
+            var ra = rot + 1.2 + (r() - 0.5) * 0.4;
+            g.strokeStyle = "#fbfbec"; g.lineWidth = 16 + r() * 10;
+            g.beginPath(); g.moveTo(cx - Math.cos(ra) * sz * 1.6, cy - Math.sin(ra) * sz * 1.6); g.lineTo(cx + Math.cos(ra) * sz * 1.6, cy + Math.sin(ra) * sz * 1.6); g.stroke();
+            g.strokeStyle = "rgba(200,205,150,.6)"; g.lineWidth = 2;
+            g.beginPath(); g.moveTo(cx - Math.cos(ra) * sz * 1.6 + 6, cy - Math.sin(ra) * sz * 1.6); g.lineTo(cx + Math.cos(ra) * sz * 1.6 + 6, cy + Math.sin(ra) * sz * 1.6); g.stroke();
           }
           g.restore();
+          /* 切り口のふち */
+          g.strokeStyle = "rgba(140,155,80,.5)"; g.lineWidth = 3; g.stroke();
         }
         g.restore();
       }
