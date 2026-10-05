@@ -109,7 +109,7 @@
     this.gLeaf = new T.SphereGeometry(1, 8, 5);
     this.gCube = new T.BoxGeometry(1, 1, 1);
     this.mSprout = new T.MeshStandardMaterial({ map: this.sproutAtlas(), alphaTest: 0.5, side: T.DoubleSide, roughness: 0.45, metalness: 0, emissive: 0x2a2410, emissiveIntensity: 0.5 });
-    this.mLeaf = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, side: T.DoubleSide, emissive: 0x3a4a20, emissiveIntensity: 0.6 });
+    this.mLeaf = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, side: T.DoubleSide, emissive: 0x9a9a78, emissiveIntensity: 0.6 });   /* 裏や影でも暗い緑にならないよう明るめ */
     this.mGarlic = new T.MeshStandardMaterial({ color: 0xf2e2a0, roughness: 0.6, emissive: 0x2a2208, emissiveIntensity: 0.6 });
     this.mFat = new T.MeshStandardMaterial({ color: 0xfff0d6, roughness: 0.12, emissive: 0x302418, emissiveIntensity: 0.5 });
     this.mKarame = new T.MeshStandardMaterial({ color: 0x4a1e06, roughness: 0.05, transparent: true, opacity: 0.85 });
@@ -196,7 +196,7 @@
     for (i = 0; i < nc; i++) {
       a = r() * Math.PI * 2; u = 0.35 + Math.sqrt(r()) * 0.6;
       d.position.set(Math.cos(a) * u * R, H * Math.sqrt(Math.max(0, 1 - u * u)) * 0.95 - 0.03, Math.sin(a) * u * R);
-      d.rotation.set((r() - 0.5) * 1.4, r() * 6, (r() - 0.5) * 1.4);
+      d.rotation.set((r() - 0.5) * 0.7, r() * 6, (r() - 0.5) * 0.7);
       d.scale.set((0.2 + r() * 0.12) * ls, 0.018, (0.13 + r() * 0.08) * ls);
       d.updateMatrix(); lm.setMatrixAt(i, d.matrix);
       col.setHSL(0.17 + r() * 0.05, 0.5 + r() * 0.2, 0.72 + r() * 0.1);   /* 淡い黄緑 */
@@ -460,9 +460,9 @@
     for (var k = 0; k < uv.count; k++) { uv.setX(k, uv.getX(k) / 0.9); uv.setY(k, uv.getY(k) / 0.8); }
     cg.center();
     /* どんぶりの右側に、2枚をずらして重ねる */
-    [[0.95, 0.66, 1.05, -0.45, 0.35, 0.2], [1.15, 0.52, 1.35, -0.45, 0.35, 0.32]].forEach(function (p) {
+    [[0.35, 0.55, 1.7, -0.5, 0.2, 0.15], [0.75, 0.45, 1.6, -0.5, 0.3, 0.3]].forEach(function (p) {
       var m = new T.Mesh(cg, [faceM, side]);
-      m.scale.set(1.1, 1.1, 1.1);
+      m.scale.set(0.85, 0.85, 0.85);
       m.rotation.set(p[3], p[4], p[5]);
       m.position.set(p[0], p[1], p[2]);
       ch.add(m);
