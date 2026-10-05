@@ -38,7 +38,7 @@
 <script>
 /* 直ピザ配達
 
-   画面を上へ引っぱって離すとピザが飛ぶ。引っぱった長さが距離、傾きが左右の向き。
+   ピザを指で上へスライドして離すと、スライドした向きへ飛ぶ。スライドした長さが距離。
    お客の手元に届けば配達成功で、次のお客はもっと遠い。届けた軒数が結果。 */
 (function () {
   "use strict";
@@ -110,8 +110,8 @@
   var ELEV = 0.30;             /* 投げ上げる角度（ラジアン） */
   var LIFT = 0.010;            /* 回転で浮く力（速さの2乗にかける） */
   var DRAG = 0.04;             /* 空気でゆっくり遅くなる */
-  var PULL_MIN = 30;           /* これより短い引っぱりは投げない */
-  var PULL_V = 32 / 600;       /* 引っぱった長さ（ゲーム座標）→ 速さ（m/秒） */
+  var PULL_MIN = 30;           /* これより短いスライドは投げない */
+  var PULL_V = 32 / 600;       /* スライドした長さ（ゲーム座標）→ 速さ（m/秒） */
   var CATCH_R = 1.15;          /* お客が取れる横のずれ */
   var HAND = { x: 0, y: 1.2, z: 0.75 };   /* 自分の目の前、少し下 */
 
@@ -119,7 +119,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, keyMode = false;
   var phase, spin = 1, pizza, customer, pieces, caught, afterT, best, snap;
-  var held, sx, sy, dragX, dragY, keyAim, keyPow, keyPowOn;
+  var held, sx, sy, dragX, dragY, trail, keyAim, keyPow, keyPowOn;
 
   var scene3d = null, tries3d = 0, lastTry3d = -1e9;
   function make3d() {
@@ -221,11 +221,11 @@
     if (state !== S.PLAY) return;
     T += dt;
     if (phase === "aim") {
-      /* 引っぱっている間は、ピザが指の向きへ少し寄って傾く */
-      var k = 1 - Math.exp(-dt * 14);
+      /* スライドしている間は、ピザが指についていく */
+      var k = 1 - Math.exp(-dt * 20);
       var tx = held ? dragX : 0, ty = held ? dragY : 0;
-      pizza.x += (HAND.x + tx * 0.00025 - pizza.x) * k;
-      pizza.y += (HAND.y - ty * 0.00012 - pizza.y) * k;
+      pizza.x += (HAND.x + tx * 0.0009 - pizza.x) * k;
+      pizza.y += (HAND.y - Math.max(-200, Math.min(400, ty)) * 0.0007 - pizza.y) * k;
       pizza.z = HAND.z;
       pizza.tiltX += ((held ? ty * 0.0006 : 0) - pizza.tiltX) * k;
       pizza.tiltZ += ((held ? -tx * 0.0006 : 0) - pizza.tiltZ) * k;
@@ -267,7 +267,7 @@
   }
 
   /* ============ 入力 ============
-     押したところから上へ引っぱって離すと投げる。長さが速さ、傾きが左右の向き。 */
+     ピザを上へスライドして離すと投げる。向きは離す直前に動かしていた向き、長さが速さ。 */
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
@@ -278,17 +278,25 @@
     }
     if (x == null || phase !== "aim") return;
     held = true; sx = x; sy = y; dragX = dragY = 0;
+    trail = [{ x: x, y: y, t: performance.now() }];
   }
   function move(x, y) {
     if (state !== S.PLAY || !held || phase !== "aim") return;
     dragX = x - sx; dragY = y - sy;
+    trail.push({ x: x, y: y, t: performance.now() });
+    if (trail.length > 40) trail.shift();
   }
   function up() {
     if (!held) return;
     held = false;
     if (state !== S.PLAY || phase !== "aim") return;
-    var dx = dragX, dy = dragY, len = Math.sqrt(dx * dx + dy * dy);
-    if (len < PULL_MIN || dy >= 0) return;
+    var len = Math.sqrt(dragX * dragX + dragY * dragY);
+    if (len < PULL_MIN || dragY >= 0) return;
+    /* 向きは最後の0.12秒ぶんの動き（短すぎるときは押したところから） */
+    var now = performance.now(), last = trail[trail.length - 1], first = trail[0];
+    for (var i = trail.length - 1; i >= 0; i--) { if (now - trail[i].t > 120) break; first = trail[i]; }
+    var dx = last.x - first.x, dy = last.y - first.y;
+    if (dx * dx + dy * dy < 400 || dy >= 0) { dx = dragX; dy = dragY; }
     throwPizza(4 + len * PULL_V, Math.atan2(dx, -dy) * 0.5);
   }
 
