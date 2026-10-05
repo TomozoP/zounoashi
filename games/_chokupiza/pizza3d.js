@@ -37,7 +37,7 @@
     sun.position.set(-20, 40, -10);
     this.scene.add(sun);
     this.w = 0; this.h = 0;
-    this.camPos = new T.Vector3(0.2, 3.0, -4.4);
+    this.camPos = new T.Vector3(0, 1.65, -0.2);
     this.camLook = new T.Vector3(0, 1.4, 14);
     this.pieces = [];
     this.makeTown();
@@ -106,7 +106,7 @@
     arm.position.set(0.32, 1.42, 0.05); arm.rotation.z = -0.15; g.add(arm);
     var arm2 = new T.Mesh(new T.CylinderGeometry(0.07, 0.08, 0.6, 10), white);
     arm2.position.set(-0.36, 1.15, 0); arm2.rotation.z = -0.25; g.add(arm2);
-    g.position.x = -0.6; this.chef = g; this.scene.add(g);
+    g.position.x = -0.6; this.chef = g;   /* 自分の目線なので場面には置かない */
   };
 
   /* ピザ：生地の縁と、具の絵を貼った円盤 */
@@ -216,8 +216,6 @@
       a.rotation.z = st.caught ? -sd * 0.15 : -sd * (0.45 + 0.25 * Math.sin(t * 6 + i * 2));
     });
     this.customer.position.y = c ? c.y + (st.caught ? Math.abs(Math.sin(st.afterT * 9)) * 0.35 : 0) : 0;
-    /* 職人の腕：回すほど速く揺れる */
-    this.arm.rotation.z = -0.15 + Math.sin(t * 12) * 0.05 * st.spin;
     /* ピザ */
     var p = st.pizza;
     this.pizza.visible = !!p && !p.torn && !p.splat;
@@ -251,8 +249,8 @@
       tl = new T.Vector3(px, py, pz + 6);
       if (c) tl.lerp(new T.Vector3(c.x, c.y + 1.4, c.z), 0.35);
     } else {
-      tp = new T.Vector3(0.2, 3.0, -4.4);
-      tl = new T.Vector3(c ? c.x * 0.5 : 0, 1.2, c ? Math.min(c.z, 30) : 14);
+      tp = new T.Vector3(0, 1.65, -0.2);
+      tl = new T.Vector3(c ? c.x * 0.3 : 0, 1.05, c ? Math.min(c.z, 30) : 14);
     }
     if (st.snap) { this.camPos.copy(tp); this.camLook.copy(tl); }
     else { this.camPos.lerp(tp, k); this.camLook.lerp(tl, k); }
