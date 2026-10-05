@@ -38,8 +38,7 @@
 <script>
 /* 直ピザ配達
 
-   指で円を描いてピザを回し、上へはじいて投げる。はじいた向きと速さで飛ぶ向きと距離が決まる。
-   よく回したピザほどまっすぐ浮いて遠くまで飛ぶ。回しすぎると破れる。
+   画面を上へ引っぱって離すとピザが飛ぶ。引っぱった長さが距離、傾きが左右の向き。
    お客の手元に届けば配達成功で、次のお客はもっと遠い。届けた軒数が結果。 */
 (function () {
   "use strict";
@@ -100,21 +99,6 @@
     s.connect(f); f.connect(g); g.connect(AC.destination);
     s.start(n, Math.random()); s.stop(n + dur + 0.05);
   }
-  /* 回っている音：回す速さで高さが変わる風切り音 */
-  var whirl = null;
-  function whirlSet(v) {
-    if (!AC || !NOISE) return;
-    if (!whirl) {
-      var s = AC.createBufferSource(); s.buffer = NOISE; s.loop = true;
-      var f = AC.createBiquadFilter(); f.type = "bandpass"; f.Q.value = 2.5;
-      var g = AC.createGain(); g.gain.value = 0;
-      s.connect(f); f.connect(g); g.connect(AC.destination); s.start();
-      whirl = { f: f, g: g };
-    }
-    var n = AC.currentTime;
-    whirl.f.frequency.setTargetAtTime(300 + 900 * v, n, 0.05);
-    whirl.g.gain.setTargetAtTime(Math.min(0.12, 0.13 * v), n, 0.05);
-  }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -126,17 +110,16 @@
   var ELEV = 0.30;             /* 投げ上げる角度（ラジアン） */
   var LIFT = 0.010;            /* 回転で浮く力（速さの2乗にかける） */
   var DRAG = 0.04;             /* 空気でゆっくり遅くなる */
-  var TEAR = 1.15;             /* 回転がこれを超えると破れる */
-  var DECAY = 0.22;            /* 回さないと1秒でこれだけ落ちる */
-  var GAIN = 0.05;             /* 指の回転（ラジアン/秒）を回転量へ */
+  var PULL_MIN = 30;           /* これより短い引っぱりは投げない */
+  var PULL_V = 32 / 600;       /* 引っぱった長さ（ゲーム座標）→ 速さ（m/秒） */
   var CATCH_R = 1.15;          /* お客が取れる横のずれ */
   var HAND = { x: 0, y: 1.2, z: 0.75 };   /* 自分の目の前、少し下 */
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, keyMode = false;
-  var phase, spin, pizza, customer, pieces, caught, afterT, best, torn, snap;
-  var trail, lastHead, held, keySpin, keyAim, keyPow, keyPowOn;
+  var phase, spin = 1, pizza, customer, pieces, caught, afterT, best, snap;
+  var held, sx, sy, dragX, dragY, keyAim, keyPow, keyPowOn;
 
   var scene3d = null, tries3d = 0, lastTry3d = -1e9;
   function make3d() {
@@ -162,33 +145,32 @@
   }
 
   function newPizza() {
-    return { x: HAND.x, y: HAND.y, z: HAND.z, vx: 0, vy: 0, vz: 0, r: 0.2, rot: 0, tiltX: 0, tiltZ: 0, spin: 0, wob: 0, wobPh: 0 };
+    return { x: HAND.x, y: HAND.y, z: HAND.z, vx: 0, vy: 0, vz: 0, r: 0.26, rot: 0, tiltX: 0, tiltZ: 0, spin: 1, wob: 0, wobPh: 0 };
   }
 
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    score = 0; T = 0; best = 0; torn = false;
+    score = 0; T = 0; best = 0;
     seed = 3 + Math.floor(Math.random() * 1000);
     customer = makeCustomer(0);
     nextPizza();
   }
   function nextPizza() {
-    phase = "spin"; spin = 0.15; pizza = newPizza(); pieces = [];
+    phase = "aim"; pizza = newPizza(); pieces = [];
     caught = false; afterT = 0; snap = true;
-    trail = []; lastHead = null; held = false;
-    keySpin = false; keyAim = 0; keyPow = 0; keyPowOn = false;
+    held = false; dragX = dragY = 0;
+    keyAim = 0; keyPow = 0; keyPowOn = false;
   }
 
   /* 投げる。v は速さ（m/秒）、ang は横の角度（右が正） */
   function throwPizza(v, ang) {
-    if (phase !== "spin") return;
+    if (phase !== "aim") return;
     v = Math.max(4, Math.min(36, v));
     ang = Math.max(-0.6, Math.min(0.6, ang));
     var h = v * Math.cos(ELEV);
     pizza.vx = h * Math.sin(ang); pizza.vz = h * Math.cos(ang); pizza.vy = v * Math.sin(ELEV);
-    pizza.spin = spin;
     pizza.wobPh = Math.random() * 6.28;
     pizza.wob = (Math.random() < 0.5 ? -1 : 1) * (0.6 + Math.random() * 0.6);
     phase = "fly";
@@ -238,22 +220,21 @@
     if (state === S.INTRO) { T += dt; if (pizza) pizza.rot += dt * 3; return; }
     if (state !== S.PLAY) return;
     T += dt;
-    if (phase === "spin") {
-      if (keySpin) spin += 0.55 * dt;
-      spin = Math.max(0, spin - DECAY * dt);
-      pizza.rot += dt * (2 + spin * 22);
-      pizza.r = 0.2 + 0.12 * Math.min(1.1, spin);
-      var wob = Math.max(0, 0.5 - spin) * 0.5;
-      pizza.tiltX = Math.sin(T * 7) * wob; pizza.tiltZ = Math.cos(T * 6) * wob;
-      pizza.x = HAND.x; pizza.y = HAND.y; pizza.z = HAND.z;
+    if (phase === "aim") {
+      /* 引っぱっている間は、ピザが指の向きへ少し寄って傾く */
+      var k = 1 - Math.exp(-dt * 14);
+      var tx = held ? dragX : 0, ty = held ? dragY : 0;
+      pizza.x += (HAND.x + tx * 0.00025 - pizza.x) * k;
+      pizza.y += (HAND.y - ty * 0.00012 - pizza.y) * k;
+      pizza.z = HAND.z;
+      pizza.tiltX += ((held ? ty * 0.0006 : 0) - pizza.tiltX) * k;
+      pizza.tiltZ += ((held ? -tx * 0.0006 : 0) - pizza.tiltZ) * k;
       if (keyPowOn) keyPow += dt;
-      if (spin > TEAR) { torn = true; burst(); miss("torn"); }
     } else if (phase === "fly") {
       var prevZ = pizza.z;
       flyStep(pizza, dt, T);
-      pizza.rot += dt * (2 + pizza.spin * 22);
-      var sp = Math.min(1, pizza.spin);
-      pizza.tiltX = Math.sin(T * 8) * (1 - sp) * 0.8; pizza.tiltZ = Math.cos(T * 7) * (1 - sp) * 0.8;
+      pizza.rot += dt * 8;
+      pizza.tiltX *= 0.9; pizza.tiltZ *= 0.9;
       var c = customer;
       if (prevZ < c.z && pizza.z >= c.z) {
         var dy = pizza.y - c.y;
@@ -283,12 +264,10 @@
   function end() {
     state = S.RESULT;
     shareButton.hidden = false;
-    whirlSet(0);
   }
 
   /* ============ 入力 ============
-     指で円を描くと回る（動く向きが曲がった分だけ回転が増える）。
-     上へはじいて離すと投げる。はじいた速さが距離、傾きが横の向き。 */
+     押したところから上へ引っぱって離すと投げる。長さが速さ、傾きが左右の向き。 */
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
@@ -297,42 +276,20 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (x == null) return;
-    held = true;
-    trail = [{ x: x, y: y, t: performance.now() }];
-    lastHead = null;
+    if (x == null || phase !== "aim") return;
+    held = true; sx = x; sy = y; dragX = dragY = 0;
   }
   function move(x, y) {
-    if (state !== S.PLAY || !held || phase !== "spin") return;
-    var now = performance.now();
-    var p = trail[trail.length - 1];
-    var dx = x - p.x, dy = y - p.y, dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < 4) return;
-    var head = Math.atan2(dy, dx);
-    if (lastHead != null) {
-      var d = head - lastHead;
-      while (d > Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
-      /* 小さな曲がりだけ数える（折り返しやはじきは回転にしない） */
-      if (Math.abs(d) < 1.2) spin += Math.abs(d) * GAIN;
-    }
-    lastHead = head;
-    trail.push({ x: x, y: y, t: now });
-    if (trail.length > 30) trail.shift();
+    if (state !== S.PLAY || !held || phase !== "aim") return;
+    dragX = x - sx; dragY = y - sy;
   }
   function up() {
     if (!held) return;
     held = false;
-    if (state !== S.PLAY || phase !== "spin") return;
-    /* 最後の0.1秒の動きではじきを見る */
-    var now = performance.now(), last = trail[trail.length - 1], first = null;
-    for (var i = trail.length - 1; i >= 0; i--) { if (now - trail[i].t > 110) break; first = trail[i]; }
-    if (!first || first === last) return;
-    var ddt = Math.max(0.016, (last.t - first.t) / 1000);
-    var vx = (last.x - first.x) / ddt, vy = (last.y - first.y) / ddt;
-    if (vy > -700 || Math.abs(vx) > -vy * 1.2) return;
-    var speed = Math.sqrt(vx * vx + vy * vy);
-    throwPizza(speed / 110, Math.atan2(vx, -vy) * 0.55);
+    if (state !== S.PLAY || phase !== "aim") return;
+    var dx = dragX, dy = dragY, len = Math.sqrt(dx * dx + dy * dy);
+    if (len < PULL_MIN || dy >= 0) return;
+    throwPizza(4 + len * PULL_V, Math.atan2(dx, -dy) * 0.5);
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -343,9 +300,9 @@
   wrap.addEventListener("pointermove", function (e) {
     var p = atCanvas(e); move(p.x, p.y);
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); var p = atCanvas(e); move(p.x, p.y); up(); });
   wrap.addEventListener("pointercancel", function () { held = false; });
-  window.addEventListener("blur", function () { held = false; keySpin = false; });
+  window.addEventListener("blur", function () { held = false; });
 
   /* お客にちょうど届く速さを探す（数字キーの自動投げと確認用） */
   function aimFor(c, sp) {
@@ -365,10 +322,9 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (state !== S.PLAY) return;
-    if (n === 1 && phase === "spin") { spin = 1; var a = aimFor(customer, 1); pizza.spin = 1; throwPizza(a.v, a.ang); pizza.wob = 0; }
-    if (n === 2 && phase === "spin") { spin = 0.3; throwPizza(8, 0.3); }
-    if (n === 3 && phase === "spin") { score = 9; customer = makeCustomer(9); snap = true; }
-    if (n === 4) spin = 1.0;
+    if (n === 1 && phase === "aim") { var a = aimFor(customer, 1); throwPizza(a.v, a.ang); }
+    if (n === 2 && phase === "aim") throwPizza(8, 0.3);
+    if (n === 3 && phase === "aim") { score = 9; customer = makeCustomer(9); snap = true; }
   }
 
   window.addEventListener("keydown", function (e) {
@@ -382,12 +338,11 @@
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
-    if (state === S.PLAY && phase === "spin") {
-      /* キーでは：スペース長押しで回す、左右で向き、上キー長押しの長さで強さ */
+    if (state === S.PLAY && phase === "aim") {
+      /* キーでは：左右で向き、上キーかスペースを押している長さで強さ */
       if (left) keyAim = Math.max(-0.5, keyAim - 0.05);
       if (right) keyAim = Math.min(0.5, keyAim + 0.05);
-      if (go) keySpin = true;
-      if (upK && !keyPowOn) { keyPowOn = true; keyPow = 0; }
+      if ((upK || go) && !keyPowOn) { keyPowOn = true; keyPow = 0; }
       return;
     }
     if (e.repeat || !go) return;
@@ -396,14 +351,13 @@
   window.addEventListener("keyup", function (e) {
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
     var upK = e.key === "ArrowUp" || e.key === "w" || e.key === "W";
-    if (go) { if (state === S.INTRO) startButton.click(); keySpin = false; }
-    if (upK && keyPowOn && state === S.PLAY && phase === "spin") { keyPowOn = false; throwPizza(5 + keyPow * 18, keyAim); }
+    if (go && state === S.INTRO) { startButton.click(); return; }
+    if ((upK || go) && keyPowOn && state === S.PLAY && phase === "aim") { keyPowOn = false; throwPizza(4 + keyPow * 18, keyAim); }
   });
 
   function doShare() {
     var text;
-    if (score === 0 && torn) text = zT("ピザを回しすぎて空中で破った", "Spun the pizza so hard it tore apart");
-    else if (score === 0) text = zT("ピザを道に叩きつけて配達をあきらめた", "Slammed the pizza onto the street and gave up delivering");
+    if (score === 0) text = zT("ピザを道に叩きつけて配達をあきらめた", "Slammed the pizza onto the street and gave up delivering");
     else text = zT("店から" + best + "m先のお客にピザを直接投げて届けた（" + score + "軒）",
       "Threw a pizza straight to a customer " + best + "m away (" + score + " deliveries)");
     window.zResultActions.x({ text: text + zT(" #直ピザ配達", " #DirectPizzaDelivery") });
@@ -431,39 +385,26 @@
     snap = false;
     if (!ok) { ctx.fillStyle = "#9fd3f2"; ctx.fillRect(0, 0, W, H); ctx.fillStyle = "#4b4f57"; ctx.fillRect(0, H * 0.55, W, H * 0.45); }
     if (state === S.PLAY) {
-      whirlSet(phase === "spin" ? Math.min(1, spin) : 0);
       /* 届けた軒数 */
       ctx.save();
       ctx.fillStyle = "#fff"; ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.lineWidth = 6;
       ctx.font = "800 64px sans-serif"; ctx.textAlign = "center";
       ctx.strokeText(String(score), W / 2, 92); ctx.fillText(String(score), W / 2, 92);
       ctx.restore();
-      if (phase === "spin") drawGauge();
+      if (phase === "aim" && keyMode) drawKeyAim();
     }
     if (state === S.RESULT) drawResult();
   }
 
-  /* 回転の目盛り：左下の縦の棒。上の赤い所まで行くと破れる */
-  function drawGauge() {
-    var x = 34, h = Math.min(320, H * 0.32), y = H - 90 - h, w = 22;
+  /* キー操作のときだけ向きと強さの目印 */
+  function drawKeyAim() {
+    var len = 40 + (keyPowOn ? Math.min(1.8, keyPow) * 60 : 0);
     ctx.save();
-    roundRect(x, y, w, h, 11); ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.fill();
-    var red = h * (1 - 1 / TEAR * 1.0);
-    ctx.fillStyle = "rgba(230,60,40,.75)"; ctx.fillRect(x, y, w, red);
-    var f = Math.min(1, spin / TEAR) * h;
-    var good = spin > 0.8 && spin <= 1.0;
-    ctx.fillStyle = spin > 1.0 ? "#ff5a3c" : good ? "#5fe07a" : "#ffd23a";
-    roundRect(x + 3, y + h - f + 3, w - 6, Math.max(0, f - 6), 8); ctx.fill();
+    ctx.translate(W / 2, H - 120);
+    ctx.rotate(keyAim);
+    ctx.fillStyle = "rgba(255,255,255,.85)";
+    ctx.fillRect(-4, -len, 8, len);
     ctx.restore();
-    if (keyMode) {
-      /* キー操作のときだけ向きと強さの目印 */
-      ctx.save();
-      ctx.translate(W / 2, H - 120);
-      ctx.rotate(keyAim);
-      ctx.fillStyle = "rgba(255,255,255,.85)";
-      ctx.fillRect(-4, -40 - (keyPowOn ? Math.min(1.6, keyPow) * 60 : 0), 8, 40 + (keyPowOn ? Math.min(1.6, keyPow) * 60 : 0));
-      ctx.restore();
-    }
   }
 
   function resultButtons() {
@@ -511,11 +452,11 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { threeD: !!scene3d, state: state, phase: phase, score: score, spin: spin, pizza: pizza && { x: pizza.x, y: pizza.y, z: pizza.z }, customer: customer, W: W, H: H }; },
+    now: function () { return { threeD: !!scene3d, state: state, phase: phase, score: score, pizza: pizza && { x: pizza.x, y: pizza.y, z: pizza.z }, customer: customer, W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     aimFor: function (sp) { return aimFor(customer, sp); },
-    throwAt: function (v, ang, sp) { spin = sp; throwPizza(v, ang); if (pizza) pizza.wob = 0; }
+    throwAt: function (v, ang) { throwPizza(v, ang); }
   };
 
   window.__recording = {
