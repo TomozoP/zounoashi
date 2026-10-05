@@ -36,6 +36,7 @@
     var key = [g.W, g.H, g.cx, g.cy, g.potY, g.look.skin, g.look.hair.join("-"), g.look.seed, g.styleId].join(",");
     if (key === this.key) return;
     this.key = key;
+    this.stale = true;
     if (this.group) { this.scene.remove(this.group); this.group.traverse(function (o) { if (o.geometry) o.geometry.dispose(); }); }
     var G = this.group = new T.Group();
     this.scene.add(G);
@@ -140,6 +141,7 @@
   BonsaiScene.prototype.setHair = function (hair, ver) {
     if (ver === this.lastHair) return;
     this.lastHair = ver;
+    this.stale = true;
     var m = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), s1 = new T.Vector3(1, 1, 1), s0 = new T.Vector3(0, 0, 0), p = new T.Vector3();
     for (var i = 0; i < this.cells.length; i++) {
       var a = this.pts[i];
@@ -156,12 +158,14 @@
     var w = Math.round(W * dpr), h = Math.round(H * dpr);
     if (!(w >= 2 && h >= 2)) return false;
     if (w !== this.w || h !== this.h) {
+      this.stale = true;
       this.renderer.setSize(w, h, false);
       this.w = w; this.h = h;
       this.camera.left = 0; this.camera.right = W; this.camera.top = 0; this.camera.bottom = -H;
       this.camera.updateProjectionMatrix();
     }
-    this.renderer.render(this.scene, this.camera);
+    /* 場面は止まっているので、髪や画面が変わったときだけ描き直す（スマホで重くしないため） */
+    if (this.stale) { this.renderer.render(this.scene, this.camera); this.stale = false; }
     ctx.drawImage(this.renderer.domElement, 0, 0, W, H);
     return true;
   };
