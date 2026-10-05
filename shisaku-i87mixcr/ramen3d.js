@@ -109,7 +109,7 @@
     this.gLeaf = new T.SphereGeometry(1, 8, 5);
     this.gCube = new T.BoxGeometry(1, 1, 1);
     this.mSprout = new T.MeshStandardMaterial({ map: this.sproutAtlas(), alphaTest: 0.5, side: T.DoubleSide, roughness: 0.45, metalness: 0, emissive: 0x2a2410, emissiveIntensity: 0.5 });
-    this.mLeaf = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, side: T.DoubleSide, emissive: 0x9a9a78, emissiveIntensity: 0.6 });   /* 裏や影でも暗い緑にならないよう明るめ */
+    this.mCabbage = new T.MeshStandardMaterial({ map: this.cabbageAtlas(), alphaTest: 0.5, side: T.DoubleSide, roughness: 0.45, metalness: 0, emissive: 0x2a2410, emissiveIntensity: 0.5 });
     this.mGarlic = new T.MeshStandardMaterial({ color: 0xf2e2a0, roughness: 0.6, emissive: 0x2a2208, emissiveIntensity: 0.6 });
     this.mFat = new T.MeshStandardMaterial({ color: 0xfff0d6, roughness: 0.12, emissive: 0x302418, emissiveIntensity: 0.5 });
     this.mKarame = new T.MeshStandardMaterial({ color: 0x4a1e06, roughness: 0.05, transparent: true, opacity: 0.85 });
@@ -142,6 +142,49 @@
           g.strokeStyle = "rgba(255,255,255," + (0.25 + depth * 0.5) + ")"; g.lineWidth = 3;
           g.beginPath(); g.moveTo(x1, y1 - 1.5); g.quadraticCurveTo(cx + px, py + bend - 1.5, x2, y2 - 1.5); g.stroke();
           if (r() < 0.35) { g.fillStyle = "hsl(50,70%," + (45 + depth * 15) + "%)"; g.beginPath(); g.ellipse(x1, y1, 7, 5.5, a, 0, 7); g.fill(); }
+        }
+        g.restore();
+      }
+    });
+  };
+
+  /* キャベツのざく切りの絵を4種類、横に並べて描く */
+  RamenScene.prototype.cabbageAtlas = function () {
+    var CW = 256, CH = 192;
+    return canvasTex(CW * 4, CH, function (g) {
+      for (var cell = 0; cell < 4; cell++) {
+        var r = rng(700 + cell * 13), ox = cell * CW;
+        g.save(); g.beginPath(); g.rect(ox, 0, CW, CH); g.clip();
+        /* 1〜2枚の葉を重ねる */
+        for (var leaf = 0; leaf < 1 + (cell % 2); leaf++) {
+          var cx = ox + CW / 2 + (leaf ? 30 : -10) + (r() - 0.5) * 20, cy = CH / 2 + (leaf ? 18 : -6);
+          var rx = CW * (0.36 - leaf * 0.08), ry = CH * (0.36 - leaf * 0.08), rot = (r() - 0.5) * 0.8;
+          var pts = [], n = 11;
+          for (var k = 0; k < n; k++) {
+            var a = k / n * Math.PI * 2, rr = 0.75 + r() * 0.3;
+            pts.push([cx + Math.cos(a + rot) * rx * rr, cy + Math.sin(a + rot) * ry * rr]);
+          }
+          g.beginPath();
+          g.moveTo((pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2);
+          for (k = 1; k <= n; k++) { var p1 = pts[k % n], p2 = pts[(k + 1) % n]; g.quadraticCurveTo(p1[0], p1[1], (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2); }
+          g.closePath();
+          /* 芯に近い淡い色から、ふちの薄い黄緑へ */
+          var gr = g.createRadialGradient(cx - rx * 0.3, cy + ry * 0.2, 4, cx, cy, rx * 1.05);
+          gr.addColorStop(0, "#f2f2d0"); gr.addColorStop(0.55, "#dfe8a8"); gr.addColorStop(1, "#b9d272");
+          g.fillStyle = gr; g.fill();
+          g.strokeStyle = "rgba(150,160,90,.6)"; g.lineWidth = 4; g.stroke();
+          /* 白い葉脈 */
+          g.save(); g.clip();
+          g.lineCap = "round";
+          var bx = cx - rx * 0.6, by = cy + ry * 0.5;
+          g.strokeStyle = "rgba(255,255,245,.9)"; g.lineWidth = 9;
+          g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(cx, cy + ry * 0.1, cx + rx * 0.8, cy - ry * 0.5); g.stroke();
+          g.lineWidth = 4;
+          for (k = 0; k < 5; k++) {
+            var t = 0.2 + k * 0.16, sx = bx + (cx + rx * 0.8 - bx) * t, sy = by + (cy - ry * 0.5 - by) * t;
+            g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + (r() - 0.3) * rx * 0.5, sy - ry * (0.4 + r() * 0.3)); g.stroke();
+          }
+          g.restore();
         }
         g.restore();
       }
@@ -189,21 +232,35 @@
     sp.userData.own = true;
     sp.frustumCulled = false;
     g.add(sp);
-    /* キャベツ */
-    /* 大きめのざく切りを、もやしの表面から見えるように混ぜる */
-    var nc = Math.round((kind === "kyabetsu" ? 16 : 7) * R * R + (kind === "kyabetsu" ? 5 : 2));
-    var lm = new T.InstancedMesh(this.gLeaf, this.mLeaf, nc), ls = Math.min(1, 0.35 + R * 0.5);
+    /* キャベツ：ざく切りを描いた板を、もやしの列の手前に混ぜる（もやしと同じ質感） */
+    var cp = [], cu = [], cn = [], ci = [], ls = Math.min(1, 0.35 + R * 0.5);
+    var nc = Math.round((kind === "kyabetsu" ? 7 : 2.5) * R + (kind === "kyabetsu" ? 3 : 1));
     for (i = 0; i < nc; i++) {
-      a = r() * Math.PI * 2; u = 0.35 + Math.sqrt(r()) * 0.6;
-      d.position.set(Math.cos(a) * u * R, H * Math.sqrt(Math.max(0, 1 - u * u)) * 0.95 - 0.03, Math.sin(a) * u * R);
-      d.rotation.set((r() - 0.5) * 0.7, r() * 6, (r() - 0.5) * 0.7);
-      d.scale.set((0.2 + r() * 0.12) * ls, 0.018, (0.13 + r() * 0.08) * ls);
-      d.updateMatrix(); lm.setMatrixAt(i, d.matrix);
-      col.setHSL(0.17 + r() * 0.05, 0.5 + r() * 0.2, 0.72 + r() * 0.1);   /* 淡い黄緑 */
-      lm.setColorAt(i, col);
+      var row = rows[2 + Math.floor(r() * (rows.length - 2))];
+      var cz = row[0] * R + 0.08, cs = R * Math.sqrt(Math.max(0, 1 - row[0] * row[0])) * 0.8;
+      var cxx = (r() * 2 - 1) * cs, ce = Math.abs(cxx) / Math.max(0.01, cs);
+      var cl = row[1] + H * 0.35 * Math.sqrt(Math.max(0, 1 - row[0] * row[0]));
+      var cw = (0.5 + r() * 0.2) * ls, chh = cw * 0.75;
+      var cyy = -0.12 + cl * (1 - ce * ce * 0.7) + 0.02 + r() * 0.1;
+      var cc = Math.floor(r() * 4), cf = r() < 0.5;
+      var cu0 = cc / 4, cu1 = cu0 + 0.25;
+      if (cf) { var ct = cu0; cu0 = cu1; cu1 = ct; }
+      var cb = cp.length / 3;
+      cp.push(cxx - cw / 2, cyy, cz, cxx + cw / 2, cyy, cz, cxx + cw / 2, cyy + chh, cz, cxx - cw / 2, cyy + chh, cz);
+      cu.push(cu0, 0, cu1, 0, cu1, 1, cu0, 1);
+      for (q = 0; q < 4; q++) cn.push(0, 0.35, 1);
+      ci.push(cb, cb + 1, cb + 2, cb, cb + 2, cb + 3);
     }
-    lm.frustumCulled = false;
-    g.add(lm);
+    var cgeo = new T.BufferGeometry();
+    cgeo.setAttribute("position", new T.Float32BufferAttribute(cp, 3));
+    cgeo.setAttribute("uv", new T.Float32BufferAttribute(cu, 2));
+    cgeo.setAttribute("normal", new T.Float32BufferAttribute(cn, 3));
+    cgeo.setIndex(ci);
+    cgeo.normalizeNormals();
+    var cm = new T.Mesh(cgeo, this.mCabbage);
+    cm.userData.own = true;
+    cm.frustumCulled = false;
+    g.add(cm);
     /* ニンニク：てっぺんに刻みの小山 */
     if (kind === "ninniku") {
       var ng = Math.max(4, Math.round(36 * Math.min(1, R / 0.8))), gm = new T.InstancedMesh(this.gCube, this.mGarlic, ng);
