@@ -144,7 +144,8 @@
      gu, gv は顔の中心からのゲーム座標（右・下が正） */
   function gs(dx, dy, sx, sy) { return Math.exp(-(dx * dx) / (sx * sx) - (dy * dy) / (sy * sy)); }
   function mouthLine(gu, expr) {
-    if (expr === true) return 62 - 0.012 * Math.min(gu * gu, 26 * 26);   /* 口角が上がる */
+    if (expr === "joy") return 62 - 0.012 * Math.min(gu * gu, 26 * 26);   /* 口角が上がる */
+    if (expr === "ouch") return 60 + 0.009 * Math.min(gu * gu, 26 * 26);  /* 口をへの字に食いしばる */
     return 61 + 0.004 * gu * gu;
   }
   function relief(gu, gv, expr) {
@@ -160,16 +161,16 @@
     d += 5 * gs(au - 44, gv - 22, 17, 14);         /* 頬骨 */
     d -= 3 * gs(au - 28, gv - 50, 6, 12);          /* ほうれい線 */
     d -= 2 * gs(gu, gv - 49, 4, 4);                /* 人中 */
-    var my = mouthLine(gu, expr), w = expr === false ? 12 : 22;
+    var my = mouthLine(gu, expr), w = expr === "shock" ? 12 : 22;
     var lip = gs(gu, 0, w, 1);
     d += 4 * lip * gs(0, gv - (my - 5), 1, 4);     /* 上唇 */
     d += 5 * lip * gs(0, gv - (my + 6), 1, 5);     /* 下唇 */
     d -= 4 * lip * gs(0, gv - my, 1, 1.6);         /* 唇の合わせ目 */
-    if (expr === false) {                          /* 「お」の口 */
+    if (expr === "shock") {                          /* 「お」の口 */
       var q = (gu / 11) * (gu / 11) + ((gv - 66) / 14) * ((gv - 66) / 14);
       if (q < 1) d -= 22 * (1 - q);
     }
-    if (expr === true) d += 3 * gs(au - 36, gv - 44, 10, 8);   /* 笑うと頬が上がる */
+    if (expr === "joy") d += 3 * gs(au - 36, gv - 44, 10, 8);   /* 笑うと頬が上がる */
     d += 5 * gs(gu, gv - 90, 22, 10);              /* あご */
     return d;
   }
@@ -180,10 +181,10 @@
     r *= 1 + 0.04 * blush; g *= 1 - 0.14 * blush; b *= 1 - 0.1 * blush;
     var sock = gs(au - 30, gv - 4, 22, 13);
     r *= 1 - 0.12 * sock; g *= 1 - 0.15 * sock; b *= 1 - 0.1 * sock;
-    var my = mouthLine(gu, expr), w = expr === false ? 13 : 23;
+    var my = mouthLine(gu, expr), w = expr === "shock" ? 13 : 23;
     var lip = gs(gu, 0, w, 1) * Math.max(gs(0, gv - (my - 4), 1, 4), gs(0, gv - (my + 5), 1, 5.5));
     r *= 1 - 0.05 * lip; g *= 1 - 0.42 * lip; b *= 1 - 0.3 * lip;
-    if (expr === false) {
+    if (expr === "shock") {
       var q = (gu / 10) * (gu / 10) + ((gv - 66) / 13) * ((gv - 66) / 13);
       if (q < 1) { r *= 0.35; g *= 0.12; b *= 0.12; }
     } else {
@@ -193,8 +194,11 @@
     out[0] = r; out[1] = g; out[2] = b;
   }
 
+  /* expr: null ふつう / "joy" うれしい / "shock" がっかり（「お」の口） / "ouch" いたっ（目をつぶる）。
+     true / false は判定の顔で、joy / shock と同じ */
   BonsaiScene.prototype.buildFace = function (expr) {
     var g = this.g; if (!g) return;
+    if (expr === true) expr = "joy"; else if (expr === false) expr = "shock";
     var key = this.key + "|" + expr;
     if (key === this.faceKey) return;
     this.faceKey = key; this.stale = true;
@@ -224,7 +228,7 @@
     function surf(gu, gv) { var fu = gu / 86, fv = gv / 104; return FZ + FD * Math.sqrt(Math.max(0, 1 - fu * fu - fv * fv)) + relief(gu, gv, expr); }
     var white = std(0xf4f0e8, { roughness: 0.2 }), iris = std(0x4a2c18, { roughness: 0.3 }), pupil = std(0x0b0806, { roughness: 0.1 });
     var lidM = std(g.look.skin, { roughness: 0.55 }), lashM = std(0x1a120c, { roughness: 0.8 });
-    var open = expr === false ? 1.0 : expr === true ? 0.45 : 0.7;   /* まぶたの開き */
+    var open = expr === "shock" ? 1.0 : expr === "joy" ? 0.45 : 0.7;   /* まぶたの開き */
     [-1, 1].forEach(function (s) {
       var ex = s * 30, ey = 2, R = 10.5, ez = surf(ex, ey) - R + 5;
       var eye = new T.Mesh(new T.SphereGeometry(R, 32, 24), white); eye.position.set(cx + ex, -(cy + ey), ez); F.add(eye);
@@ -232,7 +236,7 @@
       var pu = new T.Mesh(new T.CircleGeometry(2.6, 24), pupil); pu.position.set(cx + ex, -(cy + ey + 0.5), ez + R + 0.1); F.add(pu);
       var hl = new T.Mesh(new T.CircleGeometry(1.3, 12), new T.MeshBasicMaterial({ color: 0xffffff })); hl.position.set(cx + ex - 2, -(cy + ey - 1.5), ez + R + 0.15); F.add(hl);
       /* 上まぶた：目玉より少し大きい殻の上側 */
-      var a = Math.PI * (0.3 + 0.25 * (1 - open));
+      var a = expr === "ouch" ? Math.PI * 0.7 : Math.PI * (0.3 + 0.25 * (1 - open));
       var lid = new T.Mesh(new T.SphereGeometry(R + 1.2, 32, 16, 0, Math.PI * 2, 0, a), lidM);
       lid.scale.set(1.12, 1, 1);
       lid.position.copy(eye.position); F.add(lid);
@@ -253,7 +257,7 @@
       var hc = g.look.hair, bm = std(new T.Color(hc[0] / 255, hc[1] / 255, hc[2] / 255).getHex(), { roughness: 1 });
       var bp = [], bw = g.look.brow ? 4 : 2.6;
       for (var u = 0; u <= 1.001; u += 0.1) {
-        var bx = s * (16 + 30 * u), by = -18 + 4 * u * u - 2 * Math.sin(u * Math.PI) - (expr === false ? 5 : 0);
+        var bx = s * (16 + 30 * u), by = -18 + 4 * u * u - 2 * Math.sin(u * Math.PI) - (expr === "shock" ? 5 : 0) + (expr === "ouch" ? 6 * (1 - u) : 0);
         bp.push(new T.Vector3(cx + bx, -(cy + by), surf(bx, by) + bw * 0.4));
       }
       var brow = new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(bp), 20, 1, 8, false), bm);
