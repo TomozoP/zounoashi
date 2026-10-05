@@ -21,7 +21,7 @@
     this.renderer.toneMapping = T.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = T.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = T.PCFShadowMap;
     this.renderer.setClearColor(0xf1e3b8, 1);
     this.scene = new T.Scene();
     this.camera = new T.PerspectiveCamera(32, 0.5, 0.5, 4000);
@@ -30,10 +30,9 @@
     /* 真上やや手前の照明：影を落とす主役 */
     var key = this.key = new T.DirectionalLight(0xffe2bc, 3.2);
     key.castShadow = true;
-    key.shadow.mapSize.set(1536, 1536);
+    key.shadow.mapSize.set(1024, 1024);
     key.shadow.bias = -0.0006;
     key.shadow.normalBias = 0.02;
-    key.shadow.radius = 4;
     this.scene.add(key);
     this.scene.add(key.target);
     /* 窓側からの冷たい返し光と、奥からの縁の光 */
@@ -56,9 +55,9 @@
     this.makeSteam();
     this.makeAbura();
     var self = this;
-    this.scene.traverse(function (o) { if (o.isMesh && !o.isInstancedMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    this.wall.castShadow = false;
-    this.wall.receiveShadow = false;   /* 壁には影を落とさない（上の照明などの影が浮いて見えるため） */
+    /* 影はどんぶりまわりだけが落とし、受けるのはどんぶりとカウンターだけ（軽くするため） */
+    this.dish.traverse(function (o) { if (o.isMesh && !o.isInstancedMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    this.counterTop.receiveShadow = this.counterLow.receiveShadow = true;
   }
 
   /* 映り込み用の部屋：暗い店内に、白い蛍光灯と赤い提灯の明かり */
@@ -275,15 +274,15 @@
     band2.position.set(0, 5.52, -4.44);
     s.add(band2);
     /* カウンター：赤い天板 */
-    var top = new T.Mesh(new T.BoxGeometry(60, 0.25, 7), new T.MeshPhysicalMaterial({ color: 0xc81e1a, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 }));
+    var red = new T.MeshStandardMaterial({ color: 0xc81e1a, roughness: 0.3 });
+    var top = this.counterTop = new T.Mesh(new T.BoxGeometry(60, 0.25, 7), red);
     top.position.set(0, -1.63, 0);
     s.add(top);
     /* 作る台（上の段）の前の赤い壁と、客の前のカウンター（下の段） */
-    var red = new T.MeshPhysicalMaterial({ color: 0xc81e1a, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
     var front = new T.Mesh(new T.BoxGeometry(60, 2.8, 0.3), new T.MeshStandardMaterial({ color: 0xb01a16, roughness: 0.5 }));
     front.position.set(0, -2.9, 3.4);
     s.add(front);
-    var low = new T.Mesh(new T.BoxGeometry(60, 0.25, 7.5), red);
+    var low = this.counterLow = new T.Mesh(new T.BoxGeometry(60, 0.25, 7.5), red);
     low.position.set(0, -4.425, 7.3);
     s.add(low);
     var edge = new T.Mesh(new T.BoxGeometry(60, 0.12, 7.6), new T.MeshStandardMaterial({ color: 0x2a2624, roughness: 0.6 }));
@@ -350,22 +349,24 @@
     var s = this.dish;
     var pts = [], prof = [[0, -1.5], [1.0, -1.5], [1.04, -1.42], [1.0, -1.3], [1.2, -1.25], [1.55, -1.0], [1.85, -0.55], [2.05, 0.0], [2.14, 0.3], [2.18, 0.34], [2.12, 0.35], [2.04, 0.2], [1.8, -0.4], [1.2, -1.0], [0, -1.12]];
     prof.forEach(function (p) { pts.push(new T.Vector2(p[0], p[1])); });
-    var bowl = new T.Mesh(new T.LatheGeometry(pts, 64), new T.MeshPhysicalMaterial({ color: 0xe6eef6, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.08, side: T.DoubleSide }));
+    var bowl = new T.Mesh(new T.LatheGeometry(pts, 48), new T.MeshPhysicalMaterial({ color: 0xe6eef6, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.08, side: T.DoubleSide }));
     s.add(bowl);
     /* スープ */
     var soup = new T.Mesh(new T.CircleGeometry(2.02, 48), new T.MeshPhysicalMaterial({ color: 0x4a2008, roughness: 0.08, clearcoat: 1, clearcoatRoughness: 0.02 }));
     soup.rotation.x = -Math.PI / 2; soup.position.y = 0.12;
     s.add(soup);
     var r = rng(9), fat = new T.MeshStandardMaterial({ color: 0xf0b860, roughness: 0.02, transparent: true, opacity: 0.6, emissive: 0x3a2008 });
+    /* 脂の粒はまとめて1回で描く */
+    var dots = new T.InstancedMesh(new T.CircleGeometry(1, 10), fat, 26), d = this.dummy;
     for (var i = 0; i < 26; i++) {
-      var a = r() * 6.28, u = 1.45 + r() * 0.5;
-      var dot = new T.Mesh(new T.CircleGeometry(0.04 + r() * 0.07, 10), fat);
-      dot.rotation.x = -Math.PI / 2;
-      dot.position.set(Math.cos(a) * u, 0.125, Math.sin(a) * u);
-      s.add(dot);
+      var a = r() * 6.28, u = 1.45 + r() * 0.5, ds = 0.04 + r() * 0.07;
+      d.rotation.set(-Math.PI / 2, 0, 0); d.scale.set(ds, ds, ds);
+      d.position.set(Math.cos(a) * u, 0.125, Math.sin(a) * u);
+      d.updateMatrix(); dots.setMatrixAt(i, d.matrix);
     }
+    s.add(dots);
     /* 刻みニンニクの小山：最初から左手前に乗っている */
-    var gn = 220, gm = new T.InstancedMesh(this.gCube, new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, emissive: 0x2a2208, emissiveIntensity: 0.6 }), gn), gc = new T.Color(), d = this.dummy;
+    var gn = 220, gm = new T.InstancedMesh(this.gCube, new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, emissive: 0x2a2208, emissiveIntensity: 0.6 }), gn), gc = new T.Color();
     for (i = 0; i < gn; i++) {
       var ga = r() * Math.PI * 2, gu = Math.sqrt(r());
       d.position.set(-1.1 + Math.cos(ga) * gu * 0.55, 0.16 + (1 - gu * gu) * 0.45 + r() * 0.05, 1.0 + Math.sin(ga) * gu * 0.4);
@@ -378,7 +379,7 @@
     gm.castShadow = gm.receiveShadow = true;
     s.add(gm);
     /* 極太麺（ふちから見えるぶん） */
-    var nm = new T.MeshPhysicalMaterial({ color: 0xd9a748, roughness: 0.35, clearcoat: 0.7, sheen: 0.5, sheenColor: new T.Color(0xffe0a0) });
+    var nm = new T.MeshStandardMaterial({ color: 0xd9a748, roughness: 0.3 });
     for (i = 0; i < 16; i++) {
       a = r() * 6.28;
       var p0 = new T.Vector3(Math.cos(a) * 1.25, 0.05, Math.sin(a) * 1.25);
@@ -415,14 +416,10 @@
     /* タレのてり：表面に強い艶の層 */
     var faceM = new T.MeshPhysicalMaterial({ map: face, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 3 });
     side.envMapIntensity = 3;
-    /* てりを拾う小さな明かり（チャーシューのそばだけ照らす） */
-    /* 最後に山のてっぺんへ乗せる2枚。てりを拾う小さな明かりも一緒に動かす */
+    /* 最後にどんぶりへ落とす2枚 */
     var ch = this.chashu = new T.Group();
     ch.visible = false;
     s.add(ch);
-    var glint = new T.PointLight(0xfff0d8, 6, 3.5, 2);
-    glint.position.set(0.9, 1.9, 2.4);
-    ch.add(glint);
     var sh = new T.Shape(), pts2 = [[0.05, 0], [0.55, -0.03], [0.97, 0.02], [1.0, 0.3], [0.96, 0.62], [0.5, 0.66], [0.04, 0.6], [0, 0.3]];
     sh.moveTo(pts2[0][0], pts2[0][1]);
     pts2.forEach(function (q, k) { var n2 = pts2[(k + 1) % pts2.length]; sh.quadraticCurveTo(n2[0] * 0.15 + q[0] * 0.85, n2[1] * 0.15 + q[1] * 0.85, (q[0] + n2[0]) / 2, (q[1] + n2[1]) / 2); });
@@ -467,19 +464,18 @@
   /* ============ 空 ============ */
   RamenScene.prototype.makeSky = function () {
     var s = this.scene, r = rng(31);
-    var cm = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 1, emissive: 0x8090a0, emissiveIntensity: 0.25 });
-    var sg = new T.SphereGeometry(1, 12, 8);
+    /* 雲は球をまとめて1回で描く */
+    var cm = new T.MeshLambertMaterial({ color: 0xffffff, emissive: 0x8090a0, emissiveIntensity: 0.25 });
+    var clouds = new T.InstancedMesh(new T.SphereGeometry(1, 10, 6), cm, 300), d = this.dummy;
     for (var i = 0; i < 60; i++) {
-      var g = new T.Group(), y = CEIL / M + 6 + r() * 150;
+      var y = CEIL / M + 6 + r() * 150, cx = (r() < 0.5 ? -1 : 1) * (2.5 + r() * 6), cz = -3 - r() * 6;
       for (var k = 0; k < 5; k++) {
-        var b = new T.Mesh(sg, cm);
-        b.position.set(k * 0.8 - 1.6, (k % 2) * 0.3, r() * 0.4);
-        var sc = 0.6 + r() * 0.6; b.scale.set(sc * 1.2, sc * 0.8, sc);
-        g.add(b);
+        d.position.set(cx + k * 0.8 - 1.6, y + (k % 2) * 0.3, cz + r() * 0.4);
+        var sc = 0.6 + r() * 0.6; d.rotation.set(0, 0, 0); d.scale.set(sc * 1.2, sc * 0.8, sc);
+        d.updateMatrix(); clouds.setMatrixAt(i * 5 + k, d.matrix);
       }
-      g.position.set((r() < 0.5 ? -1 : 1) * (2.5 + r() * 6), y, -3 - r() * 6);
-      s.add(g);
     }
+    s.add(clouds);
     var n = 1500, pos = new Float32Array(n * 3);
     for (i = 0; i < n; i++) {
       pos[i * 3] = (r() - 0.5) * 120;
