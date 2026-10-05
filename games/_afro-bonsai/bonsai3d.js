@@ -323,24 +323,35 @@
       }
       brow.geometry.computeVertexNormals();
       var browG = new T.Group(); browG.add(brow); F.add(browG);
-      /* 閉じた目：目玉を隠し、肌のふくらみに線を一本。痛いときは鼻の側がとがった「＞＜」 */
+      /* 閉じた目：目玉を隠してまぶたの肌でふさぐ。線は本物の目と同じく、まつげの生え際・二重の溝・下まぶた・目尻のしわ。
+         笑うと下まぶたが押し上がって細い弧になり、痛いとぎゅっと閉じて目尻にしわが寄る */
       var shutG = new T.Group(); shutG.position.copy(at); F.add(shutG);
-      var cover = new T.Mesh(new T.SphereGeometry(1, 28, 18), lidM);
-      cover.scale.set(R * 1.12, R * 0.95, R * 0.55); cover.position.z = R * 0.4; shutG.add(cover);
-      var lp = [];
-      function onCover(x, y) { return R * 0.95 + 1.5 - 1.5 * (x / R) * (x / R); }   /* ふくらみの少し手前に浮かせる（正面からは区別がつかない） */
-      for (var q = 0; q <= 1.001; q += 0.1) {
-        var lx = (q * 2 - 1) * R * 1.0, qq = 1 - (q * 2 - 1) * (q * 2 - 1);
-        var ly = expr === "joy" ? -R * 0.3 + R * 0.6 * qq : -R * 0.18 - R * 0.22 * qq;   /* 笑うと上にふくらむ「∩」、まばたきは下にふくらむ弧 */
-        lp.push(new T.Vector3(lx, ly, onCover(lx, ly)));
+      var sk = new T.Color(g.look.skin), lidShut = std(sk.clone().multiplyScalar(0.93).getHex(), { roughness: 0.55 });
+      var crM = std(sk.clone().multiplyScalar(0.62).getHex(), { roughness: 0.8 });
+      var squeeze = expr === "ouch" ? 1 : expr === "joy" ? 0.5 : 0;
+      var cover = new T.Mesh(new T.SphereGeometry(1, 28, 18), lidShut);
+      cover.scale.set(R * 1.12, R * 0.95, R * (0.55 + 0.1 * squeeze)); cover.position.z = R * 0.4; shutG.add(cover);
+      function front(x, y) { return R * (0.95 + 0.1 * squeeze) + 1.2 - 1.6 * (x / R) * (x / R); }   /* ふくらみの少し手前（正面からは区別がつかない） */
+      function line(fy, w, m) {
+        var pts = [];
+        for (var q = 0; q <= 1.001; q += 0.1) { var lx = (q * 2 - 1) * R * 1.05, qq = 1 - (q * 2 - 1) * (q * 2 - 1), ly = fy(lx, qq); pts.push(new T.Vector3(lx, ly, front(lx, ly))); }
+        shutG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts), 20, w, 6, false), m));
       }
-      if (expr === "ouch") {
-        var tip = s < 0 ? R : -R;   /* 鼻の側の先 */
-        lp = [new T.Vector3(-tip * 1.05, R * 0.75, 0), new T.Vector3(tip * 0.9, 0, 0), new T.Vector3(-tip * 1.05, -R * 0.6, 0)].map(function (v) {
-          return new T.Vector3(v.x, v.y, onCover(v.x, v.y) + 0.3);
-        });
-        shutG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(lp, false, "catmullrom", 0.1), 24, 1.6, 6, false), lashM));
-      } else shutG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(lp), 20, expr === "joy" ? 1.4 : 0.9, 6, false), lashM));
+      /* まつげの生え際 */
+      if (expr === "joy") line(function (x, qq) { return -R * 0.18 + R * 0.16 * qq; }, 0.8, lashM);
+      else if (expr === "ouch") line(function (x, qq) { return -R * 0.08 + R * 0.04 * qq; }, 1.0, lashM);
+      else line(function (x, qq) { return -R * 0.28 - R * 0.1 * qq; }, 0.65, lashM);
+      /* 二重の溝 */
+      line(function (x, qq) { return R * (0.3 - 0.1 * squeeze) + R * 0.22 * qq; }, 0.45, crM);
+      /* 下まぶたのふくらみ（笑う・痛いと押し上がる） */
+      var bag = new T.Mesh(new T.SphereGeometry(1, 20, 12), lidM);
+      bag.scale.set(R * 1.0, R * (0.28 + 0.14 * squeeze), R * 0.4); bag.position.set(0, -R * (0.62 - 0.22 * squeeze), R * 0.62); shutG.add(bag);
+      /* 目尻のしわ */
+      for (var w = 0; w < (squeeze ? (expr === "ouch" ? 3 : 2) : 0); w++) {
+        var ox2 = s * R * 1.1, ang = (w - 0.8) * 0.45, len = R * (0.5 + 0.25 * squeeze);
+        var wp = [0, 0.5, 1].map(function (t) { var xx = ox2 + s * Math.cos(ang) * len * t, yy = Math.sin(ang) * len * t - R * 0.1; return new T.Vector3(xx, yy, front(R * 0.9, yy) - 2.5 * t); });
+        shutG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(wp), 6, 0.4, 5, false), crM));
+      }
       var openParts = [eye, look, lidG, low];
       eyes.push({ s: s, lid: lidG, a: a, look: look, brow: browG, shut: shutG, open: openParts, closed: expr === "ouch" || expr === "joy" });
     });
