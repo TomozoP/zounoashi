@@ -2,16 +2,16 @@
 <html lang="ja">
 <head>
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="echo-maze-1791109219869">
+<meta name="preview-version" content="mashimashi-1791189355530">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>【プレビュー】エコーメイズ</title>
+<title>【プレビュー】無限マシマシ</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
   #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
   #wrap { position: relative; touch-action: none; }
-  canvas { display: block; background: #0b0e15; }
+  canvas { display: block; background: #f1e3b8; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
@@ -32,24 +32,22 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/start.js?v=echo-maze-1791109219869"></script>
-<script src="../games/view.js?v=echo-maze-1791109219869"></script>
-<script src="../games/audio.js?v=echo-maze-1791109219869"></script>
-<script src="../games/lang.js?v=echo-maze-1791109219869"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=echo-maze-1791109219869"></script>
-<script src="../games/result-actions.js?v=echo-maze-1791109219869"></script>
-<script src="../games/action-icons.js?v=echo-maze-1791109219869"></script>
-<script src="../games/pad.js?v=echo-maze-1791109219869"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/start.js?v=mashimashi-1791189355530"></script>
+<script src="../games/view.js?v=mashimashi-1791189355530"></script>
+<script src="../games/audio.js?v=mashimashi-1791189355530"></script>
+<script src="../games/lang.js?v=mashimashi-1791189355530"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=mashimashi-1791189355530"></script>
+<script src="../games/result-actions.js?v=mashimashi-1791189355530"></script>
+<script src="../games/action-icons.js?v=mashimashi-1791189355530"></script>
+<script src="../games/pad.js?v=mashimashi-1791189355530"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/random-bowling/vendor/three.min.js?v=mashimashi-1791189355530"></script>
+<script src="./ramen3d.js?v=mashimashi-1791189355530"></script>
 <script>
-/* エコーメイズ
+/* 無限マシマシ
 
-   真っ暗な迷路。玉は音叉を持っていて、タップ（スペース）すると音叉が鳴り、音が音叉の先から前方へ飛んでいく。
-   音は粒になって進み、壁で跳ね返りながら届いた所の壁だけが光る（エコーロケーション）。
-   粒が当たった壁の面が線で光り、輪郭が浮かぶ。光は1.5秒ほどで消える。
-   音の粒が出口に届くと「キン」と、その方向から鳴る。
-   迷路には敵が3体いる。敵は1体ずつ順番にうなり声を出し、その音の粒で敵の居場所とまわりの壁が赤く見える。
-   こちらの音を聞きつけると、音のした場所へ急いで寄ってくる。追ってくる間はずっとうなり続ける。捕まると入口に戻される。
-   迷路の作りは画像迷路と同じ（21×21の部屋）。下の真ん中から入り、上の真ん中の出口を目指す。出口は最初に音叉を鳴らしてから光り、敵はその音が消えたころから動き出す。迷路は画面の幅いっぱいに大きく見せて上に置き、触った所に出るジョイスティックで玉を動かし、タップすると音叉が鳴る。結果は出口までの秒数。 */
+   揺れるトングからヤサイを落として、どんぶりの上に積む。
+   ずれた分はこぼれて、次からの山が細くなる。ぴったりなら細らない。
+   外れたら終わり。積んだ高さ（cm）が結果。 */
 (function () {
   "use strict";
 
@@ -59,19 +57,19 @@
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
 
-  /* ============ 画面 ============ */
   var W = 540, H = 960;
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
-    place();
+    /* 開始前に画面の大きさが変わったら（開いた直後は0のことがある）、カメラを置き直す */
+    if ((!state || state === S.INTRO) && isFinite(H) && H > 0) camY = H * 0.1;
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
 
   /* ============ 音 ============ */
-  var AC = null;
+  var AC = null, NOISE = null;
   function resumeAudio() { window.zAudioResume(AC); }
   wrap.addEventListener("touchstart", audioOn, { passive: true });
   wrap.addEventListener("touchend", resumeAudio, { passive: true });
@@ -82,22 +80,44 @@
     if (!C) return;
     try { AC = new C(); } catch (e) { return; }
     resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
   }
-  /* pan: -1 左 〜 1 右 */
-  function tone(freq, dur, vol, type, to, delay, pan) {
+  function tone(freq, dur, vol, type, to, delay) {
     if (!AC) return;
-    var o = AC.createOscillator(), g = AC.createGain(), out = g;
+    var o = AC.createOscillator(), g = AC.createGain();
     var n = AC.currentTime + (delay || 0);
     o.type = type || "sine";
     o.frequency.setValueAtTime(freq, n);
     if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
     g.gain.setValueAtTime(0.0001, n);
-    g.gain.exponentialRampToValueAtTime(vol, n + 0.008);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    o.connect(g);
-    if (pan && AC.createStereoPanner) { var p = AC.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan)); g.connect(p); out = p; }
-    out.connect(AC.destination);
+    o.connect(g); g.connect(AC.destination);
     o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q, delay) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+  }
+  /* 完成のファンファーレ（自作の短い節）：ソドミソ↑ド、最後は和音で伸ばす */
+  function fanfare() {
+    if (!AC) return;
+    var notes = [[392, 0, 0.12], [523, 0.12, 0.12], [659, 0.24, 0.12], [784, 0.36, 0.22], [659, 0.6, 0.1], [784, 0.72, 0.1], [1047, 0.84, 0.9]];
+    notes.forEach(function (q) {
+      tone(q[0], q[2], 0.07, "square", null, q[1]);
+      tone(q[0] * 1.004, q[2], 0.05, "sawtooth", null, q[1]);
+    });
+    [523, 659, 784].forEach(function (f) { tone(f, 0.9, 0.035, "triangle", null, 0.84); });
   }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
@@ -105,457 +125,248 @@
     else { try { AC.resume(); } catch (e) {} }
   });
 
-  /* ============ 迷路 ============
-     N×N の部屋。壁も1マスとして数えるので、マス目は G = 2N+1 */
-  var N = 21, G = 2 * N + 1, B = 12, BOARD = G * B;
-  var open = new Uint8Array(G * G);         /* 1 = 通路 */
-  var MID = (G - 1) / 2;                   /* 真ん中の列 */
-  var ENTRY = (G - 1) * G + MID, EXIT = MID;   /* 入口は下の真ん中、出口は上の真ん中 */
-  var EXIT_X = (MID + 0.5) * B, EXIT_Y = 0.5 * B;
-  var marks = [];                           /* 音の粒が壁に当たった点。壁の面に沿った短い線として光る */
-
-  /* ランダムな強さの低い順に掘る（Prim の最小全域木） */
-  function buildMaze() {
-    var strength = new Float32Array(G * G);
-    for (var j = 0; j < G * G; j++) strength[j] = Math.random();
-    open.fill(0);
-    var heap = [];
-    function push(w, a, b) {
-      heap.push([w, a, b]);
-      var i = heap.length - 1;
-      while (i > 0) { var p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; var t = heap[p]; heap[p] = heap[i]; heap[i] = t; i = p; }
-    }
-    function pop() {
-      var top = heap[0], last = heap.pop();
-      if (heap.length) {
-        heap[0] = last;
-        var i = 0;
-        for (;;) {
-          var l = i * 2 + 1, r = l + 1, m = i;
-          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
-          if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
-          if (m === i) break;
-          var t = heap[m]; heap[m] = heap[i]; heap[i] = t; i = m;
-        }
-      }
-      return top;
-    }
-    var done = new Uint8Array(N * N);
-    function visit(c) {
-      done[c] = 1;
-      var cx = c % N, cy = (c / N) | 0, bx = cx * 2 + 1, by = cy * 2 + 1;
-      open[by * G + bx] = 1;
-      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (dv) {
-        var nx = cx + dv[0], ny = cy + dv[1];
-        if (nx < 0 || ny < 0 || nx >= N || ny >= N || done[ny * N + nx]) return;
-        var wall = (by + dv[1]) * G + bx + dv[0];
-        push(strength[wall] + Math.random() * 0.06, wall, ny * N + nx);
-      });
-    }
-    visit(0);
-    while (heap.length) {
-      var e = pop();
-      if (done[e[2]]) continue;
-      open[e[1]] = 1;
-      visit(e[2]);
-    }
-    open[ENTRY] = 1;
-    open[EXIT] = 1;
-  }
-  function degree(i) {
-    var x = i % G, y = (i / G) | 0, n = 0;
-    if (x > 0 && open[i - 1]) n++;
-    if (x < G - 1 && open[i + 1]) n++;
-    if (y > 0 && open[i - G]) n++;
-    if (y < G - 1 && open[i + G]) n++;
-    return n;
-  }
-
-  /* ============ 音の粒 ============
-     玉の向きを中心に扇形に飛ぶ。壁に当たると跳ね返り、当たった壁が光る。
-     跳ね返るたびに弱くなり、届く距離（マス）は声の大きさで決まる */
-  var SPEED = 30 * B, CONE = 0.55, RAYS = 70, REACH_MIN = 6, REACH_MAX = 34, BOUNCE_KEEP = 0.9, GLOW_FADE = 1.5;
-  var rays = [], clock = 0, exitHeard = false;
-  var FORK_TIP = R_FORK_TIP(), forkRing = -9;   /* 音叉の先までの長さと、最後に鳴らした時刻 */
-  function R_FORK_TIP() { return 3.5 + 12; }
-  function ping(level) {
-    level = Math.max(0, level);
-    var reach = level >= 9 ? 400 : REACH_MIN + (REACH_MAX - REACH_MIN) * Math.min(1, level);
-    var cone = level >= 9 ? Math.PI : CONE, count = level >= 9 ? 360 : RAYS;
-    /* 音は音叉の先から出る（先が壁に入るときは、壁の手前から） */
-    var ox = player.x, oy = player.y, cf = Math.cos(facing), sf = Math.sin(facing);
-    for (var t = 1; t <= FORK_TIP; t++) {
-      if (solid(cellOf(player.x + cf * t, player.y + sf * t))) break;
-      ox = player.x + cf * t; oy = player.y + sf * t;
-    }
-    forkRing = clock;
-    for (var i = 0; i < count; i++) {
-      var a = facing + (count === 1 ? 0 : (i / (count - 1) * 2 - 1) * cone);
-      rays.push({ x: ox, y: oy, vx: Math.cos(a), vy: Math.sin(a), d: 0, max: reach * B, e: 1, hit: 0 });
-    }
-    exitHeard = false;
-    shouts++;
-    if (state === S.PLAY && level < 9) hear(level);
-  }
-  function cellOf(x, y) { var bx = Math.floor(x / B), by = Math.floor(y / B); return (bx < 0 || by < 0 || bx >= G || by >= G) ? -1 : by * G + bx; }
-  function solid(c) { return c < 0 || !open[c]; }
-  /* 壁の面の点 (x, y) を光らせる。vertical: 縦の面か */
-  function glow(x, y, vertical, e, col) { if (marks.length < 9000) marks.push({ x: x, y: y, v: vertical, e: e, t: 0, c: col }); }
-  function stepRays(dt) {
-    var go = SPEED * dt, sub = B / 3;
-    rays.forEach(function (r) {
-      for (var left = go; left > 0 && r.e > 0; left -= sub) {
-        var s = Math.min(sub, left), fade = Math.max(0, 1 - r.d / r.max);
-        var nx = r.x + r.vx * s, cx = cellOf(nx, r.y);
-        if (solid(cx)) { glow(r.vx > 0 ? Math.floor(nx / B) * B : (Math.floor(nx / B) + 1) * B, r.y, true, Math.min(1, 0.3 + r.e) * fade, r.col); r.vx = -r.vx; r.e *= BOUNCE_KEEP; r.hit++; }
-        else r.x = nx;
-        var ny = r.y + r.vy * s, cy = cellOf(r.x, ny);
-        if (solid(cy)) { glow(r.x, r.vy > 0 ? Math.floor(ny / B) * B : (Math.floor(ny / B) + 1) * B, false, Math.min(1, 0.3 + r.e) * fade, r.col); r.vy = -r.vy; r.e *= BOUNCE_KEEP; r.hit++; }
-        else r.y = ny;
-        r.d += s;
-        if (!r.col) for (var k = 0; k < foes.length; k++) {
-          var f = foes[k];
-          if (Math.abs(f.x - r.x) < B * 0.7 && Math.abs(f.y - r.y) < B * 0.7) { f.lit = Math.max(f.lit, 0.4 + 0.6 * fade); r.e = 0; }
-        }
-        if (r.d > r.max || r.e < 0.05) r.e = 0;
-        if (!r.col && !exitHeard && cellOf(r.x, r.y) === EXIT && state === S.PLAY) {
-          exitHeard = true;
-          var pan = (r.x - player.x) / (B * 10), vol = Math.max(0.02, 0.1 * fade);
-          tone(1568, 0.6, vol, "sine", null, 0, pan); tone(2093, 0.5, vol * 0.7, "sine", null, 0.06, pan);
-        }
-      }
-    });
-    rays = rays.filter(function (r) { return r.e > 0; });
-  }
-
-  /* ============ 敵 ============
-     ふだんはゆっくりうろつき、1体ずつ順番にうなる（音の粒が広がって、居場所とまわりの壁が赤く見える）。
-     こちらの声が届く（通路づたいの距離が声の大きさで決まる）と、声のした場所へ急いで向かい、着いたらまたうろつく。
-     向かっている間はうなり続け、音の粒も出し続ける */
-  var FOES = 3, FOE_WALK = 2 * B, FOE_RUN = 5 * B, HEAR_MIN = 8, HEAR_MAX = 36, FOE_FAR = 24;
-  var GROWL_EVERY = 0.8, GROWL_RAYS = 36, GROWL_REACH = 7, FOE_COLOR = "#ff6f7d";
-  var CHASE_PULSE = 0.35, CHASE_RAYS = 48, CHASE_REACH = 20;   /* 追ってくる間は大きな声で、遠くまで見える（危ないけれど道が分かる） */
-  var foes = [], catches = 0, caughtFlash = 0, growlClock = 0, growlTurn = 0;
-  function nbrs(c) {
-    var x = c % G, y = (c / G) | 0, out = [];
-    if (x > 0 && open[c - 1]) out.push(c - 1);
-    if (x < G - 1 && open[c + 1]) out.push(c + 1);
-    if (y > 0 && open[c - G]) out.push(c - G);
-    if (y < G - 1 && open[c + G]) out.push(c + G);
-    return out;
-  }
-  /* c から通路づたいの距離（limit マスまで） */
-  function distFrom(c, limit) {
-    var d = new Int32Array(G * G).fill(-1), q = [c];
-    d[c] = 0;
-    for (var h = 0; h < q.length; h++) {
-      var a = q[h];
-      if (d[a] >= limit) continue;
-      nbrs(a).forEach(function (m) { if (d[m] < 0) { d[m] = d[a] + 1; q.push(m); } });
-    }
-    return d;
-  }
-  function placeFoes() {
-    var d = distFrom(Math.floor(player.y / B) * G + Math.floor(player.x / B), 9999), far = [];
-    for (var c = 0; c < G * G; c++) if (d[c] >= FOE_FAR && (c % G) % 2 === 1 && ((c / G) | 0) % 2 === 1) far.push(c);
-    foes = [];
-    for (var i = 0; i < FOES && far.length; i++) {
-      var c2 = far.splice(Math.floor(Math.random() * far.length), 1)[0];
-      foes.push({ x: (c2 % G + 0.5) * B, y: (((c2 / G) | 0) + 0.5) * B, at: c2, to: c2, prev: -1, map: null, lit: 0, pulse: 0, voice: null });
-    }
-    growlClock = 0.5; growlTurn = 0;
-  }
-  /* 追ってくる間のうなり声（鳴らしっぱなしで、大きさと左右を毎回合わせる） */
-  function chaseVoice(f, on) {
-    if (!AC) return;
-    if (!f.voice) {
-      if (!on) return;
-      var o = AC.createOscillator(), lfo = AC.createOscillator(), lg = AC.createGain(), amp = AC.createGain(), g = AC.createGain(), out = g;
-      o.type = "sawtooth"; o.frequency.value = 82;
-      lfo.frequency.value = 9; lg.gain.value = 0.5; amp.gain.value = 0.5;
-      lfo.connect(lg); lg.connect(amp.gain);
-      g.gain.value = 0;
-      o.connect(amp); amp.connect(g);
-      if (AC.createStereoPanner) { var p = AC.createStereoPanner(); g.connect(p); out = p; g.pan = p; }
-      out.connect(AC.destination);
-      o.start(); lfo.start();
-      f.voice = { o: o, lfo: lfo, g: g };
-    }
-    var near = Math.hypot(f.x - player.x, f.y - player.y) / B;
-    var vol = on ? 0.26 : 0;
-    f.voice.g.gain.setTargetAtTime(vol, AC.currentTime, 0.06);
-    if (f.voice.g.pan) f.voice.g.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, (f.x - player.x) / (B * 10))), AC.currentTime, 0.06);
-  }
-  function quietFoes() {
-    foes.forEach(function (f) {
-      if (!f.voice) return;
-      try { f.voice.o.stop(); f.voice.lfo.stop(); f.voice.g.disconnect(); } catch (e) {}
-      f.voice = null;
-    });
-  }
-  function hear(level) {
-    var here = Math.floor(player.y / B) * G + Math.floor(player.x / B);
-    var range = Math.round(HEAR_MIN + (HEAR_MAX - HEAR_MIN) * Math.min(1, level));
-    var d = distFrom(here, range);
-    foes.forEach(function (f) {
-      if (d[f.at] < 0) return;
-      f.map = d;   /* 声のした場所への道しるべ。距離が減る方へ進めば着く */
-    });
-  }
-  /* 敵の声の大きさは距離によらず一定（左右だけ方向に合わせる） */
-  function fall() { return 0.5; }
-  /* うなり声。左右はその方向から。音の粒がまわりへ広がる */
-  function growl(f, rays0) {
-    var near = Math.hypot(f.x - player.x, f.y - player.y) / B, pan = (f.x - player.x) / (B * 10);
-    var vol = 0.16 * fall(near);
-    tone(f.map ? 95 : 70, 0.5, vol, "sawtooth", f.map ? 140 : 55, 0, pan);
-    tone(f.map ? 190 : 140, 0.35, vol * 0.4, "square", 90, 0.03, pan);
-    f.lit = 1;
-    emitFoe(f, GROWL_RAYS, GROWL_REACH);
-  }
-  function emitFoe(f, n, reach) {
-    for (var i = 0; i < n; i++) {
-      var a = (i + Math.random() * 0.5) / n * Math.PI * 2;
-      rays.push({ x: f.x, y: f.y, vx: Math.cos(a), vy: Math.sin(a), d: 0, max: reach * B, e: 0.75, hit: 0, col: FOE_COLOR });
-    }
-  }
-  function updateFoes(dt) {
-    var px = player.x, py = player.y;
-    /* ふだんのうなり声は、追っていない敵が1体ずつ順番に */
-    growlClock -= dt;
-    if (growlClock <= 0 && foes.length) {
-      growlClock = GROWL_EVERY;
-      for (var k = 0; k < foes.length; k++) {
-        var g = foes[(growlTurn + k) % foes.length];
-        if (!g.map) { growl(g); growlTurn = (growlTurn + k + 1) % foes.length; break; }
-      }
-    }
-    foes.forEach(function (f) {
-      f.lit = Math.max(0, f.lit - dt / GLOW_FADE);
-      chaseVoice(f, !!f.map);
-      if (f.map) {
-        f.lit = 1;
-        f.pulse -= dt;
-        if (f.pulse <= 0) { f.pulse = CHASE_PULSE; emitFoe(f, CHASE_RAYS, CHASE_REACH); }
-      }
-      var tx = (f.to % G + 0.5) * B, ty = (((f.to / G) | 0) + 0.5) * B;
-      var dx = tx - f.x, dy = ty - f.y, dd = Math.hypot(dx, dy), sp = (f.map ? FOE_RUN : FOE_WALK) * dt;
-      if (dd > sp) { f.x += dx / dd * sp; f.y += dy / dd * sp; }
-      else {
-        f.x = tx; f.y = ty; f.prev = f.at; f.at = f.to;
-        var ns = nbrs(f.at);
-        if (f.map) {
-          if (f.map[f.at] === 0) f.map = null;   /* 声のした場所に着いた */
-          else { var best = ns.filter(function (m) { return f.map[m] >= 0 && f.map[m] < f.map[f.at]; })[0]; if (best != null) f.to = best; else f.map = null; }
-        }
-        if (!f.map) {
-          var go = ns.filter(function (m) { return m !== f.prev; });
-          f.to = go.length ? go[Math.floor(Math.random() * go.length)] : (ns[0] != null ? ns[0] : f.at);
-        }
-      }
-      if (Math.abs(f.x - px) < B * 0.75 && Math.abs(f.y - py) < B * 0.75) caught(f);
-    });
-  }
-  /* 捕まったら入口に戻される */
-  function caught(f) {
-    catches++;
-    caughtFlash = 1;
-    f.lit = 1;
-    tone(160, 0.6, 0.12, "sawtooth", 50);
-    tone(90, 0.8, 0.1, "square", 40, 0.05);
-    player.x = (MID + 0.5) * B; player.y = (G - 0.5) * B;
-    facing = -Math.PI / 2;
-    quietFoes();
-    placeFoes();
-  }
-
-  /* 音叉の音：ほぼ純音の「キーン」が長く伸び、打った瞬間だけ高い倍音が混ざる。残響つき */
-  function chirp() {
-    if (!AC) return;
-    var n = AC.currentTime, out = reverbIn();
-    [[880, 0.16, 3.2], [880 * 5.8, 0.03, 0.25], [1760, 0.02, 1.2]].forEach(function (p) {
-      var o = AC.createOscillator(), g = AC.createGain();
-      o.type = "sine"; o.frequency.value = p[0];
-      g.gain.setValueAtTime(0.0001, n);
-      g.gain.exponentialRampToValueAtTime(p[1], n + 0.005);
-      g.gain.exponentialRampToValueAtTime(0.0001, n + p[2]);
-      o.connect(g); g.connect(AC.destination); g.connect(out);
-      o.start(n); o.stop(n + p[2] + 0.05);
-    });
-  }
-  /* 残響（洞窟っぽい長めの響き）。作った響きを使い回す */
-  var reverb = null;
-  function reverbIn() {
-    if (reverb) return reverb.input;
-    var len = Math.floor(AC.sampleRate * 2.8), buf = AC.createBuffer(2, len, AC.sampleRate);
-    for (var ch = 0; ch < 2; ch++) {
-      var d = buf.getChannelData(ch);
-      for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6);
-    }
-    var cv = AC.createConvolver(), input = AC.createGain(), wet = AC.createGain();
-    cv.buffer = buf; input.gain.value = 1; wet.gain.value = 0.55;
-    input.connect(cv); cv.connect(wet); wet.connect(AC.destination);
-    reverb = { input: input };
-    return input;
-  }
+  /* ============ 数字 ============ */
+  var LAYER = 36;              /* 一段の高さ（世界の座標） */
+  var PX_CM = 7.2;             /* 1cm あたり */
+  var BASE_W = 360;            /* 最初に乗っているヤサイの幅 */
+  var SWING = 205;             /* トングが揺れる幅（中心から） */
+  var HAND_UP = 230;           /* 山の上からトングまで */
+  var PERFECT = 7;             /* これ以内のずれはぴったり扱い */
+  var MIN_W = 45;              /* 山がこれより細くなったら終わり */
+  var CEIL = 1800;             /* 店の天井 */
+  var ANCHOR = 0.62;           /* 画面のこの高さに山の上が来る */
+  /* 終わってからの流れ（秒）: てっぺんにアブラ → カメラを引きながらどんぶりにチャーシュー → 手前の下の段へドンと置く → 結果 */
+  var ZOOM_T0 = 0.4, ZOOM_T1 = 1.15, CHASHU_T0 = 0, CHASHU_T1 = 0.65, PLACE_T0 = 1.25, PLACE_T1 = 1.6, RESULT_T = 2.0;
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", BUILD: "build", PLAY: "play", GOAL: "goal", RESULT: "result" };
-  var state, T, held = false, keyMode = false, time = 0;
-  var player = { x: 0, y: 0 };
-  var shouts = 0;
-  var facing = -Math.PI / 2;                  /* 玉の向き（はじめは上） */
-  var keys = { l: 0, r: 0, u: 0, d: 0 };
-  var BX = 0, BY = 0;                         /* 迷路の左上 */
-  var R_PLAYER = 3.5, BUILD_TIME = 0.4;
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, keyMode = false;
+  var layers, handX, handDir, falling, spills, combo, ending, endT;
+  var camY, zoom, endFrom, shake, flash;
 
-  /* 迷路は画面の幅いっぱいに大きく見せて上に置く（下はジョイスティックを触る場所） */
-  var SC = 1;
-  function place() {
-    BY = Math.round(Math.max(30, Math.min(120, (H - 800) / 2 + 30)));
-    SC = Math.min((W - 16) / BOARD, (H - BY - 230) / BOARD);
-    BX = Math.round((W - BOARD * SC) / 2);
+  /* 0段目は見えない土台（スープの面）。1段目からがのせたもやし */
+  function topY() { return (layers.length - 1) * LAYER; }
+  function top() { return layers[layers.length - 1]; }
+  function cm() { return Math.round((layers.length - 1) * LAYER / PX_CM); }
+  function speed() { return Math.min(1100, 240 + 16 * (layers.length - 1)); }   /* 高くなるほど速い */
+
+  /* 立体の場面。three.js が使えないときは平面の絵のまま */
+  /* 開いた直後は画面の大きさが0だったり、立体の描画の準備が間に合わなかったりする。
+     1回の失敗で平面に切り替えず、しばらく作り直し・描き直しを試す */
+  var scene3d = null, uid = 0, tries3d = 0, fails3d = 0, lastTry3d = -1e9;
+  function make3d() {
+    if (scene3d || tries3d >= 20 || !window.THREE || !window.RamenScene) return;
+    var now = performance.now();
+    if (now - lastTry3d < 500) return;
+    lastTry3d = now; tries3d++;
+    try { scene3d = new window.RamenScene(); } catch (e) { scene3d = null; }
   }
+  make3d();
+
+  var seed = 1;
+  function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
 
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
-    state = S.BUILD;
-    T = 0;
-    time = 0;
-    held = false;
-    keys = { l: 0, r: 0, u: 0, d: 0 };
-    stick = null;
-    player.x = (MID + 0.5) * B; player.y = (G - 0.5) * B;
-    shouts = 0; showTapGuide = true; release = null; begun = false; firstRing = -1; firstTap = null;
-    facing = -Math.PI / 2;
-    rays = [];
-    edges = null;
-    quietFoes();
-    catches = 0; caughtFlash = 0; foes = [];
-    marks = [];
-    buildMaze();
+    state = S.PLAY;
+    score = 0; T = 0;
+    seed = 7;
+    layers = [];
+    addLayer(0, BASE_W, 0);
+    handX = 0; handDir = Math.random() < 0.5 ? -1 : 1;
+    falling = null; spills = []; combo = 0;
+    ending = false; endT = 0; endFrom = null;
+    zoom = 1; camY = H * 0.1; shake = 0; flash = 0;
+    if (scene3d) { try { scene3d.reset(); } catch (e) { scene3d = null; } }
   }
 
-  function wallAt(bx, by) {
-    if (bx < 0 || by < 0 || bx >= G || by >= G) return true;
-    return !open[by * G + bx];
+  /* ============ ヤサイの山（一段ずつ絵にしておく） ============ */
+  var KINDS = ["yasai", "yasai", "kyabetsu", "yasai", "ninniku", "yasai", "abura", "yasai", "kyabetsu", "abura", "yasai", "ninniku"];
+  function addLayer(x, w, i) {
+    var kind = i === 0 ? "yasai" : KINDS[i % KINDS.length];
+    var L = { x: x, w: w, kind: kind, img: scene3d ? null : makeClump(w, kind, i), pop: i ? 1 : 0 };
+    layers.push(L);
+    return L;
   }
-  function hits(x, y) {
-    var r = R_PLAYER;
-    var x0 = Math.floor((x - r) / B), x1 = Math.floor((x + r - 0.001) / B);
-    var y0 = Math.floor((y - r) / B), y1 = Math.floor((y + r - 0.001) / B);
-    for (var by = y0; by <= y1; by++) for (var bx = x0; bx <= x1; bx++) if (wallAt(bx, by)) return true;
-    return false;
-  }
-  /* ぶつかった壁はかすかに光り、コツと鳴る */
-  var bumpCool = 0;
-  function bump(dx, dy) {
-    if (dx) glow(dx > 0 ? (Math.floor(player.x / B) + 1) * B : Math.floor(player.x / B) * B, player.y, true, 0.45);
-    else glow(player.x, dy > 0 ? (Math.floor(player.y / B) + 1) * B : Math.floor(player.y / B) * B, false, 0.45);
-    if (bumpCool <= 0) { tone(150, 0.07, 0.06, "sine", 110); bumpCool = 0.18; }
-  }
-  /* 角で引っかからないよう、ぶつかったら通路の真ん中へ寄せる */
-  function moveAxis(dx, dy) {
-    if (!hits(player.x + dx, player.y + dy)) { player.x += dx; player.y += dy; return; }
-    bump(dx, dy);
-    var amt = Math.abs(dx + dy);
-    if (dx) {
-      var cy = (Math.floor(player.y / B) + 0.5) * B, ahead = Math.floor((player.x + Math.sign(dx) * (R_PLAYER + 1)) / B);
-      if (!wallAt(ahead, Math.floor(player.y / B)) && Math.abs(cy - player.y) > 0.01) {
-        var ny = player.y + Math.sign(cy - player.y) * Math.min(amt, Math.abs(cy - player.y));
-        if (!hits(player.x, ny)) player.y = ny;
-      }
-    } else {
-      var cx = (Math.floor(player.x / B) + 0.5) * B, below = Math.floor((player.y + Math.sign(dy) * (R_PLAYER + 1)) / B);
-      if (!wallAt(Math.floor(player.x / B), below) && Math.abs(cx - player.x) > 0.01) {
-        var nx = player.x + Math.sign(cx - player.x) * Math.min(amt, Math.abs(cx - player.x));
-        if (!hits(nx, player.y)) player.x = nx;
+  function makeClump(w, kind, salt) {
+    var R = 2, pad = 16, dome = 46, below = 14;
+    var cw = Math.ceil(w + pad * 2), ch = dome + below + pad;
+    var c = document.createElement("canvas");
+    c.width = cw * R; c.height = ch * R;
+    var g = c.getContext("2d");
+    if (!g) return { c: c, ox: cw / 2, oy: dome + pad / 2, w: cw, h: ch };
+    g.scale(R, R);
+    var ox = cw / 2, oy = dome + pad / 2;   /* oy が段の底 */
+    var keep = seed; seed = 1000 + salt * 97 + Math.round(w);
+    function hgt(dx) { var t = dx / (w / 2); return t >= 1 ? 0 : dome * Math.sqrt(1 - t * t) * (0.82 + 0.18 * Math.cos(dx * 0.05 + salt)); }
+    /* 下地 */
+    g.fillStyle = "#d9cf9e";
+    g.beginPath();
+    g.moveTo(ox - w / 2, oy + below);
+    for (var dx = -w / 2; dx <= w / 2; dx += 4) g.lineTo(ox + dx, oy - hgt(dx) * 0.8);
+    g.lineTo(ox + w / 2, oy + below);
+    g.closePath(); g.fill();
+    /* もやし */
+    var n = Math.round(w * 0.9);
+    g.lineCap = "round";
+    for (var k = 0; k < n; k++) {
+      var px = (rnd() * 2 - 1) * w / 2 * 0.98;
+      var py = oy + below * 0.6 - rnd() * (hgt(px) + below * 0.6);
+      var a = rnd() * Math.PI, len = 12 + rnd() * 12;
+      var x1 = ox + px - Math.cos(a) * len / 2, y1 = py - Math.sin(a) * len / 2 * 0.6;
+      var x2 = ox + px + Math.cos(a) * len / 2, y2 = py + Math.sin(a) * len / 2 * 0.6;
+      g.strokeStyle = "rgba(120,100,50,.35)"; g.lineWidth = 4.2;
+      g.beginPath(); g.moveTo(x1, y1); g.quadraticCurveTo(ox + px, py - 4, x2, y2); g.stroke();
+      g.strokeStyle = rnd() < 0.5 ? "#fbf7e6" : "#efe8c6"; g.lineWidth = 2.6;
+      g.beginPath(); g.moveTo(x1, y1); g.quadraticCurveTo(ox + px, py - 4, x2, y2); g.stroke();
+      if (rnd() < 0.35) { g.fillStyle = "#e8d36a"; g.beginPath(); g.arc(x1, y1, 2.2, 0, 7); g.fill(); }
+    }
+    /* キャベツ */
+    var cab = kind === "kyabetsu" ? Math.round(w / 22) : Math.round(w / 70);
+    for (k = 0; k < cab; k++) {
+      px = (rnd() * 2 - 1) * w / 2 * 0.8;
+      py = oy - rnd() * hgt(px) * 0.9;
+      g.fillStyle = rnd() < 0.5 ? "#9cc25a" : "#c4dc84";
+      g.beginPath();
+      g.ellipse(ox + px, py, 7 + rnd() * 6, 4 + rnd() * 3, rnd() * 3, 0, 7);
+      g.fill();
+    }
+    /* ニンニク */
+    if (kind === "ninniku") {
+      for (k = 0; k < Math.max(6, w / 9); k++) {
+        px = (rnd() * 2 - 1) * Math.min(w / 2, 40);
+        py = oy - hgt(px) - 2 + rnd() * 8;
+        g.fillStyle = rnd() < 0.5 ? "#f2e6a4" : "#e6d27e";
+        g.fillRect(ox + px - 2.5, py - 2.5, 5, 5);
       }
     }
-  }
-  function moveBy(dx, dy) {
-    if (state !== S.PLAY) return;
-    var n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / 2));
-    for (var i = 0; i < n; i++) { moveAxis(dx / n, 0); moveAxis(0, dy / n); }
-    if (player.y < B * 0.7) goal();
-  }
-  /* ゴールしたら、迷路ぜんぶに波が広がって全体が見える */
-  /* 通路に面した壁の辺（ゴール後に迷路全体を見せる用） */
-  var edges = null, REVEAL_SPEED = 420;
-  function wallEdges() {
-    var out = [];
-    for (var c = 0; c < G * G; c++) {
-      if (open[c]) continue;
-      var x = c % G, y = (c / G) | 0, X = x * B, Y = y * B;
-      if (x > 0 && open[c - 1]) out.push([X, Y, X, Y + B]);
-      if (x < G - 1 && open[c + 1]) out.push([X + B, Y, X + B, Y + B]);
-      if (y > 0 && open[c - G]) out.push([X, Y, X + B, Y]);
-      if (y < G - 1 && open[c + G]) out.push([X, Y + B, X + B, Y + B]);
+    /* アブラとカラメ */
+    if (kind === "abura") {
+      for (k = 0; k < Math.max(5, w / 14); k++) {
+        px = (rnd() * 2 - 1) * Math.min(w / 2 * 0.8, 70);
+        py = oy - hgt(px) + rnd() * 6;
+        g.fillStyle = "rgba(150,90,40,.55)";
+        g.beginPath(); g.ellipse(ox + px, py + 6, 9, 5, 0, 0, 7); g.fill();
+        g.fillStyle = rnd() < 0.5 ? "#fff6e4" : "#f3dfb8";
+        g.fillRect(ox + px - 5, py - 5, 10, 8);
+        g.fillStyle = "rgba(255,255,255,.8)";
+        g.fillRect(ox + px - 4, py - 4, 4, 2);
+      }
     }
-    return out;
-  }
-  function goal() {
-    state = S.GOAL;
-    quietFoes();
-    T = 0;
-    exitHeard = true;
-    edges = wallEdges();
-    [523.25, 659.25, 783.99, 1046.5].forEach(function (f, j) { tone(f, 1.4, 0.07, "triangle", null, 0.1 + j * 0.09); });
+    seed = keep;
+    return { c: c, ox: ox, oy: oy, w: cw, h: ch };
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
-    clock += dt;
-    bumpCool -= dt;
-    stepRays(dt);
-    marks.forEach(function (m) { m.t += dt; });
-    if (marks.length && marks[0].t > GLOW_FADE) marks = marks.filter(function (m) { return m.t < GLOW_FADE; });
-    if (state === S.BUILD) {
-      T += dt;
-      if (T >= BUILD_TIME) { state = S.PLAY; T = 0; placeFoes(); shouts = 0; foes.forEach(function (f) { f.map = null; }); }
-      return;
-    }
-    if (state === S.GOAL) {
-      T += dt;
-      /* 光の輪が届いた敵は、パーンとはじけて消える */
-      foes.forEach(function (f) {
-        if (f.popAt != null || Math.hypot(f.x - EXIT_X, f.y - EXIT_Y) > T * REVEAL_SPEED) return;
-        f.popAt = T;
-        tone(1200, 0.25, 0.08, "triangle", 2400);
-        tone(600, 0.4, 0.05, "square", 1800, 0.02);
-        tone(150, 0.2, 0.08, "sine", 60);
-      });
-      if (T > 2.6) { state = S.RESULT; shareButton.hidden = false; }
-      return;
-    }
     if (state !== S.PLAY) return;
-    caughtFlash = Math.max(0, caughtFlash - dt * 1.5);
-    if (!begun && (keys.l || keys.r || keys.u || keys.d)) begun = true;
-    if (!begun) return;   /* 最初に触るまでは、敵も時間も止めておく */
-    time += dt;
-    if (firstRing >= 0 && clock - firstRing > FOE_WAIT) updateFoes(dt);   /* 敵は最初の音叉が消えたころから動く */
-    var sp = MOVE_SPEED * dt, vx = keys.r - keys.l, vy = keys.d - keys.u;
-    if (stick && stick.on) {
-      vx = (stick.x - stick.bx) / STICK_R; vy = (stick.y - stick.by) / STICK_R;
-      var m = Math.hypot(vx, vy);
-      if (m > 1) { vx /= m; vy /= m; }
-      if (m < 0.15) vx = vy = 0;
+    T += dt;
+    if (shake > 0) shake = Math.max(0, shake - dt * 3);
+    if (flash > 0) flash = Math.max(0, flash - dt * 2.5);
+    for (var i = Math.max(0, layers.length - 3); i < layers.length; i++) if (layers[i].pop > 0) layers[i].pop = Math.max(0, layers[i].pop - dt * 5);
+
+    if (!ending && !falling) {
+      handX += handDir * speed() * dt;
+      if (handX > SWING) { handX = 2 * SWING - handX; handDir = -1; }
+      if (handX < -SWING) { handX = -2 * SWING - handX; handDir = 1; }
     }
-    if (vx || vy) {
-      if (Math.hypot(vx, vy) > 0.3) facing = Math.atan2(vy, vx);
-      moveBy(vx * sp, vy * sp);
+
+    if (falling) {
+      falling.vy += 2600 * dt;
+      falling.y -= falling.vy * dt;
+      if (falling.y <= topY()) land();
+    }
+
+    for (i = spills.length - 1; i >= 0; i--) {
+      var s = spills[i];
+      s.vy += 1600 * dt; s.y -= s.vy * dt; s.x += s.vx * dt; s.r += s.vr * dt;
+      if (s.y < -1200 - (ending ? 0 : 0)) spills.splice(i, 1);
+    }
+
+    /* カメラ */
+    if (!ending) {
+      var target = Math.max(H * 0.1, topY());
+      camY += (target - camY) * Math.min(1, dt * 6);
+    } else {
+      var was = endT;
+      endT += dt;
+      if (was < CHASHU_T1 && endT >= CHASHU_T1) {      /* アブラとチャーシューが同時に乗った */
+        noiseHit(0.3, 900, 0.4, 0.6);
+        noiseHit(0.2, 2600, 0.15, 1.5, 0.04);
+        shake = 0.6;
+        noiseHit(0.25, 220, 0.6, 0.8);
+        tone(140, 0.25, 0.18, "sine", 70);
+      }
+      if (was < PLACE_T1 && endT >= PLACE_T1) {        /* 下の段に置いた */
+        shake = 1;
+        noiseHit(0.35, 160, 0.8, 0.7);
+        tone(90, 0.35, 0.25, "sine", 45);
+        fanfare();
+      }
+      if (endT > ZOOM_T0) {
+        if (!endFrom) {
+          var z = Math.min(1, H * 0.78 / (topY() + 520));   /* 画面のタテいっぱいに（下の段に置いたあとまで） */
+          endFrom = { z0: zoom, c0: camY, z1: z, c1: H * 0.24 / z - 430 };
+        }
+        var t = Math.min(1, (endT - ZOOM_T0) / (ZOOM_T1 - ZOOM_T0));
+        var e = t * t * (3 - 2 * t);
+        zoom = endFrom.z0 + (endFrom.z1 - endFrom.z0) * e;
+        camY = endFrom.c0 + (endFrom.c1 - endFrom.c0) * e;
+      }
+      if (endT > RESULT_T) { state = S.RESULT; shareButton.hidden = false; }
     }
   }
 
-  /* ============ 入力 ============
-     どこを触っても、そこにジョイスティックが出る（離してもその場に残る）。倒した方へ玉が進み、玉もその方を向く。
-     動かさずにちょんと触る（タップ）と音叉が鳴る。動かしたあと離しても鳴らない */
-  var stick = null, STICK_R = 60, MOVE_SPEED = 90;
-  var showTapGuide = true, release = null, begun = false;   /* 最初のタップまで出す指示、離したつまみの波紋 */
-  var firstRing = -1, FOE_WAIT = 2.5, firstTap = null;   /* 最初に音叉を鳴らした時刻 */
-  function sound() { showTapGuide = false; if (firstRing < 0) firstRing = clock; chirp(); ping(0.55); }
-  function down(x, y, id) {
+  function drop() {
+    if (ending || falling) return;
+    var L = top();
+    falling = { id: ++uid, x: handX, w: L.w, y: topY() + HAND_UP, vy: 0, kind: KINDS[layers.length % KINDS.length] };
+    if (!scene3d) falling.img = makeClump(L.w, falling.kind, layers.length);
+    tone(300, 0.1, 0.05, "triangle", 160);
+    /* 最後の1つと決まったら、落とした時点でアブラとチャーシューも落とし始める */
+    var f = falling;
+    if (Math.min(f.x + f.w / 2, L.x + L.w / 2) - Math.max(f.x - f.w / 2, L.x - L.w / 2) < MIN_W) {
+      ending = true; endT = 0; score = cm();
+    }
+  }
+
+  function land() {
+    var f = falling, L = top();
+    falling = null;
+    var lo = Math.max(f.x - f.w / 2, L.x - L.w / 2);
+    var hi = Math.min(f.x + f.w / 2, L.x + L.w / 2);
+    if (hi - lo < MIN_W) {               /* 外れ、または細くなりすぎたら終わり */
+      /* 外れ */
+      if (!ending) { ending = true; endT = 0; score = cm(); }
+      shake = 1;
+      noiseHit(0.5, 260, 0.5, 0.7);
+      tone(330, 0.5, 0.12, "sawtooth", 90, 0.05);
+      return;
+    }
+    var dx = f.x - L.x;
+    var x, w;
+    if (Math.abs(dx) <= PERFECT) {
+      combo++;
+      x = L.x; w = Math.min(BASE_W, L.w + (combo >= 3 ? 8 : 0));
+      flash = 1;
+      tone(520 + Math.min(combo, 12) * 60, 0.12, 0.1, "square");
+      tone(780 + Math.min(combo, 12) * 90, 0.15, 0.06, "sine", null, 0.06);
+    } else {
+      combo = 0;
+      x = (lo + hi) / 2; w = hi - lo;
+      /* はみ出した分は落とさず、そのまま消える（積もるだけ） */
+    }
+    noiseHit(0.18, 700, 0.35, 0.8);
+    noiseHit(0.12, 2400, 0.12, 1.2, 0.03);
+    var N = addLayer(x, w, layers.length);
+    N.kind = f.kind;
+    score = cm();
+    shake = Math.max(shake, 0.25);
+  }
+
+  /* ============ 入力 ============ */
+  function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
     if (state === S.RESULT) {
@@ -563,83 +374,55 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (state !== S.PLAY) return;
-    begun = true;
-    if (x == null) { sound(); return; }
-    if (firstRing < 0) { firstTap = { id: id, x: x, y: y }; return; }   /* 最初の音叉を鳴らすまでは、ジョイスティックを出さない */
-    if (stick && stick.on) return;
-    held = true; stick = { on: true, id: id, bx: x, by: y, x: x, y: y, t: clock, far: 0 };
-  }
-  function move(x, y, id) {
-    if (!stick || !stick.on || stick.id !== id) return;
-    var ox = x - stick.bx, oy = y - stick.by, d = Math.hypot(ox, oy);
-    if (d > STICK_R) { stick.bx = x - ox / d * STICK_R; stick.by = y - oy / d * STICK_R; }   /* 大きく動かしたら台座もついてくる */
-    stick.x = x; stick.y = y;
-    stick.far = Math.max(stick.far, d);
-  }
-  function up(id) {
-    if (firstTap && firstTap.id === id) {
-      if (state === S.PLAY) { release = { x: firstTap.x, y: firstTap.y, t: clock }; sound(); }
-      firstTap = null; return;
-    }
-    if (!(stick && stick.on && stick.id === id)) return;
-    var tap = stick.far < 12 && clock - stick.t < 0.4;
-    if (state === S.PLAY && tap) { release = { x: knob().x, y: knob().y, t: clock }; sound(); }
-    held = false; stick.on = false; stick.id = null; stick.x = stick.bx; stick.y = stick.by;   /* 離してもその場に出したまま */
+    drop();
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y, e.pointerId);
+    var p = atCanvas(e); down(p.x, p.y);
   });
-  wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y, e.pointerId);
-  });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(e.pointerId); });
-  wrap.addEventListener("pointercancel", function () { held = false; if (stick) { stick.on = false; stick.x = stick.bx; stick.y = stick.by; } });
-  window.addEventListener("blur", function () { held = false; if (stick) { stick.on = false; stick.x = stick.bx; stick.y = stick.by; } keys = { l: 0, r: 0, u: 0, d: 0 }; });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    if (n === 1 && state !== S.INTRO) newRound();                                          /* 次の迷路 */
-    if (n === 2 && state === S.PLAY) {                                                    /* ゴール目前へ */
-      player.x = EXIT_X; player.y = 1.5 * B;
+    if (state !== S.PLAY || ending) return;
+    if (n === 1 || n === 3) {         /* 1: 30段 3: 300段 ぴったり積む */
+      for (var i = 0; i < (n === 1 ? 30 : 300); i++) { var L = top(); addLayer(L.x, L.w, layers.length); }
+      score = cm();
+    } else if (n === 2) {             /* 2: 外して終わる */
+      falling = null; handX = top().x + top().w + 40; drop(); falling.y = topY() + 1;
     }
-    if (n === 3 && state === S.PLAY) { time += 3; goal(); }                                /* クリア */
-    if (n === 4 && state === S.PLAY) ping(1);                                             /* いちばん大きい音 */
-    if (n === 5 && state === S.PLAY) foes.forEach(function (f) { growl(f); });           /* 敵を全部うならせる */
   }
 
-  var KEYMAP = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r", ArrowUp: "u", w: "u", W: "u", ArrowDown: "d", s: "d", S: "d" };
   window.addEventListener("keydown", function (e) {
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    var dir = KEYMAP[e.key];
-    if (!esc && !go && !dir) return;
+    if (!esc && !go) return;
     e.preventDefault();
     if (!esc) keyMode = true;
-    if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
-    if (dir) { keys[dir] = 1; return; }
+    if (esc) { if (!e.repeat) newRound(); return; }
     if (e.repeat) return;
     down();
   });
   window.addEventListener("keyup", function (e) {
-    var dir = KEYMAP[e.key];
-    if (dir) { keys[dir] = 0; return; }
     if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
   });
 
-  function secText() { return (Math.floor(time * 10) / 10).toFixed(1); }
+  /* シェアは「ヤサイマシマシ…… #無限マシマシ」。長すぎるときは「マシ」の切れ目で「…」にする */
+  var SHARE_MAX = 100;
   function doShare() {
-    /* 英語のときのハッシュタグは英語のゲーム名にする */
-    var ja = "音叉を" + shouts + "回鳴らして真っ暗な迷路を" + secText() + "秒で抜けた";
-    var en = "Escaped a pitch-dark maze in " + secText() + "s with " + shouts + " tuning-fork rings";
-    window.zResultActions.x({ text: zT(ja, en) + zT(" #エコーメイズ", " #EchoMaze") });
+    var t = callText();
+    if (t.length > SHARE_MAX) t = t.slice(0, SHARE_MAX - ((SHARE_MAX - 3) % 2)) + "…";
+    window.zResultActions.x({ text: t + zT(" #無限マシマシ", " #InfiniteMashiMashi") });
   }
 
   /* ============ 描画 ============ */
+  function sy(yw) { return H * ANCHOR - (yw - camY) * zoom; }
+  function sx(xw) { return W / 2 + xw * zoom; }
+  function wy(screenY) { return camY + (H * ANCHOR - screenY) / zoom; }
+
   function roundRect(x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -649,186 +432,287 @@
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
   }
+  function mix(a, b, t) {
+    return "rgb(" + [0, 1, 2].map(function (i) { return Math.round(a[i] + (b[i] - a[i]) * t); }).join(",") + ")";
+  }
+  function hash(a, b) { var h = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return h - Math.floor(h); }
+
+  var SKY = [[140, 201, 240], [70, 120, 200], [12, 16, 48], [2, 2, 10]];
+  function skyAt(yw) {
+    var t = (yw - CEIL) / 9000;
+    if (t < 0) t = 0;
+    if (t < 1) return mix(SKY[0], SKY[1], t);
+    if (t < 2) return mix(SKY[1], SKY[2], t - 1);
+    if (t < 3) return mix(SKY[2], SKY[3], t - 2);
+    return mix(SKY[3], SKY[3], 0);
+  }
+
+  function drawBack() {
+    var yTop = wy(0), yBot = wy(H);
+    var ceilS = sy(CEIL + 60);
+    /* 空 */
+    if (yTop > CEIL) {
+      var gr = ctx.createLinearGradient(0, 0, 0, Math.max(1, ceilS));
+      gr.addColorStop(0, skyAt(yTop));
+      gr.addColorStop(1, skyAt(Math.max(CEIL, yBot)));
+      ctx.fillStyle = gr;
+      ctx.fillRect(0, 0, W, Math.min(H, ceilS) + 1);
+      /* 星 */
+      var cell = 160;
+      for (var gy = Math.floor(Math.max(yBot, CEIL + 12000) / cell); gy <= Math.floor(yTop / cell); gy++) {
+        for (var gx = -4; gx < 4; gx++) {
+          var h1 = hash(gx, gy);
+          var X = sx(gx * cell + h1 * cell), Y = sy(gy * cell + hash(gy, gx) * cell);
+          var fade = Math.min(1, (gy * cell - CEIL - 12000) / 6000);
+          ctx.fillStyle = "rgba(255,255,240," + (0.5 * fade + 0.4 * h1 * fade) + ")";
+          ctx.fillRect(X, Y, 2.2, 2.2);
+        }
+      }
+      /* 雲 */
+      var cc = 700;
+      for (gy = Math.floor(Math.max(yBot, CEIL + 600) / cc); gy <= Math.floor(Math.min(yTop, CEIL + 16000) / cc); gy++) {
+        for (gx = -2; gx < 2; gx++) {
+          if (hash(gx + 9, gy) < 0.45) continue;
+          var cx = gx * 300 + hash(gx, gy + 3) * 200, cy = gy * cc + hash(gy, gx + 5) * cc;
+          ctx.fillStyle = "rgba(255,255,255,.75)";
+          for (var b = 0; b < 4; b++) {
+            ctx.beginPath();
+            ctx.ellipse(sx(cx + b * 34 - 50), sy(cy + (b % 2) * 14), (34 + b * 6) * zoom, 22 * zoom, 0, 0, 7);
+            ctx.fill();
+          }
+        }
+      }
+    }
+    /* 店の壁 */
+    if (yBot < CEIL + 60) {
+      var wallTop = Math.max(0, ceilS);
+      ctx.fillStyle = "#f1e3b8";
+      ctx.fillRect(0, wallTop, W, H - wallTop);
+      ctx.strokeStyle = "rgba(160,130,70,.18)";
+      ctx.lineWidth = 2;
+      for (var ty = Math.ceil(Math.max(yBot, -200) / 60) * 60; ty < Math.min(yTop, CEIL); ty += 60) {
+        var Y2 = sy(ty);
+        ctx.beginPath(); ctx.moveTo(0, Y2); ctx.lineTo(W, Y2); ctx.stroke();
+      }
+      /* 壁の黄色い帯 */
+      ctx.fillStyle = "#f2c230";
+      var bandY = sy(560);
+      ctx.fillRect(0, bandY, W, 70 * zoom);
+      ctx.fillStyle = "#c79a14";
+      ctx.fillRect(0, bandY + 70 * zoom, W, 6 * zoom);
+      /* 天井 */
+      drawCeiling();
+    }
+  }
+
+  function drawCeiling() {
+    var y0 = sy(CEIL + 60), y1 = sy(CEIL);
+    var broken = topY() > CEIL - 20;
+    var hole = broken ? holeRange() : null;
+    ctx.fillStyle = "#5a3c22";
+    if (!hole) { ctx.fillRect(0, y0, W, y1 - y0); }
+    else {
+      ctx.beginPath();
+      ctx.moveTo(0, y0); ctx.lineTo(sx(hole[0]), y0);
+      for (var k = 0; k <= 6; k++) ctx.lineTo(sx(hole[0]) + (k % 2 ? 10 : -6) * zoom, y0 + (y1 - y0) * k / 6);
+      ctx.lineTo(0, y1); ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(W, y0); ctx.lineTo(sx(hole[1]), y0);
+      for (k = 0; k <= 6; k++) ctx.lineTo(sx(hole[1]) + (k % 2 ? -10 : 6) * zoom, y0 + (y1 - y0) * k / 6);
+      ctx.lineTo(W, y1); ctx.closePath(); ctx.fill();
+    }
+    /* 照明 */
+    [-170, 170].forEach(function (lx) {
+      if (hole && lx > hole[0] - 20 && lx < hole[1] + 20) return;
+      ctx.strokeStyle = "#333"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(sx(lx), y1); ctx.lineTo(sx(lx), sy(CEIL - 120)); ctx.stroke();
+      ctx.fillStyle = "#c0392b";
+      ctx.beginPath();
+      ctx.moveTo(sx(lx - 34), sy(CEIL - 160)); ctx.lineTo(sx(lx + 34), sy(CEIL - 160));
+      ctx.lineTo(sx(lx + 14), sy(CEIL - 120)); ctx.lineTo(sx(lx - 14), sy(CEIL - 120));
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(255,240,180,.9)";
+      ctx.beginPath(); ctx.arc(sx(lx), sy(CEIL - 162), 8 * zoom, 0, 7); ctx.fill();
+    });
+  }
+  function holeRange() {
+    var i = Math.min(layers.length - 1, Math.floor(CEIL / LAYER) + 1);
+    var L = layers[i];
+    return [L.x - L.w / 2 - 30, L.x + L.w / 2 + 30];
+  }
+
+  function drawCounter() {
+    var y = sy(-150);
+    ctx.fillStyle = "#c81e1a";
+    ctx.fillRect(0, y, W, 40 * zoom);
+    ctx.fillStyle = "#8e1410";
+    ctx.fillRect(0, y + 40 * zoom, W, Math.max(0, H - y));
+    ctx.fillStyle = "rgba(255,255,255,.15)";
+    ctx.fillRect(0, y, W, 4 * zoom);
+  }
+
+  function drawBowlBack() {
+    var cy = sy(14), rx = 190 * zoom, ry = 44 * zoom;
+    /* スープ */
+    ctx.fillStyle = "#5b3216";
+    ctx.beginPath(); ctx.ellipse(sx(0), cy, rx, ry, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(255,200,120,.25)";
+    for (var k = 0; k < 9; k++) {
+      ctx.beginPath(); ctx.ellipse(sx(-150 + k * 36), cy + (k % 3 - 1) * 12 * zoom, 8 * zoom, 4 * zoom, 0, 0, 7); ctx.fill();
+    }
+    /* 麺（はしっこ） */
+    ctx.strokeStyle = "#e6c25c"; ctx.lineWidth = 7 * zoom; ctx.lineCap = "round";
+    for (k = 0; k < 7; k++) {
+      var s = k < 4 ? -1 : 1, bx = s * (150 + (k % 4) * 9);
+      ctx.beginPath();
+      ctx.moveTo(sx(bx), cy - 20 * zoom + k * 5 * zoom);
+      ctx.quadraticCurveTo(sx(bx + s * 20), cy, sx(bx - s * 6), cy + 26 * zoom);
+      ctx.stroke();
+    }
+  }
+  /* 最初から左手前に乗っている刻みニンニク（平面の絵のとき） */
+  function drawGarlic() {
+    for (var k = 0; k < 40; k++) {
+      var a = k * 2.4, u = Math.sqrt((k % 10) / 10);
+      ctx.fillStyle = k % 3 ? "#f0dc8c" : "#e2c766";
+      ctx.fillRect(sx(-120 + Math.cos(a) * u * 45) - 4 * zoom, sy(20 + (1 - u * u) * 30) - Math.sin(a) * u * 10 * zoom, 8 * zoom, 7 * zoom);
+    }
+  }
+  /* 終わりの演出（平面の絵のとき）: てっぺんにアブラ、引いたあとどんぶりの右にチャーシュー */
+  function drawChashu() {
+    if (!ending) return;
+    if (endT <= CHASHU_T0) return;
+    var t = Math.min(1, (endT - CHASHU_T0) / (CHASHU_T1 - CHASHU_T0)), L = top();
+    var yb = topY() + (1 - t * t) * 350;
+    for (var k = 0; k < 9; k++) {
+      ctx.fillStyle = k % 3 ? "#fff3dc" : "#f0dcb6";
+      ctx.fillRect(sx(L.x + (k - 4) * 9 - 6), sy(yb + 30 + (4 - Math.abs(k - 4)) * 5), 12 * zoom, 10 * zoom);
+    }
+    if (endT <= CHASHU_T0) return;
+    var c = Math.min(1, (endT - CHASHU_T0) / (CHASHU_T1 - CHASHU_T0));
+    [0, 1].forEach(function (i) {
+      ctx.save();
+      ctx.translate(sx(140 + i * 22), sy(40 + i * 10 + (1 - c * c) * 600));
+      ctx.rotate(0.3 + i * 0.1);
+      ctx.fillStyle = "#8a4d2c";
+      roundRect(-40 * zoom, -28 * zoom, 80 * zoom, 56 * zoom, 18 * zoom); ctx.fill();
+      ctx.fillStyle = "#c98b63";
+      roundRect(-32 * zoom, -20 * zoom, 64 * zoom, 40 * zoom, 14 * zoom); ctx.fill();
+      ctx.restore();
+    });
+  }
+  function drawBowlFront() {
+    var cy = sy(14), rx = 200 * zoom, ry = 48 * zoom;
+    ctx.fillStyle = "#f7f3ea";
+    ctx.beginPath();
+    ctx.ellipse(sx(0), cy, rx, ry, 0, 0, Math.PI);
+    ctx.lineTo(sx(-110), sy(-148));
+    ctx.lineTo(sx(110), sy(-148));
+    ctx.closePath();
+    ctx.beginPath();
+    ctx.moveTo(sx(-200), cy);
+    ctx.bezierCurveTo(sx(-200), sy(-90), sx(-150), sy(-140), sx(-100), sy(-148));
+    ctx.lineTo(sx(100), sy(-148));
+    ctx.bezierCurveTo(sx(150), sy(-140), sx(200), sy(-90), sx(200), cy);
+    ctx.ellipse(sx(0), cy, rx, ry, 0, 0, Math.PI);
+    ctx.fill();
+    /* 赤い雷紋っぽい帯 */
+    ctx.strokeStyle = "#c0392b"; ctx.lineWidth = 6 * zoom;
+    ctx.beginPath();
+    for (var k = 0; k <= 16; k++) {
+      var xx = -176 + k * 22, yy = (k % 2 ? -46 : -30);
+      if (k === 0) ctx.moveTo(sx(xx), sy(yy)); else ctx.lineTo(sx(xx), sy(yy));
+    }
+    ctx.stroke();
+    ctx.fillStyle = "#16202e";
+    ctx.fillRect(sx(-80), sy(-150), 160 * zoom, 8 * zoom);
+    /* ふち */
+    ctx.strokeStyle = "#16202e"; ctx.lineWidth = 5 * zoom;
+    ctx.beginPath(); ctx.ellipse(sx(0), cy, rx, ry, 0, 0, Math.PI); ctx.stroke();
+  }
+
+  function drawClump(img, x, yBase, scaleY, rot) {
+    if (!img) return;
+    var w = img.w * zoom, h = img.h * zoom;
+    ctx.save();
+    ctx.translate(sx(x), sy(yBase));
+    if (rot) ctx.rotate(rot);
+    ctx.scale(1, scaleY || 1);
+    ctx.drawImage(img.c, -img.ox * zoom, -img.oy * zoom, w, h);
+    ctx.restore();
+  }
+
+  function drawPile() {
+    var yTop = wy(0) + 80, yBot = wy(H) - 80;
+    var i0 = Math.max(1, Math.floor(yBot / LAYER) + 1), i1 = Math.min(layers.length - 1, Math.ceil(yTop / LAYER) + 1);
+    for (var i = i0; i <= i1; i++) {
+      var L = layers[i];
+      drawClump(L.img, L.x, (i - 1) * LAYER, 1 + L.pop * 0.25);
+    }
+  }
+
+  function drawHand() {
+    if (ending) return;
+    var hx = falling ? falling.x : handX;
+    var hy = topY() + HAND_UP;
+    if (!falling) drawClump(makeHeld(), hx, hy, 1);
+  }
+  var heldCache = null;
+  function makeHeld() {
+    var w = top().w, kind = KINDS[layers.length % KINDS.length];
+    if (!heldCache || heldCache.w0 !== w || heldCache.n !== layers.length) {
+      heldCache = makeClump(w, kind, layers.length);
+      heldCache.w0 = w; heldCache.n = layers.length;
+    }
+    return heldCache;
+  }
 
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#0b0e15";
-    ctx.fillRect(0, 0, W, H);
-
     ctx.save();
-    ctx.translate(BX, BY);
-    ctx.scale(SC, SC);
-    if (state !== S.INTRO) {
-      /* 迷路の外枠がかすかに見え、出口はうっすら光る */
-      ctx.strokeStyle = "rgba(200,230,255,.08)";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(0.5, 0.5, BOARD - 1, BOARD - 1);
-      /* 出口の光は、最初に音叉を鳴らしてから点く */
-      var ex = EXIT_X, ey = EXIT_Y, pulse = (0.75 + 0.25 * Math.sin(clock * 2.2)) * (firstRing < 0 ? 0 : Math.min(1, (clock - firstRing) / 0.8));
-      var eg = ctx.createRadialGradient(ex, ey, 0, ex, ey, B * 2.4);
-      eg.addColorStop(0, "rgba(255,226,150," + (0.55 * pulse).toFixed(3) + ")");
-      eg.addColorStop(0.35, "rgba(255,210,120," + (0.18 * pulse).toFixed(3) + ")");
-      eg.addColorStop(1, "rgba(255,200,110,0)");
-      ctx.fillStyle = eg;
-      ctx.fillRect(ex - B * 2.4, ey - B * 2.4, B * 4.8, B * 4.8);
-      /* ゴール後：出口から光の輪が広がり、迷路の壁がすべて見えたままになる */
-      if (edges && (state === S.GOAL || state === S.RESULT)) {
-        var ex0 = EXIT_X, ey0 = EXIT_Y, front = (state === S.RESULT ? 99 : T) * REVEAL_SPEED;
-        ctx.lineWidth = 2;
-        ctx.lineCap = "butt";
-        edges.forEach(function (e) {
-          var d = Math.hypot((e[0] + e[2]) / 2 - ex0, (e[1] + e[3]) / 2 - ey0), k = front - d;
-          if (k < 0) return;
-          var hot = Math.max(0, 1 - k / 60);   /* 光の輪が通った直後は明るい */
-          ctx.strokeStyle = "rgba(" + Math.round(150 + 105 * hot) + "," + Math.round(205 + 40 * hot) + ",255," + (0.6 + 0.4 * hot).toFixed(3) + ")";
-          ctx.beginPath(); ctx.moveTo(e[0], e[1]); ctx.lineTo(e[2], e[3]); ctx.stroke();
-        });
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * 10 * shake, (Math.random() - 0.5) * 6 * shake);
+    var drawn3d = false;
+    if (!scene3d && state === S.INTRO) make3d();
+    if (scene3d) {
+      try {
+        drawn3d = scene3d.render(ctx, W, H, { layers: layers, camY: camY, zoom: zoom, handX: handX, handUp: HAND_UP, holdW: top().w, holdKind: KINDS[layers.length % KINDS.length], n: layers.length, falling: falling, spills: spills, ending: ending, intro: state === S.INTRO, time: performance.now() / 1000, abura: ending && endT > CHASHU_T0 ? Math.min(1, (endT - CHASHU_T0) / (CHASHU_T1 - CHASHU_T0)) : -1, endCam: ending && endT > ZOOM_T0 ? (function (t) { return t * t * (3 - 2 * t); })(Math.min(1, (endT - ZOOM_T0) / (ZOOM_T1 - ZOOM_T0))) : -1, place: ending && endT > PLACE_T0 ? Math.min(1, (endT - PLACE_T0) / (PLACE_T1 - PLACE_T0)) : -1, chashu: ending && endT > CHASHU_T0 ? Math.min(1, (endT - CHASHU_T0) / (CHASHU_T1 - CHASHU_T0)) : -1 });
+        fails3d = 0;
+      } catch (e) { if (++fails3d > 90) scene3d = null; }
+    }
+    if (!drawn3d) {
+      drawBack();
+      drawCounter();
+      drawBowlBack();
+      drawPile();
+      drawBowlFront();
+      drawGarlic();
+      drawChashu();
+      if (falling) drawClump(falling.img, falling.x, falling.y, 1);
+      for (var i = 0; i < spills.length; i++) {
+        var s = spills[i];
+        drawClump(s.img, s.x, s.y, 1, s.r);
       }
-      /* 音の粒が当たった壁の面（しばらくすると消える） */
-      ctx.globalCompositeOperation = "lighter";
-      ctx.lineCap = "butt";
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "rgb(150,205,255)";
-      var hl = B * 0.3;
-      marks.forEach(function (m) {
-        var a = m.e * (1 - m.t / GLOW_FADE);
-        if (a <= 0.01) return;
-        ctx.globalAlpha = Math.min(1, a);
-        ctx.strokeStyle = m.c || "rgb(150,205,255)";
-        ctx.beginPath();
-        /* 線は当たった壁のマスの中に収める（角からはみ出さない） */
-        var k = m.v ? m.y : m.x, lo = Math.floor(k / B) * B, a0 = Math.max(lo, k - hl), a1 = Math.min(lo + B, k + hl);
-        if (m.v) { ctx.moveTo(m.x, a0); ctx.lineTo(m.x, a1); }
-        else { ctx.moveTo(a0, m.y); ctx.lineTo(a1, m.y); }
-        ctx.stroke();
-      });
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-over";
-      /* 飛んでいく音の粒 */
-      rays.forEach(function (r) {
-        ctx.fillStyle = r.col || "rgba(150,215,255,.75)";
-        var sz = 2 + 1.5 * r.e;
-        ctx.globalAlpha = Math.max(0.15, r.e * (1 - r.d / r.max));
-        ctx.fillRect(r.x - sz / 2, r.y - sz / 2, sz, sz);
-      });
-      ctx.globalAlpha = 1;
-      /* 敵。うなったときと、こちらの音の粒が当たったときに見える。ゴール後は光の輪が届くとはじける */
-      foes.forEach(function (f) {
-        if (f.popAt != null) {
-          var age = (state === S.RESULT ? 99 : T) - f.popAt;
-          if (age > 0.7) return;
-          var k = age / 0.7;
-          ctx.globalCompositeOperation = "lighter";
-          var bg = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, 10 + 40 * k);
-          bg.addColorStop(0, "rgba(255,240,220," + (1 - k).toFixed(3) + ")");
-          bg.addColorStop(1, "rgba(255,120,130,0)");
-          ctx.fillStyle = bg;
-          ctx.fillRect(f.x - 60, f.y - 60, 120, 120);
-          ctx.fillStyle = "rgba(255,220,200," + (1 - k).toFixed(3) + ")";
-          for (var j = 0; j < 12; j++) {
-            var a = j / 12 * Math.PI * 2 + f.x, r = 6 + 34 * Math.sqrt(k);
-            ctx.fillRect(f.x + Math.cos(a) * r - 1.5, f.y + Math.sin(a) * r - 1.5, 3, 3);
-          }
-          ctx.globalCompositeOperation = "source-over";
-          return;
-        }
-        if (f.lit <= 0) return;
-        ctx.globalAlpha = Math.min(1, f.lit);
-        /* 敵は赤い三角形が2つ重なり、逆向きに回る（追ってくる間は速く回る） */
-        var spin = clock * (f.map ? 6 : 2);
-        ctx.fillStyle = FOE_COLOR;
-        [spin, -spin + Math.PI].forEach(function (r, j) {
-          ctx.globalAlpha = Math.min(1, f.lit) * (j ? 0.75 : 1);
-          ctx.beginPath();
-          for (var q = 0; q < 3; q++) {
-            var a = r + q * Math.PI * 2 / 3;
-            ctx[q ? "lineTo" : "moveTo"](f.x + Math.cos(a) * 6.5, f.y + Math.sin(a) * 6.5);
-          }
-          ctx.closePath(); ctx.fill();
-        });
-        ctx.globalAlpha = 1;
-      });
+      if (state !== S.INTRO) drawHand();
+    }
+    ctx.restore();
+
+    if (!drawn3d && flash > 0 && state === S.PLAY) {
+      var L = top();
+      ctx.strokeStyle = "rgba(255,255,255," + flash + ")";
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.arc(player.x, player.y, R_PLAYER + 1.5, 0, Math.PI * 2);
-      ctx.fillStyle = "#fff"; ctx.fill();
-      /* 向き：音叉。鳴らした直後は先が震える */
-      ctx.save();
-      ctx.translate(player.x, player.y);
-      ctx.rotate(facing);
-      var ring = Math.max(0, 1 - (clock - forkRing) / 0.6), wob = ring * 1.2 * Math.sin(clock * 90);
-      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.6; ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(R_PLAYER + 1.5, 0); ctx.lineTo(R_PLAYER + 5, 0);                       /* 柄 */
-      ctx.moveTo(R_PLAYER + 5, -2.8 - wob); ctx.lineTo(R_PLAYER + 5, 2.8 + wob);          /* 根元 */
-      ctx.moveTo(R_PLAYER + 5, -2.8 - wob); ctx.lineTo(R_PLAYER + 12, -2.8 - wob);        /* 2本の歯 */
-      ctx.moveTo(R_PLAYER + 5, 2.8 + wob); ctx.lineTo(R_PLAYER + 12, 2.8 + wob);
+      ctx.ellipse(sx(L.x), sy(topY() - LAYER + 4), (L.w / 2 + 14 + (1 - flash) * 30) * zoom, (16 + (1 - flash) * 8) * zoom, 0, 0, 7);
       ctx.stroke();
-      ctx.lineCap = "butt";
-      ctx.restore();
     }
-    ctx.restore();
 
-    /* 捕まったときに赤く光る */
-    if (caughtFlash > 0) { ctx.fillStyle = "rgba(224,52,74," + (0.45 * caughtFlash).toFixed(3) + ")"; ctx.fillRect(0, 0, W, H); }
-
-    /* ジョイスティック（一度触ったら出したまま） */
-    if (state === S.PLAY && stick) {
-      ctx.beginPath(); ctx.arc(stick.bx, stick.by, STICK_R, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,255,255,.08)"; ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,.3)"; ctx.lineWidth = 2; ctx.stroke();
-      var k = knob();
-      ctx.beginPath(); ctx.arc(k.x, k.y, 26, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,255,255,.45)"; ctx.fill();
-      drawFork(k.x, k.y, "#16202e");
-    }
-    /* タップしたつまみは、その場で波紋になって消える */
-    if (release) {
-      var rt = (clock - release.t) / 0.5;
-      if (rt >= 1) release = null;
-      else {
-        ctx.beginPath(); ctx.arc(release.x, release.y, 26 + rt * 40, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255,255,255," + (0.6 * (1 - rt)).toFixed(3) + ")"; ctx.lineWidth = 3; ctx.stroke();
-      }
-    }
-    /* 最初に触るまで、タップの指示（走る牛と同じ形） */
-    if (state === S.PLAY && showTapGuide && !stick) drawTapGuide();
-
-    if (state === S.RESULT) drawResult();
-  }
-
-  function knob() {
-    var kx = stick.x - stick.bx, ky = stick.y - stick.by, kd = Math.hypot(kx, ky);
-    if (kd > STICK_R) { kx = kx / kd * STICK_R; ky = ky / kd * STICK_R; }
-    return { x: stick.bx + kx, y: stick.by + ky };
-  }
-  /* つまみの上の音叉（上向き） */
-  function drawFork(x, y, col) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(0, 14); ctx.lineTo(0, 3);
-    ctx.moveTo(-6, -12); ctx.lineTo(-6, 0); ctx.quadraticCurveTo(-6, 3, 0, 3); ctx.quadraticCurveTo(6, 3, 6, 0); ctx.lineTo(6, -12);
-    ctx.stroke();
-    ctx.restore();
-  }
-  function drawTapGuide() {
-    var pulse = (performance.now() % 1200) / 1200;
-    var x = W / 2, y = (BY + BOARD * SC + H) / 2;
-    ctx.save();
-    ctx.shadowColor = "rgba(0,0,0,.5)"; ctx.shadowBlur = 10;
-    ctx.fillStyle = "#fff";
-    ctx.beginPath(); ctx.arc(x, y, 17, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255," + (1 - pulse) + ")";
-    ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.arc(x, y, 22 + pulse * 28, 0, Math.PI * 2); ctx.stroke();
-    ctx.restore();
+    if (state === S.RESULT || (ending && endT >= PLACE_T1)) drawCall();   /* 着丼と同時に出す */
+    if (state === S.RESULT) drawButtons();
   }
 
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H - h - Math.max(36, H * 0.05);   /* 画面の下 */
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -842,17 +726,34 @@
     }
     return null;
   }
-  function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.66)";
-    ctx.fillRect(0, 0, W, H);
+  /* 結果は数字でなく「ヤサイ」＋積んだ段の数だけの「マシ」で出す。画面の上に、幅に合わせて折り返す */
+  function callText() {
+    var k = Math.max(0, layers.length - 1), t = "ヤサイ";
+    for (var i = 0; i < k; i++) t += "マシ";
+    return t;
+  }
+  function drawCall() {
+    /* 行数は決めず、全部を折り返して出す（山に重なってよい） */
+    var text = callText(), top = Math.max(24, H * 0.03), maxW = W - 48, size = 40, lines;
     ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
-    ctx.font = "800 108px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(secText() + zT("秒", "s"), W / 2, H * 0.45);
+    ctx.textBaseline = "top";
+    ctx.lineJoin = "round";
+    ctx.font = "900 " + size + "px sans-serif";
+    var per = Math.max(1, Math.floor(maxW / ctx.measureText("マ").width));
+    /* 「マシ」の途中で折り返さない */
+    lines = [text.slice(0, 3)];
+    for (var i = 3; i < text.length; i += 2) {
+      if (lines[lines.length - 1].length + 2 > per) lines.push("");
+      lines[lines.length - 1] += "マシ";
+    }
+    ctx.fillStyle = "#111";                    /* 黒い文字に白い縁取り */
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = Math.max(4, size * 0.18);
+    lines.forEach(function (ln, k) { var y = top + k * size * 1.15; ctx.strokeText(ln, W / 2, y); ctx.fillText(ln, W / 2, y); });
     ctx.restore();
+  }
+  function drawButtons() {
     resultButtons().forEach(function (b) {
       ctx.save();
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
@@ -871,37 +772,34 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, time: time, player: { x: player.x, y: player.y }, W: W, H: H, shouts: shouts, rays: rays.length, facing: facing, catches: catches, foes: foes.map(function (f) { return { x: f.x, y: f.y, chase: !!f.map }; }) }; },
-    maze: function () { return { G: G, B: B, open: Array.prototype.slice.call(open) }; },
-    marks: function () { return marks.length; },
+    now: function () { return { threeD: !!scene3d, state: state, score: score, layers: layers.length, w: top().w, handX: handX, falling: !!falling, ending: ending, W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
-    move: function (dx, dy) { moveBy(dx, dy); },
-    stick: function (vx, vy) { stick = { on: vx !== 0 || vy !== 0, bx: 0, by: 0, x: vx * STICK_R, y: vy * STICK_R }; },
-    ping: function (v) { ping(v); },
     reset: function () { newRound(); }
   };
 
-  /* ============ 手元用の動画撮影 ============ */
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
-      await r.wait(1000);
+      await r.wait(800);
+      for (var i = 0; i < 8; i++) {
+        await r.until(function () { return Math.abs(handX - top().x) < 12 && !falling; }, 5);
+        r.key();
+        await r.wait(400);
+      }
+      await r.wait(600);
       r.key();
-      await r.wait(4000);
+      await r.until(function () { return state === S.RESULT; }, 15);
+      await r.wait(1500);
     }
   };
 
   /* ============ ループ ============ */
   var startButton = document.getElementById("start");
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
-
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
   startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
-  state = S.INTRO;
-  startButton.hidden = false;
-  shareButton.hidden = true;
-  buildMaze();
   layout();
+  newRound(); state = S.INTRO; startButton.hidden = false;
   var last = performance.now();
   function loop(now) {
     var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
@@ -919,11 +817,11 @@
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=echo-maze-1791109219869" : "./recorder-ui.js?v=echo-maze-1791109219869";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=mashimashi-1791189355530" : "./recorder-ui.js?v=mashimashi-1791189355530";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=echo-maze-1791109219869"></script>
-<script src="./preview-header.js?v=echo-maze-1791109219869"></script>
+<script src="./auto-reload.js?v=mashimashi-1791189355530"></script>
+<script src="./preview-header.js?v=mashimashi-1791189355530"></script>
 </body>
 </html>
