@@ -33,6 +33,8 @@
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="bonsai3d.js"></script>
 <script>
 /* アフロ盆栽
 
@@ -140,28 +142,34 @@
     }
     return c;
   }
-  /* お手本は盆栽の形。頭のまわりの土台に、枝（太い線）と葉の塊（楕円）をつなげる。
+  /* お手本は盆栽の形。頭から木の枝（最初から生えている）が伸び、その先の葉の塊（楕円）と頭のまわりの土台に髪を残す。
      座標は顔の中心（cx, cy）からのずれ */
+  function segDist2(u, v, x0, y0, x1, y1) {
+    var dx = x1 - x0, dy = y1 - y0, t = Math.max(0, Math.min(1, ((u - x0) * dx + (v - y0) * dy) / (dx * dx + dy * dy)));
+    var ddx = u - (x0 + dx * t), ddy = v - (y0 + dy * t);
+    return ddx * ddx + ddy * ddy;
+  }
   function bonsai(id, pads, branches) {
-    return { id: id, f: function (x, y) {
-      var u = x - cx, v = y - cy;
-      var bx = u / 95, by = v / 112;
-      if (bx * bx + by * by < 1 && v < -20) return true;
-      for (var i = 0; i < pads.length; i++) {
-        var p = pads[i], ex = (u - p[0]) / p[2], ey = (v - p[1]) / p[3];
-        if (ex * ex + ey * ey < 1) return true;
-      }
-      for (i = 0; i < branches.length; i++) {
-        var q = branches[i];
-        for (var k = 0; k + 3 < q.length - 1; k += 2) {
-          var x0 = q[k], y0 = q[k + 1], x1 = q[k + 2], y1 = q[k + 3], w = q[q.length - 1];
-          var dx = x1 - x0, dy = y1 - y0, t = Math.max(0, Math.min(1, ((u - x0) * dx + (v - y0) * dy) / (dx * dx + dy * dy)));
-          var ddx = u - (x0 + dx * t), ddy = v - (y0 + dy * t);
-          if (ddx * ddx + ddy * ddy < w * w / 4) return true;
+    return { id: id, pads: pads, branches: branches,
+      f: function (x, y) {
+        var u = x - cx, v = y - cy;
+        var bx = u / 95, by = v / 112;
+        if (bx * bx + by * by < 1 && v < -20) return true;
+        for (var i = 0; i < pads.length; i++) {
+          var p = pads[i], ex = (u - p[0]) / p[2], ey = (v - p[1]) / p[3];
+          if (ex * ex + ey * ey < 1) return true;
         }
-      }
-      return false;
-    } };
+        return false;
+      },
+      /* 枝の上か（margin だけ太らせて判定） */
+      wood: function (x, y, margin) {
+        var u = x - cx, v = y - cy;
+        for (var i = 0; i < branches.length; i++) {
+          var q = branches[i], w = q[q.length - 1] / 2 + (margin || 0);
+          for (var k = 0; k + 3 < q.length - 1; k += 2) if (segDist2(u, v, q[k], q[k + 1], q[k + 2], q[k + 3]) < w * w) return true;
+        }
+        return false;
+      } };
   }
   var STYLES = [
     bonsai("kumo", [[0, -200, 105, 48], [-125, -110, 72, 36], [118, -55, 78, 34]], [[0, -100, 0, -170, 18], [-30, -110, -100, -110, 16], [40, -80, 100, -60, 16]]),
@@ -176,7 +184,17 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, keyMode = false;
-  var hair, target, hairCount, style, person, phase, okPress, judgeT, scores, held, px, py, stroke, bits, chunks, dirty, order, look;
+  var hair, target, wood, hairVer = 0, hairCount, style, person, phase, okPress, judgeT, scores, held, px, py, stroke, bits, chunks, dirty, order, look;
+
+  /* 立体の絵。作れないとき（WebGLなし）は平面の絵のまま */
+  var scene3d = null, tries3d = 0, lastTry3d = -1e9;
+  function make3d() {
+    if (scene3d || tries3d >= 20 || !window.THREE || !window.BonsaiScene) return;
+    var now = performance.now();
+    if (now - lastTry3d < 500) return;
+    lastTry3d = now; tries3d++;
+    try { scene3d = new window.BonsaiScene(); } catch (e) { scene3d = null; }
+  }
 
   var seed = 1;
   function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
@@ -218,16 +236,18 @@
   function newPerson() {
     makeHairCanvas();
     style = STYLES[order[person % order.length]];
-    hair = new Uint8Array(N * N); target = new Uint8Array(N * N); hairCount = 0;
+    hair = new Uint8Array(N * N); target = new Uint8Array(N * N); wood = new Uint8Array(N * N); hairCount = 0;
     for (var j = 0; j < N; j++) for (var i = 0; i < N; i++) {
       var x = ox + (i + 0.5) * CS, y = oy + (j + 0.5) * CS;
+      if (style.wood(x, y, 0)) wood[j * N + i] = 1;            /* 枝そのもの：ここの髪は枝につながる */
+      else if (style.wood(x, y, 7)) wood[j * N + i] = 2;      /* 枝のすぐ脇：一致率に数えない */
       if (!hairable(x, y)) continue;
       hair[j * N + i] = 1; hairCount++;
       if (style.f(x, y)) target[j * N + i] = 1;
     }
     var skins = ["#f6cf57"];   /* 肌の色は黄色にそろえる */
     var hairs = [[38, 24, 18], [22, 16, 14], [92, 52, 28], [58, 36, 24]];
-    look = { skin: skins[Math.floor(rnd() * skins.length)], hair: hairs[Math.floor(rnd() * hairs.length)], brow: rnd() < 0.5 };
+    look = { skin: skins[Math.floor(rnd() * skins.length)], hair: hairs[Math.floor(rnd() * hairs.length)], brow: rnd() < 0.5, seed: 1 + Math.floor(rnd() * 99999) };
     phase = "cut"; okPress = false; judgeT = 0; dirty = true; bits = []; chunks = []; stroke = null;
     paintTexture();
   }
@@ -248,6 +268,7 @@
   function match() {
     var both = 0, any = 0;
     for (var k = 0; k < hair.length; k++) {
+      if (wood[k]) continue;                          /* 枝とその脇は数えない */
       if (hair[k] && target[k]) both++;
       if (hair[k] || target[k]) any++;
     }
@@ -280,6 +301,8 @@
       var k = j * N + i;
       if (i >= 0 && j >= 0 && i < N && j < N && hair[k] && !keep[k]) { keep[k] = 1; q.push(k); }
     }
+    /* 枝にかかっている髪も根元の側（枝は頭から生えている） */
+    for (k = 0; k < hair.length; k++) if (wood[k] === 1 && hair[k] && !keep[k]) { keep[k] = 1; q.push(k); }
     while (q.length) {
       k = q.pop(); i = k % N; j = (k / N) | 0;
       if (i > 0 && hair[k - 1] && !keep[k - 1]) { keep[k - 1] = 1; q.push(k - 1); }
@@ -438,7 +461,7 @@
 
   function paintHair() {
     if (!img || !dirty) return;
-    dirty = false;
+    dirty = false; hairVer++;
     var d = img.data;
     for (var k = 0; k < hair.length; k++) { d[k * 4] = d[k * 4 + 1] = d[k * 4 + 2] = 0; d[k * 4 + 3] = hair[k] ? 255 : 0; }
     mctx.putImageData(img, 0, 0);
@@ -479,6 +502,21 @@
     ell(cx - 84, cy + 4, 13, 20, look.skin);
     ell(cx + 84, cy + 4, 13, 20, look.skin);
     ell(cx, cy, 86, 104, look.skin);
+    drawFeatures(happy);
+  }
+  /* 枝（平面の絵のとき）。髪の上に描く */
+  function drawWood() {
+    ctx.save();
+    ctx.strokeStyle = "#6b4a2e"; ctx.lineCap = ctx.lineJoin = "round";
+    style.branches.forEach(function (q) {
+      ctx.lineWidth = q[q.length - 1];
+      ctx.beginPath(); ctx.moveTo(cx + q[0], cy + q[1]);
+      for (var k = 2; k + 1 < q.length - 1; k += 2) ctx.lineTo(cx + q[k], cy + q[k + 1]);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+  function drawFeatures(happy) {
     /* 目・眉・鼻・口 */
     ctx.fillStyle = "#222";
     ell(cx - 30, cy + 2, 7, happy === false ? 9 : 7, "#222");
@@ -512,6 +550,7 @@
     for (var y = ay - AR; y < ay + AR; y += step) for (var x = ax - AR; x < ax + AR; x += step) {
       if (hairable(x + 2, y + 2) && style.f(x + 2, y + 2)) ctx.fillRect(x, y, step + 0.8, step + 0.8);
     }
+    drawWood();
     ctx.fillStyle = "#222";
     ell(cx - 30, cy + 2, 9, 9, "#222"); ell(cx + 30, cy + 2, 9, 9, "#222");
     ctx.restore();
@@ -536,9 +575,22 @@
     for (var x = 0; x < W; x += 60) ctx.fillRect(x, 0, 30, H);
     if (hair) {
       var judged = phase === "judge" ? scores[scores.length - 1] : null;
-      drawHead(judged == null ? null : judged >= 60);
       paintHair();
-      if (workCv && img) ctx.drawImage(workCv, ox, oy, N * CS, N * CS);
+      make3d();
+      var ok3 = false;
+      if (scene3d) {
+        try {
+          scene3d.build({ W: W, H: H, cx: cx, cy: cy, potY: potY, ax: ax, ay: ay, ox: ox, oy: oy, N: N, CS: CS, AR: AR, look: look, hairable: hairable, branches: style.branches, styleId: style.id });
+          scene3d.setHair(hair, hairVer + ":" + person);
+          ok3 = scene3d.render(ctx, W, H);
+        } catch (e) { ok3 = false; }
+      }
+      if (ok3) drawFeatures(judged == null ? null : judged >= 60);
+      else {
+        drawHead(judged == null ? null : judged >= 60);
+        if (workCv && img) ctx.drawImage(workCv, ox, oy, N * CS, N * CS);
+        drawWood();
+      }
       /* 切れた髪が落ちる */
       chunks.forEach(function (c) {
         ctx.save();
