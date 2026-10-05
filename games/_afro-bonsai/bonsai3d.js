@@ -288,7 +288,7 @@
     var E = EYE[expr || "n"];
     var white = std(0xf4f0e8, { roughness: 0.2 }), iris = std(0x4a2c18, { roughness: 0.3 }), pupil = std(0x0b0806, { roughness: 0.1 });
     var lidM = std(g.look.skin, { roughness: 0.55 }), lashM = std(0x1a120c, { roughness: 0.8 });
-    var hc = g.look.hair, bm = std(new T.Color(hc[0] / 255, hc[1] / 255, hc[2] / 255).getHex(), { roughness: 1 });
+    var bm = std(0x3a2414, { roughness: 1 });   /* 眉は濃い木の色 */
     var eyes = this.eyes = [];
     [-1, 1].forEach(function (s) {
       var ex = s * 30, ey = 2, R = 10.5, ez = surf(ex, ey) - R + 5;
