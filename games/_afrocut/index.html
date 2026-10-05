@@ -37,7 +37,7 @@
 /* アフロカット
 
    大きなアフロに指で線を引くと、その線で髪が切れて、頭のてっぺんとつながっていない側が落ちる。
-   右上のお手本の髪型に近づける。切った髪は戻らない。1人12秒で3人。お手本との重なり（%）の平均が結果。 */
+   右上のお手本の髪型に近づける。切った髪は戻らない。OKを押すと判定、3人。お手本との重なり（%）の平均が結果。 */
 (function () {
   "use strict";
 
@@ -108,7 +108,6 @@
   var CS = 4;                  /* 髪の升目（ゲーム座標） */
   var AR = 215;                /* アフロの半径 */
   var BLADE = 17;              /* 一度に刈れる半径 */
-  var TIME = 12;               /* 1人ぶんの秒数 */
   var PEOPLE = 3;
   var JUDGE = 2.2;             /* 判定を見せる秒数 */
 
@@ -169,7 +168,7 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, keyMode = false;
-  var hair, target, hairCount, style, person, phase, left, judgeT, scores, held, px, py, stroke, bits, chunks, dirty, order, look;
+  var hair, target, hairCount, style, person, phase, okPress, judgeT, scores, held, px, py, stroke, bits, chunks, dirty, order, look;
 
   var seed = 1;
   function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
@@ -215,7 +214,7 @@
     var skins = ["#f2c8a2", "#e0a77c", "#c68456", "#8d5a3a", "#f6d7bd"];
     var hairs = [[38, 24, 18], [22, 16, 14], [92, 52, 28], [58, 36, 24]];
     look = { skin: skins[Math.floor(rnd() * skins.length)], hair: hairs[Math.floor(rnd() * hairs.length)], brow: rnd() < 0.5 };
-    phase = "cut"; left = TIME; judgeT = 0; dirty = true; bits = []; chunks = []; stroke = null;
+    phase = "cut"; okPress = false; judgeT = 0; dirty = true; bits = []; chunks = []; stroke = null;
     paintTexture();
   }
 
@@ -312,9 +311,8 @@
     chunks.forEach(function (c) { c.vy += 1400 * dt; c.dx += c.vx * dt; c.dy += c.vy * dt; c.rot += c.vr * dt; c.t += dt; });
     chunks = chunks.filter(function (c) { return c.t < 2; });
     if (phase === "cut") {
-      left -= dt;
-      if (left <= 0) {
-        left = 0; phase = "judge"; judgeT = 0; held = false;
+      if (okPress) {
+        okPress = false; phase = "judge"; judgeT = 0; held = false; stroke = null;
         var m = match(); scores.push(m);
         if (m >= 80) { tone(784, 0.12, 0.09, "square"); tone(1047, 0.25, 0.09, "square", null, 0.12); }
         else if (m >= 50) tone(660, 0.2, 0.08, "triangle");
@@ -347,7 +345,8 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (x == null || phase !== "cut") return;
+    if (phase !== "cut") return;
+    if (x == null || hitOk(x, y)) { okPress = true; tone(880, 0.06, 0.08, "square"); return; }
     held = true; px = x; py = y;
     stroke = [{ x: x, y: y }];
   }
@@ -387,8 +386,8 @@
   function debugKey(n) {
     if (state !== S.PLAY) return;
     if (n === 1 && phase === "cut") { for (var k = 0; k < hair.length; k++) hair[k] = hair[k] && target[k] ? 1 : 0; dirty = true; }
-    if (n === 2 && phase === "cut") left = 0.01;
-    if (n === 3) { person = PEOPLE - 1; if (phase === "cut") left = 0.01; }
+    if (n === 2 && phase === "cut") okPress = true;
+    if (n === 3) { person = PEOPLE - 1; if (phase === "cut") okPress = true; }
   }
 
   window.addEventListener("keydown", function (e) {
@@ -400,7 +399,7 @@
     keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
     if (e.repeat) return;
-    if (state === S.RESULT) down();
+    down();
   });
   window.addEventListener("keyup", function (e) {
     if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
@@ -549,12 +548,10 @@
       }
       if (state === S.PLAY) {
         drawSample();
-        /* 残り時間の棒と、何人目かの丸 */
-        var bw = W - 200, f = left / TIME;
-        roundRect(24, 34, bw, 14, 7); ctx.fillStyle = "rgba(0,0,0,.15)"; ctx.fill();
-        if (f > 0) { roundRect(24, 34, Math.max(14, bw * f), 14, 7); ctx.fillStyle = f < 0.25 ? "#e85a4f" : "#3a5a8c"; ctx.fill(); }
+        /* 何人目かの丸 */
+        if (phase === "cut") drawOk();
         for (var p = 0; p < PEOPLE; p++) {
-          ctx.beginPath(); ctx.arc(36 + p * 30, 74, 9, 0, Math.PI * 2);
+          ctx.beginPath(); ctx.arc(36 + p * 30, 44, 9, 0, Math.PI * 2);
           ctx.fillStyle = p < person || (p === person && phase === "judge") ? "#3a5a8c" : p === person ? "#e85a4f" : "rgba(0,0,0,.15)";
           ctx.fill();
         }
@@ -582,6 +579,19 @@
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
     ];
+  }
+  /* OKボタン（判定する） */
+  function okButton() { return { x: W / 2 - 100, y: H - 96, w: 200, h: 62 }; }
+  function hitOk(x, y) { var b = okButton(); return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
+  function drawOk() {
+    var b = okButton();
+    ctx.save();
+    roundRect(b.x, b.y, b.w, b.h, b.h / 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+    ctx.fillStyle = "#16202e"; ctx.font = "800 30px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("OK", b.x + b.w / 2, b.y + b.h / 2 + 1);
+    ctx.restore();
   }
   function hitButton(x, y) {
     var bs = resultButtons();
@@ -620,7 +630,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, phase: phase, score: score, person: person, style: style && style.id, left: left, scores: scores, match: hair ? match() : 0, W: W, H: H }; },
+    now: function () { return { state: state, phase: phase, score: score, person: person, style: style && style.id, okPress: okPress, scores: scores, match: hair ? match() : 0, W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
