@@ -96,7 +96,7 @@
     /* 髪：升目2つおきに巻き毛の粒をひとつ。正面から見える表面の深さに置く */
     var N = g.N, CS = g.CS, step = 2, cells = [], pts = [];
     var R = rng(g.look.seed || 1), AR = g.AR;
-    for (var j = 0; j < N; j += step) for (i = 0; i < N; i += step) {
+    for (var j = 0; j < N - 1; j += step) for (i = 0; i < N - 1; i += step) {
       var k = j * N + i;
       if (!g.hairable(g.ox + (i + 0.5) * CS, g.oy + (j + 0.5) * CS)) continue;
       var x = g.ox + (i + 1) * CS + (R() - 0.5) * 3, y = g.oy + (j + 1) * CS + (R() - 0.5) * 3;
@@ -150,7 +150,7 @@
       G.add(hm);
       return { mesh: hm, list: list };
     });
-    this.cells = cells; this.pts = pts; this.rot = rot;
+    this.cells = cells; this.pts = pts; this.rot = rot; this.N = N;
     this.lastHair = null;
     this.g = g;
   };
@@ -298,11 +298,11 @@
       /* 上まぶた：目玉より少し大きい殻の上側。前に回すと閉じる */
       var a = Math.PI * E.a, lidG = new T.Group(); lidG.position.copy(at); F.add(lidG);
       var lid = new T.Mesh(new T.SphereGeometry(R + 1.2, 32, 16, 0, Math.PI * 2, 0, a), lidM);
-      lid.scale.set(1.12, 1, 1); lidG.add(lid);
+      lid.scale.set(1.04, 1, 1); lidG.add(lid);
       var pts = [];
       for (var t = -1; t <= 1.001; t += 0.1) {
         var ang = t * 1.25, rr = R + 1.6, y = Math.cos(a) * rr, xz = Math.sin(a) * rr;
-        pts.push(new T.Vector3(Math.sin(ang) * xz * 1.15, y, Math.cos(ang) * xz));
+        pts.push(new T.Vector3(Math.sin(ang) * xz * 1.04, y, Math.cos(ang) * xz));
       }
       lidG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts), 20, 0.9, 6, false), lashM));
       /* 下まぶたのふくらみ */
@@ -323,7 +323,25 @@
       }
       brow.geometry.computeVertexNormals();
       var browG = new T.Group(); browG.add(brow); F.add(browG);
-      eyes.push({ s: s, lid: lidG, a: a, look: look, brow: browG, closed: expr === "ouch" });
+      /* 閉じた目：目玉を隠し、肌のふくらみに線を一本。痛いときは鼻の側がとがった「＞＜」 */
+      var shutG = new T.Group(); shutG.position.copy(at); F.add(shutG);
+      var cover = new T.Mesh(new T.SphereGeometry(1, 28, 18), lidM);
+      cover.scale.set(R * 1.12, R * 0.95, R * 0.55); cover.position.z = R * 0.4; shutG.add(cover);
+      var lp = [];
+      function onCover(x, y) { return R * 0.95 + 1.5 - 1.5 * (x / R) * (x / R); }   /* ふくらみの少し手前に浮かせる（正面からは区別がつかない） */
+      for (var q = 0; q <= 1.001; q += 0.1) {
+        var lx = (q * 2 - 1) * R * 1.0, ly = -R * 0.18 - R * 0.22 * (1 - (q * 2 - 1) * (q * 2 - 1));   /* 下にふくらむ弧 */
+        lp.push(new T.Vector3(lx, ly, onCover(lx, ly)));
+      }
+      if (expr === "ouch") {
+        var tip = s < 0 ? R : -R;   /* 鼻の側の先 */
+        lp = [new T.Vector3(-tip * 1.05, R * 0.75, 0), new T.Vector3(tip * 0.9, 0, 0), new T.Vector3(-tip * 1.05, -R * 0.6, 0)].map(function (v) {
+          return new T.Vector3(v.x, v.y, onCover(v.x, v.y) + 0.3);
+        });
+        shutG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(lp, false, "catmullrom", 0.1), 24, 1.6, 6, false), lashM));
+      } else shutG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(lp), 20, 0.9, 6, false), lashM));
+      var openParts = [eye, look, lidG, low];
+      eyes.push({ s: s, lid: lidG, a: a, look: look, brow: browG, shut: shutG, open: openParts, closed: expr === "ouch" });
     });
     /* 毎コマ描き直す顔の範囲（髪がかぶらない生え際の下から口まで） */
     F.traverse(function (o) { o.layers.enable(1); });
@@ -340,8 +358,10 @@
     if (bt > 0) { bl = bt < 0.07 ? bt / 0.07 : bt < 0.17 ? 1 - (bt - 0.07) / 0.1 : 0; if (bt > 0.17) A.blink = now + 1.8 + Math.random() * 3.5; }
     var n1 = Math.sin(now * 0.9) * 0.6 + Math.sin(now * 2.3 + 1) * 0.4, n2 = Math.sin(now * 0.7 + 2) * 0.5 + Math.sin(now * 1.9) * 0.5;
     this.eyes.forEach(function (e) {
-      var shut = e.closed ? 0 : bl;
-      e.lid.rotation.x = (Math.PI * 0.82 - e.a) * shut + 0.06 * n2;
+      var shut = e.closed || bl > 0.4;
+      e.shut.visible = shut;
+      e.open.forEach(function (o) { o.visible = !shut; });
+      e.lid.rotation.x = 0.06 * n2;
       e.look.rotation.y = A.gx * 0.32; e.look.rotation.x = A.gy * 0.25;
       e.brow.position.y = 1.4 * n1 + (e.s > 0 ? 0.6 : -0.6) * n2;
       e.brow.rotation.z = 0;
@@ -354,13 +374,14 @@
     this.lastHair = ver;
     this.stale = true;
     var m = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), s1 = new T.Vector3(1, 1, 1), s0 = new T.Vector3(0, 0, 0), p = new T.Vector3();
-    var self = this;
+    var self = this, NN = this.N;
     this.hairs.forEach(function (h) {
       h.list.forEach(function (n, i) {
         var a = self.pts[n];
         p.set(a[0], -a[1], a[2]);
         e.set(self.rot[n], self.rot[n] * 1.7, 0); q.setFromEuler(e);
-        m.compose(p, q, hair[self.cells[n]] ? s1 : s0);
+        var k = self.cells[n], left = hair[k] + hair[k + 1] + hair[k + NN] + hair[k + NN + 1];
+        m.compose(p, q, left >= 2 ? s1 : s0);   /* 粒の下の4升のうち半分以上残っていれば見せる */
         h.mesh.setMatrixAt(i, m);
       });
       h.mesh.instanceMatrix.needsUpdate = true;
