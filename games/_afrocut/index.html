@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>アフロカット</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #f3e9d8; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* アフロカット
+
+   大きなアフロを指でなぞって刈り、右上のお手本の髪型に近づける。
+   刈った髪は戻らない。1人12秒で3人。お手本との重なり（%）の平均が結果。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 数字 ============ */
+  var CS = 4;                  /* 髪の升目（ゲーム座標） */
+  var AR = 215;                /* アフロの半径 */
+  var BLADE = 17;              /* 一度に刈れる半径 */
+  var TIME = 12;               /* 1人ぶんの秒数 */
+  var PEOPLE = 3;
+  var JUDGE = 2.2;             /* 判定を見せる秒数 */
+
+  /* ============ 置き場所 ============ */
+  var cx, cy, ax, ay, ox, oy, N = Math.ceil(AR * 2 / CS);
+  function place() {
+    cx = W / 2;
+    cy = Math.round(Math.max(470, Math.min(H - 250, H * 0.6)));
+    ax = cx; ay = cy - 70;
+    ox = ax - AR; oy = ay - AR;
+  }
+
+  /* 髪が生えうる場所：アフロの円の中で、眉より下の顔の部分を除く */
+  function inFaceBelowBrow(x, y) {
+    var dx = (x - cx) / 86, dy = (y - cy) / 104;
+    return dx * dx + dy * dy < 1 && y > cy - 26;
+  }
+  function hairable(x, y) {
+    var dx = x - ax, dy = y - ay;
+    return dx * dx + dy * dy < AR * AR && !inFaceBelowBrow(x, y);
+  }
+
+  /* お手本の髪型。(x, y) に髪が残っているべきなら true */
+  function inPoly(pts, x, y) {
+    var c = false;
+    for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      var a = pts[i], b = pts[j];
+      if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c;
+    }
+    return c;
+  }
+  var STYLES = [
+    { id: "bouzu", f: function (x, y) { var dx = (x - cx) / 96, dy = (y - cy) / 114; return dx * dx + dy * dy < 1 && y < cy + 8; } },
+    { id: "mohican", f: function (x, y) { return Math.abs(x - cx) < 28 && y < cy - 30; } },
+    { id: "kakugari", f: function (x, y) { return Math.abs(x - cx) < 104 && y > cy - 215 && y < cy + 10; } },
+    { id: "okappa", f: function (x, y) { var dx = x - cx, dy = y - (cy - 34); return dx * dx + dy * dy < 128 * 128 && y < cy + 64; } },
+    { id: "heart", f: function (x, y) {
+      var u = (x - cx) / 150, v = -(y - (cy - 120)) / 150 + 0.1;
+      var q = u * u + v * v - 1; return q * q * q - u * u * v * v * v < 0 || inFaceBelowBrow(x, y + 30);
+    } },
+    { id: "star", f: (function () {
+      var pts = null, key = "";
+      return function (x, y) {
+        var k = cx + "," + cy;
+        if (k !== key) {
+          key = k; pts = [];
+          for (var i = 0; i < 10; i++) {
+            var r = i % 2 ? 82 : 200, a = -Math.PI / 2 + i * Math.PI / 5;
+            pts.push([cx + Math.cos(a) * r, cy - 125 + Math.sin(a) * r]);
+          }
+        }
+        return inPoly(pts, x, y);
+      };
+    })() },
+    { id: "kinoko", f: function (x, y) { var dx = (x - cx) / 170, dy = (y - (cy - 40)) / 175; return dx * dx + dy * dy < 1 && y < cy - 20; } }
+  ];
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, keyMode = false;
+  var hair, target, hairCount, style, person, phase, left, judgeT, scores, held, px, py, bits, dirty, order, look;
+
+  var seed = 1;
+  function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+
+  /* 髪の絵：もじゃもじゃの模様（texCv）を、残っている升目の形（maskCv）で切り抜いて workCv に描く */
+  var HR = 2;                  /* 髪の絵の細かさ（ゲーム座標1あたりの画素） */
+  var maskCv = null, mctx = null, img = null, texCv = null, tctx = null, workCv = null, wctx = null;
+  function makeHairCanvas() {
+    if (maskCv) return;
+    try {
+      maskCv = document.createElement("canvas"); maskCv.width = N; maskCv.height = N;
+      mctx = maskCv.getContext("2d");
+      img = mctx.createImageData(N, N);
+      texCv = document.createElement("canvas"); texCv.width = texCv.height = N * CS * HR;
+      tctx = texCv.getContext("2d");
+      workCv = document.createElement("canvas"); workCv.width = workCv.height = N * CS * HR;
+      wctx = workCv.getContext("2d");
+    } catch (e) { mctx = null; img = null; }
+  }
+  function paintTexture() {
+    if (!tctx) return;
+    var c = look.hair, sz = N * CS * HR;
+    function col(m) { return "rgb(" + Math.round(c[0] * m) + "," + Math.round(c[1] * m) + "," + Math.round(c[2] * m) + ")"; }
+    tctx.fillStyle = col(0.8); tctx.fillRect(0, 0, sz, sz);
+    tctx.lineWidth = 2.2 * HR; tctx.lineCap = "round";
+    for (var i = 0; i < 2600; i++) {
+      var x = rnd() * sz, y = rnd() * sz, r = (3 + rnd() * 5) * HR, a = rnd() * 6.28;
+      tctx.strokeStyle = col(0.55 + rnd() * 0.9);
+      tctx.beginPath(); tctx.arc(x, y, r, a, a + 3.5 + rnd() * 2); tctx.stroke();
+    }
+  }
+
+  function newPerson() {
+    makeHairCanvas();
+    style = STYLES[order[person % order.length]];
+    hair = new Uint8Array(N * N); target = new Uint8Array(N * N); hairCount = 0;
+    for (var j = 0; j < N; j++) for (var i = 0; i < N; i++) {
+      var x = ox + (i + 0.5) * CS, y = oy + (j + 0.5) * CS;
+      if (!hairable(x, y)) continue;
+      hair[j * N + i] = 1; hairCount++;
+      if (style.f(x, y)) target[j * N + i] = 1;
+    }
+    var skins = ["#f2c8a2", "#e0a77c", "#c68456", "#8d5a3a", "#f6d7bd"];
+    var hairs = [[38, 24, 18], [22, 16, 14], [92, 52, 28], [58, 36, 24]];
+    look = { skin: skins[Math.floor(rnd() * skins.length)], hair: hairs[Math.floor(rnd() * hairs.length)], brow: rnd() < 0.5 };
+    phase = "cut"; left = TIME; judgeT = 0; dirty = true; bits = [];
+    paintTexture();
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    score = 0; T = 0;
+    seed = 3 + Math.floor(Math.random() * 100000);
+    order = STYLES.map(function (s, i) { return i; });
+    for (var i = order.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = order[i]; order[i] = order[j]; order[j] = t; }
+    person = 0; scores = []; held = false;
+    newPerson();
+  }
+
+  /* お手本との重なり：残した髪とお手本の、共通部分 ÷ どちらかにある部分 */
+  function match() {
+    var both = 0, any = 0;
+    for (var k = 0; k < hair.length; k++) {
+      if (hair[k] && target[k]) both++;
+      if (hair[k] || target[k]) any++;
+    }
+    return any ? Math.round(both / any * 100) : 0;
+  }
+
+  /* (x, y) のまわりを刈る。刈った升目の数を返す */
+  function cutAt(x, y) {
+    var n = 0, r = BLADE / CS;
+    var gi = (x - ox) / CS, gj = (y - oy) / CS;
+    var i0 = Math.max(0, Math.floor(gi - r)), i1 = Math.min(N - 1, Math.ceil(gi + r));
+    var j0 = Math.max(0, Math.floor(gj - r)), j1 = Math.min(N - 1, Math.ceil(gj + r));
+    for (var j = j0; j <= j1; j++) for (var i = i0; i <= i1; i++) {
+      var k = j * N + i;
+      if (!hair[k]) continue;
+      var dx = i + 0.5 - gi, dy = j + 0.5 - gj;
+      if (dx * dx + dy * dy > r * r) continue;
+      hair[k] = 0; n++;
+    }
+    if (n) {
+      dirty = true;
+      if (bits.length < 140 && rnd() < Math.min(1, n / 12)) {
+        bits.push({ x: x + (rnd() - 0.5) * 20, y: y + (rnd() - 0.5) * 20, vx: (rnd() - 0.5) * 120, vy: -60 - rnd() * 80, r: 4 + rnd() * 6, life: 1.6 });
+      }
+    }
+    return n;
+  }
+  function cutLine(x0, y0, x1, y1) {
+    var d = Math.hypot(x1 - x0, y1 - y0), steps = Math.max(1, Math.ceil(d / 4)), n = 0;
+    for (var s = 1; s <= steps; s++) n += cutAt(x0 + (x1 - x0) * s / steps, y0 + (y1 - y0) * s / steps);
+    return n;
+  }
+
+  /* ============ 進行 ============ */
+  var snipT = 0;
+  function update(dt) {
+    if (state !== S.PLAY) return;
+    T += dt;
+    snipT -= dt;
+    bits.forEach(function (b) { b.vy += 900 * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt; });
+    bits = bits.filter(function (b) { return b.life > 0 && b.y < H + 20; });
+    if (phase === "cut") {
+      left -= dt;
+      if (left <= 0) {
+        left = 0; phase = "judge"; judgeT = 0; held = false;
+        var m = match(); scores.push(m);
+        if (m >= 80) { tone(784, 0.12, 0.09, "square"); tone(1047, 0.25, 0.09, "square", null, 0.12); }
+        else if (m >= 50) tone(660, 0.2, 0.08, "triangle");
+        else tone(220, 0.35, 0.08, "sawtooth", 150);
+      }
+    } else if (phase === "judge") {
+      judgeT += dt;
+      if (judgeT > JUDGE) {
+        person++;
+        if (person >= PEOPLE) end();
+        else newPerson();
+      }
+    }
+  }
+
+  function end() {
+    var sum = 0; scores.forEach(function (s) { sum += s; });
+    score = Math.round(sum / scores.length);
+    state = S.RESULT;
+    shareButton.hidden = false;
+  }
+
+  /* ============ 入力 ============
+     なぞったところを刈る。 */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (x == null || phase !== "cut") return;
+    held = true; px = x; py = y;
+    if (cutAt(x, y)) snip();
+  }
+  function move(x, y) {
+    if (!held) { px = x; py = y; return; }
+    if (state !== S.PLAY || phase !== "cut") { held = false; return; }
+    if (cutLine(px, py, x, y)) snip();
+    px = x; py = y;
+  }
+  function up() { held = false; }
+  function snip() {
+    if (snipT > 0) return;
+    snipT = 0.07;
+    noiseHit(0.04, 4200, 0.12, 3);
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    if (state !== S.PLAY) return;
+    if (n === 1 && phase === "cut") { for (var k = 0; k < hair.length; k++) hair[k] = hair[k] && target[k] ? 1 : 0; dirty = true; }
+    if (n === 2 && phase === "cut") left = 0.01;
+    if (n === 3) { person = PEOPLE - 1; if (phase === "cut") left = 0.01; }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;
+    if (state === S.RESULT) down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
+  });
+
+  function doShare() {
+    var text;
+    if (score >= 85) text = zT("アフロを注文どおり" + score + "%の精度でカットしたカリスマ美容師", "Charisma stylist: cut an afro to order with " + score + "% accuracy");
+    else if (score >= 50) text = zT("アフロを" + score + "%注文どおりにカットした", "Cut an afro " + score + "% to order");
+    else text = zT("アフロを注文と" + (100 - score) + "%ちがう髪型にした", "Gave an afro a haircut " + (100 - score) + "% different from the order");
+    window.zResultActions.x({ text: text + zT(" #アフロカット", " #AfroCut") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function ell(x, y, rx, ry, col) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
+
+  function paintHair() {
+    if (!img || !dirty) return;
+    dirty = false;
+    var d = img.data;
+    for (var k = 0; k < hair.length; k++) { d[k * 4] = d[k * 4 + 1] = d[k * 4 + 2] = 0; d[k * 4 + 3] = hair[k] ? 255 : 0; }
+    mctx.putImageData(img, 0, 0);
+    var sz = workCv.width;
+    wctx.globalCompositeOperation = "source-over";
+    wctx.clearRect(0, 0, sz, sz);
+    wctx.drawImage(texCv, 0, 0);
+    wctx.globalCompositeOperation = "destination-in";
+    wctx.imageSmoothingEnabled = true;
+    wctx.filter = "blur(" + (1.5 * HR) + "px)";   /* 刈り口のぎざぎざをぼかす（効かない端末ではそのまま） */
+    wctx.drawImage(maskCv, 0, 0, sz, sz);
+    wctx.filter = "none";
+    wctx.globalCompositeOperation = "source-over";
+  }
+
+  /* 顔（眉から下）。髪の下に描く頭も含む */
+  function drawHead(happy) {
+    ctx.fillStyle = "#3a5a8c";
+    roundRect(cx - 150, cy + 120, 300, 200, 60); ctx.fill();
+    ctx.fillStyle = "#e9e3d6";
+    roundRect(cx - 150, cy + 120, 300, 30, 15); ctx.fill();
+    ell(cx, cy + 112, 34, 30, look.skin);
+    ell(cx - 84, cy + 4, 13, 20, look.skin);
+    ell(cx + 84, cy + 4, 13, 20, look.skin);
+    ell(cx, cy, 86, 104, look.skin);
+    /* 目・眉・鼻・口 */
+    ctx.fillStyle = "#222";
+    ell(cx - 30, cy + 2, 7, happy === false ? 9 : 7, "#222");
+    ell(cx + 30, cy + 2, 7, happy === false ? 9 : 7, "#222");
+    ctx.strokeStyle = "rgba(40,25,15,.9)"; ctx.lineWidth = look.brow ? 7 : 4; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(cx - 44, cy - 16); ctx.lineTo(cx - 18, cy - 18); ctx.moveTo(cx + 18, cy - 18); ctx.lineTo(cx + 44, cy - 16); ctx.stroke();
+    ctx.strokeStyle = "rgba(0,0,0,.25)"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(cx, cy + 14); ctx.lineTo(cx - 6, cy + 36); ctx.lineTo(cx + 4, cy + 38); ctx.stroke();
+    ctx.strokeStyle = "#7a2e22"; ctx.lineWidth = 4;
+    ctx.beginPath();
+    if (happy === true) ctx.arc(cx, cy + 52, 18, 0.15, Math.PI - 0.15);
+    else if (happy === false) ctx.ellipse(cx, cy + 66, 10, 13, 0, 0, Math.PI * 2);
+    else { ctx.moveTo(cx - 16, cy + 62); ctx.lineTo(cx + 16, cy + 62); }
+    ctx.stroke();
+  }
+
+  /* お手本の絵：右上の札に、小さな頭とお手本の髪 */
+  function drawSample() {
+    var s = 0.3, bx = W - 152, by = 26, bw = 132, bh = 150;
+    ctx.save();
+    roundRect(bx, by, bw, bh, 14); ctx.fillStyle = "#fffaf0"; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+    roundRect(bx, by, bw, bh, 14); ctx.clip();
+    ctx.translate(bx + bw / 2, by + bh * 0.62);
+    ctx.scale(s, s);
+    ctx.translate(-cx, -cy);
+    ell(cx, cy + 112, 34, 30, "#f2c8a2");
+    ell(cx, cy, 86, 104, "#f2c8a2");
+    ctx.fillStyle = "#2a1a12";
+    var step = 8;
+    for (var y = ay - AR; y < ay + AR; y += step) for (var x = ax - AR; x < ax + AR; x += step) {
+      if (hairable(x + 4, y + 4) && style.f(x + 4, y + 4)) ctx.fillRect(x, y, step + 0.5, step + 0.5);
+    }
+    ctx.fillStyle = "#222";
+    ell(cx - 30, cy + 2, 9, 9, "#222"); ell(cx + 30, cy + 2, 9, 9, "#222");
+    ctx.restore();
+  }
+
+  /* はさみ（指の位置） */
+  function drawScissors(x, y, open) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(-0.6);
+    ctx.strokeStyle = "#cfd6de"; ctx.lineWidth = 6; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-30, -open * 8); ctx.moveTo(0, 0); ctx.lineTo(-30, open * 8); ctx.stroke();
+    ctx.strokeStyle = "#e85a4f"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(14, -8, 8, 0, Math.PI * 2); ctx.moveTo(22, 8); ctx.arc(14, 8, 8, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+    /* 床屋の壁 */
+    ctx.fillStyle = "#f3e9d8"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#e6d6bc";
+    for (var x = 0; x < W; x += 60) ctx.fillRect(x, 0, 30, H);
+    if (hair) {
+      var judged = phase === "judge" ? scores[scores.length - 1] : null;
+      drawHead(judged == null ? null : judged >= 60);
+      paintHair();
+      if (workCv && img) ctx.drawImage(workCv, ox, oy, N * CS, N * CS);
+      /* 刈った髪が落ちる */
+      bits.forEach(function (b) {
+        ctx.globalAlpha = Math.min(1, b.life);
+        ell(b.x, b.y, b.r, b.r * 0.8, "rgb(" + look.hair.join(",") + ")");
+      });
+      ctx.globalAlpha = 1;
+      if (phase === "judge" && state === S.PLAY) {
+        /* 足りない所を白、刈り残しを赤で重ね、重なりの%を出す */
+        ctx.save();
+        ctx.fillStyle = "rgba(255,255,255,.28)";
+        for (var k = 0; k < target.length; k++) {
+          if (!target[k] || hair[k]) continue;
+          ctx.fillRect(ox + (k % N) * CS, oy + ((k / N) | 0) * CS, CS, CS);
+        }
+        ctx.fillStyle = "rgba(255,60,60,.35)";
+        for (k = 0; k < target.length; k++) {
+          if (target[k] || !hair[k]) continue;
+          ctx.fillRect(ox + (k % N) * CS, oy + ((k / N) | 0) * CS, CS, CS);
+        }
+        var a = Math.min(1, judgeT * 4);
+        ctx.globalAlpha = a;
+        ctx.fillStyle = "#fff"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 10; ctx.lineJoin = "round";
+        ctx.font = "900 96px sans-serif"; ctx.textAlign = "center";
+        var ty = ay - AR + 40 + (1 - a) * 30;
+        ctx.strokeText(judged + "%", cx, Math.max(150, ty)); ctx.fillText(judged + "%", cx, Math.max(150, ty));
+        ctx.restore();
+      }
+      if (state === S.PLAY) {
+        drawSample();
+        /* 残り時間の棒と、何人目かの丸 */
+        var bw = W - 200, f = left / TIME;
+        roundRect(24, 34, bw, 14, 7); ctx.fillStyle = "rgba(0,0,0,.15)"; ctx.fill();
+        if (f > 0) { roundRect(24, 34, Math.max(14, bw * f), 14, 7); ctx.fillStyle = f < 0.25 ? "#e85a4f" : "#3a5a8c"; ctx.fill(); }
+        for (var p = 0; p < PEOPLE; p++) {
+          ctx.beginPath(); ctx.arc(36 + p * 30, 74, 9, 0, Math.PI * 2);
+          ctx.fillStyle = p < person || (p === person && phase === "judge") ? "#3a5a8c" : p === person ? "#e85a4f" : "rgba(0,0,0,.15)";
+          ctx.fill();
+        }
+        if (held && phase === "cut") drawScissors(px, py, 0.5 + 0.5 * Math.abs(Math.sin(T * 30)));
+      }
+    }
+    if (state === S.RESULT) drawResult();
+  }
+
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(score + "%", W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, phase: phase, score: score, person: person, style: style && style.id, left: left, scores: scores, match: hair ? match() : 0, W: W, H: H }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(4000);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  layout();
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
