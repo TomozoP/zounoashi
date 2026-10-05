@@ -199,8 +199,7 @@
       d.rotation.set((r() - 0.5) * 1.4, r() * 6, (r() - 0.5) * 1.4);
       d.scale.set((0.2 + r() * 0.12) * ls, 0.018, (0.13 + r() * 0.08) * ls);
       d.updateMatrix(); lm.setMatrixAt(i, d.matrix);
-      if (r() < 0.3) col.setHSL(0.25 + r() * 0.03, 0.5, 0.6 + r() * 0.1);   /* 外側の緑 */
-      else col.setHSL(0.17 + r() * 0.05, 0.5 + r() * 0.2, 0.72 + r() * 0.1);   /* 芯に近い淡い黄緑 */
+      col.setHSL(0.17 + r() * 0.05, 0.5 + r() * 0.2, 0.72 + r() * 0.1);   /* 淡い黄緑 */
       lm.setColorAt(i, col);
     }
     lm.frustumCulled = false;
@@ -391,29 +390,54 @@
       tube.scale.set(1, 1, 1);
       s.add(tube);
     }
-    /* チャーシュー（豚）：厚切りを山に立てかける */
-    var side = new T.MeshPhysicalMaterial({ color: 0x4a200c, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.03 });
-    var face = canvasTex(512, 512, function (g, w, h) {
-      /* 豚バラの断面：濃い焼き色の縁、赤身、白い脂の筋 */
-      g.fillStyle = "#4a200c"; g.fillRect(0, 0, w, h);
-      g.fillStyle = "#b9765a"; g.fillRect(w * 0.04, h * 0.06, w * 0.92, h * 0.88);
-      var rr = rng(4);
-      for (var i = 0; i < 4; i++) {
-        var y = h * (0.2 + i * 0.2 + (rr() - 0.5) * 0.06);
-        g.fillStyle = i % 2 ? "rgba(246,226,204,.95)" : "rgba(236,206,180,.9)";
-        g.beginPath(); g.moveTo(w * 0.04, y);
-        for (var x = 0; x <= 1.0001; x += 0.1) g.lineTo(w * (0.04 + x * 0.92), y + Math.sin(x * 6 + i) * h * 0.025);
-        for (x = 1; x >= -0.0001; x -= 0.1) g.lineTo(w * (0.04 + x * 0.92), y + h * (0.05 + rr() * 0.03) + Math.sin(x * 6 + i) * h * 0.025);
-        g.fill();
+    /* チャーシュー（豚）：丸く巻いた厚切り。まわりはこんがり焼き色、断面は淡い桃色に巻きの筋 */
+    var crust = canvasTex(256, 256, function (g, w, h) {
+      g.fillStyle = "#9a5522"; g.fillRect(0, 0, w, h);
+      var rr = rng(12);
+      for (var i = 0; i < 900; i++) {
+        var c = rr();
+        g.fillStyle = c < 0.4 ? "rgba(70,30,8,.5)" : c < 0.8 ? "rgba(200,130,60,.5)" : "rgba(240,190,120,.5)";
+        g.beginPath(); g.arc(rr() * w, rr() * h, 2 + rr() * 7, 0, 7); g.fill();
       }
-      for (i = 0; i < 260; i++) { g.fillStyle = "rgba(90,40,20," + (rr() * 0.18) + ")"; g.fillRect(w * (0.05 + rr() * 0.9), h * (0.07 + rr() * 0.86), 6, 2); }
-      var e = g.createLinearGradient(0, 0, 0, h);
-      e.addColorStop(0, "rgba(60,25,8,.7)"); e.addColorStop(0.12, "rgba(60,25,8,0)"); e.addColorStop(0.88, "rgba(60,25,8,0)"); e.addColorStop(1, "rgba(60,25,8,.7)");
+    });
+    crust.wrapS = crust.wrapT = T.RepeatWrapping;
+    var side = new T.MeshPhysicalMaterial({ map: crust, roughness: 0.45, clearcoat: 0.8, clearcoatRoughness: 0.15 });
+    var face = canvasTex(512, 512, function (g, w, h) {
+      var cx = w / 2, cy = h / 2, rr = rng(4);
+      g.fillStyle = "#8a4a1c"; g.fillRect(0, 0, w, h);          /* 縁の焼き色 */
+      g.fillStyle = "#c58a62";
+      g.beginPath(); g.ellipse(cx, cy, w * 0.45, h * 0.44, 0, 0, 7); g.fill();
+      var m = g.createRadialGradient(cx, cy, 0, cx, cy, w * 0.44);
+      m.addColorStop(0, "#e2bba4"); m.addColorStop(0.75, "#d6a88c"); m.addColorStop(1, "#bf8460");
+      g.fillStyle = m;
+      g.beginPath(); g.ellipse(cx, cy, w * 0.42, h * 0.41, 0, 0, 7); g.fill();
+      /* 巻いた肉の重なりの筋（うずまき） */
+      g.lineCap = "round";
+      for (var pass = 0; pass < 2; pass++) {
+        g.strokeStyle = pass ? "rgba(245,225,205,.55)" : "rgba(150,80,50,.45)";
+        g.lineWidth = pass ? 4 : 7;
+        g.beginPath();
+        for (var t = 0; t <= 1.0001; t += 0.01) {
+          var ang = t * Math.PI * 5.2 + 0.6, rad = (0.06 + t * 0.34) * w;
+          var x = cx + Math.cos(ang) * rad * 1.02 + (pass ? 3 : 0), y = cy + Math.sin(ang) * rad * 0.98;
+          if (t === 0) g.moveTo(x, y); else g.lineTo(x, y);
+        }
+        g.stroke();
+      }
+      /* 肉の繊維と、ところどころの脂 */
+      for (var i = 0; i < 420; i++) {
+        var a = rr() * 6.28, u = Math.sqrt(rr()) * 0.4;
+        g.fillStyle = rr() < 0.75 ? "rgba(150,85,60," + (rr() * 0.2) + ")" : "rgba(255,240,225," + (rr() * 0.35) + ")";
+        g.fillRect(cx + Math.cos(a) * u * w, cy + Math.sin(a) * u * h, 2 + rr() * 6, 2);
+      }
+      /* 焼き色から肉へのなじみ */
+      var e = g.createRadialGradient(cx, cy, w * 0.33, cx, cy, w * 0.47);
+      e.addColorStop(0, "rgba(120,55,20,0)"); e.addColorStop(1, "rgba(120,55,20,.6)");
       g.fillStyle = e; g.fillRect(0, 0, w, h);
-      /* タレがかかった照り */
-      var t = g.createLinearGradient(0, 0, w, h);
-      t.addColorStop(0, "rgba(120,50,10,.25)"); t.addColorStop(0.35, "rgba(255,240,220,0)"); t.addColorStop(0.42, "rgba(255,245,230,.45)"); t.addColorStop(0.5, "rgba(255,240,220,0)"); t.addColorStop(1, "rgba(110,45,10,.3)");
-      g.fillStyle = t; g.fillRect(0, 0, w, h);
+      /* タレの照り */
+      var tl = g.createLinearGradient(0, 0, w, h);
+      tl.addColorStop(0.3, "rgba(255,240,220,0)"); tl.addColorStop(0.4, "rgba(255,245,230,.35)"); tl.addColorStop(0.5, "rgba(255,240,220,0)");
+      g.fillStyle = tl; g.fillRect(0, 0, w, h);
     });
     /* タレのてり：表面に強い艶の層 */
     var faceM = new T.MeshPhysicalMaterial({ map: face, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 3 });
@@ -422,13 +446,18 @@
     var ch = this.chashu = new T.Group();
     ch.visible = false;
     s.add(ch);
-    var sh = new T.Shape(), pts2 = [[0.05, 0], [0.55, -0.03], [0.97, 0.02], [1.0, 0.3], [0.96, 0.62], [0.5, 0.66], [0.04, 0.6], [0, 0.3]];
-    sh.moveTo(pts2[0][0], pts2[0][1]);
-    pts2.forEach(function (q, k) { var n2 = pts2[(k + 1) % pts2.length]; sh.quadraticCurveTo(n2[0] * 0.15 + q[0] * 0.85, n2[1] * 0.15 + q[1] * 0.85, (q[0] + n2[0]) / 2, (q[1] + n2[1]) / 2); });
-    var cg = new T.ExtrudeGeometry(sh, { depth: 0.22, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.04, bevelSegments: 3, curveSegments: 6 });
-    /* 断面の模様は 0〜1 の座標でそのまま貼る（縦は 0.66 まで） */
+    /* 少しいびつな丸（横0.9×縦0.8） */
+    var sh = new T.Shape(), pts2 = [], cr = rng(21);
+    for (var q = 0; q < 14; q++) {
+      var qa = q / 14 * Math.PI * 2, qr = 1 + (cr() - 0.5) * 0.08;
+      pts2.push([0.45 + Math.cos(qa) * 0.45 * qr, 0.4 + Math.sin(qa) * 0.4 * qr]);
+    }
+    sh.moveTo((pts2[0][0] + pts2[1][0]) / 2, (pts2[0][1] + pts2[1][1]) / 2);
+    for (q = 1; q <= 14; q++) { var q1 = pts2[q % 14], q2 = pts2[(q + 1) % 14]; sh.quadraticCurveTo(q1[0], q1[1], (q1[0] + q2[0]) / 2, (q1[1] + q2[1]) / 2); }
+    var cg = new T.ExtrudeGeometry(sh, { depth: 0.3, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.04, bevelSegments: 3, curveSegments: 4 });
+    /* 断面の模様は 0〜1 に合わせて貼る */
     var uv = cg.attributes.uv;
-    for (var k = 0; k < uv.count; k++) uv.setY(k, uv.getY(k) / 0.66);
+    for (var k = 0; k < uv.count; k++) { uv.setX(k, uv.getX(k) / 0.9); uv.setY(k, uv.getY(k) / 0.8); }
     cg.center();
     /* どんぶりの右側に、2枚をずらして重ねる */
     [[0.95, 0.66, 1.05, -0.45, 0.35, 0.2], [1.15, 0.52, 1.35, -0.45, 0.35, 0.32]].forEach(function (p) {
