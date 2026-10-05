@@ -36,8 +36,8 @@
 <script>
 /* アフロカット
 
-   大きなアフロを指でなぞって刈り、右上のお手本の髪型に近づける。
-   刈った髪は戻らない。1人12秒で3人。お手本との重なり（%）の平均が結果。 */
+   大きなアフロに指で線を引くと、その線で髪が切れて、頭のてっぺんとつながっていない側が落ちる。
+   右上のお手本の髪型に近づける。切った髪は戻らない。1人12秒で3人。お手本との重なり（%）の平均が結果。 */
 (function () {
   "use strict";
 
@@ -169,7 +169,7 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, keyMode = false;
-  var hair, target, hairCount, style, person, phase, left, judgeT, scores, held, px, py, bits, dirty, order, look;
+  var hair, target, hairCount, style, person, phase, left, judgeT, scores, held, px, py, stroke, bits, chunks, dirty, order, look;
 
   var seed = 1;
   function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
@@ -215,7 +215,7 @@
     var skins = ["#f2c8a2", "#e0a77c", "#c68456", "#8d5a3a", "#f6d7bd"];
     var hairs = [[38, 24, 18], [22, 16, 14], [92, 52, 28], [58, 36, 24]];
     look = { skin: skins[Math.floor(rnd() * skins.length)], hair: hairs[Math.floor(rnd() * hairs.length)], brow: rnd() < 0.5 };
-    phase = "cut"; left = TIME; judgeT = 0; dirty = true; bits = [];
+    phase = "cut"; left = TIME; judgeT = 0; dirty = true; bits = []; chunks = []; stroke = null;
     paintTexture();
   }
 
@@ -241,41 +241,76 @@
     return any ? Math.round(both / any * 100) : 0;
   }
 
-  /* (x, y) のまわりを刈る。刈った升目の数を返す */
-  function cutAt(x, y) {
-    var n = 0, r = BLADE / CS;
-    var gi = (x - ox) / CS, gj = (y - oy) / CS;
-    var i0 = Math.max(0, Math.floor(gi - r)), i1 = Math.min(N - 1, Math.ceil(gi + r));
-    var j0 = Math.max(0, Math.floor(gj - r)), j1 = Math.min(N - 1, Math.ceil(gj + r));
-    for (var j = j0; j <= j1; j++) for (var i = i0; i <= i1; i++) {
-      var k = j * N + i;
-      if (!hair[k]) continue;
-      var dx = i + 0.5 - gi, dy = j + 0.5 - gj;
-      if (dx * dx + dy * dy > r * r) continue;
-      hair[k] = 0; n++;
-    }
-    if (n) {
-      dirty = true;
-      if (bits.length < 140 && rnd() < Math.min(1, n / 12)) {
-        bits.push({ x: x + (rnd() - 0.5) * 20, y: y + (rnd() - 0.5) * 20, vx: (rnd() - 0.5) * 120, vy: -60 - rnd() * 80, r: 4 + rnd() * 6, life: 1.6 });
+  /* 線で切る。線の上の升目を消し、頭のてっぺん（根元）とつながらなくなった髪を落とす */
+  var KERF = 1.3;              /* 切り口の太さ（升目） */
+  function cutStroke(pts) {
+    var cutN = 0, r2 = KERF * KERF;
+    for (var p = 1; p < pts.length; p++) {
+      var x0 = pts[p - 1].x, y0 = pts[p - 1].y, x1 = pts[p].x, y1 = pts[p].y;
+      var steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+      for (var s2 = 0; s2 <= steps; s2++) {
+        var gi = (x0 + (x1 - x0) * s2 / steps - ox) / CS, gj = (y0 + (y1 - y0) * s2 / steps - oy) / CS;
+        for (var j = Math.floor(gj - KERF); j <= Math.ceil(gj + KERF); j++) for (var i = Math.floor(gi - KERF); i <= Math.ceil(gi + KERF); i++) {
+          if (i < 0 || j < 0 || i >= N || j >= N) continue;
+          var dx = i + 0.5 - gi, dy = j + 0.5 - gj;
+          if (dx * dx + dy * dy > r2) continue;
+          if (hair[j * N + i]) { hair[j * N + i] = 0; cutN++; }
+        }
       }
     }
-    return n;
+    if (!cutN) return 0;
+    dirty = true;
+    /* 根元から4方向にたどれる髪だけ残す */
+    var keep = new Uint8Array(N * N), q = [];
+    var ri = Math.floor((cx - ox) / CS), rj = Math.floor((cy - 90 - oy) / CS);
+    for (j = rj - 5; j <= rj + 5; j++) for (i = ri - 5; i <= ri + 5; i++) {
+      var k = j * N + i;
+      if (i >= 0 && j >= 0 && i < N && j < N && hair[k] && !keep[k]) { keep[k] = 1; q.push(k); }
+    }
+    while (q.length) {
+      k = q.pop(); i = k % N; j = (k / N) | 0;
+      if (i > 0 && hair[k - 1] && !keep[k - 1]) { keep[k - 1] = 1; q.push(k - 1); }
+      if (i < N - 1 && hair[k + 1] && !keep[k + 1]) { keep[k + 1] = 1; q.push(k + 1); }
+      if (j > 0 && hair[k - N] && !keep[k - N]) { keep[k - N] = 1; q.push(k - N); }
+      if (j < N - 1 && hair[k + N] && !keep[k + N]) { keep[k + N] = 1; q.push(k + N); }
+    }
+    var fall = new Uint8Array(N * N), fallN = 0;
+    for (k = 0; k < hair.length; k++) if (hair[k] && !keep[k]) { fall[k] = 1; hair[k] = 0; fallN++; }
+    if (fallN) dropChunk(fall);
+    for (var b = 0; b < 10; b++) {
+      var pp = pts[Math.floor(rnd() * pts.length)];
+      bits.push({ x: pp.x, y: pp.y, vx: (rnd() - 0.5) * 120, vy: -40 - rnd() * 80, r: 2 + rnd() * 3, life: 1.2 });
+    }
+    return cutN + fallN;
   }
-  function cutLine(x0, y0, x1, y1) {
-    var d = Math.hypot(x1 - x0, y1 - y0), steps = Math.max(1, Math.ceil(d / 4)), n = 0;
-    for (var s = 1; s <= steps; s++) n += cutAt(x0 + (x1 - x0) * s / steps, y0 + (y1 - y0) * s / steps);
-    return n;
+  /* 落ちる髪のかたまりを、もじゃもじゃ模様で切り抜いた絵にして落とす */
+  function dropChunk(fall) {
+    if (!img || chunks.length > 6) return;
+    try {
+      var d = img.data;
+      for (var k = 0; k < fall.length; k++) { d[k * 4] = d[k * 4 + 1] = d[k * 4 + 2] = 0; d[k * 4 + 3] = fall[k] ? 255 : 0; }
+      mctx.putImageData(img, 0, 0);
+      var c = document.createElement("canvas"); c.width = c.height = workCv.width;
+      var g = c.getContext("2d");
+      g.drawImage(texCv, 0, 0);
+      g.globalCompositeOperation = "destination-in";
+      g.imageSmoothingEnabled = true;
+      g.drawImage(maskCv, 0, 0, c.width, c.height);
+      var sx = 0, sy = 0, n = 0;
+      for (k = 0; k < fall.length; k++) if (fall[k]) { sx += k % N; sy += (k / N) | 0; n++; }
+      chunks.push({ cv: c, px: ox + (sx / n + 0.5) * CS, py: oy + (sy / n + 0.5) * CS, dx: 0, dy: 0, vx: (sx / n - N / 2) * 4, vy: -120, rot: 0, vr: (rnd() - 0.5) * 3, t: 0 });
+      dirty = true;
+    } catch (e) {}
   }
 
   /* ============ 進行 ============ */
-  var snipT = 0;
   function update(dt) {
     if (state !== S.PLAY) return;
     T += dt;
-    snipT -= dt;
     bits.forEach(function (b) { b.vy += 900 * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt; });
     bits = bits.filter(function (b) { return b.life > 0 && b.y < H + 20; });
+    chunks.forEach(function (c) { c.vy += 1400 * dt; c.dx += c.vx * dt; c.dy += c.vy * dt; c.rot += c.vr * dt; c.t += dt; });
+    chunks = chunks.filter(function (c) { return c.t < 2; });
     if (phase === "cut") {
       left -= dt;
       if (left <= 0) {
@@ -303,7 +338,7 @@
   }
 
   /* ============ 入力 ============
-     なぞったところを刈る。 */
+     指で線を引き、離したところで切る。 */
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
@@ -314,19 +349,26 @@
     }
     if (x == null || phase !== "cut") return;
     held = true; px = x; py = y;
-    if (cutAt(x, y)) snip();
+    stroke = [{ x: x, y: y }];
   }
   function move(x, y) {
-    if (!held) { px = x; py = y; return; }
-    if (state !== S.PLAY || phase !== "cut") { held = false; return; }
-    if (cutLine(px, py, x, y)) snip();
     px = x; py = y;
+    if (!held || !stroke) return;
+    if (state !== S.PLAY || phase !== "cut") { held = false; stroke = null; return; }
+    var l = stroke[stroke.length - 1];
+    if (Math.hypot(x - l.x, y - l.y) >= 3) stroke.push({ x: x, y: y });
   }
-  function up() { held = false; }
+  function up() {
+    if (!held) return;
+    held = false;
+    if (stroke && stroke.length > 1 && state === S.PLAY && phase === "cut") {
+      if (cutStroke(stroke)) snip();
+    }
+    stroke = null;
+  }
   function snip() {
-    if (snipT > 0) return;
-    snipT = 0.07;
-    noiseHit(0.04, 4200, 0.12, 3);
+    noiseHit(0.06, 4200, 0.14, 3);
+    setTimeout(function () { noiseHit(0.08, 3600, 0.12, 3); }, 70);
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -472,7 +514,13 @@
       drawHead(judged == null ? null : judged >= 60);
       paintHair();
       if (workCv && img) ctx.drawImage(workCv, ox, oy, N * CS, N * CS);
-      /* 刈った髪が落ちる */
+      /* 切れた髪が落ちる */
+      chunks.forEach(function (c) {
+        ctx.save();
+        ctx.translate(c.px + c.dx, c.py + c.dy); ctx.rotate(c.rot); ctx.translate(-c.px, -c.py);
+        ctx.drawImage(c.cv, ox, oy, N * CS, N * CS);
+        ctx.restore();
+      });
       bits.forEach(function (b) {
         ctx.globalAlpha = Math.min(1, b.life);
         ell(b.x, b.y, b.r, b.r * 0.8, "rgb(" + look.hair.join(",") + ")");
@@ -510,7 +558,18 @@
           ctx.fillStyle = p < person || (p === person && phase === "judge") ? "#3a5a8c" : p === person ? "#e85a4f" : "rgba(0,0,0,.15)";
           ctx.fill();
         }
-        if (held && phase === "cut") drawScissors(px, py, 0.5 + 0.5 * Math.abs(Math.sin(T * 30)));
+        if (held && stroke && phase === "cut") {
+          /* 引いている線 */
+          ctx.save();
+          ctx.lineCap = ctx.lineJoin = "round";
+          ctx.strokeStyle = "rgba(255,255,255,.95)"; ctx.lineWidth = 4;
+          ctx.setLineDash([10, 8]); ctx.lineDashOffset = -T * 60;
+          ctx.beginPath(); ctx.moveTo(stroke[0].x, stroke[0].y);
+          for (var si = 1; si < stroke.length; si++) ctx.lineTo(stroke[si].x, stroke[si].y);
+          ctx.stroke();
+          ctx.restore();
+          drawScissors(px, py, 1);
+        }
       }
     }
     if (state === S.RESULT) drawResult();
