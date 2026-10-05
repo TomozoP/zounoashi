@@ -109,7 +109,7 @@
     this.gLeaf = new T.SphereGeometry(1, 8, 5);
     this.gCube = new T.BoxGeometry(1, 1, 1);
     this.mSprout = new T.MeshStandardMaterial({ map: this.sproutAtlas(), alphaTest: 0.5, side: T.DoubleSide, roughness: 0.45, metalness: 0, emissive: 0x2a2410, emissiveIntensity: 0.5 });
-    this.mLeaf = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, side: T.DoubleSide, emissive: 0x142008, emissiveIntensity: 0.5 });
+    this.mLeaf = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, side: T.DoubleSide, emissive: 0x3a4a20, emissiveIntensity: 0.6 });
     this.mGarlic = new T.MeshStandardMaterial({ color: 0xf2e2a0, roughness: 0.6, emissive: 0x2a2208, emissiveIntensity: 0.6 });
     this.mFat = new T.MeshStandardMaterial({ color: 0xfff0d6, roughness: 0.12, emissive: 0x302418, emissiveIntensity: 0.5 });
     this.mKarame = new T.MeshStandardMaterial({ color: 0x4a1e06, roughness: 0.05, transparent: true, opacity: 0.85 });
@@ -190,15 +190,17 @@
     sp.frustumCulled = false;
     g.add(sp);
     /* キャベツ */
-    var nc = Math.round((kind === "kyabetsu" ? 14 : 3) * R * R + (kind === "kyabetsu" ? 4 : 1));
-    var lm = new T.InstancedMesh(this.gLeaf, this.mLeaf, nc);
+    /* 大きめのざく切りを、もやしの表面から見えるように混ぜる */
+    var nc = Math.round((kind === "kyabetsu" ? 16 : 7) * R * R + (kind === "kyabetsu" ? 5 : 2));
+    var lm = new T.InstancedMesh(this.gLeaf, this.mLeaf, nc), ls = Math.min(1, 0.35 + R * 0.5);
     for (i = 0; i < nc; i++) {
-      a = r() * Math.PI * 2; u = Math.sqrt(r()) * 0.9;
-      d.position.set(Math.cos(a) * u * R, H * Math.sqrt(Math.max(0, 1 - u * u)) * 0.85 - 0.06, Math.sin(a) * u * R);
-      d.rotation.set((r() - 0.5) * 1.2, r() * 6, (r() - 0.5) * 1.2);
-      d.scale.set(0.09 + r() * 0.06, 0.012, 0.06 + r() * 0.04);
+      a = r() * Math.PI * 2; u = 0.35 + Math.sqrt(r()) * 0.6;
+      d.position.set(Math.cos(a) * u * R, H * Math.sqrt(Math.max(0, 1 - u * u)) * 0.95 - 0.03, Math.sin(a) * u * R);
+      d.rotation.set((r() - 0.5) * 1.4, r() * 6, (r() - 0.5) * 1.4);
+      d.scale.set((0.2 + r() * 0.12) * ls, 0.018, (0.13 + r() * 0.08) * ls);
       d.updateMatrix(); lm.setMatrixAt(i, d.matrix);
-      col.setHSL(0.24 + r() * 0.04, 0.5, 0.45 + r() * 0.25);
+      if (r() < 0.3) col.setHSL(0.25 + r() * 0.03, 0.5, 0.6 + r() * 0.1);   /* 外側の緑 */
+      else col.setHSL(0.17 + r() * 0.05, 0.5 + r() * 0.2, 0.72 + r() * 0.1);   /* 芯に近い淡い黄緑 */
       lm.setColorAt(i, col);
     }
     lm.frustumCulled = false;
