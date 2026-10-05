@@ -145,5 +145,6 @@ window.DRAFT_GAMES = [
     "play": "games/_meishoku/index.html",
     "full": true,
     "catch": ""
-  }
+  },
+  {"type":"lab","tags":[],"id":"chokupiza","title":"直ピザ配達","year":2026,"date":"2026-10-05","plays":null,"url":"","img":"games/_chokupiza/img/thumb.webp","play":"games/_chokupiza/index.html","full":true,"catch":"ピザを回して直接投げて届ける"},
 ];
