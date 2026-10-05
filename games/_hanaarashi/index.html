@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>花畑荒らし</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #69ad48; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 花畑荒らし
+
+   花畑を走り回って花を踏み荒らすおじさんを、指で追いかけて捕まえる。
+   追いかける自分も花を踏む。花が4割を切ったら終わり。捕まえた人数が結果。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    var nh = view.gameHeight;
+    H = nh;
+    if (!field || (fieldCv && fieldCv.height !== H * 2 && state !== S.PLAY)) makeField();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+  }
+  /* 笛：捕まえたとき */
+  function whistle() {
+    if (!AC) return;
+    for (var i = 0; i < 2; i++) {
+      var o = AC.createOscillator(), m = AC.createOscillator(), mg = AC.createGain(), g = AC.createGain();
+      var n = AC.currentTime + i * 0.22;
+      o.type = "sine"; o.frequency.value = 2300;
+      m.frequency.value = 38; mg.gain.value = 140;
+      m.connect(mg); mg.connect(o.frequency);
+      g.gain.setValueAtTime(0.0001, n);
+      g.gain.exponentialRampToValueAtTime(0.09, n + 0.02);
+      g.gain.setValueAtTime(0.09, n + 0.14);
+      g.gain.exponentialRampToValueAtTime(0.0001, n + 0.2);
+      o.connect(g); g.connect(AC.destination);
+      o.start(n); m.start(n); o.stop(n + 0.25); m.stop(n + 0.25);
+    }
+  }
+  /* おじさんの笑い声（ハッハッハ） */
+  function laugh() {
+    for (var i = 0; i < 3; i++) tone(260 - i * 18, 0.09, 0.07, "sawtooth", 200 - i * 18, i * 0.13);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 数字 ============ */
+  var CELL = 20;               /* 花1本の升目 */
+  var TOP = 120;               /* 花畑の上端 */
+  var SIDE = 14;               /* 花畑の左右の余白 */
+  var FOOT = 13;               /* 踏む広さ（半径） */
+  var P_SPD = 330;             /* 自分の速さ */
+  var CATCH = 36;              /* これより近づけば捕まえる */
+  var END_RATIO = 0.4;         /* 花がこれを切ったら終わり */
+  var COLORS = ["#ff6f91", "#ffd23f", "#ffffff", "#c38bff", "#ff9b3d", "#5ec8ff"];
+
+  /* ============ 花畑 ============ */
+  var field = null, fieldCv = null, fctx = null, cols, rows, total, alive, fx0, fy0, fx1, fy1;
+  function makeField() {
+    cols = Math.floor((W - SIDE * 2) / CELL);
+    rows = Math.floor((H - TOP - 24) / CELL);
+    fx0 = (W - cols * CELL) / 2; fy0 = TOP; fx1 = fx0 + cols * CELL; fy1 = fy0 + rows * CELL;
+    total = cols * rows; alive = total;
+    field = new Uint8Array(total);
+    for (var i = 0; i < total; i++) field[i] = 1;
+    try {
+      fieldCv = document.createElement("canvas");
+      fieldCv.width = W * 2; fieldCv.height = H * 2;
+      fctx = fieldCv.getContext("2d");
+    } catch (e) { fctx = null; }
+    if (fctx) {
+      fctx.setTransform(2, 0, 0, 2, 0, 0);
+      fctx.fillStyle = "#5c9b3e"; fctx.fillRect(0, 0, W, H);
+      fctx.fillStyle = "#4f8a34"; fctx.fillRect(fx0 - 6, fy0 - 6, cols * CELL + 12, rows * CELL + 12);
+      fctx.fillStyle = "#69ad48"; fctx.fillRect(fx0, fy0, cols * CELL, rows * CELL);
+      var r = 7;
+      for (var y = 0; y < rows; y++) for (var x = 0; x < cols; x++) drawFlower(x, y, r);
+    }
+  }
+  function frand(i) { var s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
+  function drawFlower(x, y) {
+    var i = y * cols + x, cx = fx0 + x * CELL + CELL / 2 + (frand(i) - 0.5) * 6, cy = fy0 + y * CELL + CELL / 2 + (frand(i + 9) - 0.5) * 6;
+    var col = COLORS[Math.floor(frand(i + 3) * COLORS.length)];
+    fctx.fillStyle = "#3f7a2a";
+    fctx.beginPath(); fctx.ellipse(cx + 3, cy + 4, 4, 2, 0.6, 0, Math.PI * 2); fctx.fill();
+    fctx.fillStyle = col;
+    for (var k = 0; k < 5; k++) {
+      var a = k / 5 * Math.PI * 2 + frand(i + 5);
+      fctx.beginPath(); fctx.arc(cx + Math.cos(a) * 4, cy + Math.sin(a) * 4, 3.4, 0, Math.PI * 2); fctx.fill();
+    }
+    fctx.fillStyle = col === "#ffd23f" ? "#b8611e" : "#ffe066";
+    fctx.beginPath(); fctx.arc(cx, cy, 2.4, 0, Math.PI * 2); fctx.fill();
+  }
+  /* 踏んだ升目を土にする。踏んだ本数を返す */
+  function trample(px, py) {
+    var n = 0;
+    var x0 = Math.floor((px - FOOT - fx0) / CELL), x1 = Math.floor((px + FOOT - fx0) / CELL);
+    var y0 = Math.floor((py - FOOT - fy0) / CELL), y1 = Math.floor((py + FOOT - fy0) / CELL);
+    for (var y = Math.max(0, y0); y <= Math.min(rows - 1, y1); y++) for (var x = Math.max(0, x0); x <= Math.min(cols - 1, x1); x++) {
+      var i = y * cols + x;
+      if (!field[i]) continue;
+      var cx = fx0 + x * CELL + CELL / 2, cy = fy0 + y * CELL + CELL / 2;
+      if ((cx - px) * (cx - px) + (cy - py) * (cy - py) > (FOOT + 6) * (FOOT + 6)) continue;
+      field[i] = 0; alive--; n++;
+      if (fctx) {
+        fctx.fillStyle = "#8a6a43";
+        fctx.beginPath(); fctx.ellipse(cx, cy, CELL * 0.62, CELL * 0.55, frand(i) * 3, 0, Math.PI * 2); fctx.fill();
+        fctx.fillStyle = "rgba(255,255,255,.35)";
+        var col = COLORS[Math.floor(frand(i + 3) * COLORS.length)];
+        fctx.fillStyle = col; fctx.globalAlpha = 0.5;
+        fctx.beginPath(); fctx.ellipse(cx + 2, cy - 1, 4, 1.6, frand(i + 1) * 3, 0, Math.PI * 2); fctx.fill();
+        fctx.globalAlpha = 1;
+      }
+    }
+    return n;
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, keyMode = false;
+  var me, ojis, held, tx, ty, keys = {}, carried, spawnT, nextId, crunchT, endT;
+
+  var seed = 1;
+  function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+
+  function newOji() {
+    var lvl = score;
+    var side = Math.floor(rnd() * 4), x, y;
+    if (side === 0) { x = fx0 + rnd() * (fx1 - fx0); y = fy0 - 30; }
+    else if (side === 1) { x = fx1 + 30; y = fy0 + rnd() * (fy1 - fy0); }
+    else if (side === 2) { x = fx0 + rnd() * (fx1 - fx0); y = fy1 + 30; }
+    else { x = fx0 - 30; y = fy0 + rnd() * (fy1 - fy0); }
+    return { id: nextId++, x: x, y: y, vx: 0, vy: 0, gx: W / 2, gy: (fy0 + fy1) / 2, walk: 0, flee: false, juke: 0, jx: 0, jy: 0,
+      spd: 125 + lvl * 10, fast: Math.min(320, 270 + lvl * 7), think: 0, entering: 0.6 };
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    score = 0; T = 0;
+    seed = 5 + Math.floor(Math.random() * 1000);
+    nextId = 1;
+    makeField();
+    me = { x: W / 2, y: fy1 - 60, vx: 0, vy: 0, walk: 0, face: 1 };
+    ojis = [newOji()];
+    held = false; carried = []; spawnT = 0; crunchT = 0; endT = 0;
+  }
+
+  /* ============ 進行 ============ */
+  function clampIn(o, m) {
+    o.x = Math.max(fx0 + m, Math.min(fx1 - m, o.x));
+    o.y = Math.max(fy0 + m, Math.min(fy1 - m, o.y));
+  }
+
+  function updateOji(o, dt) {
+    if (o.entering > 0) {
+      o.entering -= dt;
+      var ex = W / 2 - o.x, ey = (fy0 + fy1) / 2 - o.y, el = Math.hypot(ex, ey) || 1;
+      o.vx = ex / el * o.spd * 1.3; o.vy = ey / el * o.spd * 1.3;
+      o.x += o.vx * dt; o.y += o.vy * dt;
+      if (o.x > fx0 + 20 && o.x < fx1 - 20 && o.y > fy0 + 20 && o.y < fy1 - 20) o.entering = 0;
+      o.walk += dt * 10;
+      return;
+    }
+    var dx = o.x - me.x, dy = o.y - me.y, d = Math.hypot(dx, dy) || 1;
+    var wasFlee = o.flee;
+    o.flee = d < 175;
+    if (o.flee && !wasFlee && rnd() < 0.5) laugh();
+    var wx, wy, sp;
+    if (o.flee) {
+      /* 逃げる：自分から離れる向き＋ときどき横っ跳び＋壁から離れる */
+      wx = dx / d; wy = dy / d;
+      o.think -= dt;
+      if (o.think <= 0) {
+        o.think = 0.35 + rnd() * 0.5;
+        var s = rnd() < 0.5 ? -1 : 1;
+        o.jx = -wy * s; o.jy = wx * s;
+        o.juke = rnd() < 0.35 ? 0.25 : 0;
+      }
+      var side = o.juke > 0 ? 1.6 : 0.55;
+      o.juke -= dt;
+      wx += o.jx * side; wy += o.jy * side;
+      var m = 70;
+      if (o.x < fx0 + m) wx += (fx0 + m - o.x) / m * 2.2;
+      if (o.x > fx1 - m) wx -= (o.x - (fx1 - m)) / m * 2.2;
+      if (o.y < fy0 + m) wy += (fy0 + m - o.y) / m * 2.2;
+      if (o.y > fy1 - m) wy -= (o.y - (fy1 - m)) / m * 2.2;
+      sp = o.fast;
+    } else {
+      /* うろつく：まだ花の残っている所へ向かう */
+      o.think -= dt;
+      var gd = Math.hypot(o.gx - o.x, o.gy - o.y);
+      if (o.think <= 0 || gd < 20) {
+        o.think = 1.2 + rnd() * 1.5;
+        var best = -1;
+        for (var k = 0; k < 8; k++) {
+          var cx = fx0 + 30 + rnd() * (fx1 - fx0 - 60), cy = fy0 + 30 + rnd() * (fy1 - fy0 - 60);
+          var ci = Math.floor((cy - fy0) / CELL) * cols + Math.floor((cx - fx0) / CELL);
+          var sc = (field[ci] ? 1 : 0) + rnd() * 0.5 - Math.hypot(cx - o.x, cy - o.y) / 2000;
+          if (sc > best) { best = sc; o.gx = cx; o.gy = cy; }
+        }
+      }
+      wx = o.gx - o.x; wy = o.gy - o.y;
+      sp = o.spd;
+    }
+    var wl = Math.hypot(wx, wy) || 1;
+    var k2 = 1 - Math.exp(-dt * 8);
+    o.vx += (wx / wl * sp - o.vx) * k2; o.vy += (wy / wl * sp - o.vy) * k2;
+    o.x += o.vx * dt; o.y += o.vy * dt;
+    clampIn(o, 16);
+    o.walk += dt * (6 + Math.hypot(o.vx, o.vy) / 25);
+    trample(o.x, o.y + 14);
+  }
+
+  function update(dt) {
+    if (state !== S.PLAY) return;
+    T += dt;
+    /* 自分：触っている所へ走る（キーなら上下左右） */
+    var ax = 0, ay = 0;
+    if (held) { ax = tx - me.x; ay = ty - me.y; }
+    else if (keys.l || keys.r || keys.u || keys.d) { ax = (keys.r ? 1 : 0) - (keys.l ? 1 : 0); ay = (keys.d ? 1 : 0) - (keys.u ? 1 : 0); ax *= 100; ay *= 100; }
+    var al = Math.hypot(ax, ay);
+    var want = al > 6 ? Math.min(P_SPD, al * 8) : 0;
+    var kk = 1 - Math.exp(-dt * 12);
+    me.vx += ((al ? ax / al : 0) * want - me.vx) * kk;
+    me.vy += ((al ? ay / al : 0) * want - me.vy) * kk;
+    me.x += me.vx * dt; me.y += me.vy * dt;
+    clampIn(me, 14);
+    var msp = Math.hypot(me.vx, me.vy);
+    if (Math.abs(me.vx) > 20) me.face = me.vx > 0 ? 1 : -1;
+    me.walk += dt * (msp > 20 ? 6 + msp / 25 : 0);
+    var stepped = msp > 30 ? trample(me.x, me.y + 14) : 0;
+
+    for (var i = ojis.length - 1; i >= 0; i--) {
+      var o = ojis[i];
+      updateOji(o, dt);
+      if (o.entering <= 0 && Math.hypot(o.x - me.x, o.y - me.y) < CATCH) {
+        ojis.splice(i, 1);
+        carried.push({ x: o.x, y: o.y, t: 0, walk: o.walk });
+        score++;
+        whistle();
+        spawnT = 1.0;
+      }
+    }
+    /* 捕まえたおじさんは、くるくる回って空へ飛んでいく */
+    carried.forEach(function (c) { c.t += dt; });
+    carried = carried.filter(function (c) { return c.t < 1.4; });
+    if (spawnT > 0) {
+      spawnT -= dt;
+      if (spawnT <= 0) {
+        var want2 = score >= 6 ? 3 : score >= 3 ? 2 : 1;
+        while (ojis.length < want2) ojis.push(newOji());
+      }
+    }
+    crunchT -= dt;
+    if (crunchT <= 0 && (stepped || ojis.length)) { crunchT = 0.18; noiseHit(0.05, 1800, 0.05, 2); }
+    if (alive / total < END_RATIO) end();
+  }
+
+  function end() {
+    state = S.RESULT;
+    shareButton.hidden = false;
+    held = false;
+    tone(330, 0.3, 0.08, "triangle", 220);
+  }
+
+  /* ============ 入力 ============
+     触っている間、その場所へ向かって走る。 */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (x == null) return;
+    held = true; tx = x; ty = y;
+  }
+  function move(x, y) {
+    if (state !== S.PLAY || !held) return;
+    tx = x; ty = y;
+  }
+  function up() { held = false; }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); keys = {}; });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    if (state !== S.PLAY) return;
+    if (n === 1 && ojis.length) { me.x = ojis[0].x; me.y = ojis[0].y; ojis[0].entering = 0; }
+    if (n === 2) {
+      /* 終わりの手前まで花を減らす */
+      for (var i = 0; i < total && alive / total > END_RATIO + 0.03; i++) {
+        var j = Math.floor(rnd() * total);
+        if (field[j]) trample(fx0 + (j % cols) * CELL + CELL / 2, fy0 + Math.floor(j / cols) * CELL + CELL / 2);
+      }
+    }
+    if (n === 3) { score += 3; ojis.forEach(function (o) { o.spd += 30; o.fast = Math.min(320, o.fast + 21); }); spawnT = 0.01; }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var k = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r", ArrowUp: "u", w: "u", W: "u", ArrowDown: "d", s: "d", S: "d" }[e.key];
+    if (!esc && !go && !k) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (k) { keys[k] = true; return; }
+    if (e.repeat) return;
+    if (state === S.RESULT) down();
+  });
+  window.addEventListener("keyup", function (e) {
+    var k = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r", ArrowUp: "u", w: "u", W: "u", ArrowDown: "d", s: "d", S: "d" }[e.key];
+    if (k) keys[k] = false;
+    if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
+  });
+
+  function doShare() {
+    var text;
+    if (score === 0) text = zT("花畑を踏み荒らすおじさんを一人も捕まえられず、一緒に花畑を踏み荒らした", "Couldn't catch a single flower-stomping old man and stomped the flower field with him");
+    else if (score >= 10) text = zT("花畑を踏み荒らすおじさんを" + score + "人捕まえて花畑の守り神になった", "Caught " + score + " flower-stomping old men and became the guardian of the flower field");
+    else text = zT("花畑を踏み荒らすおじさんを" + score + "人捕まえた", "Caught " + score + " flower-stomping old men");
+    window.zResultActions.x({ text: text + zT(" #花畑荒らし", " #FlowerFieldStomper") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function ell(x, y, rx, ry, col) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
+
+  /* おじさん：はげ頭に横の白髪、ひげ、白い肌着に腹巻。逃げるときは汗 */
+  function drawOji(x, y, walk, flee, face) {
+    var sw = Math.sin(walk), up = Math.abs(Math.cos(walk)) * 2;
+    ell(x, y + 22, 16, 6, "rgba(0,0,0,.25)");
+    ctx.save(); ctx.translate(x, y - up);
+    ctx.strokeStyle = "#5a4636"; ctx.lineWidth = 7; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-5, 8); ctx.lineTo(-5 - sw * 5, 20); ctx.moveTo(5, 8); ctx.lineTo(5 + sw * 5, 20); ctx.stroke();
+    ctx.strokeStyle = "#f0c39a"; ctx.lineWidth = 5;
+    var arm = flee ? -1 : 1;
+    ctx.beginPath(); ctx.moveTo(-11, -6); ctx.lineTo(-17 + sw * 4 * arm, flee ? -18 : 6); ctx.moveTo(11, -6); ctx.lineTo(17 - sw * 4 * arm, flee ? -18 : 6); ctx.stroke();
+    ell(0, -1, 13, 13, "#f7f5ee");
+    ctx.fillStyle = "#c9a43c"; ctx.fillRect(-12.5, 2, 25, 8);
+    ctx.fillStyle = "#a8862b"; ctx.fillRect(-12.5, 5, 25, 1.5);
+    ell(0, -20, 11, 11, "#f0c39a");
+    ell(-3, -25, 4, 2.5, "rgba(255,255,255,.7)");
+    ctx.fillStyle = "#d8d8d8";
+    ctx.beginPath(); ctx.arc(-10, -19, 4, 0, Math.PI * 2); ctx.arc(10, -19, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#222";
+    if (flee) { ctx.fillRect(-6, -21, 3, 3); ctx.fillRect(3, -21, 3, 3); }
+    else { ctx.lineWidth = 1.6; ctx.strokeStyle = "#222"; ctx.beginPath(); ctx.arc(-4.5, -20, 2, Math.PI * 1.1, Math.PI * 1.9); ctx.arc(4.5, -20, 2, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); }
+    ctx.fillStyle = "#333"; ctx.beginPath(); ctx.ellipse(0, -15.5, 5.5, 2, 0, 0, Math.PI * 2); ctx.fill();
+    if (flee) {
+      ctx.fillStyle = "#222"; ctx.beginPath(); ctx.ellipse(0, -12, 2.5, 2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#8fd3ff"; ctx.beginPath(); ctx.moveTo(13, -30); ctx.quadraticCurveTo(17, -24, 13, -22); ctx.quadraticCurveTo(10, -25, 13, -30); ctx.fill();
+    } else {
+      ctx.strokeStyle = "#222"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(0, -14, 3, 0.2, Math.PI - 0.2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  /* 自分：麦わら帽子に緑の前掛け */
+  function drawMe(x, y, walk, face) {
+    var sw = Math.sin(walk), up = Math.abs(Math.cos(walk)) * 2;
+    ell(x, y + 22, 15, 6, "rgba(0,0,0,.25)");
+    ctx.save(); ctx.translate(x, y - up);
+    ctx.strokeStyle = "#2d3a55"; ctx.lineWidth = 7; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-5, 8); ctx.lineTo(-5 - sw * 5, 20); ctx.moveTo(5, 8); ctx.lineTo(5 + sw * 5, 20); ctx.stroke();
+    ctx.strokeStyle = "#e9b48f"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(-10, -6); ctx.lineTo(-16 - sw * 5, 5); ctx.moveTo(10, -6); ctx.lineTo(16 + sw * 5, 5); ctx.stroke();
+    roundRect(-11, -12, 22, 22, 7); ctx.fillStyle = "#e85a4f"; ctx.fill();
+    roundRect(-8, -6, 16, 16, 4); ctx.fillStyle = "#3f8f4a"; ctx.fill();
+    ell(0, -21, 10, 10, "#e9b48f");
+    ctx.fillStyle = "#222"; ctx.fillRect(-4 + face, -22, 2.5, 3); ctx.fillRect(2 + face, -22, 2.5, 3);
+    ell(0, -27, 17, 5, "#e8c66a");
+    ell(0, -30, 9, 6, "#e8c66a");
+    ctx.fillStyle = "#c0392b"; ctx.fillRect(-9, -29, 18, 2.5);
+    ctx.restore();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+    if (fieldCv && fctx) ctx.drawImage(fieldCv, 0, 0, fieldCv.width / 2, fieldCv.height / 2);
+    else { ctx.fillStyle = "#69ad48"; ctx.fillRect(0, 0, W, H); }
+
+    if (me) {
+      /* 奥（上）にいる人から描く */
+      var list = [{ y: me.y, f: function () { drawMe(me.x, me.y, me.walk, me.face); } }];
+      (ojis || []).forEach(function (o) { list.push({ y: o.y, f: function () { drawOji(o.x, o.y, o.walk, o.flee, 1); } }); });
+      list.sort(function (a, b) { return a.y - b.y; });
+      list.forEach(function (it) { it.f(); });
+      (carried || []).forEach(function (c) {
+        var k = c.t / 1.4;
+        ctx.save();
+        ctx.translate(c.x, c.y - k * k * 900);
+        ctx.rotate(k * 14);
+        ctx.scale(1 - k * 0.5, 1 - k * 0.5);
+        drawOji(0, 0, c.walk, true, 1);
+        ctx.restore();
+      });
+    }
+
+    if (state === S.PLAY || state === S.INTRO) {
+      /* 捕まえた人数と、残りの花の棒（左が終わりの線） */
+      ctx.save();
+      ctx.fillStyle = "#fff"; ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.lineWidth = 6;
+      ctx.font = "800 60px sans-serif"; ctx.textAlign = "center";
+      ctx.strokeText(String(score), W / 2, 70); ctx.fillText(String(score), W / 2, 70);
+      var bx = 60, bw = W - 120, by = 90, bh = 10;
+      roundRect(bx, by, bw, bh, 5); ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.fill();
+      var f = Math.max(0, (alive / total - END_RATIO) / (1 - END_RATIO));
+      if (f > 0) { roundRect(bx, by, Math.max(bh, bw * f), bh, 5); ctx.fillStyle = f < 0.25 ? "#ff6f6f" : "#ffd6e4"; ctx.fill(); }
+      ctx.restore();
+    }
+
+    if (state === S.RESULT) drawResult();
+  }
+
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, score: score, alive: alive, total: total, ratio: alive / total, me: me && { x: me.x, y: me.y }, ojis: (ojis || []).map(function (o) { return { x: o.x, y: o.y, flee: o.flee, entering: o.entering }; }), W: W, H: H }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); },
+    hold: function (x, y) { if (x == null) held = false; else { held = true; tx = x; ty = y; } }
+  };
+
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(4000);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  layout();
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
