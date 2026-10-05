@@ -105,7 +105,7 @@
   });
 
   /* ============ 数字 ============ */
-  var CS = 4;                  /* 髪の升目（ゲーム座標） */
+  var CS = 2;                  /* 髪の升目（ゲーム座標） */
   var AR = 215;                /* アフロの半径 */
   var BLADE = 17;              /* 一度に刈れる半径 */
   var PEOPLE = 3;
@@ -174,31 +174,37 @@
   function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
 
   /* 髪の絵：もじゃもじゃの模様（texCv）を、残っている升目の形（maskCv）で切り抜いて workCv に描く */
-  var HR = 2;                  /* 髪の絵の細かさ（ゲーム座標1あたりの画素） */
-  var maskCv = null, mctx = null, img = null, texCv = null, tctx = null, workCv = null, wctx = null;
+  var HR = 2.5;                /* 髪の絵の細かさ（ゲーム座標1あたりの画素） */
+  var judgeFor = -1, judgeCv = null, jctx = null, maskCv = null, mctx = null, img = null, texCv = null, tctx = null, workCv = null, wctx = null;
   function makeHairCanvas() {
     if (maskCv) return;
     try {
       maskCv = document.createElement("canvas"); maskCv.width = N; maskCv.height = N;
       mctx = maskCv.getContext("2d");
       img = mctx.createImageData(N, N);
-      texCv = document.createElement("canvas"); texCv.width = texCv.height = N * CS * HR;
+      texCv = document.createElement("canvas"); texCv.width = texCv.height = Math.round(N * CS * HR);
       tctx = texCv.getContext("2d");
-      workCv = document.createElement("canvas"); workCv.width = workCv.height = N * CS * HR;
+      workCv = document.createElement("canvas"); workCv.width = workCv.height = Math.round(N * CS * HR);
+      judgeCv = document.createElement("canvas"); judgeCv.width = judgeCv.height = N;
+      jctx = judgeCv.getContext("2d");
       wctx = workCv.getContext("2d");
     } catch (e) { mctx = null; img = null; }
   }
   function paintTexture() {
     if (!tctx) return;
-    var c = look.hair, sz = N * CS * HR;
-    function col(m) { return "rgb(" + Math.round(c[0] * m) + "," + Math.round(c[1] * m) + "," + Math.round(c[2] * m) + ")"; }
-    tctx.fillStyle = col(0.8); tctx.fillRect(0, 0, sz, sz);
-    tctx.lineWidth = 2.2 * HR; tctx.lineCap = "round";
-    for (var i = 0; i < 2600; i++) {
-      var x = rnd() * sz, y = rnd() * sz, r = (3 + rnd() * 5) * HR, a = rnd() * 6.28;
-      tctx.strokeStyle = col(0.55 + rnd() * 0.9);
-      tctx.beginPath(); tctx.arc(x, y, r, a, a + 3.5 + rnd() * 2); tctx.stroke();
-    }
+    var c = look.hair, sz = texCv.width;
+    function col(m) { return "rgb(" + Math.min(255, Math.round(c[0] * m)) + "," + Math.min(255, Math.round(c[1] * m)) + "," + Math.min(255, Math.round(c[2] * m)) + ")"; }
+    tctx.fillStyle = col(0.7); tctx.fillRect(0, 0, sz, sz);
+    tctx.lineCap = "round";
+    /* 細かい巻き毛：暗い段・ふつう・明るい段の順に重ねる */
+    [[0.45, 5000, 1.6], [0.9, 7000, 1.3], [1.5, 3500, 1.0]].forEach(function (L) {
+      tctx.lineWidth = L[2] * HR;
+      for (var i = 0; i < L[1]; i++) {
+        var x = rnd() * sz, y = rnd() * sz, r = (1.8 + rnd() * 3.2) * HR, a = rnd() * 6.28;
+        tctx.strokeStyle = col(L[0] * (0.8 + rnd() * 0.4));
+        tctx.beginPath(); tctx.arc(x, y, r, a, a + 3 + rnd() * 2.5); tctx.stroke();
+      }
+    });
   }
 
   function newPerson() {
@@ -226,7 +232,7 @@
     seed = 3 + Math.floor(Math.random() * 100000);
     order = STYLES.map(function (s, i) { return i; });
     for (var i = order.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = order[i]; order[i] = order[j]; order[j] = t; }
-    person = 0; scores = []; held = false;
+    person = 0; scores = []; held = false; judgeFor = -1;
     newPerson();
   }
 
@@ -241,7 +247,7 @@
   }
 
   /* 線で切る。線の上の升目を消し、頭のてっぺん（根元）とつながらなくなった髪を落とす */
-  var KERF = 1.3;              /* 切り口の太さ（升目） */
+  var KERF = 2.0;              /* 切り口の太さ（升目） */
   function cutStroke(pts) {
     var cutN = 0, r2 = KERF * KERF;
     for (var p = 1; p < pts.length; p++) {
@@ -262,7 +268,7 @@
     /* 根元から4方向にたどれる髪だけ残す */
     var keep = new Uint8Array(N * N), q = [];
     var ri = Math.floor((cx - ox) / CS), rj = Math.floor((cy - 90 - oy) / CS);
-    for (j = rj - 5; j <= rj + 5; j++) for (i = ri - 5; i <= ri + 5; i++) {
+    for (j = rj - 10; j <= rj + 10; j++) for (i = ri - 10; i <= ri + 10; i++) {
       var k = j * N + i;
       if (i >= 0 && j >= 0 && i < N && j < N && hair[k] && !keep[k]) { keep[k] = 1; q.push(k); }
     }
@@ -297,7 +303,7 @@
       g.drawImage(maskCv, 0, 0, c.width, c.height);
       var sx = 0, sy = 0, n = 0;
       for (k = 0; k < fall.length; k++) if (fall[k]) { sx += k % N; sy += (k / N) | 0; n++; }
-      chunks.push({ cv: c, px: ox + (sx / n + 0.5) * CS, py: oy + (sy / n + 0.5) * CS, dx: 0, dy: 0, vx: (sx / n - N / 2) * 4, vy: -120, rot: 0, vr: (rnd() - 0.5) * 3, t: 0 });
+      chunks.push({ cv: c, px: ox + (sx / n + 0.5) * CS, py: oy + (sy / n + 0.5) * CS, dx: 0, dy: 0, vx: (sx / n - N / 2) * 2, vy: -120, rot: 0, vr: (rnd() - 0.5) * 3, t: 0 });
       dirty = true;
     } catch (e) {}
   }
@@ -481,9 +487,9 @@
     ell(cx, cy + 112, 34, 30, "#f2c8a2");
     ell(cx, cy, 86, 104, "#f2c8a2");
     ctx.fillStyle = "#2a1a12";
-    var step = 8;
+    var step = 4;
     for (var y = ay - AR; y < ay + AR; y += step) for (var x = ax - AR; x < ax + AR; x += step) {
-      if (hairable(x + 4, y + 4) && style.f(x + 4, y + 4)) ctx.fillRect(x, y, step + 0.5, step + 0.5);
+      if (hairable(x + 2, y + 2) && style.f(x + 2, y + 2)) ctx.fillRect(x, y, step + 0.8, step + 0.8);
     }
     ctx.fillStyle = "#222";
     ell(cx - 30, cy + 2, 9, 9, "#222"); ell(cx + 30, cy + 2, 9, 9, "#222");
@@ -527,16 +533,16 @@
       if (phase === "judge" && state === S.PLAY) {
         /* 足りない所を白、刈り残しを赤で重ね、重なりの%を出す */
         ctx.save();
-        ctx.fillStyle = "rgba(255,255,255,.28)";
-        for (var k = 0; k < target.length; k++) {
-          if (!target[k] || hair[k]) continue;
-          ctx.fillRect(ox + (k % N) * CS, oy + ((k / N) | 0) * CS, CS, CS);
+        if (jctx && judgeFor !== person) {
+          judgeFor = person;
+          var jd = jctx.createImageData(N, N), q = jd.data;
+          for (var k = 0; k < target.length; k++) {
+            if (target[k] && !hair[k]) { q[k * 4] = q[k * 4 + 1] = q[k * 4 + 2] = 255; q[k * 4 + 3] = 72; }
+            else if (!target[k] && hair[k]) { q[k * 4] = 255; q[k * 4 + 1] = 60; q[k * 4 + 2] = 60; q[k * 4 + 3] = 90; }
+          }
+          jctx.putImageData(jd, 0, 0);
         }
-        ctx.fillStyle = "rgba(255,60,60,.35)";
-        for (k = 0; k < target.length; k++) {
-          if (target[k] || !hair[k]) continue;
-          ctx.fillRect(ox + (k % N) * CS, oy + ((k / N) | 0) * CS, CS, CS);
-        }
+        if (judgeCv) ctx.drawImage(judgeCv, ox, oy, N * CS, N * CS);
         var a = Math.min(1, judgeT * 4);
         ctx.globalAlpha = a;
         ctx.fillStyle = "#fff"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 10; ctx.lineJoin = "round";
