@@ -353,7 +353,9 @@
     if (!this.eyes) return;
     var A = this.anim || (this.anim = { blink: now + 1.5, gx: 0, gy: 0, tx: 0, ty: 0, next: now + 1 });
     if (now > A.next) { A.tx = (Math.random() * 2 - 1) * 0.9; A.ty = (Math.random() * 2 - 1) * 0.5; A.next = now + 0.6 + Math.random() * 2.2; }
-    var f = Math.min(1, 0.25); A.gx += (A.tx - A.gx) * f; A.gy += (A.ty - A.gy) * f;
+    var f = 0.25; A.gx += (A.tx - A.gx) * f; A.gy += (A.ty - A.gy) * f;
+    /* はさみを持っている間は、両目ではさみを追う */
+    var aim = this.aim, cam = this.g;
     var bt = now - A.blink, bl = 0;
     if (bt > 0) { bl = bt < 0.07 ? bt / 0.07 : bt < 0.17 ? 1 - (bt - 0.07) / 0.1 : 0; if (bt > 0.17) A.blink = now + 1.8 + Math.random() * 3.5; }
     var n1 = Math.sin(now * 0.9) * 0.6 + Math.sin(now * 2.3 + 1) * 0.4, n2 = Math.sin(now * 0.7 + 2) * 0.5 + Math.sin(now * 1.9) * 0.5;
@@ -362,7 +364,14 @@
       e.shut.visible = shut;
       e.open.forEach(function (o) { o.visible = !shut; });
       e.lid.rotation.x = 0.06 * n2;
-      e.look.rotation.y = A.gx * 0.32; e.look.rotation.x = A.gy * 0.25;
+      var ry = A.gx * 0.32, rx = A.gy * 0.25;
+      if (aim && cam) {
+        var dx = aim.x - (cam.cx + e.s * 30), dy = aim.y - (cam.cy + 2);
+        ry = Math.max(-0.55, Math.min(0.55, Math.atan2(dx, 160)));
+        rx = Math.max(-0.45, Math.min(0.45, Math.atan2(dy, 160)));
+      }
+      e.ry = e.ry == null ? ry : e.ry + (ry - e.ry) * 0.35; e.rx = e.rx == null ? rx : e.rx + (rx - e.rx) * 0.35;
+      e.look.rotation.y = e.ry; e.look.rotation.x = e.rx;
       e.brow.position.y = 1.4 * n1 + (e.s > 0 ? 0.6 : -0.6) * n2;
       e.brow.rotation.z = 0;
     });
