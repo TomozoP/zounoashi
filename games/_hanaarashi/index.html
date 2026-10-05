@@ -48,7 +48,7 @@
   window.zResultActions.bind(shareButton, doShare);
 
   var W = 540, H = 960;
-  var yaw = 0, turnTouch = null, walkTouch = null, stick = null;
+  var yaw = 0, goalX = 0, goalY = 0;
   var portrait = new Image(); portrait.src = "img/ojisan.png";
   function layout() {
     var view = window.zGameView.measure(wrap, W);
@@ -222,7 +222,7 @@
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    score = 0; T = 0; yaw = 0; stick = null; walkTouch = null; turnTouch = null;
+    score = 0; T = 0; yaw = 0;
     seed = 5 + Math.floor(Math.random() * 1000);
     nextId = 1;
     makeField();
@@ -300,12 +300,14 @@
   function update(dt) {
     if (state !== S.PLAY) return;
     T += dt;
-    /* 一人称：前後移動と向き。左の指は移動、右の指は見回す。 */
-    yaw += ((keys.r ? 1 : 0) - (keys.l ? 1 : 0)) * dt * 1.8;
-    var forward = (keys.u ? 1 : 0) - (keys.d ? 1 : 0), sideways = 0;
-    if (stick) { forward = Math.max(-1, Math.min(1, (stick.y - ty) / 65)); sideways = Math.max(-1, Math.min(1, (tx - stick.x) / 65)); }
-    var ax = (Math.sin(yaw) * forward + Math.cos(yaw) * sideways) * 100;
-    var ay = (-Math.cos(yaw) * forward + Math.sin(yaw) * sideways) * 100;
+    /* 触っている場所へ走る。キーは以前と同じ上下左右の移動。 */
+    var ax = 0, ay = 0;
+    if (held) {
+      ax = goalX - me.x; ay = goalY - me.y;
+    } else if (keys.l || keys.r || keys.u || keys.d) {
+      ax = ((keys.r ? 1 : 0) - (keys.l ? 1 : 0)) * 100;
+      ay = ((keys.d ? 1 : 0) - (keys.u ? 1 : 0)) * 100;
+    }
     var al = Math.hypot(ax, ay);
     var want = al > 6 ? Math.min(P_SPD, al * 8) : 0;
     var kk = 1 - Math.exp(-dt * 12);
@@ -362,33 +364,33 @@
       return;
     }
     if (x == null) return;
-    held = true; tx = x; ty = y;
+    held = true; target(x, y);
+  }
+  function target(x, y) {
+    tx = x; ty = y;
+    /* 画面で触れた地面を花畑の座標へ戻し、到着したら止まる。 */
+    var depth = 400 * 48 / Math.max(24, y - H * 0.43);
+    goalX = Math.max(fx0 + 14, Math.min(fx1 - 14, me.x + (x - W / 2) * depth / 400));
+    goalY = Math.max(fy0 + 14, Math.min(fy1 - 14, me.y - depth));
   }
   function move(x, y) {
     if (state !== S.PLAY || !held) return;
-    tx = x; ty = y;
+    target(x, y);
   }
   function up() { held = false; }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
-    if (state === S.INTRO) return;
-    var p = atCanvas(e); audioOn();
-    if (state === S.RESULT) { down(p.x, p.y); return; }
-    e.preventDefault();
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
     if (wrap.setPointerCapture && e.pointerId != null) wrap.setPointerCapture(e.pointerId);
-    if (p.x < W * 0.5) { walkTouch = e.pointerId; stick = {x:p.x,y:p.y}; tx=p.x; ty=p.y; }
-    else { turnTouch = {id:e.pointerId,x:p.x}; }
   });
   wrap.addEventListener("pointermove", function(e) {
-    var p=atCanvas(e);
-    if (turnTouch && e.pointerId === turnTouch.id) { yaw += (p.x-turnTouch.x)*0.006; turnTouch.x=p.x; }
-    if (stick && e.pointerId === walkTouch) { tx=p.x; ty=p.y; }
+    var p=atCanvas(e); move(p.x, p.y);
   });
-  function release(e) { if(e.pointerId===walkTouch) { stick=null; walkTouch=null; } if(turnTouch && e.pointerId===turnTouch.id) turnTouch=null; }
-  wrap.addEventListener("pointerup", release);
-  wrap.addEventListener("pointercancel", release);
-  window.addEventListener("blur", function(){ stick=null; turnTouch=null; keys={}; });
+  wrap.addEventListener("pointerup", function(e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", up);
+  window.addEventListener("blur", function(){ up(); keys={}; });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
@@ -491,13 +493,10 @@
         if(portrait.complete && portrait.width) ctx.drawImage(portrait,p.x-w/2,p.y-h-lift,w,h);
       }
     });
-    /* 小さい照準と移動用の丸だけを重ねる。 */
+    /* 触っている場所を小さい丸で示す。 */
     if(state===S.PLAY){
       ctx.strokeStyle="rgba(255,255,255,.85)";ctx.lineWidth=2;
-      ctx.beginPath();ctx.arc(W/2,H*0.49,4,0,Math.PI*2);ctx.stroke();
-      var sx=stick?stick.x:92,sy=stick?stick.y:H-125;
-      ctx.strokeStyle="rgba(255,255,255,.38)";ctx.lineWidth=3;ctx.beginPath();ctx.arc(sx,sy,58,0,Math.PI*2);ctx.stroke();
-      ell(stick?Math.max(sx-48,Math.min(sx+48,tx)):sx,stick?Math.max(sy-48,Math.min(sy+48,ty)):sy,22,22,"rgba(255,255,255,.28)");
+      if (held) { ctx.beginPath();ctx.arc(tx,ty,12,0,Math.PI*2);ctx.stroke(); }
     }
   }
 
@@ -570,7 +569,7 @@
     now: function () { return { state: state, score: score, alive: alive, total: total, ratio: alive / total, me: me && { x: me.x, y: me.y, yaw: yaw }, ojis: (ojis || []).map(function (o) { return { x: o.x, y: o.y, flee: o.flee, entering: o.entering }; }), W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
-    hold: function (x, y) { if (x == null) held = false; else { held = true; tx = x; ty = y; } }
+    hold: function (x, y) { if (x == null) held = false; else { held = true; target(x, y); } }
   };
 
   window.__recording = {

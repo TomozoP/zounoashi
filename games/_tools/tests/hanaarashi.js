@@ -1,4 +1,4 @@
-/* 一人称の移動・捕獲・結果画面を短く確認する。 */
+/* 以前の上下左右・タッチ移動と、捕獲・結果画面を短く確認する。 */
 const assert = require('assert');
 const load = require('../harness');
 const g = load('games/_hanaarashi/index.html');
@@ -10,7 +10,11 @@ const start = g.probe.now().me;
 g.key('w'); g.step(20); g.key('w', true);
 assert(g.probe.now().me.y < start.y, '前に進む');
 g.key('d'); g.step(20); g.key('d', true);
-assert(g.probe.now().me.yaw > 0, '右を向く');
+assert(g.probe.now().me.x > start.x, '右に移動する');
+assert.equal(g.probe.now().me.yaw, 0, 'キーで視点を回さない');
+const beforeTouch = g.probe.now().me;
+g.down(430, g.probe.now().H * 0.7); g.step(15); g.up();
+assert(g.probe.now().me.x > beforeTouch.x && g.probe.now().me.y < beforeTouch.y, '画面で触れた地面へ走る');
 g.win.fire('keydown', {key:'1',code:'Digit1',preventDefault:function(){}}); g.step(2);
 assert(g.probe.now().score >= 1, '近づくと捕まえる');
 g.win.fire('keydown', {key:'2',code:'Digit2',preventDefault:function(){}});
@@ -18,4 +22,4 @@ g.step(1800);
 assert.equal(g.probe.now().state, 'result');
 g.press(' '); g.step(2);
 assert.equal(g.probe.now().state, 'play');
-console.log('花畑荒らし：移動・旋回・捕獲・終了・再開を確認');
+console.log('花畑荒らし：上下左右・タッチ移動・捕獲・終了・再開を確認');
