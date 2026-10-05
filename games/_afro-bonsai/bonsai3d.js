@@ -330,7 +330,8 @@
       var lp = [];
       function onCover(x, y) { return R * 0.95 + 1.5 - 1.5 * (x / R) * (x / R); }   /* ふくらみの少し手前に浮かせる（正面からは区別がつかない） */
       for (var q = 0; q <= 1.001; q += 0.1) {
-        var lx = (q * 2 - 1) * R * 1.0, ly = -R * 0.18 - R * 0.22 * (1 - (q * 2 - 1) * (q * 2 - 1));   /* 下にふくらむ弧 */
+        var lx = (q * 2 - 1) * R * 1.0, qq = 1 - (q * 2 - 1) * (q * 2 - 1);
+        var ly = expr === "joy" ? -R * 0.3 + R * 0.6 * qq : -R * 0.18 - R * 0.22 * qq;   /* 笑うと上にふくらむ「∩」、まばたきは下にふくらむ弧 */
         lp.push(new T.Vector3(lx, ly, onCover(lx, ly)));
       }
       if (expr === "ouch") {
@@ -339,9 +340,9 @@
           return new T.Vector3(v.x, v.y, onCover(v.x, v.y) + 0.3);
         });
         shutG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(lp, false, "catmullrom", 0.1), 24, 1.6, 6, false), lashM));
-      } else shutG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(lp), 20, 0.9, 6, false), lashM));
+      } else shutG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(lp), 20, expr === "joy" ? 1.4 : 0.9, 6, false), lashM));
       var openParts = [eye, look, lidG, low];
-      eyes.push({ s: s, lid: lidG, a: a, look: look, brow: browG, shut: shutG, open: openParts, closed: expr === "ouch" });
+      eyes.push({ s: s, lid: lidG, a: a, look: look, brow: browG, shut: shutG, open: openParts, closed: expr === "ouch" || expr === "joy" });
     });
     /* 毎コマ描き直す顔の範囲（髪がかぶらない生え際の下から口まで） */
     F.traverse(function (o) { o.layers.enable(1); });
