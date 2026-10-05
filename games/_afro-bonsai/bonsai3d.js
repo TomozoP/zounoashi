@@ -53,7 +53,7 @@
     [-1, 1].forEach(function (s) {
       var ear = new T.Mesh(new T.SphereGeometry(1, 20, 14), skin);
       ear.scale.set(13, 20, 10); ear.position.set(cx + s * 84, -(cy + 4), 140); G.add(ear);
-      var inner = new T.Mesh(new T.SphereGeometry(1, 16, 12), std(0xd9a93c, { roughness: 0.7 }));
+      var inner = new T.Mesh(new T.SphereGeometry(1, 16, 12), std(0x5e3f26, { roughness: 0.8 }));
       inner.scale.set(7, 12, 6); inner.position.set(cx + s * 86, -(cy + 4), 146); G.add(inner);
     });
     /* 幹 */
@@ -220,6 +220,10 @@
   /* 肌の色むら：頬と鼻先に赤み、唇、口の中と歯 */
   function tint(gu, gv, e, out) {
     var au = Math.abs(gu), r = 1, g = 1, b = 1;
+    /* 木目：横にゆらぐ細い縞 */
+    var grain = 0.5 + 0.5 * Math.sin(gv * 0.55 + Math.sin(gu * 0.045 + gv * 0.01) * 3.2 + Math.sin(gu * 0.13) * 0.6);
+    grain = Math.pow(grain, 6) * 0.16 + 0.03 * Math.sin(gu * 0.9 + gv * 0.2);
+    r *= 1 - grain; g *= 1 - grain * 1.1; b *= 1 - grain * 1.2;
     var blush = (e === "joy" ? 0.9 : 0.5) * gs(au - 42, gv - 32, 18, 14) + 0.35 * gs(gu, gv - 36, 9, 7);
     if (e === "ouch") blush += 0.6 * gs(gu, gv - 10, 40, 30);
     r *= 1 + 0.04 * blush; g *= 1 - 0.14 * blush; b *= 1 - 0.1 * blush;
@@ -277,7 +281,7 @@
     }
     geo.setAttribute("color", new T.BufferAttribute(cols, 3));
     geo.computeVertexNormals();
-    var skinM = new T.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, clearcoat: 0.15, clearcoatRoughness: 0.6, sheen: 0.4, sheenColor: new T.Color(0xffd9a0) });
+    var skinM = new T.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.62, clearcoat: 0.2, clearcoatRoughness: 0.5, sheen: 0.2, sheenColor: new T.Color(0xc89a6a) });
     F.add(new T.Mesh(geo, skinM));
     /* 目：白目・虹彩・瞳・まぶた。まばたき・視線・眉は毎コマ animate で少し動かす */
     function surf(gu, gv) { var fu = gu / 86, fv = gv / 104; return FZ + FD * Math.sqrt(Math.max(0, 1 - fu * fu - fv * fv)) + relief(gu, gv, expr); }
@@ -363,6 +367,9 @@
   /* 生き物らしさ：まばたき、視線のふらつき、眉と目元のかすかな動き。形は作り直さず回すだけ */
   BonsaiScene.prototype.animate = function (now) {
     if (!this.eyes) return;
+    /* 反応の震え・跳ねは顔だけ動かす。動いている間は全体も描き直す */
+    var j = this.jolt || { x: 0, y: 0 }, fp = this.faceGroup.position;
+    if (fp.x !== j.x || fp.y !== -j.y) { fp.set(j.x, -j.y, 0); this.stale = true; }
     var A = this.anim || (this.anim = { blink: now + 1.5, gx: 0, gy: 0, tx: 0, ty: 0, next: now + 1 });
     if (now > A.next) { A.tx = (Math.random() * 2 - 1) * 0.9; A.ty = (Math.random() * 2 - 1) * 0.5; A.next = now + 0.6 + Math.random() * 2.2; }
     var f = 0.25; A.gx += (A.tx - A.gx) * f; A.gy += (A.ty - A.gy) * f;
