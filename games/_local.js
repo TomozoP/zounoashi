@@ -148,5 +148,5 @@ window.DRAFT_GAMES = [
   },
   {"type":"lab","tags":[],"id":"chokupiza","title":"直ピザ配達","year":2026,"date":"2026-10-05","plays":null,"url":"","img":"games/_chokupiza/img/thumb.webp","play":"games/_chokupiza/index.html","full":true,"catch":"ピザを回して直接投げて届ける"},
   {"type":"lab","tags":[],"id":"hanaarashi","title":"花畑荒らし","year":2026,"date":"2026-10-05","plays":null,"url":"","img":"games/_hanaarashi/img/thumb.webp","play":"games/_hanaarashi/index.html","full":true,"catch":"花畑を踏み荒らすおじさんを捕まえる"},
-  {"type":"lab","tags":[],"id":"afrocut","title":"アフロカット","year":2026,"date":"2026-10-05","plays":null,"url":"","img":"games/_afrocut/img/thumb.webp","play":"games/_afrocut/index.html","full":true,"catch":"アフロをカットしてお手本の髪型にする"},
+  {"type":"lab","tags":[],"id":"lion-tokoya","title":"ライオンの床屋","year":2026,"date":"2026-10-05","plays":null,"url":"","img":"games/_lion-tokoya/img/thumb.webp","play":"games/_lion-tokoya/index.html","full":true,"catch":"ライオンのたてがみを切ってお手本の髪型にする"},
 ];
