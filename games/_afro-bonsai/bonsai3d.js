@@ -28,6 +28,11 @@
     sun.position.set(-0.6, 0.9, 1); this.scene.add(sun);
     var rim = new T.DirectionalLight(0xffe0b0, 0.8);
     rim.position.set(0.8, 0.2, 0.6); this.scene.add(rim);
+    this.scene.children.forEach(function (o) { o.layers.enable(1); });
+    /* 顔だけを毎コマ描く小さな画面（髪や鉢は描き直さないので軽い） */
+    this.faceR = new T.WebGLRenderer({ antialias: true, alpha: true });
+    this.faceR.outputColorSpace = T.SRGBColorSpace; this.faceR.setClearColor(0x000000, 0);
+    this.faceCam = new T.OrthographicCamera(0, 1, 0, -1, 1, 5000); this.faceCam.position.set(0, 0, 2000); this.faceCam.layers.set(1);
     this.group = null; this.key = ""; this.w = 0; this.h = 0;
   }
 
@@ -125,30 +130,55 @@
       var cap = new T.Mesh(new T.SphereGeometry(w / 2, 12, 10), bark);
       cap.position.copy(pts3[pts3.length - 1]); G.add(cap);
     });
-    var hairGeo = new T.IcosahedronGeometry(5.2, 0);
-    var hm = new T.InstancedMesh(hairGeo, std(0xffffff, { roughness: 0.95, flatShading: true }), cells.length);
-    var col = new T.Color(), c3 = g.look.hair;
-    for (i = 0; i < cells.length; i++) {
-      var mm = 0.55 + R() * 0.9;
-      col.setRGB(c3[0] / 255 * mm, c3[1] / 255 * mm, c3[2] / 255 * mm, T.SRGBColorSpace);
-      hm.setColorAt(i, col);
-    }
-    this.hair = hm; this.cells = cells; this.pts = pts; this.rot = pts.map(function () { return R() * 6.28; });
-    G.add(hm);
+    /* 生え際の粒は別にして、顔を毎コマ描き直すときも一緒に描く（顔の上に前髪がかぶるため） */
+    var hairGeo = new T.IcosahedronGeometry(5.2, 0), hairM = std(0xffffff, { roughness: 0.95, flatShading: true });
+    var col = new T.Color(), c3 = g.look.hair, cols3 = cells.map(function () { return 0.55 + R() * 0.9; });
+    var rot = pts.map(function () { return R() * 6.28; });
+    this.hairs = [[], []].map(function (list, which) {
+      pts.forEach(function (a, n) {
+        var fringe = a[1] > cy - 50 && a[1] < cy && Math.abs(a[0] - cx) < 90;
+        if (fringe === (which === 1)) list.push(n);
+      });
+      var hm = new T.InstancedMesh(hairGeo, hairM, Math.max(1, list.length));
+      hm.count = list.length;
+      list.forEach(function (n, i) {
+        var mm = cols3[n];
+        col.setRGB(c3[0] / 255 * mm, c3[1] / 255 * mm, c3[2] / 255 * mm, T.SRGBColorSpace);
+        hm.setColorAt(i, col);
+      });
+      if (which === 1) hm.layers.enable(1);
+      G.add(hm);
+      return { mesh: hm, list: list };
+    });
+    this.cells = cells; this.pts = pts; this.rot = rot;
     this.lastHair = null;
     this.g = g;
   };
 
 
   /* 顔の形。正面から平行に見るので、凹凸は前後（z）の起伏で付けて光の当たり方で見せる。
-     gu, gv は顔の中心からのゲーム座標（右・下が正） */
+     gu, gv は顔の中心からのゲーム座標（右・下が正）。
+     e: null ふつう / "joy" 大喜び / "shock" 愕然（大きく開いた口） / "ouch" 痛がる（目をつぶって歯を食いしばる） */
   function gs(dx, dy, sx, sy) { return Math.exp(-(dx * dx) / (sx * sx) - (dy * dy) / (sy * sy)); }
-  function mouthLine(gu, expr) {
-    if (expr === "joy") return 62 - 0.012 * Math.min(gu * gu, 26 * 26);   /* 口角が上がる */
-    if (expr === "ouch") return 60 + 0.009 * Math.min(gu * gu, 26 * 26);  /* 口をへの字に食いしばる */
-    return 61 + 0.004 * gu * gu;
+  /* 口の開き：上の縁と下の縁（開いていなければ null） */
+  function mouthEdges(gu, e) {
+    var g2 = gu * gu;
+    if (e === "joy") { if (Math.abs(gu) >= 34) return null; return [60 - 0.012 * g2, 76 - 0.0258 * g2]; }
+    if (e === "ouch") { if (Math.abs(gu) >= 30) return null; var c = 1 - g2 / 900; return [60 + 0.008 * g2 - 4 * c, 64 + 0.008 * g2 + 4 * c]; }
+    if (e === "shock") { var q = 1 - g2 / 324; if (q <= 0) return null; var h = 22 * Math.sqrt(q); return [72 - h, 72 + h]; }
+    return null;
   }
-  function relief(gu, gv, expr) {
+  function closedLine(gu) { return 61 + 0.004 * gu * gu; }
+  /* 口の中の色：0 なし / 1 口の中（暗い） / 2 歯 */
+  function mouthKind(gu, gv, e) {
+    var m = mouthEdges(gu, e);
+    if (!m || gv <= m[0] || gv >= m[1]) return 0;
+    var f = (gv - m[0]) / (m[1] - m[0]);
+    if (e === "joy") return f < 0.38 ? 2 : 1;
+    if (e === "ouch") return Math.abs(f - 0.5) < 0.09 ? 1 : 2;
+    return f < 0.12 ? 2 : 1;
+  }
+  function relief(gu, gv, e) {
     var au = Math.abs(gu), d = 0;
     d -= 9 * gs(au - 30, gv - 2, 19, 12);          /* 目のくぼみ */
     d += 4 * gs(au - 30, gv - 15, 25, 6);          /* 眉の骨 */
@@ -160,42 +190,64 @@
     d -= 4 * gs(au - 7, gv - 43, 3, 2.5);          /* 鼻の穴 */
     d += 5 * gs(au - 44, gv - 22, 17, 14);         /* 頬骨 */
     d -= 3 * gs(au - 28, gv - 50, 6, 12);          /* ほうれい線 */
-    d -= 2 * gs(gu, gv - 49, 4, 4);                /* 人中 */
-    var my = mouthLine(gu, expr), w = expr === "shock" ? 12 : 22;
-    var lip = gs(gu, 0, w, 1);
-    d += 4 * lip * gs(0, gv - (my - 5), 1, 4);     /* 上唇 */
-    d += 5 * lip * gs(0, gv - (my + 6), 1, 5);     /* 下唇 */
-    d -= 4 * lip * gs(0, gv - my, 1, 1.6);         /* 唇の合わせ目 */
-    if (expr === "shock") {                          /* 「お」の口 */
-      var q = (gu / 11) * (gu / 11) + ((gv - 66) / 14) * ((gv - 66) / 14);
-      if (q < 1) d -= 22 * (1 - q);
+    d += 5 * gs(gu, gv - 92, 22, 10);              /* あご */
+    var m = mouthEdges(gu, e);
+    if (m) {
+      var lw = gs(gu, 0, e === "shock" ? 16 : 30, 1);
+      d += 5 * lw * gs(0, gv - (m[0] - 3), 1, 3.5); /* 上唇 */
+      d += 6 * lw * gs(0, gv - (m[1] + 3), 1, 4);   /* 下唇 */
+      if (gv > m[0] && gv < m[1]) d -= 16;          /* 口の中 */
+    } else if (!e || e === "joy" || e === "ouch") {
+      var my = closedLine(gu), lip = gs(gu, 0, 22, 1);
+      d += 4 * lip * gs(0, gv - (my - 5), 1, 4);
+      d += 5 * lip * gs(0, gv - (my + 6), 1, 5);
+      d -= 2 * gs(gu, gv - 49, 4, 4);              /* 人中 */
     }
-    if (expr === "joy") d += 3 * gs(au - 36, gv - 44, 10, 8);   /* 笑うと頬が上がる */
-    d += 5 * gs(gu, gv - 90, 22, 10);              /* あご */
+    if (e === "joy") {
+      d += 9 * gs(au - 38, gv - 38, 14, 11);       /* 頬が大きく上がる */
+      d -= 4 * gs(au - 36, gv - 56, 4, 14);        /* 深いほうれい線 */
+    }
+    if (e === "ouch") {
+      d += 6 * gs(au - 38, gv - 26, 14, 10);       /* 頬が目を押し上げる */
+      d -= 3 * gs(au - 6, gv + 8, 1.6, 9);         /* 眉間のしわ */
+      d -= 2.5 * gs(au - 9, gv - 14, 6, 1.3);      /* 鼻のしわ */
+      d -= 2.5 * gs(au - 9, gv - 19, 6, 1.3);
+      d -= 3 * gs(au - 34, gv - 62, 3, 10);        /* 口の脇のしわ */
+    }
+    if (e === "shock") d -= 3 * gs(au - 44, gv - 40, 14, 18);   /* 頬がこける */
     return d;
   }
-  /* 肌の色むら：頬と鼻先に赤み、唇、口の中 */
-  function tint(gu, gv, expr, out) {
+  /* 肌の色むら：頬と鼻先に赤み、唇、口の中と歯 */
+  function tint(gu, gv, e, out) {
     var au = Math.abs(gu), r = 1, g = 1, b = 1;
-    var blush = 0.5 * gs(au - 42, gv - 30, 18, 14) + 0.35 * gs(gu, gv - 36, 9, 7);
+    var blush = (e === "joy" ? 0.9 : 0.5) * gs(au - 42, gv - 32, 18, 14) + 0.35 * gs(gu, gv - 36, 9, 7);
+    if (e === "ouch") blush += 0.6 * gs(gu, gv - 10, 40, 30);
     r *= 1 + 0.04 * blush; g *= 1 - 0.14 * blush; b *= 1 - 0.1 * blush;
     var sock = gs(au - 30, gv - 4, 22, 13);
+    if (e === "shock") sock *= 1.8;
     r *= 1 - 0.12 * sock; g *= 1 - 0.15 * sock; b *= 1 - 0.1 * sock;
-    var my = mouthLine(gu, expr), w = expr === "shock" ? 13 : 23;
-    var lip = gs(gu, 0, w, 1) * Math.max(gs(0, gv - (my - 4), 1, 4), gs(0, gv - (my + 5), 1, 5.5));
-    r *= 1 - 0.05 * lip; g *= 1 - 0.42 * lip; b *= 1 - 0.3 * lip;
-    if (expr === "shock") {
-      var q = (gu / 10) * (gu / 10) + ((gv - 66) / 13) * ((gv - 66) / 13);
-      if (q < 1) { r *= 0.35; g *= 0.12; b *= 0.12; }
+    var m = mouthEdges(gu, e), lip = 0;
+    if (m) {
+      var lw = gs(gu, 0, e === "shock" ? 17 : 31, 1);
+      lip = lw * Math.max(gs(0, gv - (m[0] - 3), 1, 3.5), gs(0, gv - (m[1] + 3), 1, 4.5));
     } else {
-      var seam = gs(gu, 0, w * 0.85, 1) * gs(0, gv - my, 1, 1.3);
+      var my = closedLine(gu), lw2 = gs(gu, 0, 23, 1);
+      lip = lw2 * Math.max(gs(0, gv - (my - 4), 1, 4), gs(0, gv - (my + 5), 1, 5.5));
+      var seam = gs(gu, 0, 20, 1) * gs(0, gv - my, 1, 1.3);
       r *= 1 - 0.55 * seam; g *= 1 - 0.7 * seam; b *= 1 - 0.65 * seam;
     }
+    r *= 1 - 0.05 * lip; g *= 1 - 0.42 * lip; b *= 1 - 0.3 * lip;
     out[0] = r; out[1] = g; out[2] = b;
   }
+  /* 目と眉の形（表情ごと）。a は上まぶたの縁の角度（大きいほど閉じる） */
+  var EYE = {
+    n: { a: 0.38, low: 0, iris: 1, brow: function (u) { return -18 + 4 * u * u - 2 * Math.sin(u * Math.PI); } },
+    joy: { a: 0.6, low: 4, iris: 1, brow: function (u) { return -19 + 4 * u * u - 4 * Math.sin(u * Math.PI); } },
+    ouch: { a: 0.8, low: 4, iris: 1, brow: function (u) { return -22 + 13 * u - 2 * u * u; } },
+    shock: { a: 0.2, low: -1, iris: 0.7, brow: function (u) { return -21 + 5 * u * u - 3 * Math.sin(u * Math.PI); } }
+  };
 
-  /* expr: null ふつう / "joy" うれしい / "shock" がっかり（「お」の口） / "ouch" いたっ（目をつぶる）。
-     true / false は判定の顔で、joy / shock と同じ */
+  /* true / false は判定の顔で、joy / shock と同じ */
   BonsaiScene.prototype.buildFace = function (expr) {
     var g = this.g; if (!g) return;
     if (expr === true) expr = "joy"; else if (expr === false) expr = "shock";
@@ -206,7 +258,7 @@
     var F = this.faceGroup = new T.Group(); this.group.add(F);
     var cx = g.cx, cy = g.cy, FZ = this.faceZ, FD = this.faceD;
     var base = new T.Color(g.look.skin);
-    var geo = new T.SphereGeometry(1, 120, 90), pos = geo.attributes.position, n = pos.count;
+    var geo = new T.SphereGeometry(1, 220, 160), pos = geo.attributes.position, n = pos.count;
     var cols = new Float32Array(n * 3), tc = [1, 1, 1];
     for (var i = 0; i < n; i++) {
       var px = pos.getX(i), py = pos.getY(i), pz = pos.getZ(i);
@@ -219,57 +271,80 @@
       } else tc[0] = tc[1] = tc[2] = 1;
       pos.setXYZ(i, cx + gu, -(cy + gv), FZ + z);
       cols[i * 3] = base.r * tc[0]; cols[i * 3 + 1] = base.g * tc[1]; cols[i * 3 + 2] = base.b * tc[2];
+      var mk = pz > 0.3 ? mouthKind(gu, gv, expr) : 0;                 /* 歯と口の中は肌の色と別に塗る */
+      if (mk === 2) { cols[i * 3] = 0.86; cols[i * 3 + 1] = 0.83; cols[i * 3 + 2] = 0.74; }
+      else if (mk === 1) { cols[i * 3] = 0.09; cols[i * 3 + 1] = 0.012; cols[i * 3 + 2] = 0.015; }
     }
     geo.setAttribute("color", new T.BufferAttribute(cols, 3));
     geo.computeVertexNormals();
     var skinM = new T.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, clearcoat: 0.15, clearcoatRoughness: 0.6, sheen: 0.4, sheenColor: new T.Color(0xffd9a0) });
     F.add(new T.Mesh(geo, skinM));
-    /* 目：白目・虹彩・瞳・まぶた */
+    /* 目：白目・虹彩・瞳・まぶた。まばたき・視線・眉は毎コマ animate で少し動かす */
     function surf(gu, gv) { var fu = gu / 86, fv = gv / 104; return FZ + FD * Math.sqrt(Math.max(0, 1 - fu * fu - fv * fv)) + relief(gu, gv, expr); }
+    var E = EYE[expr || "n"];
     var white = std(0xf4f0e8, { roughness: 0.2 }), iris = std(0x4a2c18, { roughness: 0.3 }), pupil = std(0x0b0806, { roughness: 0.1 });
     var lidM = std(g.look.skin, { roughness: 0.55 }), lashM = std(0x1a120c, { roughness: 0.8 });
-    var open = expr === "shock" ? 1.0 : expr === "joy" ? 0.45 : 0.7;   /* まぶたの開き */
+    var hc = g.look.hair, bm = std(new T.Color(hc[0] / 255, hc[1] / 255, hc[2] / 255).getHex(), { roughness: 1 });
+    var eyes = this.eyes = [];
     [-1, 1].forEach(function (s) {
       var ex = s * 30, ey = 2, R = 10.5, ez = surf(ex, ey) - R + 5;
-      var eye = new T.Mesh(new T.SphereGeometry(R, 32, 24), white); eye.position.set(cx + ex, -(cy + ey), ez); F.add(eye);
-      var ir = new T.Mesh(new T.CircleGeometry(5.6, 32), iris); ir.position.set(cx + ex, -(cy + ey + 0.5), ez + R + 0.05); F.add(ir);
-      var pu = new T.Mesh(new T.CircleGeometry(2.6, 24), pupil); pu.position.set(cx + ex, -(cy + ey + 0.5), ez + R + 0.1); F.add(pu);
-      var hl = new T.Mesh(new T.CircleGeometry(1.3, 12), new T.MeshBasicMaterial({ color: 0xffffff })); hl.position.set(cx + ex - 2, -(cy + ey - 1.5), ez + R + 0.15); F.add(hl);
-      /* 上まぶた：目玉より少し大きい殻の上側 */
-      var a = expr === "ouch" ? Math.PI * 0.7 : Math.PI * (0.3 + 0.25 * (1 - open));
+      var at = new T.Vector3(cx + ex, -(cy + ey), ez);
+      var eye = new T.Mesh(new T.SphereGeometry(R, 32, 24), white); eye.position.copy(at); F.add(eye);
+      /* 黒目は目玉の中心で回すと視線が動く */
+      var look = new T.Group(); look.position.copy(at); F.add(look);
+      var ir = new T.Mesh(new T.CircleGeometry(5.6 * E.iris, 32), iris); ir.position.set(0, -0.5, R + 0.05); look.add(ir);
+      var pu = new T.Mesh(new T.CircleGeometry(2.6 * E.iris, 24), pupil); pu.position.set(0, -0.5, R + 0.1); look.add(pu);
+      var hl = new T.Mesh(new T.CircleGeometry(1.3, 12), new T.MeshBasicMaterial({ color: 0xffffff })); hl.position.set(-2, 1.5, R + 0.15); look.add(hl);
+      /* 上まぶた：目玉より少し大きい殻の上側。前に回すと閉じる */
+      var a = Math.PI * E.a, lidG = new T.Group(); lidG.position.copy(at); F.add(lidG);
       var lid = new T.Mesh(new T.SphereGeometry(R + 1.2, 32, 16, 0, Math.PI * 2, 0, a), lidM);
-      lid.scale.set(1.12, 1, 1);
-      lid.position.copy(eye.position); F.add(lid);
-      /* まつげの線：まぶたの縁 */
+      lid.scale.set(1.12, 1, 1); lidG.add(lid);
       var pts = [];
       for (var t = -1; t <= 1.001; t += 0.1) {
-        var ang = t * 1.25, rr = R + 1.6;
-        var y = Math.cos(a) * rr, xz = Math.sin(a) * rr;
-        var v3 = new T.Vector3(Math.sin(ang) * xz * 1.15, y, Math.cos(ang) * xz);
-        pts.push(v3.add(eye.position));
+        var ang = t * 1.25, rr = R + 1.6, y = Math.cos(a) * rr, xz = Math.sin(a) * rr;
+        pts.push(new T.Vector3(Math.sin(ang) * xz * 1.15, y, Math.cos(ang) * xz));
       }
-      F.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts), 20, 0.9, 6, false), lashM));
+      lidG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts), 20, 0.9, 6, false), lashM));
       /* 下まぶたのふくらみ */
-      var low = new T.Mesh(new T.TorusGeometry(R * 0.95, 1.6, 8, 24, Math.PI * 0.8), lidM);
+      var low = new T.Mesh(new T.TorusGeometry(R * 0.95, 1.6 + E.low * 0.3, 8, 24, Math.PI * 0.8), lidM);
       low.rotation.z = Math.PI + Math.PI * 0.1; low.scale.set(1.1, 0.55, 1);
-      low.position.set(eye.position.x, eye.position.y + 0.5, ez + R * 0.55); F.add(low);
-      /* 眉：毛の色の太い線を顔の表面に沿わせる */
-      var hc = g.look.hair, bm = std(new T.Color(hc[0] / 255, hc[1] / 255, hc[2] / 255).getHex(), { roughness: 1 });
+      low.position.set(at.x, at.y + 0.5 + E.low, ez + R * 0.55); F.add(low);
+      /* 眉：毛の色の太い線を顔の表面に沿わせる。眉頭を太く、眉尻を細く */
       var bp = [], bw = g.look.brow ? 4 : 2.6;
       for (var u = 0; u <= 1.001; u += 0.1) {
-        var bx = s * (16 + 30 * u), by = -18 + 4 * u * u - 2 * Math.sin(u * Math.PI) - (expr === "shock" ? 5 : 0) + (expr === "ouch" ? 6 * (1 - u) : 0);
-        bp.push(new T.Vector3(cx + bx, -(cy + by), surf(bx, by) + bw * 0.4));
+        var bx = s * (16 + 30 * u), by = E.brow(u);
+        bp.push(new T.Vector3(cx + bx, -(cy + by), surf(bx, by) + bw * 0.4 + 1));
       }
-      var brow = new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(bp), 20, 1, 8, false), bm);
+      var bc = new T.CatmullRomCurve3(bp), brow = new T.Mesh(new T.TubeGeometry(bc, 20, 1, 8, false), bm);
       var bpa = brow.geometry.attributes.position;
-      /* 眉頭を太く、眉尻を細く */
-      var bc = new T.CatmullRomCurve3(bp);
       for (var j = 0; j < bpa.count; j++) {
-        var sg = Math.floor(j / 9), tt = sg / 20, cc = bc.getPointAt(tt), wd = bw * (1.1 - 0.6 * tt);
+        var tt = Math.floor(j / 9) / 20, cc = bc.getPointAt(tt), wd = bw * (1.1 - 0.6 * tt);
         bpa.setXYZ(j, cc.x + (bpa.getX(j) - cc.x) * wd, cc.y + (bpa.getY(j) - cc.y) * wd, cc.z + (bpa.getZ(j) - cc.z) * wd * 0.5);
       }
       brow.geometry.computeVertexNormals();
-      F.add(brow);
+      var browG = new T.Group(); browG.add(brow); F.add(browG);
+      eyes.push({ s: s, lid: lidG, a: a, look: look, brow: browG, closed: expr === "ouch" });
+    });
+    /* 毎コマ描き直す顔の範囲（髪がかぶらない生え際の下から口まで） */
+    F.traverse(function (o) { o.layers.enable(1); });
+    this.faceRect = [cx - 74, cy - 25, 148, 123];
+  };
+
+  /* 生き物らしさ：まばたき、視線のふらつき、眉と目元のかすかな動き。形は作り直さず回すだけ */
+  BonsaiScene.prototype.animate = function (now) {
+    if (!this.eyes) return;
+    var A = this.anim || (this.anim = { blink: now + 1.5, gx: 0, gy: 0, tx: 0, ty: 0, next: now + 1 });
+    if (now > A.next) { A.tx = (Math.random() * 2 - 1) * 0.9; A.ty = (Math.random() * 2 - 1) * 0.5; A.next = now + 0.6 + Math.random() * 2.2; }
+    var f = Math.min(1, 0.25); A.gx += (A.tx - A.gx) * f; A.gy += (A.ty - A.gy) * f;
+    var bt = now - A.blink, bl = 0;
+    if (bt > 0) { bl = bt < 0.07 ? bt / 0.07 : bt < 0.17 ? 1 - (bt - 0.07) / 0.1 : 0; if (bt > 0.17) A.blink = now + 1.8 + Math.random() * 3.5; }
+    var n1 = Math.sin(now * 0.9) * 0.6 + Math.sin(now * 2.3 + 1) * 0.4, n2 = Math.sin(now * 0.7 + 2) * 0.5 + Math.sin(now * 1.9) * 0.5;
+    this.eyes.forEach(function (e) {
+      var shut = e.closed ? 0 : bl;
+      e.lid.rotation.x = (Math.PI * 0.82 - e.a) * shut + 0.06 * n2;
+      e.look.rotation.y = A.gx * 0.32; e.look.rotation.x = A.gy * 0.25;
+      e.brow.position.y = 1.4 * n1 + (e.s > 0 ? 0.6 : -0.6) * n2;
+      e.brow.rotation.z = 0;
     });
   };
 
@@ -279,14 +354,17 @@
     this.lastHair = ver;
     this.stale = true;
     var m = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), s1 = new T.Vector3(1, 1, 1), s0 = new T.Vector3(0, 0, 0), p = new T.Vector3();
-    for (var i = 0; i < this.cells.length; i++) {
-      var a = this.pts[i];
-      p.set(a[0], -a[1], a[2]);
-      e.set(this.rot[i], this.rot[i] * 1.7, 0); q.setFromEuler(e);
-      m.compose(p, q, hair[this.cells[i]] ? s1 : s0);
-      this.hair.setMatrixAt(i, m);
-    }
-    this.hair.instanceMatrix.needsUpdate = true;
+    var self = this;
+    this.hairs.forEach(function (h) {
+      h.list.forEach(function (n, i) {
+        var a = self.pts[n];
+        p.set(a[0], -a[1], a[2]);
+        e.set(self.rot[n], self.rot[n] * 1.7, 0); q.setFromEuler(e);
+        m.compose(p, q, hair[self.cells[n]] ? s1 : s0);
+        h.mesh.setMatrixAt(i, m);
+      });
+      h.mesh.instanceMatrix.needsUpdate = true;
+    });
   };
 
   BonsaiScene.prototype.render = function (ctx, W, H) {
@@ -301,8 +379,20 @@
       this.camera.updateProjectionMatrix();
     }
     /* 場面は止まっているので、髪や画面が変わったときだけ描き直す（スマホで重くしないため） */
+    var now = global.performance.now() / 1000;
+    this.animate(now);
     if (this.stale) { this.renderer.render(this.scene, this.camera); this.stale = false; }
     ctx.drawImage(this.renderer.domElement, 0, 0, W, H);
+    /* 顔の範囲だけ描き直して重ねる（顔の輪郭は表情で変わらないので、下の絵の顔をそのまま覆える） */
+    var r = this.faceRect;
+    if (r) {
+      var x0 = Math.floor(r[0] * dpr) / dpr, y0 = Math.floor(r[1] * dpr) / dpr, x1 = Math.ceil((r[0] + r[2]) * dpr) / dpr, y1 = Math.ceil((r[1] + r[3]) * dpr) / dpr;
+      var fw = Math.round((x1 - x0) * dpr), fh = Math.round((y1 - y0) * dpr), fc = this.faceCam;
+      if (fw !== this.fw || fh !== this.fh) { this.faceR.setSize(fw, fh, false); this.fw = fw; this.fh = fh; }
+      if (fc.left !== x0 || fc.top !== -y0 || fc.right !== x1) { fc.left = x0; fc.right = x1; fc.top = -y0; fc.bottom = -y1; fc.updateProjectionMatrix(); }
+      this.faceR.render(this.scene, fc);
+      ctx.drawImage(this.faceR.domElement, x0, y0, x1 - x0, y1 - y0);
+    }
     return true;
   };
 
