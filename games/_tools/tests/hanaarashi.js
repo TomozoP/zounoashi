@@ -1,0 +1,21 @@
+/* 一人称の移動・捕獲・結果画面を短く確認する。 */
+const assert = require('assert');
+const load = require('../harness');
+const g = load('games/_hanaarashi/index.html');
+assert.equal(g.probe.now().state, 'intro');
+g.press(' ');
+g.step(2);
+assert.equal(g.probe.now().state, 'play');
+const start = g.probe.now().me;
+g.key('w'); g.step(20); g.key('w', true);
+assert(g.probe.now().me.y < start.y, '前に進む');
+g.key('d'); g.step(20); g.key('d', true);
+assert(g.probe.now().me.yaw > 0, '右を向く');
+g.win.fire('keydown', {key:'1',code:'Digit1',preventDefault:function(){}}); g.step(2);
+assert(g.probe.now().score >= 1, '近づくと捕まえる');
+g.win.fire('keydown', {key:'2',code:'Digit2',preventDefault:function(){}});
+g.step(1800);
+assert.equal(g.probe.now().state, 'result');
+g.press(' '); g.step(2);
+assert.equal(g.probe.now().state, 'play');
+console.log('花畑荒らし：移動・旋回・捕獲・終了・再開を確認');

@@ -36,7 +36,7 @@
 <script>
 /* 花畑荒らし
 
-   花畑を走り回って花を踏み荒らすおじさんを、指で追いかけて捕まえる。
+   花畑を一人称視点で歩き、花を踏み荒らすおじさんを追いかけて捕まえる。
    追いかける自分も花を踏む。花が4割を切ったら終わり。捕まえた人数が結果。 */
 (function () {
   "use strict";
@@ -48,6 +48,8 @@
   window.zResultActions.bind(shareButton, doShare);
 
   var W = 540, H = 960;
+  var yaw = 0, turnTouch = null, walkTouch = null, stick = null;
+  var portrait = new Image(); portrait.src = "img/ojisan.png";
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     var nh = view.gameHeight;
@@ -131,7 +133,7 @@
   var TOP = 120;               /* 花畑の上端 */
   var SIDE = 14;               /* 花畑の左右の余白 */
   var FOOT = 13;               /* 踏む広さ（半径） */
-  var P_SPD = 330;             /* 自分の速さ */
+  var P_SPD = 290;             /* 自分の速さ */
   var CATCH = 36;              /* これより近づけば捕まえる */
   var END_RATIO = 0.4;         /* 花がこれを切ったら終わり */
   var COLORS = ["#ff6f91", "#ffd23f", "#ffffff", "#c38bff", "#ff9b3d", "#5ec8ff"];
@@ -140,7 +142,7 @@
   var field = null, fieldCv = null, fctx = null, cols, rows, total, alive, fx0, fy0, fx1, fy1;
   function makeField() {
     cols = Math.floor((W - SIDE * 2) / CELL);
-    rows = Math.floor((H - TOP - 24) / CELL);
+    rows = 32;
     fx0 = (W - cols * CELL) / 2; fy0 = TOP; fx1 = fx0 + cols * CELL; fy1 = fy0 + rows * CELL;
     total = cols * rows; alive = total;
     field = new Uint8Array(total);
@@ -213,19 +215,19 @@
     else if (side === 2) { x = fx0 + rnd() * (fx1 - fx0); y = fy1 + 30; }
     else { x = fx0 - 30; y = fy0 + rnd() * (fy1 - fy0); }
     return { id: nextId++, x: x, y: y, vx: 0, vy: 0, gx: W / 2, gy: (fy0 + fy1) / 2, walk: 0, flee: false, juke: 0, jx: 0, jy: 0,
-      spd: 125 + lvl * 10, fast: Math.min(320, 270 + lvl * 7), think: 0, entering: 0.6 };
+      spd: 125 + lvl * 10, fast: Math.min(260, 215 + lvl * 5), think: 0, entering: 0.6 };
   }
 
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    score = 0; T = 0;
+    score = 0; T = 0; yaw = 0; stick = null; walkTouch = null; turnTouch = null;
     seed = 5 + Math.floor(Math.random() * 1000);
     nextId = 1;
     makeField();
     me = { x: W / 2, y: fy1 - 60, vx: 0, vy: 0, walk: 0, face: 1 };
-    ojis = [newOji()];
+    ojis = [newOji()]; ojis[0].x = W / 2; ojis[0].y = me.y - 210; ojis[0].entering = 0;
     held = false; carried = []; spawnT = 0; crunchT = 0; endT = 0;
   }
 
@@ -298,10 +300,12 @@
   function update(dt) {
     if (state !== S.PLAY) return;
     T += dt;
-    /* 自分：触っている所へ走る（キーなら上下左右） */
-    var ax = 0, ay = 0;
-    if (held) { ax = tx - me.x; ay = ty - me.y; }
-    else if (keys.l || keys.r || keys.u || keys.d) { ax = (keys.r ? 1 : 0) - (keys.l ? 1 : 0); ay = (keys.d ? 1 : 0) - (keys.u ? 1 : 0); ax *= 100; ay *= 100; }
+    /* 一人称：前後移動と向き。左の指は移動、右の指は見回す。 */
+    yaw += ((keys.r ? 1 : 0) - (keys.l ? 1 : 0)) * dt * 1.8;
+    var forward = (keys.u ? 1 : 0) - (keys.d ? 1 : 0), sideways = 0;
+    if (stick) { forward = Math.max(-1, Math.min(1, (stick.y - ty) / 65)); sideways = Math.max(-1, Math.min(1, (tx - stick.x) / 65)); }
+    var ax = (Math.sin(yaw) * forward + Math.cos(yaw) * sideways) * 100;
+    var ay = (-Math.cos(yaw) * forward + Math.sin(yaw) * sideways) * 100;
     var al = Math.hypot(ax, ay);
     var want = al > 6 ? Math.min(P_SPD, al * 8) : 0;
     var kk = 1 - Math.exp(-dt * 12);
@@ -368,15 +372,23 @@
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
-    e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y);
+    if (state === S.INTRO) return;
+    var p = atCanvas(e); audioOn();
+    if (state === S.RESULT) { down(p.x, p.y); return; }
+    e.preventDefault();
+    if (wrap.setPointerCapture && e.pointerId != null) wrap.setPointerCapture(e.pointerId);
+    if (p.x < W * 0.5) { walkTouch = e.pointerId; stick = {x:p.x,y:p.y}; tx=p.x; ty=p.y; }
+    else { turnTouch = {id:e.pointerId,x:p.x}; }
   });
-  wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
+  wrap.addEventListener("pointermove", function(e) {
+    var p=atCanvas(e);
+    if (turnTouch && e.pointerId === turnTouch.id) { yaw += (p.x-turnTouch.x)*0.006; turnTouch.x=p.x; }
+    if (stick && e.pointerId === walkTouch) { tx=p.x; ty=p.y; }
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { up(); });
-  window.addEventListener("blur", function () { up(); keys = {}; });
+  function release(e) { if(e.pointerId===walkTouch) { stick=null; walkTouch=null; } if(turnTouch && e.pointerId===turnTouch.id) turnTouch=null; }
+  wrap.addEventListener("pointerup", release);
+  wrap.addEventListener("pointercancel", release);
+  window.addEventListener("blur", function(){ stick=null; turnTouch=null; keys={}; });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
@@ -431,76 +443,68 @@
   }
   function ell(x, y, rx, ry, col) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
 
-  /* おじさん：はげ頭に横の白髪、ひげ、白い肌着に腹巻。逃げるときは汗 */
-  function drawOji(x, y, walk, flee, face) {
-    var sw = Math.sin(walk), up = Math.abs(Math.cos(walk)) * 2;
-    ell(x, y + 22, 16, 6, "rgba(0,0,0,.25)");
-    ctx.save(); ctx.translate(x, y - up);
-    ctx.strokeStyle = "#5a4636"; ctx.lineWidth = 7; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(-5, 8); ctx.lineTo(-5 - sw * 5, 20); ctx.moveTo(5, 8); ctx.lineTo(5 + sw * 5, 20); ctx.stroke();
-    ctx.strokeStyle = "#f0c39a"; ctx.lineWidth = 5;
-    var arm = flee ? -1 : 1;
-    ctx.beginPath(); ctx.moveTo(-11, -6); ctx.lineTo(-17 + sw * 4 * arm, flee ? -18 : 6); ctx.moveTo(11, -6); ctx.lineTo(17 - sw * 4 * arm, flee ? -18 : 6); ctx.stroke();
-    ell(0, -1, 13, 13, "#f7f5ee");
-    ctx.fillStyle = "#c9a43c"; ctx.fillRect(-12.5, 2, 25, 8);
-    ctx.fillStyle = "#a8862b"; ctx.fillRect(-12.5, 5, 25, 1.5);
-    ell(0, -20, 11, 11, "#f0c39a");
-    ell(-3, -25, 4, 2.5, "rgba(255,255,255,.7)");
-    ctx.fillStyle = "#d8d8d8";
-    ctx.beginPath(); ctx.arc(-10, -19, 4, 0, Math.PI * 2); ctx.arc(10, -19, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#222";
-    if (flee) { ctx.fillRect(-6, -21, 3, 3); ctx.fillRect(3, -21, 3, 3); }
-    else { ctx.lineWidth = 1.6; ctx.strokeStyle = "#222"; ctx.beginPath(); ctx.arc(-4.5, -20, 2, Math.PI * 1.1, Math.PI * 1.9); ctx.arc(4.5, -20, 2, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); }
-    ctx.fillStyle = "#333"; ctx.beginPath(); ctx.ellipse(0, -15.5, 5.5, 2, 0, 0, Math.PI * 2); ctx.fill();
-    if (flee) {
-      ctx.fillStyle = "#222"; ctx.beginPath(); ctx.ellipse(0, -12, 2.5, 2, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#8fd3ff"; ctx.beginPath(); ctx.moveTo(13, -30); ctx.quadraticCurveTo(17, -24, 13, -22); ctx.quadraticCurveTo(10, -25, 13, -30); ctx.fill();
-    } else {
-      ctx.strokeStyle = "#222"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(0, -14, 3, 0.2, Math.PI - 0.2); ctx.stroke();
-    }
-    ctx.restore();
+  /* 地面も人物も同じカメラで透視投影する。距離で縮小し、奥から描く。 */
+  function project(x,y,z) {
+    var dx=x-me.x, dy=y-me.y;
+    var depth=dx*Math.sin(yaw)-dy*Math.cos(yaw);
+    if(depth<8) return null;
+    var scale=400/depth;
+    return {x:W/2+(dx*Math.cos(yaw)+dy*Math.sin(yaw))*scale,y:H*0.43+(48-z)*scale,s:scale,d:depth};
   }
-  /* 自分：麦わら帽子に緑の前掛け */
-  function drawMe(x, y, walk, face) {
-    var sw = Math.sin(walk), up = Math.abs(Math.cos(walk)) * 2;
-    ell(x, y + 22, 15, 6, "rgba(0,0,0,.25)");
-    ctx.save(); ctx.translate(x, y - up);
-    ctx.strokeStyle = "#2d3a55"; ctx.lineWidth = 7; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(-5, 8); ctx.lineTo(-5 - sw * 5, 20); ctx.moveTo(5, 8); ctx.lineTo(5 + sw * 5, 20); ctx.stroke();
-    ctx.strokeStyle = "#e9b48f"; ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.moveTo(-10, -6); ctx.lineTo(-16 - sw * 5, 5); ctx.moveTo(10, -6); ctx.lineTo(16 + sw * 5, 5); ctx.stroke();
-    roundRect(-11, -12, 22, 22, 7); ctx.fillStyle = "#e85a4f"; ctx.fill();
-    roundRect(-8, -6, 16, 16, 4); ctx.fillStyle = "#3f8f4a"; ctx.fill();
-    ell(0, -21, 10, 10, "#e9b48f");
-    ctx.fillStyle = "#222"; ctx.fillRect(-4 + face, -22, 2.5, 3); ctx.fillRect(2 + face, -22, 2.5, 3);
-    ell(0, -27, 17, 5, "#e8c66a");
-    ell(0, -30, 9, 6, "#e8c66a");
-    ctx.fillStyle = "#c0392b"; ctx.fillRect(-9, -29, 18, 2.5);
-    ctx.restore();
+  function scene() {
+    var sky=ctx.createLinearGradient(0,0,0,H*0.48);
+    sky.addColorStop(0,"#77bde8"); sky.addColorStop(1,"#e9f5ef");
+    ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle="#75a75a"; ctx.fillRect(0,H*0.43,W,H);
+    var list=[];
+    for(var i=0;i<total;i++) {
+      var x=fx0+(i%cols+0.5)*CELL, y=fy0+(Math.floor(i/cols)+0.5)*CELL;
+      var p=project(x,y,0);
+      if(p && p.x>-100 && p.x<W+100 && p.y<H+100) list.push({type:0,i:i,x:x,y:y,d:p.d});
+    }
+    /* 柵で花畑の端が分かる。 */
+    for(var k=0;k<=32;k++) {
+      var y=fy0+k*CELL;
+      [fx0,fx1].forEach(function(x){ var p=project(x,y,0); if(p) list.push({type:2,x:x,y:y,d:p.d}); });
+    }
+    for(var k=0;k<=cols;k++) [fy0,fy1].forEach(function(y){var x=fx0+k*CELL,p=project(x,y,0);if(p)list.push({type:2,x:x,y:y,d:p.d});});
+    (ojis||[]).forEach(function(o){var p=project(o.x,o.y,0);if(p)list.push({type:1,o:o,x:o.x,y:o.y,d:p.d});});
+    (carried||[]).forEach(function(o){var p=project(o.x,o.y,0);if(p)list.push({type:1,o:o,x:o.x,y:o.y,d:p.d,fly:o.t});});
+    list.sort(function(a,b){return b.d-a.d;});
+    list.forEach(function(it){
+      var p=project(it.x,it.y,0), sc=p.s;
+      if(it.type===0) {
+        if(!field[it.i]) {ell(p.x,p.y,11*sc,3*sc,"#8b7551");return;}
+        var head=project(it.x,it.y,13+frand(it.i)*8);
+        ctx.strokeStyle="#42783a"; ctx.lineWidth=Math.max(1,2*sc);
+        ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(head.x,head.y);ctx.stroke();
+        var r=Math.max(1,3*sc);ctx.fillStyle=COLORS[it.i%COLORS.length];
+        for(var j=0;j<5;j++){var angle=j*Math.PI*2/5;ell(head.x+Math.cos(angle)*r,head.y+Math.sin(angle)*r,r,r,ctx.fillStyle);}
+        ell(head.x,head.y,r*0.55,r*0.55,"#ffe483");
+      } else if(it.type===2) {
+        var top=project(it.x,it.y,35);ctx.strokeStyle="#e3d6b3";ctx.lineWidth=Math.max(1,4*sc);
+        ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(top.x,top.y);ctx.stroke();
+      } else {
+        ell(p.x,p.y,18*sc,5*sc,"rgba(0,0,0,.2)");
+        var h=100*sc, w=h*(portrait.width/(portrait.height||1)||0.85);
+        var lift=it.fly ? it.fly*it.fly*230*sc : Math.abs(Math.sin(it.o.walk))*3*sc;
+        if(portrait.complete && portrait.width) ctx.drawImage(portrait,p.x-w/2,p.y-h-lift,w,h);
+      }
+    });
+    /* 小さい照準と移動用の丸だけを重ねる。 */
+    if(state===S.PLAY){
+      ctx.strokeStyle="rgba(255,255,255,.85)";ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(W/2,H*0.49,4,0,Math.PI*2);ctx.stroke();
+      var sx=stick?stick.x:92,sy=stick?stick.y:H-125;
+      ctx.strokeStyle="rgba(255,255,255,.38)";ctx.lineWidth=3;ctx.beginPath();ctx.arc(sx,sy,58,0,Math.PI*2);ctx.stroke();
+      ell(stick?Math.max(sx-48,Math.min(sx+48,tx)):sx,stick?Math.max(sy-48,Math.min(sy+48,ty)):sy,22,22,"rgba(255,255,255,.28)");
+    }
   }
 
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
-    if (fieldCv && fctx) ctx.drawImage(fieldCv, 0, 0, fieldCv.width / 2, fieldCv.height / 2);
-    else { ctx.fillStyle = "#69ad48"; ctx.fillRect(0, 0, W, H); }
-
-    if (me) {
-      /* 奥（上）にいる人から描く */
-      var list = [{ y: me.y, f: function () { drawMe(me.x, me.y, me.walk, me.face); } }];
-      (ojis || []).forEach(function (o) { list.push({ y: o.y, f: function () { drawOji(o.x, o.y, o.walk, o.flee, 1); } }); });
-      list.sort(function (a, b) { return a.y - b.y; });
-      list.forEach(function (it) { it.f(); });
-      (carried || []).forEach(function (c) {
-        var k = c.t / 1.4;
-        ctx.save();
-        ctx.translate(c.x, c.y - k * k * 900);
-        ctx.rotate(k * 14);
-        ctx.scale(1 - k * 0.5, 1 - k * 0.5);
-        drawOji(0, 0, c.walk, true, 1);
-        ctx.restore();
-      });
-    }
+    if (me) scene();
 
     if (state === S.PLAY || state === S.INTRO) {
       /* 捕まえた人数と、残りの花の棒（左が終わりの線） */
@@ -563,7 +567,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, alive: alive, total: total, ratio: alive / total, me: me && { x: me.x, y: me.y }, ojis: (ojis || []).map(function (o) { return { x: o.x, y: o.y, flee: o.flee, entering: o.entering }; }), W: W, H: H }; },
+    now: function () { return { state: state, score: score, alive: alive, total: total, ratio: alive / total, me: me && { x: me.x, y: me.y, yaw: yaw }, ojis: (ojis || []).map(function (o) { return { x: o.x, y: o.y, flee: o.flee, entering: o.entering }; }), W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     hold: function (x, y) { if (x == null) held = false; else { held = true; tx = x; ty = y; } }
@@ -587,7 +591,7 @@
   newRound(); state = S.INTRO; startButton.hidden = false;
   var last = performance.now();
   function loop(now) {
-    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    var dt = Math.max(0, (now - last) / 1000);
     last = now;
     if (!window.__recordManual) {
       while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
