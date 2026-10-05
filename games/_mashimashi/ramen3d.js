@@ -644,7 +644,7 @@
       /* 終わりの引き：下の段に置いたあとのどんぶりの底から、山のてっぺんまでを画面のタテいっぱいに */
       var yt = (st.layers.length - 1) * LAYER / M + 0.8, zt = 0;
       var yb = -1.5 - 2.8, zb = 6.0 + 2.2;
-      var a1 = (0.5 - 0.13) * 2 * tan, a2 = (0.83 - 0.5) * 2 * tan;   /* 見下ろす分、下は少し余らせる */
+      var a1 = (0.5 - 0.13) * 2 * tan, a2 = (0.75 - 0.5) * 2 * tan;   /* 見下ろす分と下のボタンの分、下は余らせる */
       var De = Math.max(zb + 15, (yt - yb + a1 * zt + a2 * zb) / (a1 + a2));
       var cy = yb + a2 * (De - zb);
       var e = st.endCam, c0 = this.camStart || { py: py, pz: pz, ly: ly };
