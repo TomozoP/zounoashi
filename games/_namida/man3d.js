@@ -84,7 +84,9 @@
 
   function ManScene() {
     T = global.THREE;
-    this.renderer = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    this.renderer = new T.WebGLRenderer({ antialias: false, alpha: true, powerPreference: "high-performance" });
+    /* スマホ（指で触る画面）は描く細かさを下げて軽くする */
+    this.mobile = !!(global.matchMedia && global.matchMedia("(pointer: coarse)").matches);
     this.renderer.outputColorSpace = T.SRGBColorSpace;
     this.renderer.setClearColor(0x000000, 0);
     this.scene = new T.Scene();
@@ -106,7 +108,8 @@
       m.position.set(l[0], l[1], l[2]); m.lookAt(0, 0, 0); env.add(m);
     });
     this.scene.environment = pm.fromScene(env, 0.03).texture;
-    this.tearMat = new T.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, thickness: 12, ior: 1.33, roughness: 0.02, metalness: 0, attenuationColor: new T.Color(0xc4e6ff), attenuationDistance: 28, envMapIntensity: 1.6, specularIntensity: 1, clearcoat: 1, clearcoatRoughness: 0.02 });
+    /* 透過の計算（場面をもう一度描く）は重いので、半透明＋映り込みで水らしく見せる */
+    this.tearMat = new T.MeshPhysicalMaterial({ color: 0x6f98b8, transparent: true, opacity: 0.55, ior: 1.33, roughness: 0.04, metalness: 0.1, envMapIntensity: 1.4, specularIntensity: 1, clearcoat: 1, clearcoatRoughness: 0.02, depthWrite: false });
     var prof = [];
     for (var i = 0; i <= 18; i++) { var a = i / 18 * Math.PI; prof.push(new T.Vector2(Math.sin(a) * Math.sin(a / 2) * 1.05, Math.cos(a) * 1.45)); }
     this.tearGeo = new T.LatheGeometry(prof, 16);
@@ -239,7 +242,7 @@
     this.faces = [false, true].map(function (big) {
       var tex = self.paintSkin(big);
       var mat = new T.MeshPhysicalMaterial({ map: tex.color, bumpMap: tex.bump, bumpScale: 1.4, roughness: 0.5, clearcoat: 1, clearcoatMap: self.wtex, clearcoatRoughness: 0.12, sheen: 0.25, sheenRoughness: 0.6, sheenColor: new T.Color(0xff9a80), envMapIntensity: 0.6 });
-      var geo = new T.SphereGeometry(1, 180, 140);
+      var geo = new T.SphereGeometry(1, 120, 96);
       var p = geo.attributes.position, uv = geo.attributes.uv;
       for (var i = 0; i < p.count; i++) {
         var x = p.getX(i), y = p.getY(i), z = p.getZ(i), u = x, v = -y;
@@ -449,7 +452,8 @@
       var v = (t.y - self.FY) / self.RY, u = (t.x - self.FX) / (self.RX * widthAt(v));
       wc.beginPath(); wc.arc((u + 1) / 2 * 256, (v + 1) / 2 * 256, 2.6 + t.vol * 2.5, 0, Math.PI * 2); wc.fill();
     });
-    this.wtex.needsUpdate = true;
+    this.wT = (this.wT || 0) + (s.dt || 0);
+    if (this.wT > 0.1) { this.wtex.needsUpdate = true; this.wT = 0; }
     this.water = { level: s.level, rip: s.ripples || [], T: s.T };
     /* アメンボ */
     var sd = s.strider;
@@ -463,7 +467,7 @@
   };
 
   ManScene.prototype.render = function (ctx, W, H) {
-    var dpr = Math.min(1.5, global.devicePixelRatio || 1);
+    var dpr = Math.min(this.mobile ? 1 : 1.5, global.devicePixelRatio || 1);
     var w = Math.round(W * dpr), h = Math.round(H * dpr);
     if (!(w >= 2 && h >= 2)) return false;
     if (w !== this.w || h !== this.h) {
@@ -489,7 +493,7 @@
 
   /* 水の絵：描いた場面を、水面より下だけ揺らして屈折させ、色を吸わせ、光の網目と水面の照り返しを足す */
   ManScene.prototype.makePost = function () {
-    this.rt = new T.WebGLRenderTarget(2, 2, { samples: 4, type: T.HalfFloatType });
+    this.rt = new T.WebGLRenderTarget(2, 2, { samples: 2, type: T.HalfFloatType });
     var rips = []; for (var i = 0; i < 12; i++) rips.push(new T.Vector4());
     var mat = new T.ShaderMaterial({
       uniforms: { tScene: { value: this.rt.texture }, uSize: { value: new T.Vector2(540, 960) }, uLevel: { value: 2000 }, uTime: { value: 0 }, uRip: { value: rips } },
