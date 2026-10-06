@@ -241,12 +241,23 @@
     var ddx = u - (x0 + dx * t), ddy = v - (y0 + dy * t);
     return ddx * ddx + ddy * ddy;
   }
-  function bonsai(id, pads, branches) {
+  function inEll(u, v, x0, y0, rx, ry) { var a = (u - x0) / rx, b = (v - y0) / ry; return a * a + b * b < 1; }
+  /* 頭の土台（毎回ボウズにならないよう、お手本ごとに形を変える） */
+  var BASES = {
+    cap: function (u, v) { return v < -20 && inEll(u, v, 0, 0, 95, 112); },
+    puffs: function (u, v) { return BASES.cap(u, v) || (v < 20 && (inEll(u, v, -92, -12, 26, 34) || inEll(u, v, 92, -12, 26, 34))); },   /* 横がふくらむ */
+    bang: function (u, v) { return BASES.cap(u, v) || (v < 40 && inEll(u, v, -84, 6, 24, 44)); },                                       /* 片側だけ長い */
+    mohawk: function (u, v) { return v < -22 && Math.abs(u) < 26 && inEll(u, v, 0, -20, 95, 150); },                                   /* 真ん中だけ立てる */
+    buns: function (u, v) { return BASES.cap(u, v) || inEll(u, v, -58, -118, 30, 28) || inEll(u, v, 58, -118, 30, 28); },              /* お団子ふたつ */
+    flattop: function (u, v) { return v < -20 && v > -150 && Math.abs(u) < 92 && inEll(u, v, 0, -40, 112, 135); },                   /* 角刈り */
+    swept: function (u, v) { return BASES.cap(u, v) || inEll(u, v, 95, -72, 72, 26) || inEll(u, v, 150, -60, 34, 18); }   /* 右へ流れる */
+  };
+  function bonsai(id, pads, branches, base) {
+    var baseF = BASES[base || "cap"];
     return { id: id, pads: pads, branches: branches,
       f: function (x, y) {
         var u = x - cx, v = y - cy;
-        var bx = u / 95, by = v / 112;
-        if (bx * bx + by * by < 1 && v < -20) return true;
+        if (baseF(u, v)) return true;
         for (var i = 0; i < pads.length; i++) {
           var p = pads[i], ex = (u - p[0]) / p[2], ey = (v - p[1]) / p[3];
           if (ex * ex + ey * ey < 1) return true;
@@ -265,12 +276,12 @@
   }
   /* 枝の根元はどれも頭の中（顔の楕円の内側）から出す */
   var STYLES = [
-    bonsai("kumo", [[0, -200, 105, 48], [-125, -110, 72, 36], [118, -55, 78, 34]], [[0, -100, 0, -170, 18], [-40, -85, -100, -110, 16], [40, -80, 100, -60, 16]]),
-    bonsai("kengai", [[-40, -190, 90, 42], [140, 30, 50, 34]], [[0, -100, -30, -160, 18], [55, -75, 130, -60, 145, 15, 16]]),
-    bonsai("bunjin", [[-90, -225, 65, 28]], [[0, -98, -60, -170, -90, -215, 14]]),
-    bonsai("soukan", [[-95, -210, 80, 40], [100, -180, 75, 38]], [[-25, -95, -80, -180, 16], [25, -95, 90, -155, 16]]),
-    bonsai("houki", [[0, -200, 150, 70]], [[0, -100, 0, -150, 30]]),
-    bonsai("fukinagashi", [[110, -200, 80, 30], [150, -120, 60, 26]], [[0, -98, 100, -190, 14], [45, -80, 140, -120, 12]])
+    bonsai("kumo", [[0, -200, 105, 48], [-125, -110, 72, 36], [118, -55, 78, 34]], [[0, -100, 0, -170, 18], [-40, -85, -100, -110, 16], [40, -80, 100, -60, 16]], "puffs"),
+    bonsai("kengai", [[-40, -190, 90, 42], [140, 30, 50, 34]], [[0, -100, -30, -160, 18], [55, -75, 130, -60, 145, 15, 16]], "bang"),
+    bonsai("bunjin", [[-90, -225, 65, 28]], [[0, -98, -60, -170, -90, -215, 14]], "mohawk"),
+    bonsai("soukan", [[-95, -210, 80, 40], [100, -180, 75, 38]], [[-25, -95, -80, -180, 16], [25, -95, 90, -155, 16]], "buns"),
+    bonsai("houki", [[0, -200, 150, 70]], [[0, -100, 0, -150, 30]], "flattop"),
+    bonsai("fukinagashi", [[110, -200, 80, 30], [150, -120, 60, 26]], [[0, -98, 100, -190, 14], [45, -80, 140, -120, 12]], "swept")
   ];
 
 
@@ -341,7 +352,7 @@
     var skins = ["#b5844f"];   /* 顔も幹と同じ木の色 */
     var hairs = [[52, 98, 40], [44, 86, 38], [62, 104, 44], [40, 90, 48]];   /* 髪は盆栽の葉の緑 */
     look = { skin: skins[Math.floor(rnd() * skins.length)], hair: hairs[Math.floor(rnd() * hairs.length)], brow: rnd() < 0.5, seed: 1 + Math.floor(rnd() * 99999) };
-    react.kind = null; react.t = 0; tool = "line";
+    react.kind = null; react.t = 0;
     phase = "cut"; okPress = false; judgeT = 0; dirty = true; bits = []; chunks = []; stroke = null;
     paintTexture();
   }
@@ -502,8 +513,6 @@
     }
     if (phase !== "cut") return;
     if (x == null || hitOk(x, y)) { okPress = true; tone(880, 0.06, 0.08, "square"); return; }
-    var tb = hitTool(x, y);
-    if (tb) { if (tool !== tb) { tool = tb; tone(660, 0.05, 0.06, "square"); } return; }
     held = true; px = x; py = y;
     stroke = [{ x: x, y: y }];
     if (tool === "trace") { traceBefore = match(); traceN = carve(stroke, TRACE); }
@@ -541,40 +550,8 @@
     }
     stroke = null;
   }
-  /* ハサミは2本：線を引いて切る「直線」と、なぞった所だけ切る「なぞり」。画面の下で切り替える */
-  var tool = "line", TRACE = 4, traceBefore = 0, traceN = 0, snipT = 0;
-  function toolButtons() {
-    var w = 96, h = 64, gap = 18, y = H - h - Math.max(28, H * 0.035);
-    return [{ id: "line", x: W / 2 - w - gap / 2, y: y, w: w, h: h }, { id: "trace", x: W / 2 + gap / 2, y: y, w: w, h: h }];
-  }
-  function hitTool(x, y) {
-    var bs = toolButtons();
-    for (var i = 0; i < bs.length; i++) { var b = bs[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id; }
-    return null;
-  }
-  function drawTools() {
-    toolButtons().forEach(function (b) {
-      var on = tool === b.id, ink = on ? "#fff" : "#16202e";
-      ctx.save();
-      roundRect(b.x, b.y, b.w, b.h, b.h / 2);
-      ctx.fillStyle = on ? "#16202e" : "#fff"; ctx.fill();
-      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
-      /* 左に小さなハサミ、右へ切りかたの線（直線か波線） */
-      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
-      ctx.strokeStyle = ink; ctx.lineWidth = 4; ctx.lineCap = "round";
-      ctx.setLineDash([5, 6]);
-      ctx.beginPath();
-      if (b.id === "line") { ctx.moveTo(-6, 0); ctx.lineTo(34, 0); }
-      else { ctx.moveTo(-6, 0); ctx.bezierCurveTo(4, -18, 18, 18, 34, -4); }
-      ctx.stroke(); ctx.setLineDash([]);
-      ctx.save(); ctx.translate(-14, 0);
-      ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(10, -7); ctx.moveTo(-4, 0); ctx.lineTo(10, 7); ctx.stroke();
-      ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(-12, -6, 5, 0, Math.PI * 2); ctx.moveTo(-7, 6); ctx.arc(-12, 6, 5, 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
-      ctx.restore();
-    });
-  }
+  /* ハサミはなぞった所だけ切る（直線で切るほうは使わない） */
+  var tool = "trace", TRACE = 4, traceBefore = 0, traceN = 0, snipT = 0;
   /* 切るたびの反応：お手本に近づけば喜び、お手本の所を切られると痛がり、大きく削られるとがっかりする */
   var REACT = 1.3;             /* 反応の顔を見せる秒数 */
   function reactTo(d) {
@@ -853,7 +830,7 @@
         ctx.restore();
       }
       if (state === S.PLAY) {
-        if (phase === "cut") { drawSample(); drawOk(); drawTools(); }   /* 完成を押したらお手本は消す */
+        if (phase === "cut") { drawSample(); drawOk(); }   /* 完成を押したらお手本は消す */
         if (held && stroke && phase === "cut" && tool === "trace") drawScissors(px, py, 0.6);
         else if (held && stroke && phase === "cut") {
           /* 引いている線 */
