@@ -390,6 +390,7 @@
       c.beginPath(); c.moveTo(10, 10 + k * 27); c.lineTo(118, 10 + k * 27); c.stroke();
     }
     c.fillStyle = "rgba(70,130,200,.24)";
+    if (n >= 14) { c.fillStyle = "rgba(60,110,170,.35)"; c.fillRect(0, 0, 128, 128); c.fillStyle = "rgba(70,130,200,.24)"; }
     for (var i = 0; i < n; i++) { c.beginPath(); c.ellipse(64 + Math.sin(i * 2.4) * 36, 64 + Math.cos(i * 1.7) * 36, 17 + (i % 3) * 6, 13 + (i % 2) * 7, 0, 0, Math.PI * 2); c.fill(); }
     this.htex.needsUpdate = true;
   };

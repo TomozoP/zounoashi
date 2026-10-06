@@ -112,6 +112,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
   var tears, drops, ripples = [], fill, wet, hx, hy, px, py, sobT, swishT, burst, hideUI = false;
+  var HCAP = 4, soak = 0, dripT = 0;            /* ハンカチが吸える量(ml)。満杯だと吸えずに垂れる。指を離すと絞れる */
   var CAP = 20;                                 /* 取りこぼしてよい量(ml)。これであごまで水がたまる */
 
   /* 顔の置き場所。高さが変わっても涙の量で終わるので、難しさは変わらない */
@@ -143,7 +144,7 @@
     score = 0;
     T = 0;
     held = false;
-    tears = []; drops = []; ripples = []; fill = 0; wet = 0;
+    tears = []; drops = []; ripples = []; fill = 0; wet = 0; soak = 0; dripT = 0;
     hx = W / 2; hy = FY + 120; px = null; py = null;
     sobT = 0.4; swishT = 0; burst = false;
   }
@@ -199,11 +200,24 @@
           continue;
         }
       }
-      if (play && held && wipeHit(t)) {
+      if (play && held && !t.drip && soak < HCAP && wipeHit(t)) {
         tears.splice(i, 1);
-        score += t.vol; wet += t.vol;
+        score += t.vol; wet += t.vol; soak = Math.min(HCAP, soak + t.vol);
         tone(1100 + Math.random() * 300, 0.05, 0.04, "sine", 1700);
+        if (soak >= HCAP) noiseHit(0.25, 400, 0.12, 1.2);
       }
+    }
+    /* 満杯のハンカチからは垂れる。離している間は絞って乾く */
+    if (play && held && soak >= HCAP) {
+      dripT -= dt;
+      if (dripT <= 0) {
+        dripT = 0.22;
+        tears.push({ x: hx + (Math.random() - 0.5) * 60, y: hy + 40, vx: 0, vy: 40, vol: 0.3, onFace: false, trail: [], ph: 0, drip: true });
+      }
+    }
+    if (!held && soak > 0) {
+      if (play && soak >= HCAP * 0.3 && Math.random() < dt * 8) noiseHit(0.08, 900 + Math.random() * 600, 0.04, 2);
+      soak = Math.max(0, soak - dt * HCAP / 0.9);
     }
     if (play) { px = hx; py = hy; }
     stepDrops(dt);
@@ -536,7 +550,7 @@
     if (scene3d) {
       try {
         scene3d.build({ W: W, H: H, FX: FX, FY: FY, RX: RX, RY: RY });
-        scene3d.pose({ T: T, dt: Math.max(0, T - lastPoseT), burst: burst, tears: tears, drops: drops, level: waterY(), ripples: ripples, held: held && state === S.PLAY, hx: hx, hy: hy, wet: wet });
+        scene3d.pose({ T: T, dt: Math.max(0, T - lastPoseT), burst: burst, tears: tears, drops: drops, level: waterY(), ripples: ripples, held: held && state === S.PLAY, hx: hx, hy: hy, wet: soak / HCAP * 21 });
         lastPoseT = T;
         ok3 = scene3d.render(ctx, W, H);
       } catch (e) { ok3 = false; }
@@ -612,7 +626,8 @@
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     skip: function (n) { for (var i = 0; i < (n || 1); i++) update(1 / 60); },
-    wipe: function (x, y) { held = true; hx = x; hy = y; },
+    wipe: function (x, y) { if (x == null) { held = false; return; } held = true; hx = x; hy = y; },
+    soak: function () { return soak; },
     hideUI: function (v) { hideUI = v !== false; draw(); }
   };
 
