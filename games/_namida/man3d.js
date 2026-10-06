@@ -128,6 +128,12 @@
     var z = Math.sqrt(q), w = Math.max(0, Math.min(1, (z - 0.05) / 0.35));
     return this.RZ * z + relief(dx, dy, this.big) * w;
   };
+  /* (x, y) のまわり r の範囲でいちばん手前の表面（涙やハンカチを埋めないため） */
+  ManScene.prototype.surfMax = function (x, y, r) {
+    var m = 0;
+    for (var i = -2; i <= 2; i++) for (var j = -2; j <= 2; j++) m = Math.max(m, this.surf(x + i * r / 2, y + j * r / 2));
+    return m;
+  };
   ManScene.prototype.P = function (x, y, off) { return new T.Vector3(x, -y, this.surf(x, y) + (off || 0)); };
   ManScene.prototype.tube = function (pts, r, mat, off, parent) {
     var self = this;
@@ -177,29 +183,47 @@
     /* 奥の壁（ぼけた部屋の明かり） */
     var wall = new T.Mesh(new T.PlaneGeometry(g.W, H), new T.MeshBasicMaterial({ map: this.paintWall(g.W, H) }));
     wall.position.set(g.W / 2, -H / 2, -800); G.add(wall);
-    /* 体（背広・シャツ・ネクタイ）。上から見た輪を回して作る */
-    var top = FY + RY * 0.82;
-    function lathe(prof, mat, sz, z) {
-      var m = new T.Mesh(new T.LatheGeometry(prof.map(function (p) { return new T.Vector2(p[0], -p[1]); }), 64), mat);
-      m.scale.z = sz; m.position.set(FX, -top, z); G.add(m); return m;
+    /* 体（肩・胸・腕と、白いタンクトップ）。上から見た輪を回して作り、前側を胸やお腹の分だけ押し出す */
+    var top = FY + RY * 0.82, BW = g.W, BH = H;
+    var bodyTex = this.paintBody(BW, BH, FX, top);
+    var bodySkin = new T.MeshPhysicalMaterial({ map: bodyTex.color, bumpMap: bodyTex.bump, bumpScale: 1.2, roughness: 0.55, clearcoat: 0.12, clearcoatRoughness: 0.4, sheen: 0.25, sheenRoughness: 0.6, sheenColor: new T.Color(0xff9a80), envMapIntensity: 0.6 });
+    /* 胸・お腹の盛り上がり（rel は首の付け根からの下向きの距離） */
+    function bodyRelief(dx, rel) {
+      var ax = Math.abs(dx);
+      var h = 16 * Math.exp(-Math.pow((ax - 85) / 70, 2) - Math.pow((rel - 205) / 55, 2));      /* 胸 */
+      h -= 4 * Math.exp(-Math.pow(dx / 14, 2) - Math.pow((rel - 200) / 70, 2));                  /* みぞおち */
+      h += 34 * Math.exp(-Math.pow(dx / 170, 2) - Math.pow((rel - 420) / 140, 2));              /* お腹 */
+      h += 5 * Math.exp(-Math.pow((rel - 92 - Math.pow((ax - 60) / 90, 2) * 14) / 8, 2)) * (ax > 25 && ax < 175 ? 1 : 0);  /* 鎖骨 */
+      h -= 6 * Math.exp(-Math.pow(dx / 18, 2) - Math.pow((rel - 105) / 14, 2));                  /* 鎖骨の間のくぼみ */
+      return h;
     }
-    var suit = new T.MeshPhysicalMaterial({ color: 0x343a46, roughness: 0.75, sheen: 0.6, sheenRoughness: 0.5, sheenColor: new T.Color(0x8890a0) });
-    lathe([[0, 30], [120, 30], [170, 52], [228, 78], [262, 112], [276, 160], [282, 230], [286, H - top + 40], [0, H - top + 40]], suit, 0.5, -130);
-    var neckM = std(0xd9a07f, { roughness: 0.55 });
-    lathe([[0, -150], [98, -150], [102, -40], [108, 30], [124, 70], [140, 92], [0, 92]], neckM, 0.75, -60);
-    var shirt = new T.MeshPhysicalMaterial({ color: 0xf2f2ec, roughness: 0.65, sheen: 0.4, sheenColor: new T.Color(0xffffff) });
-    function ext(pts, mat, z, depth) {
-      var m = new T.Mesh(new T.ExtrudeGeometry(shapeOf(pts), { depth: depth || 6, bevelEnabled: true, bevelThickness: 3, bevelSize: 3, bevelSegments: 3, curveSegments: 6 }), mat);
-      m.position.z = z; G.add(m); return m;
+    function bodyGeo(prof, sz, z0, extra) {
+      var geo = new T.LatheGeometry(prof.map(function (p) { return new T.Vector2(p[0], -p[1]); }), 96, -Math.PI / 2, Math.PI * 2);
+      var p = geo.attributes.position, uv = geo.attributes.uv;
+      for (var i = 0; i < p.count; i++) {
+        var x = p.getX(i), y = p.getY(i), z = p.getZ(i) * sz;
+        var rel = -y, fr = Math.max(0, z) / (sz * 260);
+        z += z0 + (z > 0 ? (bodyRelief(x, rel) + (extra || 0)) * Math.min(1, fr * 2.5) : 0);
+        p.setXYZ(i, FX + x, -(top + rel), z);
+        uv.setXY(i, (FX + x) / BW, 1 - (top + rel) / BH);
+      }
+      geo.computeVertexNormals();
+      return geo;
     }
-    ext([[FX - 100, top + 62], [FX, top + 250], [FX + 100, top + 62]], shirt, 2, 4);
+    var prof = [[0, -10], [96, -10], [104, 30], [150, 56], [212, 78], [252, 112], [266, 160], [262, 220], [244, 280], [242, 330], [252, 430], [256, H - top + 40], [0, H - top + 40]];
+    G.add(new T.Mesh(bodyGeo(prof, 0.55, -150), bodySkin));
+    /* 首（体と同じ肌） */
+    var neck = new T.Mesh(bodyGeo([[0, -170], [96, -170], [100, -40], [104, 20], [0, 20]], 0.72, -140), bodySkin); G.add(neck);
+    /* 腕 */
     [-1, 1].forEach(function (s) {
-      ext([[FX + s * 6, top + 98], [FX + s * 112, top + 46], [FX + s * 132, top + 74], [FX + s * 60, top + 150]], shirt, 18, 5);
-      ext([[FX + s * 128, top + 70], [FX + s * 26, top + 250], [FX + s * 70, top + 330], [FX + s * 200, top + 110], [FX + s * 175, top + 76]], suit, 10, 6);
+      var arm = new T.Mesh(new T.CylinderGeometry(58, 48, 560, 40, 8), bodySkin);
+      arm.position.set(FX + s * 262, -(top + 470), -175); arm.rotation.z = s * 0.05; G.add(arm);
+      ball(bodySkin, 60, 74, 60, FX + s * 256, top + 196, -175, G);
     });
-    var tieM = new T.MeshPhysicalMaterial({ color: 0x7e1f2a, roughness: 0.45, sheen: 0.8, sheenColor: new T.Color(0xd06070) });
-    ext([[FX - 14, top + 112], [FX + 14, top + 112], [FX + 24, top + 240], [FX, top + 275], [FX - 24, top + 240]], tieM, 12, 4);
-    ext([[FX - 22, top + 92], [FX + 22, top + 92], [FX + 15, top + 116], [FX - 15, top + 116]], tieM, 20, 6);
+    /* タンクトップ（白いリブ編み）。体に沿わせて少し外に出し、首まわりと袖ぐりは絵で抜く */
+    var tank = this.paintTank(BW, BH, FX, top);
+    var tankM = new T.MeshPhysicalMaterial({ color: 0xe6e2d8, map: tank.color, alphaMap: tank.alpha, alphaTest: 0.5, bumpMap: tank.bump, bumpScale: 2.2, roughness: 0.85, sheen: 0.6, sheenRoughness: 0.7, sheenColor: new T.Color(0xffffff), side: T.DoubleSide });
+    G.add(new T.Mesh(bodyGeo([[0, 18], [104, 18], [112, 32], [152, 56], [214, 80], [255, 114], [269, 162], [265, 222], [247, 282], [245, 332], [256, 432], [260, H - top + 40], [0, H - top + 40]], 0.55, -146, 3), tankM));
 
     /* 頭。玉を顔の凹凸の分だけ押し出し・へこませて作る（ふつう・号泣の2つ） */
     var head = this.head = new T.Group(); G.add(head);
@@ -383,7 +407,7 @@
       var r = 8 + t.vol * 9;
       m.visible = true;
       m.scale.set(r * 0.85, r * 0.95, t.onFace ? r * 0.45 : r * 0.8);
-      m.position.set(t.x + (t.onFace ? shake : 0), -t.y, (t.onFace ? self.surf(t.x, t.y) : self.RZ * 0.9) + r * 0.25);
+      m.position.set(t.x + (t.onFace ? shake : 0), -t.y, (t.onFace ? self.surfMax(t.x, t.y, r) + r * 0.5 : Math.max(self.RZ * 0.9, self.surfMax(t.x, t.y, r) + r)));
     });
     /* しぶき */
     var dp = this.dropPool;
@@ -412,7 +436,7 @@
     h.visible = !!s.held;
     if (s.held) {
       this.paintHanky(s.wet);
-      var z = Math.max(this.surf(s.hx, s.hy), 60) + 40;
+      var z = Math.max(this.surfMax(s.hx, s.hy, 60), 60) + 34;
       h.position.set(s.hx, -s.hy, z);
       h.rotation.set(-0.15, 0.1, 0.2 - Math.sin(s.T * 6) * 0.05);
       var a = h.geometry.attributes.position, b = this.hbase;
@@ -507,6 +531,76 @@
     this.post = new T.Mesh(new T.PlaneGeometry(2, 2), mat);
     this.postScene = new T.Scene(); this.postScene.add(this.post);
     this.postCam = new T.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  };
+
+  /* 体の肌の絵（ゲーム座標そのままの向きで貼る） */
+  ManScene.prototype.paintBody = function (W, H, FX, top) {
+    var S = 2, doc = global.document;
+    var cv = doc.createElement("canvas"); cv.width = W * S / 2; cv.height = H * S / 2;
+    var c = cv.getContext("2d"), k = S / 2;
+    var bv = doc.createElement("canvas"); bv.width = cv.width; bv.height = cv.height;
+    var b = bv.getContext("2d");
+    var seed = 11;
+    function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+    c.fillStyle = "#d9a283"; c.fillRect(0, 0, cv.width, cv.height);
+    var i;
+    for (i = 0; i < 160; i++) {
+      var x = rnd() * cv.width, y = rnd() * cv.height, r = 20 + rnd() * 60;
+      var g = c.createRadialGradient(x, y, 0, x, y, r);
+      var col = rnd() < 0.5 ? "190,125,98" : "236,185,155";
+      g.addColorStop(0, "rgba(" + col + ",.22)"); g.addColorStop(1, "rgba(" + col + ",0)");
+      c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+    }
+    /* 首と胸の上の日焼け・赤み */
+    var g2 = c.createRadialGradient(FX * k, (top + 60) * k, 0, FX * k, (top + 60) * k, 160 * k);
+    g2.addColorStop(0, "rgba(200,105,85,.28)"); g2.addColorStop(1, "rgba(200,105,85,0)");
+    c.fillStyle = g2; c.fillRect(0, 0, cv.width, cv.height);
+    /* 胸毛と腕の毛（まばら） */
+    c.lineCap = "round";
+    for (i = 0; i < 1300; i++) {
+      var hx = FX + (rnd() - 0.5) * 2 * 120 * Math.pow(rnd(), 0.6), hy = top + 120 + rnd() * 160;
+      c.strokeStyle = rnd() < 0.35 ? "rgba(150,140,132,.75)" : "rgba(50,42,38,.7)"; c.lineWidth = 1.1;
+      var a = Math.PI / 2 + (hx - FX) * 0.006 + (rnd() - 0.5) * 1.6, l = 5 + rnd() * 7;
+      c.beginPath(); c.moveTo(hx * k, hy * k); c.quadraticCurveTo((hx + Math.cos(a) * l * 0.5 + 2) * k, (hy + Math.sin(a) * l * 0.5) * k, (hx + Math.cos(a) * l) * k, (hy + Math.sin(a) * l) * k); c.stroke();
+    }
+    for (i = 0; i < 900; i++) {
+      var s = rnd() < 0.5 ? -1 : 1, ax = FX + s * (215 + rnd() * 110), ay = top + 180 + rnd() * 600;
+      c.strokeStyle = "rgba(60,50,45,.45)"; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(ax * k, ay * k); c.lineTo((ax + s * 2) * k, (ay + 6) * k); c.stroke();
+    }
+    /* ほくろ */
+    c.fillStyle = "rgba(80,50,40,.8)";
+    [[FX - 60, top + 170], [FX + 140, top + 260], [FX + 40, top + 330]].forEach(function (p) { c.beginPath(); c.arc(p[0] * k, p[1] * k, 2.2, 0, Math.PI * 2); c.fill(); });
+    b.fillStyle = "#808080"; b.fillRect(0, 0, bv.width, bv.height);
+    for (i = 0; i < 40000; i++) { b.fillStyle = rnd() < 0.5 ? "rgba(60,60,60,.45)" : "rgba(200,200,200,.3)"; b.fillRect(rnd() * bv.width, rnd() * bv.height, 1.4, 1.4); }
+    var ct = new T.CanvasTexture(cv); ct.colorSpace = T.SRGBColorSpace;
+    return { color: ct, bump: new T.CanvasTexture(bv) };
+  };
+
+  /* タンクトップの形（首まわりのU字と袖ぐり）、リブ編みの縦すじ、少しの黄ばみ */
+  ManScene.prototype.paintTank = function (W, H, FX, top) {
+    var doc = global.document, w = W, h = H;
+    function cvs() { var c = doc.createElement("canvas"); c.width = w; c.height = h; return c; }
+    var av = cvs(), a = av.getContext("2d"), cv = cvs(), c = cv.getContext("2d"), bv = cvs(), b = bv.getContext("2d");
+    var img = a.createImageData(w, h), d = img.data;
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+      var dx = Math.abs(x - FX), rel = y - top, on = rel > 22;
+      if (dx < 88 && rel < 70 + 125 * Math.sqrt(Math.max(0, 1 - Math.pow(dx / 88, 2)))) on = false;      /* 首まわり */
+      var edge = rel < 80 ? 140 : rel < 270 ? 140 + 110 * Math.pow((rel - 80) / 190, 2.2) : 400;
+      if (dx > edge) on = false;                                                                           /* 袖ぐり */
+      var o = (y * w + x) * 4; d[o] = d[o + 1] = d[o + 2] = on ? 255 : 0; d[o + 3] = 255;
+    }
+    a.putImageData(img, 0, 0);
+    c.fillStyle = "#ffffff"; c.fillRect(0, 0, w, h);
+    var g = c.createLinearGradient(0, top, 0, h);
+    g.addColorStop(0, "rgba(235,225,200,.0)"); g.addColorStop(1, "rgba(225,212,180,.35)");
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    b.fillStyle = "#808080"; b.fillRect(0, 0, w, h);
+    for (var xx = 0; xx < w; xx += 4) { b.fillStyle = "rgba(255,255,255,.55)"; b.fillRect(xx, 0, 2, h); }
+    /* 縁の縫い目 */
+    c.strokeStyle = "rgba(200,195,185,.9)"; c.lineWidth = 3;
+    var tex = function (cvx, color) { var t = new T.CanvasTexture(cvx); if (color) t.colorSpace = T.SRGBColorSpace; return t; };
+    return { alpha: tex(av), color: tex(cv, true), bump: tex(bv) };
   };
 
   /* 奥の壁：薄暗い部屋に、ぼけた明かり */
