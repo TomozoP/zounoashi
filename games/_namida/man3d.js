@@ -260,7 +260,7 @@
     });
 
     /* アメンボ（細長い体と、水面に届く長い脚） */
-    var st = this.strider = new T.Group(); this.scene.add(st);
+    var st = this.strider = new T.Group(); st.visible = false;   /* 絵はゲーム側の2Dで描く */
     var inner = this.striderInner = new T.Group(); st.add(inner);
     inner.scale.setScalar(2.0 * K);
     var shell = new T.MeshPhysicalMaterial({ color: 0x2b2118, roughness: 0.45, sheen: 0.8, sheenRoughness: 0.4, sheenColor: new T.Color(0x9a8a70), clearcoat: 0.4 });
