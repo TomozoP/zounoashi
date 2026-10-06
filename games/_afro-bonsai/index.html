@@ -341,7 +341,7 @@
     var skins = ["#b5844f"];   /* 顔も幹と同じ木の色 */
     var hairs = [[52, 98, 40], [44, 86, 38], [62, 104, 44], [40, 90, 48]];   /* 髪は盆栽の葉の緑 */
     look = { skin: skins[Math.floor(rnd() * skins.length)], hair: hairs[Math.floor(rnd() * hairs.length)], brow: rnd() < 0.5, seed: 1 + Math.floor(rnd() * 99999) };
-    react.kind = null; react.t = 0;
+    react.kind = null; react.t = 0; tool = "line";
     phase = "cut"; okPress = false; judgeT = 0; dirty = true; bits = []; chunks = []; stroke = null;
     paintTexture();
   }
@@ -373,7 +373,12 @@
   /* 線で切る。線の上の升目を消し、頭のてっぺん（根元）とつながらなくなった髪を落とす */
   var KERF = 1.2;              /* 切り口の太さ（升目）。太いと見た目より削れて小さくなる */
   function cutStroke(pts) {
-    var cutN = 0, r2 = KERF * KERF;
+    var n = carve(pts, KERF);
+    return n ? n + settle(pts) : 0;
+  }
+  /* 線の上の升目を消す（半径 rad 升） */
+  function carve(pts, rad) {
+    var cutN = 0, r2 = rad * rad, KERF = rad;
     for (var p = 1; p < pts.length; p++) {
       var x0 = pts[p - 1].x, y0 = pts[p - 1].y, x1 = pts[p].x, y1 = pts[p].y;
       var steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
@@ -387,8 +392,12 @@
         }
       }
     }
-    if (!cutN) return 0;
-    dirty = true;
+    if (cutN) dirty = true;
+    return cutN;
+  }
+  /* 根元とつながらなくなった髪を落とす。落ちた升目の数を返す */
+  function settle(pts) {
+    var i, j;
     /* 根元から4方向にたどれる髪だけ残す */
     var keep = new Uint8Array(N * N), q = [];
     var ri = Math.floor((cx - ox) / CS), rj = Math.floor((cy - 90 - oy) / CS);
@@ -412,7 +421,7 @@
       var pp = pts[Math.floor(rnd() * pts.length)];
       bits.push({ x: pp.x, y: pp.y, vx: (rnd() - 0.5) * 120, vy: -40 - rnd() * 80, r: 2 + rnd() * 3, life: 1.2 });
     }
-    return cutN + fallN;
+    return fallN;
   }
   /* 落ちる髪のかたまりを、もじゃもじゃ模様で切り抜いた絵にして落とす */
   function dropChunk(fall) {
@@ -493,23 +502,78 @@
     }
     if (phase !== "cut") return;
     if (x == null || hitOk(x, y)) { okPress = true; tone(880, 0.06, 0.08, "square"); return; }
+    var tb = hitTool(x, y);
+    if (tb) { if (tool !== tb) { tool = tb; tone(660, 0.05, 0.06, "square"); } return; }
     held = true; px = x; py = y;
     stroke = [{ x: x, y: y }];
+    if (tool === "trace") { traceBefore = match(); traceN = carve(stroke, TRACE); }
   }
   function move(x, y) {
     px = x; py = y;
     if (!held || !stroke) return;
     if (state !== S.PLAY || phase !== "cut") { held = false; stroke = null; return; }
+    if (tool === "trace") {               /* なぞったところを、その場で切る */
+      var last = stroke[stroke.length - 1];
+      if (Math.hypot(x - last.x, y - last.y) < 2) return;
+      var seg = [last, { x: x, y: y }];
+      stroke.push(seg[1]);
+      var c = carve(seg, TRACE);
+      if (c) {
+        traceN += c;
+        if (rnd() < 0.5) bits.push({ x: x, y: y, vx: (rnd() - 0.5) * 120, vy: -40 - rnd() * 80, r: 2 + rnd() * 3, life: 1.2 });
+        snipT -= Math.hypot(seg[1].x - seg[0].x, seg[1].y - seg[0].y);
+        if (snipT <= 0) { snipT = 40; noiseHit(0.04, 4200, 0.08, 3); }
+      }
+      return;
+    }
     stroke[1] = { x: x, y: y };          /* 押したところから今の指までの直線 */
   }
   function up() {
     if (!held) return;
     held = false;
+    if (tool === "trace" && stroke && state === S.PLAY && phase === "cut") {
+      if (traceN) { settle(stroke); snip(); reactTo(match() - traceBefore); }
+      stroke = null; return;
+    }
     if (stroke && stroke.length > 1 && state === S.PLAY && phase === "cut") {
       var before = match();
       if (cutStroke(stroke)) { snip(); reactTo(match() - before); }
     }
     stroke = null;
+  }
+  /* ハサミは2本：線を引いて切る「直線」と、なぞった所だけ切る「なぞり」。画面の下で切り替える */
+  var tool = "line", TRACE = 4, traceBefore = 0, traceN = 0, snipT = 0;
+  function toolButtons() {
+    var w = 96, h = 64, gap = 18, y = H - h - Math.max(28, H * 0.035);
+    return [{ id: "line", x: W / 2 - w - gap / 2, y: y, w: w, h: h }, { id: "trace", x: W / 2 + gap / 2, y: y, w: w, h: h }];
+  }
+  function hitTool(x, y) {
+    var bs = toolButtons();
+    for (var i = 0; i < bs.length; i++) { var b = bs[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id; }
+    return null;
+  }
+  function drawTools() {
+    toolButtons().forEach(function (b) {
+      var on = tool === b.id, ink = on ? "#fff" : "#16202e";
+      ctx.save();
+      roundRect(b.x, b.y, b.w, b.h, b.h / 2);
+      ctx.fillStyle = on ? "#16202e" : "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      /* 左に小さなハサミ、右へ切りかたの線（直線か波線） */
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      ctx.strokeStyle = ink; ctx.lineWidth = 4; ctx.lineCap = "round";
+      ctx.setLineDash([5, 6]);
+      ctx.beginPath();
+      if (b.id === "line") { ctx.moveTo(-6, 0); ctx.lineTo(34, 0); }
+      else { ctx.moveTo(-6, 0); ctx.bezierCurveTo(4, -18, 18, 18, 34, -4); }
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.save(); ctx.translate(-14, 0);
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(10, -7); ctx.moveTo(-4, 0); ctx.lineTo(10, 7); ctx.stroke();
+      ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(-12, -6, 5, 0, Math.PI * 2); ctx.moveTo(-7, 6); ctx.arc(-12, 6, 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      ctx.restore();
+    });
   }
   /* 切るたびの反応：お手本に近づけば喜び、お手本の所を切られると痛がり、大きく削られるとがっかりする */
   var REACT = 1.3;             /* 反応の顔を見せる秒数 */
@@ -789,8 +853,9 @@
         ctx.restore();
       }
       if (state === S.PLAY) {
-        if (phase === "cut") { drawSample(); drawOk(); }   /* 完成を押したらお手本は消す */
-        if (held && stroke && phase === "cut") {
+        if (phase === "cut") { drawSample(); drawOk(); drawTools(); }   /* 完成を押したらお手本は消す */
+        if (held && stroke && phase === "cut" && tool === "trace") drawScissors(px, py, 0.6);
+        else if (held && stroke && phase === "cut") {
           /* 引いている線 */
           ctx.save();
           ctx.lineCap = ctx.lineJoin = "round";

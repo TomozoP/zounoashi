@@ -186,8 +186,8 @@
   function relief(gu, gv, e) {
     gu /= FX; gv = CY0 + (gv - CY0) / FY;
     var au = Math.abs(gu), d = 0;
-    d -= 9 * gs(au - 30, gv - 2, 19, 12);          /* 目のくぼみ */
-    d += 4 * gs(au - 30, gv - 15, 25, 6);          /* 眉の骨 */
+    d -= 12 * gs(au - 32, gv - 8, 24, 20);         /* 目のくぼみ（大きな目に合わせて広め） */
+    d += 4 * gs(au - 30, gv - 18, 25, 5);          /* 眉の骨 */
     d -= 3 * gs(au - 70, gv - 5, 12, 22);          /* こめかみ */
     d += 5 * gs(gu, gv - 8, 6, 12);                /* 鼻すじ */
     d += 15 * gs(gu, gv - 28, 8, 12);              /* 鼻 */
@@ -234,7 +234,7 @@
     var blush = (e === "joy" ? 0.9 : 0.5) * gs(au - 42, gv - 32, 18, 14) + 0.35 * gs(gu, gv - 36, 9, 7);
     if (e === "ouch") blush += 0.6 * gs(gu, gv - 10, 40, 30);
     r *= 1 + 0.04 * blush; g *= 1 - 0.14 * blush; b *= 1 - 0.1 * blush;
-    var sock = gs(au - 30, gv - 4, 22, 13);
+    var sock = gs(au - 32, gv - 9, 25, 20);
     if (e === "shock") sock *= 1.8;
     r *= 1 - 0.12 * sock; g *= 1 - 0.15 * sock; b *= 1 - 0.1 * sock;
     var m = mouthEdges(gu, e), lip = 0;
@@ -252,7 +252,7 @@
   }
   /* 目と眉の形（表情ごと）。a は上まぶたの縁の角度（大きいほど閉じる） */
   var EYE = {
-    n: { a: 0.38, low: 0, iris: 1, brow: function (u) { return -18 + 4 * u * u - 2 * Math.sin(u * Math.PI); } },
+    n: { a: 0.3, low: 0, iris: 1, brow: function (u) { return -18 + 4 * u * u - 2 * Math.sin(u * Math.PI); } },
     joy: { a: 0.6, low: 4, iris: 1, brow: function (u) { return -19 + 4 * u * u - 4 * Math.sin(u * Math.PI); } },
     ouch: { a: 0.8, low: 4, iris: 1, brow: function (u) { return -22 + 13 * u - 2 * u * u; } },
     shock: { a: 0.2, low: -1, iris: 0.7, brow: function (u) { return -21 + 5 * u * u - 3 * Math.sin(u * Math.PI); } }
@@ -298,14 +298,14 @@
     var bm = std(0x3a2414, { roughness: 1 });   /* 眉は濃い木の色 */
     var eyes = this.eyes = [];
     [-1, 1].forEach(function (s) {
-      var ex = fx(s * 30), ey = fy(2), R = 12.8, ez = surf(ex, ey) - R + 5;
+      var ex = fx(s * 32), ey = 6, R = 20, K = R / 10.5, ez = surf(ex, ey) - R + 5;
       var at = new T.Vector3(cx + ex, -(cy + ey), ez);
       var eye = new T.Mesh(new T.SphereGeometry(R, 32, 24), white); eye.position.copy(at); F.add(eye);
       /* 黒目は目玉の中心で回すと視線が動く */
       var look = new T.Group(); look.position.copy(at); F.add(look);
-      var ir = new T.Mesh(new T.CircleGeometry(5.6 * E.iris, 32), iris); ir.position.set(0, -0.5, R + 0.05); look.add(ir);
-      var pu = new T.Mesh(new T.CircleGeometry(2.6 * E.iris, 24), pupil); pu.position.set(0, -0.5, R + 0.1); look.add(pu);
-      var hl = new T.Mesh(new T.CircleGeometry(1.3, 12), new T.MeshBasicMaterial({ color: 0xffffff })); hl.position.set(-2, 1.5, R + 0.15); look.add(hl);
+      var ir = new T.Mesh(new T.CircleGeometry(5.6 * K * E.iris, 32), iris); ir.position.set(0, -0.5 * K, R + 0.05); look.add(ir);
+      var pu = new T.Mesh(new T.CircleGeometry(2.6 * K * E.iris, 24), pupil); pu.position.set(0, -0.5 * K, R + 0.1); look.add(pu);
+      var hl = new T.Mesh(new T.CircleGeometry(1.3 * K, 12), new T.MeshBasicMaterial({ color: 0xffffff })); hl.position.set(-2 * K, 1.5 * K, R + 0.15); look.add(hl);
       /* 上まぶた：目玉より少し大きい殻の上側。前に回すと閉じる */
       var a = Math.PI * E.a, lidG = new T.Group(); lidG.position.copy(at); F.add(lidG);
       var lid = new T.Mesh(new T.SphereGeometry(R + 1.2, 32, 16, 0, Math.PI * 2, 0, a), lidM);
@@ -315,7 +315,7 @@
         var ang = t * 1.25, rr = R + 1.6, y = Math.cos(a) * rr, xz = Math.sin(a) * rr;
         pts.push(new T.Vector3(Math.sin(ang) * xz * 1.04, y, Math.cos(ang) * xz));
       }
-      lidG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts), 20, 0.9, 6, false), lashM));
+      lidG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts), 20, 1.3, 6, false), lashM));
       /* 下まぶたのふくらみ */
       var low = new T.Mesh(new T.TorusGeometry(R * 0.95, 1.6 + E.low * 0.3, 8, 24, Math.PI * 0.8), lidM);
       low.rotation.z = Math.PI + Math.PI * 0.1; low.scale.set(1.1, 0.55, 1);
@@ -392,7 +392,7 @@
       e.lid.rotation.x = 0.06 * n2;
       var ry = A.gx * 0.32, rx = A.gy * 0.25;
       if (aim && cam) {
-        var dx = aim.x - (cam.cx + fx(e.s * 30)), dy = aim.y - (cam.cy + fy(2));
+        var dx = aim.x - (cam.cx + fx(e.s * 32)), dy = aim.y - (cam.cy + 6);
         ry = Math.max(-0.55, Math.min(0.55, Math.atan2(dx, 160)));
         rx = Math.max(-0.45, Math.min(0.45, Math.atan2(dy, 160)));
       }
