@@ -112,9 +112,11 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
   var tears, drops, ripples = [], fill, wet, hx, hy, px, py, sobT, swishT, burst, hideUI = false;
-  var HCAP = 6, soak = 0, dripT = 0, tilt = 0;  /* コップに入る量(ml)。満杯だとあふれる。指を離すと中身をあける */
-  var CW = 40, CH = 110;                        /* コップの口の半径と高さ。指はコップの底のすぐ下 */
-  var CAP = 28;                                 /* 取りこぼしてよい量(ml)。これであごまで水がたまる */
+  /* アメンボ：床の水面に浮かび、左右のドラッグで滑る。落ちてくる涙を水に落ちる前に受け止める */
+  var sx = 270, sxT = 270, sv = 0, dragX0 = 0, dragS0 = 0, AW = 62, rippleT = 0, gulp = 0;
+  var soak = 0, tilt = 0;
+  var BASE = 120;                               /* 最初の水面の高さ（画面の下から） */
+  var CAP = 16;                                 /* 取りこぼしてよい量(ml)。これであごまで水がたまる */
 
   /* 顔の置き場所。高さが変わっても涙の量で終わるので、難しさは変わらない */
   /* 顔は画面の横幅ぎりぎりまで大きく映す */
@@ -128,7 +130,7 @@
     if (Math.abs(d) >= 1) return FY;
     return FY + RY * Math.sqrt(1 - d * d);
   }
-  function waterY() { return H - (H - LOSE) * fill; }
+  function waterY() { return (H - BASE) - (H - BASE - LOSE) * fill; }
 
   /* 涙の出口（左右の目尻と目頭） */
   function eyeSpots() {
@@ -145,15 +147,15 @@
     score = 0;
     T = 0;
     held = false;
-    tears = []; drops = []; ripples = []; fill = 0; wet = 0; soak = 0; dripT = 0; tilt = 2.1;
-    hx = W / 2; hy = FY + 120; px = null; py = null;
+    tears = []; drops = []; ripples = []; fill = 0; wet = 0; gulp = 0;
+    sx = sxT = W / 2; sv = 0;
     sobT = 0.4; swishT = 0; burst = false;
   }
 
   /* 泣く強さ。時間とともに増え、ときどき号泣する */
   function rate() {
-    var r = Math.min(6.5, 1.3 + T * 0.09);
-    return burst ? r * 2.2 : r;
+    var r = Math.min(4.2, 0.9 + T * 0.055);
+    return burst ? r * 1.8 : r;
   }
   var spawnAcc = 0, spotI = 0;
   function spawn(n) {
@@ -194,6 +196,12 @@
         t.vy += 1500 * dt;
         t.x += t.vx * dt; t.y += t.vy * dt;
         if (t.trail.length) t.trail.splice(0, 2);
+        if (play && t.y >= wy - 26 && t.y < wy + 6 && Math.abs(t.x - sx) < AW) {
+          tears.splice(i, 1);
+          score += t.vol; gulp = 1;
+          tone(700 + Math.random() * 200, 0.07, 0.06, "sine", 1200);
+          continue;
+        }
         if (t.y >= wy) {
           tears.splice(i, 1);
           splash(t.x, wy, t.vol);
@@ -201,31 +209,15 @@
           continue;
         }
       }
-      if (play && held && !t.drip && cupHit(t)) {
-        tears.splice(i, 1);
-        if (soak < HCAP) {
-          score += t.vol; wet += t.vol; soak = Math.min(HCAP, soak + t.vol);
-          tone(900 + soak * 120 + Math.random() * 60, 0.06, 0.05, "sine", 1300 + soak * 150);
-        } else {
-          /* 満杯：入った分だけふちからあふれる */
-          var sd = Math.random() < 0.5 ? -1 : 1;
-          tears.push({ x: hx + sd * CW, y: cupTop() + 6, vx: sd * 30, vy: 20, vol: t.vol, onFace: false, trail: [], ph: 0, drip: true });
-          noiseHit(0.06, 2400, 0.03, 2);
-        }
-      }
     }
-    /* 指を離している間は、コップを傾けて中身をあける（あけた涙は床の水にならない） */
-    if (!held) {
-      tilt = Math.min(2.1, tilt + dt * 5);
-      if (soak > 0 && tilt > 1.2) {
-        dripT -= dt;
-        var sx = hx + (hx < FX ? -1 : 1) * CW;
-        if (dripT <= 0) { dripT = 0.03; tears.push({ x: sx, y: hy - 30, vx: (hx < FX ? -60 : 60), vy: 80, vol: 0.2, onFace: false, trail: [], ph: 0, drip: true, pour: true }); }
-        if (play && Math.random() < dt * 10) noiseHit(0.08, 700 + Math.random() * 500, 0.04, 2);
-        soak = Math.max(0, soak - dt * HCAP / 0.8);
-      }
-    } else tilt = Math.max(0, tilt - dt * 8);
-    if (play) { px = hx; py = hy; }
+    /* アメンボの動き：ドラッグの先へ水の上を滑る */
+    if (play) {
+      var nx = sx + (sxT - sx) * Math.min(1, dt * 12);
+      sv = (nx - sx) / dt; sx = nx;
+      rippleT -= dt;
+      if (rippleT <= 0 && Math.abs(sv) > 40) { rippleT = 0.12; ripples.push({ x: sx, t: T, a: 1.5 }); if (ripples.length > 12) ripples.shift(); }
+    }
+    gulp = Math.max(0, gulp - dt * 4);
     stepDrops(dt);
     swishT -= dt;
     if (play && fill >= 1) {
@@ -235,20 +227,6 @@
       tone(300, 0.5, 0.12, "sine", 90);
       noiseHit(0.6, 500, 0.15, 0.8);
     }
-  }
-  /* コップの口に上から入った涙を受ける */
-  function cupTop() { return hy - 12 - CH; }
-  function cupHit(t) {
-    var top = cupTop();
-    return Math.abs(t.x - hx) < CW - 3 && t.y >= top - 4 && t.y <= top + 34;
-  }
-  var HR = 58;
-  function wipeHit(t) {
-    var ax = px == null ? hx : px, ay = py == null ? hy : py;
-    var dx = hx - ax, dy = hy - ay, l2 = dx * dx + dy * dy, k = 0;
-    if (l2 > 0) k = Math.max(0, Math.min(1, ((t.x - ax) * dx + (t.y - ay) * dy) / l2));
-    var cx = ax + dx * k - t.x, cy = ay + dy * k - t.y;
-    return cx * cx + cy * cy < HR * HR;
   }
   function splash(x, y, vol) {
     noiseHit(0.1, 1500 + Math.random() * 800, 0.05, 2);
@@ -276,13 +254,11 @@
     }
     if (x == null) return;
     held = true;
-    hx = x; hy = y; px = null; py = null;
+    dragX0 = x; dragS0 = sxT;
   }
   function move(x, y) {
     if (state !== S.PLAY || !held) return;
-    var d = Math.hypot(x - hx, y - hy);
-    hx = x; hy = y;
-    if (d > 18 && swishT <= 0) { noiseHit(0.09, 2600, Math.min(0.05, d / 1200), 1.5); swishT = 0.09; }
+    sxT = Math.max(30, Math.min(W - 30, dragS0 + (x - dragX0) * 1.2));
   }
   function up() {
     if (!held) return;
@@ -470,7 +446,6 @@
     var sx = burst ? Math.sin(T * 47) * 2.5 : Math.sin(T * 9) * 0.8;
     [-1, 1].forEach(function (s) {
       var x = FX + s * 112 + sx, y = FY + 52;
-      if (held && state === S.PLAY && Math.abs(hx - x) < 100 && Math.abs(hy - y) < 90) return;
       ctx.save(); ctx.translate(x, y); ctx.scale(1, 0.6);
       var gr = ctx.createRadialGradient(0, 0, 0, 0, 0, 44);
       gr.addColorStop(0, "rgba(235,90,80,.38)"); gr.addColorStop(1, "rgba(235,90,80,0)");
@@ -520,27 +495,16 @@
     drops.forEach(function (d) { ell(d.x, d.y, 4, 5); ctx.fill(); });
   }
   function drawHanky() {
-    if (!held || state !== S.PLAY) return;
-    ctx.save();
-    ctx.translate(hx, hy);
-    ctx.rotate(-0.2 + Math.sin(T * 6) * 0.05);
-    var s = 104;
-    ctx.shadowColor = "rgba(0,0,0,.25)"; ctx.shadowBlur = 10; ctx.shadowOffsetY = 4;
-    roundRect(-s / 2, -s / 2, s, s, 10); ctx.fillStyle = "#fdfdfb"; ctx.fill();
-    ctx.shadowColor = "transparent";
-    ctx.strokeStyle = "#5b8fd8"; ctx.lineWidth = 6;
-    roundRect(-s / 2 + 9, -s / 2 + 9, s - 18, s - 18, 6); ctx.stroke();
-    ctx.lineWidth = 2;
-    for (var k = -1; k <= 1; k++) {
-      ctx.beginPath(); ctx.moveTo(k * 22, -s / 2 + 9); ctx.lineTo(k * 22, s / 2 - 9); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(-s / 2 + 9, k * 22); ctx.lineTo(s / 2 - 9, k * 22); ctx.stroke();
-    }
-    /* 吸った分だけしみ */
-    ctx.fillStyle = "rgba(70,130,200,.22)";
-    var n = Math.min(14, Math.floor(wet / 1.5));
-    for (var i = 0; i < n; i++) { ell(Math.sin(i * 2.4) * 30, Math.cos(i * 1.7) * 30, 14 + (i % 3) * 5, 11 + (i % 2) * 6); ctx.fill(); }
+    var y = waterY();
+    ctx.save(); ctx.strokeStyle = "#2a2018"; ctx.lineWidth = 3; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.ellipse(sx, y - 14, 22, 5, 0, 0, Math.PI * 2); ctx.fillStyle = "#3a2a1c"; ctx.fill();
+    [-1, 1].forEach(function (s) {
+      ctx.beginPath(); ctx.moveTo(sx + s * 8, y - 14); ctx.quadraticCurveTo(sx + s * 40, y - 34, sx + s * 70, y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx + s * 4, y - 14); ctx.quadraticCurveTo(sx + s * 24, y - 28, sx + s * 40, y); ctx.stroke();
+    });
     ctx.restore();
   }
+
 
   /* 立体の絵。作れないとき（WebGLなし）は平面の絵のまま */
   var scene3d = null, tries3d = 0, lastTry3d = -1e9, lastPoseT = 0;
@@ -560,13 +524,25 @@
     var ok3 = false;
     if (scene3d) {
       try {
-        scene3d.build({ W: W, H: H, FX: FX, FY: FY, RX: RX, RY: RY, CW: CW, CH: CH });
-        scene3d.pose({ T: T, dt: Math.max(0, T - lastPoseT), burst: burst, tears: tears, drops: drops, level: waterY(), ripples: ripples, held: held && state === S.PLAY, hx: hx, hy: hy, cup: { on: state === S.PLAY && (held || soak > 0 || tilt < 2.05), x: hx, y: hy - 12, level: soak / HCAP, tilt: (hx < FX ? 1 : -1) * tilt } });
+        scene3d.build({ W: W, H: H, FX: FX, FY: FY, RX: RX, RY: RY, CW: 40, CH: 110 });
+        scene3d.pose({ T: T, dt: Math.max(0, T - lastPoseT), burst: burst, tears: tears, drops: drops, level: waterY(), ripples: ripples, strider: { x: sx, y: waterY(), v: sv, gulp: gulp } });
         lastPoseT = T;
         ok3 = scene3d.render(ctx, W, H);
       } catch (e) { ok3 = false; }
     }
     if (!ok3) { drawBody(); drawFace(); drawTears(); drawWater(); drawHanky(); }
+    else if (state === S.PLAY) {
+      /* アメンボの脚が水面を押すくぼみ */
+      var wy = waterY();
+      ctx.save(); ctx.strokeStyle = "rgba(230,245,255,.55)"; ctx.lineWidth = 1.5;
+      [35, 59, -64].forEach(function (lx) {
+        [1, 0.7].forEach(function (k) {
+          var x = sx + lx * 2.0 * (RX / 188) * (sv >= 0 ? 1 : -1) * k * (k < 1 ? 1 : 1);
+          ctx.beginPath(); ctx.ellipse(x, wy + 1, 10, 2.4, 0, 0, Math.PI * 2); ctx.stroke();
+        });
+      });
+      ctx.restore();
+    }
     if (state === S.PLAY && !hideUI) {
       ctx.save();
       ctx.fillStyle = "#fff";
@@ -637,8 +613,9 @@
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     skip: function (n) { for (var i = 0; i < (n || 1); i++) update(1 / 60); },
-    wipe: function (x, y) { if (x == null) { held = false; return; } held = true; hx = x; hy = y; },
-    soak: function () { return soak; },
+    go: function (x) { sxT = x; },
+    falling: function () { return tears.filter(function (t) { return !t.onFace; }).map(function (t) { return { x: t.x, y: t.y }; }); },
+    strider: function () { return sx; },
     hideUI: function (v) { hideUI = v !== false; draw(); }
   };
 

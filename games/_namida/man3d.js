@@ -259,14 +259,30 @@
       self.pools.push(ball(self.poolMat, 28 * K, 3 * K, 2.5 * K, ex, ey, self.surf(ex, ey) + 1, head));
     });
 
-    /* コップ（ガラス）と、中にたまった涙 */
-    var CW = this.CW = g.CW, CH = this.CH = g.CH;
-    var cup = this.cup = new T.Group(); cup.visible = false; this.scene.add(cup);
-    var glass = new T.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, thickness: 3, ior: 1.5, roughness: 0.04, metalness: 0, side: T.DoubleSide, envMapIntensity: 1.4, specularIntensity: 1, clearcoat: 1, clearcoatRoughness: 0.03 });
-    var gp = [[0, 0], [CW - 8, 0], [CW - 6, 2], [CW - 5, 8], [CW, CH - 2], [CW + 1, CH], [CW - 2, CH], [CW - 3.5, CH - 2], [CW - 8.5, 10], [CW - 10, 8], [0, 8]];
-    cup.add(new T.Mesh(new T.LatheGeometry(gp.map(function (p) { return new T.Vector2(p[0], p[1]); }), 48), glass));
-    this.cupWater = new T.Mesh(new T.CylinderGeometry(1, 1, 1, 40), this.tearMat);
-    cup.add(this.cupWater);
+    /* アメンボ（細長い体と、水面に届く長い脚） */
+    var st = this.strider = new T.Group(); this.scene.add(st);
+    var inner = this.striderInner = new T.Group(); st.add(inner);
+    inner.scale.setScalar(2.0 * K);
+    var shell = new T.MeshPhysicalMaterial({ color: 0x2b2118, roughness: 0.45, sheen: 0.8, sheenRoughness: 0.4, sheenColor: new T.Color(0x9a8a70), clearcoat: 0.4 });
+    var legM = new T.MeshStandardMaterial({ color: 0x1e1610, roughness: 0.6 });
+    var bodyG = new T.CapsuleGeometry(4.2, 30, 6, 14); bodyG.rotateZ(Math.PI / 2);
+    var bodyM = new T.Mesh(bodyG, shell); bodyM.position.set(0, 13, 0); bodyM.scale.set(1, 0.85, 1.1); inner.add(bodyM);
+    var headM = new T.Mesh(new T.SphereGeometry(3.6, 14, 10), shell); headM.position.set(19.5, 14, 0); inner.add(headM);
+    [-1, 1].forEach(function (z) {
+      var eye = new T.Mesh(new T.SphereGeometry(1.4, 8, 6), new T.MeshStandardMaterial({ color: 0x0a0806, roughness: 0.2 }));
+      eye.position.set(21, 15.5, z * 2.6); inner.add(eye);
+      var ant = new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3([new T.Vector3(22, 15, z * 1.5), new T.Vector3(28, 20, z * 4), new T.Vector3(34, 19, z * 6)]), 8, 0.5, 5), legM); inner.add(ant);
+    });
+    function leg(pts, r) {
+      var c = new T.CatmullRomCurve3(pts.map(function (p) { return new T.Vector3(p[0], p[1], p[2]); }));
+      inner.add(new T.Mesh(new T.TubeGeometry(c, 24, r, 6), legM));
+    }
+    [-1, 1].forEach(function (z) {
+      leg([[14, 12, z * 2], [20, 10, z * 7], [24, 3, z * 9], [25, 0.6, z * 10]], 0.9);
+      leg([[3, 12, z * 3], [9, 22, z * 16], [26, 10, z * 28], [42, 0.6, z * 36]], 0.75);
+      leg([[-4, 12, z * 3], [-12, 21, z * 15], [-30, 9, z * 26], [-46, 0.6, z * 32]], 0.75);
+    });
+    this.face = 1;
   };
 
   /* 肌の絵（色と、毛穴の凹凸）。顔の正面に平らに貼る */
@@ -435,18 +451,14 @@
     });
     this.wtex.needsUpdate = true;
     this.water = { level: s.level, rip: s.ripples || [], T: s.T };
-    /* コップ */
-    var c = this.cup, cs = s.cup;
-    c.visible = !!(cs && cs.on);
-    if (c.visible) {
-      var CW = this.CW, CH = this.CH;
-      c.position.set(cs.x, -cs.y, Math.max(this.surfMax(cs.x, cs.y - CH / 2, CW + 10), 60) + CW + 12);
-      c.rotation.set(0.18, 0, cs.tilt);
-      var lv = Math.max(0.001, cs.level) * (CH - 14);
-      var w = this.cupWater;
-      w.visible = cs.level > 0.01;
-      var rr = CW - 9 + (lv / (CH - 14)) * 4;
-      w.scale.set(rr, lv, rr); w.position.set(0, 9 + lv / 2, 0);
+    /* アメンボ */
+    var sd = s.strider;
+    if (sd) {
+      if (Math.abs(sd.v) > 20) this.face += ((sd.v > 0 ? 1 : -1) - this.face) * Math.min(1, (s.dt || 0) * 10);
+      var st = this.strider, bob = Math.sin(s.T * 7) * 0.6;
+      st.position.set(sd.x, -sd.y + bob, 230);
+      st.scale.set(this.face, 1 - sd.gulp * 0.12, 1);
+      st.rotation.z = -Math.max(-0.12, Math.min(0.12, sd.v / 4000));
     }
   };
 
