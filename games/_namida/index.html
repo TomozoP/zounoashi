@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>おじさんの涙</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #e8dcc4; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../voice.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* おじさんの涙
+
+   泣いているおじさんの涙を、ハンカチ（指でなぞる）で拭いてあげる。
+   拭けずに落ちた涙は足もとにたまり、あごまで来たら終わり。拭いた量(ml)が結果。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    s.loopStart = 0; s.playbackRate.value = 1;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+  }
+  /* おじさんの泣き声（母音合成）。big は号泣 */
+  var voiceStop = null, voiceEnd = 0;
+  function sob(big) {
+    if (!AC || !window.zVoice) return;
+    if (AC.currentTime < voiceEnd - 0.05) return;
+    var p = 150 + Math.random() * 25;
+    var words = big
+      ? [["", "u", 0.16], ["", "o", 0.22], ["", "o", 0.5], ["", "o", 0.35]]
+      : (Math.random() < 0.5 ? [["h", "u", 0.1], ["", "", 0.06], ["", "u", 0.32]] : [["", "u", 0.12], ["", "u", 0.4]]);
+    var r = window.zVoice.speak(AC, AC.currentTime + 0.02, big ? p + 40 : p, words, { volume: big ? 0.3 : 0.2, noise: NOISE, swing: big ? 1.6 : 1.1 });
+    if (r) { voiceEnd = r.end || (AC.currentTime + 1); voiceStop = r.stop; }
+  }
+  function stopVoice() { if (voiceStop) { try { voiceStop(); } catch (e) {} } voiceStop = null; voiceEnd = 0; }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+  var tears, drops, fill, wet, hx, hy, px, py, sobT, swishT, burst, hideUI = false;
+  var CAP = 20;                                 /* 取りこぼしてよい量(ml)。これであごまで水がたまる */
+
+  /* 顔の置き場所。高さが変わっても涙の量で終わるので、難しさは変わらない */
+  var FX = 270, FY, RX = 188, RY = 232, LOSE;
+  function place() {
+    FY = Math.round(Math.max(330, Math.min(H * 0.40, H - 520)));
+    LOSE = FY + RY - 24;
+  }
+  function edgeY(x) {
+    var d = (x - FX) / RX;
+    if (Math.abs(d) >= 1) return FY;
+    return FY + RY * Math.sqrt(1 - d * d);
+  }
+  function waterY() { return H - (H - LOSE) * fill; }
+
+  /* 涙の出口（左右の目尻と目頭） */
+  function eyeSpots() {
+    return [
+      { x: FX - 118, y: FY - 22, dx: -10 }, { x: FX - 42, y: FY - 18, dx: 4 },
+      { x: FX + 42, y: FY - 18, dx: -4 }, { x: FX + 118, y: FY - 22, dx: 10 }
+    ];
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    score = 0;
+    T = 0;
+    held = false;
+    tears = []; drops = []; fill = 0; wet = 0;
+    hx = W / 2; hy = FY + 120; px = null; py = null;
+    sobT = 0.4; swishT = 0; burst = false;
+  }
+
+  /* 泣く強さ。時間とともに増え、ときどき号泣する */
+  function rate() {
+    var r = Math.min(6.5, 1.3 + T * 0.09);
+    return burst ? r * 2.2 : r;
+  }
+  var spawnAcc = 0, spotI = 0;
+  function spawn(n) {
+    var sp = eyeSpots();
+    for (var i = 0; i < n; i++) {
+      spotI = (spotI + 1 + (Math.random() < 0.35 ? 1 : 0)) % 4;
+      var s = sp[spotI];
+      var vol = 0.25 + Math.random() * 0.45 + (burst ? 0.15 : 0);
+      tears.push({ x: s.x + (Math.random() - 0.5) * 10, y: s.y + 6, vx: s.dx, vy: 40 + Math.random() * 40, vol: vol, onFace: true, trail: [], ph: Math.random() * 6.28 });
+    }
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    if (state === S.RESULT) { stepDrops(dt); return; }
+    T += dt;
+    var play = state === S.PLAY;
+    if (play) {
+      var cyc = T % 9;
+      var b = T > 7 && cyc > 6.3 && cyc < 8.4;
+      if (b && !burst) sob(true);
+      burst = b;
+      sobT -= dt;
+      if (sobT <= 0) { sob(false); sobT = burst ? 0.9 : 1.4 + Math.random() * 1.2; }
+    } else burst = false;
+
+    spawnAcc += dt * (play ? rate() : 0.9);
+    while (spawnAcc >= 1) { spawnAcc -= 1; spawn(1); }
+
+    var wy = waterY();
+    for (var i = tears.length - 1; i >= 0; i--) {
+      var t = tears[i];
+      if (t.onFace) {
+        t.vy = Math.min(160, t.vy + dt * 60);
+        t.x += (t.vx + Math.sin(T * 3 + t.ph) * 6) * dt;
+        t.y += t.vy * dt;
+        t.trail.push(t.x, t.y);
+        if (t.trail.length > 40) t.trail.splice(0, 2);
+        if (t.y > edgeY(t.x) - 6) { t.onFace = false; t.vx = (t.x - FX) * 0.25; t.vy = Math.max(t.vy, 60); }
+      } else {
+        t.vy += 1500 * dt;
+        t.x += t.vx * dt; t.y += t.vy * dt;
+        if (t.trail.length) t.trail.splice(0, 2);
+        if (t.y >= wy) {
+          tears.splice(i, 1);
+          splash(t.x, wy, t.vol);
+          if (play) fill += t.vol / CAP;
+          continue;
+        }
+      }
+      if (play && held && wipeHit(t)) {
+        tears.splice(i, 1);
+        score += t.vol; wet += t.vol;
+        tone(1100 + Math.random() * 300, 0.05, 0.04, "sine", 1700);
+      }
+    }
+    if (play) { px = hx; py = hy; }
+    stepDrops(dt);
+    swishT -= dt;
+    if (play && fill >= 1) {
+      fill = 1;
+      state = S.RESULT;
+      held = false;
+      stopVoice();
+      tone(300, 0.5, 0.12, "sine", 90);
+      noiseHit(0.6, 500, 0.15, 0.8);
+    }
+  }
+  /* ハンカチが通った線の近くの涙を吸う */
+  var HR = 58;
+  function wipeHit(t) {
+    var ax = px == null ? hx : px, ay = py == null ? hy : py;
+    var dx = hx - ax, dy = hy - ay, l2 = dx * dx + dy * dy, k = 0;
+    if (l2 > 0) k = Math.max(0, Math.min(1, ((t.x - ax) * dx + (t.y - ay) * dy) / l2));
+    var cx = ax + dx * k - t.x, cy = ay + dy * k - t.y;
+    return cx * cx + cy * cy < HR * HR;
+  }
+  function splash(x, y, vol) {
+    noiseHit(0.1, 1500 + Math.random() * 800, 0.05, 2);
+    for (var i = 0; i < 4; i++) drops.push({ x: x, y: y, vx: (Math.random() - 0.5) * 160, vy: -120 - Math.random() * 160, life: 0.5 });
+  }
+  function stepDrops(dt) {
+    for (var i = drops.length - 1; i >= 0; i--) {
+      var d = drops[i];
+      d.vy += 900 * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.life -= dt;
+      if (d.life <= 0) drops.splice(i, 1);
+    }
+  }
+
+  /* ============ 入力 ============ */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (x == null) return;
+    held = true;
+    hx = x; hy = y; px = null; py = null;
+  }
+  function move(x, y) {
+    if (state !== S.PLAY || !held) return;
+    var d = Math.hypot(x - hx, y - hy);
+    hx = x; hy = y;
+    if (d > 18 && swishT <= 0) { noiseHit(0.09, 2600, Math.min(0.05, d / 1200), 1.5); swishT = 0.09; }
+  }
+  function up() {
+    if (!held) return;
+    held = false;
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  /* 本番以外だけ、数字キーで場面を飛ばせる。
+     1 号泣の強さまで飛ぶ  2 あふれる直前  3 結果 */
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    if (state !== S.PLAY) { newRound(); }
+    if (n === 1) T = 60;
+    if (n === 2) fill = 0.95;
+    if (n === 3) { score = Math.max(score, 48.3); fill = 1; }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function ml() { return score.toFixed(1); }
+  function doShare() {
+    window.zResultActions.x({ text: zT("泣いているおじさんの涙を" + ml() + "ml拭いてあげた", "Wiped " + ml() + " ml of tears from a crying old man") + zT(" #おじさんの涙", " #OldMansTears") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function ell(x, y, rx, ry, rot) { ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot || 0, 0, Math.PI * 2); }
+
+  var SKIN = "#f1c39b", LINE = "#5b3b26";
+  function drawBack() {
+    ctx.fillStyle = "#e8dcc4";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(160,130,90,.10)";
+    for (var x = 0; x < W; x += 60) ctx.fillRect(x, 0, 26, H);
+  }
+  function drawBody() {
+    var top = FY + RY - 40;
+    /* 背広 */
+    ctx.fillStyle = "#4a5260";
+    ctx.beginPath();
+    ctx.moveTo(10, H + 10);
+    ctx.lineTo(20, top + 150);
+    ctx.quadraticCurveTo(40, top + 70, 160, top + 50);
+    ctx.lineTo(380, top + 50);
+    ctx.quadraticCurveTo(500, top + 70, 520, top + 150);
+    ctx.lineTo(530, H + 10);
+    ctx.closePath(); ctx.fill();
+    ctx.lineWidth = 4; ctx.strokeStyle = "#2c313a"; ctx.stroke();
+    /* 首 */
+    ctx.fillStyle = SKIN;
+    ctx.fillRect(FX - 70, top - 30, 140, 90);
+    /* シャツ */
+    ctx.fillStyle = "#fbfbf6";
+    ctx.beginPath();
+    ctx.moveTo(FX - 95, top + 48); ctx.lineTo(FX, top + 210); ctx.lineTo(FX + 95, top + 48);
+    ctx.lineTo(FX + 60, top + 40); ctx.lineTo(FX, top + 80); ctx.lineTo(FX - 60, top + 40);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#9aa0a8"; ctx.lineWidth = 3; ctx.stroke();
+    /* ネクタイ */
+    ctx.fillStyle = "#b8343a";
+    ctx.beginPath();
+    ctx.moveTo(FX - 18, top + 82); ctx.lineTo(FX + 18, top + 82); ctx.lineTo(FX + 12, top + 104);
+    ctx.lineTo(FX + 30, top + 220); ctx.lineTo(FX, top + 250); ctx.lineTo(FX - 30, top + 220);
+    ctx.lineTo(FX - 12, top + 104); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#7a1f24"; ctx.stroke();
+  }
+  function drawFace() {
+    var shake = burst ? Math.sin(T * 47) * 2.5 : Math.sin(T * 9) * 0.8;
+    ctx.save();
+    ctx.translate(shake, 0);
+    /* 耳 */
+    ctx.fillStyle = SKIN; ctx.strokeStyle = LINE; ctx.lineWidth = 4;
+    ell(FX - RX + 4, FY + 10, 26, 44); ctx.fill(); ctx.stroke();
+    ell(FX + RX - 4, FY + 10, 26, 44); ctx.fill(); ctx.stroke();
+    /* 顔 */
+    ell(FX, FY, RX, RY); ctx.fill(); ctx.stroke();
+    /* 横の髪と頭の光 */
+    ctx.fillStyle = "#3b3633";
+    ell(FX - RX + 14, FY - 66, 16, 50, 0.25); ctx.fill();
+    ell(FX + RX - 14, FY - 66, 16, 50, -0.25); ctx.fill();
+    ctx.strokeStyle = "#3b3633"; ctx.lineWidth = 3;
+    for (var k = 0; k < 3; k++) {
+      ctx.beginPath(); ctx.moveTo(FX - 120, FY - 150 + k * 14);
+      ctx.quadraticCurveTo(FX, FY - 222 + k * 10, FX + 125, FY - 140 + k * 16); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(255,255,255,.45)";
+    ell(FX - 60, FY - 175, 46, 16, -0.25); ctx.fill();
+    /* おでこのしわ */
+    ctx.strokeStyle = "rgba(91,59,38,.55)"; ctx.lineWidth = 3;
+    for (k = 0; k < 3; k++) {
+      ctx.beginPath(); ctx.moveTo(FX - 70 + k * 6, FY - 112 - k * 16);
+      ctx.quadraticCurveTo(FX, FY - 128 - k * 16 + (burst ? 6 : 0), FX + 70 - k * 6, FY - 112 - k * 16); ctx.stroke();
+    }
+    /* 眉（内側が上がる） */
+    var lift = burst ? 14 : 6;
+    ctx.strokeStyle = "#2d2724"; ctx.lineWidth = 13; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(FX - 140, FY - 62); ctx.quadraticCurveTo(FX - 95, FY - 70, FX - 40, FY - 86 - lift); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(FX + 140, FY - 62); ctx.quadraticCurveTo(FX + 95, FY - 70, FX + 40, FY - 86 - lift); ctx.stroke();
+    /* ぎゅっとつぶった目 */
+    ctx.strokeStyle = LINE; ctx.lineWidth = 6;
+    [-1, 1].forEach(function (s) {
+      var ex = FX + s * 80;
+      ctx.beginPath(); ctx.moveTo(ex - 44, FY - 20); ctx.quadraticCurveTo(ex, FY - 44, ex + 44, FY - 20); ctx.stroke();
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(ex - 34, FY - 8); ctx.quadraticCurveTo(ex, FY + 2, ex + 34, FY - 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ex + s * 50, FY - 26); ctx.lineTo(ex + s * 62, FY - 34);
+      ctx.moveTo(ex + s * 50, FY - 18); ctx.lineTo(ex + s * 64, FY - 16); ctx.stroke();
+      ctx.lineWidth = 6;
+      /* 目にたまる涙 */
+      ctx.fillStyle = "rgba(120,200,255,.75)";
+      ell(ex, FY - 18, 42, burst ? 10 : 7); ctx.fill();
+    });
+    /* ほお */
+    ctx.fillStyle = "rgba(230,90,80,.30)";
+    ell(FX - 112, FY + 52, 38, 22); ctx.fill();
+    ell(FX + 112, FY + 52, 38, 22); ctx.fill();
+    /* 鼻 */
+    ctx.fillStyle = "#eba985"; ctx.strokeStyle = LINE; ctx.lineWidth = 4;
+    ell(FX, FY + 36, 36, 30); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(220,70,60,.35)"; ell(FX, FY + 40, 24, 18); ctx.fill();
+    ctx.fillStyle = LINE; ell(FX - 13, FY + 54, 7, 4); ctx.fill(); ell(FX + 13, FY + 54, 7, 4); ctx.fill();
+    /* 口（わなわな） */
+    var mw = burst ? 70 : 54, mh = (burst ? 52 : 30) + Math.sin(T * (burst ? 26 : 11)) * (burst ? 8 : 4);
+    var my = FY + 128;
+    ctx.fillStyle = "#5a1d1f";
+    ctx.beginPath();
+    ctx.moveTo(FX - mw, my + mh * 0.5);
+    ctx.quadraticCurveTo(FX, my - mh * 1.0, FX + mw, my + mh * 0.5);
+    ctx.quadraticCurveTo(FX, my + mh * 1.0, FX - mw, my + mh * 0.5);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = LINE; ctx.lineWidth = 4; ctx.stroke();
+    ctx.save(); ctx.clip();
+    ctx.fillStyle = "#d9737a"; ell(FX, my + mh * 0.75, mw * 0.55, mh * 0.35); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.fillRect(FX - mw, my - mh * 0.3, mw * 2, 12);
+    ctx.restore();
+    /* ひげ */
+    ctx.fillStyle = "#3b3633";
+    ctx.beginPath();
+    ctx.moveTo(FX, FY + 74);
+    ctx.quadraticCurveTo(FX - 40, FY + 64, FX - 82, FY + 96);
+    ctx.quadraticCurveTo(FX - 40, FY + 96, FX, FY + 86);
+    ctx.quadraticCurveTo(FX + 40, FY + 96, FX + 82, FY + 96);
+    ctx.quadraticCurveTo(FX + 40, FY + 64, FX, FY + 74);
+    ctx.fill();
+    /* ぶしょうひげ */
+    ctx.fillStyle = "rgba(60,50,45,.35)";
+    for (var i = 0; i < 40; i++) {
+      var a = 0.5 + (i * 0.618 % 1) * 2.14, rr = 0.82 + ((i * 0.37) % 1) * 0.14;
+      ctx.fillRect(FX + Math.cos(a) * RX * rr, FY + Math.sin(a) * RY * rr, 3, 3);
+    }
+    ctx.restore();
+  }
+  function drawTears() {
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    tears.forEach(function (t) {
+      var r = 8 + t.vol * 9;
+      if (t.trail.length >= 4) {
+        ctx.strokeStyle = "rgba(150,215,255,.45)"; ctx.lineWidth = r * 0.9;
+        ctx.beginPath(); ctx.moveTo(t.trail[0], t.trail[1]);
+        for (var i = 2; i < t.trail.length; i += 2) ctx.lineTo(t.trail[i], t.trail[i + 1]);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(110,195,255,.9)";
+      ctx.beginPath();
+      ctx.moveTo(t.x, t.y - r * 1.9);
+      ctx.quadraticCurveTo(t.x + r * 1.1, t.y - r * 0.2, t.x, t.y + r);
+      ctx.quadraticCurveTo(t.x - r * 1.1, t.y - r * 0.2, t.x, t.y - r * 1.9);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(40,120,190,.8)"; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,.85)";
+      ell(t.x - r * 0.3, t.y - r * 0.2, r * 0.22, r * 0.35); ctx.fill();
+    });
+  }
+  function drawWater() {
+    var wy = waterY();
+    if (fill > 0.001 || state !== S.INTRO) {
+      ctx.fillStyle = "rgba(90,175,235,.72)";
+      ctx.beginPath(); ctx.moveTo(0, H);
+      for (var x = 0; x <= W; x += 20) ctx.lineTo(x, wy + Math.sin(x * 0.03 + T * 3) * 5);
+      ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "rgba(220,245,255,.8)"; ctx.lineWidth = 4;
+      ctx.beginPath();
+      for (x = 0; x <= W; x += 20) { var y = wy + Math.sin(x * 0.03 + T * 3) * 5; if (x) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+      ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(130,205,255,.9)";
+    drops.forEach(function (d) { ell(d.x, d.y, 4, 5); ctx.fill(); });
+  }
+  function drawHanky() {
+    if (!held || state !== S.PLAY) return;
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(-0.2 + Math.sin(T * 6) * 0.05);
+    var s = 104;
+    ctx.shadowColor = "rgba(0,0,0,.25)"; ctx.shadowBlur = 10; ctx.shadowOffsetY = 4;
+    roundRect(-s / 2, -s / 2, s, s, 10); ctx.fillStyle = "#fdfdfb"; ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.strokeStyle = "#5b8fd8"; ctx.lineWidth = 6;
+    roundRect(-s / 2 + 9, -s / 2 + 9, s - 18, s - 18, 6); ctx.stroke();
+    ctx.lineWidth = 2;
+    for (var k = -1; k <= 1; k++) {
+      ctx.beginPath(); ctx.moveTo(k * 22, -s / 2 + 9); ctx.lineTo(k * 22, s / 2 - 9); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-s / 2 + 9, k * 22); ctx.lineTo(s / 2 - 9, k * 22); ctx.stroke();
+    }
+    /* 吸った分だけしみ */
+    ctx.fillStyle = "rgba(70,130,200,.22)";
+    var n = Math.min(14, Math.floor(wet / 1.5));
+    for (var i = 0; i < n; i++) { ell(Math.sin(i * 2.4) * 30, Math.cos(i * 1.7) * 30, 14 + (i % 3) * 5, 11 + (i % 2) * 6); ctx.fill(); }
+    ctx.restore();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT && !hideUI);
+    ctx.clearRect(0, 0, W, H);
+    drawBack();
+    drawBody();
+    drawFace();
+    drawTears();
+    drawWater();
+    drawHanky();
+    if (state === S.PLAY && !hideUI) {
+      ctx.save();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 40px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(ml() + "ml", W / 2, Math.max(56, FY - RY - 26));
+      ctx.restore();
+    }
+    if (state === S.RESULT && !hideUI) drawResult();
+  }
+
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.textAlign = "center";
+    ctx.font = "800 108px sans-serif";
+    var num = ml(), unit = "ml";
+    var nw = ctx.measureText(num).width;
+    ctx.font = "800 54px sans-serif";
+    var uw = ctx.measureText(unit).width;
+    var x0 = W / 2 - (nw + 8 + uw) / 2;
+    ctx.textAlign = "left";
+    ctx.font = "800 108px sans-serif";
+    ctx.fillText(num, x0, H * 0.45);
+    ctx.font = "800 54px sans-serif";
+    ctx.fillText(unit, x0 + nw + 8, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, score: score, fill: fill, tears: tears.length, T: T, W: W, H: H, FY: FY }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); },
+    wipe: function (x, y) { held = true; hx = x; hy = y; },
+    hideUI: function (v) { hideUI = v !== false; draw(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      if (!await r.until(function () { return state === S.RESULT; }, 120)) throw Error("終わらない");
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById('start');
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener('click', function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  layout();
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
