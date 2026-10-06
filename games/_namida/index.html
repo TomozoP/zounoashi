@@ -9,7 +9,7 @@
   * { -webkit-tap-highlight-color: transparent; }
   #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
   #wrap { position: relative; touch-action: none; }
-  canvas { display: block; background: #e8dcc4; }
+  canvas { display: block; background: #2e2620; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
@@ -111,7 +111,7 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
-  var tears, drops, fill, wet, hx, hy, px, py, sobT, swishT, burst, hideUI = false;
+  var tears, drops, ripples = [], fill, wet, hx, hy, px, py, sobT, swishT, burst, hideUI = false;
   var CAP = 20;                                 /* 取りこぼしてよい量(ml)。これであごまで水がたまる */
 
   /* 顔の置き場所。高さが変わっても涙の量で終わるので、難しさは変わらない */
@@ -142,7 +142,7 @@
     score = 0;
     T = 0;
     held = false;
-    tears = []; drops = []; fill = 0; wet = 0;
+    tears = []; drops = []; ripples = []; fill = 0; wet = 0;
     hx = W / 2; hy = FY + 120; px = null; py = null;
     sobT = 0.4; swishT = 0; burst = false;
   }
@@ -226,13 +226,16 @@
   }
   function splash(x, y, vol) {
     noiseHit(0.1, 1500 + Math.random() * 800, 0.05, 2);
-    for (var i = 0; i < 4; i++) drops.push({ x: x, y: y, vx: (Math.random() - 0.5) * 160, vy: -120 - Math.random() * 160, life: 0.5 });
+    var n = 4 + Math.round(vol * 6);
+    for (var i = 0; i < n; i++) drops.push({ x: x, y: y, vx: (Math.random() - 0.5) * 220, vy: -150 - Math.random() * 260 * (0.6 + vol), life: 0.7, r: 2 + Math.random() * 3 * (0.5 + vol) });
+    ripples.push({ x: x, t: T, a: 3 + vol * 6 });
+    if (ripples.length > 12) ripples.shift();
   }
   function stepDrops(dt) {
     for (var i = drops.length - 1; i >= 0; i--) {
       var d = drops[i];
       d.vy += 900 * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.life -= dt;
-      if (d.life <= 0) drops.splice(i, 1);
+      if (d.life <= 0 || (d.vy > 0 && d.y > waterY() + 4)) drops.splice(i, 1);
     }
   }
 
@@ -514,7 +517,7 @@
   }
 
   /* 立体の絵。作れないとき（WebGLなし）は平面の絵のまま */
-  var scene3d = null, tries3d = 0, lastTry3d = -1e9;
+  var scene3d = null, tries3d = 0, lastTry3d = -1e9, lastPoseT = 0;
   function make3d() {
     if (scene3d || tries3d >= 20 || !window.THREE || !window.ManScene) return;
     var now = performance.now();
@@ -532,17 +535,16 @@
     if (scene3d) {
       try {
         scene3d.build({ W: W, H: H, FX: FX, FY: FY, RX: RX, RY: RY });
-        scene3d.pose({ T: T, burst: burst, tears: tears, held: held && state === S.PLAY, hx: hx, hy: hy, wet: wet });
+        scene3d.pose({ T: T, dt: Math.max(0, T - lastPoseT), burst: burst, tears: tears, drops: drops, level: waterY(), ripples: ripples, held: held && state === S.PLAY, hx: hx, hy: hy, wet: wet });
+        lastPoseT = T;
         ok3 = scene3d.render(ctx, W, H);
       } catch (e) { ok3 = false; }
     }
-    if (ok3) drawTrails();
-    else { drawBody(); drawFace(); drawTears(); }
-    drawWater();
-    if (!ok3) drawHanky();
+    if (!ok3) { drawBody(); drawFace(); drawTears(); drawWater(); drawHanky(); }
     if (state === S.PLAY && !hideUI) {
       ctx.save();
-      ctx.fillStyle = "#16202e";
+      ctx.fillStyle = "#fff";
+      ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 8;
       ctx.font = "800 40px sans-serif";
       ctx.textAlign = "center";
       ctx.fillText(ml() + "ml", W / 2, Math.max(56, FY - RY - 26));
@@ -608,6 +610,7 @@
     now: function () { return { state: state, score: score, fill: fill, tears: tears.length, T: T, W: W, H: H, FY: FY }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
+    skip: function (n) { for (var i = 0; i < (n || 1); i++) update(1 / 60); },
     wipe: function (x, y) { held = true; hx = x; hy = y; },
     hideUI: function (v) { hideUI = v !== false; draw(); }
   };

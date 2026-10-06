@@ -37,6 +37,11 @@
     if (v < top || v > bot) return -Math.min(Math.abs(v - top), Math.abs(v - bot)) - (1 - Math.sqrt(q)) * 0.1;
     return Math.min(v - top, bot - v, (1 - Math.abs(du)) * m.w);
   }
+  /* 輪郭：高さごとの横幅の倍率（こめかみ・ほお骨・ほおのこけ・えら・頭のてっぺん） */
+  function e1(v, c, s) { var a = (v - c) / s; return Math.exp(-a * a); }
+  function widthAt(v) {
+    return 1 + 0.05 * e1(v, -0.02, 0.22) - 0.035 * e1(v, -0.42, 0.12) - 0.05 * e1(v, 0.36, 0.11) + 0.075 * e1(v, 0.66, 0.1) - 0.05 * e1(v, -0.8, 0.18);
+  }
   function relief(u, v, big) {
     var au = Math.abs(u), h = 0;
     /* 額と眉の骨 */
@@ -85,23 +90,40 @@
     this.scene = new T.Scene();
     this.camera = new T.OrthographicCamera(0, 540, 0, -960, 1, 5000);
     this.camera.position.set(0, 0, 2000);
-    this.scene.add(new T.HemisphereLight(0xfff4e6, 0x5b4a3e, 0.9));
-    var sun = new T.DirectionalLight(0xfff2e4, 2.6);
-    sun.position.set(-0.85, 0.75, 0.7); this.scene.add(sun);
-    var rim = new T.DirectionalLight(0xcfe6ff, 0.7);
-    rim.position.set(0.9, 0.1, 0.5); this.scene.add(rim);
+    this.scene.add(new T.HemisphereLight(0xfff0e0, 0x3a2e26, 0.45));
+    var sun = new T.DirectionalLight(0xffeedd, 2.7);
+    sun.position.set(-0.8, 0.7, 0.75); this.scene.add(sun);
+    var rim = new T.DirectionalLight(0xbcd6ff, 1.4);
+    rim.position.set(0.95, 0.25, -0.2); this.scene.add(rim);
+    var fill = new T.DirectionalLight(0xffd8c0, 0.5);
+    fill.position.set(0.6, -0.2, 1); this.scene.add(fill);
     this.key = ""; this.w = 0; this.h = 0; this.group = null;
-    this.tearMat = new T.MeshStandardMaterial({ color: 0x8fd2ff, roughness: 0.08, metalness: 0.1, transparent: true, opacity: 0.88, emissive: 0x1b4d77, emissiveIntensity: 0.35 });
+    /* 映り込み用のまわりの光（白い箱の部屋に明かりの板） */
+    var pm = new T.PMREMGenerator(this.renderer), env = new T.Scene();
+    var room = new T.Mesh(new T.BoxGeometry(10, 10, 10), new T.MeshBasicMaterial({ color: 0x3a3028, side: T.BackSide })); env.add(room);
+    [[-3, 3, 2, 3, 2, 0xfff0dd, 6], [3.5, 1, -1, 2, 3, 0xbfd8ff, 3], [0, 4.9, 0, 4, 4, 0xffffff, 2.5], [0, -2, 4.9, 6, 1, 0xffd9b0, 1.2]].forEach(function (l) {
+      var m = new T.Mesh(new T.PlaneGeometry(l[3], l[4]), new T.MeshBasicMaterial({ color: new T.Color(l[5]).multiplyScalar(l[6]), side: T.DoubleSide }));
+      m.position.set(l[0], l[1], l[2]); m.lookAt(0, 0, 0); env.add(m);
+    });
+    this.scene.environment = pm.fromScene(env, 0.03).texture;
+    this.tearMat = new T.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, thickness: 12, ior: 1.33, roughness: 0.02, metalness: 0, attenuationColor: new T.Color(0xc4e6ff), attenuationDistance: 28, envMapIntensity: 1.6, specularIntensity: 1, clearcoat: 1, clearcoatRoughness: 0.02 });
     var prof = [];
     for (var i = 0; i <= 18; i++) { var a = i / 18 * Math.PI; prof.push(new T.Vector2(Math.sin(a) * Math.sin(a / 2) * 1.05, Math.cos(a) * 1.45)); }
     this.tearGeo = new T.LatheGeometry(prof, 16);
-    this.poolMat = new T.MeshStandardMaterial({ color: 0xcfeaff, roughness: 0.05, transparent: true, opacity: 0.55 });
+    this.poolMat = this.tearMat;
+    this.dropGeo = new T.SphereGeometry(1, 14, 10);
+    this.dropPool = [];
+    /* 顔のぬれ具合（涙の通った跡が光る） */
+    this.wcv = global.document.createElement("canvas"); this.wcv.width = this.wcv.height = 256;
+    var wc = this.wcv.getContext("2d"); wc.fillStyle = "rgb(14,14,14)"; wc.fillRect(0, 0, 256, 256);
+    this.wtex = new T.CanvasTexture(this.wcv);
+    this.makePost();
     this.tearPool = [];
   }
 
   /* 頭（楕円の玉）の表面の奥行き */
   ManScene.prototype.surf = function (x, y) {
-    var dx = (x - this.FX) / this.RX, dy = (y - this.FY) / this.RY, q = 1 - dx * dx - dy * dy;
+    var dy = (y - this.FY) / this.RY, dx = (x - this.FX) / (this.RX * widthAt(dy)), q = 1 - dx * dx - dy * dy;
     if (q <= 0) return 0;
     var z = Math.sqrt(q), w = Math.max(0, Math.min(1, (z - 0.05) / 0.35));
     return this.RZ * z + relief(dx, dy, this.big) * w;
@@ -149,39 +171,53 @@
     if (this.group) { this.scene.remove(this.group); this.group.traverse(function (o) { if (o.geometry) o.geometry.dispose(); }); }
     var G = this.group = new T.Group();
     this.scene.add(G);
-    var FX = this.FX = g.FX, FY = this.FY = g.FY, RX = this.RX = g.RX, RY = this.RY = g.RY, RZ = this.RZ = 150;
+    var FX = this.FX = g.FX, FY = this.FY = g.FY, RX = this.RX = g.RX, RY = this.RY = g.RY, RZ = this.RZ = 175;
     var H = g.H, self = this;
 
-    /* 体（背広・シャツ・ネクタイ） */
-    var top = FY + RY - 40;
-    var suit = std(0x4a5262, { roughness: 0.9 });
-    ball(suit, 262, 120, 120, FX, top + 130, -90, G);
-    var torso = new T.Mesh(new T.CylinderGeometry(262, 275, Math.max(10, H - top), 40), suit);
-    torso.scale.z = 0.46; torso.position.set(FX, -(top + 130 + (H - top) / 2), -90); G.add(torso);
-    var neckM = std(0xeab48c, { roughness: 0.7 });
-    var neck = new T.Mesh(new T.CylinderGeometry(68, 74, 130, 28), neckM);
-    neck.position.set(FX, -(top + 20), -20); G.add(neck);
-    var shirt = std(0xfafaf4, { roughness: 0.7 });
-    flat(shapeOf([[FX - 92, top + 52], [FX, top + 220], [FX + 92, top + 52], [FX + 58, top + 44], [FX, top + 84], [FX - 58, top + 44]]), shirt, 40, G);
-    var tieM = std(0xb8343a, { roughness: 0.6 });
-    var tie = flat(shapeOf([[FX - 18, top + 84], [FX + 18, top + 84], [FX + 12, top + 106], [FX + 30, top + 222], [FX, top + 252], [FX - 30, top + 222], [FX - 12, top + 106]]), tieM, 44, G);
-    var knot = ball(tieM, 20, 14, 10, FX, top + 92, 46, G);
+    /* 奥の壁（ぼけた部屋の明かり） */
+    var wall = new T.Mesh(new T.PlaneGeometry(g.W, H), new T.MeshBasicMaterial({ map: this.paintWall(g.W, H) }));
+    wall.position.set(g.W / 2, -H / 2, -800); G.add(wall);
+    /* 体（背広・シャツ・ネクタイ）。上から見た輪を回して作る */
+    var top = FY + RY * 0.82;
+    function lathe(prof, mat, sz, z) {
+      var m = new T.Mesh(new T.LatheGeometry(prof.map(function (p) { return new T.Vector2(p[0], -p[1]); }), 64), mat);
+      m.scale.z = sz; m.position.set(FX, -top, z); G.add(m); return m;
+    }
+    var suit = new T.MeshPhysicalMaterial({ color: 0x343a46, roughness: 0.75, sheen: 0.6, sheenRoughness: 0.5, sheenColor: new T.Color(0x8890a0) });
+    lathe([[0, 30], [120, 30], [170, 52], [228, 78], [262, 112], [276, 160], [282, 230], [286, H - top + 40], [0, H - top + 40]], suit, 0.5, -130);
+    var neckM = std(0xd9a07f, { roughness: 0.55 });
+    lathe([[0, -150], [98, -150], [102, -40], [108, 30], [124, 70], [140, 92], [0, 92]], neckM, 0.75, -60);
+    var shirt = new T.MeshPhysicalMaterial({ color: 0xf2f2ec, roughness: 0.65, sheen: 0.4, sheenColor: new T.Color(0xffffff) });
+    function ext(pts, mat, z, depth) {
+      var m = new T.Mesh(new T.ExtrudeGeometry(shapeOf(pts), { depth: depth || 6, bevelEnabled: true, bevelThickness: 3, bevelSize: 3, bevelSegments: 3, curveSegments: 6 }), mat);
+      m.position.z = z; G.add(m); return m;
+    }
+    ext([[FX - 100, top + 62], [FX, top + 250], [FX + 100, top + 62]], shirt, 2, 4);
+    [-1, 1].forEach(function (s) {
+      ext([[FX + s * 6, top + 98], [FX + s * 112, top + 46], [FX + s * 132, top + 74], [FX + s * 60, top + 150]], shirt, 18, 5);
+      ext([[FX + s * 128, top + 70], [FX + s * 26, top + 250], [FX + s * 70, top + 330], [FX + s * 200, top + 110], [FX + s * 175, top + 76]], suit, 10, 6);
+    });
+    var tieM = new T.MeshPhysicalMaterial({ color: 0x7e1f2a, roughness: 0.45, sheen: 0.8, sheenColor: new T.Color(0xd06070) });
+    ext([[FX - 14, top + 112], [FX + 14, top + 112], [FX + 24, top + 240], [FX, top + 275], [FX - 24, top + 240]], tieM, 12, 4);
+    ext([[FX - 22, top + 92], [FX + 22, top + 92], [FX + 15, top + 116], [FX - 15, top + 116]], tieM, 20, 6);
 
     /* 頭。玉を顔の凹凸の分だけ押し出し・へこませて作る（ふつう・号泣の2つ） */
     var head = this.head = new T.Group(); G.add(head);
     var earM = std(0xdca084, { roughness: 0.6 });
     [-1, 1].forEach(function (s) {
-      ball(earM, 22, 40, 20, FX + s * (RX - 8), FY + 8, -14, head);
+      var ex = FX + s * (RX * widthAt(0.0) - 10);
+      var ear = ball(earM, 20, 44, 18, ex, FY + 4, -20, head); ear.rotation.y = s * 0.5;
+      ball(std(0xb87a64, { roughness: 0.7 }), 10, 30, 8, ex + s * 4, FY + 2, -8, head).rotation.y = s * 0.5;
     });
     this.faces = [false, true].map(function (big) {
       var tex = self.paintSkin(big);
-      var mat = new T.MeshPhysicalMaterial({ map: tex.color, bumpMap: tex.bump, bumpScale: 1.6, roughness: 0.52, clearcoat: 0.18, clearcoatRoughness: 0.45, });
+      var mat = new T.MeshPhysicalMaterial({ map: tex.color, bumpMap: tex.bump, bumpScale: 1.4, roughness: 0.5, clearcoat: 1, clearcoatMap: self.wtex, clearcoatRoughness: 0.12, sheen: 0.25, sheenRoughness: 0.6, sheenColor: new T.Color(0xff9a80), envMapIntensity: 0.6 });
       var geo = new T.SphereGeometry(1, 180, 140);
       var p = geo.attributes.position, uv = geo.attributes.uv;
       for (var i = 0; i < p.count; i++) {
         var x = p.getX(i), y = p.getY(i), z = p.getZ(i), u = x, v = -y;
         var w = Math.max(0, Math.min(1, (z - 0.05) / 0.35));
-        p.setXYZ(i, FX + x * RX, -(FY + v * RY), z * RZ + (w > 0 ? relief(u, v, big) * w : 0));
+        p.setXYZ(i, FX + x * RX * widthAt(v), -(FY + v * RY), z * RZ + (w > 0 ? relief(u, v, big) * w : 0));
         uv.setXY(i, (u + 1) / 2, 1 - (v + 1) / 2);
       }
       geo.computeVertexNormals();
@@ -193,7 +229,7 @@
     this.pools = [];
     [-1, 1].forEach(function (s) {
       var ex = FX + s * 80;
-      self.pools.push(ball(self.poolMat, 30, 3, 3, ex, FY - 10, self.surf(ex, FY - 10) + 1, head));
+      self.pools.push(ball(self.poolMat, 28, 3, 2.5, ex, FY - 10, self.surf(ex, FY - 10) + 1, head));
     });
 
     /* ハンカチ（布に格子とシミの絵を貼る） */
@@ -346,9 +382,31 @@
       if (!t) { m.visible = false; return; }
       var r = 8 + t.vol * 9;
       m.visible = true;
-      m.scale.set(r, r, r * 0.8);
-      m.position.set(t.x + (t.onFace ? shake : 0), -t.y, (t.onFace ? self.surf(t.x, t.y) : self.RZ * 0.9) + r * 0.6);
+      m.scale.set(r * 0.85, r * 0.95, t.onFace ? r * 0.45 : r * 0.8);
+      m.position.set(t.x + (t.onFace ? shake : 0), -t.y, (t.onFace ? self.surf(t.x, t.y) : self.RZ * 0.9) + r * 0.25);
     });
+    /* しぶき */
+    var dp = this.dropPool;
+    while (dp.length < s.drops.length) { var d = new T.Mesh(this.dropGeo, this.tearMat); this.scene.add(d); dp.push(d); }
+    dp.forEach(function (m, i) {
+      var d = s.drops[i];
+      if (!d) { m.visible = false; return; }
+      m.visible = true; var r = d.r || 4;
+      m.scale.set(r, r * (1 + Math.min(1.2, Math.abs(d.vy) / 500)), r);
+      m.position.set(d.x, -d.y, 150);
+    });
+    /* 涙の通った跡をぬらす（だんだん乾く） */
+    var wc = this.wcv.getContext("2d");
+    this.dryT = (this.dryT || 0) + (s.dt || 0);
+    if (this.dryT > 0.1) { wc.fillStyle = "rgba(14,14,14," + Math.min(1, this.dryT * 0.25) + ")"; wc.fillRect(0, 0, 256, 256); this.dryT = 0; }
+    wc.fillStyle = "rgba(255,255,255,.5)";
+    s.tears.forEach(function (t) {
+      if (!t.onFace) return;
+      var v = (t.y - self.FY) / self.RY, u = (t.x - self.FX) / (self.RX * widthAt(v));
+      wc.beginPath(); wc.arc((u + 1) / 2 * 256, (v + 1) / 2 * 256, 2.6 + t.vol * 2.5, 0, Math.PI * 2); wc.fill();
+    });
+    this.wtex.needsUpdate = true;
+    this.water = { level: s.level, rip: s.ripples || [], T: s.T };
     /* ハンカチ */
     var h = this.hanky;
     h.visible = !!s.held;
@@ -373,13 +431,105 @@
     if (!(w >= 2 && h >= 2)) return false;
     if (w !== this.w || h !== this.h) {
       this.renderer.setSize(w, h, false);
+      this.rt.setSize(w, h);
       this.w = w; this.h = h;
       this.camera.left = 0; this.camera.right = W; this.camera.top = 0; this.camera.bottom = -H;
       this.camera.updateProjectionMatrix();
     }
+    var u = this.post.material.uniforms, wt = this.water || { level: H, rip: [], T: 0 };
+    u.uSize.value.set(W, H); u.uLevel.value = wt.level; u.uTime.value = wt.T;
+    for (var i = 0; i < 12; i++) {
+      var r = wt.rip[wt.rip.length - 1 - i];
+      u.uRip.value[i].set(r ? r.x : 0, r ? wt.T - r.t : 0, r ? r.a : 0, 0);
+    }
+    this.renderer.setRenderTarget(this.rt);
     this.renderer.render(this.scene, this.camera);
+    this.renderer.setRenderTarget(null);
+    this.renderer.render(this.postScene, this.postCam);
     ctx.drawImage(this.renderer.domElement, 0, 0, W, H);
     return true;
+  };
+
+  /* 水の絵：描いた場面を、水面より下だけ揺らして屈折させ、色を吸わせ、光の網目と水面の照り返しを足す */
+  ManScene.prototype.makePost = function () {
+    this.rt = new T.WebGLRenderTarget(2, 2, { samples: 4, type: T.HalfFloatType });
+    var rips = []; for (var i = 0; i < 12; i++) rips.push(new T.Vector4());
+    var mat = new T.ShaderMaterial({
+      uniforms: { tScene: { value: this.rt.texture }, uSize: { value: new T.Vector2(540, 960) }, uLevel: { value: 2000 }, uTime: { value: 0 }, uRip: { value: rips } },
+      vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
+      fragmentShader: [
+        "uniform sampler2D tScene; uniform vec2 uSize; uniform float uLevel; uniform float uTime; uniform vec4 uRip[12];",
+        "varying vec2 vUv;",
+        "vec4 S(vec2 p){ return texture2D(tScene, vec2(p.x / uSize.x, 1.0 - p.y / uSize.y)); }",
+        "float ripple(vec2 p, out vec2 g){",
+        "  float h = 0.0; g = vec2(0.0);",
+        "  for (int i = 0; i < 12; i++) { vec4 r = uRip[i]; if (r.z <= 0.0) continue;",
+        "    float dx = p.x - r.x, d = abs(dx), front = r.y * 150.0, k = 0.13;",
+        "    float env = r.z * exp(-r.y * 1.6) * exp(-pow((d - front) / 40.0, 2.0));",
+        "    h += env * sin((d - front) * k); g.x += env * cos((d - front) * k) * sign(dx); }",
+        "  return h; }",
+        "float caus(vec2 q, float t){",
+        "  vec2 a = q + vec2(sin(q.y * 1.7 + t * 0.9), cos(q.x * 1.3 - t * 0.7)) * 0.7;",
+        "  vec2 b = q * 1.63 + vec2(cos(q.y * 2.1 - t * 1.1), sin(q.x * 1.9 + t * 0.8)) * 0.6;",
+        "  float v1 = abs(sin(a.x) * sin(a.y)), v2 = abs(sin(b.x + 1.3) * sin(b.y + 0.7));",
+        "  return pow(1.0 - v1, 9.0) * 0.6 + pow(1.0 - v2, 12.0) * 0.5; }",
+        "void main(){",
+        "  vec2 p = vec2(vUv.x * uSize.x, (1.0 - vUv.y) * uSize.y);",
+        "  vec2 g; float rp = ripple(p, g);",
+        "  float h = uLevel + sin(p.x * 0.021 + uTime * 1.7) * 2.0 + sin(p.x * 0.053 - uTime * 2.3) * 1.1 + rp;",
+        "  float d = p.y - h;",
+        "  vec3 c;",
+        "  if (d < 0.0) {",
+        "    c = S(p).rgb;",
+        "    c *= 1.0 - 0.25 * exp(-pow((d + 1.5) / 1.2, 2.0));",
+        "  } else {",
+        "    float dd = d;",
+        "    vec2 n = vec2(sin(p.y * 0.05 + uTime * 1.3 + p.x * 0.02) + sin(p.x * 0.031 - uTime * 1.1),",
+        "                  cos(p.x * 0.043 + uTime * 1.5) + sin(p.y * 0.037 - uTime * 0.9));",
+        "    n += g * 0.35;",
+        "    vec2 off = n * (1.6 + min(dd, 140.0) * 0.035);",
+        "    c = S(p + off).rgb;",
+        "    float band = 1.0 - smoothstep(0.0, 18.0, dd);",
+        "    vec3 mir = S(vec2(p.x + off.x * 2.0, h + 36.0 - dd)).rgb;",
+        "    c = mix(c, mir * 1.15 + vec3(0.04, 0.06, 0.07), band * 0.6);",
+        "    vec3 ab = exp(-(dd + 25.0) * vec3(0.0045, 0.0018, 0.0012));",
+        "    c = c * ab + vec3(0.05, 0.24, 0.28) * (1.0 - ab);",
+        "    c += vec3(0.7, 0.9, 1.0) * caus(p * 0.024 + n * 0.08, uTime * 0.9) * 0.16 * exp(-dd * 0.004);",
+        "    c += vec3(1.0) * exp(-pow(d / 1.3, 2.0)) * 0.55;",
+        "    c += vec3(0.6, 0.8, 0.9) * exp(-dd / 5.0) * 0.08;",
+        "  }",
+        "  gl_FragColor = vec4(c, 1.0);",
+        "  #include <colorspace_fragment>",
+        "}"
+      ].join("\n"),
+      depthTest: false, depthWrite: false
+    });
+    this.post = new T.Mesh(new T.PlaneGeometry(2, 2), mat);
+    this.postScene = new T.Scene(); this.postScene.add(this.post);
+    this.postCam = new T.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  };
+
+  /* 奥の壁：薄暗い部屋に、ぼけた明かり */
+  ManScene.prototype.paintWall = function (W, H) {
+    var cv = global.document.createElement("canvas"); cv.width = 512; cv.height = Math.round(512 * H / W);
+    var c = cv.getContext("2d"), w = cv.width, h = cv.height;
+    var g = c.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, "#5a4a3c"); g.addColorStop(0.5, "#3e332b"); g.addColorStop(1, "#211b17");
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    var seed = 3;
+    function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+    for (var i = 0; i < 22; i++) {
+      var x = rnd() * w, y = rnd() * h * 0.6, r = 20 + rnd() * 60;
+      var rg = c.createRadialGradient(x, y, 0, x, y, r);
+      var col = rnd() < 0.7 ? "255,200,140" : "200,220,255";
+      rg.addColorStop(0, "rgba(" + col + "," + (0.18 + rnd() * 0.2) + ")"); rg.addColorStop(0.7, "rgba(" + col + ",0.06)"); rg.addColorStop(1, "rgba(" + col + ",0)");
+      c.fillStyle = rg; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+    }
+    var vg = c.createRadialGradient(w / 2, h * 0.4, w * 0.2, w / 2, h * 0.5, h * 0.75);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.55)");
+    c.fillStyle = vg; c.fillRect(0, 0, w, h);
+    var t = new T.CanvasTexture(cv); t.colorSpace = T.SRGBColorSpace;
+    return t;
   };
 
   global.ManScene = ManScene;
