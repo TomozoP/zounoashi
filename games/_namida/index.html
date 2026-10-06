@@ -34,6 +34,8 @@
 <script src="../action-icons.js"></script>
 <script src="../voice.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="man3d.js"></script>
 <script>
 /* おじさんの涙
 
@@ -453,16 +455,33 @@
     }
     ctx.restore();
   }
-  function drawTears() {
+  function drawBlush() {
+    var sx = burst ? Math.sin(T * 47) * 2.5 : Math.sin(T * 9) * 0.8;
+    [-1, 1].forEach(function (s) {
+      var x = FX + s * 112 + sx, y = FY + 52;
+      if (held && state === S.PLAY && Math.abs(hx - x) < 100 && Math.abs(hy - y) < 90) return;
+      ctx.save(); ctx.translate(x, y); ctx.scale(1, 0.6);
+      var gr = ctx.createRadialGradient(0, 0, 0, 0, 0, 44);
+      gr.addColorStop(0, "rgba(235,90,80,.38)"); gr.addColorStop(1, "rgba(235,90,80,0)");
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, 44, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    });
+  }
+  function drawTrails() {
     ctx.lineCap = "round"; ctx.lineJoin = "round";
     tears.forEach(function (t) {
+      if (t.trail.length < 4) return;
+      ctx.strokeStyle = "rgba(170,225,255,.42)"; ctx.lineWidth = (8 + t.vol * 9) * 0.8;
+      ctx.beginPath(); ctx.moveTo(t.trail[0], t.trail[1]);
+      for (var i = 2; i < t.trail.length; i += 2) ctx.lineTo(t.trail[i], t.trail[i + 1]);
+      ctx.stroke();
+    });
+  }
+  function drawTears() {
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    drawTrails();
+    tears.forEach(function (t) {
       var r = 8 + t.vol * 9;
-      if (t.trail.length >= 4) {
-        ctx.strokeStyle = "rgba(150,215,255,.45)"; ctx.lineWidth = r * 0.9;
-        ctx.beginPath(); ctx.moveTo(t.trail[0], t.trail[1]);
-        for (var i = 2; i < t.trail.length; i += 2) ctx.lineTo(t.trail[i], t.trail[i + 1]);
-        ctx.stroke();
-      }
       ctx.fillStyle = "rgba(110,195,255,.9)";
       ctx.beginPath();
       ctx.moveTo(t.x, t.y - r * 1.9);
@@ -512,15 +531,33 @@
     ctx.restore();
   }
 
+  /* 立体の絵。作れないとき（WebGLなし）は平面の絵のまま */
+  var scene3d = null, tries3d = 0, lastTry3d = -1e9;
+  function make3d() {
+    if (scene3d || tries3d >= 20 || !window.THREE || !window.ManScene) return;
+    var now = performance.now();
+    if (now - lastTry3d < 500) return;
+    lastTry3d = now; tries3d++;
+    try { scene3d = new window.ManScene(); } catch (e) { scene3d = null; }
+  }
+
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT && !hideUI);
     ctx.clearRect(0, 0, W, H);
     drawBack();
-    drawBody();
-    drawFace();
-    drawTears();
+    make3d();
+    var ok3 = false;
+    if (scene3d) {
+      try {
+        scene3d.build({ W: W, H: H, FX: FX, FY: FY, RX: RX, RY: RY });
+        scene3d.pose({ T: T, burst: burst, tears: tears, held: held && state === S.PLAY, hx: hx, hy: hy, wet: wet });
+        ok3 = scene3d.render(ctx, W, H);
+      } catch (e) { ok3 = false; }
+    }
+    if (ok3) { drawBlush(); drawTrails(); }
+    else { drawBody(); drawFace(); drawTears(); }
     drawWater();
-    drawHanky();
+    if (!ok3) drawHanky();
     if (state === S.PLAY && !hideUI) {
       ctx.save();
       ctx.fillStyle = "#16202e";
