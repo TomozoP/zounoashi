@@ -126,7 +126,7 @@
     var dy = (y - this.FY) / this.RY, dx = (x - this.FX) / (this.RX * widthAt(dy)), q = 1 - dx * dx - dy * dy;
     if (q <= 0) return 0;
     var z = Math.sqrt(q), w = Math.max(0, Math.min(1, (z - 0.05) / 0.35));
-    return this.RZ * z + relief(dx, dy, this.big) * w;
+    return this.RZ * z + relief(dx, dy, this.big) * this.K * w;
   };
   /* (x, y) のまわり r の範囲でいちばん手前の表面（涙やハンカチを埋めないため） */
   ManScene.prototype.surfMax = function (x, y, r) {
@@ -177,14 +177,17 @@
     if (this.group) { this.scene.remove(this.group); this.group.traverse(function (o) { if (o.geometry) o.geometry.dispose(); }); }
     var G = this.group = new T.Group();
     this.scene.add(G);
-    var FX = this.FX = g.FX, FY = this.FY = g.FY, RX = this.RX = g.RX, RY = this.RY = g.RY, RZ = this.RZ = 175;
+    var FX = this.FX = g.FX, FY = this.FY = g.FY, RX = this.RX = g.RX, RY = this.RY = g.RY, RZ = this.RZ = 175 * g.RX / 188, K = this.K = g.RX / 188;
     var H = g.H, self = this;
 
     /* 奥の壁（ぼけた部屋の明かり） */
     var wall = new T.Mesh(new T.PlaneGeometry(g.W, H), new T.MeshBasicMaterial({ map: this.paintWall(g.W, H) }));
     wall.position.set(g.W / 2, -H / 2, -800); G.add(wall);
     /* 体（肩・胸・腕と、白いタンクトップ）。上から見た輪を回して作り、前側を胸やお腹の分だけ押し出す */
+    /* 体は顔の大きさに合わせて広げる（首の付け根を中心に K 倍） */
     var top = FY + RY * 0.82, BW = g.W, BH = H;
+    var GBo = new T.Group(); GBo.position.set(FX, -top, 0); GBo.scale.set(K, K, K); G.add(GBo);
+    var GB = new T.Group(); GB.position.set(-FX, top, 0); GBo.add(GB);
     var bodyTex = this.paintBody(BW, BH, FX, top);
     var bodySkin = new T.MeshPhysicalMaterial({ map: bodyTex.color, bumpMap: bodyTex.bump, bumpScale: 1.2, roughness: 0.55, clearcoat: 0.12, clearcoatRoughness: 0.4, sheen: 0.25, sheenRoughness: 0.6, sheenColor: new T.Color(0xff9a80), envMapIntensity: 0.6 });
     /* 胸・お腹の盛り上がり（rel は首の付け根からの下向きの距離） */
@@ -211,27 +214,27 @@
       return geo;
     }
     var prof = [[0, -10], [96, -10], [104, 30], [150, 56], [212, 78], [252, 112], [266, 160], [262, 220], [244, 280], [242, 330], [252, 430], [256, H - top + 40], [0, H - top + 40]];
-    G.add(new T.Mesh(bodyGeo(prof, 0.55, -150), bodySkin));
+    GB.add(new T.Mesh(bodyGeo(prof, 0.55, -150), bodySkin));
     /* 首（体と同じ肌） */
-    var neck = new T.Mesh(bodyGeo([[0, -170], [96, -170], [100, -40], [104, 20], [0, 20]], 0.72, -140), bodySkin); G.add(neck);
+    var neck = new T.Mesh(bodyGeo([[0, -170], [96, -170], [100, -40], [104, 20], [0, 20]], 0.72, -140), bodySkin); GB.add(neck);
     /* 腕 */
     [-1, 1].forEach(function (s) {
       var arm = new T.Mesh(new T.CylinderGeometry(58, 48, 560, 40, 8), bodySkin);
-      arm.position.set(FX + s * 262, -(top + 470), -175); arm.rotation.z = s * 0.05; G.add(arm);
-      ball(bodySkin, 60, 74, 60, FX + s * 256, top + 196, -175, G);
+      arm.position.set(FX + s * 262, -(top + 470), -175); arm.rotation.z = s * 0.05; GB.add(arm);
+      ball(bodySkin, 60, 74, 60, FX + s * 256, top + 196, -175, GB);
     });
     /* タンクトップ（白いリブ編み）。体に沿わせて少し外に出し、首まわりと袖ぐりは絵で抜く */
     var tank = this.paintTank(BW, BH, FX, top);
     var tankM = new T.MeshPhysicalMaterial({ color: 0xe6e2d8, map: tank.color, alphaMap: tank.alpha, alphaTest: 0.5, bumpMap: tank.bump, bumpScale: 2.2, roughness: 0.85, sheen: 0.6, sheenRoughness: 0.7, sheenColor: new T.Color(0xffffff), side: T.DoubleSide });
-    G.add(new T.Mesh(bodyGeo([[0, 18], [104, 18], [112, 32], [152, 56], [214, 80], [255, 114], [269, 162], [265, 222], [247, 282], [245, 332], [256, 432], [260, H - top + 40], [0, H - top + 40]], 0.55, -146, 3), tankM));
+    GB.add(new T.Mesh(bodyGeo([[0, 18], [104, 18], [112, 32], [152, 56], [214, 80], [255, 114], [269, 162], [265, 222], [247, 282], [245, 332], [256, 432], [260, H - top + 40], [0, H - top + 40]], 0.55, -146, 3), tankM));
 
     /* 頭。玉を顔の凹凸の分だけ押し出し・へこませて作る（ふつう・号泣の2つ） */
     var head = this.head = new T.Group(); G.add(head);
     var earM = std(0xdca084, { roughness: 0.6 });
     [-1, 1].forEach(function (s) {
-      var ex = FX + s * (RX * widthAt(0.0) - 10);
-      var ear = ball(earM, 20, 44, 18, ex, FY + 4, -20, head); ear.rotation.y = s * 0.5;
-      ball(std(0xb87a64, { roughness: 0.7 }), 10, 30, 8, ex + s * 4, FY + 2, -8, head).rotation.y = s * 0.5;
+      var ex = FX + s * (RX * widthAt(0.0) - 10 * K);
+      var ear = ball(earM, 20 * K, 44 * K, 18 * K, ex, FY + 4, -20 * K, head); ear.rotation.y = s * 0.5;
+      ball(std(0xb87a64, { roughness: 0.7 }), 10 * K, 30 * K, 8 * K, ex + s * 4 * K, FY + 2, -8 * K, head).rotation.y = s * 0.5;
     });
     this.faces = [false, true].map(function (big) {
       var tex = self.paintSkin(big);
@@ -241,7 +244,7 @@
       for (var i = 0; i < p.count; i++) {
         var x = p.getX(i), y = p.getY(i), z = p.getZ(i), u = x, v = -y;
         var w = Math.max(0, Math.min(1, (z - 0.05) / 0.35));
-        p.setXYZ(i, FX + x * RX * widthAt(v), -(FY + v * RY), z * RZ + (w > 0 ? relief(u, v, big) * w : 0));
+        p.setXYZ(i, FX + x * RX * widthAt(v), -(FY + v * RY), z * RZ + (w > 0 ? relief(u, v, big) * K * w : 0));
         uv.setXY(i, (u + 1) / 2, 1 - (v + 1) / 2);
       }
       geo.computeVertexNormals();
@@ -252,8 +255,8 @@
     /* 目にたまる涙 */
     this.pools = [];
     [-1, 1].forEach(function (s) {
-      var ex = FX + s * 80;
-      self.pools.push(ball(self.poolMat, 28, 3, 2.5, ex, FY - 10, self.surf(ex, FY - 10) + 1, head));
+      var ex = FX + s * RX * 0.42, ey = FY - RY * 0.043;
+      self.pools.push(ball(self.poolMat, 28 * K, 3 * K, 2.5 * K, ex, ey, self.surf(ex, ey) + 1, head));
     });
 
     /* ハンカチ（布に格子とシミの絵を貼る） */
@@ -397,7 +400,7 @@
     this.head.position.x = shake;
     this.big = !!s.burst;
     this.faces[0].visible = !this.big; this.faces[1].visible = this.big;
-    this.pools.forEach(function (p) { p.scale.y = s.burst ? 4.5 : 3; });
+    var K = this.K; this.pools.forEach(function (p) { p.scale.y = (s.burst ? 4.5 : 3) * K; });
     /* 涙 */
     var self = this, pool = this.tearPool;
     while (pool.length < s.tears.length) { var m = new T.Mesh(this.tearGeo, this.tearMat); this.scene.add(m); pool.push(m); }
