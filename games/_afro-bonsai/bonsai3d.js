@@ -183,10 +183,21 @@
     if (e === "ouch") return Math.abs(f - 0.5) < 0.09 ? 1 : 2;
     return f < 0.12 ? 2 : 1;
   }
+  /* 目の切れ込み（顔の座標）。この中だけ肌を深く削って、奥の目玉を見せる */
+  var EYEX = 40, EYEY = 6, EYEW = 19, noAlmond = false;
+  function almondH(e) { return e === "shock" ? 12 : 8.5; }
+  function almond(gu, gv, e) {
+    if (noAlmond || e === "joy" || e === "ouch") return 0;
+    var q = 1 - Math.pow((Math.abs(gu) - EYEX) / EYEW, 2);
+    if (q <= 0) return 0;
+    var hh = almondH(e) * Math.sqrt(q), dy = gv - EYEY + (Math.abs(gu) - EYEX) * 0.06;   /* 目尻が少し上がる */
+    return Math.max(0, Math.min(1, (hh - Math.abs(dy)) / 1.5));
+  }
   function relief(gu, gv, e) {
+    var cut = almond(gu, gv, e);
     gu /= FX; gv = CY0 + (gv - CY0) / FY;
-    var au = Math.abs(gu), d = 0;
-    d -= 12 * gs(au - 32, gv - 8, 24, 20);         /* 目のくぼみ（大きな目に合わせて広め） */
+    var au = Math.abs(gu), d = -18 * cut;
+    d -= 5 * gs(au - 32, gv - 8, 24, 20);          /* 目のまわりのくぼみ */
     d += 4 * gs(au - 30, gv - 18, 25, 5);          /* 眉の骨 */
     d -= 3 * gs(au - 70, gv - 5, 12, 22);          /* こめかみ */
     d += 5 * gs(gu, gv - 8, 6, 12);                /* 鼻すじ */
@@ -298,7 +309,9 @@
     var bm = std(0x3a2414, { roughness: 1 });   /* 眉は濃い木の色 */
     var eyes = this.eyes = [];
     [-1, 1].forEach(function (s) {
-      var ex = fx(s * 32), ey = 6, R = 20, K = R / 10.5, ez = surf(ex, ey) - R + 5;
+      /* 目玉は顔の奥に置き、切れ込みからだけ見せる（はみ出さない） */
+      noAlmond = true; var base = surf(fx(s * 32), 6); noAlmond = false;
+      var ex = fx(s * 32), ey = 6, R = 20, K = R / 10.5, ez = base - R + 1.5;
       var at = new T.Vector3(cx + ex, -(cy + ey), ez);
       var eye = new T.Mesh(new T.SphereGeometry(R, 32, 24), white); eye.position.copy(at); F.add(eye);
       /* 黒目は目玉の中心で回すと視線が動く */
@@ -309,17 +322,25 @@
       /* 上まぶた：目玉より少し大きい殻の上側。前に回すと閉じる */
       var a = Math.PI * E.a, lidG = new T.Group(); lidG.position.copy(at); F.add(lidG);
       var lid = new T.Mesh(new T.SphereGeometry(R + 1.2, 32, 16, 0, Math.PI * 2, 0, a), lidM);
-      lid.scale.set(1.04, 1, 1); lidG.add(lid);
+      lid.visible = false;   /* 上まぶたは切れ込みの形で表すので使わない */
       var pts = [];
       for (var t = -1; t <= 1.001; t += 0.1) {
         var ang = t * 1.25, rr = R + 1.6, y = Math.cos(a) * rr, xz = Math.sin(a) * rr;
         pts.push(new T.Vector3(Math.sin(ang) * xz * 1.04, y, Math.cos(ang) * xz));
       }
-      lidG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts), 20, 1.3, 6, false), lashM));
+      /* まつげの線：切れ込みの上の縁に沿わせる */
+      var lp2 = [], hh0 = almondH(expr);
+      for (var t2 = -1; t2 <= 1.001; t2 += 0.1) {
+        var lx = s * EYEX + t2 * EYEW * 0.98, q2 = Math.max(0, 1 - t2 * t2);
+        var ly = EYEY - (s * t2) * EYEW * 0.06 - hh0 * Math.sqrt(q2) - 0.6;
+        noAlmond = true; var lz = surf(lx, ly); noAlmond = false;
+        lp2.push(new T.Vector3(cx + lx, -(cy + ly), lz + 0.6));
+      }
+      var lashLine = new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(lp2), 24, 1.2, 6, false), lashM); F.add(lashLine);
       /* 下まぶたのふくらみ */
       var low = new T.Mesh(new T.TorusGeometry(R * 0.95, 1.6 + E.low * 0.3, 8, 24, Math.PI * 0.8), lidM);
       low.rotation.z = Math.PI + Math.PI * 0.1; low.scale.set(1.1, 0.55, 1);
-      low.position.set(at.x, at.y + 0.5 + E.low, ez + R * 0.55); F.add(low);
+      low.visible = false;
       /* 眉：毛の色の太い線を顔の表面に沿わせる。眉頭を太く、眉尻を細く */
       var bp = [], bw = g.look.brow ? 4 : 2.6;
       for (var u = 0; u <= 1.001; u += 0.1) {
@@ -363,7 +384,7 @@
         var wp = [0, 0.5, 1].map(function (t) { var xx = ox2 + s * Math.cos(ang) * len * t, yy = Math.sin(ang) * len * t - R * 0.1; return new T.Vector3(xx, yy, front(R * 0.9, yy) - 2.5 * t); });
         shutG.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(wp), 6, 0.4, 5, false), crM));
       }
-      var openParts = [eye, look, lidG, low];
+      var openParts = [eye, look, lashLine];
       eyes.push({ s: s, lid: lidG, a: a, look: look, brow: browG, shut: shutG, open: openParts, closed: expr === "ouch" || expr === "joy" });
     });
     /* 毎コマ描き直す顔の範囲（髪がかぶらない生え際の下から口まで） */
