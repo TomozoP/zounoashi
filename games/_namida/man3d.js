@@ -259,14 +259,14 @@
       self.pools.push(ball(self.poolMat, 28 * K, 3 * K, 2.5 * K, ex, ey, self.surf(ex, ey) + 1, head));
     });
 
-    /* ハンカチ（布に格子とシミの絵を貼る） */
-    this.hcv = global.document.createElement("canvas"); this.hcv.width = this.hcv.height = 128;
-    this.htex = new T.CanvasTexture(this.hcv); this.htex.colorSpace = T.SRGBColorSpace;
-    var hgeo = new T.PlaneGeometry(108, 108, 10, 10);
-    this.hbase = hgeo.attributes.position.array.slice();
-    this.hanky = new T.Mesh(hgeo, new T.MeshStandardMaterial({ map: this.htex, roughness: 0.95, side: T.DoubleSide }));
-    this.hanky.visible = false; this.scene.add(this.hanky);
-    this.hwet = -1;
+    /* コップ（ガラス）と、中にたまった涙 */
+    var CW = this.CW = g.CW, CH = this.CH = g.CH;
+    var cup = this.cup = new T.Group(); cup.visible = false; this.scene.add(cup);
+    var glass = new T.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, thickness: 3, ior: 1.5, roughness: 0.04, metalness: 0, side: T.DoubleSide, envMapIntensity: 1.4, specularIntensity: 1, clearcoat: 1, clearcoatRoughness: 0.03 });
+    var gp = [[0, 0], [CW - 8, 0], [CW - 6, 2], [CW - 5, 8], [CW, CH - 2], [CW + 1, CH], [CW - 2, CH], [CW - 3.5, CH - 2], [CW - 8.5, 10], [CW - 10, 8], [0, 8]];
+    cup.add(new T.Mesh(new T.LatheGeometry(gp.map(function (p) { return new T.Vector2(p[0], p[1]); }), 48), glass));
+    this.cupWater = new T.Mesh(new T.CylinderGeometry(1, 1, 1, 40), this.tearMat);
+    cup.add(this.cupWater);
   };
 
   /* 肌の絵（色と、毛穴の凹凸）。顔の正面に平らに貼る */
@@ -435,21 +435,18 @@
     });
     this.wtex.needsUpdate = true;
     this.water = { level: s.level, rip: s.ripples || [], T: s.T };
-    /* ハンカチ */
-    var h = this.hanky;
-    h.visible = !!s.held;
-    if (s.held) {
-      this.paintHanky(s.wet);
-      var z = Math.max(this.surfMax(s.hx, s.hy, 60), 60) + 34;
-      h.position.set(s.hx, -s.hy, z);
-      h.rotation.set(-0.15, 0.1, 0.2 - Math.sin(s.T * 6) * 0.05);
-      var a = h.geometry.attributes.position, b = this.hbase;
-      for (var i = 0; i < a.count; i++) {
-        var x = b[i * 3], y = b[i * 3 + 1];
-        a.array[i * 3 + 2] = Math.sin(x * 0.05 + s.T * 5) * 4 + Math.cos(y * 0.06 + s.T * 4) * 3 - (x * x + y * y) * 0.004;
-      }
-      a.needsUpdate = true;
-      h.geometry.computeVertexNormals();
+    /* コップ */
+    var c = this.cup, cs = s.cup;
+    c.visible = !!(cs && cs.on);
+    if (c.visible) {
+      var CW = this.CW, CH = this.CH;
+      c.position.set(cs.x, -cs.y, Math.max(this.surfMax(cs.x, cs.y - CH / 2, CW + 10), 60) + CW + 12);
+      c.rotation.set(0.18, 0, cs.tilt);
+      var lv = Math.max(0.001, cs.level) * (CH - 14);
+      var w = this.cupWater;
+      w.visible = cs.level > 0.01;
+      var rr = CW - 9 + (lv / (CH - 14)) * 4;
+      w.scale.set(rr, lv, rr); w.position.set(0, 9 + lv / 2, 0);
     }
   };
 
