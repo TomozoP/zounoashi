@@ -146,7 +146,32 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": ""
   },
-  {"type":"lab","tags":[],"id":"chokupiza","title":"直ピザ配達","year":2026,"date":"2026-10-05","plays":null,"url":"","img":"games/_chokupiza/img/thumb.webp","play":"games/_chokupiza/index.html","full":true,"catch":"ピザを回して直接投げて届ける"},
-  {"type":"lab","tags":[],"id":"hanaarashi","title":"花畑荒らし","year":2026,"date":"2026-10-05","plays":null,"url":"","img":"games/_hanaarashi/img/thumb.webp","play":"games/_hanaarashi/index.html","full":true,"catch":"花畑を踏み荒らすおじさんを捕まえる"},
-  {"type":"lab","tags":[],"id":"afro-bonsai","title":"アフロ盆栽","year":2026,"date":"2026-10-05","plays":null,"url":"","img":"games/_afro-bonsai/img/thumb.webp","play":"games/_afro-bonsai/index.html","full":true,"catch":"アフロを切ってお手本の盆栽の形にする"},
+  {
+    "type": "lab",
+    "tags": [],
+    "id": "chokupiza",
+    "title": "直ピザ配達",
+    "year": 2026,
+    "date": "2026-10-05",
+    "plays": null,
+    "url": "",
+    "img": "games/_chokupiza/img/thumb.webp",
+    "play": "games/_chokupiza/index.html",
+    "full": true,
+    "catch": "ピザを回して直接投げて届ける"
+  },
+  {
+    "type": "lab",
+    "tags": [],
+    "id": "hanaarashi",
+    "title": "花畑荒らし",
+    "year": 2026,
+    "date": "2026-10-05",
+    "plays": null,
+    "url": "",
+    "img": "games/_hanaarashi/img/thumb.webp",
+    "play": "games/_hanaarashi/index.html",
+    "full": true,
+    "catch": "花畑を踏み荒らすおじさんを捕まえる"
+  }
 ];
