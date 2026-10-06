@@ -53,11 +53,11 @@
     [-1, 1].forEach(function (s) {
       var ear = new T.Mesh(new T.SphereGeometry(1, 20, 14), skin);
       ear.scale.set(13, 20, 10); ear.position.set(cx + s * 84, -(cy + 4), 140); G.add(ear);
-      var inner = new T.Mesh(new T.SphereGeometry(1, 16, 12), std(0x5e3f26, { roughness: 0.8 }));
+      var inner = new T.Mesh(new T.SphereGeometry(1, 16, 12), std(0x8a5e38, { roughness: 0.8 }));
       inner.scale.set(7, 12, 6); inner.position.set(cx + s * 86, -(cy + 4), 146); G.add(inner);
     });
     /* 幹 */
-    var bark = std(0x6b4a2e, { roughness: 1 });
+    var bark = std(0x9a6c45, { roughness: 1 });
     var curve = new T.CatmullRomCurve3([
       new T.Vector3(cx, -(cy + 60), 80),
       new T.Vector3(cx - 24, -(cy + 90 + (P - cy) * 0.33), 70),
@@ -170,7 +170,12 @@
   }
   function closedLine(gu) { return 61 + 0.004 * gu * gu; }
   /* 口の中の色：0 なし / 1 口の中（暗い） / 2 歯 */
+  /* 顔のパーツの大きさ：横に FX 倍、縦に FY 倍（CY0 を中心に）。顔の座標をパーツの元の座標に戻してから形を決める */
+  var FX = 1.25, FY = 1.1, CY0 = 30;
+  function fx(u) { return u * FX; }
+  function fy(v) { return CY0 + (v - CY0) * FY; }
   function mouthKind(gu, gv, e) {
+    gu /= FX; gv = CY0 + (gv - CY0) / FY;
     var m = mouthEdges(gu, e);
     if (!m || gv <= m[0] || gv >= m[1]) return 0;
     var f = (gv - m[0]) / (m[1] - m[0]);
@@ -179,6 +184,7 @@
     return f < 0.12 ? 2 : 1;
   }
   function relief(gu, gv, e) {
+    gu /= FX; gv = CY0 + (gv - CY0) / FY;
     var au = Math.abs(gu), d = 0;
     d -= 9 * gs(au - 30, gv - 2, 19, 12);          /* 目のくぼみ */
     d += 4 * gs(au - 30, gv - 15, 25, 6);          /* 眉の骨 */
@@ -219,6 +225,7 @@
   }
   /* 肌の色むら：頬と鼻先に赤み、唇、口の中と歯 */
   function tint(gu, gv, e, out) {
+    gu /= FX; gv = CY0 + (gv - CY0) / FY;
     var au = Math.abs(gu), r = 1, g = 1, b = 1;
     /* 木目：横にゆらぐ細い縞 */
     var grain = 0.5 + 0.5 * Math.sin(gv * 0.55 + Math.sin(gu * 0.045 + gv * 0.01) * 3.2 + Math.sin(gu * 0.13) * 0.6);
@@ -291,7 +298,7 @@
     var bm = std(0x3a2414, { roughness: 1 });   /* 眉は濃い木の色 */
     var eyes = this.eyes = [];
     [-1, 1].forEach(function (s) {
-      var ex = s * 30, ey = 2, R = 10.5, ez = surf(ex, ey) - R + 5;
+      var ex = fx(s * 30), ey = fy(2), R = 12.8, ez = surf(ex, ey) - R + 5;
       var at = new T.Vector3(cx + ex, -(cy + ey), ez);
       var eye = new T.Mesh(new T.SphereGeometry(R, 32, 24), white); eye.position.copy(at); F.add(eye);
       /* 黒目は目玉の中心で回すと視線が動く */
@@ -316,7 +323,7 @@
       /* 眉：毛の色の太い線を顔の表面に沿わせる。眉頭を太く、眉尻を細く */
       var bp = [], bw = g.look.brow ? 4 : 2.6;
       for (var u = 0; u <= 1.001; u += 0.1) {
-        var bx = s * (16 + 30 * u), by = E.brow(u);
+        var bx = fx(s * (16 + 30 * u)), by = Math.max(-20, fy(E.brow(u)));
         bp.push(new T.Vector3(cx + bx, -(cy + by), surf(bx, by) + bw * 0.4 + 1));
       }
       var bc = new T.CatmullRomCurve3(bp), brow = new T.Mesh(new T.TubeGeometry(bc, 20, 1, 8, false), bm);
@@ -361,7 +368,7 @@
     });
     /* 毎コマ描き直す顔の範囲（髪がかぶらない生え際の下から口まで） */
     F.traverse(function (o) { o.layers.enable(1); });
-    this.faceRect = [cx - 74, cy - 25, 148, 123];
+    this.faceRect = [cx - 80, cy - 25, 160, 130];
   };
 
   /* 生き物らしさ：まばたき、視線のふらつき、眉と目元のかすかな動き。形は作り直さず回すだけ */
@@ -385,7 +392,7 @@
       e.lid.rotation.x = 0.06 * n2;
       var ry = A.gx * 0.32, rx = A.gy * 0.25;
       if (aim && cam) {
-        var dx = aim.x - (cam.cx + e.s * 30), dy = aim.y - (cam.cy + 2);
+        var dx = aim.x - (cam.cx + fx(e.s * 30)), dy = aim.y - (cam.cy + fy(2));
         ry = Math.max(-0.55, Math.min(0.55, Math.atan2(dx, 160)));
         rx = Math.max(-0.45, Math.min(0.45, Math.atan2(dy, 160)));
       }
