@@ -174,5 +174,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "花畑を踏み荒らすおじさんを捕まえる"
   },
-  {"type":"lab","tags":[],"id":"namida","title":"おじさんの涙","year":2026,"date":"2026-10-06","plays":null,"url":"","img":"games/_namida/img/thumb.webp","play":"games/_namida/index.html","full":true,"catch":""},
+  {"type":"lab","tags":[],"id":"namida","title":"おじさんの涙を舐め生きるアメンボ","year":2026,"date":"2026-10-06","plays":null,"url":"","img":"games/_namida/img/thumb.webp","play":"games/_namida/index.html","full":true,"catch":""},
 ];
