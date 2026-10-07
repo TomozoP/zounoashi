@@ -33,6 +33,8 @@
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="pom3d.js"></script>
 <script>
 /* わたあめポメ
 
@@ -145,8 +147,12 @@
   var S = { INTRO: "intro", PLAY: "play", END: "end", RESULT: "result" };
   var state, T, held, keyMode = false;
   var sec = new Float32Array(N);   /* 向きごとにたまっている綿あめの面積 */
+  /* 綿の玉の形。上から見た向きごとに、ポメの中心から綿の外側までの半径を持つ。
+     ポメは向きを変えないので、糸が触れた側ほどふくらむ */
+  var PN = 48, PTH = Math.PI * 2 / PN;
+  var f = new Float32Array(PN), W8 = new Float32Array(PN);
   var px, py, tx, ty, A, roll, spinRate, lastAng, keyDir;
-  var camR, endT, score, wisps, steam, flingCool, meltCool, melted, flung, barks, barkT;
+  var camR, camX = 0, camY = 0, endT, score, wisps, steam, flingCool, meltCool, melted, flung, barks, barkT;
 
   /* 綿の模様（ポメに貼りついて転がる細い筋）。毎回同じ形にする */
   var STRANDS = [];
@@ -166,13 +172,27 @@
     T = 0; held = false; keyDir = 0;
     for (var i = 0; i < N; i++) sec[i] = 0;
     px = 0; py = 26; tx = px; ty = py;
+    for (i = 0; i < PN; i++) f[i] = R0;
     A = Math.PI * R0 * R0; roll = 0; spinRate = 0; lastAng = Math.atan2(py, px);
-    camR = 48; endT = 0; score = 0; melted = 0; flung = 0; barks = 0; barkT = 1;
+    camR = 48; camX = 0; camY = 0; endT = 0; score = 0; melted = 0; flung = 0; barks = 0; barkT = 1;
     wisps = []; steam = []; flingCool = 0; meltCool = 0;
     humOn();
   }
 
   function rad() { return Math.sqrt(A / Math.PI); }
+  function area() { var a = 0; for (var i = 0; i < PN; i++) a += 0.5 * f[i] * f[i] * PTH; return a; }
+  function maxF() { var m = 0; for (var i = 0; i < PN; i++) if (f[i] > m) m = f[i]; return m; }
+  /* 向き a（ラジアン）の半径。隣の区画となめらかにつなぐ */
+  function fAt(a) {
+    var u = ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / PTH, i = Math.floor(u), t = u - i;
+    return f[i % PN] * (1 - t) + f[(i + 1) % PN] * t;
+  }
+  /* 向き a のまわりに面積 amt を足す（マイナスなら削る） */
+  function spread(a, amt, sig) {
+    var sum = 0, i;
+    for (i = 0; i < PN; i++) { var d = wrapA(i * PTH - a); W8[i] = Math.exp(-d * d / (2 * sig * sig)); sum += W8[i]; }
+    for (i = 0; i < PN; i++) f[i] = Math.max(R0, f[i] + amt * (W8[i] / sum) / (f[i] * PTH));
+  }
   function diameter() { return 2 * rad(); }
   function wrapA(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
 
@@ -182,7 +202,13 @@
     barkT += dt;
     if (state === S.INTRO) { T += dt; return; }
     updateParts(dt);
-    camR += (Math.max(48, Math.hypot(px, py) + r + 8) - camR) * Math.min(1, dt * 2.5);
+    /* 画面に入れる範囲：鍋とポメの両方を囲む円 */
+    var dd = Math.hypot(px, py), mf = maxF() + 6, BR = BOWL + 6, fr, fx = 0, fy = 0;
+    if (dd + mf <= BR) fr = BR;
+    else if (dd + BR <= mf) { fr = mf; fx = px; fy = py; }
+    else { fr = (dd + mf + BR) / 2; fx = px / dd * (fr - BR); fy = py / dd * (fr - BR); }
+    var ke = Math.min(1, dt * 2.5);
+    camR += (Math.max(44, fr) - camR) * ke; camX += (fx - camX) * ke; camY += (fy - camY) * ke;
     if (state === S.END) {
       endT += dt;
       if (endT > 1.6) toResult();
@@ -193,7 +219,7 @@
 
     /* ポメは指を追う。キーのときは今の距離のまま真ん中のまわりを回る */
     if (!held && keyDir) {
-      var d0 = Math.max(HEAD + r + 4, Math.hypot(px, py)), a0 = Math.atan2(py, px) + keyDir * Math.PI * 2 * 0.9 * dt;
+      var d0 = Math.max(HEAD + fAt(Math.atan2(-py, -px)) + 4, Math.hypot(px, py)), a0 = Math.atan2(py, px) + keyDir * Math.PI * 2 * 0.9 * dt;
       tx = Math.cos(a0) * d0; ty = Math.sin(a0) * d0;
     }
     var k = Math.min(1, dt * 18), ox = px, oy = py;
@@ -212,13 +238,20 @@
     }
 
     /* ポメにかかっている向きの糸を巻き取る */
-    var dist = Math.hypot(px, py);
-    var half = dist > r ? Math.asin(Math.min(1, r / dist)) : Math.PI;
+    var dist = Math.hypot(px, py), inward = ang + Math.PI;   /* ポメの、真ん中を向いた側 */
+    var near = fAt(inward), wide = Math.max(near, rad());
+    var half = dist > wide ? Math.asin(Math.min(1, wide / dist)) : Math.PI;
     var got = 0;
     for (i = 0; i < N; i++) {
       if (Math.abs(wrapA(i * DTH + DTH / 2 - ang)) <= half) { if (sec[i] > feedRate(T) * CAP / N * 0.25) barks++; got += sec[i]; sec[i] = 0; }
     }
-    A += got;
+    /* 糸は真ん中を向いた側に付く。触れた側ほどふくらむ */
+    if (got > 0) spread(inward, got, 0.5);
+
+    /* ふわっとならす（隣とすこし混ぜる） */
+    var g0 = new Float32Array(f), kk = Math.min(0.25, dt * 1.5);
+    for (i = 0; i < PN; i++) f[i] = g0[i] + (g0[(i + 1) % PN] + g0[(i + PN - 1) % PN] - 2 * g0[i]) * kk;
+    A = area();
 
     /* 糸を1本巻き取るたびに「ワン」。大きいほど低い声 */
     if (barks > 0 && barkT > 0.07) { bark(); barkT = 0; barks = 0; }
@@ -226,19 +259,20 @@
     /* 回しすぎ：外側の綿が飛び散る */
     flingCool -= dt;
     if (spinRate > FAST && A > Math.PI * R0 * R0 * 1.2) {
-      var loss = Math.min(A - Math.PI * R0 * R0, A * (spinRate - FAST) * 0.9 * dt);
-      A -= loss; flung += loss;
+      var kf = Math.min(0.5, (spinRate - FAST) * 0.5 * dt);
+      for (i = 0; i < PN; i++) f[i] -= (f[i] - R0) * kf;
+      var a2 = area(); flung += A - a2; A = a2;
       for (var w = 0; w < 3; w++) if (Math.random() < 0.7) spawnWisp();
       if (flingCool <= 0) { flingCool = 0.18; noiseHit(0.2, 2600, 0.08, 0.8); }
     }
 
     /* 真ん中の熱い頭に触ると溶ける */
     meltCool -= dt;
-    r = rad();
-    if (dist - r < HEAD) {
-      var m = Math.min(A - Math.PI * R0 * R0, 2600 * dt);
-      if (m > 0) { A -= m; melted += m; }
-      if (Math.random() < 0.6) steam.push({ x: px - Math.cos(ang) * r, y: py - Math.sin(ang) * r, life: 0.7, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30 });
+    near = fAt(inward);
+    if (dist - near < HEAD) {
+      spread(inward, -2600 * dt, 0.5);
+      var a3 = area(); melted += A - a3; A = a3;
+      if (Math.random() < 0.6) steam.push({ x: px - Math.cos(ang) * near, y: py - Math.sin(ang) * near, life: 0.7, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30 });
       if (meltCool <= 0) { meltCool = 0.22; noiseHit(0.25, 4200, 0.12, 0.6); }
     }
 
@@ -295,7 +329,10 @@
 
   /* ============ 入力 ============ */
   var scale = 1;   /* 1cm が何ピクセルか */
-  function toWorld(x, y) { return { x: (x - CX) / scale, y: (y - CY) / scale }; }
+  function toWorld(x, y) {
+    if (scene3d) { var p = scene3d.unproject(x, y, W, H); if (p) return p; }
+    return { x: (x - CX) / scale, y: (y - CY) / scale };
+  }
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
@@ -333,7 +370,7 @@
 
   /* 本番以外だけ、数字キーで場面を飛ばせる */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
-  function bigPom(d) { A = Math.PI * d * d / 4; var a = Math.atan2(py, px), dd = HEAD + d / 2 + 6; px = tx = Math.cos(a) * dd; py = ty = Math.sin(a) * dd; lastAng = a; }
+  function bigPom(d) { for (var i = 0; i < PN; i++) f[i] = d / 2; A = area(); var a = Math.atan2(py, px), dd = HEAD + d / 2 + 6; px = tx = Math.cos(a) * dd; py = ty = Math.sin(a) * dd; lastAng = a; }
   function debugKey(n) {
     if (n === 1) { if (state !== S.PLAY) newRound(); bigPom(180); T = TOTAL; }      /* 1: 大きくして終わり */
     if (n === 2) { if (state !== S.PLAY) newRound(); T = TOTAL - 3; }                /* 2: 砂糖があと3秒 */
@@ -384,9 +421,21 @@
     ctx.closePath();
   }
 
+  /* 立体の絵。作れないとき（WebGLなし）は平面の絵のまま */
+  var scene3d = null, tries3d = 0, lastTry3d = -1e9;
+  function make3d() {
+    if (scene3d || tries3d >= 20 || !window.THREE || !window.PomScene) return;
+    var now = performance.now();
+    if (now - lastTry3d < 500) return;
+    lastTry3d = now; tries3d++;
+    try { scene3d = new window.PomScene(); } catch (e) { scene3d = null; }
+  }
+
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     scale = Math.min(W * 0.47, H * 0.40) / (camR || 48);
+    make3d();
+    if (scene3d && draw3d()) { if (state === S.RESULT) drawResult(); return; }
 
     /* 夜店の台の上（上から見ている） */
     ctx.fillStyle = "#24304a"; ctx.fillRect(0, 0, W, H);
@@ -404,6 +453,57 @@
     ctx.restore();
 
     if (state === S.RESULT) drawResult();
+  }
+
+  function draw3d() {
+    var bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#1c2440"); bg.addColorStop(1, "#2c3a5c");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    scene3d.aspect(W, H);
+    var now = performance.now() / 1000;
+    scene3d.update({ px: px, py: py, f: f, PN: PN, R0: R0, camR: camR || 48, camX: camX, camY: camY,
+      sugar: state === S.INTRO ? 1 : Math.max(0, 1 - T / TOTAL), spin: state === S.PLAY || state === S.INTRO ? 0.35 : 0.02,
+      bounce: 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15,
+      dizzy: spinRate > FAST * 0.85 || state === S.END });
+    if (!scene3d.render(ctx, W, H)) return false;
+    /* 糸・湯気・飛び散る綿は、立体の位置を画面に写して重ねる */
+    var o = scene3d.project(0, -1, 0, W, H), e = scene3d.project(10, -1, 0, W, H);
+    var k = Math.hypot(e.x - o.x, e.y - o.y) / 10;          /* 1cm が何ピクセルか */
+    if (state === S.PLAY || state === S.INTRO) {
+      var cap = feedRate(T) * CAP / N, dist = Math.hypot(px, py);
+      var reach = Math.max(BOWL * 1.05, dist - fAt(Math.atan2(-py, -px)) + 2);
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      for (var i = 0; i < N; i++) {
+        var fill = state === S.INTRO ? 0.4 : sec[i] / cap;
+        if (fill < 0.03) continue;
+        var a = i * DTH + DTH / 2;
+        for (var j = 0; j < 3; j++) {
+          var aa = a + (j - 1) * 0.05 + Math.sin(now * 7 + i * 3 + j) * 0.03;
+          var len = HEAD + (reach - HEAD) * Math.min(1, fill * (0.8 + j * 0.1));
+          ctx.strokeStyle = "rgba(255,255,255," + (0.2 + fill * 0.5) + ")";
+          ctx.lineWidth = Math.max(1, (0.5 + fill * 0.7) * k);
+          ctx.beginPath();
+          for (var q = 0; q <= 6; q++) {
+            var rr = HEAD + (len - HEAD) * q / 6, wob = Math.sin(now * 5 + i + j * 2 + q) * 0.06 * q / 6;
+            var p = scene3d.project(Math.cos(aa + wob) * rr, -1 + Math.sin(now * 4 + q + i) * 0.8, Math.sin(aa + wob) * rr, W, H);
+            if (q) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
+          }
+          ctx.stroke();
+        }
+      }
+    }
+    steam.forEach(function (s) {
+      var p = scene3d.project(s.x, (0.7 - s.life) * 20, s.y, W, H);
+      ctx.fillStyle = "rgba(255,200,170," + Math.max(0, s.life * 0.5) + ")";
+      ctx.beginPath(); ctx.arc(p.x, p.y, (2 + (0.7 - s.life) * 6) * k, 0, Math.PI * 2); ctx.fill();
+    });
+    wisps.forEach(function (w) {
+      var p = scene3d.project(w.x, 0, w.y, W, H), p2 = scene3d.project(w.x - w.vx * 0.04, 0, w.y - w.vy * 0.04, W, H);
+      ctx.strokeStyle = "rgba(255,255,255," + Math.max(0, w.life) + ")";
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    });
+    return true;
   }
 
   function drawMachine() {
@@ -473,12 +573,15 @@
       var g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
       g.addColorStop(0, "#ffffff"); g.addColorStop(0.75, "#f2f3f7"); g.addColorStop(1, "#d9dce6");
       ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(0, 0, r * 0.94, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      for (var pi = 0; pi <= PN; pi++) { var pa = pi * PTH - roll, pr = f[pi % PN] * 0.94; if (pi) ctx.lineTo(Math.cos(pa) * pr, Math.sin(pa) * pr); else ctx.moveTo(Math.cos(pa) * pr, Math.sin(pa) * pr); }
+      ctx.fill();
       var bumps = Math.max(14, Math.min(40, Math.round(r / 2.2)));
       for (var i = 0; i < bumps; i++) {
         var a = i / bumps * Math.PI * 2, br = r * 0.14 + 1;
         ctx.fillStyle = i % 2 ? "#f6f7fa" : "#e9ebf1";
-        ctx.beginPath(); ctx.arc(Math.cos(a) * (r - br * 0.8), Math.sin(a) * (r - br * 0.8), br, 0, Math.PI * 2); ctx.fill();
+        var fr = fAt(a - roll);
+        ctx.beginPath(); ctx.arc(Math.cos(a) * (fr - br * 0.8), Math.sin(a) * (fr - br * 0.8), br, 0, Math.PI * 2); ctx.fill();
       }
       ctx.lineCap = "round";
       for (i = 0; i < STRANDS.length; i++) {
@@ -602,7 +705,7 @@
     /* テスト用：指の代わりに、真ん中から d cm の所を1秒に w 周で回す */
     orbit: function (w, d) { held = true; var a = Math.atan2(py, px) + w * Math.PI * 2 / 60; tx = Math.cos(a) * d; ty = Math.sin(a) * d; }
   };
-  window.__thumbnail = function () { newRound(); bigPom(110); T = 12; camR = Math.hypot(px, py) + 55 + 8; };
+  window.__thumbnail = function () { newRound(); bigPom(110); T = 12; for (var i = 0; i < 300; i++) update(0); };
 
   window.__recording = {
     sound: function () { audioOn(); return AC; },
