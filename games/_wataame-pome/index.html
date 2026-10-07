@@ -36,9 +36,9 @@
 <script>
 /* わたあめポメ
 
-   綿あめ機の上で、棒をくわえたポメラニアンを指でくるくる回す。
-   下から上がってくる綿あめは、ポメの下を向いている側にだけ付く。
-   回さないと下だけ伸びて重みで落ち、回しすぎると外側が飛び散る。
+   綿あめ機の上で、ポメラニアンを指でくるくる回す。
+   下から上がってくる綿あめは、ポメの下を向いている側に、回した速さの分だけ付く。
+   20秒のあいだにとにかく回しまくる。回さないと下だけ伸びて重みで落ちる。
    砂糖がなくなったときの直径(cm)が結果。 */
 (function () {
   "use strict";
@@ -134,10 +134,10 @@
      向きはポメに貼りついているので、ポメを回すと一緒に回る。 */
   var N = 72, DTH = Math.PI * 2 / N;
   var R0 = 14;                     /* ポメ本体（毛こみ）の半径 cm */
-  var TOTAL = 30;                  /* 砂糖がなくなるまでの秒数 */
+  var TOTAL = 20;                  /* 砂糖がなくなるまでの秒数 */
   var SPREAD = 0.3;                /* 綿あめが付く幅（下向きを中心に、ラジアン） */
-  var FLING = 2600;                /* これ以上の 角速度²×半径 で外側が飛び散る */
-  function feedRate(t) { return 320 + 1500 * Math.min(1, t / TOTAL); }   /* 1秒に付く断面積 cm² */
+  /* 1秒に付く断面積 cm²。回す速さ（角速度）に比例して、回せば回すほど付く */
+  function feedRate(w) { return 160 * Math.min(40, Math.abs(w)); }
 
   var S = { INTRO: "intro", PLAY: "play", END: "end", RESULT: "result" };
   var state, T, held, keyMode = false;
@@ -200,7 +200,7 @@
       omega += (w - omega) * Math.min(1, dt * 12);
       pending = 0;
     } else {
-      if (keyDir) omega += keyDir * 9 * dt;
+      if (keyDir) omega = Math.max(-30, Math.min(30, omega + keyDir * 9 * dt));
       else omega *= Math.exp(-0.9 * dt);
       ang += omega * dt;
     }
@@ -214,7 +214,7 @@
         W8[i] = Math.exp(-d * d / (2 * SPREAD * SPREAD));
         sum += W8[i];
       }
-      var A = feedRate(T) * dt;
+      var A = feedRate(omega) * dt;
       for (i = 0; i < N; i++) f[i] += A * (W8[i] / sum) / (f[i] * DTH);
     }
 
@@ -222,22 +222,9 @@
     var g = new Float32Array(f);
     for (var k = 0; k < N; k++) f[k] = g[k] + (g[(k + 1) % N] + g[(k + N - 1) % N] - 2 * g[k]) * Math.min(0.25, dt * 6);
 
-    /* 回しすぎ：外側が遠心力で飛び散る */
-    flingCool -= dt;
-    var lim = FLING / Math.max(0.01, omega * omega), flung = 0;
-    for (var j = 0; j < N; j++) {
-      if (f[j] > lim && f[j] > R0) {
-        var nf = Math.max(R0, lim, f[j] - (f[j] - lim) * Math.min(1, dt * 4));
-        flung += f[j] - nf;
-        if (Math.random() < (f[j] - nf) * 0.8) spawnWisp(j);
-        f[j] = nf;
-      }
-    }
-    if (flung > 0.3 && flingCool <= 0) { flingCool = 0.18; noiseHit(0.2, 2600, 0.07, 0.8); }
-
     /* 回さなさすぎ：下にたまった塊が重みで落ちる */
     dropCool -= dt;
-    var mean = 0; for (j = 0; j < N; j++) mean += f[j]; mean /= N;
+    var j, mean = 0; for (j = 0; j < N; j++) mean += f[j]; mean /= N;
     var worst = -1, over = 0;
     for (j = 0; j < N; j++) { var o = f[j] - (mean * 1.12 + 3); if (o > over) { over = o; worst = j; } }
     if (worst >= 0 && dropCool <= 0) dropChunk(worst, mean);
@@ -547,8 +534,8 @@
       ctx.fillStyle = "#f2c9c4";
       ctx.beginPath(); ctx.moveTo(s * R * 0.3, -R * 0.75); ctx.quadraticCurveTo(s * R * 0.55, -R * 1.2, s * R * 0.68, -R * 1.15); ctx.quadraticCurveTo(s * R * 0.8, -R * 0.85, s * R * 0.7, -R * 0.55); ctx.closePath(); ctx.fill();
     });
-    /* 目。速く回ると目が回る */
-    var dizzy = Math.abs(omega) > 9 || state === S.END;
+    /* 目 */
+    var dizzy = false;
     ctx.strokeStyle = "#1a1210"; ctx.fillStyle = "#1a1210"; ctx.lineWidth = R * 0.06; ctx.lineCap = "round";
     [-1, 1].forEach(function (s) {
       var ex = s * R * 0.32, ey = -R * 0.08;
