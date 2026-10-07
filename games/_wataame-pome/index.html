@@ -9,7 +9,7 @@
   * { -webkit-tap-highlight-color: transparent; }
   #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
   #wrap { position: relative; touch-action: none; }
-  canvas { display: block; background: #1b1636; }
+  canvas { display: block; background: #24304a; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
@@ -33,12 +33,13 @@
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="pom3d.js"></script>
 <script>
 /* わたあめポメ
 
-   綿あめ機の上で、ポメラニアンを指でくるくる回す。
-   下から上がってくる綿あめは、ポメの下を向いている側に、回した速さの分だけ付く。
-   20秒のあいだにとにかく回しまくる。回さないと下だけ伸びて重みで落ちる。
+   上から見た綿あめ機。真ん中から出る綿あめの糸を、白いポメを指で連れてぐるぐる回って巻き取る。
+   真ん中の熱い頭に触ると溶け、速く回りすぎると外側が飛び散る。
    砂糖がなくなったときの直径(cm)が結果。 */
 (function () {
   "use strict";
@@ -129,143 +130,156 @@
     else { try { AC.resume(); } catch (e) {} }
   });
 
-  /* ============ 綿あめの形 ============
-     ポメの中心から見た向きごとに、綿あめの外側までの半径(cm)を持つ。
-     向きはポメに貼りついているので、ポメを回すと一緒に回る。 */
-  var N = 72, DTH = Math.PI * 2 / N;
-  var R0 = 14;                     /* ポメ本体（毛こみ）の半径 cm */
-  var TOTAL = 20;                  /* 砂糖がなくなるまでの秒数 */
-  var SPREAD = 0.3;                /* 綿あめが付く幅（下向きを中心に、ラジアン） */
-  /* 1秒に付く断面積 cm²。回す速さ（角速度）と今の大きさに比例するので、回すほど桁違いに大きくなる */
-  function feedRate(w) { var aw = Math.min(40, Math.abs(w)); return aw * (40 + 0.05 * area()); }
-  var MAXD = 1e7;                  /* いちばん大きくて直径100km。ここまで育つと空へ打ち上がって惑星になる */
-  /* 長さの表示。cm → m → km */
-  function unitOf(cm) {
-    if (cm < 1000) return [String(Math.round(cm)), "cm"];
-    if (cm < 100000) return [(cm < 10000 ? (cm / 100).toFixed(1) : String(Math.round(cm / 100))), "m"];
-    return [(cm < 1e6 ? (cm / 1e5).toFixed(2) : cm < 1e7 ? (cm / 1e5).toFixed(1) : String(Math.round(cm / 1e5))), "km"];
-  }
+  /* ============ 綿あめ機 ============
+     上から見た綿あめ機。真ん中の回る頭から綿あめの糸が四方へ出てくる。
+     糸は向きごとの区画にたまり、ポメが通ると巻き取られてポメが大きくなる。
+     同じ所にいると、その向きの分しか取れないので、ぐるぐる回るほど大きくなる。
+     長さの単位は cm。 */
+  var N = 16, DTH = Math.PI * 2 / N;
+  var R0 = 14;                     /* ポメ本体（毛こみ）の半径 */
+  var BOWL = 32;                   /* 鍋の半径 */
+  var HEAD = 7;                    /* 真ん中の回る頭の半径（触ると綿あめが溶ける） */
+  var TOTAL = 30;                  /* 砂糖がなくなるまでの秒数 */
+  var CAP = 1.1;                   /* 1区画にたまる上限（何秒分の糸か） */
+  var FAST = 2.4;                  /* これより速く（1秒に何周）回ると外側が飛び散る */
+  function feedRate(t) { return 320 + 1500 * Math.min(1, t / TOTAL); }   /* 1秒に出る綿あめの面積 cm² */
 
-  var S = { INTRO: "intro", PLAY: "play", END: "end", LAUNCH: "launch", RESULT: "result" };
+  var S = { INTRO: "intro", PLAY: "play", END: "end", RESULT: "result" };
   var state, T, held, keyMode = false;
-  var f = new Float32Array(N), ang, omega, pending, lastFinger, keyDir;
-  var drops, camR, endT, score, bits, wisps, flingCool, dropCool, launchT = 0, planet = false;
+  var sec = new Float32Array(N);   /* 向きごとにたまっている綿あめの面積 */
+  /* 綿の玉の形。上から見た向きごとに、ポメの中心から綿の外側までの半径を持つ。
+     ポメは向きを変えないので、糸が触れた側ほどふくらむ */
+  var PN = 48, PTH = Math.PI * 2 / PN;
+  var f = new Float32Array(PN), W8 = new Float32Array(PN);
+  var px, py, tx, ty, A, roll, spinRate, lastAng, keyDir;
+  var camR, camX = 0, camY = 0, endT, score, wisps, steam, flingCool, meltCool, melted, flung, barks, barkT;
 
-  /* 綿の模様（ポメに貼りついて回る細い筋）。毎回同じ形にする */
+  /* 綿の模様（ポメに貼りついて転がる細い筋）。毎回同じ形にする */
   var STRANDS = [];
   (function () {
     var seed = 7;
     function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
-    for (var i = 0; i < 260; i++) STRANDS.push({ a: rnd() * Math.PI * 2, r: rnd(), len: 0.25 + rnd() * 0.5, bend: (rnd() - 0.5) * 0.6, w: 1 + rnd() * 2, light: rnd() < 0.5 });
-  })();
-  var LANTERNS = [];
-  (function () {
-    var seed = 31;
-    function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
-    for (var i = 0; i < 14; i++) LANTERNS.push({ x: rnd(), y: rnd() * 0.45, r: 18 + rnd() * 40, c: rnd() < 0.6 ? "255,120,60" : "255,200,90", a: 0.10 + rnd() * 0.18 });
+    for (var i = 0; i < 200; i++) STRANDS.push({ a: rnd() * Math.PI * 2, r: rnd(), len: 0.3 + rnd() * 0.6, w: 1 + rnd() * 1.6, dark: rnd() < 0.45 });
   })();
 
   var CX, CY;
-  /* 宇宙の星（決まった並び） */
-  var STARS = [];
-  (function () {
-    var seed = 4242;
-    function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
-    for (var i = 0; i < 140; i++) STARS.push({ x: rnd(), y: rnd(), r: 0.6 + rnd() * 1.6, a: 0.4 + rnd() * 0.6 });
-  })();
-
-  function place() { CX = W / 2; CY = Math.round(H * 0.40); }
+  function place() { CX = W / 2; CY = Math.round(H * 0.46); }
 
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     T = 0; held = false; keyDir = 0;
-    for (var i = 0; i < N; i++) f[i] = R0;
-    ang = 0; omega = 0; pending = 0; lastFinger = null;
-    drops = 0; camR = 34; endT = 0; score = 0; launchT = 0; planet = false;
-    bits = []; wisps = []; flingCool = 0; dropCool = 0; barkT = 1; lastBark = diameter();
+    for (var i = 0; i < N; i++) sec[i] = 0;
+    px = 0; py = 26; tx = px; ty = py;
+    for (i = 0; i < PN; i++) f[i] = R0;
+    A = Math.PI * R0 * R0; roll = 0; spinRate = 0; lastAng = Math.atan2(py, px);
+    camR = 48; camX = 0; camY = 0; endT = 0; score = 0; melted = 0; flung = 0; barks = 0; barkT = 1;
+    wisps = []; steam = []; flingCool = 0; meltCool = 0;
     humOn();
   }
 
-  function area() { var a = 0; for (var i = 0; i < N; i++) a += 0.5 * f[i] * f[i] * DTH; return a; }
-  function diameter() { return 2 * Math.sqrt(area() / Math.PI); }
-  function maxR() { var m = 0; for (var i = 0; i < N; i++) if (f[i] > m) m = f[i]; return m; }
+  function rad() { return Math.sqrt(A / Math.PI); }
+  function area() { var a = 0; for (var i = 0; i < PN; i++) a += 0.5 * f[i] * f[i] * PTH; return a; }
+  function maxF() { var m = 0; for (var i = 0; i < PN; i++) if (f[i] > m) m = f[i]; return m; }
+  /* 向き a（ラジアン）の半径。隣の区画となめらかにつなぐ */
+  function fAt(a) {
+    var u = ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / PTH, i = Math.floor(u), t = u - i;
+    return f[i % PN] * (1 - t) + f[(i + 1) % PN] * t;
+  }
+  /* 向き a のまわりに面積 amt を足す（マイナスなら削る） */
+  function spread(a, amt, sig) {
+    var sum = 0, i;
+    for (i = 0; i < PN; i++) { var d = wrapA(i * PTH - a); W8[i] = Math.exp(-d * d / (2 * sig * sig)); sum += W8[i]; }
+    for (i = 0; i < PN; i++) f[i] = Math.max(R0, f[i] + amt * (W8[i] / sum) / (f[i] * PTH));
+  }
+  function diameter() { return 2 * rad(); }
   function wrapA(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
 
   /* ============ 進行 ============ */
-  var W8 = new Float32Array(N);
   function update(dt) {
-    if (state === S.INTRO) { ang += dt * 0.6; return; }
-    updateBits(dt);
+    var r = rad();
+    barkT += dt;
+    if (state === S.INTRO) { T += dt; return; }
+    updateParts(dt);
+    /* 画面に入れる範囲：鍋とポメの両方を囲む円 */
+    var dd = Math.hypot(px, py), mf = maxF() + 6, BR = BOWL + 6, fr, fx = 0, fy = 0;
+    if (dd + mf <= BR) fr = BR;
+    else if (dd + BR <= mf) { fr = mf; fx = px; fy = py; }
+    else { fr = (dd + mf + BR) / 2; fx = px / dd * (fr - BR); fy = py / dd * (fr - BR); }
+    var ke = Math.min(1, dt * 2.5);
+    camR += (Math.max(44, fr) - camR) * ke; camX += (fx - camX) * ke; camY += (fy - camY) * ke;
     if (state === S.END) {
-      /* 終わり：正面を向いて、下に足が生えて、ワンとひと鳴き */
-      endT += dt; barkT += dt; omega = 0;
-      var front = Math.round(ang / (Math.PI * 2)) * Math.PI * 2;
-      ang += (front - ang) * Math.min(1, dt * 5);
-      if (endT > 1.1 && !endBark) { endBark = true; barkT = 0; bark(); }
-      camR += (Math.max(34, maxR() + 4) - camR) * Math.min(1, dt * 3);
-      if (endT > 2.2) toResult();
-      return;
-    }
-    if (state === S.LAUNCH) {
-      /* 100km：空へ打ち上がって、宇宙で惑星になる */
-      launchT += dt; barkT += dt; omega = 0;
-      var fr = Math.round(ang / (Math.PI * 2)) * Math.PI * 2;
-      ang += (fr - ang) * Math.min(1, dt * 4);
-      if (launchT > 2.5 && !endBark) { endBark = true; barkT = 0; bark(); }
-      if (launchT > 3.6) toResult();
+      endT += dt;
+      if (endT > 1.6) toResult();
       return;
     }
     if (state !== S.PLAY) return;
     T += dt;
 
-    /* 回る速さ。指でつかんでいる間は指の回った分だけ回す。離すと惰性で回り続けて少しずつ止まる */
-    if (held) {
-      ang += pending;
-      var w = pending / dt;
-      omega += (w - omega) * Math.min(1, dt * 12);
-      pending = 0;
-    } else {
-      if (keyDir) omega = Math.max(-30, Math.min(30, omega + keyDir * 9 * dt));
-      else omega *= Math.exp(-0.9 * dt);
-      ang += omega * dt;
+    /* ポメは指を追う。キーのときは今の距離のまま真ん中のまわりを回る */
+    if (!held && keyDir) {
+      var d0 = Math.max(HEAD + fAt(Math.atan2(-py, -px)) + 4, Math.hypot(px, py)), a0 = Math.atan2(py, px) + keyDir * Math.PI * 2 * 0.9 * dt;
+      tx = Math.cos(a0) * d0; ty = Math.sin(a0) * d0;
     }
+    var k = Math.min(1, dt * 18), ox = px, oy = py;
+    px += (tx - px) * k; py += (ty - py) * k;
+    roll += Math.hypot(px - ox, py - oy) / r * (px * (py - oy) - py * (px - ox) >= 0 ? 1 : -1);
 
-    /* 綿あめが付く。下を向いている側ほど多く、外側ほど厚みは増えにくい */
+    /* 真ん中のまわりを1秒に何周しているか */
+    var ang = Math.atan2(py, px), da = wrapA(ang - lastAng); lastAng = ang;
+    spinRate += (Math.abs(da) / dt / (Math.PI * 2) - spinRate) * Math.min(1, dt * 6);
+
+    /* 糸が出て、向きごとにたまる */
     var feeding = T < TOTAL;
     if (feeding) {
-      var sum = 0, i;
-      for (i = 0; i < N; i++) {
-        var d = wrapA(i * DTH + ang - Math.PI / 2);
-        W8[i] = Math.exp(-d * d / (2 * SPREAD * SPREAD));
-        sum += W8[i];
-      }
-      var A = feedRate(omega) * dt;
-      for (i = 0; i < N; i++) f[i] += A * (W8[i] / sum) / (f[i] * DTH);
+      var add = feedRate(T) * dt / N, cap = feedRate(T) * CAP / N;
+      for (var i = 0; i < N; i++) sec[i] = Math.min(cap, sec[i] + add);
     }
 
+    /* ポメにかかっている向きの糸を巻き取る */
+    var dist = Math.hypot(px, py), inward = ang + Math.PI;   /* ポメの、真ん中を向いた側 */
+    var near = fAt(inward), wide = Math.max(near, rad());
+    var half = dist > wide ? Math.asin(Math.min(1, wide / dist)) : Math.PI;
+    var got = 0;
+    for (i = 0; i < N; i++) {
+      if (Math.abs(wrapA(i * DTH + DTH / 2 - ang)) <= half) { if (sec[i] > feedRate(T) * CAP / N * 0.25) barks++; got += sec[i]; sec[i] = 0; }
+    }
+    /* 糸は真ん中を向いた側に付く。触れた側ほどふくらむ */
+    if (got > 0) spread(inward, got, 0.5);
+
     /* ふわっとならす（隣とすこし混ぜる） */
-    var g = new Float32Array(f);
-    for (var k = 0; k < N; k++) f[k] = g[k] + (g[(k + 1) % N] + g[(k + N - 1) % N] - 2 * g[k]) * Math.min(0.25, dt * 6);
+    var g0 = new Float32Array(f), kk = Math.min(0.25, dt * 1.5);
+    for (i = 0; i < PN; i++) f[i] = g0[i] + (g0[(i + 1) % PN] + g0[(i + PN - 1) % PN] - 2 * g0[i]) * kk;
+    A = area();
 
+    /* 糸を1本巻き取るたびに「ワン」。大きいほど低い声 */
+    if (barks > 0 && barkT > 0.07) { bark(); barkT = 0; barks = 0; }
 
-    camR += (Math.max(34, maxR() + 4) - camR) * Math.min(1, dt * 3);
+    /* 回しすぎ：外側の綿が飛び散る */
+    flingCool -= dt;
+    if (spinRate > FAST && A > Math.PI * R0 * R0 * 1.2) {
+      var kf = Math.min(0.5, (spinRate - FAST) * 0.5 * dt);
+      for (i = 0; i < PN; i++) f[i] -= (f[i] - R0) * kf;
+      var a2 = area(); flung += A - a2; A = a2;
+      for (var w = 0; w < 3; w++) if (Math.random() < 0.7) spawnWisp();
+      if (flingCool <= 0) { flingCool = 0.18; noiseHit(0.2, 2600, 0.08, 0.8); }
+    }
 
-    /* 3cm 大きくなるたびに「ワン」 */
-    barkT += dt;
-    var dia = diameter();
-    if (dia > Math.max(lastBark + 3, lastBark * 1.08) && barkT > 0.2) { lastBark = dia; barkT = 0; bark(); }
-    if (dia < lastBark * 0.92) lastBark = dia;
+    /* 真ん中の熱い頭に触ると溶ける */
+    meltCool -= dt;
+    near = fAt(inward);
+    if (dist - near < HEAD) {
+      spread(inward, -2600 * dt, 0.5);
+      var a3 = area(); melted += A - a3; A = a3;
+      if (Math.random() < 0.6) steam.push({ x: px - Math.cos(ang) * near, y: py - Math.sin(ang) * near, life: 0.7, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30 });
+      if (meltCool <= 0) { meltCool = 0.22; noiseHit(0.25, 4200, 0.12, 0.6); }
+    }
 
-    if (diameter() >= MAXD) { toLaunch(); return; }
-    if (!feeding) { state = S.END; endT = 0; endBark = false; held = false; keyDir = 0; humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
+    if (!feeding) { state = S.END; endT = 0; humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
   }
 
-  var barkT = 1, lastBark = 28, endBark = false;
-  /* 足の伸び具合（0〜1）。終わってから生える */
-  function legGrow() { return state === S.RESULT ? 1 : state === S.LAUNCH ? Math.max(0, Math.min(1, (launchT - 2.1) / 0.4)) : state === S.END ? Math.max(0, Math.min(1, (endT - 0.5) / 0.4)) : 0; }
-  /* わん。のこぎり波を口の形（2つの山の帯域）に通して、高さを下げながら短く鳴らす。大きいほど低い */
+  /* わん。のこぎり波を口の形（2つの山の帯域）に通して、高さを下げながら短く鳴らす */
   function bark() {
     if (!AC) return;
     var d = diameter(), p = Math.max(170, 620 * Math.pow(28 / Math.max(28, d), 0.45)) * (0.92 + Math.random() * 0.16);
@@ -284,53 +298,41 @@
     noiseHit(0.05, p * 3, 0.15, 1.5);
   }
 
-  function spawnWisp(j) {
-    var th = j * DTH + ang, r = f[j];
-    var tx = -Math.sin(th) * Math.sign(omega || 1), ty = Math.cos(th) * Math.sign(omega || 1);
-    var sp = Math.abs(omega) * r;
-    wisps.push({ x: Math.cos(th) * r, y: Math.sin(th) * r, vx: tx * sp + Math.cos(th) * 40, vy: ty * sp + Math.sin(th) * 40, life: 0.8, a: th });
+  function spawnWisp() {
+    var r = rad(), ang = Math.atan2(py, px), side = Math.random() * Math.PI * 2;
+    var tdir = ang + Math.PI / 2;
+    var sp = spinRate * Math.PI * 2 * Math.hypot(px, py);
+    wisps.push({ x: px + Math.cos(side) * r, y: py + Math.sin(side) * r, vx: Math.cos(tdir) * sp * 0.6 + Math.cos(side) * 80, vy: Math.sin(tdir) * sp * 0.6 + Math.sin(side) * 80, life: 0.7 });
   }
-  function updateBits(dt) {
-    var floor = camR + 40;
-    for (var i = bits.length - 1; i >= 0; i--) {
-      var b = bits[i];
-      b.vy += 980 * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.rot += b.vr * dt;
-      if (b.y - b.r > floor + 400) bits.splice(i, 1);
-    }
+  function updateParts(dt) {
+    var i;
     for (i = wisps.length - 1; i >= 0; i--) {
       var w = wisps[i];
-      w.life -= dt; w.x += w.vx * dt; w.y += w.vy * dt; w.vy += 200 * dt;
-      w.vx *= Math.exp(-2 * dt); w.vy *= Math.exp(-2 * dt);
+      w.life -= dt; w.x += w.vx * dt; w.y += w.vy * dt;
+      w.vx *= Math.exp(-2.5 * dt); w.vy *= Math.exp(-2.5 * dt);
       if (w.life <= 0) wisps.splice(i, 1);
     }
-    if (bits.length > 30) bits.splice(0, bits.length - 30);
+    for (i = steam.length - 1; i >= 0; i--) {
+      var s = steam[i];
+      s.life -= dt; s.x += s.vx * dt; s.y += s.vy * dt;
+      if (s.life <= 0) steam.splice(i, 1);
+    }
     if (wisps.length > 200) wisps.splice(0, wisps.length - 200);
+    if (steam.length > 80) steam.splice(0, steam.length - 80);
   }
 
   function toResult() {
     state = S.RESULT;
-    score = planet ? MAXD : Math.round(diameter());
-  }
-  function toLaunch() {
-    var k = MAXD / diameter();
-    for (var i = 0; i < N; i++) f[i] *= k;
-    state = S.LAUNCH; launchT = 0; planet = true; endBark = false;
-    held = false; keyDir = 0; camR = maxR() + 4; bits = []; wisps = [];
-    humOff();
-    tone(120, 1.3, 0.14, "sawtooth", 900);
-    noiseHit(1.2, 500, 0.35, 0.7);
-    tone(523, 0.5, 0.08, "triangle", null, 1.5); tone(659, 0.5, 0.08, "triangle", null, 1.65); tone(784, 0.9, 0.08, "triangle", null, 1.8);
-  }
-  /* 打ち上げの進み。up: 上へ飛んでいく(0〜1)、space: 背景が宇宙になる(0〜1)、down: 惑星が降りてくる(0〜1) */
-  function launchPhase() {
-    if (state === S.RESULT && planet) return { up: 1, space: 1, down: 1 };
-    if (state !== S.LAUNCH) return null;
-    var t = launchT;
-    return { up: Math.min(1, t / 1.1), space: Math.max(0, Math.min(1, (t - 0.4) / 0.9)), down: Math.max(0, Math.min(1, (t - 1.3) / 1.1)) };
+    score = Math.round(diameter());
+    tone(660, 0.12, 0.1, "square"); tone(990, 0.3, 0.1, "square", null, 0.1);
   }
 
   /* ============ 入力 ============ */
-  function fingerAngle(x, y) { return Math.atan2(y - CY, x - CX); }
+  var scale = 1;   /* 1cm が何ピクセルか */
+  function toWorld(x, y) {
+    if (scene3d) { var p = scene3d.unproject(x, y, W, H); if (p) return p; }
+    return { x: (x - CX) / scale, y: (y - CY) / scale };
+  }
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
@@ -342,14 +344,11 @@
     if (state !== S.PLAY) return;
     if (x == null) { keyDir = 1; return; }
     held = true;
-    pending = 0;
-    lastFinger = fingerAngle(x, y);
+    var p = toWorld(x, y); tx = p.x; ty = p.y;
   }
   function move(x, y) {
     if (state !== S.PLAY || !held) return;
-    var a = fingerAngle(x, y);
-    pending += wrapA(a - lastFinger);
-    lastFinger = a;
+    var p = toWorld(x, y); tx = p.x; ty = p.y;
   }
   function up() {
     keyDir = 0;
@@ -371,11 +370,11 @@
 
   /* 本番以外だけ、数字キーで場面を飛ばせる */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function bigPom(d) { for (var i = 0; i < PN; i++) f[i] = d / 2; A = area(); var a = Math.atan2(py, px), dd = HEAD + d / 2 + 6; px = tx = Math.cos(a) * dd; py = ty = Math.sin(a) * dd; lastAng = a; }
   function debugKey(n) {
-    if (n === 1) { if (state !== S.PLAY) newRound(); for (var i = 0; i < N; i++) f[i] = 90; T = TOTAL; }      /* 1: 大きくして終わり */
-    if (n === 2) { if (state !== S.PLAY) newRound(); T = TOTAL - 3; }                                       /* 2: 砂糖があと3秒 */
-    if (n === 3) { if (state !== S.PLAY) newRound(); for (var j = 0; j < N; j++) f[j] = 70; }               /* 3: 大きくする */
-    if (n === 4) { if (state !== S.PLAY) newRound(); for (var m = 0; m < N; m++) f[m] = MAXD; }            /* 4: 惑星になる */
+    if (n === 1) { if (state !== S.PLAY) newRound(); bigPom(180); T = TOTAL; }      /* 1: 大きくして終わり */
+    if (n === 2) { if (state !== S.PLAY) newRound(); T = TOTAL - 3; }                /* 2: 砂糖があと3秒 */
+    if (n === 3) { if (state !== S.PLAY) newRound(); bigPom(140); }                  /* 3: 大きくする */
   }
 
   window.addEventListener("keydown", function (e) {
@@ -402,19 +401,12 @@
 
   function doShare() {
     var d = score;
-    var u = unitOf(d), L = u[0] + u[1];
-    var ja = d >= MAXD ? "ポメラニアンを直径" + L + "の綿あめにして惑星にした"
-      : d >= 100000 ? "ポメラニアンを直径" + L + "の綿あめにして宇宙から見えるようにした"
-      : d >= 1000 ? "ポメラニアンを直径" + L + "の綿あめにして家より大きくした"
-      : d >= 200 ? "ポメラニアンを直径" + L + "の綿あめにしてドアを通れなくした"
-      : d >= 120 ? "ポメラニアンを直径" + L + "の綿あめにして抱っこできなくした"
-      : "ポメラニアンを直径" + L + "の綿あめにした";
-    var en = d >= MAXD ? "Turned a Pomeranian into a " + L + " cotton candy. It became a planet."
-      : d >= 100000 ? "Turned a Pomeranian into a " + L + " cotton candy. You can see it from space."
-      : d >= 1000 ? "Turned a Pomeranian into a " + L + " cotton candy. It's bigger than a house."
-      : d >= 200 ? "Turned a Pomeranian into a " + L + " cotton candy. It no longer fits through the door."
-      : d >= 120 ? "Turned a Pomeranian into a " + L + " cotton candy. Too big to hug now."
-      : "Turned a Pomeranian into a " + L + " cotton candy.";
+    var ja = d >= 200 ? "ポメラニアンを直径" + d + "cmの綿あめにしてドアを通れなくした"
+      : d >= 120 ? "ポメラニアンを直径" + d + "cmの綿あめにして抱っこできなくした"
+      : "ポメラニアンを直径" + d + "cmの綿あめにした";
+    var en = d >= 200 ? "Turned a Pomeranian into a " + d + "cm cotton candy. It no longer fits through the door."
+      : d >= 120 ? "Turned a Pomeranian into a " + d + "cm cotton candy. Too big to hug now."
+      : "Turned a Pomeranian into a " + d + "cm cotton candy.";
     window.zResultActions.x({ text: zT(ja, en) + zT(" #わたあめポメ", " #CottonCandyPom") });
   }
 
@@ -429,258 +421,236 @@
     ctx.closePath();
   }
 
-  var scale = 1;   /* 1cm が何ピクセルか */
+  /* 立体の絵。作れないとき（WebGLなし）は平面の絵のまま */
+  var scene3d = null, tries3d = 0, lastTry3d = -1e9;
+  function make3d() {
+    if (scene3d || tries3d >= 20 || !window.THREE || !window.PomScene) return;
+    var now = performance.now();
+    if (now - lastTry3d < 500) return;
+    lastTry3d = now; tries3d++;
+    try { scene3d = new window.PomScene(); } catch (e) { scene3d = null; }
+  }
+
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
-    var cr = camR || 34;
-    scale = Math.min(W * 0.40 / cr, H * 0.30 / cr);
+    scale = Math.min(W * 0.47, H * 0.40) / (camR || 48);
+    make3d();
+    if (scene3d && draw3d()) { if (state === S.RESULT) drawResult(); return; }
 
-    var lp = launchPhase();
-    if (lp && lp.down < 1 && lp.space < 1 || !lp) {
-      /* 夜店の台（打ち上げのときは下へ流れていく） */
-      var sink = lp ? Math.pow(lp.up, 2) * H * 0.9 : 0;
-      ctx.save(); ctx.translate(0, sink);
-      ctx.fillStyle = "#24304a"; ctx.fillRect(0, -sink, W, H + sink);
-      ctx.fillStyle = "rgba(255,255,255,.03)";
-      for (var y = 0; y < H; y += 46) ctx.fillRect(0, y, W, 23);
-      drawMachine(cr);
-      drawStreams(cr);
-      ctx.restore();
-    }
-    if (lp && lp.space > 0) drawSpace(lp.space);
+    /* 夜店の台の上（上から見ている） */
+    ctx.fillStyle = "#24304a"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(255,255,255,.03)";
+    for (var y = 0; y < H; y += 46) ctx.fillRect(0, y, W, 23);
 
-    var cy = CY;
-    if (lp) {
-      if (lp.down <= 0) cy = CY - Math.pow(lp.up, 2) * (CY + cr * scale * 1.2);
-      else {
-        /* 惑星：画面に収まる大きさで上から降りてくる */
-        var e = 1 - Math.pow(1 - lp.down, 3);
-        scale = Math.min(W, H) * 0.24 / maxR();
-        cy = -maxR() * scale * 1.5 + (CY + maxR() * scale * 1.5) * e;
-      }
-    }
-    var showPlanet = lp && lp.down > 0;
     ctx.save();
-    ctx.translate(CX, cy);
+    ctx.translate(CX, CY);
     ctx.scale(scale, scale);
-    if (showPlanet) drawRing(true);
-    if (!lp) drawBits();
-    drawFloss();
-    drawLegs();
+    drawMachine();
+    drawThreads();
+    drawSteam();
     drawPom();
-    if (!lp) drawWisps();
-    if (showPlanet) drawRing(false);
+    drawWisps();
     ctx.restore();
 
     if (state === S.RESULT) drawResult();
   }
 
-  /* 宇宙の背景 */
-  function drawSpace(a) {
-    ctx.save();
-    ctx.globalAlpha = a;
-    ctx.fillStyle = "#070a1c"; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = "#fff";
-    STARS.forEach(function (s) { ctx.globalAlpha = a * s.a; ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2); ctx.fill(); });
-    ctx.restore();
-  }
-  /* 惑星の環。奥の半分を先に、手前の半分を後に描く */
-  function drawRing(back) {
-    var R = maxR();
-    ctx.save();
-    ctx.rotate(-0.25);
-    ctx.lineCap = "round";
-    [["rgba(255,182,206,.85)", 1.55, 0.09], ["rgba(190,220,255,.8)", 1.78, 0.07]].forEach(function (c) {
-      ctx.strokeStyle = c[0]; ctx.lineWidth = R * c[2];
-      ctx.beginPath();
-      if (back) ctx.ellipse(0, 0, R * c[1], R * c[1] * 0.22, 0, Math.PI, Math.PI * 2);
-      else ctx.ellipse(0, 0, R * c[1], R * c[1] * 0.22, 0, 0, Math.PI);
-      ctx.stroke();
+  function draw3d() {
+    var bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#1c2440"); bg.addColorStop(1, "#2c3a5c");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    scene3d.aspect(W, H);
+    var now = performance.now() / 1000;
+    scene3d.update({ px: px, py: py, f: f, PN: PN, R0: R0, camR: camR || 48, camX: camX, camY: camY,
+      sugar: state === S.INTRO ? 1 : Math.max(0, 1 - T / TOTAL), spin: state === S.PLAY || state === S.INTRO ? 0.35 : 0.02,
+      bounce: 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15,
+      dizzy: spinRate > FAST * 0.85 || state === S.END });
+    if (!scene3d.render(ctx, W, H)) return false;
+    /* 糸・湯気・飛び散る綿は、立体の位置を画面に写して重ねる */
+    var o = scene3d.project(0, -1, 0, W, H), e = scene3d.project(10, -1, 0, W, H);
+    var k = Math.hypot(e.x - o.x, e.y - o.y) / 10;          /* 1cm が何ピクセルか */
+    if (state === S.PLAY || state === S.INTRO) {
+      var cap = feedRate(T) * CAP / N, dist = Math.hypot(px, py);
+      var reach = Math.max(BOWL * 1.05, dist - fAt(Math.atan2(-py, -px)) + 2);
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      for (var i = 0; i < N; i++) {
+        var fill = state === S.INTRO ? 0.4 : sec[i] / cap;
+        if (fill < 0.03) continue;
+        var a = i * DTH + DTH / 2;
+        for (var j = 0; j < 3; j++) {
+          var aa = a + (j - 1) * 0.05 + Math.sin(now * 7 + i * 3 + j) * 0.03;
+          var len = HEAD + (reach - HEAD) * Math.min(1, fill * (0.8 + j * 0.1));
+          ctx.strokeStyle = "rgba(255,255,255," + (0.2 + fill * 0.5) + ")";
+          ctx.lineWidth = Math.max(1, (0.5 + fill * 0.7) * k);
+          ctx.beginPath();
+          for (var q = 0; q <= 6; q++) {
+            var rr = HEAD + (len - HEAD) * q / 6, wob = Math.sin(now * 5 + i + j * 2 + q) * 0.06 * q / 6;
+            var p = scene3d.project(Math.cos(aa + wob) * rr, -1 + Math.sin(now * 4 + q + i) * 0.8, Math.sin(aa + wob) * rr, W, H);
+            if (q) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
+          }
+          ctx.stroke();
+        }
+      }
+    }
+    steam.forEach(function (s) {
+      var p = scene3d.project(s.x, (0.7 - s.life) * 20, s.y, W, H);
+      ctx.fillStyle = "rgba(255,200,170," + Math.max(0, s.life * 0.5) + ")";
+      ctx.beginPath(); ctx.arc(p.x, p.y, (2 + (0.7 - s.life) * 6) * k, 0, Math.PI * 2); ctx.fill();
     });
-    ctx.restore();
+    wisps.forEach(function (w) {
+      var p = scene3d.project(w.x, 0, w.y, W, H), p2 = scene3d.project(w.x - w.vx * 0.04, 0, w.y - w.vy * 0.04, W, H);
+      ctx.strokeStyle = "rgba(255,255,255," + Math.max(0, w.life) + ")";
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    });
+    return true;
   }
 
-  function machineY(cr) { return CY + (cr + 16) * scale; }
-
-  function drawMachine(cr) {
-    var y = machineY(cr), bw = 30 * scale, bh = 11 * scale;
-    /* 台 */
-    ctx.fillStyle = "#3a3f52";
-    roundRect(CX - bw * 1.25, y + bh * 0.9, bw * 2.5, Math.max(H - y, 40), 10 * scale * 0.3);
-    ctx.fill();
-    ctx.fillStyle = "#c63a4a";
-    ctx.fillRect(CX - bw * 1.25, y + bh * 1.3, bw * 2.5, 6 * scale);
-    /* 残り時間 */
-    var rest = state === S.INTRO ? TOTAL : state === S.PLAY ? Math.max(0, Math.ceil(TOTAL - T)) : 0;
-    var ty = y + bh * 1.3 + 6 * scale, fs = Math.max(28, Math.min(72, bw * 0.8));
-    ctx.fillStyle = "#1c2030";
-    roundRect(CX - fs * 0.95, ty + fs * 0.25, fs * 1.9, fs * 1.2, fs * 0.2); ctx.fill();
-    ctx.fillStyle = rest <= 5 && state === S.PLAY ? "#ff6b6b" : "#ffe08a";
-    ctx.font = "800 " + Math.round(fs) + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(String(rest), CX, ty + fs * 0.88);
-    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-    /* 鍋の内側 */
-    ctx.fillStyle = "#59606f";
-    ctx.beginPath(); ctx.ellipse(CX, y, bw, bh * 0.55, 0, 0, Math.PI * 2); ctx.fill();
-    /* 回る頭。中の砂糖が減っていく */
-    var hr = 7 * scale, left = state === S.INTRO ? 1 : Math.max(0, 1 - T / TOTAL);
+  function drawMachine() {
+    /* 鍋 */
+    var g = ctx.createRadialGradient(0, 0, HEAD, 0, 0, BOWL);
+    g.addColorStop(0, "#56607a"); g.addColorStop(1, "#3a4258");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0, 0, BOWL, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#c9cfdb"; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(0, 0, BOWL, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.arc(0, 0, BOWL - 1.6, Math.PI * 1.1, Math.PI * 1.6); ctx.stroke();
+    /* 回る頭。中の砂糖が減っていく。熱いので赤く光る */
+    var left = state === S.INTRO ? 1 : Math.max(0, 1 - T / TOTAL);
+    var hot = ctx.createRadialGradient(0, 0, 0, 0, 0, HEAD * 1.8);
+    hot.addColorStop(0, "rgba(255,120,60,.45)"); hot.addColorStop(1, "rgba(255,120,60,0)");
+    ctx.fillStyle = hot; ctx.beginPath(); ctx.arc(0, 0, HEAD * 1.8, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#b9c0cc";
-    ctx.beginPath(); ctx.ellipse(CX, y - 2 * scale, hr, hr * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, HEAD, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#8a92a2";
+    var now = performance.now() / 1000;
+    for (var i = 0; i < 12; i++) {
+      var a = i / 12 * Math.PI * 2 + now * 9;
+      ctx.beginPath(); ctx.arc(Math.cos(a) * HEAD * 0.86, Math.sin(a) * HEAD * 0.86, 0.5, 0, Math.PI * 2); ctx.fill();
+    }
     if (left > 0) {
       ctx.fillStyle = "#f4f4f6";
-      ctx.beginPath(); ctx.ellipse(CX, y - 2 * scale, hr * 0.8 * Math.sqrt(left), hr * 0.4 * Math.sqrt(left), 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0, HEAD * 0.7 * Math.sqrt(left), 0, Math.PI * 2); ctx.fill();
     }
-    /* 鍋の縁（手前） */
-    ctx.strokeStyle = "#d9dde5"; ctx.lineWidth = Math.max(2, 2.2 * scale);
-    ctx.beginPath(); ctx.ellipse(CX, y, bw, bh * 0.55, 0, 0, Math.PI); ctx.stroke();
-    ctx.fillStyle = "#cfd4dd";
-    ctx.beginPath(); ctx.ellipse(CX, y, bw, bh * 0.55, 0, 0, Math.PI); ctx.lineTo(CX - bw * 0.92, y + bh); ctx.ellipse(CX, y + bh * 0.4, bw * 0.92, bh * 0.6, 0, Math.PI, 0, true); ctx.closePath(); ctx.fill();
   }
 
-  /* 鍋から立ちのぼる綿の糸 */
-  function drawStreams(cr) {
-    if (state !== S.PLAY && state !== S.INTRO) return;
-    var y0 = machineY(cr) - 2 * scale, bottom = CY + bottomR() * scale;
-    var now = performance.now() / 1000;
-    ctx.save();
+  /* 真ん中から四方へ出る糸。たまっている向きほど濃く長く見える */
+  function drawThreads() {
+    var cap = feedRate(T) * CAP / N, now = performance.now() / 1000;
+    var reach = Math.max(BOWL * 1.05, Math.hypot(px, py) + rad() * 0.3);
     ctx.lineCap = "round";
-    for (var i = 0; i < 9; i++) {
-      var ph = now * (2.2 + i * 0.3) + i * 1.7;
-      var sx = CX + Math.sin(ph) * 30 * scale * (0.4 + (i % 3) * 0.3);
-      ctx.strokeStyle = "rgba(255,255,255," + (state === S.INTRO ? 0.25 : 0.55) + ")";
-      ctx.lineWidth = 1.5 + (i % 3) * 1.2;
-      ctx.beginPath(); ctx.moveTo(sx, y0);
-      ctx.bezierCurveTo(sx + Math.sin(ph * 1.3) * 40, y0 - (y0 - bottom) * 0.4, CX + Math.cos(ph) * 30, bottom + (y0 - bottom) * 0.3, CX + Math.sin(ph * 0.7) * 10 * scale, bottom);
-      ctx.stroke();
+    for (var i = 0; i < N; i++) {
+      var fill = state === S.INTRO ? 0.4 : sec[i] / cap;
+      if (fill < 0.03) continue;
+      var a = i * DTH + DTH / 2;
+      /* 1本の糸は、細い筋を3本束ねて描く */
+      for (var j = 0; j < 3; j++) {
+        var aa = a + (j - 1) * 0.05 + Math.sin(now * 7 + i * 3 + j) * 0.03;
+        var len = HEAD + (reach - HEAD) * Math.min(1, fill * (0.8 + j * 0.1));
+        var bend = Math.sin(now * 5 + i + j * 2) * 0.12;
+        ctx.strokeStyle = "rgba(255,255,255," + (0.15 + fill * 0.45) + ")";
+        ctx.lineWidth = 0.7 + fill * 1.2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(aa) * HEAD, Math.sin(aa) * HEAD);
+        ctx.quadraticCurveTo(Math.cos(aa + bend) * (HEAD + len) / 2, Math.sin(aa + bend) * (HEAD + len) / 2, Math.cos(aa) * len, Math.sin(aa) * len);
+        ctx.stroke();
+      }
     }
-    ctx.restore();
-  }
-  function bottomR() {
-    var j = Math.round(wrapA(Math.PI / 2 - ang) / DTH);
-    return f[(j % N + N) % N] || R0;
-  }
-
-  function flossPoint(i) {
-    var th = i * DTH, r = f[(i % N + N) % N];
-    return [Math.cos(th) * r, Math.sin(th) * r];
-  }
-  function drawFloss() {
-    ctx.save();
-    ctx.rotate(ang);
-    var big = maxR();
-    /* 輪郭 */
-    ctx.beginPath();
-    for (var i = 0; i <= N; i++) {
-      var p = flossPoint(i), q = flossPoint(i + 1);
-      var mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
-      if (i === 0) ctx.moveTo(mx, my); else ctx.quadraticCurveTo(p[0], p[1], mx, my);
-    }
-    ctx.closePath();
-    var gr = ctx.createRadialGradient(0, 0, R0 * 0.5, 0, 0, Math.max(R0 + 1, big));
-    gr.addColorStop(0, "#ffffff"); gr.addColorStop(0.75, "#f2f3f7"); gr.addColorStop(1, "#dcdfe8");
-    ctx.fillStyle = gr; ctx.fill();
-    /* ふちのもこもこ */
-    for (i = 0; i < N; i++) {
-      var r = f[i];
-      var th = i * DTH + Math.sin(i * 12.9) * 0.03;
-      var br = Math.max(1.5, Math.min(r * 0.3, r * DTH * 0.9 + 2));
-      ctx.fillStyle = i % 2 ? "#f6f7fa" : "#e9ebf1";
-      ctx.beginPath(); ctx.arc(Math.cos(th) * (r - br * 0.45), Math.sin(th) * (r - br * 0.45), br, 0, Math.PI * 2); ctx.fill();
-    }
-    /* 糸の筋 */
-    ctx.lineCap = "round";
-    for (i = 0; i < STRANDS.length; i++) {
-      var s = STRANDS[i];
-      var j = Math.round(s.a / DTH) % N, rr = f[j];
-      if (rr < R0 + 3) continue;
-      var rad = R0 + (rr - R0) * (0.15 + s.r * 0.8);
-      ctx.strokeStyle = s.light ? "rgba(255,255,255,.9)" : "rgba(170,175,195,.2)";
-      ctx.lineWidth = s.w * Math.max(1, rr / 40);
-      ctx.beginPath();
-      ctx.arc(0, 0, rad, s.a, s.a + s.len * Math.min(1, 30 / rad + 0.2), false);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  /* 顔と足の大きさ。綿あめがとても大きくなっても見えるように、綿あめの3割より小さくしない */
-  function faceR() { return Math.max(R0, maxR() * 0.3); }
-  /* 前足2本。綿あめの下の縁から、毛と同じ白で境目なく伸びる */
-  function drawLegs() {
-    var t = legGrow();
-    if (t <= 0) return;
-    var R = faceR(), bot = bottomR(), w = R * 0.34, top = bot - R * 0.4, foot = bot + R * 0.9 * t;
-    [-1, 1].forEach(function (s) {
-      var x = s * R * 0.38;
-      ctx.fillStyle = "#eef0f5";
-      ctx.beginPath();
-      ctx.moveTo(x - w / 2, top);
-      ctx.lineTo(x - w * 0.46, foot - w * 0.3);
-      ctx.quadraticCurveTo(x - w * 0.5 + s * w * 0.06, foot, x + s * w * 0.06, foot);
-      ctx.quadraticCurveTo(x + w * 0.5 + s * w * 0.06, foot, x + w * 0.46, foot - w * 0.3);
-      ctx.lineTo(x + w / 2, top);
-      ctx.closePath(); ctx.fill();
-    });
   }
 
   function drawPom() {
+    var r = rad();
     ctx.save();
-    ctx.rotate(ang);
-    var R = faceR();
+    ctx.translate(px, py);
+    /* 影 */
+    ctx.fillStyle = "rgba(0,0,0,.25)";
+    ctx.beginPath(); ctx.ellipse(r * 0.08, r * 0.12, r * 1.02, r * 1.0, 0, 0, Math.PI * 2); ctx.fill();
+    /* ポメの毛と綿あめはひと続きの白い綿。転がった分だけ模様が回る */
+    {
+      ctx.save();
+      ctx.rotate(roll);
+      var g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
+      g.addColorStop(0, "#ffffff"); g.addColorStop(0.75, "#f2f3f7"); g.addColorStop(1, "#d9dce6");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      for (var pi = 0; pi <= PN; pi++) { var pa = pi * PTH - roll, pr = f[pi % PN] * 0.94; if (pi) ctx.lineTo(Math.cos(pa) * pr, Math.sin(pa) * pr); else ctx.moveTo(Math.cos(pa) * pr, Math.sin(pa) * pr); }
+      ctx.fill();
+      var bumps = Math.max(14, Math.min(40, Math.round(r / 2.2)));
+      for (var i = 0; i < bumps; i++) {
+        var a = i / bumps * Math.PI * 2, br = r * 0.14 + 1;
+        ctx.fillStyle = i % 2 ? "#f6f7fa" : "#e9ebf1";
+        var fr = fAt(a - roll);
+        ctx.beginPath(); ctx.arc(Math.cos(a) * (fr - br * 0.8), Math.sin(a) * (fr - br * 0.8), br, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.lineCap = "round";
+      for (i = 0; i < STRANDS.length; i++) {
+        var s = STRANDS[i], rr = r * (0.3 + s.r * 0.6);
+        ctx.strokeStyle = s.dark ? "rgba(170,175,195,.35)" : "rgba(255,255,255,.9)";
+        ctx.lineWidth = s.w * Math.max(0.6, r / 50);
+        ctx.beginPath(); ctx.arc(0, 0, rr, s.a, s.a + s.len * Math.min(1, 24 / rr + 0.15)); ctx.stroke();
+      }
+      ctx.restore();
+    }
     var bounce = 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15;
     ctx.scale(bounce, bounce);
-    /* 白いポメ。毛と綿あめはひと続きなので、耳と顔だけ見える */
+    drawPomFace(R0);
+    ctx.restore();
+  }
+
+  /* 白いポメ（上を見上げている顔） */
+  function drawPomFace(R) {
+    ctx.save();
+    var t = performance.now() / 1000;
+    /* 耳 */
     [-1, 1].forEach(function (s) {
       ctx.fillStyle = "#f6f7fa";
       ctx.beginPath(); ctx.moveTo(s * R * 0.12, -R * 0.7); ctx.quadraticCurveTo(s * R * 0.5, -R * 1.45, s * R * 0.72, -R * 1.32); ctx.quadraticCurveTo(s * R * 0.95, -R * 0.9, s * R * 0.8, -R * 0.35); ctx.closePath(); ctx.fill();
       ctx.fillStyle = "#f2c9c4";
       ctx.beginPath(); ctx.moveTo(s * R * 0.3, -R * 0.75); ctx.quadraticCurveTo(s * R * 0.55, -R * 1.2, s * R * 0.68, -R * 1.15); ctx.quadraticCurveTo(s * R * 0.8, -R * 0.85, s * R * 0.7, -R * 0.55); ctx.closePath(); ctx.fill();
     });
-    /* 目 */
-    var dizzy = false;
+    /* 目。速く回ったり溶けたりすると目が回る */
+    var dizzy = spinRate > FAST * 0.85 || state === S.END;
     ctx.strokeStyle = "#1a1210"; ctx.fillStyle = "#1a1210"; ctx.lineWidth = R * 0.06; ctx.lineCap = "round";
     [-1, 1].forEach(function (s) {
-      var ex = s * R * 0.32, ey = -R * 0.08;
+      var ex = s * R * 0.32, ey = -R * 0.04;
       if (dizzy) {
         ctx.beginPath();
-        for (var k = 0; k < 20; k++) { var a = k * 0.6 + (s > 0 ? ang * 2 : -ang * 2), rr = R * 0.012 * k; var px = ex + Math.cos(a) * rr, py = ey + Math.sin(a) * rr; if (k) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
+        for (var k = 0; k < 20; k++) { var a = k * 0.6 + s * t * 8, rr = R * 0.012 * k; var x = ex + Math.cos(a) * rr, y = ey + Math.sin(a) * rr; if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
         ctx.stroke();
       } else {
-        ctx.beginPath(); ctx.arc(ex, ey, R * 0.1, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(ex + R * 0.03, ey - R * 0.04, R * 0.035, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#1a1210";
+        ctx.beginPath(); ctx.arc(ex, ey, R * 0.11, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(ex + R * 0.035, ey - R * 0.045, R * 0.04, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#1a1210";
       }
     });
     /* 鼻と口 */
-    ctx.beginPath(); ctx.ellipse(0, R * 0.16, R * 0.09, R * 0.065, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#1a1210"; ctx.lineWidth = R * 0.05;
-    ctx.beginPath(); ctx.moveTo(-R * 0.2, R * 0.36); ctx.quadraticCurveTo(-R * 0.13, R * 0.46, 0, R * 0.42); ctx.quadraticCurveTo(R * 0.13, R * 0.46, R * 0.2, R * 0.36); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, R * 0.2, R * 0.1, R * 0.07, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = R * 0.05;
+    ctx.beginPath(); ctx.moveTo(-R * 0.18, R * 0.34); ctx.quadraticCurveTo(-R * 0.09, R * 0.42, 0, R * 0.3); ctx.quadraticCurveTo(R * 0.09, R * 0.42, R * 0.18, R * 0.34); ctx.stroke();
+    ctx.fillStyle = "#e8848a";
+    ctx.beginPath(); ctx.ellipse(0, R * 0.44, R * 0.08, R * 0.1, 0, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 
-  function drawBits() {
-    bits.forEach(function (b) {
-      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot);
-      ctx.fillStyle = "#f2f3f7";
-      for (var k = 0; k < 6; k++) {
-        var a = k / 6 * Math.PI * 2;
-        ctx.beginPath(); ctx.arc(Math.cos(a) * b.r * 0.45, Math.sin(a) * b.r * 0.45, b.r * 0.6, 0, Math.PI * 2); ctx.fill();
-      }
-      ctx.restore();
-    });
-  }
   function drawWisps() {
     ctx.lineCap = "round";
     wisps.forEach(function (w) {
       ctx.strokeStyle = "rgba(255,255,255," + Math.max(0, w.life) + ")";
-      ctx.lineWidth = 2 / scale * 2;
-      ctx.beginPath(); ctx.moveTo(w.x, w.y); ctx.lineTo(w.x - w.vx * 0.03, w.y - w.vy * 0.03); ctx.stroke();
+      ctx.lineWidth = 3 / scale;
+      ctx.beginPath(); ctx.moveTo(w.x, w.y); ctx.lineTo(w.x - w.vx * 0.04, w.y - w.vy * 0.04); ctx.stroke();
+    });
+  }
+  function drawSteam() {
+    steam.forEach(function (s) {
+      ctx.fillStyle = "rgba(255,200,170," + Math.max(0, s.life * 0.5) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, 2 + (0.7 - s.life) * 6, 0, Math.PI * 2); ctx.fill();
     });
   }
 
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H - h - Math.max(28, H * 0.035);
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -695,19 +665,21 @@
     return null;
   }
   function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.fillStyle = "#fff";
     ctx.shadowColor = "rgba(0,0,0,.6)";
     ctx.shadowBlur = 10;
     ctx.textAlign = "center";
     ctx.font = "800 108px sans-serif";
-    var u = unitOf(score), num = u[0], nw = ctx.measureText(num).width;
+    var num = String(score), nw = ctx.measureText(num).width;
     ctx.font = "800 52px sans-serif";
-    var uw = ctx.measureText(u[1]).width;
+    var uw = ctx.measureText("cm").width;
     var x0 = W / 2 - (nw + 8 + uw) / 2;
     ctx.textAlign = "left";
-    ctx.font = "800 108px sans-serif"; ctx.fillText(num, x0, H * 0.15);
-    ctx.font = "800 52px sans-serif"; ctx.fillText(u[1], x0 + nw + 8, H * 0.15);
+    ctx.font = "800 108px sans-serif"; ctx.fillText(num, x0, H * 0.45);
+    ctx.font = "800 52px sans-serif"; ctx.fillText("cm", x0 + nw + 8, H * 0.45);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
@@ -727,12 +699,13 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, T: T, diameter: diameter(), omega: omega, drops: drops, W: W, H: H }; },
+    now: function () { return { state: state, score: score, T: T, diameter: diameter(), spin: spinRate, melted: melted, flung: flung, W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
-    spin: function (w) { held = false; keyDir = 0; omega = w; }   /* テスト用：決まった速さで回す */
+    /* テスト用：指の代わりに、真ん中から d cm の所を1秒に w 周で回す */
+    orbit: function (w, d) { held = true; var a = Math.atan2(py, px) + w * Math.PI * 2 / 60; tx = Math.cos(a) * d; ty = Math.sin(a) * d; }
   };
-  window.__thumbnail = function () { newRound(); for (var i = 0; i < N; i++) f[i] = 55 + Math.sin(i * 0.7) * 2; camR = 59; T = 12; };
+  window.__thumbnail = function () { newRound(); bigPom(110); T = 12; for (var i = 0; i < 300; i++) update(0); };
 
   window.__recording = {
     sound: function () { audioOn(); return AC; },
