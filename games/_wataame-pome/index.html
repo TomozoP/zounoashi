@@ -33,8 +33,6 @@
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
-<script src="../random-bowling/vendor/three.min.js"></script>
-<script src="pom3d.js"></script>
 <script>
 /* わたあめポメ
 
@@ -131,7 +129,7 @@
   /* ============ 遊び ============
      綿あめ機の真ん中で回っているポメに、スプレー（綿あめを吹き付けて伸ばす）と
      ハサミ（なぞった所を刈る）でオリジナルのポメラニアンを作る。
-     「完成」で、いちばん長い差し渡し(cm)が結果。形は pom3d.js が持つ。 */
+     「完成」で、いちばん長い差し渡し(cm)が結果。 */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, T, held, keyMode = false;
   var tool = "spray", pointer = null, barkT, grown, barkAcc, snipT, blinkT, puffs, bits;
@@ -154,14 +152,14 @@
     return Math.max(x1 - x0, y1 - y0);
   }
   /* ポメの中心の画面の位置 */
-  function pomScreen() {
-    if (scene3d && window.THREE) return scene3d.project(new THREE.Vector3(0, 26, 0), W, H);
-    return { x: W / 2, y: CY };
-  }
+  function pomScreen() { return { x: W / 2, y: CY }; }
+  /* 1cm が何ピクセルか。綿が大きくなるほど引いて全体を見せる */
+  var viewR = 44;
+  function pxPerCm() { return Math.min(W * 0.46, H * 0.33) / viewR; }
   /* 画面の点 → ポメの中心からの (x, 上が+y) cm */
   function toPom(x, y) {
-    if (scene3d) { var p = scene3d.unproject(x, y, W, H); if (p) return p; }
-    return { x: (x - W / 2) / 2.2, y: (CY - y) / 2.2 };
+    var k = pxPerCm();
+    return { x: (x - W / 2) / k, y: (CY - y) / k };
   }
 
   /* スプレー：指の方向の綿を、指の所まで伸ばす（先ほど細く）。指が綿の中なら何もしない */
@@ -371,27 +369,14 @@
     ctx.closePath();
   }
 
-  /* 立体の絵。作れないとき（WebGLなし）は平面の絵 */
-  var scene3d = null, tries3d = 0, lastTry3d = -1e9;
-  function make3d() {
-    if (scene3d || tries3d >= 20 || !window.THREE || !window.PomScene) return;
-    var now = performance.now();
-    if (now - lastTry3d < 500) return;
-    lastTry3d = now; tries3d++;
-    try { scene3d = new window.PomScene(); } catch (e) { scene3d = null; }
-  }
-
   var lastDraw = 0;
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
-    make3d();
     drawBg(now0());
     var now = performance.now() / 1000, dt = Math.min(0.1, Math.max(0, now - (lastDraw || now))); lastDraw = now;
-    if (scene3d) {
-      scene3d.aspect(W, H);
-      scene3d.update({ dt: dt, f: f, PN: PN, bounce: 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15, blink: blinkT < 0 });
-      if (!scene3d.render(ctx, W, H)) drawFlat();
-    } else drawFlat();
+    var mx = 0; for (var q = 0; q < PN; q++) if (f[q] > mx) mx = f[q];
+    viewR += (Math.max(44, mx + 16) - viewR) * Math.min(1, dt * 2);
+    drawPom();
 
     /* スプレーの霧と、刈った綿のくず */
     puffs.forEach(function (p) {
@@ -433,14 +418,83 @@
     ctx.globalAlpha = 1;
   }
 
-  /* WebGL が使えないときの平面の絵（中央に白い玉） */
-  function drawFlat() {
-    ctx.fillStyle = "#f6f7fa";
+  /* 綿のもようの位置（毎回同じ） */
+  var CURLS = [];
+  (function () {
+    var sd = 5;
+    function rnd() { sd = (sd * 16807) % 2147483647; return sd / 2147483647; }
+    for (var i = 0; i < 140; i++) CURLS.push({ a: rnd() * Math.PI * 2, r: 0.25 + rnd() * 0.68, s: 0.6 + rnd() * 0.8, t: rnd() * Math.PI * 2 });
+  })();
+
+  /* 正面から見たポメ。綿の形 f を、もこもこの白い玉として描き、真ん中に顔 */
+  function drawPom() {
+    var k = pxPerCm(), cx = W / 2, cy = CY, i;
+    function pt(j, sh) { var a = j * PTH, r = (f[(j % PN + PN) % PN] - (sh || 0)) * k; return [cx + Math.cos(a) * r, cy - Math.sin(a) * r]; }
+    var R = START * k, bounce = 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15;
+
+    /* 影 */
+    var low = 0; for (i = 0; i < PN; i++) low = Math.max(low, -Math.sin(i * PTH) * f[i]);
+    ctx.fillStyle = "rgba(150,40,90,.22)";
+    ctx.beginPath(); ctx.ellipse(cx, cy + low * k + 18, Math.max(40, viewR * k * 0.55), 12, 0, 0, Math.PI * 2); ctx.fill();
+
+    /* 耳（頭の上の綿の縁から、後ろにのぞく） */
+    [-1, 1].forEach(function (s) {
+      var a = Math.PI / 2 - s * 0.55, r = fAt(a) * k;
+      var bx = cx + Math.cos(a) * (r - R * 0.25), by = cy - Math.sin(a) * (r - R * 0.25);
+      ctx.save(); ctx.translate(bx, by); ctx.rotate(-(a - Math.PI / 2));
+      ctx.fillStyle = "#f4f5f9";
+      ctx.beginPath(); ctx.moveTo(-R * 0.42, R * 0.2); ctx.quadraticCurveTo(-R * 0.15, -R * 0.75, 0, -R * 0.82); ctx.quadraticCurveTo(R * 0.15, -R * 0.75, R * 0.42, R * 0.2); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#ffb3c6";
+      ctx.beginPath(); ctx.moveTo(-R * 0.22, R * 0.05); ctx.quadraticCurveTo(-R * 0.08, -R * 0.5, 0, -R * 0.56); ctx.quadraticCurveTo(R * 0.08, -R * 0.5, R * 0.22, R * 0.05); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    });
+
+    /* 綿の玉 */
     ctx.beginPath();
-    for (var i = 0; i <= PN; i++) { var x = W / 2 + Math.cos(i * PTH) * f[i % PN] * 2.2, y = CY - Math.sin(i * PTH) * f[i % PN] * 2.2; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
-    ctx.fill();
-    ctx.fillStyle = "#15100e";
-    ctx.beginPath(); ctx.arc(W / 2 - 20, CY - 5, 7, 0, Math.PI * 2); ctx.arc(W / 2 + 20, CY - 5, 7, 0, Math.PI * 2); ctx.fill();
+    for (i = 0; i <= PN; i++) {
+      var p = pt(i), q = pt(i + 1), mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+      if (i === 0) ctx.moveTo(mx, my); else ctx.quadraticCurveTo(p[0], p[1], mx, my);
+    }
+    ctx.closePath();
+    var big = viewR * k;
+    var g = ctx.createRadialGradient(cx - big * 0.25, cy - big * 0.3, big * 0.05, cx, cy, big);
+    g.addColorStop(0, "#ffffff"); g.addColorStop(0.6, "#f3f4f8"); g.addColorStop(1, "#dcdfe9");
+    ctx.fillStyle = g; ctx.fill();
+    /* ふちのもこもこ */
+    for (i = 0; i < PN; i += 2) {
+      var a = i * PTH, r = f[i] * k, br = Math.max(5, Math.min(R * 0.45, r * PTH * 1.4));
+      ctx.fillStyle = i % 4 ? "#f7f8fb" : "#eceef4";
+      ctx.beginPath(); ctx.arc(cx + Math.cos(a) * (r - br * 0.7), cy - Math.sin(a) * (r - br * 0.7), br, 0, Math.PI * 2); ctx.fill();
+    }
+    /* もこもこの影の筋 */
+    ctx.lineCap = "round";
+    CURLS.forEach(function (c) {
+      var r = fAt(c.a) * k * c.r;
+      if (r < R * 0.9) return;
+      var x = cx + Math.cos(c.a) * r, y = cy - Math.sin(c.a) * r, len = Math.max(4, R * 0.28) * c.s;
+      ctx.strokeStyle = "rgba(190,195,210,.28)"; ctx.lineWidth = Math.max(1.2, R * 0.04);
+      ctx.beginPath(); ctx.arc(x, y, len, c.t, c.t + 2.2); ctx.stroke();
+    });
+
+    /* 顔 */
+    ctx.save();
+    ctx.translate(cx, cy + R * 0.1); ctx.scale(bounce, bounce);
+    ctx.fillStyle = "rgba(255,150,180,.45)";
+    ctx.beginPath(); ctx.ellipse(-R * 0.55, R * 0.18, R * 0.16, R * 0.1, 0, 0, Math.PI * 2); ctx.ellipse(R * 0.55, R * 0.18, R * 0.16, R * 0.1, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#15100e"; ctx.strokeStyle = "#15100e"; ctx.lineCap = "round"; ctx.lineWidth = Math.max(1.5, R * 0.06);
+    [-1, 1].forEach(function (s) {
+      var ex = s * R * 0.32, ey = -R * 0.08;
+      if (blinkT < 0) { ctx.beginPath(); ctx.moveTo(ex - R * 0.1, ey); ctx.lineTo(ex + R * 0.1, ey); ctx.stroke(); }
+      else {
+        ctx.beginPath(); ctx.arc(ex, ey, R * 0.12, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(ex + R * 0.04, ey - R * 0.05, R * 0.045, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#15100e";
+      }
+    });
+    ctx.beginPath(); ctx.ellipse(0, R * 0.14, R * 0.1, R * 0.075, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-R * 0.16, R * 0.3); ctx.quadraticCurveTo(-R * 0.08, R * 0.38, 0, R * 0.26); ctx.quadraticCurveTo(R * 0.08, R * 0.38, R * 0.16, R * 0.3); ctx.stroke();
+    ctx.fillStyle = "#ff7d98";
+    ctx.beginPath(); ctx.ellipse(0, R * 0.42, R * 0.08, R * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   }
 
   function drawTools() {
