@@ -139,8 +139,7 @@
   var R0 = 14;                     /* ポメ本体（毛こみ）の半径 */
   var BOWL = 32;                   /* 鍋の半径 */
   var HEAD = 7;                    /* 真ん中の回る頭の半径（触ると綿あめが溶ける） */
-  var TOTAL = 30;                  /* 糸の出る量がいちばん多くなるまでの秒数 */
-  var GOAL = 150;                  /* この直径(cm)になるまでのタイムを競う */
+  var TOTAL = 10;                  /* 砂糖がなくなるまでの秒数 */
   var CAP = 1.1;                   /* 1区画にたまる上限（何秒分の糸か） */
   var FAST = 2.4;                  /* これより速く（1秒に何周）回ると外側が飛び散る */
   function feedRate(t) { return 320 + 1500 * Math.min(1, t / TOTAL); }   /* 1秒に出る綿あめの面積 cm² */
@@ -232,7 +231,7 @@
     spinRate += (Math.abs(da) / dt / (Math.PI * 2) - spinRate) * Math.min(1, dt * 6);
 
     /* 糸が出て、向きごとにたまる */
-    var feeding = true;
+    var feeding = T < TOTAL;
     if (feeding) {
       var add = feedRate(T) * dt / N, cap = feedRate(T) * CAP / N;
       for (var i = 0; i < N; i++) sec[i] = Math.min(cap, sec[i] + add);
@@ -277,7 +276,7 @@
       if (meltCool <= 0) { meltCool = 0.22; noiseHit(0.25, 4200, 0.12, 0.6); }
     }
 
-    if (diameter() >= GOAL) { state = S.END; endT = 0; humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
+    if (!feeding) { state = S.END; endT = 0; humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
   }
 
   /* わん。のこぎり波を口の形（2つの山の帯域）に通して、高さを下げながら短く鳴らす */
@@ -324,7 +323,7 @@
 
   function toResult() {
     state = S.RESULT;
-    score = Math.floor(T * 100) / 100;
+    score = Math.round(diameter());
     tone(660, 0.12, 0.1, "square"); tone(990, 0.3, 0.1, "square", null, 0.1);
   }
 
@@ -373,9 +372,9 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function bigPom(d) { for (var i = 0; i < PN; i++) f[i] = d / 2; A = area(); var a = Math.atan2(py, px), dd = HEAD + d / 2 + 6; px = tx = Math.cos(a) * dd; py = ty = Math.sin(a) * dd; lastAng = a; }
   function debugKey(n) {
-    if (n === 1) { if (state !== S.PLAY) newRound(); bigPom(GOAL + 2); T = 18.5; }  /* 1: 大きくして終わり */
-    if (n === 2) { if (state !== S.PLAY) newRound(); bigPom(GOAL - 12); }           /* 2: ゴール手前 */
-    if (n === 3) { if (state !== S.PLAY) newRound(); bigPom(110); }                  /* 3: 大きくする */
+    if (n === 1) { if (state !== S.PLAY) newRound(); bigPom(180); T = TOTAL; }      /* 1: 大きくして終わり */
+    if (n === 2) { if (state !== S.PLAY) newRound(); T = TOTAL - 3; }                /* 2: 砂糖があと3秒 */
+    if (n === 3) { if (state !== S.PLAY) newRound(); bigPom(140); }                  /* 3: 大きくする */
   }
 
   window.addEventListener("keydown", function (e) {
@@ -401,9 +400,13 @@
   });
 
   function doShare() {
-    var t = score.toFixed(2);
-    var ja = "ポメラニアンを" + t + "秒で抱っこできない大きさの綿あめにした";
-    var en = "Turned a Pomeranian into cotton candy too big to hug in " + t + " seconds.";
+    var d = score;
+    var ja = d >= 200 ? "ポメラニアンを直径" + d + "cmの綿あめにしてドアを通れなくした"
+      : d >= 120 ? "ポメラニアンを直径" + d + "cmの綿あめにして抱っこできなくした"
+      : "ポメラニアンを直径" + d + "cmの綿あめにした";
+    var en = d >= 200 ? "Turned a Pomeranian into a " + d + "cm cotton candy. It no longer fits through the door."
+      : d >= 120 ? "Turned a Pomeranian into a " + d + "cm cotton candy. Too big to hug now."
+      : "Turned a Pomeranian into a " + d + "cm cotton candy.";
     window.zResultActions.x({ text: zT(ja, en) + zT(" #わたあめポメ", " #CottonCandyPom") });
   }
 
@@ -473,7 +476,7 @@
     scene3d.aspect(W, H);
     var now = performance.now() / 1000;
     scene3d.update({ px: px, py: py, f: f, PN: PN, R0: R0, camR: camR || 48, camX: camX, camY: camY,
-      sugar: 1, spin: state === S.PLAY || state === S.INTRO ? 0.35 : 0.02,
+      sugar: state === S.INTRO ? 1 : Math.max(0, 1 - T / TOTAL), spin: state === S.PLAY || state === S.INTRO ? 0.35 : 0.02,
       bounce: 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15,
       dizzy: spinRate > FAST * 0.85 || state === S.END });
     if (!scene3d.render(ctx, W, H)) return false;
@@ -528,7 +531,7 @@
     ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 0.8;
     ctx.beginPath(); ctx.arc(0, 0, BOWL - 1.6, Math.PI * 1.1, Math.PI * 1.6); ctx.stroke();
     /* 回る頭。中の砂糖が減っていく。熱いので赤く光る */
-    var left = 1;
+    var left = state === S.INTRO ? 1 : Math.max(0, 1 - T / TOTAL);
     var hot = ctx.createRadialGradient(0, 0, 0, 0, 0, HEAD * 1.8);
     hot.addColorStop(0, "rgba(255,120,60,.45)"); hot.addColorStop(1, "rgba(255,120,60,0)");
     ctx.fillStyle = hot; ctx.beginPath(); ctx.arc(0, 0, HEAD * 1.8, 0, Math.PI * 2); ctx.fill();
@@ -684,13 +687,13 @@
     ctx.shadowBlur = 10;
     ctx.textAlign = "center";
     ctx.font = "800 108px sans-serif";
-    var num = score.toFixed(2), unit = zT("秒", "s"), nw = ctx.measureText(num).width;
+    var num = String(score), nw = ctx.measureText(num).width;
     ctx.font = "800 52px sans-serif";
-    var uw = ctx.measureText(unit).width;
+    var uw = ctx.measureText("cm").width;
     var x0 = W / 2 - (nw + 8 + uw) / 2;
     ctx.textAlign = "left";
     ctx.font = "800 108px sans-serif"; ctx.fillText(num, x0, H * 0.45);
-    ctx.font = "800 52px sans-serif"; ctx.fillText(unit, x0 + nw + 8, H * 0.45);
+    ctx.font = "800 52px sans-serif"; ctx.fillText("cm", x0 + nw + 8, H * 0.45);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
