@@ -1,5 +1,5 @@
 /* わたあめポメの立体の絵と、綿の形。
-   綿あめ機の頭の上にポメが乗っていて、正面から見ている。
+   ポメを正面から見ている。
    形はゲーム側の「正面から見た向きごとの半径」（平面の形）で、ここはそれを厚みのある綿の玉にして描くだけ。単位は cm。
    模型はすべて基本図形から自作。three.js は random-bowling の既存配布物（MIT）を使う。
    スマホで重くならないよう、球の細かさと描く解像度をおさえている。 */
@@ -23,7 +23,6 @@
     var back = new T.DirectionalLight(0xc8d4ff, 0.7);
     back.position.set(0.6, 0.4, -1); this.scene.add(back);
     this.w = 0; this.h = 0; this.view = 44;
-    this.buildMachine();
     this.buildBall();
     this.buildFace();
   }
@@ -33,34 +32,6 @@
     for (var k in extra) o[k] = extra[k];
     return new T.MeshStandardMaterial(o);
   }
-
-  /* 綿あめ機：鍋・胴・真ん中の回る頭 */
-  PomScene.prototype.buildMachine = function () {
-    var G = this.machine = new T.Group();
-    var pts = [], i;
-    for (i = 0; i <= 12; i++) {
-      var t = i / 12;
-      pts.push(new T.Vector2(8 + 24 * Math.sin(t * Math.PI / 2), -14 + 14 * (1 - Math.cos(t * Math.PI / 2))));
-    }
-    G.add(new T.Mesh(new T.LatheGeometry(pts, 48), std(0x8a93a8, { metalness: 0.6, roughness: 0.35, side: T.DoubleSide })));
-    var rim = new T.Mesh(new T.TorusGeometry(32, 0.9, 10, 64), std(0xdde2ec, { metalness: 0.7, roughness: 0.25 }));
-    rim.rotation.x = Math.PI / 2; G.add(rim);
-    var body = new T.Mesh(new T.CylinderGeometry(27, 29, 70, 48, 1, true), std(0xd23a4c, { roughness: 0.6 }));
-    body.position.y = -49; G.add(body);
-    var band = new T.Mesh(new T.CylinderGeometry(27.3, 27.6, 5, 48, 1, true), std(0xf4f4f6, { roughness: 0.6 }));
-    band.position.y = -24; G.add(band);
-    var head = this.head = new T.Group();
-    var drum = new T.Mesh(new T.CylinderGeometry(7, 7, 16, 32), std(0xc4cad6, { metalness: 0.8, roughness: 0.3 }));
-    drum.position.y = 0; head.add(drum);
-    var holes = std(0x4a5060, { roughness: 0.6 });
-    for (i = 0; i < 12; i++) {
-      var hole = new T.Mesh(new T.SphereGeometry(0.6, 8, 6), holes);
-      var a = i / 12 * Math.PI * 2;
-      hole.position.set(Math.cos(a) * 7, 4, Math.sin(a) * 7); head.add(hole);
-    }
-    G.add(head);
-    this.scene.add(G);
-  };
 
   /* 綿の玉：ポメの毛と綿あめをひと続きにした白い玉 */
   PomScene.prototype.buildBall = function () {
@@ -160,8 +131,6 @@
       this.mr = mr; this.thick = thick;
     }
 
-    this.head.rotation.y += g.dt * 6;
-
     /* 顔は正面の真ん中、耳は頭の上の綿の縁 */
     this.face.position.set(0, 1.5, (this.thick || START) - 0.8);
     var s = g.bounce;
@@ -179,7 +148,7 @@
     var cam = this.camera, el = 8 * Math.PI / 180;
     var vf = cam.fov * Math.PI / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * cam.aspect);
     var Dst = Math.max(this.view / Math.tan(hf / 2), this.view * 1.25 / Math.tan(vf / 2));
-    var lookY = CY - this.view * 0.35;
+    var lookY = CY - this.view * 0.1;
     cam.position.set(0, lookY + Math.sin(el) * Dst, Math.cos(el) * Dst);
     cam.lookAt(0, lookY, 0);
     cam.updateMatrixWorld();
