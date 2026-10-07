@@ -38,7 +38,7 @@
 <script>
 /* わたあめポメ
 
-   綿あめ機の真ん中で回っているポメを、スプレーとハサミでオリジナルのポメラニアンにする。 */
+   綿あめ機の上のポメに、外側から指を回してスプレーを吹き付け、ハサミで刈ってオリジナルのポメラニアンにする。 */
 (function () {
   "use strict";
 
@@ -135,6 +135,58 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, T, held, keyMode = false;
   var tool = "spray", pointer = null, barkT, grown, barkAcc, snipT, blinkT, puffs, bits;
+  /* ポメの形：正面から見て、中心から向きごとの綿の外側までの半径（cm、右が0で反時計回り） */
+  var PN = 96, PTH = Math.PI * 2 / PN, START = 15, BODY = 11;
+  var f = new Float32Array(PN), W8 = new Float32Array(PN);
+  function wrapA(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
+  function fAt(a) {
+    var u = ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / PTH, i = Math.floor(u), t = u - i;
+    return f[i % PN] * (1 - t) + f[(i + 1) % PN] * t;
+  }
+  function area() { var a = 0; for (var i = 0; i < PN; i++) a += 0.5 * f[i] * f[i] * PTH; return a; }
+  /* いちばん長い差し渡し（縦か横） */
+  function size() {
+    var x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+    for (var i = 0; i < PN; i++) {
+      var x = Math.cos(i * PTH) * f[i], y = Math.sin(i * PTH) * f[i];
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    return Math.max(x1 - x0, y1 - y0);
+  }
+  /* ポメの中心の画面の位置 */
+  function pomScreen() {
+    if (scene3d && window.THREE) return scene3d.project(new THREE.Vector3(0, 26, 0), W, H);
+    return { x: W / 2, y: CY };
+  }
+  /* 画面の点 → ポメの中心からの (x, 上が+y) cm */
+  function toPom(x, y) {
+    if (scene3d) { var p = scene3d.unproject(x, y, W, H); if (p) return p; }
+    return { x: (x - W / 2) / 2.2, y: (CY - y) / 2.2 };
+  }
+
+  /* スプレー：指の方向の綿を、指の所まで伸ばす（先ほど細く）。指が綿の中なら何もしない */
+  function spray(p, dt) {
+    var d = Math.hypot(p.x, p.y), a = Math.atan2(p.y, p.x), sig = 0.2, before = area();
+    if (d <= fAt(a)) return 0;
+    for (var i = 0; i < PN; i++) {
+      var e = wrapA(i * PTH - a), w = Math.exp(-e * e / (2 * sig * sig));
+      if (w < 0.02) continue;
+      f[i] = Math.min(Math.max(f[i], d * Math.sqrt(w)), f[i] + 34 * w * dt);
+    }
+    return area() - before;
+  }
+  /* ハサミ：指の所で綿を切る。指より外側の綿がなくなる */
+  function cut(p, dt) {
+    var d = Math.hypot(p.x, p.y), a = Math.atan2(p.y, p.x), cut = 0;
+    if (d >= fAt(a)) return 0;
+    for (var i = 0; i < PN; i++) {
+      var e = Math.abs(wrapA(i * PTH - a));
+      if (e > 0.12) continue;
+      var lim = Math.max(BODY, d + e * 40);
+      if (f[i] > lim) { cut += f[i] - lim; f[i] = lim; }
+    }
+    return cut;
+  }
 
   var CX, CY;
   function place() { CX = W / 2; CY = Math.round(H * 0.42); }
@@ -145,7 +197,7 @@
     state = S.PLAY;
     T = 0; held = false; pointer = null; tool = "spray";
     barkT = 1; grown = 0; barkAcc = 0; snipT = 0; blinkT = 3; puffs = []; bits = []; score = 0;
-    if (scene3d) scene3d.reset();
+    for (var i = 0; i < PN; i++) f[i] = START;
     humOn();
   }
   var score = 0;
@@ -156,13 +208,16 @@
     if (blinkT < -0.12) blinkT = 2 + Math.random() * 3;
     updateParts(dt);
     if (state !== S.PLAY) return;
-    if (held && pointer && scene3d) {
-      var r = scene3d.tool(tool === "spray" ? "spray" : "cut", pointer.x, pointer.y, W, H, dt);
+    if (held && pointer) {
+      var pp = toPom(pointer.x, pointer.y);
+      var r = { amount: tool === "spray" ? spray(pp, dt) : -cut(pp, dt) };
       if (tool === "spray") {
-        for (var i = 0; i < 3; i++) puffs.push({ x: pointer.x + (Math.random() - 0.5) * 30, y: pointer.y + (Math.random() - 0.5) * 30, life: 0.5, s: 4 + Math.random() * 6 });
+        /* 指からポメの中心へ向かって飛ぶ霧 */
+        var c = pomScreen(), vx = c.x - pointer.x, vy = c.y - pointer.y, vl = Math.hypot(vx, vy) || 1;
+        for (var i = 0; i < 3; i++) puffs.push({ x: pointer.x + (Math.random() - 0.5) * 16, y: pointer.y + (Math.random() - 0.5) * 16, vx: vx / vl * 420 + (Math.random() - 0.5) * 120, vy: vy / vl * 420 + (Math.random() - 0.5) * 120, life: 0.45, s: 3 + Math.random() * 5 });
         if (r.amount > 0) { grown += r.amount; barkAcc += r.amount; }
         /* 綿が一定量ふくらむたびに「ワン」 */
-        if (barkAcc > 1500 && barkT > 0.25) { barkAcc = 0; bark(); barkT = 0; }
+        if (barkAcc > 120 && barkT > 0.25) { barkAcc = 0; bark(); barkT = 0; }
       } else if (r.amount < 0) {
         if (snipT <= 0) { snipT = 0.13; snip(); }
         if (Math.random() < 0.5) bits.push({ x: pointer.x, y: pointer.y, vx: (Math.random() - 0.5) * 120, vy: -60 - Math.random() * 60, life: 1, s: 3 + Math.random() * 4 });
@@ -172,7 +227,7 @@
 
   function updateParts(dt) {
     var i;
-    for (i = puffs.length - 1; i >= 0; i--) { var p = puffs[i]; p.life -= dt; p.s += dt * 20; if (p.life <= 0) puffs.splice(i, 1); }
+    for (i = puffs.length - 1; i >= 0; i--) { var p = puffs[i]; p.life -= dt; p.s += dt * 20; p.x += p.vx * dt; p.y += p.vy * dt; if (p.life <= 0) puffs.splice(i, 1); }
     for (i = bits.length - 1; i >= 0; i--) {
       var b = bits[i]; b.life -= dt; b.vy += 600 * dt; b.x += b.vx * dt; b.y += b.vy * dt;
       if (b.life <= 0) bits.splice(i, 1);
@@ -184,7 +239,7 @@
   /* わん。のこぎり波を口の形（2つの山の帯域）に通して、高さを下げながら短く鳴らす */
   function bark() {
     if (!AC) return;
-    var d = scene3d ? scene3d.size() : 30, p = Math.max(170, 620 * Math.pow(28 / Math.max(28, d), 0.45)) * (0.92 + Math.random() * 0.16);
+    var d = size(), p = Math.max(170, 620 * Math.pow(28 / Math.max(28, d), 0.45)) * (0.92 + Math.random() * 0.16);
     var n = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
     o.type = "sawtooth";
     o.frequency.setValueAtTime(p * 0.8, n);
@@ -209,7 +264,7 @@
 
   function finish() {
     state = S.RESULT;
-    score = Math.round(scene3d ? scene3d.size() : 30);
+    score = Math.round(size());
     held = false; pointer = null;
     humOff();
     bark(); setTimeout(bark, 220);
@@ -273,8 +328,8 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (state !== S.PLAY) newRound();
-    if (n === 1 && scene3d) {          /* 1: 適当に伸ばした形 */
-      for (var k = 0; k < 40; k++) scene3d.tool("spray", W / 2 + Math.cos(k) * 160, CY + Math.sin(k * 1.7) * 160, W, H, 0.3);
+    if (n === 1) {                     /* 1: 適当に伸ばした形 */
+      for (var k = 0; k < 12; k++) { var a = k * 2.4; spray({ x: Math.cos(a) * (30 + k * 3), y: Math.sin(a) * (30 + k * 3) }, 3); }
     }
     if (n === 2) finish();             /* 2: 完成 */
   }
@@ -336,7 +391,7 @@
     var now = performance.now() / 1000, dt = Math.min(0.1, Math.max(0, now - (lastDraw || now))); lastDraw = now;
     if (scene3d) {
       scene3d.aspect(W, H);
-      scene3d.update({ dt: dt, spin: state === S.INTRO ? 0 : 0.5, bounce: 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15, blink: blinkT < 0 });
+      scene3d.update({ dt: dt, f: f, PN: PN, bounce: 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15, blink: blinkT < 0 });
       if (!scene3d.render(ctx, W, H)) drawFlat();
     } else drawFlat();
 
@@ -357,7 +412,9 @@
   function drawFlat() {
     ctx.fillStyle = "#d23a4c"; ctx.fillRect(W / 2 - 90, CY + 80, 180, H);
     ctx.fillStyle = "#f6f7fa";
-    ctx.beginPath(); ctx.arc(W / 2, CY, 70, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    for (var i = 0; i <= PN; i++) { var x = W / 2 + Math.cos(i * PTH) * f[i % PN] * 2.2, y = CY - Math.sin(i * PTH) * f[i % PN] * 2.2; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+    ctx.fill();
     ctx.fillStyle = "#15100e";
     ctx.beginPath(); ctx.arc(W / 2 - 20, CY - 5, 7, 0, Math.PI * 2); ctx.arc(W / 2 + 20, CY - 5, 7, 0, Math.PI * 2); ctx.fill();
   }
@@ -439,7 +496,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, T: T, tool: tool, size: scene3d ? scene3d.size() : null, W: W, H: H }; },
+    now: function () { return { state: state, score: score, T: T, tool: tool, size: size(), W: W, H: H }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };

@@ -1,6 +1,6 @@
 /* わたあめポメの立体の絵と、綿の形。
-   綿あめ機の回る頭の上にポメが乗って、ゆっくり回っている。
-   綿の玉は「方向ごとの半径」で形を持ち、スプレーで伸ばし、ハサミで刈る。単位は cm。
+   綿あめ機の頭の上にポメが乗っていて、正面から見ている。
+   形はゲーム側の「正面から見た向きごとの半径」（平面の形）で、ここはそれを厚みのある綿の玉にして描くだけ。単位は cm。
    模型はすべて基本図形から自作。three.js は random-bowling の既存配布物（MIT）を使う。
    スマホで重くならないよう、球の細かさと描く解像度をおさえている。 */
 (function (global) {
@@ -22,12 +22,10 @@
     sun.position.set(-0.5, 1, 0.8); this.scene.add(sun);
     var back = new T.DirectionalLight(0xc8d4ff, 0.7);
     back.position.set(0.6, 0.4, -1); this.scene.add(back);
-    this.w = 0; this.h = 0; this.turn = 0; this.view = 40;
-    this.ray = new T.Raycaster();
+    this.w = 0; this.h = 0; this.view = 44;
     this.buildMachine();
     this.buildBall();
     this.buildFace();
-    this.reset();
   }
 
   function std(color, extra) {
@@ -71,7 +69,6 @@
     this.n = n;
     this.dir = new Float32Array(n * 3);
     this.fuzz = new Float32Array(n);
-    this.rad = new Float32Array(n);
     var col = new Float32Array(n * 3);
     for (i = 0; i < n; i++) {
       var x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
@@ -109,7 +106,6 @@
     var tongue = this.tongue = new T.Mesh(new T.SphereGeometry(1, 12, 10), pink);
     tongue.scale.set(1.1, 1.4, 0.6); tongue.position.set(0, -4.4, 0.6); F.add(tongue);
     this.pom.add(F);
-    this.faceDir = new T.Vector3(0, 0.12, 1).normalize();
     this.ears = [];
     [-1, 1].forEach(function (s) {
       var ear = new T.Group();
@@ -117,62 +113,9 @@
       cone.position.y = 3; ear.add(cone);
       var inner = new T.Mesh(new T.ConeGeometry(2, 5, 10), std(0xf2b8b4, { roughness: 0.8 }));
       inner.position.set(0, 2.6, 1.3); ear.add(inner);
-      ear.userData.dir = new T.Vector3(s * 0.42, 0.85, 0.32).normalize();
+      ear.userData.dir = new T.Vector3(s * 0.5, 0.87, 0);
       this.pom.add(ear); this.ears.push(ear);
     }, this);
-  };
-
-  PomScene.prototype.reset = function () {
-    for (var i = 0; i < this.n; i++) this.rad[i] = START;
-    this.dirty = true; this.turn = 0;
-  };
-
-  /* 方向 d（玉の向きの中）に一番近い頂点の半径 */
-  PomScene.prototype.radAt = function (d) {
-    var best = -2, bi = 0, D = this.dir;
-    for (var i = 0; i < this.n; i++) {
-      var c = D[i * 3] * d.x + D[i * 3 + 1] * d.y + D[i * 3 + 2] * d.z;
-      if (c > best) { best = c; bi = i; }
-    }
-    return this.rad[bi];
-  };
-
-  /* 画面の点から道具を使う。tool: "spray" | "cut"。戻り値は綿の増減（cm³ のめやす）と当たった所 */
-  PomScene.prototype.tool = function (tool, sx, sy, W, H, dt) {
-    var cam = this.camera;
-    this.ray.setFromCamera(new T.Vector2(sx / W * 2 - 1, 1 - sy / H * 2), cam);
-    this.pom.updateMatrixWorld();
-    var hits = this.ray.intersectObject(this.ball, false);
-    var inv = new T.Matrix4().copy(this.pom.matrixWorld).invert();
-    var o = this.ray.ray.origin.clone().applyMatrix4(inv);
-    var d = this.ray.ray.direction.clone().transformDirection(inv);
-    var target, reach, onBall = hits.length > 0;
-    if (onBall) {
-      target = hits[0].point.clone().applyMatrix4(inv);
-      reach = Infinity;
-    } else {
-      /* 玉から外れた所：視線の上で玉の中心に一番近い点まで、綿を伸ばす */
-      var t = -o.dot(d);
-      target = o.clone().addScaledVector(d, t);
-      reach = target.length();
-    }
-    var dirT = target.clone().normalize();
-    var sig = tool === "cut" ? 0.2 : 0.22, s2 = 2 * sig * sig, D = this.dir, R = this.rad, total = 0;
-    if (tool === "cut" && !onBall) return { amount: 0, hit: null };
-    for (var i = 0; i < this.n; i++) {
-      var c = D[i * 3] * dirT.x + D[i * 3 + 1] * dirT.y + D[i * 3 + 2] * dirT.z;
-      if (c < 0.6) continue;
-      var a = Math.acos(Math.min(1, c)), w = Math.exp(-a * a / s2);
-      if (w < 0.02) continue;
-      var r0 = R[i], r1;
-      if (tool === "cut") r1 = Math.max(BODY, r0 - 60 * w * dt);
-      else r1 = Math.min(Math.max(r0, reach * Math.sqrt(w)), r0 + (onBall ? 14 : 26) * w * dt);   /* 先ほど細く伸びる */
-      R[i] = r1;
-      total += (r1 * r1 * r1 - r0 * r0 * r0);
-    }
-    if (total !== 0) this.dirty = true;
-    var hitW = target.clone().applyMatrix4(this.pom.matrixWorld);
-    return { amount: total * 0.05, hit: hitW };
   };
 
   /* 立体の点 → ゲーム画面の座標 */
@@ -180,57 +123,63 @@
     var p = v.clone().project(this.camera);
     return { x: (p.x + 1) / 2 * W, y: (1 - p.y) / 2 * H };
   };
-
-  /* 大きさ：いちばん長い差し渡し（上下・左右・前後のうち最大）cm */
-  PomScene.prototype.size = function () {
-    var mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9], D = this.dir, R = this.rad;
-    for (var i = 0; i < this.n; i++) for (var k = 0; k < 3; k++) {
-      var v = D[i * 3 + k] * R[i];
-      if (v < mn[k]) mn[k] = v; if (v > mx[k]) mx[k] = v;
-    }
-    return Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
+  /* ゲーム画面の座標 → ポメの中心を通る正面の面の上の点（ポメの中心から、右が x、上が y） */
+  PomScene.prototype.unproject = function (sx, sy, W, H) {
+    var v = new T.Vector3(sx / W * 2 - 1, 1 - sy / H * 2, 0.5).unproject(this.camera);
+    var o = this.camera.position, d = v.sub(o);
+    if (Math.abs(d.z) < 1e-6) return null;
+    var t = -o.z / d.z;
+    return { x: o.x + d.x * t, y: o.y + d.y * t - CY };
   };
-  PomScene.prototype.maxR = function () { var m = 0; for (var i = 0; i < this.n; i++) if (this.rad[i] > m) m = this.rad[i]; return m; };
 
-  /* 毎コマ：g = { dt, spin, bounce, dizzy, sugar } */
+  /* 平面の形の、向き a の半径（なめらかにつなぐ） */
+  function prof(f, PN, a) {
+    var u = ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / (Math.PI * 2 / PN), i = Math.floor(u), t = u - i;
+    return f[i % PN] * (1 - t) + f[(i + 1) % PN] * t;
+  }
+
+  /* 毎コマ：g = { dt, f, PN, bounce, blink } */
   PomScene.prototype.update = function (g) {
-    this.turn += g.spin * g.dt;
-    this.pom.rotation.y = this.turn;
-    this.head.rotation.y = this.turn;
-
-    if (this.dirty) {
-      this.dirty = false;
-      var pos = this.ballGeo.attributes.position, D = this.dir, R = this.rad;
-      for (var i = 0; i < this.n; i++) {
-        var r = R[i] * (1 + this.fuzz[i] * (0.02 + 0.5 / R[i]));
-        pos.setXYZ(i, D[i * 3] * r, D[i * 3 + 1] * r, D[i * 3 + 2] * r);
+    var f = g.f, PN = g.PN, i, mean = 0;
+    for (i = 0; i < PN; i++) mean += f[i];
+    mean /= PN;
+    var key = 0; for (i = 0; i < PN; i++) key += f[i] * (i % 7 + 1);
+    if (key !== this.key) {
+      this.key = key;
+      /* 正面から見た形は f のまま。奥行きは、太い所でも平均くらいの厚みにおさえる */
+      var thick = Math.max(START, mean * 0.95), pos = this.ballGeo.attributes.position, D = this.dir, mr = 0;
+      for (i = 0; i < this.n; i++) {
+        var x = D[i * 3], y = D[i * 3 + 1], z = D[i * 3 + 2];
+        var fr = prof(f, PN, Math.atan2(y, x)), k = 1 + this.fuzz[i] * (0.02 + 0.5 / fr);
+        pos.setXYZ(i, x * fr * k, y * fr * k, z * Math.min(fr, thick) * k);
+        if (fr > mr) mr = fr;
       }
       pos.needsUpdate = true;
       this.ballGeo.computeVertexNormals();
       this.ballGeo.computeBoundingSphere();
-      this.mr = this.maxR();
+      this.mr = mr; this.thick = thick;
     }
 
-    /* 顔と耳は、その方向の綿の表面に置く */
-    var fr = this.radAt(this.faceDir);
-    this.face.position.copy(this.faceDir).multiplyScalar(fr - 0.6);
-    this.face.quaternion.setFromUnitVectors(new T.Vector3(0, 0, 1), this.faceDir);
+    this.head.rotation.y += g.dt * 6;
+
+    /* 顔は正面の真ん中、耳は頭の上の綿の縁 */
+    this.face.position.set(0, 1.5, (this.thick || START) - 0.8);
     var s = g.bounce;
     this.face.scale.set(s, s, s);
     this.eyes.forEach(function (e) { e.scale.set(1, g.blink ? 0.15 : 1, 1); });
     this.ears.forEach(function (ear) {
-      var d = ear.userData.dir, r = this.radAt(d);
-      ear.position.copy(d).multiplyScalar(r - 1.5);
-      ear.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), d);
+      var d = ear.userData.dir, a = Math.atan2(d.y, d.x), r = prof(f, PN, a);
+      ear.position.set(Math.cos(a) * (r - 2), Math.sin(a) * (r - 2), 2);
+      ear.rotation.set(0, 0, a - Math.PI / 2);
     }, this);
 
     /* カメラは前の斜め上から。綿の大きさに合わせて引く */
-    var want = Math.max(40, (this.mr || START) + 14);
+    var want = Math.max(44, (this.mr || START) + 16);
     this.view += (want - this.view) * Math.min(1, g.dt * 2);
-    var cam = this.camera, el = 22 * Math.PI / 180;
+    var cam = this.camera, el = 8 * Math.PI / 180;
     var vf = cam.fov * Math.PI / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * cam.aspect);
     var Dst = Math.max(this.view / Math.tan(hf / 2), this.view * 1.25 / Math.tan(vf / 2));
-    var lookY = CY - this.view * 0.12;
+    var lookY = CY - this.view * 0.35;
     cam.position.set(0, lookY + Math.sin(el) * Dst, Math.cos(el) * Dst);
     cam.lookAt(0, lookY, 0);
     cam.updateMatrixWorld();
