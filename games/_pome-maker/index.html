@@ -135,7 +135,9 @@
   /* 毛色と飾り */
   var FURS = ["#f6f7fa", "#fbe3bd", "#f2a65a", "#a8693d", "#3b3536", "#ffc2da", "#bfe2ff", "#bdeed9"];
   var DECOS = ["ribbon", "crown", "glasses", "flower", "star"];
-  var fur = FURS[0], deco = DECOS[0], decos = [], dragDeco = null;
+  var EYES = ["round", "kira", "happy", "sleepy", "angry"];
+  var MOUTHS = ["tongue", "w", "open", "fang", "o"];
+  var fur = FURS[0], deco = DECOS[0], decos = [], dragDeco = null, eye = EYES[0], mouth = MOUTHS[0];
   var tool = "spray", pointer = null, barkT, grown, barkAcc, snipT, blinkT, puffs, bits;
   /* ポメの形：正面から見て、中心から向きごとの綿の外側までの半径（cm、右が0で反時計回り） */
   var PN = 96, PTH = Math.PI * 2 / PN, START = 15, BODY = 11;
@@ -197,7 +199,7 @@
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    T = 0; held = false; pointer = null; tool = "spray"; fur = FURS[0]; decos = []; dragDeco = null;
+    T = 0; held = false; pointer = null; tool = "spray"; fur = FURS[0]; decos = []; dragDeco = null; eye = EYES[0]; mouth = MOUTHS[0];
     barkT = 1; grown = 0; barkAcc = 0; snipT = 0; blinkT = 3; puffs = []; bits = []; score = 0;
     for (var i = 0; i < PN; i++) f[i] = START;
     humOn();
@@ -276,22 +278,27 @@
   /* ============ 入力 ============ */
   /* 下のボタン：スプレー・ハサミ（道具を選ぶ）と「完成」 */
   function toolButtons() {
-    var h = 62, w = 84, gap = 10, wd = 116, y = H - h - Math.max(28, H * 0.035);
-    var x0 = W / 2 - (w * 4 + wd + gap * 4) / 2;
+    var h = 62, w = 72, gap = 8, wd = 100, y = H - h - Math.max(28, H * 0.035);
+    var x0 = W / 2 - (w * 5 + wd + gap * 5) / 2;
     return [
       { id: "spray", x: x0, y: y, w: w, h: h, label: "スプレー" },
       { id: "cut", x: x0 + (w + gap), y: y, w: w, h: h, label: "ハサミ" },
       { id: "color", x: x0 + (w + gap) * 2, y: y, w: w, h: h, label: "毛色" },
-      { id: "deco", x: x0 + (w + gap) * 3, y: y, w: w, h: h, label: "飾り" },
-      { id: "done", x: x0 + (w + gap) * 4, y: y, w: wd, h: h, label: "完成" }
+      { id: "face", x: x0 + (w + gap) * 3, y: y, w: w, h: h, label: "顔" },
+      { id: "deco", x: x0 + (w + gap) * 4, y: y, w: w, h: h, label: "飾り" },
+      { id: "done", x: x0 + (w + gap) * 5, y: y, w: wd, h: h, label: "完成" }
     ];
   }
   /* 毛色・飾りを選んでいるときに、ボタンの上に並ぶ選択肢 */
   function choices() {
-    if (tool !== "color" && tool !== "deco") return [];
-    var list = tool === "color" ? FURS : DECOS, sz = 54, gap = 10, y = toolButtons()[0].y - sz - 18;
-    var x0 = W / 2 - (list.length * sz + (list.length - 1) * gap) / 2;
-    return list.map(function (v, i) { return { v: v, x: x0 + i * (sz + gap), y: y, w: sz, h: sz }; });
+    var rows = tool === "color" ? [["fur", FURS]] : tool === "deco" ? [["deco", DECOS]] : tool === "face" ? [["eye", EYES], ["mouth", MOUTHS]] : [];
+    var sz = 54, gap = 10, out = [];
+    rows.forEach(function (row, r) {
+      var list = row[1], y = toolButtons()[0].y - (sz + 18) - (rows.length - 1 - r) * (sz + 12);
+      var x0 = W / 2 - (list.length * sz + (list.length - 1) * gap) / 2;
+      list.forEach(function (v, i) { out.push({ g: row[0], v: v, x: x0 + i * (sz + gap), y: y, w: sz, h: sz }); });
+    });
+    return out;
   }
   function hitTool(x, y) {
     var bs = toolButtons().concat(choices());
@@ -312,11 +319,14 @@
     if (hb && hb.id === "done") { finish(); return; }
     if (hb && hb.id) { tool = hb.id; tone(700 + toolButtons().indexOf(hb) * 150, 0.06, 0.08, "triangle"); return; }
     if (hb) {                                   /* 選択肢 */
-      if (tool === "color") { fur = hb.v; bark(); } else deco = hb.v;
+      if (hb.g === "fur") { fur = hb.v; bark(); }
+      else if (hb.g === "eye") { eye = hb.v; bark(); }
+      else if (hb.g === "mouth") { mouth = hb.v; bark(); }
+      else deco = hb.v;
       tone(1200, 0.05, 0.08, "triangle");
       return;
     }
-    if (tool === "color") return;
+    if (tool === "color" || tool === "face") return;
     if (tool === "deco") {                      /* 触った所に飾りを置く。指を離すまで動かせる */
       var p = toPom(x, y);
       dragDeco = { kind: deco, x: p.x, y: p.y };
@@ -509,23 +519,54 @@
     ctx.translate(cx, cy + R * 0.1); ctx.scale(bounce, bounce);
     ctx.fillStyle = "rgba(255,150,180,.45)";
     ctx.beginPath(); ctx.ellipse(-R * 0.55, R * 0.18, R * 0.16, R * 0.1, 0, 0, Math.PI * 2); ctx.ellipse(R * 0.55, R * 0.18, R * 0.16, R * 0.1, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#15100e"; ctx.strokeStyle = "#15100e"; ctx.lineCap = "round"; ctx.lineWidth = Math.max(1.5, R * 0.06);
-    [-1, 1].forEach(function (s) {
-      var ex = s * R * 0.32, ey = -R * 0.08;
-      if (blinkT < 0) { ctx.beginPath(); ctx.moveTo(ex - R * 0.1, ey); ctx.lineTo(ex + R * 0.1, ey); ctx.stroke(); }
-      else {
-        ctx.beginPath(); ctx.arc(ex, ey, R * 0.12, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(ex + R * 0.04, ey - R * 0.05, R * 0.045, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#15100e";
-      }
-    });
-    ctx.beginPath(); ctx.ellipse(0, R * 0.14, R * 0.1, R * 0.075, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(-R * 0.16, R * 0.3); ctx.quadraticCurveTo(-R * 0.08, R * 0.38, 0, R * 0.26); ctx.quadraticCurveTo(R * 0.08, R * 0.38, R * 0.16, R * 0.3); ctx.stroke();
-    ctx.fillStyle = "#ff7d98";
-    ctx.beginPath(); ctx.ellipse(0, R * 0.42, R * 0.08, R * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+    drawEyes(eye, R, blinkT < 0);
+    ctx.fillStyle = "#15100e"; ctx.beginPath(); ctx.ellipse(0, R * 0.14, R * 0.1, R * 0.075, 0, 0, Math.PI * 2); ctx.fill();
+    drawMouth(mouth, R);
     ctx.restore();
 
     /* 飾り（ポメに貼りついているので、引いて見ると小さくなる） */
     decos.forEach(function (d) { drawDeco(d.kind, cx + d.x * k, cy - d.y * k, R * 0.75); });
+  }
+
+  /* 目。顔の真ん中が (0, 0)、R が頭の大きさ */
+  function drawEyes(kind, R, shut) {
+    ctx.save();
+    ctx.fillStyle = "#15100e"; ctx.strokeStyle = "#15100e"; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.lineWidth = Math.max(1.5, R * 0.06);
+    [-1, 1].forEach(function (s) {
+      var ex = s * R * 0.32, ey = -R * 0.08;
+      ctx.beginPath();
+      if (kind === "happy") { ctx.moveTo(ex - R * 0.11, ey + R * 0.03); ctx.quadraticCurveTo(ex, ey - R * 0.14, ex + R * 0.11, ey + R * 0.03); ctx.stroke(); }
+      else if (kind === "sleepy") { ctx.moveTo(ex - R * 0.11, ey - R * 0.02); ctx.quadraticCurveTo(ex, ey + R * 0.1, ex + R * 0.11, ey - R * 0.02); ctx.stroke(); }
+      else if (shut) { ctx.moveTo(ex - R * 0.1, ey); ctx.lineTo(ex + R * 0.1, ey); ctx.stroke(); }
+      else if (kind === "kira") {
+        ctx.arc(ex, ey, R * 0.16, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.beginPath(); ctx.arc(ex + R * 0.05, ey - R * 0.06, R * 0.06, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(ex - R * 0.06, ey + R * 0.06, R * 0.03, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#15100e";
+      } else {
+        ctx.arc(ex, ey, R * 0.12, 0, Math.PI * 2); ctx.fill();
+        if (kind === "angry") { ctx.beginPath(); ctx.moveTo(ex - s * R * 0.16, ey - R * 0.26); ctx.lineTo(ex + s * R * 0.12, ey - R * 0.15); ctx.stroke(); }
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(ex + R * 0.04, ey - R * 0.05, R * 0.045, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#15100e";
+      }
+    });
+    ctx.restore();
+  }
+  /* 口。鼻の下から */
+  function drawMouth(kind, R) {
+    ctx.save();
+    ctx.fillStyle = "#15100e"; ctx.strokeStyle = "#15100e"; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.lineWidth = Math.max(1.5, R * 0.06);
+    function w() { ctx.beginPath(); ctx.moveTo(-R * 0.16, R * 0.3); ctx.quadraticCurveTo(-R * 0.08, R * 0.38, 0, R * 0.26); ctx.quadraticCurveTo(R * 0.08, R * 0.38, R * 0.16, R * 0.3); ctx.stroke(); }
+    if (kind === "tongue") { w(); ctx.fillStyle = "#ff7d98"; ctx.beginPath(); ctx.ellipse(0, R * 0.42, R * 0.08, R * 0.11, 0, 0, Math.PI * 2); ctx.fill(); }
+    else if (kind === "w") w();
+    else if (kind === "open") {
+      ctx.beginPath(); ctx.moveTo(-R * 0.17, R * 0.26); ctx.quadraticCurveTo(0, R * 0.62, R * 0.17, R * 0.26); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#ff7d98"; ctx.beginPath(); ctx.ellipse(0, R * 0.4, R * 0.09, R * 0.05, 0, 0, Math.PI * 2); ctx.fill();
+    } else if (kind === "fang") {
+      w(); ctx.fillStyle = "#fff"; ctx.lineWidth = Math.max(1, R * 0.03);
+      [-1, 1].forEach(function (s) { ctx.beginPath(); ctx.moveTo(s * R * 0.12, R * 0.31); ctx.lineTo(s * R * 0.06, R * 0.33); ctx.lineTo(s * R * 0.1, R * 0.43); ctx.closePath(); ctx.fill(); ctx.stroke(); });
+    } else if (kind === "o") { ctx.beginPath(); ctx.ellipse(0, R * 0.34, R * 0.07, R * 0.09, 0, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
   }
 
   /* 色を明るく(+)・暗く(-)する */
@@ -580,13 +621,15 @@
       ctx.restore();
     });
     choices().forEach(function (c) {
-      var on = c.v === (tool === "color" ? fur : deco);
+      var on = c.v === { fur: fur, deco: deco, eye: eye, mouth: mouth }[c.g];
       ctx.save();
       ctx.beginPath(); ctx.arc(c.x + c.w / 2, c.y + c.h / 2, c.w / 2, 0, Math.PI * 2);
-      ctx.fillStyle = tool === "color" ? c.v : "#fff"; ctx.fill();
+      ctx.fillStyle = c.g === "fur" ? c.v : c.g === "deco" ? "#fff" : fur; ctx.fill();
       ctx.lineWidth = on ? 5 : 3; ctx.strokeStyle = on ? "#16202e" : "rgba(22,32,46,.35)"; ctx.stroke();
       ctx.restore();
-      if (tool === "deco") drawDeco(c.v, c.x + c.w / 2, c.y + c.h / 2, c.w * 0.32);
+      if (c.g === "deco") drawDeco(c.v, c.x + c.w / 2, c.y + c.h / 2, c.w * 0.32);
+      if (c.g === "eye") { ctx.save(); ctx.translate(c.x + c.w / 2, c.y + c.h / 2 + 4); drawEyes(c.v, 52, false); ctx.restore(); }
+      if (c.g === "mouth") { ctx.save(); ctx.translate(c.x + c.w / 2, c.y + c.h / 2 - 14); drawMouth(c.v, 52); ctx.restore(); }
     });
   }
 
