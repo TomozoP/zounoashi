@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>雪玉ポメ</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 雪玉ポメ
+
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+
+    place();                                   /* 高さが決まってから置き直す */
+
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null;
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+
+  /* 雪の坂。単位は cm。y が坂の下向き、x が横。雪玉（中にポメ）は転がるほど雪がついて大きくなる */
+  var CY;                                      /* 雪玉を置く画面の高さ */
+  function place() {
+    CY = Math.round(H * 0.3);
+  }
+  var TIME = 40;                               /* 坂の長さ（秒） */
+  var ball, cam, objs, nextSpawn, steer, keyDir, puffs, bumpT, roll, stuck, trail, finishT;
+  /* 雪玉の半径(cm)から、坂を下る速さと1cmの画面の大きさ */
+  function speed() { return ball.r * 6; }
+  function zoomFor(r) { return H * 0.085 / r; }
+
+  /* 坂に置くもの。大きさ（直径cm）で種類が決まる */
+  function kindFor(d) { return d < 50 ? "rock" : d < 160 ? "snowman" : d < 700 ? "tree" : d < 2000 ? "house" : d < 6000 ? "bldg" : "mount"; }
+  function spawnRow() {
+    var view = W / cam.z, n = 1 + (Math.random() < 0.6 ? 1 : 0) + (Math.random() < 0.3 ? 1 : 0);
+    for (var i = 0; i < n; i++) {
+      var d = ball.r * 2 * (0.15 + Math.pow(Math.random(), 3) * 2.4);
+      objs.push({ x: ball.x + (Math.random() - 0.5) * view * 1.4, y: nextSpawn + Math.random() * ball.r * 2, d: d, kind: kindFor(d), seed: Math.random(), hit: 0 });
+    }
+    nextSpawn += ball.r * (2.2 + Math.random() * 1.6);
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden=true;
+    state = S.PLAY;
+    score = 0;
+    T = 0;
+    held = false;
+    ball = { x: 0, y: 0, r: 15, vx: 0 };
+    cam = { x: 0, y: 0, z: zoomFor(15) };
+    objs = []; puffs = []; stuck = []; trail = [];
+    steer = null; keyDir = 0; bumpT = 0; roll = 0; finishT = 0;
+    nextSpawn = 300;
+    while (nextSpawn < H / cam.z * 1.2) spawnRow();
+  }
+
+  /* ============ 進行 ============ */
+  function updateFx(dt) {
+    for (var i = puffs.length - 1; i >= 0; i--) { var p = puffs[i]; p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; if (p.life <= 0) puffs.splice(i, 1); }
+    if (puffs.length > 150) puffs.splice(0, puffs.length - 150);
+    /* カメラは雪玉を追って、大きくなるほど引く */
+    cam.z += (zoomFor(ball.r) - cam.z) * Math.min(1, dt * 2);
+    cam.x += (ball.x - cam.x) * Math.min(1, dt * 3);
+    cam.y = ball.y;
+  }
+  function finish() {
+    state = S.RESULT; finishT = 0; held = false; steer = null;
+    score = Math.round(ball.r * 2);
+    bark(); setTimeout(bark, 220);
+  }
+  /* わん。のこぎり波を口の形（2つの山の帯域）に通して、高さを下げながら短く鳴らす。大きいほど低い */
+  function bark() {
+    if (!AC) return;
+    var d = ball.r * 2, p = Math.max(150, 620 * Math.pow(30 / Math.max(30, d), 0.35)) * (0.92 + Math.random() * 0.16);
+    var n = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(p * 0.8, n);
+    o.frequency.linearRampToValueAtTime(p * 1.15, n + 0.04);
+    o.frequency.exponentialRampToValueAtTime(p * 0.6, n + 0.13);
+    var f1 = AC.createBiquadFilter(); f1.type = "bandpass"; f1.frequency.value = p * 1.6; f1.Q.value = 3;
+    var f2 = AC.createBiquadFilter(); f2.type = "bandpass"; f2.frequency.value = p * 4; f2.Q.value = 4;
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(0.7, n + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + 0.14);
+    o.connect(f1); o.connect(f2); f1.connect(g); f2.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + 0.17);
+    noiseHit(0.05, p * 3, 0.12, 1.5);
+  }
+
+  function update(dt) {
+    updateFx(dt);
+    if (state !== S.PLAY) return;
+    T += dt;
+
+    var v = speed();
+    /* 左右：指の横位置へ寄せる（キーは押している向きへ） */
+    var want = 0;
+    if (steer != null) want = (steer - (W / 2 + (ball.x - cam.x) * cam.z)) / cam.z * 4;
+    else if (keyDir) want = keyDir * ball.r * 6;
+    want = Math.max(-ball.r * 8, Math.min(ball.r * 8, want));
+    ball.vx += (want - ball.vx) * Math.min(1, dt * 8);
+    ball.x += ball.vx * dt;
+    ball.y += v * dt;
+    roll += v * dt / ball.r;
+    /* 雪の上を転がるだけで少しずつ大きくなる（雪だるま式） */
+    ball.r *= 1 + 0.06 * dt;
+    bumpT -= dt;
+    /* ぶつかる。小さいものはくっつけて大きくなり、大きいものには弾かれて雪が落ちる */
+    for (var i = objs.length - 1; i >= 0; i--) {
+      var o = objs[i], dx = o.x - ball.x, dy = o.y - ball.y, rr = ball.r + o.d * 0.35;
+      if (dx * dx + dy * dy > rr * rr) continue;
+      if (o.d < ball.r * 2 * 0.8) {
+        ball.r = Math.sqrt(ball.r * ball.r + o.d * o.d * 0.25 * 0.7);
+        stuck.push({ kind: o.kind, u: (Math.random() - 0.5) * 1.6, ph: roll - Math.PI / 2, s: o.d / 2, seed: o.seed });
+        if (stuck.length > 40) stuck.shift();
+        for (var k = 0; k < 6; k++) puffs.push({ x: o.x, y: o.y, vx: (Math.random() - 0.5) * ball.r * 6, vy: -Math.random() * ball.r * 4, life: 0.6, s: ball.r * (0.1 + Math.random() * 0.15) });
+        objs.splice(i, 1);
+        bark();
+      } else if (bumpT <= 0) {
+        bumpT = 0.6;
+        ball.r *= 0.93;
+        ball.vx = (dx > 0 ? -1 : 1) * ball.r * 10;
+        ball.y -= ball.r * 0.6;
+        for (k = 0; k < 10; k++) puffs.push({ x: ball.x, y: ball.y, vx: (Math.random() - 0.5) * ball.r * 8, vy: (Math.random() - 0.5) * ball.r * 8, life: 0.7, s: ball.r * (0.1 + Math.random() * 0.2) });
+        noiseHit(0.25, 300, 0.5, 0.8); tone(140, 0.2, 0.2, "triangle", 70);
+      }
+    }
+    /* 置くものを先へ足し、通り過ぎたものは消す */
+    while (nextSpawn < ball.y + H / cam.z * 1.1) spawnRow();
+    objs = objs.filter(function (o) { return o.y > ball.y - H / cam.z; });
+    trail.push({ x: ball.x, y: ball.y, r: ball.r });
+    if (trail.length > 400) trail.shift();
+    if (T >= TIME) finish();
+  }
+
+  /* ============ 入力 ============
+     タップとスペースキーで同じことができるようにする。
+     x が null のときはキー操作（場所を指さない）。 */
+  function down(x, y) {
+    if(state===S.INTRO)return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    held = true;
+    steer = x == null ? null : x;
+  }
+  function move(x, y) {
+    if (state !== S.PLAY || !held) return;
+    steer = x;
+  }
+  function up() {
+    if (!held) return;
+    held = false;
+    steer = null;
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  /* 本番以外（手元・確認用ページ・制作中の固定リンク）だけ、数字キーで場面を飛ばせる。
+     本番（www.zounoashi.com/games/ 以下）では効かない。 */
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    /* ▼DEBUG: 1 大きくする / 2 終わり3秒前 / 3 完了 */
+    if (state !== S.PLAY) newRound();
+    if (n === 1) ball.r *= 3;
+    if (n === 2) T = TIME - 3;
+    if (n === 3) finish();
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (!esc && !go && !left && !right) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (left || right) {
+      if (state !== S.PLAY) return;
+      keyDir = left ? -1 : 1;
+      return;
+    }
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
+    if (/^(ArrowLeft|ArrowRight|a|A|d|D)$/.test(e.key)) keyDir = 0;
+  });
+
+  function doShare() {
+    /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
+       URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
+    /* 英語のときのハッシュタグは英語のゲーム名にする（空白・記号は除く） */
+    var ja = "ポメラニアンが雪の坂を転がって直径" + sizeText(score, "ja") + "になった", en = "My Pomeranian rolled down a snowy slope and grew to " + sizeText(score, "en") + " across.";
+    window.zResultActions.x({ text: zT(ja, en) + zT(" #雪玉ポメ", " #SnowballPom") });
+  }
+
+  /* ============ 描画 ============ */
+  function sizeText(cm, lang) { return cm >= 1000 ? (cm / 100).toFixed(1) + "m" : cm + "cm"; }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+
+    drawWorld();
+
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* ============ 雪の坂の絵 ============ */
+  function sx(x) { return W / 2 + (x - cam.x) * cam.z; }
+  function sy(y) { return CY + (y - cam.y) * cam.z; }
+  function hash(a, b) { var h = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return h - Math.floor(h); }
+  function drawWorld() {
+    var z = cam.z, i;
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#e4edf8"); g.addColorStop(1, "#f7fbff");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    /* 雪のでこぼこ（坂といっしょに流れる） */
+    var sp = 70 / z, gx0 = Math.floor((cam.x - W / 2 / z) / sp) - 1, gy0 = Math.floor((cam.y - CY / z) / sp) - 1;
+    ctx.fillStyle = "rgba(170,190,220,.28)";
+    for (var gy = gy0; gy < gy0 + H / z / sp + 3; gy++) for (var gx = gx0; gx < gx0 + W / z / sp + 3; gx++) {
+      var hx = hash(gx, gy), hy = hash(gy, gx);
+      ctx.beginPath(); ctx.ellipse(sx((gx + hx) * sp), sy((gy + hy) * sp), 10 + hx * 14, 3 + hy * 3, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    /* 転がった跡 */
+    ctx.strokeStyle = "rgba(170,192,224,.3)"; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (i = 1; i < trail.length; i++) {
+      var a = trail[i - 1], b = trail[i];
+      ctx.lineWidth = b.r * 1.2 * z;
+      ctx.beginPath(); ctx.moveTo(sx(a.x), sy(a.y)); ctx.lineTo(sx(b.x), sy(b.y)); ctx.stroke();
+    }
+    /* 置いてあるものと雪玉を、上から順に重ねる */
+    var list = objs.slice().sort(function (p, q) { return p.y - q.y; }), drawn = false;
+    list.forEach(function (o) {
+      if (!drawn && o.y > ball.y) { drawBall(); drawn = true; }
+      var X = sx(o.x), Y = sy(o.y), D = o.d * z;
+      if (Y < -D * 2 || Y > H + D || X < -D || X > W + D) return;
+      ctx.fillStyle = "rgba(120,140,175,.25)";
+      ctx.beginPath(); ctx.ellipse(X, Y, D * 0.45, D * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+      drawObj(o.kind, X, Y, D, o.seed);
+    });
+    if (!drawn) drawBall();
+    puffs.forEach(function (p) {
+      ctx.fillStyle = "rgba(255,255,255," + Math.max(0, p.life / 0.7) + ")";
+      ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), p.s * z, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  /* 雪玉。中のポメは顔と前足を出してこちらを見ている。雪のかたまりとくっつけたものは転がって回る */
+  function drawBall() {
+    var X = sx(ball.x), Y = CY, R = ball.r * cam.z, i;
+    ctx.fillStyle = "rgba(110,130,170,.3)";
+    ctx.beginPath(); ctx.ellipse(X, Y + R * 0.75, R * 1.05, R * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+    /* 後ろ側（見えない側）に回ったものは描かず、手前のものだけ */
+    function onBall(u, th) { return { x: X + Math.sin(u) * R, y: Y + Math.cos(u) * Math.sin(th) * R, z: Math.cos(u) * Math.cos(th) }; }
+    var g = ctx.createRadialGradient(X - R * 0.35, Y - R * 0.4, R * 0.1, X, Y, R);
+    g.addColorStop(0, "#ffffff"); g.addColorStop(0.7, "#eef3fa"); g.addColorStop(1, "#c9d6e8");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X, Y, R, 0, Math.PI * 2); ctx.fill();
+    /* 雪のかたまり（転がると上から下へ流れる） */
+    for (i = 0; i < 22; i++) {
+      var q = onBall((hash(i, 3) - 0.5) * 2.6, roll + i * 1.7);
+      if (q.z <= 0.05) continue;
+      ctx.fillStyle = "rgba(190,205,228," + (0.5 * q.z) + ")";
+      ctx.beginPath(); ctx.arc(q.x, q.y, R * (0.08 + hash(i, 9) * 0.08) * (0.4 + q.z * 0.6), 0, Math.PI * 2); ctx.fill();
+    }
+    stuck.forEach(function (st) {
+      var q = onBall(st.u, roll - st.ph);
+      if (q.z <= 0.1) return;
+      drawObj(st.kind, q.x, q.y + st.s * cam.z * 0.3, st.s * 2 * cam.z * (0.5 + q.z * 0.4), st.seed);
+    });
+    /* ポメ */
+    var hr = R * 0.42, hy = Y - R * 0.02;
+    [-1, 1].forEach(function (s) {
+      ctx.fillStyle = "#fbf3e6";
+      ctx.beginPath(); ctx.moveTo(X + s * hr * 0.95, hy - hr * 0.2); ctx.quadraticCurveTo(X + s * hr * 0.85, hy - hr * 1.35, X + s * hr * 0.35, hy - hr * 0.85); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#ffbfd0";
+      ctx.beginPath(); ctx.moveTo(X + s * hr * 0.8, hy - hr * 0.4); ctx.quadraticCurveTo(X + s * hr * 0.75, hy - hr * 1.05, X + s * hr * 0.45, hy - hr * 0.8); ctx.closePath(); ctx.fill();
+    });
+    ctx.fillStyle = "#fbf3e6";
+    ctx.beginPath(); ctx.arc(X, hy, hr, 0, Math.PI * 2); ctx.fill();
+    for (i = 0; i < 14; i++) { var a = i / 14 * Math.PI * 2; ctx.beginPath(); ctx.arc(X + Math.cos(a) * hr * 0.95, hy + Math.sin(a) * hr * 0.95, hr * 0.2, 0, Math.PI * 2); ctx.fill(); }
+    [-1, 1].forEach(function (s) {
+      ctx.beginPath(); ctx.ellipse(X + s * hr * 0.42, hy + hr * 1.05, hr * 0.22, hr * 0.17, 0, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.fillStyle = "#15100e";
+    [-1, 1].forEach(function (s) { ctx.beginPath(); ctx.arc(X + s * hr * 0.33, hy - hr * 0.08, hr * 0.12, 0, Math.PI * 2); ctx.fill(); });
+    ctx.fillStyle = "#fff";
+    [-1, 1].forEach(function (s) { ctx.beginPath(); ctx.arc(X + s * hr * 0.33 + hr * 0.04, hy - hr * 0.13, hr * 0.045, 0, Math.PI * 2); ctx.fill(); });
+    ctx.fillStyle = "#15100e";
+    ctx.beginPath(); ctx.ellipse(X, hy + hr * 0.16, hr * 0.1, hr * 0.075, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#15100e"; ctx.lineWidth = Math.max(1.5, hr * 0.06); ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(X - hr * 0.16, hy + hr * 0.32); ctx.quadraticCurveTo(X - hr * 0.08, hy + hr * 0.4, X, hy + hr * 0.28); ctx.quadraticCurveTo(X + hr * 0.08, hy + hr * 0.4, X + hr * 0.16, hy + hr * 0.32); ctx.stroke();
+    ctx.fillStyle = "#ff7d98"; ctx.beginPath(); ctx.ellipse(X, hy + hr * 0.45, hr * 0.08, hr * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,150,180,.45)";
+    [-1, 1].forEach(function (s) { ctx.beginPath(); ctx.ellipse(X + s * hr * 0.58, hy + hr * 0.2, hr * 0.15, hr * 0.09, 0, 0, Math.PI * 2); ctx.fill(); });
+    if (bumpT > 0.3) {                         /* ぶつかった直後は少し赤く */
+      ctx.fillStyle = "rgba(255,80,80," + ((bumpT - 0.3) * 0.8) + ")";
+      ctx.beginPath(); ctx.arc(X, Y, R, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  /* 坂のもの。(X, Y) が地面に着いている所、D が幅（px） */
+  function drawObj(kind, X, Y, D, seed) {
+    ctx.save();
+    ctx.translate(X, Y);
+    if (kind === "rock") {
+      ctx.fillStyle = "#8b93a3"; ctx.beginPath(); ctx.ellipse(0, -D * 0.22, D * 0.5, D * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(-D * 0.05, -D * 0.4, D * 0.3, D * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+    } else if (kind === "snowman") {
+      ctx.fillStyle = "#fff"; ctx.strokeStyle = "#c9d6e8"; ctx.lineWidth = Math.max(1, D * 0.02);
+      ctx.beginPath(); ctx.arc(0, -D * 0.3, D * 0.3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, -D * 0.78, D * 0.21, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#15100e"; [-1, 1].forEach(function (s) { ctx.beginPath(); ctx.arc(s * D * 0.07, -D * 0.82, D * 0.025, 0, Math.PI * 2); ctx.fill(); });
+      ctx.fillStyle = "#ff8a2a"; ctx.beginPath(); ctx.moveTo(0, -D * 0.77); ctx.lineTo(D * 0.16, -D * 0.74); ctx.lineTo(0, -D * 0.72); ctx.fill();
+      ctx.fillStyle = "#e0413a"; ctx.fillRect(-D * 0.2, -D * 0.6, D * 0.4, D * 0.07);
+    } else if (kind === "tree") {
+      ctx.fillStyle = "#7a5233"; ctx.fillRect(-D * 0.07, -D * 0.25, D * 0.14, D * 0.25);
+      for (var i = 0; i < 3; i++) {
+        var y0 = -D * (0.2 + i * 0.35), w = D * (0.5 - i * 0.12);
+        ctx.fillStyle = "#2f7d58"; ctx.beginPath(); ctx.moveTo(-w, y0); ctx.lineTo(0, y0 - D * 0.55); ctx.lineTo(w, y0); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(-w * 0.45, y0 - D * 0.3); ctx.lineTo(0, y0 - D * 0.55); ctx.lineTo(w * 0.45, y0 - D * 0.3); ctx.quadraticCurveTo(0, y0 - D * 0.22, -w * 0.45, y0 - D * 0.3); ctx.fill();
+      }
+    } else if (kind === "house") {
+      ctx.fillStyle = "#b5694a"; ctx.fillRect(-D * 0.42, -D * 0.5, D * 0.84, D * 0.5);
+      ctx.fillStyle = "#ffd76a"; ctx.fillRect(-D * 0.28, -D * 0.36, D * 0.18, D * 0.14); ctx.fillRect(D * 0.1, -D * 0.36, D * 0.18, D * 0.14);
+      ctx.fillStyle = "#5a3a2a"; ctx.fillRect(-D * 0.06, -D * 0.24, D * 0.12, D * 0.24);
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(-D * 0.55, -D * 0.46); ctx.lineTo(0, -D * 0.85); ctx.lineTo(D * 0.55, -D * 0.46); ctx.closePath(); ctx.fill();
+    } else if (kind === "bldg") {
+      ctx.fillStyle = "#7f8fa8"; ctx.fillRect(-D * 0.35, -D * 1.4, D * 0.7, D * 1.4);
+      ctx.fillStyle = "#fff"; ctx.fillRect(-D * 0.38, -D * 1.44, D * 0.76, D * 0.08);
+      ctx.fillStyle = "#cfe3ff";
+      for (var r = 0; r < 7; r++) for (var c = 0; c < 3; c++) ctx.fillRect(-D * 0.27 + c * D * 0.2, -D * 1.28 + r * D * 0.18, D * 0.12, D * 0.1);
+    } else {
+      ctx.fillStyle = "#8ea3c4"; ctx.beginPath(); ctx.moveTo(-D * 0.55, 0); ctx.lineTo(0, -D * 0.8); ctx.lineTo(D * 0.55, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(-D * 0.2, -D * 0.5); ctx.lineTo(0, -D * 0.8); ctx.lineTo(D * 0.2, -D * 0.5); ctx.lineTo(D * 0.07, -D * 0.55); ctx.lineTo(-D * 0.05, -D * 0.47); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    var num = score >= 1000 ? (score / 100).toFixed(1) : String(score), unit = score >= 1000 ? "m" : "cm";
+    ctx.font = "800 108px sans-serif"; var nw = ctx.measureText(num).width;
+    ctx.font = "800 52px sans-serif"; var uw = ctx.measureText(unit).width;
+    var x0 = W / 2 - (nw + 8 + uw) / 2;
+    ctx.textAlign = "left";
+    ctx.font = "800 108px sans-serif"; ctx.fillText(num, x0, H * 0.45);
+    ctx.font = "800 52px sans-serif"; ctx.fillText(unit, x0 + nw + 8, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx,b.label,0,1,30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
+     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
+  window.__probe = {
+    now: function () { return { state: state, score: score, T: T, r: ball.r, objs: objs.length, W: W, H: H }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============
+     record.js が呼ぶ自動操作。ゲームに合わせて run の中だけ書き換える。 */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      if (!await r.until(function () { return state === S.RESULT; }, TIME + 5)) throw Error("勝敗が出ない");
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  newRound();state=S.INTRO;startButton.hidden=false;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    /* 端末の速さで難しさが変わらないように、描画が遅れてもゲームの時間は実際の時間どおり進める。
+       1回の update は 1/60 秒までに刻む。タブから戻ってきたときの大きな空白だけは切り捨てる */
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
