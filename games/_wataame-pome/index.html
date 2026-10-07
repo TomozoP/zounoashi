@@ -137,7 +137,8 @@
   var TOTAL = 20;                  /* 砂糖がなくなるまでの秒数 */
   var SPREAD = 0.3;                /* 綿あめが付く幅（下向きを中心に、ラジアン） */
   /* 1秒に付く断面積 cm²。回す速さ（角速度）と今の大きさに比例するので、回すほど桁違いに大きくなる */
-  function feedRate(w) { var aw = Math.min(40, Math.abs(w)); return aw * (40 + 0.036 * area()); }
+  function feedRate(w) { var aw = Math.min(40, Math.abs(w)); return aw * (40 + 0.05 * area()); }
+  var MAXD = 1e7;                  /* いちばん大きくて直径100km。ここまで育つと空へ打ち上がって惑星になる */
   /* 長さの表示。cm → m → km */
   function unitOf(cm) {
     if (cm < 1000) return [String(Math.round(cm)), "cm"];
@@ -145,10 +146,10 @@
     return [(cm < 1e6 ? (cm / 1e5).toFixed(2) : cm < 1e7 ? (cm / 1e5).toFixed(1) : String(Math.round(cm / 1e5))), "km"];
   }
 
-  var S = { INTRO: "intro", PLAY: "play", END: "end", RESULT: "result" };
+  var S = { INTRO: "intro", PLAY: "play", END: "end", LAUNCH: "launch", RESULT: "result" };
   var state, T, held, keyMode = false;
   var f = new Float32Array(N), ang, omega, pending, lastFinger, keyDir;
-  var drops, camR, endT, score, bits, wisps, flingCool, dropCool;
+  var drops, camR, endT, score, bits, wisps, flingCool, dropCool, launchT = 0, planet = false;
 
   /* 綿の模様（ポメに貼りついて回る細い筋）。毎回同じ形にする */
   var STRANDS = [];
@@ -165,6 +166,14 @@
   })();
 
   var CX, CY;
+  /* 宇宙の星（決まった並び） */
+  var STARS = [];
+  (function () {
+    var seed = 4242;
+    function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+    for (var i = 0; i < 140; i++) STARS.push({ x: rnd(), y: rnd(), r: 0.6 + rnd() * 1.6, a: 0.4 + rnd() * 0.6 });
+  })();
+
   function place() { CX = W / 2; CY = Math.round(H * 0.40); }
 
   function newRound() {
@@ -174,7 +183,7 @@
     T = 0; held = false; keyDir = 0;
     for (var i = 0; i < N; i++) f[i] = R0;
     ang = 0; omega = 0; pending = 0; lastFinger = null;
-    drops = 0; camR = 34; endT = 0; score = 0;
+    drops = 0; camR = 34; endT = 0; score = 0; launchT = 0; planet = false;
     bits = []; wisps = []; flingCool = 0; dropCool = 0; barkT = 1; lastBark = diameter();
     humOn();
   }
@@ -197,6 +206,15 @@
       if (endT > 1.1 && !endBark) { endBark = true; barkT = 0; bark(); }
       camR += (Math.max(34, maxR() + 4) - camR) * Math.min(1, dt * 3);
       if (endT > 2.2) toResult();
+      return;
+    }
+    if (state === S.LAUNCH) {
+      /* 100km：空へ打ち上がって、宇宙で惑星になる */
+      launchT += dt; barkT += dt; omega = 0;
+      var fr = Math.round(ang / (Math.PI * 2)) * Math.PI * 2;
+      ang += (fr - ang) * Math.min(1, dt * 4);
+      if (launchT > 2.5 && !endBark) { endBark = true; barkT = 0; bark(); }
+      if (launchT > 3.6) toResult();
       return;
     }
     if (state !== S.PLAY) return;
@@ -246,12 +264,13 @@
     if (dia > Math.max(lastBark + 3, lastBark * 1.08) && barkT > 0.2) { lastBark = dia; barkT = 0; bark(); }
     if (dia < lastBark * 0.92) lastBark = dia;
 
+    if (diameter() >= MAXD) { toLaunch(); return; }
     if (!feeding) { state = S.END; endT = 0; endBark = false; held = false; keyDir = 0; humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
   }
 
   var barkT = 1, lastBark = 28, endBark = false;
   /* 足の伸び具合（0〜1）。終わってから生える */
-  function legGrow() { return state === S.RESULT ? 1 : state === S.END ? Math.max(0, Math.min(1, (endT - 0.5) / 0.4)) : 0; }
+  function legGrow() { return state === S.RESULT ? 1 : state === S.LAUNCH ? Math.max(0, Math.min(1, (launchT - 2.1) / 0.4)) : state === S.END ? Math.max(0, Math.min(1, (endT - 0.5) / 0.4)) : 0; }
   /* わん。のこぎり波を口の形（2つの山の帯域）に通して、高さを下げながら短く鳴らす。大きいほど低い */
   function bark() {
     if (!AC) return;
@@ -316,7 +335,24 @@
 
   function toResult() {
     state = S.RESULT;
-    score = Math.round(diameter());
+    score = planet ? MAXD : Math.round(diameter());
+  }
+  function toLaunch() {
+    var k = MAXD / diameter();
+    for (var i = 0; i < N; i++) f[i] *= k;
+    state = S.LAUNCH; launchT = 0; planet = true; endBark = false;
+    held = false; keyDir = 0; camR = maxR() + 4; bits = []; wisps = [];
+    humOff();
+    tone(120, 1.3, 0.14, "sawtooth", 900);
+    noiseHit(1.2, 500, 0.35, 0.7);
+    tone(523, 0.5, 0.08, "triangle", null, 1.5); tone(659, 0.5, 0.08, "triangle", null, 1.65); tone(784, 0.9, 0.08, "triangle", null, 1.8);
+  }
+  /* 打ち上げの進み。up: 上へ飛んでいく(0〜1)、space: 背景が宇宙になる(0〜1)、down: 惑星が降りてくる(0〜1) */
+  function launchPhase() {
+    if (state === S.RESULT && planet) return { up: 1, space: 1, down: 1 };
+    if (state !== S.LAUNCH) return null;
+    var t = launchT;
+    return { up: Math.min(1, t / 1.1), space: Math.max(0, Math.min(1, (t - 0.4) / 0.9)), down: Math.max(0, Math.min(1, (t - 1.3) / 1.1)) };
   }
 
   /* ============ 入力 ============ */
@@ -365,6 +401,7 @@
     if (n === 1) { if (state !== S.PLAY) newRound(); for (var i = 0; i < N; i++) f[i] = 90; T = TOTAL; }      /* 1: 大きくして終わり */
     if (n === 2) { if (state !== S.PLAY) newRound(); T = TOTAL - 3; }                                       /* 2: 砂糖があと3秒 */
     if (n === 3) { if (state !== S.PLAY) newRound(); for (var j = 0; j < N; j++) f[j] = 70; }               /* 3: 大きくする */
+    if (n === 4) { if (state !== S.PLAY) newRound(); for (var m = 0; m < N; m++) f[m] = MAXD; }            /* 4: 惑星になる */
   }
 
   window.addEventListener("keydown", function (e) {
@@ -392,12 +429,14 @@
   function doShare() {
     var d = score;
     var u = unitOf(d), L = u[0] + u[1];
-    var ja = d >= 100000 ? "ポメラニアンを直径" + L + "の綿あめにして宇宙から見えるようにした"
+    var ja = d >= MAXD ? "ポメラニアンを直径" + L + "の綿あめにして惑星にした"
+      : d >= 100000 ? "ポメラニアンを直径" + L + "の綿あめにして宇宙から見えるようにした"
       : d >= 1000 ? "ポメラニアンを直径" + L + "の綿あめにして家より大きくした"
       : d >= 200 ? "ポメラニアンを直径" + L + "の綿あめにしてドアを通れなくした"
       : d >= 120 ? "ポメラニアンを直径" + L + "の綿あめにして抱っこできなくした"
       : "ポメラニアンを直径" + L + "の綿あめにした";
-    var en = d >= 100000 ? "Turned a Pomeranian into a " + L + " cotton candy. You can see it from space."
+    var en = d >= MAXD ? "Turned a Pomeranian into a " + L + " cotton candy. It became a planet."
+      : d >= 100000 ? "Turned a Pomeranian into a " + L + " cotton candy. You can see it from space."
       : d >= 1000 ? "Turned a Pomeranian into a " + L + " cotton candy. It's bigger than a house."
       : d >= 200 ? "Turned a Pomeranian into a " + L + " cotton candy. It no longer fits through the door."
       : d >= 120 ? "Turned a Pomeranian into a " + L + " cotton candy. Too big to hug now."
@@ -422,25 +461,69 @@
     var cr = camR || 34;
     scale = Math.min(W * 0.40 / cr, H * 0.30 / cr);
 
-    /* 夜店の台 */
-    ctx.fillStyle = "#24304a"; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = "rgba(255,255,255,.03)";
-    for (var y = 0; y < H; y += 46) ctx.fillRect(0, y, W, 23);
+    var lp = launchPhase();
+    if (lp && lp.down < 1 && lp.space < 1 || !lp) {
+      /* 夜店の台（打ち上げのときは下へ流れていく） */
+      var sink = lp ? Math.pow(lp.up, 2) * H * 0.9 : 0;
+      ctx.save(); ctx.translate(0, sink);
+      ctx.fillStyle = "#24304a"; ctx.fillRect(0, -sink, W, H + sink);
+      ctx.fillStyle = "rgba(255,255,255,.03)";
+      for (var y = 0; y < H; y += 46) ctx.fillRect(0, y, W, 23);
+      drawMachine(cr);
+      drawStreams(cr);
+      ctx.restore();
+    }
+    if (lp && lp.space > 0) drawSpace(lp.space);
 
-    drawMachine(cr);
-    drawStreams(cr);
-
+    var cy = CY;
+    if (lp) {
+      if (lp.down <= 0) cy = CY - Math.pow(lp.up, 2) * (CY + cr * scale * 1.2);
+      else {
+        /* 惑星：画面に収まる大きさで上から降りてくる */
+        var e = 1 - Math.pow(1 - lp.down, 3);
+        scale = Math.min(W, H) * 0.24 / maxR();
+        cy = -maxR() * scale * 1.5 + (CY + maxR() * scale * 1.5) * e;
+      }
+    }
+    var showPlanet = lp && lp.down > 0;
     ctx.save();
-    ctx.translate(CX, CY);
+    ctx.translate(CX, cy);
     ctx.scale(scale, scale);
-    drawBits();
+    if (showPlanet) drawRing(true);
+    if (!lp) drawBits();
     drawFloss();
     drawLegs();
     drawPom();
-    drawWisps();
+    if (!lp) drawWisps();
+    if (showPlanet) drawRing(false);
     ctx.restore();
 
     if (state === S.RESULT) drawResult();
+  }
+
+  /* 宇宙の背景 */
+  function drawSpace(a) {
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = "#070a1c"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#fff";
+    STARS.forEach(function (s) { ctx.globalAlpha = a * s.a; ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2); ctx.fill(); });
+    ctx.restore();
+  }
+  /* 惑星の環。奥の半分を先に、手前の半分を後に描く */
+  function drawRing(back) {
+    var R = maxR();
+    ctx.save();
+    ctx.rotate(-0.25);
+    ctx.lineCap = "round";
+    [["rgba(255,182,206,.85)", 1.55, 0.09], ["rgba(190,220,255,.8)", 1.78, 0.07]].forEach(function (c) {
+      ctx.strokeStyle = c[0]; ctx.lineWidth = R * c[2];
+      ctx.beginPath();
+      if (back) ctx.ellipse(0, 0, R * c[1], R * c[1] * 0.22, 0, Math.PI, Math.PI * 2);
+      else ctx.ellipse(0, 0, R * c[1], R * c[1] * 0.22, 0, 0, Math.PI);
+      ctx.stroke();
+    });
+    ctx.restore();
   }
 
   function machineY(cr) { return CY + (cr + 16) * scale; }
