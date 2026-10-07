@@ -177,14 +177,14 @@ window.DRAFT_GAMES = [
   {
     "type": "lab",
     "tags": [],
-    "id": "wataame-pome",
-    "title": "わたあめポメ",
+    "id": "pome-maker",
+    "title": "オリジナルポメラニアンメーカー",
     "year": 2026,
     "date": "2026-10-07",
     "plays": null,
     "url": "",
-    "img": "games/_wataame-pome/img/thumb.webp",
-    "play": "games/_wataame-pome/index.html",
+    "img": "games/_pome-maker/img/thumb.webp",
+    "play": "games/_pome-maker/index.html",
     "full": true,
     "catch": "ポメラニアンを綿あめ機で大きくする"
   }

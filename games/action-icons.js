@@ -2,7 +2,7 @@
    ボタンを足すときは、ゲームごとに描かずここへ同じ線の太さで足す。 */
 (function(global){
   'use strict';
-  function kind(label){return label==='もう一度'||label==='もう一度走る'?'retry':label==='Xでシェア'||label==='Xでポスト'?'share':label==='次'||label==='次へ'?'next':label==='画像を選ぶ'?'photo':label==='ガイドを消す'?'guide':label==='ガイドを出す'?'guideOff':label==='スプレー'?'spray':label==='ハサミ'?'scissors':null;}
+  function kind(label){return label==='もう一度'||label==='もう一度走る'?'retry':label==='Xでシェア'||label==='Xでポスト'?'share':label==='次'||label==='次へ'?'next':label==='画像を選ぶ'?'photo':label==='ガイドを消す'?'guide':label==='ガイドを出す'?'guideOff':label==='スプレー'?'spray':label==='ハサミ'?'scissors':label==='毛色'?'palette':label==='飾り'?'ribbon':null;}
   function draw(ctx,label,x,y,size){
     var id=kind(label);if(!id)return false;
     ctx.save();ctx.translate(x,y);ctx.scale((size||30)/24,(size||30)/24);ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';
@@ -25,6 +25,16 @@
       ctx.beginPath();ctx.arc(-5,6,3.2,0,Math.PI*2);ctx.stroke();
       ctx.beginPath();ctx.arc(5,6,3.2,0,Math.PI*2);ctx.stroke();
       ctx.beginPath();ctx.moveTo(-3,3.5);ctx.lineTo(6,-10);ctx.moveTo(3,3.5);ctx.lineTo(-6,-10);ctx.stroke();
+    }else if(id==='palette'){
+      /* 絵の具の板と、色の丸3つ */
+      ctx.beginPath();ctx.moveTo(1,-10);ctx.bezierCurveTo(10,-10,12,-2,11,3);ctx.bezierCurveTo(10,8,4,6,3,9);ctx.bezierCurveTo(1,12,-6,11,-9,7);ctx.bezierCurveTo(-13,1,-10,-10,1,-10);ctx.closePath();ctx.stroke();
+      ctx.beginPath();ctx.arc(-4,-4,1.6,0,Math.PI*2);ctx.arc(3,-5,1.6,0,Math.PI*2);ctx.moveTo(-3.4,3);ctx.arc(-5,3,1.6,0,Math.PI*2);ctx.fill();
+    }else if(id==='ribbon'){
+      /* 蝶結びのリボン */
+      ctx.beginPath();ctx.moveTo(-2,0);ctx.lineTo(-10,-6);ctx.lineTo(-10,6);ctx.closePath();ctx.stroke();
+      ctx.beginPath();ctx.moveTo(2,0);ctx.lineTo(10,-6);ctx.lineTo(10,6);ctx.closePath();ctx.stroke();
+      ctx.beginPath();ctx.arc(0,0,2.4,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-1.5,2.2);ctx.lineTo(-4,10);ctx.moveTo(1.5,2.2);ctx.lineTo(4,10);ctx.stroke();
     }else if(id==='guide'||id==='guideOff'){
       /* 目の形。消えているときは斜線を引く */
       ctx.beginPath();ctx.moveTo(-10,0);ctx.quadraticCurveTo(0,-10,10,0);ctx.quadraticCurveTo(0,10,-10,0);ctx.closePath();ctx.stroke();

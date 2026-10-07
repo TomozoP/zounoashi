@@ -1,7 +1,7 @@
-/* わたあめポメ：開始・道具の切り替え・完成・再開を短く確認する（立体の形は偽DOMでは作らない）。 */
+/* オリジナルポメラニアンメーカー：開始・道具の切り替え・完成・再開を短く確認する（立体の形は偽DOMでは作らない）。 */
 const assert = require('assert');
 const load = require('../harness');
-const g = load('games/_wataame-pome/index.html');
+const g = load('games/_pome-maker/index.html');
 assert.equal(g.probe.now().state, 'intro');
 g.press(' ');
 g.step(2);
@@ -15,4 +15,4 @@ assert.equal(g.probe.now().state, 'result');
 g.press(' '); g.step(2);
 assert.equal(g.probe.now().state, 'play');
 assert.equal(g.probe.now().tool, 'spray', '再開するとスプレーに戻る');
-console.log('わたあめポメ：開始・道具の切り替え・完成・再開を確認');
+console.log('オリジナルポメラニアンメーカー：開始・道具の切り替え・完成・再開を確認');
