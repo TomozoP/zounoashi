@@ -136,8 +136,14 @@
   var R0 = 14;                     /* ポメ本体（毛こみ）の半径 cm */
   var TOTAL = 20;                  /* 砂糖がなくなるまでの秒数 */
   var SPREAD = 0.3;                /* 綿あめが付く幅（下向きを中心に、ラジアン） */
-  /* 1秒に付く断面積 cm²。回す速さ（角速度）に比例して、回せば回すほど付く */
-  function feedRate(w) { return 160 * Math.min(40, Math.abs(w)); }
+  /* 1秒に付く断面積 cm²。回す速さ（角速度）と今の大きさに比例するので、回すほど桁違いに大きくなる */
+  function feedRate(w) { var aw = Math.min(40, Math.abs(w)); return aw * (40 + 0.036 * area()); }
+  /* 長さの表示。cm → m → km */
+  function unitOf(cm) {
+    if (cm < 1000) return [String(Math.round(cm)), "cm"];
+    if (cm < 100000) return [(cm < 10000 ? (cm / 100).toFixed(1) : String(Math.round(cm / 100))), "m"];
+    return [(cm < 1e6 ? (cm / 1e5).toFixed(2) : cm < 1e7 ? (cm / 1e5).toFixed(1) : String(Math.round(cm / 1e5))), "km"];
+  }
 
   var S = { INTRO: "intro", PLAY: "play", END: "end", RESULT: "result" };
   var state, T, held, keyMode = false;
@@ -237,8 +243,8 @@
     /* 3cm 大きくなるたびに「ワン」 */
     barkT += dt;
     var dia = diameter();
-    if (dia > lastBark + 3 && barkT > 0.2) { lastBark = dia; barkT = 0; bark(); }
-    if (dia < lastBark - 3) lastBark = dia;
+    if (dia > Math.max(lastBark + 3, lastBark * 1.08) && barkT > 0.2) { lastBark = dia; barkT = 0; bark(); }
+    if (dia < lastBark * 0.92) lastBark = dia;
 
     if (!feeding) { state = S.END; endT = 0; endBark = false; held = false; keyDir = 0; humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
   }
@@ -385,12 +391,17 @@
 
   function doShare() {
     var d = score;
-    var ja = d >= 200 ? "ポメラニアンを直径" + d + "cmの綿あめにしてドアを通れなくした"
-      : d >= 120 ? "ポメラニアンを直径" + d + "cmの綿あめにして抱っこできなくした"
-      : "ポメラニアンを直径" + d + "cmの綿あめにした";
-    var en = d >= 200 ? "Turned a Pomeranian into a " + d + "cm cotton candy. It no longer fits through the door."
-      : d >= 120 ? "Turned a Pomeranian into a " + d + "cm cotton candy. Too big to hug now."
-      : "Turned a Pomeranian into a " + d + "cm cotton candy.";
+    var u = unitOf(d), L = u[0] + u[1];
+    var ja = d >= 100000 ? "ポメラニアンを直径" + L + "の綿あめにして宇宙から見えるようにした"
+      : d >= 1000 ? "ポメラニアンを直径" + L + "の綿あめにして家より大きくした"
+      : d >= 200 ? "ポメラニアンを直径" + L + "の綿あめにしてドアを通れなくした"
+      : d >= 120 ? "ポメラニアンを直径" + L + "の綿あめにして抱っこできなくした"
+      : "ポメラニアンを直径" + L + "の綿あめにした";
+    var en = d >= 100000 ? "Turned a Pomeranian into a " + L + " cotton candy. You can see it from space."
+      : d >= 1000 ? "Turned a Pomeranian into a " + L + " cotton candy. It's bigger than a house."
+      : d >= 200 ? "Turned a Pomeranian into a " + L + " cotton candy. It no longer fits through the door."
+      : d >= 120 ? "Turned a Pomeranian into a " + L + " cotton candy. Too big to hug now."
+      : "Turned a Pomeranian into a " + L + " cotton candy.";
     window.zResultActions.x({ text: zT(ja, en) + zT(" #わたあめポメ", " #CottonCandyPom") });
   }
 
@@ -535,13 +546,15 @@
     ctx.restore();
   }
 
+  /* 顔と足の大きさ。綿あめがとても大きくなっても見えるように、綿あめの3割より小さくしない */
+  function faceR() { return Math.max(R0, maxR() * 0.3); }
   /* 前足2本。綿あめの下の縁から、毛と同じ白で境目なく伸びる */
   function drawLegs() {
     var t = legGrow();
     if (t <= 0) return;
-    var bot = bottomR(), w = R0 * 0.34, top = bot - R0 * 0.4, foot = bot + R0 * 0.9 * t;
+    var R = faceR(), bot = bottomR(), w = R * 0.34, top = bot - R * 0.4, foot = bot + R * 0.9 * t;
     [-1, 1].forEach(function (s) {
-      var x = s * R0 * 0.38;
+      var x = s * R * 0.38;
       ctx.fillStyle = "#eef0f5";
       ctx.beginPath();
       ctx.moveTo(x - w / 2, top);
@@ -556,7 +569,7 @@
   function drawPom() {
     ctx.save();
     ctx.rotate(ang);
-    var R = R0;
+    var R = faceR();
     var bounce = 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15;
     ctx.scale(bounce, bounce);
     /* 白いポメ。毛と綿あめはひと続きなので、耳と顔だけ見える */
@@ -631,13 +644,13 @@
     ctx.shadowBlur = 10;
     ctx.textAlign = "center";
     ctx.font = "800 108px sans-serif";
-    var num = String(score), nw = ctx.measureText(num).width;
+    var u = unitOf(score), num = u[0], nw = ctx.measureText(num).width;
     ctx.font = "800 52px sans-serif";
-    var uw = ctx.measureText("cm").width;
+    var uw = ctx.measureText(u[1]).width;
     var x0 = W / 2 - (nw + 8 + uw) / 2;
     ctx.textAlign = "left";
     ctx.font = "800 108px sans-serif"; ctx.fillText(num, x0, H * 0.15);
-    ctx.font = "800 52px sans-serif"; ctx.fillText("cm", x0 + nw + 8, H * 0.15);
+    ctx.font = "800 52px sans-serif"; ctx.fillText(u[1], x0 + nw + 8, H * 0.15);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
