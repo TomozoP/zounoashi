@@ -89,12 +89,11 @@
     this.shapeKey = "";
   };
 
-  /* ポメの顔（目・鼻・舌・耳）。玉の表面のカメラ側に貼る */
+  /* ポメの顔（目・鼻・耳）。玉の表面のカメラ側に貼る */
   PomScene.prototype.buildFace = function () {
     var F = this.face = new T.Group();
     var black = std(0x15100e, { roughness: 0.3 });
     var white = std(0xffffff, { roughness: 1 });
-    var pink = std(0xe8848a, { roughness: 0.7 });
     this.eyes = []; this.dizzy = [];
     var ring = new T.TorusGeometry(1.3, 0.35, 6, 18);
     [-1, 1].forEach(function (s) {
@@ -111,8 +110,12 @@
     }, this);
     var nose = new T.Mesh(new T.SphereGeometry(1.3, 12, 10), black);
     nose.scale.set(1.2, 0.85, 1); nose.position.set(0, -1.6, 1.2); F.add(nose);
-    var tongue = new T.Mesh(new T.SphereGeometry(1, 12, 10), pink);
-    tongue.scale.set(1.1, 1.4, 0.6); tongue.position.set(0, -4.4, 0.6); F.add(tongue);
+    /* 顔は綿あめに隠れず、いつも一番手前に描く（耳→耳の内側→目・鼻→目の光の順に重ねる） */
+    F.traverse(function (o) {
+      if (!o.isMesh) return;
+      o.material = o.material.clone(); o.material.depthTest = false; o.material.depthWrite = false;
+      o.renderOrder = o.geometry.type === "ConeGeometry" ? (o.parent === F ? 10 : 11) : o.parent === F ? 12 : 13;
+    });
     this.scene.add(F);
   };
 
