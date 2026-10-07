@@ -188,6 +188,18 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "ポメラニアンを綿あめ機で大きくする"
   },
-  {"type":"lab","tags":[],"id":"wataame-pome","title":"わたあめポメ","year":2026,"date":"2026-10-07","plays":null,"url":"","img":"games/_wataame-pome/img/thumb.webp","play":"games/_wataame-pome/index.html","full":true,"catch":"ポメラニアンを綿あめ機で大きくする"},
-  {"type":"lab","tags":[],"id":"snow-pome","title":"雪玉ポメ","year":2026,"date":"2026-10-07","plays":null,"url":"","img":"games/_snow-pome/img/thumb.webp","play":"games/_snow-pome/index.html","full":true,"catch":"ポメラニアンが雪の坂を転がって大きくなる"},
+  {
+    "type": "lab",
+    "tags": [],
+    "id": "snow-pome",
+    "title": "雪玉ポメ",
+    "year": 2026,
+    "date": "2026-10-07",
+    "plays": null,
+    "url": "",
+    "img": "games/_snow-pome/img/thumb.webp",
+    "play": "games/_snow-pome/index.html",
+    "full": true,
+    "catch": "ポメラニアンが雪の坂を転がって大きくなる"
+  }
 ];
