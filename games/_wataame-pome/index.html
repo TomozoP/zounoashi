@@ -213,7 +213,9 @@
     camR += (Math.max(44, fr) - camR) * ke; camX += (fx - camX) * ke; camY += (fy - camY) * ke;
     if (state === S.END) {
       endT += dt;
-      if (endT > 1.6) toResult();
+      /* 丸さの測定：中心から円が広がって、いちばん出っぱった所で止まる */
+      if (endT > 1.4 && !pinged) { pinged = true; tone(1568, 0.25, 0.1, "sine"); tone(2093, 0.4, 0.07, "sine", null, 0.08); }
+      if (endT > 3.2) toResult();
       return;
     }
     if (state !== S.PLAY) return;
@@ -279,7 +281,7 @@
       if (meltCool <= 0) { meltCool = 0.22; noiseHit(0.25, 4200, 0.12, 0.6); }
     }
 
-    if (!feeding) { state = S.END; endT = 0; humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
+    if (!feeding) { state = S.END; endT = 0; pinged = false; measure(); humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
   }
 
   /* わん。のこぎり波を口の形（2つの山の帯域）に通して、高さを下げながら短く鳴らす */
@@ -324,12 +326,15 @@
     if (steam.length > 80) steam.splice(0, steam.length - 80);
   }
 
-  var resDia = 0, resRound = 0;
+  var resDia = 0, resRound = 0, resR = 0, resX = 0, resY = 0, pinged = false;
+  /* 点数は 直径cm × 丸さ。大きく、しかも真ん丸なほど高い */
+  function measure() {
+    resDia = Math.round(diameter()); resRound = Math.round(roundness() * 100);
+    resR = maxF(); resX = px; resY = py;
+    score = Math.round(resDia * resRound / 100);
+  }
   function toResult() {
     state = S.RESULT;
-    /* 点数は 直径cm × 丸さ。大きく、しかも真ん丸なほど高い */
-    resDia = Math.round(diameter()); resRound = Math.round(roundness() * 100);
-    score = Math.round(resDia * resRound / 100);
     tone(660, 0.12, 0.1, "square"); tone(990, 0.3, 0.1, "square", null, 0.1);
   }
 
@@ -387,7 +392,7 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function bigPom(d) { for (var i = 0; i < PN; i++) f[i] = d / 2; A = area(); var a = Math.atan2(py, px), dd = HEAD + d / 2 + 6; px = tx = Math.cos(a) * dd; py = ty = Math.sin(a) * dd; lastAng = a; }
   function debugKey(n) {
-    if (n === 1) { if (state !== S.PLAY) newRound(); bigPom(180); T = TOTAL; }      /* 1: 大きくして終わり */
+    if (n === 1) { if (state !== S.PLAY) newRound(); bigPom(150); for (var b = 0; b < PN; b++) f[b] *= 1 + 0.25 * Math.max(0, Math.cos(b * PTH)); T = TOTAL; }   /* 1: 少しいびつに大きくして終わり */
     if (n === 2) { if (state !== S.PLAY) newRound(); T = TOTAL - 3; }                /* 2: 砂糖があと3秒 */
     if (n === 3) { if (state !== S.PLAY) newRound(); bigPom(140); }                  /* 3: 大きくする */
   }
@@ -446,7 +451,7 @@
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     scale = Math.min(W * 0.47, H * 0.40) / (camR || 48);
     make3d();
-    if (scene3d && draw3d()) { drawCount(); if (state === S.RESULT) drawResult(); return; }
+    if (scene3d && draw3d()) { drawCount(); drawMeasure(); if (state === S.RESULT) drawResult(); return; }
 
     drawFestival();
 
@@ -462,6 +467,36 @@
 
     drawCount();
     if (state === S.RESULT) drawResult();
+  }
+
+  /* 丸さの測定の円。綿あめのふちの高さに、中心から広がる輪を描く */
+  function drawMeasure() {
+    if (state !== S.END && state !== S.RESULT || !resR) return;
+    var t = state === S.RESULT ? 9 : endT;
+    var g = Math.max(0, Math.min(1, (t - 0.2) / 1.2)), r = resR * (1 - Math.pow(1 - g, 3));
+    if (r <= 0.5) return;
+    ctx.save();
+    ctx.beginPath();
+    for (var i = 0; i <= 72; i++) {
+      var a = i / 72 * Math.PI * 2, p = scene3d.project(resX + Math.cos(a) * r, 0, resY + Math.sin(a) * r, W, H);
+      if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
+    }
+    var flash = t > 1.4 ? Math.max(0, 1 - (t - 1.4) / 0.4) : 0;
+    ctx.strokeStyle = "rgba(255,230,120," + (0.85 + flash * 0.15) + ")";
+    ctx.lineWidth = 4 + flash * 6;
+    ctx.shadowColor = "rgba(255,210,80,.9)"; ctx.shadowBlur = 12 + flash * 20;
+    ctx.setLineDash(g < 1 ? [] : [14, 10]);
+    ctx.stroke();
+    /* 測った丸さ。円が止まってから数え上がる */
+    if (state === S.END && t > 1.4) {
+      var k = Math.min(1, (t - 1.4) / 1.0), top = scene3d.project(resX, 0, resY - resR, W, H);
+      ctx.setLineDash([]);
+      ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10;
+      ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+      ctx.font = "800 64px sans-serif";
+      ctx.fillText(Math.round(resRound * k) + "%", W / 2, Math.max(80, top.y - 16));
+    }
+    ctx.restore();
   }
 
   /* 残り秒数。画面の上に大きく、最後の3秒は赤く */
@@ -712,7 +747,7 @@
     ctx.font = "800 108px sans-serif";
     var num = String(score), nw = ctx.measureText(num).width;
     ctx.font = "800 52px sans-serif";
-    var unit = zT("点", "pts"), uw = ctx.measureText(unit).width;
+    var unit = "pome", uw = ctx.measureText(unit).width;
     var x0 = W / 2 - (nw + 8 + uw) / 2;
     ctx.textAlign = "left";
     ctx.font = "800 108px sans-serif"; ctx.fillText(num, x0, H * 0.15);
