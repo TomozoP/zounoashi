@@ -18,6 +18,17 @@
   #share-button[hidden] { display:none; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
 </style>
+<!-- ゲームのOGP：道具で更新 -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ゾウノアシゲームズ">
+<meta property="og:title" content="おじさんの涙を舐め生きるアメンボ">
+<meta property="og:url" content="https://www.zounoashi.com/share/namida/">
+<meta property="og:image" content="https://www.zounoashi.com/games/namida/img/thumb.webp">
+<meta property="og:image:alt" content="おじさんの涙を舐め生きるアメンボ">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="おじさんの涙を舐め生きるアメンボ">
+<meta name="twitter:image" content="https://www.zounoashi.com/games/namida/img/thumb.webp">
+<!-- ゲームのOGPここまで -->
 </head>
 <body>
 <div id="stage"><div id="wrap">
@@ -90,6 +101,84 @@
     o.connect(g); g.connect(AC.destination);
     o.start(n); o.stop(n + dur + 0.05);
   }
+  /* BGM：ゆっくりしたシャッフルの12小節ブルース（自作）。イ長調、66拍/分。
+     ブギのベース、エレピの和音、ブラシの刻み、ときどきギターの泣きのフレーズ。少し先まで音を予約しておく */
+  var bgm = null;
+  var TRIP = 60 / 66 / 3;                                  /* 3連の1つ分 */
+  var BLUES = [0, 0, 0, 0, 5, 5, 0, 0, 7, 5, 0, 7];         /* 小節ごとの根音（イからの半音数） */
+  var BOOGIE = [0, 4, 7, 9, 10, 9, 7, 4];                  /* ベースの8つの音 */
+  var LICKS = {                                            /* [小節内の3連の位置, イからの半音数, 長さ(3連)] */
+    3: [[0, 15, 2], [2, 12, 1], [3, 10, 2], [5, 7, 4], [9, 3, 3]],
+    7: [[0, 12, 1], [1, 15, 1], [2, 17, 3], [6, 15, 2], [8, 12, 4]],
+    11: [[0, 19, 2], [3, 17, 1], [4, 15, 2], [6, 12, 2], [9, 10, 3]]
+  };
+  function hz(semi, base) { return base * Math.pow(2, semi / 12); }
+  function bgmStart() {
+    if (!AC || bgm) return;
+    var out = AC.createGain(); out.gain.value = 0.0001;
+    var lp = AC.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3200;
+    out.connect(lp); lp.connect(AC.destination);
+    out.gain.setTargetAtTime(0.5, AC.currentTime, 1.0);
+    bgm = { out: out, step: 0, next: AC.currentTime + 0.1 };
+    setInterval(bgmTick, 90);
+  }
+  function bgmTick() {
+    if (!bgm || !AC) return;
+    if (bgm.next < AC.currentTime) bgm.next = AC.currentTime + 0.05;   /* 裏に回って遅れた分はまとめて鳴らさない */
+    while (bgm.next < AC.currentTime + 0.4) {
+      var st = bgm.step % 144, bar = Math.floor(st / 12), b = st % 12, beat = Math.floor(b / 3), tr = b % 3, t = bgm.next;
+      var root = hz(BLUES[bar], 55);
+      /* ベース：シャッフルの表(1つ目)と裏(3つ目) */
+      if (tr !== 1) bgmBass(t, hz(BOOGIE[beat * 2 + (tr ? 1 : 0)], root), TRIP * (tr ? 1 : 2) * 0.95);
+      /* 太鼓：1・3拍に低い音、2・4拍に軽いスネア、刻みは表と裏 */
+      if (tr === 0 && beat % 2 === 0) bgmKick(t);
+      if (tr === 0 && beat % 2 === 1) bgmNoise(t, 0.16, 1800, 0.10);
+      if (tr !== 1) bgmNoise(t, 0.05, 7000, tr ? 0.035 : 0.05);
+      /* エレピ：2・4拍の裏に3度・7度・9度 */
+      if (tr === 2 && beat % 2 === 1) [4, 10, 14].forEach(function (k) { bgmKeys(t, hz(k, root * 2), TRIP * 1.6); });
+      if (b === 0) [4, 10, 14].forEach(function (k) { bgmKeys(t, hz(k, root * 2), TRIP * 2.5); });
+      /* ギター：決まった小節でだけ泣く */
+      var lk = LICKS[bar];
+      if (lk && bgm.step % 288 >= 144) lk.forEach(function (n) { if (n[0] === b) bgmGuitar(t, hz(n[1], 220), TRIP * n[2]); });
+      bgm.step++; bgm.next += TRIP;
+    }
+  }
+  function bgmBass(t, f, dur) {
+    var o = AC.createOscillator(), g = AC.createGain(), lp = AC.createBiquadFilter();
+    o.type = "triangle"; o.frequency.value = f; lp.type = "lowpass"; lp.frequency.value = 600;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.32, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(lp); lp.connect(g); g.connect(bgm.out); o.start(t); o.stop(t + dur + 0.05);
+  }
+  function bgmKeys(t, f, dur) {
+    var o = AC.createOscillator(), o2 = AC.createOscillator(), g = AC.createGain();
+    o.type = "sine"; o.frequency.value = f; o2.type = "triangle"; o2.frequency.value = f * 2.001;
+    var g2 = AC.createGain(); g2.gain.value = 0.25;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(bgm.out); o.start(t); o2.start(t); o.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
+  }
+  function bgmKick(t) {
+    var o = AC.createOscillator(), g = AC.createGain();
+    o.type = "sine"; o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.15);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.28, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    o.connect(g); g.connect(bgm.out); o.start(t); o.stop(t + 0.3);
+  }
+  function bgmNoise(t, dur, freq, vol) {
+    if (!NOISE) return;
+    var s2 = AC.createBufferSource(); s2.buffer = NOISE;
+    var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = 0.8;
+    var g = AC.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s2.connect(f); f.connect(g); g.connect(bgm.out); s2.start(t, Math.random()); s2.stop(t + dur + 0.05);
+  }
+  function bgmGuitar(t, f, dur) {
+    /* 半音下からすべり上がる、ゆれのある音 */
+    var o = AC.createOscillator(), g = AC.createGain(), lp = AC.createBiquadFilter(), lfo = AC.createOscillator(), lg = AC.createGain();
+    o.type = "sawtooth"; o.frequency.setValueAtTime(f * 0.944, t); o.frequency.exponentialRampToValueAtTime(f, t + 0.09);
+    lfo.frequency.value = 5.5; lg.gain.setValueAtTime(0, t); lg.gain.linearRampToValueAtTime(f * 0.012, t + dur);
+    lfo.connect(lg); lg.connect(o.frequency);
+    lp.type = "lowpass"; lp.frequency.value = 1400; lp.Q.value = 2;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.07, t + 0.02); g.gain.setTargetAtTime(0.0001, t + dur * 0.6, dur * 0.35 + 0.05);
+    o.connect(lp); lp.connect(g); g.connect(bgm.out); o.start(t); lfo.start(t); o.stop(t + dur * 1.6 + 0.2); lfo.stop(t + dur * 1.6 + 0.2);
+  }
   function noiseHit(dur, freq, vol, q) {
     if (!AC || !NOISE) return;
     var s = AC.createBufferSource(); s.buffer = NOISE;
@@ -115,7 +204,7 @@
   /* アメンボ：床の水面に浮かび、左右のドラッグで滑る。落ちてくる涙を水に落ちる前に受け止める */
   var sx = 270, sxT = 270, sv = 0, dragX0 = 0, dragS0 = 0, rippleT = 0, gulp = 0, glow = 0;
   var soak = 0, tilt = 0;
-  var BASE = 120;                               /* 最初の水面の高さ（画面の下から） */
+  var BASE = 70;                               /* 最初の水面の高さ（画面の下から） */
   var CAP = 16;                                 /* 取りこぼしてよい量(ml)。これであごまで水がたまる */
 
   /* 顔の置き場所。高さが変わっても涙の量で終わるので、難しさは変わらない */
@@ -141,6 +230,7 @@
   }
 
   function newRound() {
+    bgmStart();
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
@@ -699,7 +789,7 @@
   var startButton = document.getElementById('start');
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
   ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener('click', function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  startButton.addEventListener('click', function (e) { e.stopPropagation(); audioOn(); resumeAudio(); bgmStart(); newRound(); });
   layout();
   newRound(); state = S.INTRO; startButton.hidden = false;
   var last = performance.now();
