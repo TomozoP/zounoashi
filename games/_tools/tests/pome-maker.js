@@ -7,7 +7,7 @@ g.press(' ');
 g.step(2);
 assert.equal(g.probe.now().state, 'play');
 const H = g.probe.now().H;
-g.tap(136, H - 62 / 2 - Math.max(28, H * 0.035)); g.step(2);
+g.tap(116, H - 62 / 2 - Math.max(28, H * 0.035)); g.step(2);
 assert.equal(g.probe.now().tool, 'cut', 'ハサミを選べる');
 g.down(270, H * 0.4); g.step(30); g.up();
 g.win.fire('keydown', {key:'2',code:'Digit2',preventDefault:function(){}}); g.step(2);
