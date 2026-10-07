@@ -184,10 +184,13 @@
     if (state === S.INTRO) { ang += dt * 0.6; return; }
     updateBits(dt);
     if (state === S.END) {
-      endT += dt;
-      ang += omega * dt; omega *= Math.exp(-2 * dt);
+      /* 終わり：正面を向いて、下に足が生えて、ワンとひと鳴き */
+      endT += dt; barkT += dt; omega = 0;
+      var front = Math.round(ang / (Math.PI * 2)) * Math.PI * 2;
+      ang += (front - ang) * Math.min(1, dt * 5);
+      if (endT > 1.1 && !endBark) { endBark = true; barkT = 0; bark(); }
       camR += (Math.max(34, maxR() + 4) - camR) * Math.min(1, dt * 3);
-      if (endT > 1.6) toResult();
+      if (endT > 2.2) toResult();
       return;
     }
     if (state !== S.PLAY) return;
@@ -237,10 +240,12 @@
     if (dia > lastBark + 3 && barkT > 0.2) { lastBark = dia; barkT = 0; bark(); }
     if (dia < lastBark - 3) lastBark = dia;
 
-    if (!feeding) { state = S.END; endT = 0; humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
+    if (!feeding) { state = S.END; endT = 0; endBark = false; held = false; keyDir = 0; humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
   }
 
-  var barkT = 1, lastBark = 28;
+  var barkT = 1, lastBark = 28, endBark = false;
+  /* 足の伸び具合（0〜1）。終わってから生える */
+  function legGrow() { return state === S.RESULT ? 1 : state === S.END ? Math.max(0, Math.min(1, (endT - 0.5) / 0.4)) : 0; }
   /* わん。のこぎり波を口の形（2つの山の帯域）に通して、高さを下げながら短く鳴らす。大きいほど低い */
   function bark() {
     if (!AC) return;
@@ -306,7 +311,6 @@
   function toResult() {
     state = S.RESULT;
     score = Math.round(diameter());
-    tone(660, 0.12, 0.1, "square"); tone(990, 0.3, 0.1, "square", null, 0.1);
   }
 
   /* ============ 入力 ============ */
@@ -420,6 +424,7 @@
     ctx.scale(scale, scale);
     drawBits();
     drawFloss();
+    drawLegs();
     drawPom();
     drawWisps();
     ctx.restore();
@@ -437,6 +442,15 @@
     ctx.fill();
     ctx.fillStyle = "#c63a4a";
     ctx.fillRect(CX - bw * 1.25, y + bh * 1.3, bw * 2.5, 6 * scale);
+    /* 残り時間 */
+    var rest = state === S.INTRO ? TOTAL : state === S.PLAY ? Math.max(0, Math.ceil(TOTAL - T)) : 0;
+    var ty = y + bh * 1.3 + 6 * scale, fs = Math.max(28, Math.min(72, bw * 0.8));
+    ctx.fillStyle = "#1c2030";
+    roundRect(CX - fs * 0.95, ty + fs * 0.25, fs * 1.9, fs * 1.2, fs * 0.2); ctx.fill();
+    ctx.fillStyle = rest <= 5 && state === S.PLAY ? "#ff6b6b" : "#ffe08a";
+    ctx.font = "800 " + Math.round(fs) + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(String(rest), CX, ty + fs * 0.88);
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     /* 鍋の内側 */
     ctx.fillStyle = "#59606f";
     ctx.beginPath(); ctx.ellipse(CX, y, bw, bh * 0.55, 0, 0, Math.PI * 2); ctx.fill();
@@ -521,6 +535,24 @@
     ctx.restore();
   }
 
+  /* 前足2本。綿あめの下の縁から、毛と同じ白で境目なく伸びる */
+  function drawLegs() {
+    var t = legGrow();
+    if (t <= 0) return;
+    var bot = bottomR(), w = R0 * 0.34, top = bot - R0 * 0.4, foot = bot + R0 * 0.9 * t;
+    [-1, 1].forEach(function (s) {
+      var x = s * R0 * 0.38;
+      ctx.fillStyle = "#eef0f5";
+      ctx.beginPath();
+      ctx.moveTo(x - w / 2, top);
+      ctx.lineTo(x - w * 0.46, foot - w * 0.3);
+      ctx.quadraticCurveTo(x - w * 0.5 + s * w * 0.06, foot, x + s * w * 0.06, foot);
+      ctx.quadraticCurveTo(x + w * 0.5 + s * w * 0.06, foot, x + w * 0.46, foot - w * 0.3);
+      ctx.lineTo(x + w / 2, top);
+      ctx.closePath(); ctx.fill();
+    });
+  }
+
   function drawPom() {
     ctx.save();
     ctx.rotate(ang);
@@ -578,7 +610,7 @@
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H - h - Math.max(28, H * 0.035);
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -593,8 +625,6 @@
     return null;
   }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.66)";
-    ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.fillStyle = "#fff";
     ctx.shadowColor = "rgba(0,0,0,.6)";
@@ -606,8 +636,8 @@
     var uw = ctx.measureText("cm").width;
     var x0 = W / 2 - (nw + 8 + uw) / 2;
     ctx.textAlign = "left";
-    ctx.font = "800 108px sans-serif"; ctx.fillText(num, x0, H * 0.45);
-    ctx.font = "800 52px sans-serif"; ctx.fillText("cm", x0 + nw + 8, H * 0.45);
+    ctx.font = "800 108px sans-serif"; ctx.fillText(num, x0, H * 0.15);
+    ctx.font = "800 52px sans-serif"; ctx.fillText("cm", x0 + nw + 8, H * 0.15);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
