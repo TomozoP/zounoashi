@@ -146,7 +146,7 @@
   var state, T, held, keyMode = false;
   var sec = new Float32Array(N);   /* 向きごとにたまっている綿あめの面積 */
   var px, py, tx, ty, A, roll, spinRate, lastAng, keyDir;
-  var camR, endT, score, wisps, steam, flingCool, meltCool, melted, flung;
+  var camR, endT, score, wisps, steam, flingCool, meltCool, melted, flung, nextBark, barkT;
 
   /* 綿の模様（ポメに貼りついて転がる細い筋）。毎回同じ形にする */
   var STRANDS = [];
@@ -167,7 +167,7 @@
     for (var i = 0; i < N; i++) sec[i] = 0;
     px = 0; py = 26; tx = px; ty = py;
     A = Math.PI * R0 * R0; roll = 0; spinRate = 0; lastAng = Math.atan2(py, px);
-    camR = 48; endT = 0; score = 0; melted = 0; flung = 0;
+    camR = 48; endT = 0; score = 0; melted = 0; flung = 0; nextBark = 40; barkT = 1;
     wisps = []; steam = []; flingCool = 0; meltCool = 0;
     humOn();
   }
@@ -179,6 +179,7 @@
   /* ============ 進行 ============ */
   function update(dt) {
     var r = rad();
+    barkT += dt;
     if (state === S.INTRO) { T += dt; return; }
     updateParts(dt);
     camR += (Math.max(48, Math.hypot(px, py) + r + 8) - camR) * Math.min(1, dt * 2.5);
@@ -219,6 +220,12 @@
     }
     A += got;
 
+    /* 10cm 大きくなるたびに「わん」。大きいほど低い声 */
+    if (diameter() >= nextBark) {
+      while (nextBark <= diameter()) nextBark += 10;
+      if (barkT > 0.2) { bark(); barkT = 0; }
+    }
+
     /* 回しすぎ：外側の綿が飛び散る */
     flingCool -= dt;
     if (spinRate > FAST && A > Math.PI * R0 * R0 * 1.2) {
@@ -239,6 +246,25 @@
     }
 
     if (!feeding) { state = S.END; endT = 0; humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
+  }
+
+  /* わん。のこぎり波を口の形（2つの山の帯域）に通して、高さを下げながら短く鳴らす */
+  function bark() {
+    if (!AC) return;
+    var d = diameter(), p = Math.max(170, 620 * Math.pow(28 / Math.max(28, d), 0.45));
+    var n = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(p * 0.8, n);
+    o.frequency.linearRampToValueAtTime(p * 1.15, n + 0.04);
+    o.frequency.exponentialRampToValueAtTime(p * 0.6, n + 0.2);
+    var f1 = AC.createBiquadFilter(); f1.type = "bandpass"; f1.frequency.value = p * 1.6; f1.Q.value = 3;
+    var f2 = AC.createBiquadFilter(); f2.type = "bandpass"; f2.frequency.value = p * 4; f2.Q.value = 4;
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(0.9, n + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + 0.22);
+    o.connect(f1); o.connect(f2); f1.connect(g); f2.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + 0.25);
+    noiseHit(0.05, p * 3, 0.15, 1.5);
   }
 
   function spawnWisp() {
@@ -442,8 +468,8 @@
     /* 影 */
     ctx.fillStyle = "rgba(0,0,0,.25)";
     ctx.beginPath(); ctx.ellipse(r * 0.08, r * 0.12, r * 1.02, r * 1.0, 0, 0, Math.PI * 2); ctx.fill();
-    /* 綿あめ（ポメに巻きついた白い綿）。転がった分だけ模様が回る */
-    if (r > R0 + 0.5) {
+    /* ポメの毛と綿あめはひと続きの白い綿。転がった分だけ模様が回る */
+    {
       ctx.save();
       ctx.rotate(roll);
       var g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
@@ -458,14 +484,15 @@
       }
       ctx.lineCap = "round";
       for (i = 0; i < STRANDS.length; i++) {
-        var s = STRANDS[i], rr = R0 + (r - R0) * (0.1 + s.r * 0.8);
-        if (rr < R0 + 2) continue;
+        var s = STRANDS[i], rr = r * (0.3 + s.r * 0.6);
         ctx.strokeStyle = s.dark ? "rgba(170,175,195,.35)" : "rgba(255,255,255,.9)";
         ctx.lineWidth = s.w * Math.max(0.6, r / 50);
         ctx.beginPath(); ctx.arc(0, 0, rr, s.a, s.a + s.len * Math.min(1, 24 / rr + 0.15)); ctx.stroke();
       }
       ctx.restore();
     }
+    var bounce = 1 + Math.sin(Math.min(1, barkT / 0.25) * Math.PI) * 0.18;
+    ctx.scale(bounce, bounce);
     drawPomFace(R0);
     ctx.restore();
   }
@@ -476,22 +503,11 @@
     var t = performance.now() / 1000;
     /* 耳 */
     [-1, 1].forEach(function (s) {
-      ctx.fillStyle = "#f4f2ee";
+      ctx.fillStyle = "#f6f7fa";
       ctx.beginPath(); ctx.moveTo(s * R * 0.12, -R * 0.7); ctx.quadraticCurveTo(s * R * 0.5, -R * 1.45, s * R * 0.72, -R * 1.32); ctx.quadraticCurveTo(s * R * 0.95, -R * 0.9, s * R * 0.8, -R * 0.35); ctx.closePath(); ctx.fill();
       ctx.fillStyle = "#f2c9c4";
       ctx.beginPath(); ctx.moveTo(s * R * 0.3, -R * 0.75); ctx.quadraticCurveTo(s * R * 0.55, -R * 1.2, s * R * 0.68, -R * 1.15); ctx.quadraticCurveTo(s * R * 0.8, -R * 0.85, s * R * 0.7, -R * 0.55); ctx.closePath(); ctx.fill();
     });
-    /* ふさふさの毛 */
-    ctx.beginPath();
-    for (var i = 0; i <= 40; i++) {
-      var th = i / 40 * Math.PI * 2, r = R * (i % 2 ? 0.88 : 1.02);
-      if (i === 0) ctx.moveTo(Math.cos(th) * r, Math.sin(th) * r); else ctx.lineTo(Math.cos(th) * r, Math.sin(th) * r);
-    }
-    ctx.closePath();
-    ctx.fillStyle = "#faf9f6"; ctx.fill();
-    ctx.strokeStyle = "rgba(150,150,170,.5)"; ctx.lineWidth = R * 0.03; ctx.stroke();
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath(); ctx.arc(0, R * 0.12, R * 0.62, 0, Math.PI * 2); ctx.fill();
     /* 目。速く回ったり溶けたりすると目が回る */
     var dizzy = spinRate > FAST * 0.85 || state === S.END;
     ctx.strokeStyle = "#1a1210"; ctx.fillStyle = "#1a1210"; ctx.lineWidth = R * 0.06; ctx.lineCap = "round";
