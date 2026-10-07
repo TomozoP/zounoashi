@@ -117,6 +117,14 @@
       o.renderOrder = o.geometry.type === "ConeGeometry" ? (o.parent === F ? 10 : 11) : o.parent === F ? 12 : 13;
     });
     this.scene.add(F);
+    /* 前足2本。玉の下の手前から、毛と同じ白で出る */
+    var L = this.legs = new T.Group();
+    var fur = new T.MeshStandardMaterial({ color: 0xeeeef2, roughness: 1 });
+    [-1, 1].forEach(function (s) {
+      var leg = new T.Mesh(new T.CapsuleGeometry(2.1, 5, 6, 14), fur);
+      leg.position.set(s * 3.6, -3.2, 0); L.add(leg);
+    });
+    this.scene.add(L);
   };
 
   /* 毎コマ：g = { px, py, f, PN, R0, camR, sugar, spin, bounce, dizzy } */
@@ -164,6 +172,16 @@
     this.face.lookAt(cam.position);
     var s = g.bounce * (g.R0 / 14);
     this.face.scale.set(s, s, s);
+    /* 前足：画面で玉のいちばん下あたり（少し手前）に付ける。玉が大きくなると一緒に太く長く */
+    var up = new T.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+    var dl = v.clone().multiplyScalar(0.45).addScaledVector(up, -0.9).normalize();
+    var hl = Math.sqrt(dl.x * dl.x + dl.z * dl.z), al = Math.atan2(dl.z, dl.x);
+    var ul = ((al % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / PTH, kl = Math.floor(ul), tl = ul - kl;
+    var rl = mean + (f[kl % PN] * (1 - tl) + f[(kl + 1) % PN] * tl - mean) * hl;
+    this.legs.position.copy(c).addScaledVector(dl, rl * 0.92);
+    this.legs.quaternion.copy(cam.quaternion);
+    var ls = Math.max(g.R0, mean * 0.55) / 14;
+    this.legs.scale.set(ls, ls, ls);
     for (i = 0; i < 2; i++) {
       this.eyes[i].visible = !g.dizzy;
       this.dizzy[i].visible = g.dizzy;
