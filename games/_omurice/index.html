@@ -147,6 +147,7 @@
   var state, score, T, held, keyMode = false;
   var GRAM = 8.2 * 8.2 * 8.2 * 1.1;            /* 体積（ゲームの単位）→ グラム。1単位≒8.2cm、ケチャップは1.1g/cm³ */
   var volume = 0, stroke = null, lastPt = null, lastMoveT = 0, look = 0;
+  var orbit = { yaw: 0, tilt: 0, vy: 0, vt: 0 }, spin = null;   /* 完成後にドラッグで回して眺める */
 
   function place() {}
 
@@ -158,6 +159,7 @@
     T = 0;
     held = false;
     volume = 0; stroke = null; lastPt = null; look = 0;
+    orbit = { yaw: 0, tilt: 0, vy: 0, vt: 0 }; spin = null;
     if (scene3d) scene3d.clear();
   }
 
@@ -172,7 +174,14 @@
   /* ============ 進行 ============ */
   function update(dt) {
     T += dt;
-    if (state === S.RESULT) look = Math.min(1, look + dt * 0.8);
+    if (state === S.RESULT) {
+      look = Math.min(1, look + dt * 0.8);
+      if (!spin) {                             /* 離したあとは少しすべって止まる */
+        orbit.yaw += orbit.vy * dt; orbit.tilt += orbit.vt * dt;
+        var k = Math.exp(-dt * 3.5); orbit.vy *= k; orbit.vt *= k;
+      }
+      orbit.tilt = Math.max(-0.75, Math.min(0.55, orbit.tilt));
+    }
     if (state !== S.PLAY) return;
     /* 止めたままでもケチャップは少しずつ出て、点が太る */
     if (held && stroke && lastPt && scene3d) {
@@ -202,6 +211,7 @@
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
       if (hit === "retry") newRound();
+      else if (!hit && x != null) { spin = { x: x, y: y, t: T }; orbit.vy = orbit.vt = 0; }
       return;
     }
     if (x == null) return;
@@ -223,6 +233,13 @@
     lastPt = h;
   }
   function move(x, y) {
+    if (state === S.RESULT && spin) {
+      var dx = x - spin.x, dy = y - spin.y, dts = Math.max(1 / 120, T - spin.t);
+      orbit.yaw -= dx * 0.009; orbit.tilt += dy * 0.006;
+      orbit.vy = -dx * 0.009 / dts; orbit.vt = dy * 0.006 / dts;
+      spin = { x: x, y: y, t: T };
+      return;
+    }
     if (state !== S.PLAY || !held) return;
     var dtm = Math.max(1 / 120, T - lastXY.t);
     var dist = Math.hypot(x - lastXY.x, y - lastXY.y);
@@ -235,6 +252,7 @@
     lastXY = { x: x, y: y, t: T }; lastMoveT = T;
   }
   function up() {
+    if (spin) { if (T - spin.t > 0.08) orbit.vy = orbit.vt = 0; spin = null; }
     if (!held) return;
     held = false;
     stroke = null; lastPt = null;
@@ -318,7 +336,7 @@
     make3d();
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "#2a1c12"; ctx.fillRect(0, 0, W, H);
-    if (scene3d) { try { scene3d.render(ctx, W, H, look); } catch (e) {} }
+    if (scene3d) { try { scene3d.render(ctx, W, H, look, orbit); } catch (e) {} }
     if (hideUI) return;
     if (state === S.PLAY) drawOk();
     if (state === S.RESULT) drawResult();

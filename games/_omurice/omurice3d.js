@@ -207,15 +207,17 @@
   };
 
   /* 画面の形に合わせてカメラを置く（皿の幅が画面に収まるように） */
-  OmuScene.prototype.setView = function (W, H, look) {
+  OmuScene.prototype.setView = function (W, H, look, orbit) {
     var cam = this.camera;
     cam.aspect = W / H;
     var vf = cam.fov * Math.PI / 360;
     var hf = Math.atan(Math.tan(vf) * cam.aspect);
     /* 横は卵の幅＋少し、縦は卵の長さ＋少しが入る近さ */
     var dist = Math.max(1.05 / Math.tan(hf), 1.75 / Math.tan(vf));
-    var tilt = 0.98 - 0.1 * (look || 0);     /* 見下ろす角度（ラジアン） */
-    cam.position.set(0, Math.sin(tilt) * dist + 0.1, Math.cos(tilt) * dist);
+    var tilt = 0.98 - 0.1 * (look || 0), yaw = 0;   /* 見下ろす角度・まわりこむ角度（ラジアン） */
+    if (orbit) { tilt += orbit.tilt; yaw = orbit.yaw; }
+    tilt = Math.max(0.22, Math.min(1.45, tilt));
+    cam.position.set(Math.sin(yaw) * Math.cos(tilt) * dist, Math.sin(tilt) * dist + 0.1, Math.cos(yaw) * Math.cos(tilt) * dist);
     cam.lookAt(0, 0.1, 0.05);
     cam.updateProjectionMatrix();
   };
@@ -297,11 +299,11 @@
     this.strokes = [];
   };
 
-  OmuScene.prototype.render = function (ctx, W, H, look) {
+  OmuScene.prototype.render = function (ctx, W, H, look, orbit) {
     var dpr = Math.min(2, global.devicePixelRatio || 1);
     var w = Math.round(W * dpr), h = Math.round(H * dpr);
     if (w !== this.w || h !== this.h) { this.w = w; this.h = h; this.renderer.setSize(w, h, false); }
-    this.setView(W, H, look);
+    this.setView(W, H, look, orbit);
     this.renderer.render(this.scene, this.camera);
     ctx.drawImage(this.renderer.domElement, 0, 0, W, H);
     return true;
