@@ -339,7 +339,7 @@
     /* 横向きの卵の長さが画面の幅に収まる近さ */
     var dist = Math.max(1.55 / Math.tan(hf), 0.9 / Math.tan(vf));
     var tilt = 0.98 - 0.1 * (look || 0), yaw = 0;   /* 見下ろす角度・まわりこむ角度（ラジアン） */
-    if (orbit) { tilt += orbit.tilt; yaw = orbit.yaw; }
+    if (orbit) { tilt += orbit.tilt; yaw = orbit.yaw; if (orbit.zoom) dist /= orbit.zoom; }
     tilt = Math.max(0.22, Math.min(1.45, tilt));
     cam.position.set(Math.sin(yaw) * Math.cos(tilt) * dist, Math.sin(tilt) * dist + 0.1, Math.cos(yaw) * Math.cos(tilt) * dist);
     cam.lookAt(0, 0.12, 0.02);
@@ -426,6 +426,13 @@
   OmuScene.prototype.newOmu = function (seed) {
     this.clear();
     this.buildEgg(seed);
+  };
+  /* 線を1本だけ消す（2本指で拡大縮小を始めたときの書きかけ） */
+  OmuScene.prototype.dropStroke = function (s) {
+    var i = this.strokes.indexOf(s);
+    if (i < 0) return;
+    s.pts = []; this.rebuild(s);
+    this.strokes.splice(i, 1);
   };
   OmuScene.prototype.clear = function () {
     this.strokes.forEach(function (s) { s.pts = []; this.rebuild(s); }, this);
