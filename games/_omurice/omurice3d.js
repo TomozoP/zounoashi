@@ -39,13 +39,29 @@
   function eggBump(g, s) {
     var img = g.createImageData(s, s), d = img.data;
     for (var y = 0; y < s; y++) for (var x = 0; x < s; x++) {
-      var u = x / s * 8, v = y / s * 8;
-      var n = fbm(u, v, 0.5, 4) * 0.7 + noise3(u * 9, v * 9, 3) * 0.3;
-      var c = Math.round(n * 255), i = (y * s + x) * 4;
+      var u = x / s * 10, v = y / s * 10;
+      var n = 0.5 + (fbm(u, v, 0.5, 3) - 0.5) * 0.5 + (noise3(u * 14, v * 14, 3) - 0.5) * 0.18;
+      var c = Math.round(Math.max(0, Math.min(1, n)) * 255), i = (y * s + x) * 4;
       d[i] = d[i + 1] = d[i + 2] = c; d[i + 3] = 255;
     }
     g.putImageData(img, 0, 0);
+    /* 膜のしわ（短く曲がった細い溝） */
+    g.lineCap = "round";
+    for (var k = 0; k < 900; k++) {
+      var x0 = Math.random() * s, y0 = Math.random() * s, a = Math.random() * 6.3, L = 8 + Math.random() * 40;
+      g.strokeStyle = "rgba(40,40,40," + (0.08 + Math.random() * 0.16).toFixed(2) + ")";
+      g.lineWidth = 0.8 + Math.random() * 1.6;
+      g.beginPath(); g.moveTo(x0, y0);
+      for (var t = 1; t <= 5; t++) { a += (Math.random() - 0.5) * 0.9; x0 += Math.cos(a) * L / 5; y0 += Math.sin(a) * L / 5; g.lineTo(x0, y0); }
+      g.stroke();
+    }
+    /* ふくらんだ気泡のあと（明るい小さな点） */
+    for (k = 0; k < 500; k++) {
+      g.fillStyle = "rgba(255,255,255," + (0.06 + Math.random() * 0.12).toFixed(2) + ")";
+      g.beginPath(); g.arc(Math.random() * s, Math.random() * s, 1 + Math.random() * 3, 0, 7); g.fill();
+    }
   }
+
   /* 木の机 */
   function woodColor(g, s) {
     var img = g.createImageData(s, s), d = img.data;
@@ -64,8 +80,8 @@
     T = global.THREE;
     var r = this.renderer = new T.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
     r.outputColorSpace = T.SRGBColorSpace;
-    r.toneMapping = T.ACESFilmicToneMapping;
-    r.toneMappingExposure = 0.95;
+    r.toneMapping = T.LinearToneMapping;
+    r.toneMappingExposure = 1.0;
     r.shadowMap.enabled = true;
     r.shadowMap.type = T.PCFSoftShadowMap;
     var S = this.scene = new T.Scene();
@@ -88,9 +104,9 @@
     S.environment = pm.fromScene(env, 0.02).texture;
 
     /* 光 */
-    S.add(new T.HemisphereLight(0xfff1dc, 0x4a3020, 0.45));
+    S.add(new T.HemisphereLight(0xfff1dc, 0x4a3020, 0.5));
     var key = this.key = new T.DirectionalLight(0xfff0d8, 2.6);
-    key.position.set(-2.5, 6, 3);
+    key.position.set(-4, 4.5, 1.5);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
     var sc = key.shadow.camera; sc.left = -3; sc.right = 3; sc.top = 3; sc.bottom = -3; sc.near = 1; sc.far = 15;
@@ -103,7 +119,7 @@
     this.buildPlate();
     this.buildEgg();
 
-    this.inkMat = new T.MeshPhysicalMaterial({ color: 0x9c0d07, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.08, sheen: 0.3, sheenColor: new T.Color(0xff5030) });
+    this.inkMat = new T.MeshPhysicalMaterial({ color: 0xb3120a, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.08, sheen: 0.3, sheenColor: new T.Color(0xff5030) });
     this.strokes = [];
     this.ray = new T.Raycaster();
     this.targets = [this.egg, this.plateTop];
@@ -125,7 +141,8 @@
       [0, 0.03], [1.1, 0.03], [1.38, 0.05], [1.5, 0.1], [1.62, 0.16], [1.68, 0.175], [1.7, 0.16], [1.62, 0.12], [1.45, 0.04], [1.25, 0.0], [0.9, 0.0], [0.88, 0.012], [0, 0.012]
     ].map(function (p) { return new T.Vector2(p[0], p[1]); });
     var geo = new T.LatheGeometry(pts.reverse(), 128);
-    geo.scale(1.2, 1, 0.92);
+    geo.scale(1.2, 1, 0.78);
+    geo.rotateY(Math.PI / 2);
     geo.computeVertexNormals();
     var m = new T.MeshPhysicalMaterial({ color: 0xf6f4ee, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05 });
     var p = new T.Mesh(geo, m);
@@ -133,78 +150,73 @@
     this.scene.add(p);
     /* 線を引ける皿の面（見えない板） */
     var top = new T.Mesh(new T.CircleGeometry(1.0, 48), new T.MeshBasicMaterial({ visible: false }));
-    top.rotation.x = -Math.PI / 2; top.position.y = 0.031; top.scale.set(1.62, 1.55, 1);
+    top.rotation.x = -Math.PI / 2; top.position.y = 0.031; top.scale.set(1.25, 1.95, 1);
     this.plateTop = top;
     this.scene.add(top);
   };
 
   /* 卵：ラグビーボール形のふくらみ。両端に包んだしわ、表面に焼きむら */
   OmuScene.prototype.buildEgg = function () {
-    var geo = new T.SphereGeometry(1, 192, 96);
+    /* 極（UVの縮むところ）を卵の両端に向けてから形を作る */
+    var geo = new T.SphereGeometry(1, 200, 120);
+    geo.rotateZ(Math.PI / 2);
     var pos = geo.attributes.position, cols = [];
     var v = new T.Vector3();
     for (var i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i);
       var x = v.x, y = v.y, z = v.z;
       var ax = Math.abs(x);
-      var taper = 1 - 0.22 * Math.pow(ax, 2.6);
-      /* 底は平ら、上は丸く */
-      var Y = y >= 0 ? Math.pow(y, 0.85) * 0.5 : y * 0.04;
+      /* 両端がとがった木の葉形。底は平ら、上はふっくら */
+      var taper = Math.pow(Math.max(0, 1 - Math.pow(ax, 1.7)), 0.62) / Math.max(0.0001, Math.sqrt(Math.max(0, 1 - x * x)));
+      taper = Math.min(1.25, taper) * (1 - 0.12 * ax);
+      var Y = y >= 0 ? Math.pow(y, 0.8) * 0.56 : y * 0.03;
       var Z = z * 0.66;
       Y *= taper; Z *= taper;
-      var X = x * 1.12;
-      /* 端の包み込みのしわ */
+      var X = x * 1.32;
+      /* 卵の膜のゆるいしわと、端の包みじわ */
       var ang = Math.atan2(y, z);
-      var end = smooth(0.62, 0.98, ax) * Math.max(0, y + 0.2);
-      var fold = Math.sin(ang * 11 + fbm(x * 3, y * 3, z * 3, 2) * 4) * 0.022 * end;
-      /* 全体のゆるいうねり */
-      var wob = (fbm(x * 2.2 + 7, y * 2.2, z * 2.2, 3) - 0.5) * 0.05 * Math.max(0, y);
+      var end = smooth(0.55, 0.97, ax) * Math.max(0, y + 0.3);
+      var fold = Math.sin(ang * 9 + fbm(x * 3, y * 3, z * 3, 2) * 5) * 0.018 * end;
+      var wob = (fbm(x * 3.2 + 7, y * 3.2, z * 3.2, 4) - 0.5) * 0.09 * Math.max(0, y + 0.1);
+      var crease = Math.pow(Math.abs(Math.sin(fbm(x * 1.8, y * 1.8 + 3, z * 1.8, 3) * 9)), 6) * -0.02 * Math.max(0, y);
+      var d = fold + wob + crease;
       var n = new T.Vector3(X, Y * 1.6, Z).normalize();
-      X += n.x * (fold + wob); Y += n.y * (fold + wob) + 0.012; Z += n.z * (fold + wob);
+      X += n.x * d; Y += n.y * d + 0.012; Z += n.z * d;
       pos.setXYZ(i, X, Y, Z);
-      /* 色: 明るい卵色に、焼き色と半熟の照り */
-      var spot = fbm(x * 4 + 3, y * 4, z * 4, 4);
-      var brown = smooth(0.58, 0.75, spot) * 0.55 + end * 0.25;
-      var pale = smooth(0.35, 0.2, fbm(x * 6, y * 6 + 9, z * 6, 3)) * 0.5;
-      var rC = 0.99 - brown * 0.14 + pale * 0.01, gC = 0.76 - brown * 0.22 + pale * 0.08, bC = 0.2 - brown * 0.08 + pale * 0.12;
-      var col = new T.Color().setRGB(rC, gC, bC, T.SRGBColorSpace);
+      /* 色: あざやかな卵の黄色。明るいむらと、端だけほんのり濃い */
+      var patch = fbm(x * 3 + 3, y * 3, z * 3, 4);
+      var light = smooth(0.45, 0.7, patch) * 0.6;
+      var deep = smooth(0.8, 1.0, ax) * 0.4 + smooth(0.35, 0.2, patch) * 0.3;
+      var col = new T.Color().setRGB(0.99 + light * 0.01, 0.8 + light * 0.07 - deep * 0.08, 0.1 + light * 0.14 - deep * 0.05, T.SRGBColorSpace);
       cols.push(col.r, col.g, col.b);
     }
     geo.setAttribute("color", new T.Float32BufferAttribute(cols, 3));
     geo.computeVertexNormals();
-    var bump = canvasTex(512, eggBump, 3);
+    var bump = canvasTex(1024, eggBump);
+    bump.repeat.set(1, 1);
     var m = new T.MeshPhysicalMaterial({
-      color: 0xffffff, vertexColors: true, roughness: 0.38, bumpMap: bump, bumpScale: 0.6,
-      clearcoat: 0.55, clearcoatRoughness: 0.35, sheen: 0.4, sheenColor: new T.Color(0xffe6a0), sheenRoughness: 0.6
+      color: 0xffffff, vertexColors: true, roughness: 0.6, bumpMap: bump, bumpScale: 3,
+      clearcoat: 0.12, clearcoatRoughness: 0.55, sheen: 0.35, sheenColor: new T.Color(0xffe080), sheenRoughness: 0.5,
+      emissive: new T.Color(0x3a2000), emissiveIntensity: 0.15
     });
     var egg = this.egg = new T.Mesh(geo, m);
     egg.position.y = 0.03;
+    egg.rotation.y = Math.PI / 2;            /* タテ画面に合わせて縦向き */
     egg.castShadow = true; egg.receiveShadow = true;
     this.scene.add(egg);
-    /* 卵のふちからのぞくケチャップライス */
-    var rice = new T.Mesh(new T.SphereGeometry(1, 64, 24),
-      new T.MeshStandardMaterial({ color: 0xc24a26, roughness: 0.7, bumpMap: canvasTex(256, function (g, s) {
-        for (var k = 0; k < 2200; k++) {
-          var gx = Math.random() * s, gy = Math.random() * s, c = 120 + Math.random() * 135;
-          g.fillStyle = "rgb(" + c + "," + c + "," + c + ")";
-          g.beginPath(); g.ellipse(gx, gy, 3.2, 1.6, Math.random() * 3, 0, 7); g.fill();
-        }
-      }, 4), bumpScale: 2 }));
-    rice.scale.set(1.08, 0.06, 0.66);
-    rice.position.y = 0.04;
-    rice.receiveShadow = true;
-    this.scene.add(rice);
   };
 
   /* 画面の形に合わせてカメラを置く（皿の幅が画面に収まるように） */
   OmuScene.prototype.setView = function (W, H, look) {
     var cam = this.camera;
     cam.aspect = W / H;
-    var hf = 2 * Math.atan(Math.tan(cam.fov * Math.PI / 360) * cam.aspect);
-    var dist = 1.5 / Math.tan(hf / 2);
-    var tilt = 1.0 - 0.18 * (look || 0);      /* 見下ろす角度（ラジアン）。完成後は少し低く */
+    var vf = cam.fov * Math.PI / 360;
+    var hf = Math.atan(Math.tan(vf) * cam.aspect);
+    /* 横は卵の幅＋少し、縦は卵の長さ＋少しが入る近さ */
+    var dist = Math.max(1.05 / Math.tan(hf), 1.75 / Math.tan(vf));
+    var tilt = 0.98 - 0.1 * (look || 0);     /* 見下ろす角度（ラジアン） */
     cam.position.set(0, Math.sin(tilt) * dist + 0.1, Math.cos(tilt) * dist);
-    cam.lookAt(0, 0.12, 0);
+    cam.lookAt(0, 0.1, 0.05);
     cam.updateProjectionMatrix();
   };
 
