@@ -2,22 +2,23 @@
 <html lang="ja">
 <head>
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="wataame-pome-1791414728447">
+<meta name="preview-version" content="omurice-1791499009922">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>【プレビュー】綿ポメ</title>
+<title>【プレビュー】オム文字シミュレーター</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
   #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
   #wrap { position: relative; touch-action: none; }
-  canvas { display: block; background: #1b1636; }
+  canvas { display: block; background: #2a1c12; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
   #start[hidden] { display:none; }
   #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
-  #share-button[hidden] { display:none; }
+  #share-button[hidden], #save-button[hidden] { display:none; }
+  #save-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
   /* 制作中の確認ページであることを常に見せる。canvasの外なので録画には入らない */
   #preview-label { position:fixed; left:0; right:0; top:0; z-index:10; padding:4px 0; background:#e8443a; color:#fff; font:bold 14px sans-serif; text-align:center; letter-spacing:.2em; pointer-events:none; }
@@ -31,23 +32,26 @@
   <canvas id="c"></canvas>
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+  <button id="save-button" type="button" aria-label="画像を保存" hidden></button>
 </div></div>
-<script src="../games/start.js?v=wataame-pome-1791414728447"></script>
-<script src="../games/view.js?v=wataame-pome-1791414728447"></script>
-<script src="../games/audio.js?v=wataame-pome-1791414728447"></script>
-<script src="../games/lang.js?v=wataame-pome-1791414728447"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=wataame-pome-1791414728447"></script>
-<script src="../games/result-actions.js?v=wataame-pome-1791414728447"></script>
-<script src="../games/action-icons.js?v=wataame-pome-1791414728447"></script>
-<script src="../games/pad.js?v=wataame-pome-1791414728447"></script>   <!-- ジョイパッドと、絵の外のタップ -->
-<script src="../games/random-bowling/vendor/three.min.js?v=wataame-pome-1791414728447"></script>
-<script src="./pom3d.js?v=wataame-pome-1791414728447"></script>
+<script src="../games/start.js?v=omurice-1791499009922"></script>
+<script src="../games/view.js?v=omurice-1791499009922"></script>
+<script src="../games/audio.js?v=omurice-1791499009922"></script>
+<script src="../games/lang.js?v=omurice-1791499009922"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=omurice-1791499009922"></script>
+<script src="../games/result-actions.js?v=omurice-1791499009922"></script>
+<script src="../games/action-icons.js?v=omurice-1791499009922"></script>
+<script src="../games/pad.js?v=omurice-1791499009922"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/random-bowling/vendor/three.min.js?v=omurice-1791499009922"></script>
+<script src="./omurice3d.js?v=omurice-1791499009922"></script>
 <script>
-/* 綿ポメ
+/* オム文字シミュレーター
 
-   上から見た綿あめ機。真ん中から出る綿あめの糸を、白いポメを指で連れてぐるぐる回って巻き取る。
-   真ん中の熱い頭に触ると溶け、速く回りすぎると外側が飛び散る。
-   砂糖がなくなったときの直径(cm)が結果。 */
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
 (function () {
   "use strict";
 
@@ -56,21 +60,45 @@
   var wrap = document.getElementById("wrap");
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
+  var saveButton = document.getElementById("save-button");
+  /* 画像揚げと同じく、スマホは共有シート（写真に保存できる）、PCはファイルで保存。UIを除いた立体の絵だけ */
+  /* Claude の確認用ページの中ではファイルを直接落とせないので、ページの保存の仕組みを使う */
+  var pageSaver = null;
+  if (window.claude && window.claude.use) window.claude.use("downloads").then(function (d) { pageSaver = d; }, function () {});
+  /* 保存する画像の名前: オム文字_YYYYMMDD-HHMMSS.png */
+  function fileName() {
+    var d = new Date();
+    function p2(n) { return (n < 10 ? "0" : "") + n; }
+    return zT("オム文字", "OmuMoji") + "_" + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + "-" + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + ".png";
+  }
+  window.zResultActions.bind(saveButton, function () {
+    if (!scene3d) return;
+    var cv = scene3d.renderer.domElement, name = fileName();
+    if (pageSaver) { cv.toBlob(function (b) { if (b) pageSaver.save({ filename: name, data: b }).catch(function () {}); }, "image/png"); return; }
+    window.zResultActions.saveImage({ canvas: cv, name: name });
+  });
 
-  /* ============ 画面 ============ */
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
   var W = 540, H = 960;
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
-    place();
+
+    place();                                   /* 高さが決まってから置き直す */
+
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
 
-  /* ============ 音 ============ */
-  var AC = null, NOISE = null, hum = null;
-  function resumeAudio() { window.zAudioResume(AC); }
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null;
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
   wrap.addEventListener("touchstart", audioOn, { passive: true });
   wrap.addEventListener("touchend", resumeAudio, { passive: true });
   wrap.addEventListener("pointerup", resumeAudio, true);
@@ -109,328 +137,261 @@
     s.connect(f); f.connect(g); g.connect(AC.destination);
     s.start(n); s.stop(n + dur + 0.05);
   }
-  /* 綿あめ機のうなり。回っている間だけ鳴らす */
-  function humOn() {
-    if (!AC || !NOISE || hum) return;
-    var s = AC.createBufferSource(); s.buffer = NOISE; s.loop = true;
-    var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 520; f.Q.value = 2.5;
-    var o = AC.createOscillator(); o.type = "sawtooth"; o.frequency.value = 92;
-    var of = AC.createBiquadFilter(); of.type = "lowpass"; of.frequency.value = 300;
-    var g = AC.createGain(), n = AC.currentTime;
-    g.gain.setValueAtTime(0.0001, n);
-    g.gain.exponentialRampToValueAtTime(0.09, n + 0.4);
-    s.connect(f); f.connect(g); o.connect(of); of.connect(g); g.connect(AC.destination);
-    s.start(n); o.start(n);
-    hum = { s: s, o: o, g: g };
-  }
-  function humOff() {
-    if (!hum) return;
-    var n = AC.currentTime, h = hum; hum = null;
-    h.g.gain.cancelScheduledValues(n);
-    h.g.gain.setValueAtTime(h.g.gain.value, n);
-    h.g.gain.exponentialRampToValueAtTime(0.0001, n + 0.6);
-    h.s.stop(n + 0.7); h.o.stop(n + 0.7);
-  }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
     else { try { AC.resume(); } catch (e) {} }
   });
 
-  /* ============ 綿あめ機 ============
-     上から見た綿あめ機。真ん中の回る頭から綿あめの糸が四方へ出てくる。
-     糸は向きごとの区画にたまり、ポメが通ると巻き取られてポメが大きくなる。
-     同じ所にいると、その向きの分しか取れないので、ぐるぐる回るほど大きくなる。
-     長さの単位は cm。 */
-  var N = 16, DTH = Math.PI * 2 / N;
-  var R0 = 14;                     /* ポメ本体（毛こみ）の半径 */
-  var BOWL = 32;                   /* 鍋の半径 */
-  var HEAD = 7;                    /* 真ん中の回る頭の半径（触ると綿あめが溶ける） */
-  var TOTAL = 10;                  /* 砂糖がなくなるまでの秒数 */
-  var CAP = 1.1;                   /* 1区画にたまる上限（何秒分の糸か） */
-  var FAST = 2.4;                  /* これより速く（1秒に何周）回ると外側が飛び散る */
-  function feedRate(t) { return 320 + 1500 * Math.min(1, t / TOTAL); }   /* 1秒に出る綿あめの面積 cm² */
+  /* ============ ケチャップの音 ============ 押し出している間だけ、こもった「ぶちゅー」 */
+  var squeeze = null;
+  function squeezeOn() {
+    if (!AC || !NOISE || squeeze) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE; s.loop = true;
+    var f = AC.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 380; f.Q.value = 6;
+    var g = AC.createGain(); g.gain.value = 0.0001;
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start();
+    squeeze = { s: s, f: f, g: g };
+    tone(120, 0.12, 0.08, "sine", 70);
+  }
+  function squeezeLevel(v) {
+    if (!squeeze) return;
+    var n = AC.currentTime;
+    squeeze.g.gain.setTargetAtTime(0.02 + 0.22 * v, n, 0.03);
+    squeeze.f.frequency.setTargetAtTime(260 + 500 * v + Math.random() * 120, n, 0.03);
+  }
+  function squeezeOff() {
+    if (!squeeze) return;
+    var q = squeeze; squeeze = null;
+    q.g.gain.setTargetAtTime(0.0001, AC.currentTime, 0.04);
+    setTimeout(function () { try { q.s.stop(); } catch (e) {} }, 300);
+  }
 
-  var S = { INTRO: "intro", PLAY: "play", END: "end", RESULT: "result" };
-  var state, T, held, keyMode = false;
-  var sec = new Float32Array(N);   /* 向きごとにたまっている綿あめの面積 */
-  /* 綿の玉の形。上から見た向きごとに、ポメの中心から綿の外側までの半径を持つ。
-     ポメは向きを変えないので、糸が触れた側ほどふくらむ */
-  var PN = 48, PTH = Math.PI * 2 / PN;
-  var f = new Float32Array(PN), W8 = new Float32Array(PN);
-  var px, py, tx, ty, A, roll, spinRate, lastAng, keyDir;
-  var camR, camX = 0, camY = 0, endT, score, wisps, steam, flingCool, meltCool, melted, flung, barks, barkT;
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+  var GRAM = 8.2 * 8.2 * 8.2 * 1.1;            /* 体積（ゲームの単位）→ グラム。1単位≒8.2cm、ケチャップは1.1g/cm³ */
+  var volume = 0, stroke = null, lastPt = null, lastMoveT = 0, look = 0;
+  var CAP = 0.12, empty = false;             /* ケチャップ1本分の量（重くなりすぎないための上限） */
+  var orbit = { yaw: 0, tilt: 0, vy: 0, vt: 0 }, spin = null;   /* 完成後にドラッグで回して眺める */
 
-  /* 綿の模様（ポメに貼りついて転がる細い筋）。毎回同じ形にする */
-  var STRANDS = [];
-  (function () {
-    var seed = 7;
-    function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
-    for (var i = 0; i < 200; i++) STRANDS.push({ a: rnd() * Math.PI * 2, r: rnd(), len: 0.3 + rnd() * 0.6, w: 1 + rnd() * 1.6, dark: rnd() < 0.45 });
-  })();
-
-  var CX, CY;
-  function place() { CX = W / 2; CY = Math.round(H * 0.46); }
+  function place() {}
 
   function newRound() {
-    shareButton.hidden = true;
+    shareButton.hidden = true; saveButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    T = 0; held = false; keyDir = 0;
-    for (var i = 0; i < N; i++) sec[i] = 0;
-    px = 0; py = 26; tx = px; ty = py;
-    for (i = 0; i < PN; i++) f[i] = R0;
-    A = Math.PI * R0 * R0; roll = 0; spinRate = 0; lastAng = Math.atan2(py, px);
-    camR = 48; camX = 0; camY = 0; endT = 0; score = 0; resDia = 0; resRound = 0; melted = 0; flung = 0; barks = 0; barkT = 1;
-    wisps = []; steam = []; flingCool = 0; meltCool = 0;
-    humOn();
+    score = 0;
+    T = 0;
+    held = false;
+    volume = 0; stroke = null; lastPt = null; look = 0; empty = false;
+    orbit = { yaw: 0, tilt: 0, vy: 0, vt: 0 }; spin = null;
+    if (scene3d) scene3d.newOmu(1 + Math.floor(Math.random() * 2147483000));
   }
 
-  function rad() { return Math.sqrt(A / Math.PI); }
-  function area() { var a = 0; for (var i = 0; i < PN; i++) a += 0.5 * f[i] * f[i] * PTH; return a; }
-  /* 丸さ（0〜1）。綿あめの面積を、いちばん出っぱった所を半径にした円の面積で割る。真ん丸で1 */
-  function roundness() { var m = maxF(); return m > 0 ? Math.min(1, area() / (Math.PI * m * m)) : 1; }
-  function maxF() { var m = 0; for (var i = 0; i < PN; i++) if (f[i] > m) m = f[i]; return m; }
-  /* 向き a（ラジアン）の半径。隣の区画となめらかにつなぐ */
-  function fAt(a) {
-    var u = ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / PTH, i = Math.floor(u), t = u - i;
-    return f[i % PN] * (1 - t) + f[(i + 1) % PN] * t;
+  /* 立体の絵。作れないとき（WebGLなし）は何も描けない */
+  var scene3d = null, tries3d = 0;
+  function make3d() {
+    if (scene3d || tries3d >= 5 || !window.THREE || !window.OmuScene) return;
+    tries3d++;
+    try { scene3d = new window.OmuScene(); scene3d.newOmu(1 + Math.floor(Math.random() * 2147483000)); } catch (e) { scene3d = null; }
   }
-  /* 向き a のまわりに面積 amt を足す（マイナスなら削る） */
-  function spread(a, amt, sig) {
-    var sum = 0, i;
-    for (i = 0; i < PN; i++) { var d = wrapA(i * PTH - a); W8[i] = Math.exp(-d * d / (2 * sig * sig)); sum += W8[i]; }
-    for (i = 0; i < PN; i++) f[i] = Math.max(R0, f[i] + amt * (W8[i] / sum) / (f[i] * PTH));
-  }
-  function diameter() { return 2 * rad(); }
-  function wrapA(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
 
   /* ============ 進行 ============ */
   function update(dt) {
-    var r = rad();
-    barkT += dt;
-    if (state === S.INTRO) { T += dt; return; }
-    updateParts(dt);
-    /* 画面に入れる範囲：鍋とポメの両方を囲む円 */
-    var dd = Math.hypot(px, py), mf = maxF() + 6, BR = BOWL + 6, fr, fx = 0, fy = 0;
-    if (dd + mf <= BR) fr = BR;
-    else if (dd + BR <= mf) { fr = mf; fx = px; fy = py; }
-    else { fr = (dd + mf + BR) / 2; fx = px / dd * (fr - BR); fy = py / dd * (fr - BR); }
-    var ke = Math.min(1, dt * 2.5);
-    camR += (Math.max(44, fr) - camR) * ke; camX += (fx - camX) * ke; camY += (fy - camY) * ke;
-    if (state === S.END) {
-      endT += dt;
-      /* 丸さの測定：中心から円が広がって、いちばん出っぱった所で止まる */
-      if (endT > 1.4 && !pinged) { pinged = true; tone(1568, 0.25, 0.1, "sine"); tone(2093, 0.4, 0.07, "sine", null, 0.08); }
-      if (endT > 3.2) toResult();
-      return;
+    T += dt;
+    if (state === S.RESULT) {
+      look = Math.min(1, look + dt * 0.8);
+      if (!spin) {                             /* 離したあとは少しすべって止まる */
+        orbit.yaw += orbit.vy * dt; orbit.tilt += orbit.vt * dt;
+        var k = Math.exp(-dt * 3.5); orbit.vy *= k; orbit.vt *= k;
+      }
+      orbit.tilt = Math.max(-0.75, Math.min(0.55, orbit.tilt));
     }
     if (state !== S.PLAY) return;
-    T += dt;
-
-    /* ポメは指を追う。キーのときは今の距離のまま真ん中のまわりを回る */
-    if (!held && keyDir) {
-      var d0 = Math.max(HEAD + fAt(Math.atan2(-py, -px)) + 4, Math.hypot(px, py)), a0 = Math.atan2(py, px) + keyDir * Math.PI * 2 * 0.9 * dt;
-      tx = Math.cos(a0) * d0; ty = Math.sin(a0) * d0;
+    /* 止めたままでもケチャップは少しずつ出て、点が太る */
+    if (held && !empty && stroke && lastPt && scene3d) {
+      var still = T - lastMoveT;
+      if (still > 0.08) {
+        var last = stroke.pts[stroke.pts.length - 1];
+        if (last && last.r < 0.05) {
+          var before = last.r;
+          last.r = Math.min(0.05, last.r + dt * 0.02);
+          volume += Math.PI * (last.r * last.r - before * before) * last.r * 0.9;
+          scene3d.rebuild(stroke);
+          checkEmpty();
+          squeezeLevel(0.35);
+        } else squeezeLevel(0.1);
+      }
     }
-    if (held) aim(fingerX, fingerY);   /* 指が止まっていても、大きくなった分だけ離れる */
-    var k = Math.min(1, dt * 18), ox = px, oy = py;
-    px += (tx - px) * k; py += (ty - py) * k;
-    roll += Math.hypot(px - ox, py - oy) / r * (px * (py - oy) - py * (px - ox) >= 0 ? 1 : -1);
-
-    /* 真ん中のまわりを1秒に何周しているか */
-    var ang = Math.atan2(py, px), da = wrapA(ang - lastAng); lastAng = ang;
-    spinRate += (Math.abs(da) / dt / (Math.PI * 2) - spinRate) * Math.min(1, dt * 6);
-
-    /* 糸が出て、向きごとにたまる */
-    var feeding = T < TOTAL;
-    if (feeding) {
-      var add = feedRate(T) * dt / N, cap = feedRate(T) * CAP / N;
-      for (var i = 0; i < N; i++) sec[i] = Math.min(cap, sec[i] + add);
-    }
-
-    /* ポメにかかっている向きの糸を巻き取る */
-    var dist = Math.hypot(px, py), inward = ang + Math.PI;   /* ポメの、真ん中を向いた側 */
-    var near = fAt(inward), wide = Math.max(near, rad());
-    var half = dist > wide ? Math.asin(Math.min(1, wide / dist)) : Math.PI;
-    var got = 0;
-    for (i = 0; i < N; i++) {
-      if (Math.abs(wrapA(i * DTH + DTH / 2 - ang)) <= half) { if (sec[i] > feedRate(T) * CAP / N * 0.25) barks++; got += sec[i]; sec[i] = 0; }
-    }
-    /* 糸は真ん中を向いた側に付く。触れた側ほどふくらむ */
-    if (got > 0) spread(inward, got, 0.5);
-
-    /* ふわっとならす（隣とすこし混ぜる） */
-    var g0 = new Float32Array(f), kk = Math.min(0.25, dt * 1.5);
-    for (i = 0; i < PN; i++) f[i] = g0[i] + (g0[(i + 1) % PN] + g0[(i + PN - 1) % PN] - 2 * g0[i]) * kk;
-    A = area();
-
-    /* 糸を1本巻き取るたびに「ワン」。大きいほど低い声 */
-    if (barks > 0 && barkT > 0.07) { bark(); barkT = 0; barks = 0; }
-
-    /* 回しすぎ：外側の綿が飛び散る */
-    flingCool -= dt;
-    if (spinRate > FAST && A > Math.PI * R0 * R0 * 1.2) {
-      var kf = Math.min(0.5, (spinRate - FAST) * 0.5 * dt);
-      for (i = 0; i < PN; i++) f[i] -= (f[i] - R0) * kf;
-      var a2 = area(); flung += A - a2; A = a2;
-      for (var w = 0; w < 3; w++) if (Math.random() < 0.7) spawnWisp();
-      if (flingCool <= 0) { flingCool = 0.18; noiseHit(0.2, 2600, 0.08, 0.8); }
-    }
-
-    /* 真ん中の熱い頭に触ると溶ける */
-    meltCool -= dt;
-    near = fAt(inward);
-    if (dist - near < HEAD) {
-      spread(inward, -2600 * dt, 0.5);
-      var a3 = area(); melted += A - a3; A = a3;
-      if (Math.random() < 0.6) steam.push({ x: px - Math.cos(ang) * near, y: py - Math.sin(ang) * near, life: 0.7, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30 });
-      if (meltCool <= 0) { meltCool = 0.22; noiseHit(0.25, 4200, 0.12, 0.6); }
-    }
-
-    if (!feeding) { state = S.END; endT = 0; pinged = false; measure(); humOff(); tone(880, 0.25, 0.12, "triangle"); tone(1320, 0.4, 0.1, "triangle", null, 0.12); }
   }
 
-  /* わん。のこぎり波を口の形（2つの山の帯域）に通して、高さを下げながら短く鳴らす */
-  function bark() {
-    if (!AC) return;
-    var d = diameter(), p = Math.max(170, 620 * Math.pow(28 / Math.max(28, d), 0.45)) * (0.92 + Math.random() * 0.16);
-    var n = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
-    o.type = "sawtooth";
-    o.frequency.setValueAtTime(p * 0.8, n);
-    o.frequency.linearRampToValueAtTime(p * 1.15, n + 0.04);
-    o.frequency.exponentialRampToValueAtTime(p * 0.6, n + 0.13);
-    var f1 = AC.createBiquadFilter(); f1.type = "bandpass"; f1.frequency.value = p * 1.6; f1.Q.value = 3;
-    var f2 = AC.createBiquadFilter(); f2.type = "bandpass"; f2.frequency.value = p * 4; f2.Q.value = 4;
-    g.gain.setValueAtTime(0.0001, n);
-    g.gain.exponentialRampToValueAtTime(0.9, n + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, n + 0.14);
-    o.connect(f1); o.connect(f2); f1.connect(g); f2.connect(g); g.connect(AC.destination);
-    o.start(n); o.stop(n + 0.17);
-    noiseHit(0.05, p * 3, 0.15, 1.5);
+  /* ============ 入力 ============ なぞったところにケチャップ。ゆっくりほど太い */
+  function screenPick(x, y) {
+    if (!scene3d) return null;
+    return scene3d.pick(x / W, y / H);
   }
-
-  function spawnWisp() {
-    var r = rad(), ang = Math.atan2(py, px), side = Math.random() * Math.PI * 2;
-    var tdir = ang + Math.PI / 2;
-    var sp = spinRate * Math.PI * 2 * Math.hypot(px, py);
-    wisps.push({ x: px + Math.cos(side) * r, y: py + Math.sin(side) * r, vx: Math.cos(tdir) * sp * 0.6 + Math.cos(side) * 80, vy: Math.sin(tdir) * sp * 0.6 + Math.sin(side) * 80, life: 0.7 });
-  }
-  function updateParts(dt) {
-    var i;
-    for (i = wisps.length - 1; i >= 0; i--) {
-      var w = wisps[i];
-      w.life -= dt; w.x += w.vx * dt; w.y += w.vy * dt;
-      w.vx *= Math.exp(-2.5 * dt); w.vy *= Math.exp(-2.5 * dt);
-      if (w.life <= 0) wisps.splice(i, 1);
-    }
-    for (i = steam.length - 1; i >= 0; i--) {
-      var s = steam[i];
-      s.life -= dt; s.x += s.vx * dt; s.y += s.vy * dt;
-      if (s.life <= 0) steam.splice(i, 1);
-    }
-    if (wisps.length > 200) wisps.splice(0, wisps.length - 200);
-    if (steam.length > 80) steam.splice(0, steam.length - 80);
-  }
-
-  var resDia = 0, resRound = 0, resR = 0, resX = 0, resY = 0, pinged = false;
-  /* 点数は 直径(cm)の数 × 丸さ(%)の数 をそのまま掛けたもの。大きく、しかも真ん丸なほど高い */
-  function measure() {
-    resDia = Math.round(diameter()); resRound = Math.round(roundness() * 100);
-    resR = maxF(); resX = px; resY = py;
-    score = resDia * resRound;
-  }
-  function toResult() {
-    state = S.RESULT;
-    tone(660, 0.12, 0.1, "square"); tone(990, 0.3, 0.1, "square", null, 0.1);
-  }
-
-  /* ============ 入力 ============ */
-  var scale = 1;   /* 1cm が何ピクセルか */
-  function toWorld(x, y) {
-    if (scene3d) { var p = scene3d.unproject(x, y, W, H); if (p) return p; }
-    return { x: (x - CX) / scale, y: (y - CY) / scale };
-  }
+  var lastXY = null;
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
       if (hit === "retry") newRound();
+      else if (!hit && x != null) { spin = { x: x, y: y, t: T }; orbit.vy = orbit.vt = 0; }
       return;
     }
-    if (state !== S.PLAY) return;
-    if (x == null) { keyDir = 1; return; }
+    if (x == null) return;
+    if (hitOk(x, y)) { finish(); return; }
+    if (hitReset(x, y)) { newRound(); tone(330, 0.15, 0.08, "triangle", 520); return; }
     held = true;
-    aim(x, y);
+    stroke = null; lastPt = null; lastXY = { x: x, y: y, t: T }; lastMoveT = T;
+    if (empty) { sputter(); return; }
+    squeezeOn();
+    paintAt(x, y, 0);
+  }
+  /* 空になったら出ない。ぷすっと空気だけ */
+  function sputter() {
+    noiseHit(0.08, 900, 0.12, 2); noiseHit(0.06, 1400, 0.08, 2);
+  }
+  function checkEmpty() {
+    if (empty || volume < CAP) return;
+    empty = true; volume = CAP;
+    squeezeOff(); sputter();
+  }
+  function paintAt(x, y, speed) {
+    if (empty) return;
+    var h = screenPick(x, y);
+    if (!h) { stroke = null; lastPt = null; return; }
+    if (!stroke) stroke = scene3d.beginStroke();
+    /* 速さ（ゲーム座標/秒）から太さ。速いと細く、ゆっくりだと太い */
+    var r = Math.max(0.012, Math.min(0.034, 0.034 - speed * 0.000026));
+    var added = scene3d.addPoint(stroke, h, r);
+    if (added === -2) {                        /* 長い線は、前の点からつなげて新しい線に */
+      var prev = stroke.pts[stroke.pts.length - 1];
+      stroke = scene3d.beginStroke(); scene3d.addPoint(stroke, prev, prev.r);
+      added = scene3d.addPoint(stroke, h, r);
+    }
+    if (added < 0) { stroke = scene3d.beginStroke(); added = scene3d.addPoint(stroke, h, r); }
+    /* 細い線でも点が増えすぎないよう、長さにも最低の量をかける */
+    volume += Math.max(added, scene3d.lastLen * 0.0022);
+    checkEmpty();
+    lastPt = h;
   }
   function move(x, y) {
+    if (state === S.RESULT && spin) {
+      var dx = x - spin.x, dy = y - spin.y, dts = Math.max(1 / 120, T - spin.t);
+      orbit.yaw -= dx * 0.009; orbit.tilt += dy * 0.006;
+      orbit.vy = -dx * 0.009 / dts; orbit.vt = dy * 0.006 / dts;
+      spin = { x: x, y: y, t: T };
+      return;
+    }
     if (state !== S.PLAY || !held) return;
-    aim(x, y);
-  }
-  /* 指のある向きへポメを連れていく。大きくなって指が画面の端で届かなくても、
-     ポメは真ん中に触れない所まで自動で離れるので、向きだけで回せる */
-  var fingerX = 0, fingerY = 0;
-  function aim(x, y) {
-    fingerX = x; fingerY = y;
-    var p = toWorld(x, y), a = Math.atan2(p.y, p.x);
-    var d = Math.max(Math.hypot(p.x, p.y), HEAD + fAt(a + Math.PI) + 3);
-    tx = Math.cos(a) * d; ty = Math.sin(a) * d;
+    var dtm = Math.max(1 / 120, T - lastXY.t);
+    var dist = Math.hypot(x - lastXY.x, y - lastXY.y);
+    if (dist < 1.5) return;
+    var speed = dist / dtm;
+    /* 速く動かしても線がとぎれないよう、間を細かく埋める */
+    var n = Math.max(1, Math.ceil(dist / 6));
+    for (var i = 1; i <= n; i++) paintAt(lastXY.x + (x - lastXY.x) * i / n, lastXY.y + (y - lastXY.y) * i / n, speed);
+    squeezeLevel(Math.min(1, 0.3 + speed / 1400));
+    lastXY = { x: x, y: y, t: T }; lastMoveT = T;
   }
   function up() {
-    keyDir = 0;
+    if (spin) { if (T - spin.t > 0.08) orbit.vy = orbit.vt = 0; spin = null; }
     if (!held) return;
     held = false;
+    stroke = null; lastPt = null;
+    squeezeOff();
+  }
+  function finish() {
+    if (state !== S.PLAY) return;
+    up();
+    score = Math.round(volume * GRAM * 10) / 10;
+    state = S.RESULT;
+    [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.5, 0.07, "triangle", 0, i * 0.08); });
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  /* 2本指のピンチで少しだけ寄る・引く（PCはホイール）。そのあいだは描かない */
+  var ZMIN = 0.85, ZMAX = 1.45, zoom = 1, touches = {}, pinch = null;
+  function fingers() { var a = []; for (var k in touches) a.push(touches[k]); return a; }
+  function pinchDist() { var f = fingers(); return Math.hypot(f[0].x - f[1].x, f[0].y - f[1].y); }
+  function startPinch() {
+    if (held && stroke && scene3d && stroke.pts.length < 6) { volume = Math.max(0, volume - stroke.pts.length * 0.0012); scene3d.dropStroke(stroke); }
+    up(); spin = null;
+    pinch = { d0: Math.max(10, pinchDist()), z0: zoom };
+  }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y);
+    var p = atCanvas(e);
+    touches[e.pointerId] = { x: p.x, y: p.y };
+    if (fingers().length === 2 && state !== S.INTRO) { startPinch(); return; }
+    if (pinch) return;
+    down(p.x, p.y);
   });
   wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
+    var p = atCanvas(e);
+    if (touches[e.pointerId]) touches[e.pointerId] = { x: p.x, y: p.y };
+    if (pinch) {
+      if (fingers().length >= 2) zoom = Math.max(ZMIN, Math.min(ZMAX, pinch.z0 * pinchDist() / pinch.d0));
+      return;
+    }
+    move(p.x, p.y);
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { up(); });
+  function release(e) {
+    delete touches[e.pointerId];
+    if (pinch) { if (!fingers().length) pinch = null; return; }
+    up();
+  }
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); release(e); });
+  wrap.addEventListener("pointercancel", release);
+  wrap.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    zoom = Math.max(ZMIN, Math.min(ZMAX, zoom * Math.exp(-e.deltaY * 0.0012)));
+  }, { passive: false });
   window.addEventListener("blur", function () { up(); });
 
-  /* 本番以外だけ、数字キーで場面を飛ばせる */
+  /* 本番以外（手元・確認用ページ・制作中の固定リンク）だけ、数字キーで場面を飛ばせる。 */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
-  function bigPom(d) { for (var i = 0; i < PN; i++) f[i] = d / 2; A = area(); var a = Math.atan2(py, px), dd = HEAD + d / 2 + 6; px = tx = Math.cos(a) * dd; py = ty = Math.sin(a) * dd; lastAng = a; }
+  /* ハートを描く（画面の真ん中あたり） */
+  function autoHeart() {
+    if (state !== S.PLAY || !scene3d) return;
+    var cx = W / 2, cy = H * 0.5, s = 7;
+    held = true; stroke = null; lastXY = null;
+    for (var i = 0; i <= 480; i++) {
+      var t = i / 480 * Math.PI * 2;
+      var x = cx + s * 16 * Math.pow(Math.sin(t), 3);
+      var y = cy - s * (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * 0.75;
+      paintAt(x, y, 500);
+    }
+    held = false; stroke = null;
+  }
   function debugKey(n) {
-    if (n === 1) { if (state !== S.PLAY) newRound(); bigPom(150); for (var b = 0; b < PN; b++) f[b] *= 1 + 0.25 * Math.max(0, Math.cos(b * PTH)); T = TOTAL; }   /* 1: 少しいびつに大きくして終わり */
-    if (n === 2) { if (state !== S.PLAY) newRound(); T = TOTAL - 3; }                /* 2: 砂糖があと3秒 */
-    if (n === 3) { if (state !== S.PLAY) newRound(); bigPom(140); }                  /* 3: 大きくする */
+    if (n === 1) autoHeart();
+    if (n === 2) finish();
   }
 
   window.addEventListener("keydown", function (e) {
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
-    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
-    if (!esc && !go && !left && !right) return;
+    if (!esc && !go) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
-    if (left || right) {
-      if (state === S.PLAY) keyDir = right ? 1 : -1;
-      return;
-    }
     if (e.repeat) return;
+    if (state === S.PLAY) { finish(); return; }
     down();
   });
   window.addEventListener("keyup", function (e) {
-    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
-    if (e.key === "ArrowLeft" || e.key === "ArrowRight" || /^[aAdD]$/.test(e.key)) keyDir = 0;
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); }
   });
 
   function doShare() {
-    var d = resDia;
-    var ja = "ポメラニアンを直径" + d + "cmの綿あめにした";
-    var en = "Turned a Pomeranian into a " + d + "cm cotton candy.";
-    window.zResultActions.x({ text: zT(ja, en) + zT(" #綿ポメ", " #CottonCandyPom") });
+    /* ▼SHARE */
+    window.zResultActions.x({ text: zT("#オム文字シミュレーター", "#OmuMojiSimulator") });
   }
 
   /* ============ 描画 ============ */
@@ -444,297 +405,81 @@
     ctx.closePath();
   }
 
-  /* 立体の絵。作れないとき（WebGLなし）は平面の絵のまま */
-  var scene3d = null, tries3d = 0, lastTry3d = -1e9;
-  function make3d() {
-    if (scene3d || tries3d >= 20 || !window.THREE || !window.PomScene) return;
-    var now = performance.now();
-    if (now - lastTry3d < 500) return;
-    lastTry3d = now; tries3d++;
-    try { scene3d = new window.PomScene(); } catch (e) { scene3d = null; }
-  }
-
+  var hideUI = false;
   function draw() {
-    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
-    scale = Math.min(W * 0.47, H * 0.40) / (camR || 48);
+    window.zResultActions.place(shareButton, resultButtons()[2], W, H, state === S.RESULT && !hideUI);
+    window.zResultActions.place(saveButton, resultButtons()[1], W, H, state === S.RESULT && !hideUI);
     make3d();
-    if (scene3d && draw3d()) { drawCount(); drawMeasure(); if (state === S.RESULT) drawResult(); return; }
-
-    drawFestival();
-
-    ctx.save();
-    ctx.translate(CX, CY);
-    ctx.scale(scale, scale);
-    drawMachine();
-    drawThreads();
-    drawSteam();
-    drawPom();
-    drawWisps();
-    ctx.restore();
-
-    drawCount();
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#2a1c12"; ctx.fillRect(0, 0, W, H);
+    if (scene3d) { try { orbit.zoom = zoom; scene3d.render(ctx, W, H, look, orbit); } catch (e) {} }
+    if (hideUI) return;
+    if (state === S.PLAY) { drawReset(); drawOk(); if (held && lastXY) drawBottle(lastXY.x, lastXY.y); }
     if (state === S.RESULT) drawResult();
   }
 
-  /* 丸さの測定の円。綿あめのふちの高さに、中心から広がる輪を描く */
-  function drawMeasure() {
-    if (state !== S.END && state !== S.RESULT || !resR) return;
-    var t = state === S.RESULT ? 9 : endT;
-    var g = Math.max(0, Math.min(1, (t - 0.2) / 1.2)), r = resR * (1 - Math.pow(1 - g, 3));
-    if (r <= 0.5) return;
-    ctx.save();
-    ctx.beginPath();
-    for (var i = 0; i <= 72; i++) {
-      var a = i / 72 * Math.PI * 2, p = scene3d.project(resX + Math.cos(a) * r, 0, resY + Math.sin(a) * r, W, H);
-      if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
-    }
-    var flash = t > 1.4 ? Math.max(0, 1 - (t - 1.4) / 0.4) : 0;
-    ctx.strokeStyle = "rgba(255,230,120," + (0.85 + flash * 0.15) + ")";
-    ctx.lineWidth = 4 + flash * 6;
-    ctx.shadowColor = "rgba(255,210,80,.9)"; ctx.shadowBlur = 12 + flash * 20;
-    ctx.setLineDash(g < 1 ? [] : [14, 10]);
-    ctx.stroke();
-    /* 測った丸さ。円が止まってから数え上がる */
-    if (state === S.END && t > 1.4) {
-      var k = Math.min(1, (t - 1.4) / 1.0), top = scene3d.project(resX, 0, resY - resR, W, H);
-      ctx.setLineDash([]);
-      ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10;
-      ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
-      ctx.font = "800 64px sans-serif";
-      ctx.fillText(Math.round(resRound * k) + "%", W / 2, Math.max(80, top.y - 16));
-    }
-    ctx.restore();
-  }
-
-  /* 残り秒数。画面の上に大きく、最後の3秒は赤く */
-  function drawCount() {
-    if (noUI || state !== S.PLAY && state !== S.INTRO) return;
-    var rest = state === S.INTRO ? TOTAL : Math.max(0, Math.ceil(TOTAL - T));
-    ctx.save();
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.font = "800 96px sans-serif";
-    ctx.shadowColor = "rgba(0,0,0,.5)"; ctx.shadowBlur = 12;
-    ctx.fillStyle = state === S.PLAY && rest <= 3 ? "#ff6b6b" : "#fff";
-    ctx.fillText(String(rest), W / 2, H * 0.09);
-    ctx.restore();
-  }
-
-  /* 夏祭りの夜。紫の空に、ぼんやり光る提灯 */
-  var LANTERNS = [];
-  (function () {
-    var seed = 31;
-    function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
-    for (var i = 0; i < 14; i++) LANTERNS.push({ x: rnd(), y: rnd() * 0.45, r: 18 + rnd() * 40, c: rnd() < 0.6 ? "255,120,60" : "255,200,90", a: 0.10 + rnd() * 0.18 });
-  })();
-  function drawFestival() {
-    var bg = ctx.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, "#1b1636"); bg.addColorStop(0.6, "#2c1b3a"); bg.addColorStop(1, "#140e1c");
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
-    LANTERNS.forEach(function (l) {
-      var x = l.x * W, y = l.y * H;
-      var gr = ctx.createRadialGradient(x, y, 0, x, y, l.r);
-      gr.addColorStop(0, "rgba(" + l.c + "," + l.a + ")"); gr.addColorStop(1, "rgba(" + l.c + ",0)");
-      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(x, y, l.r, 0, Math.PI * 2); ctx.fill();
-    });
-  }
-
-  function draw3d() {
-    drawFestival();
-    scene3d.aspect(W, H);
-    var now = performance.now() / 1000;
-    scene3d.update({ px: px, py: py, f: f, PN: PN, R0: R0, camR: camR || 48, camX: camX, camY: camY,
-      sugar: state === S.INTRO ? 1 : Math.max(0, 1 - T / TOTAL), spin: state === S.PLAY || state === S.INTRO ? 0.35 : 0.02,
-      bounce: 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15,
-      dizzy: spinRate > FAST * 0.85 || state === S.END });
-    if (!scene3d.render(ctx, W, H)) return false;
-    /* 糸・湯気・飛び散る綿は、立体の位置を画面に写して重ねる */
-    var o = scene3d.project(0, -1, 0, W, H), e = scene3d.project(10, -1, 0, W, H);
-    var k = Math.hypot(e.x - o.x, e.y - o.y) / 10;          /* 1cm が何ピクセルか */
-    if (state === S.PLAY || state === S.INTRO) {
-      var cap = feedRate(T) * CAP / N, dist = Math.hypot(px, py);
-      var reach = Math.max(BOWL * 1.05, dist - fAt(Math.atan2(-py, -px)) + 2);
-      ctx.lineCap = "round"; ctx.lineJoin = "round";
-      for (var i = 0; i < N; i++) {
-        var fill = state === S.INTRO ? 0.4 : sec[i] / cap;
-        if (fill < 0.03) continue;
-        var a = i * DTH + DTH / 2;
-        for (var j = 0; j < 3; j++) {
-          var aa = a + (j - 1) * 0.05 + Math.sin(now * 7 + i * 3 + j) * 0.03;
-          var len = HEAD + (reach - HEAD) * Math.min(1, fill * (0.8 + j * 0.1));
-          ctx.strokeStyle = "rgba(255,255,255," + (0.2 + fill * 0.5) + ")";
-          ctx.lineWidth = Math.max(1, (0.5 + fill * 0.7) * k);
-          ctx.beginPath();
-          for (var q = 0; q <= 6; q++) {
-            var rr = HEAD + (len - HEAD) * q / 6, wob = Math.sin(now * 5 + i + j * 2 + q) * 0.06 * q / 6;
-            var p = scene3d.project(Math.cos(aa + wob) * rr, -1 + Math.sin(now * 4 + q + i) * 0.8, Math.sin(aa + wob) * rr, W, H);
-            if (q) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
-          }
-          ctx.stroke();
-        }
-      }
-    }
-    steam.forEach(function (s) {
-      var p = scene3d.project(s.x, (0.7 - s.life) * 20, s.y, W, H);
-      ctx.fillStyle = "rgba(255,200,170," + Math.max(0, s.life * 0.5) + ")";
-      ctx.beginPath(); ctx.arc(p.x, p.y, (2 + (0.7 - s.life) * 6) * k, 0, Math.PI * 2); ctx.fill();
-    });
-    wisps.forEach(function (w) {
-      var p = scene3d.project(w.x, 0, w.y, W, H), p2 = scene3d.project(w.x - w.vx * 0.04, 0, w.y - w.vy * 0.04, W, H);
-      ctx.strokeStyle = "rgba(255,255,255," + Math.max(0, w.life) + ")";
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
-    });
-    return true;
-  }
-
-  function drawMachine() {
-    /* 鍋 */
-    var g = ctx.createRadialGradient(0, 0, HEAD, 0, 0, BOWL);
-    g.addColorStop(0, "#56607a"); g.addColorStop(1, "#3a4258");
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(0, 0, BOWL, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#c9cfdb"; ctx.lineWidth = 2.4;
-    ctx.beginPath(); ctx.arc(0, 0, BOWL, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 0.8;
-    ctx.beginPath(); ctx.arc(0, 0, BOWL - 1.6, Math.PI * 1.1, Math.PI * 1.6); ctx.stroke();
-    /* 回る頭。中の砂糖が減っていく。熱いので赤く光る */
-    var left = state === S.INTRO ? 1 : Math.max(0, 1 - T / TOTAL);
-    var hot = ctx.createRadialGradient(0, 0, 0, 0, 0, HEAD * 1.8);
-    hot.addColorStop(0, "rgba(255,120,60,.45)"); hot.addColorStop(1, "rgba(255,120,60,0)");
-    ctx.fillStyle = hot; ctx.beginPath(); ctx.arc(0, 0, HEAD * 1.8, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#b9c0cc";
-    ctx.beginPath(); ctx.arc(0, 0, HEAD, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#8a92a2";
-    var now = performance.now() / 1000;
-    for (var i = 0; i < 12; i++) {
-      var a = i / 12 * Math.PI * 2 + now * 9;
-      ctx.beginPath(); ctx.arc(Math.cos(a) * HEAD * 0.86, Math.sin(a) * HEAD * 0.86, 0.5, 0, Math.PI * 2); ctx.fill();
-    }
-    if (left > 0) {
-      ctx.fillStyle = "#f4f4f6";
-      ctx.beginPath(); ctx.arc(0, 0, HEAD * 0.7 * Math.sqrt(left), 0, Math.PI * 2); ctx.fill();
-    }
-  }
-
-  /* 真ん中から四方へ出る糸。たまっている向きほど濃く長く見える */
-  function drawThreads() {
-    var cap = feedRate(T) * CAP / N, now = performance.now() / 1000;
-    var reach = Math.max(BOWL * 1.05, Math.hypot(px, py) + rad() * 0.3);
-    ctx.lineCap = "round";
-    for (var i = 0; i < N; i++) {
-      var fill = state === S.INTRO ? 0.4 : sec[i] / cap;
-      if (fill < 0.03) continue;
-      var a = i * DTH + DTH / 2;
-      /* 1本の糸は、細い筋を3本束ねて描く */
-      for (var j = 0; j < 3; j++) {
-        var aa = a + (j - 1) * 0.05 + Math.sin(now * 7 + i * 3 + j) * 0.03;
-        var len = HEAD + (reach - HEAD) * Math.min(1, fill * (0.8 + j * 0.1));
-        var bend = Math.sin(now * 5 + i + j * 2) * 0.12;
-        ctx.strokeStyle = "rgba(255,255,255," + (0.15 + fill * 0.45) + ")";
-        ctx.lineWidth = 0.7 + fill * 1.2;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(aa) * HEAD, Math.sin(aa) * HEAD);
-        ctx.quadraticCurveTo(Math.cos(aa + bend) * (HEAD + len) / 2, Math.sin(aa + bend) * (HEAD + len) / 2, Math.cos(aa) * len, Math.sin(aa) * len);
-        ctx.stroke();
-      }
-    }
-  }
-
-  function drawPom() {
-    var r = rad();
+  /* 描いているところに、口を下に向けたケチャップの容器。中の赤が残りの量 */
+  function drawBottle(px, py) {
+    var w = 46, h = 104, left = Math.max(0, 1 - volume / CAP);
     ctx.save();
     ctx.translate(px, py);
-    /* 影 */
-    ctx.fillStyle = "rgba(0,0,0,.25)";
-    ctx.beginPath(); ctx.ellipse(r * 0.08, r * 0.12, r * 1.02, r * 1.0, 0, 0, Math.PI * 2); ctx.fill();
-    /* ポメの毛と綿あめはひと続きの白い綿。転がった分だけ模様が回る */
-    {
-      ctx.save();
-      ctx.rotate(roll);
-      var g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
-      g.addColorStop(0, "#ffffff"); g.addColorStop(0.75, "#f2f3f7"); g.addColorStop(1, "#d9dce6");
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      for (var pi = 0; pi <= PN; pi++) { var pa = pi * PTH - roll, pr = f[pi % PN] * 0.94; if (pi) ctx.lineTo(Math.cos(pa) * pr, Math.sin(pa) * pr); else ctx.moveTo(Math.cos(pa) * pr, Math.sin(pa) * pr); }
-      ctx.fill();
-      var bumps = Math.max(14, Math.min(40, Math.round(r / 2.2)));
-      for (var i = 0; i < bumps; i++) {
-        var a = i / bumps * Math.PI * 2, br = r * 0.14 + 1;
-        ctx.fillStyle = i % 2 ? "#f6f7fa" : "#e9ebf1";
-        var fr = fAt(a - roll);
-        ctx.beginPath(); ctx.arc(Math.cos(a) * (fr - br * 0.8), Math.sin(a) * (fr - br * 0.8), br, 0, Math.PI * 2); ctx.fill();
-      }
-      ctx.lineCap = "round";
-      for (i = 0; i < STRANDS.length; i++) {
-        var s = STRANDS[i], rr = r * (0.3 + s.r * 0.6);
-        ctx.strokeStyle = s.dark ? "rgba(170,175,195,.35)" : "rgba(255,255,255,.9)";
-        ctx.lineWidth = s.w * Math.max(0.6, r / 50);
-        ctx.beginPath(); ctx.arc(0, 0, rr, s.a, s.a + s.len * Math.min(1, 24 / rr + 0.15)); ctx.stroke();
-      }
-      ctx.restore();
-    }
-    var bounce = 1 + Math.sin(Math.min(1, barkT / 0.15) * Math.PI) * 0.15;
-    ctx.scale(bounce, bounce);
-    drawPomFace(R0);
+    ctx.rotate(0.32);                          /* 少し傾けて持っている */
+    /* 口（先が描いている点） */
+    ctx.beginPath();
+    ctx.moveTo(-3, -2); ctx.lineTo(3, -2); ctx.lineTo(7, -20); ctx.lineTo(-7, -20); ctx.closePath();
+    ctx.fillStyle = "#f4f1ea"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#16202e"; ctx.stroke();
+    /* ふた */
+    roundRect(-15, -38, 30, 20, 5);
+    ctx.fillStyle = "#e23a2a"; ctx.fill(); ctx.stroke();
+    /* 本体（すりガラスの入れ物） */
+    var top = -38 - h;
+    function body() { roundRect(-w / 2, top, w, h + 2, 16); }
+    body(); ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.fill();
+    ctx.save(); body(); ctx.clip();
+    var lv = -36 - h * left;                   /* 口の側にたまっている */
+    ctx.fillStyle = "#b3120a"; ctx.fillRect(-w / 2, lv, w, -36 - lv);
+    ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.fillRect(-w / 2 + 7, top + 8, 6, h - 16);
+    ctx.restore();
+    body(); ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
     ctx.restore();
   }
 
-  /* 白いポメ（上を見上げている顔） */
-  function drawPomFace(R) {
+  /* 全リセット（別のオムライスが出る）。左下、アイコンだけ */
+  function resetButton() { var b = okButton(), w = 96; return { x: 24, y: b.y, w: w, h: b.h }; }
+  function hitReset(x, y) { var b = resetButton(); return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
+  function drawReset() {
+    var b = resetButton();
     ctx.save();
-    var t = performance.now() / 1000;
-    /* 耳 */
-    [-1, 1].forEach(function (s) {
-      ctx.fillStyle = "#f6f7fa";
-      ctx.beginPath(); ctx.moveTo(s * R * 0.12, -R * 0.7); ctx.quadraticCurveTo(s * R * 0.5, -R * 1.45, s * R * 0.72, -R * 1.32); ctx.quadraticCurveTo(s * R * 0.95, -R * 0.9, s * R * 0.8, -R * 0.35); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "#f2c9c4";
-      ctx.beginPath(); ctx.moveTo(s * R * 0.3, -R * 0.75); ctx.quadraticCurveTo(s * R * 0.55, -R * 1.2, s * R * 0.68, -R * 1.15); ctx.quadraticCurveTo(s * R * 0.8, -R * 0.85, s * R * 0.7, -R * 0.55); ctx.closePath(); ctx.fill();
-    });
-    /* 目。速く回ったり溶けたりすると目が回る */
-    var dizzy = spinRate > FAST * 0.85 || state === S.END;
-    ctx.strokeStyle = "#1a1210"; ctx.fillStyle = "#1a1210"; ctx.lineWidth = R * 0.06; ctx.lineCap = "round";
-    [-1, 1].forEach(function (s) {
-      var ex = s * R * 0.32, ey = -R * 0.04;
-      if (dizzy) {
-        ctx.beginPath();
-        for (var k = 0; k < 20; k++) { var a = k * 0.6 + s * t * 8, rr = R * 0.012 * k; var x = ex + Math.cos(a) * rr, y = ey + Math.sin(a) * rr; if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
-        ctx.stroke();
-      } else {
-        ctx.beginPath(); ctx.arc(ex, ey, R * 0.11, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(ex + R * 0.035, ey - R * 0.045, R * 0.04, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#1a1210";
-      }
-    });
-    /* 鼻と口 */
-    ctx.beginPath(); ctx.ellipse(0, R * 0.2, R * 0.1, R * 0.07, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.lineWidth = R * 0.05;
-    ctx.beginPath(); ctx.moveTo(-R * 0.18, R * 0.34); ctx.quadraticCurveTo(-R * 0.09, R * 0.42, 0, R * 0.3); ctx.quadraticCurveTo(R * 0.09, R * 0.42, R * 0.18, R * 0.34); ctx.stroke();
-    ctx.fillStyle = "#e8848a";
-    ctx.beginPath(); ctx.ellipse(0, R * 0.44, R * 0.08, R * 0.1, 0, 0, Math.PI * 2); ctx.fill();
+    roundRect(b.x, b.y, b.w, b.h, b.h / 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+    ctx.fillStyle = "#16202e";
+    if (window.zActionIcon) window.zActionIcon(ctx, "もう一度", b.x + b.w / 2, b.y + b.h / 2 + 1, 30);
     ctx.restore();
   }
 
-  function drawWisps() {
-    ctx.lineCap = "round";
-    wisps.forEach(function (w) {
-      ctx.strokeStyle = "rgba(255,255,255," + Math.max(0, w.life) + ")";
-      ctx.lineWidth = 3 / scale;
-      ctx.beginPath(); ctx.moveTo(w.x, w.y); ctx.lineTo(w.x - w.vx * 0.04, w.y - w.vy * 0.04); ctx.stroke();
-    });
-  }
-  function drawSteam() {
-    steam.forEach(function (s) {
-      ctx.fillStyle = "rgba(255,200,170," + Math.max(0, s.life * 0.5) + ")";
-      ctx.beginPath(); ctx.arc(s.x, s.y, 2 + (0.7 - s.life) * 6, 0, Math.PI * 2); ctx.fill();
-    });
+  /* 「完成」ボタン。下の中央 */
+  function okButton() { var w = 180, h = 62; return { x: W / 2 - w / 2, y: H - h - Math.max(28, H * 0.035), w: w, h: h }; }
+  function hitOk(x, y) { var b = okButton(); return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
+  function drawOk() {
+    var b = okButton();
+    ctx.save();
+    roundRect(b.x, b.y, b.w, b.h, b.h / 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+    ctx.fillStyle = "#16202e"; ctx.font = "800 30px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(zT("完成", "Done"), b.x + b.w / 2, b.y + b.h / 2 + 1);
+    ctx.restore();
   }
 
-  /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
+  /* 結果画面。絵が見えるよう暗くせず、ボタンだけを下に */
   function resultButtons() {
-    var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H - h - Math.max(28, H * 0.035);
+    var h = 54, gap = 14, wr = 136, wv = 136, ws = 180;
+    var x0 = W / 2 - (wr + wv + ws + gap * 2) / 2, y = H - h - Math.max(36, H * 0.05);
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
-      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+      { id: "save", x: x0 + wr + gap, y: y, w: wv, h: h, label: "画像を保存" },
+      { id: "share", x: x0 + wr + wv + gap * 2, y: y, w: ws, h: h, label: "Xでシェア" }
     ];
   }
   function hitButton(x, y) {
@@ -746,24 +491,6 @@
     return null;
   }
   function drawResult() {
-    ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
-    ctx.textAlign = "center";
-    ctx.font = "800 108px sans-serif";
-    var num = String(score), nw = ctx.measureText(num).width;
-    ctx.font = "800 52px sans-serif";
-    var unit = "pome", uw = ctx.measureText(unit).width;
-    var x0 = W / 2 - (nw + 8 + uw) / 2;
-    ctx.textAlign = "left";
-    ctx.font = "800 108px sans-serif"; ctx.fillText(num, x0, H * 0.15);
-    ctx.font = "800 52px sans-serif"; ctx.fillText(unit, x0 + nw + 8, H * 0.15);
-    /* 内訳：直径 × 丸さ */
-    ctx.textAlign = "center";
-    ctx.font = "700 36px sans-serif";
-    ctx.fillText(resDia + "cm × " + resRound + "%", W / 2, H * 0.15 + 58);
-    ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
@@ -782,34 +509,35 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, round: roundness(), T: T, diameter: diameter(), spin: spinRate, melted: melted, flung: flung, W: W, H: H }; },
+    now: function () { return { state: state, score: score, W: W, H: H, volume: volume, strokes: scene3d ? scene3d.strokes.length : 0, has3d: !!scene3d }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
-    /* テスト用：指の代わりに、真ん中から d cm の所を1秒に w 周で回す */
-    orbit: function (w, d) { held = true; var a = Math.atan2(py, px) + w * Math.PI * 2 / 60; tx = Math.cos(a) * d; ty = Math.sin(a) * d; }
+    hideUI: function (v) { hideUI = v !== false; }
   };
-  var noUI = false;
-  window.__thumbnail = function () { newRound(); bigPom(110); T = 5; noUI = true; for (var i = 0; i < 300; i++) update(0); };   /* サムネ用：数字を出さない */
 
+  /* ============ 手元用の動画撮影 ============ */
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
       await r.wait(1000);
       r.key();
-      if (!await r.until(function () { return state === S.RESULT; }, 40)) throw Error("結果が出ない");
       await r.wait(1500);
     }
   };
 
   /* ============ ループ ============ */
-  var startButton = document.getElementById("start");
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
-  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); tone(900, 0.12, 0.12, "triangle", 1400); tone(1100, 0.14, 0.1, "triangle", 1700, 0.13); });
-  newRound(); humOff(); state = S.INTRO; startButton.hidden = false;
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  newRound();state=S.INTRO;startButton.hidden=false;
   layout();
   var last = performance.now();
   function loop(now) {
+    /* 端末の速さで難しさが変わらないように、描画が遅れてもゲームの時間は実際の時間どおり進める。
+       1回の update は 1/60 秒までに刻む。タブから戻ってきたときの大きな空白だけは切り捨てる */
     var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
     last = now;
     if (!window.__recordManual) {
@@ -821,16 +549,15 @@
   requestAnimationFrame(loop);
 })();
 </script>
-
 <script>
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=wataame-pome-1791414728447" : "./recorder-ui.js?v=wataame-pome-1791414728447";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=omurice-1791499009922" : "./recorder-ui.js?v=omurice-1791499009922";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=wataame-pome-1791414728447"></script>
-<script src="./preview-header.js?v=wataame-pome-1791414728447"></script>
+<script src="./auto-reload.js?v=omurice-1791499009922"></script>
+<script src="./preview-header.js?v=omurice-1791499009922"></script>
 </body>
 </html>
