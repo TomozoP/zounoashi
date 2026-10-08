@@ -157,7 +157,14 @@
   };
 
   /* 卵：ラグビーボール形のふくらみ。両端に包んだしわ、表面に焼きむら */
-  OmuScene.prototype.buildEgg = function () {
+  OmuScene.prototype.buildEgg = function (seed) {
+    /* seed ごとに形・しわ・焼き色の違うオムライスになる */
+    var R = seed || 1;
+    function rr() { R = (R * 16807) % 2147483647; return (R - 1) / 2147483646; }
+    var SX = rr() * 50, SY = rr() * 50, SZ = rr() * 50;
+    var LEN = 1.2 + rr() * 0.22, WID = 0.6 + rr() * 0.12, HGT = 0.5 + rr() * 0.12, TONE = rr();
+    function F(a, b, c, o) { return fbm(a + SX, b + SY, c + SZ, o); }
+    if (this.egg) { this.scene.remove(this.egg); this.egg.geometry.dispose(); }
     /* 極（UVの縮むところ）を卵の両端に向けてから形を作る */
     var geo = new T.SphereGeometry(1, 200, 120);
     geo.rotateZ(Math.PI / 2);
@@ -170,37 +177,38 @@
       /* 両端がとがった木の葉形。底は平ら、上はふっくら */
       var taper = Math.pow(Math.max(0, 1 - Math.pow(ax, 1.7)), 0.62) / Math.max(0.0001, Math.sqrt(Math.max(0, 1 - x * x)));
       taper = Math.min(1.25, taper) * (1 - 0.12 * ax);
-      var Y = y >= 0 ? Math.pow(y, 0.8) * 0.56 : y * 0.03;
-      var Z = z * 0.66;
+      var Y = y >= 0 ? Math.pow(y, 0.8) * HGT : y * 0.03;
+      var Z = z * WID;
       Y *= taper; Z *= taper;
-      var X = x * 1.32;
+      var X = x * LEN;
       /* 卵の膜のゆるいしわと、端の包みじわ */
       var ang = Math.atan2(y, z);
       var end = smooth(0.55, 0.97, ax) * Math.max(0, y + 0.3);
-      var fold = Math.sin(ang * 9 + fbm(x * 3, y * 3, z * 3, 2) * 5) * 0.018 * end;
-      var wob = (fbm(x * 3.2 + 7, y * 3.2, z * 3.2, 4) - 0.5) * 0.09 * Math.max(0, y + 0.1);
-      var crease = Math.pow(Math.abs(Math.sin(fbm(x * 1.8, y * 1.8 + 3, z * 1.8, 3) * 9)), 6) * -0.02 * Math.max(0, y);
+      var fold = Math.sin(ang * 9 + F(x * 3, y * 3, z * 3, 2) * 5) * 0.018 * end;
+      var wob = (F(x * 3.2 + 7, y * 3.2, z * 3.2, 4) - 0.5) * 0.09 * Math.max(0, y + 0.1);
+      var crease = Math.pow(Math.abs(Math.sin(F(x * 1.8, y * 1.8 + 3, z * 1.8, 3) * 9)), 6) * -0.02 * Math.max(0, y);
       var d = fold + wob + crease;
       var n = new T.Vector3(X, Y * 1.6, Z).normalize();
       X += n.x * d; Y += n.y * d + 0.012; Z += n.z * d;
       pos.setXYZ(i, X, Y, Z);
       /* 色: あざやかな卵の黄色。明るいむらと、端だけほんのり濃い */
-      var patch = fbm(x * 3 + 3, y * 3, z * 3, 4);
+      var patch = F(x * 3 + 3, y * 3, z * 3, 4);
       var light = smooth(0.45, 0.7, patch) * 0.6;
       var deep = smooth(0.8, 1.0, ax) * 0.4 + smooth(0.35, 0.2, patch) * 0.3;
-      var col = new T.Color().setRGB(0.99 + light * 0.01, 0.8 + light * 0.07 - deep * 0.08, 0.1 + light * 0.14 - deep * 0.05, T.SRGBColorSpace);
+      var col = new T.Color().setRGB(0.99 + light * 0.01, 0.76 + TONE * 0.07 + light * 0.07 - deep * 0.08, 0.1 + light * 0.14 - deep * 0.05, T.SRGBColorSpace);
       cols.push(col.r, col.g, col.b);
     }
     geo.setAttribute("color", new T.Float32BufferAttribute(cols, 3));
     geo.computeVertexNormals();
-    var bump = canvasTex(1024, eggBump);
-    bump.repeat.set(1, 1);
-    var m = new T.MeshPhysicalMaterial({
+    var bump = this.eggBump || (this.eggBump = canvasTex(1024, eggBump));
+    var m = this.eggMat || new T.MeshPhysicalMaterial({
       color: 0xffffff, vertexColors: true, roughness: 0.6, bumpMap: bump, bumpScale: 3,
       clearcoat: 0.12, clearcoatRoughness: 0.55, sheen: 0.35, sheenColor: new T.Color(0xffe080), sheenRoughness: 0.5,
       emissive: new T.Color(0x3a2000), emissiveIntensity: 0.15
     });
+    this.eggMat = m;
     var egg = this.egg = new T.Mesh(geo, m);
+    if (this.targets) this.targets[0] = egg;
     egg.position.y = 0.03;
     egg.castShadow = true; egg.receiveShadow = true;
     this.scene.add(egg);
@@ -297,6 +305,11 @@
     s.mesh = new T.Mesh(geo, this.inkMat);
     s.mesh.castShadow = true;
     this.scene.add(s.mesh);
+  };
+  /* 全部消して、別のオムライスを出す */
+  OmuScene.prototype.newOmu = function (seed) {
+    this.clear();
+    this.buildEgg(seed);
   };
   OmuScene.prototype.clear = function () {
     this.strokes.forEach(function (s) { s.pts = []; this.rebuild(s); }, this);
