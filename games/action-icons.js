@@ -2,7 +2,7 @@
    ボタンを足すときは、ゲームごとに描かずここへ同じ線の太さで足す。 */
 (function(global){
   'use strict';
-  function kind(label){return label==='もう一度'||label==='もう一度走る'?'retry':label==='Xでシェア'||label==='Xでポスト'?'share':label==='次'||label==='次へ'?'next':label==='画像を選ぶ'||label==='背景'?'photo':label==='ガイドを消す'?'guide':label==='ガイドを出す'?'guideOff':label==='スプレー'?'spray':label==='ハサミ'?'scissors':label==='毛色'?'palette':label==='飾り'?'ribbon':label==='顔'?'face':label==='画像を保存'?'save':null;}
+  function kind(label){return label==='もう一度'||label==='もう一度走る'?'retry':label==='Xでシェア'||label==='Xでポスト'?'share':label==='次'||label==='次へ'?'next':label==='画像を選ぶ'||label==='背景'?'photo':label==='ガイドを消す'?'guide':label==='ガイドを出す'?'guideOff':label==='スプレー'?'spray':label==='ハサミ'?'scissors':label==='毛色'?'palette':label==='飾り'?'ribbon':label==='顔'?'face':label==='画像を保存'?'save':label==='カッター'?'cutter':label==='やすり'?'sand':null;}
   function draw(ctx,label,x,y,size){
     var id=kind(label);if(!id)return false;
     ctx.save();ctx.translate(x,y);ctx.scale((size||30)/24,(size||30)/24);ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';
@@ -33,6 +33,14 @@
       /* 下向きの矢印と受け皿（画像の保存） */
       ctx.beginPath();ctx.moveTo(0,-10);ctx.lineTo(0,3);ctx.moveTo(-5,-2);ctx.lineTo(0,3);ctx.lineTo(5,-2);ctx.stroke();
       ctx.beginPath();ctx.moveTo(-9,4);ctx.lineTo(-9,10);ctx.lineTo(9,10);ctx.lineTo(9,4);ctx.stroke();
+    }else if(id==='cutter'){
+      /* 斜めの柄と、先のとがった刃 */
+      ctx.beginPath();ctx.moveTo(-10,10);ctx.lineTo(-2,2);ctx.lineTo(1,5);ctx.lineTo(-7,13);ctx.closePath();ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-1,1);ctx.lineTo(10,-10);ctx.lineTo(4,4);ctx.closePath();ctx.stroke();
+    }else if(id==='sand'){
+      /* 角の丸い当て木と、ざらざらの粒 */
+      ctx.beginPath();ctx.moveTo(-9,-4);ctx.lineTo(9,-4);ctx.arcTo(11,-4,11,-2,2);ctx.lineTo(11,4);ctx.lineTo(-11,4);ctx.lineTo(-11,-2);ctx.arcTo(-11,-4,-9,-4,2);ctx.stroke();
+      ctx.beginPath();for(var i=-9;i<=9;i+=4.5){ctx.moveTo(i+1,8);ctx.arc(i,8,1,0,Math.PI*2);}ctx.fill();
     }else if(id==='face'){
       /* 丸い顔に目と口 */
       ctx.beginPath();ctx.arc(0,0,10,0,Math.PI*2);ctx.stroke();
