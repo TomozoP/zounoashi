@@ -478,6 +478,10 @@ var SITE = {
    空のままでも問題ありません（数えないし、数字が出ないだけ）。
    下の GAMES に plays を手書きしてあるゲームは、そちらの数字が優先されます。
    -------------------------------------------------------------- */
+/* Googleアナリティクスの測定ID（G-で始まる）。入れると、開いた回数はアナリティクスで数え、
+   カードの数字は counter.gs が1日1回アナリティクスから取ってきた数になる。
+   空のときは前のとおり、開くたびに counter.gs で1増やす */
+var GA_ID = "";
 var COUNTER_URL = "https://script.google.com/macros/s/AKfycbx-Dmc71cYXmZR554kMq7cjkCVFfJpZ7iEzhETDu9ZAp0KtuW34LyrVUvvqKNBGVGkCmw/exec";
 
 
@@ -823,13 +827,33 @@ var EN = {
   /* 手元(localhost)で開いているか。下書きの読み込みと、プレイ数を数えない判定に使う */
   var LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])?$/.test(location.hostname);
 
+  /* アナリティクス。手元で開いた分は送らない */
+  var GA_ON = !!GA_ID && !LOCAL;
+  if (GA_ON) {
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function () { dataLayer.push(arguments); };
+    gtag("js", new Date());
+    gtag("config", GA_ID, { send_page_view: false });   /* ページの切り替えはルーターから送る */
+    var gaTag = document.createElement("script");
+    gaTag.async = true;
+    gaTag.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(GA_ID);
+    document.head.appendChild(gaTag);
+  }
+  function gaPage(title) {
+    if (GA_ON) gtag("event", "page_view", { page_title: title, page_location: location.href });
+  }
+  /* アナリティクスのイベント名に使えない「-」は「_」にする（counter.gs も同じ形で受け取る） */
+  function gaKey(id) { return String(id).replace(/-/g, "_"); }
+
   /* ゲームを開いたときに1増やす。同じタブで開き直しても二重には数えない */
   function countsHit(id) {
-    if (!COUNTER_URL || !id || LOCAL) return;   /* 手元で試した分は数えない */
+    if (!id || LOCAL) return;   /* 手元で試した分は数えない */
+    if (!GA_ON && !COUNTER_URL) return;
     try {
       if (sessionStorage.getItem("hit:" + id)) return;
       sessionStorage.setItem("hit:" + id, "1");
     } catch (e) {}
+    if (GA_ON) { gtag("event", "play_" + gaKey(id)); return; }
     fetch(COUNTER_URL + "?hit=" + encodeURIComponent(id), { cache: "no-store" })
       .then(function (r) { return r.json(); })
       .then(function (d) { for (var k in d) counts[k] = d[k]; })
@@ -839,7 +863,9 @@ var EN = {
   /* GAMES に手書きした数があればそれを、無ければ数えた回数を使う */
   function playsOf(g) {
     if (g.plays != null) return g.plays;
-    return (g.id && counts[g.id] != null) ? counts[g.id] : null;
+    if (!g.id) return null;
+    if (counts[g.id] != null) return counts[g.id];
+    return counts[gaKey(g.id)] != null ? counts[gaKey(g.id)] : null;
   }
 
   function fmtPlays(n) {
@@ -1376,9 +1402,10 @@ var EN = {
   function countsIfGrid() {
     if ($("#grid")) countsLoad(function () { if ($("#grid")) paintGrid(); });
   }
-  addEventListener("hashchange", function () { render(); countsIfGrid(); });
+  addEventListener("hashchange", function () { render(); countsIfGrid(); gaPage(document.title); });
   render();
   countsIfGrid();
+  gaPage(document.title);
 
   /* まだ公開しない下書きのゲーム。ローカルで見たときだけ一覧に出す。
      中身は games/_local.js（_ で始まる名前は GitHub Pages が公開しない）ので、
