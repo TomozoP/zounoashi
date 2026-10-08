@@ -147,6 +147,8 @@
   var state, score, T, held, keyMode = false;
   var GRAM = 8.2 * 8.2 * 8.2 * 1.1;            /* 体積（ゲームの単位）→ グラム。1単位≒8.2cm、ケチャップは1.1g/cm³ */
   var volume = 0, stroke = null, lastPt = null, lastMoveT = 0, look = 0;
+  var CAP = 0.12, empty = false;             /* ケチャップ1本分の量（重くなりすぎないための上限） */
+  var SIZES = [0.5, 1, 1.75], size = 1;      /* ケチャップの太さ（細・中・太） */
   var orbit = { yaw: 0, tilt: 0, vy: 0, vt: 0 }, spin = null;   /* 完成後にドラッグで回して眺める */
 
   function place() {}
@@ -158,7 +160,7 @@
     score = 0;
     T = 0;
     held = false;
-    volume = 0; stroke = null; lastPt = null; look = 0;
+    volume = 0; stroke = null; lastPt = null; look = 0; empty = false;
     orbit = { yaw: 0, tilt: 0, vy: 0, vt: 0 }; spin = null;
     if (scene3d) scene3d.clear();
   }
@@ -184,15 +186,16 @@
     }
     if (state !== S.PLAY) return;
     /* 止めたままでもケチャップは少しずつ出て、点が太る */
-    if (held && stroke && lastPt && scene3d) {
+    if (held && !empty && stroke && lastPt && scene3d) {
       var still = T - lastMoveT;
       if (still > 0.08) {
         var last = stroke.pts[stroke.pts.length - 1];
-        if (last && last.r < 0.075) {
+        if (last && last.r < 0.075 * SIZES[size]) {
           var before = last.r;
-          last.r = Math.min(0.075, last.r + dt * 0.03);
+          last.r = Math.min(0.075 * SIZES[size], last.r + dt * 0.03 * SIZES[size]);
           volume += Math.PI * (last.r * last.r - before * before) * last.r * 0.9;
           scene3d.rebuild(stroke);
+          checkEmpty();
           squeezeLevel(0.35);
         } else squeezeLevel(0.1);
       }
@@ -216,20 +219,40 @@
     }
     if (x == null) return;
     if (hitOk(x, y)) { finish(); return; }
+    var sb = hitSize(x, y);
+    if (sb >= 0) { size = sb; tone(500 + sb * 200, 0.06, 0.08, "sine"); return; }
     held = true;
     stroke = null; lastPt = null; lastXY = { x: x, y: y, t: T }; lastMoveT = T;
+    if (empty) { sputter(); return; }
     squeezeOn();
     paintAt(x, y, 0);
   }
+  /* 空になったら出ない。ぷすっと空気だけ */
+  function sputter() {
+    noiseHit(0.08, 900, 0.12, 2); noiseHit(0.06, 1400, 0.08, 2);
+  }
+  function checkEmpty() {
+    if (empty || volume < CAP) return;
+    empty = true; volume = CAP;
+    squeezeOff(); sputter();
+  }
   function paintAt(x, y, speed) {
+    if (empty) return;
     var h = screenPick(x, y);
     if (!h) { stroke = null; lastPt = null; return; }
     if (!stroke) stroke = scene3d.beginStroke();
     /* 速さ（ゲーム座標/秒）から太さ。速いと細く、ゆっくりだと太い */
-    var r = Math.max(0.018, Math.min(0.055, 0.055 - speed * 0.00004));
+    var r = Math.max(0.018, Math.min(0.055, 0.055 - speed * 0.00004)) * SIZES[size];
     var added = scene3d.addPoint(stroke, h, r);
+    if (added === -2) {                        /* 長い線は、前の点からつなげて新しい線に */
+      var prev = stroke.pts[stroke.pts.length - 1];
+      stroke = scene3d.beginStroke(); scene3d.addPoint(stroke, prev, prev.r);
+      added = scene3d.addPoint(stroke, h, r);
+    }
     if (added < 0) { stroke = scene3d.beginStroke(); added = scene3d.addPoint(stroke, h, r); }
-    volume += added;
+    /* 細い線でも点が増えすぎないよう、長さにも最低の量をかける */
+    volume += Math.max(added, scene3d.lastLen * 0.0022);
+    checkEmpty();
     lastPt = h;
   }
   function move(x, y) {
@@ -338,12 +361,57 @@
     ctx.fillStyle = "#2a1c12"; ctx.fillRect(0, 0, W, H);
     if (scene3d) { try { scene3d.render(ctx, W, H, look, orbit); } catch (e) {} }
     if (hideUI) return;
-    if (state === S.PLAY) drawOk();
+    if (state === S.PLAY) { drawSizes(); drawOk(); drawBottle(); }
     if (state === S.RESULT) drawResult();
   }
 
-  /* 「完成」ボタン。下の中央 */
-  function okButton() { var w = 180, h = 62; return { x: W / 2 - w / 2, y: H - h - Math.max(28, H * 0.035), w: w, h: h }; }
+  /* 太さを選ぶ丸いボタン3つ。左下。中の赤い点の大きさが太さ */
+  function sizeButtons() {
+    var d = 62, gap = 12, y = okButton().y, bs = [];
+    for (var i = 0; i < 3; i++) bs.push({ x: 24 + i * (d + gap) + d / 2, y: y + 31, r: d / 2 });
+    return bs;
+  }
+  function hitSize(x, y) {
+    var bs = sizeButtons();
+    for (var i = 0; i < bs.length; i++) if (Math.hypot(x - bs[i].x, y - bs[i].y) <= bs[i].r + 4) return i;
+    return -1;
+  }
+  function drawSizes() {
+    sizeButtons().forEach(function (b, i) {
+      ctx.save();
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = i === size ? 6 : 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(b.x, b.y, [5, 9, 15][i], 0, 7);
+      ctx.fillStyle = "#b3120a"; ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  /* 右上のケチャップの容器。中の赤が残りの量 */
+  function drawBottle() {
+    var w = 40, h = 84, x = W - w - 22, y = 22, left = Math.max(0, 1 - volume / CAP);
+    ctx.save();
+    function body() {
+      ctx.beginPath();
+      ctx.moveTo(x + w / 2 - 5, y); ctx.lineTo(x + w / 2 + 5, y);
+      ctx.lineTo(x + w / 2 + 7, y + 14); ctx.quadraticCurveTo(x + w, y + 18, x + w, y + 30);
+      ctx.lineTo(x + w, y + h - 8); ctx.quadraticCurveTo(x + w, y + h, x + w - 8, y + h);
+      ctx.lineTo(x + 8, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - 8);
+      ctx.lineTo(x, y + 30); ctx.quadraticCurveTo(x, y + 18, x + w / 2 - 7, y + 14);
+      ctx.closePath();
+    }
+    body(); ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.fill();
+    ctx.save(); body(); ctx.clip();
+    var top = y + 20 + (h - 20) * (1 - left);
+    ctx.fillStyle = "#b3120a"; ctx.fillRect(x, top, w, y + h - top);
+    ctx.restore();
+    body(); ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+    ctx.restore();
+  }
+
+  /* 「完成」ボタン。右下 */
+  function okButton() { var w = 160, h = 62; return { x: W - w - 24, y: H - h - Math.max(28, H * 0.035), w: w, h: h }; }
   function hitOk(x, y) { var b = okButton(); return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
   function drawOk() {
     var b = okButton();

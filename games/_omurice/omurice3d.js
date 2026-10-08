@@ -122,7 +122,7 @@
     this.inkMat = new T.MeshPhysicalMaterial({ color: 0xb3120a, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.08, sheen: 0.3, sheenColor: new T.Color(0xff5030) });
     this.strokes = [];
     this.ray = new T.Raycaster();
-    this.targets = [this.egg, this.plateTop];
+    this.targets = [this.egg, this.plate, this.table];
     this.w = 0; this.h = 0; this.look = 0;
   }
 
@@ -132,6 +132,7 @@
     var m = new T.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0 });
     var t = new T.Mesh(new T.PlaneGeometry(40, 40), m);
     t.rotation.x = -Math.PI / 2; t.receiveShadow = true;
+    this.table = t;
     this.scene.add(t);
   };
 
@@ -147,6 +148,7 @@
     var m = new T.MeshPhysicalMaterial({ color: 0xf6f4ee, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05 });
     var p = new T.Mesh(geo, m);
     p.castShadow = true; p.receiveShadow = true;
+    this.plate = p;
     this.scene.add(p);
     /* 線を引ける皿の面（見えない板） */
     var top = new T.Mesh(new T.CircleGeometry(1.0, 48), new T.MeshBasicMaterial({ visible: false }));
@@ -212,13 +214,13 @@
     cam.aspect = W / H;
     var vf = cam.fov * Math.PI / 360;
     var hf = Math.atan(Math.tan(vf) * cam.aspect);
-    /* 横は卵の幅＋少し、縦は卵の長さ＋少しが入る近さ */
-    var dist = Math.max(1.05 / Math.tan(hf), 1.75 / Math.tan(vf));
+    /* 卵がぎりぎり画面に収まる近さ */
+    var dist = Math.max(0.74 / Math.tan(hf), 1.22 / Math.tan(vf));
     var tilt = 0.98 - 0.1 * (look || 0), yaw = 0;   /* 見下ろす角度・まわりこむ角度（ラジアン） */
     if (orbit) { tilt += orbit.tilt; yaw = orbit.yaw; }
     tilt = Math.max(0.22, Math.min(1.45, tilt));
     cam.position.set(Math.sin(yaw) * Math.cos(tilt) * dist, Math.sin(tilt) * dist + 0.1, Math.cos(yaw) * Math.cos(tilt) * dist);
-    cam.lookAt(0, 0.1, 0.05);
+    cam.lookAt(0, 0.12, 0.08);
     cam.updateProjectionMatrix();
   };
 
@@ -229,7 +231,8 @@
     if (!hits.length) return null;
     var h = hits[0];
     var n = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : new T.Vector3(0, 1, 0);
-    if (h.object === this.plateTop) n.set(0, 1, 0);
+    if (h.object === this.table) n.set(0, 1, 0);
+    if (n.y < 0) n.negate();
     return { p: h.point.clone(), n: n.normalize(), o: h.object };
   };
 
@@ -241,10 +244,13 @@
   };
   OmuScene.prototype.addPoint = function (s, hit, r) {
     var last = s.pts[s.pts.length - 1];
-    if (last && last.p.distanceTo(hit.p) < 0.012) { last.r = Math.max(last.r, r * 0.9 + last.r * 0.1); this.rebuild(s); return 0; }
+    this.lastLen = 0;
+    if (last && last.p.distanceTo(hit.p) < 0.012) { return 0; }
+    if (s.pts.length >= 240) return -2;                  /* 1本が長すぎると作り直しが重いので、続きは新しい線にする */
     var len = last ? last.p.distanceTo(hit.p) : 0;
     if (last && (len > 0.25 || last.o !== hit.o)) return -1;                   /* 卵から皿へ飛ぶような大きな跳びはつなげない */
     s.pts.push({ p: hit.p, n: hit.n, r: r, o: hit.o });
+    this.lastLen = len;
     this.rebuild(s);
     return len * Math.PI * r * r * 0.75;                  /* 使ったケチャップの量（体積） */
   };
