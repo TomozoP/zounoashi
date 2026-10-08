@@ -137,7 +137,7 @@
       S.add(b); return b;
     }
     /* 食卓（幅120cm×奥行80cm、高さ72cm ≒ 14.6×9.8、8.8） */
-    var tex = canvasTex(1024, woodColor, 2);
+    var tex = canvasTex(1024, woodColor);   /* くり返さず1枚で貼る（継ぎ目を出さない） */
     tex.colorSpace = T.SRGBColorSpace;
     var wood = std(0xffffff, { map: tex, roughness: 0.55 });
     var dark = std(0x5a3b24, { roughness: 0.7 });
