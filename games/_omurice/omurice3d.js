@@ -142,8 +142,7 @@
       [0, 0.03], [1.1, 0.03], [1.38, 0.05], [1.5, 0.1], [1.62, 0.16], [1.68, 0.175], [1.7, 0.16], [1.62, 0.12], [1.45, 0.04], [1.25, 0.0], [0.9, 0.0], [0.88, 0.012], [0, 0.012]
     ].map(function (p) { return new T.Vector2(p[0], p[1]); });
     var geo = new T.LatheGeometry(pts.reverse(), 128);
-    geo.scale(1.2, 1, 0.78);
-    geo.rotateY(Math.PI / 2);
+    geo.scale(1.12, 1, 0.82);
     geo.computeVertexNormals();
     var m = new T.MeshPhysicalMaterial({ color: 0xf6f4ee, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05 });
     var p = new T.Mesh(geo, m);
@@ -203,7 +202,6 @@
     });
     var egg = this.egg = new T.Mesh(geo, m);
     egg.position.y = 0.03;
-    egg.rotation.y = Math.PI / 2;            /* タテ画面に合わせて縦向き */
     egg.castShadow = true; egg.receiveShadow = true;
     this.scene.add(egg);
   };
@@ -214,13 +212,13 @@
     cam.aspect = W / H;
     var vf = cam.fov * Math.PI / 360;
     var hf = Math.atan(Math.tan(vf) * cam.aspect);
-    /* 卵がぎりぎり画面に収まる近さ */
-    var dist = Math.max(0.9 / Math.tan(hf), 1.45 / Math.tan(vf));
+    /* 横向きの卵の長さが画面の幅に収まる近さ */
+    var dist = Math.max(1.55 / Math.tan(hf), 0.9 / Math.tan(vf));
     var tilt = 0.98 - 0.1 * (look || 0), yaw = 0;   /* 見下ろす角度・まわりこむ角度（ラジアン） */
     if (orbit) { tilt += orbit.tilt; yaw = orbit.yaw; }
     tilt = Math.max(0.22, Math.min(1.45, tilt));
     cam.position.set(Math.sin(yaw) * Math.cos(tilt) * dist, Math.sin(tilt) * dist + 0.1, Math.cos(yaw) * Math.cos(tilt) * dist);
-    cam.lookAt(0, 0.12, 0.08);
+    cam.lookAt(0, 0.12, 0.02);
     cam.updateProjectionMatrix();
   };
 
