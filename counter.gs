@@ -95,8 +95,8 @@ function rowOf_(sh, id) {
 /* 全部の回数は5分のあいだ控えに置き、毎回スプレッドシートを読まない。
    1回の実行を短くして、同時に動く数（上限1000）を増やさないため */
 /* アナリティクスに切り替えたら書く（上の説明を参照）。空なら前のとおり ?hit= で数える */
-var GA_PROPERTY_ID = "";
-var GA_START = "";
+var GA_PROPERTY_ID = "558011689";
+var GA_START = "2026-10-08";
 
 var CACHE_KEY = "all";
 var CACHE_SEC = 300;
