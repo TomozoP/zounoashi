@@ -385,7 +385,7 @@
     var self = this;
     function cap(pt) {
       var m = new T.Mesh(new T.SphereGeometry(1, 16, 10), self.inkMat);
-      m.position.copy(pt.p).addScaledVector(pt.n, pt.r * 0.25);
+      m.position.copy(pt.p).addScaledVector(pt.n, pt.r * 0.5 + 0.004);
       m.scale.set(pt.r * 1.05, pt.r * 0.72, pt.r * 1.05);
       m.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), pt.n);
       m.castShadow = true;
@@ -401,7 +401,7 @@
       t.subVectors(b, a).normalize();
       side.crossVectors(P[i].n, t).normalize();
       var r = P[i].r;
-      c.copy(P[i].p).addScaledVector(P[i].n, r * 0.25);
+      c.copy(P[i].p).addScaledVector(P[i].n, r * 0.5 + 0.004);
       for (var k = 0; k < SEG; k++) {
         var ang = k / SEG * Math.PI * 2;
         verts.push(
