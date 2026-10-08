@@ -126,14 +126,130 @@
     this.w = 0; this.h = 0; this.look = 0;
   }
 
+  /* 食卓と、まわりのリビング（床・壁・窓・ソファ・棚・照明・観葉植物）。すべて基本図形で自作 */
   OmuScene.prototype.buildTable = function () {
-    var tex = canvasTex(1024, woodColor, 5);
+    var S = this.scene;
+    function std(c, o) { var p = { color: c, roughness: 0.8 }; for (var k in o) p[k] = o[k]; return new T.MeshStandardMaterial(p); }
+    function box(w, h, d, m, x, y, z, shadow) {
+      var b = new T.Mesh(new T.BoxGeometry(w, h, d), m);
+      b.position.set(x, y, z);
+      if (shadow) { b.castShadow = true; b.receiveShadow = true; }
+      S.add(b); return b;
+    }
+    /* 食卓（幅120cm×奥行80cm、高さ72cm ≒ 14.6×9.8、8.8） */
+    var tex = canvasTex(1024, woodColor, 2);
     tex.colorSpace = T.SRGBColorSpace;
-    var m = new T.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0 });
-    var t = new T.Mesh(new T.PlaneGeometry(40, 40), m);
+    var wood = std(0xffffff, { map: tex, roughness: 0.55 });
+    var dark = std(0x5a3b24, { roughness: 0.7 });
+    var t = new T.Mesh(new T.PlaneGeometry(14.6, 9.8), wood);
     t.rotation.x = -Math.PI / 2; t.receiveShadow = true;
-    this.table = t;
-    this.scene.add(t);
+    this.table = t; S.add(t);
+    box(14.6, 0.45, 9.8, dark, 0, -0.23, 0);
+    [[-6.6, -4.2], [6.6, -4.2], [-6.6, 4.2], [6.6, 4.2]].forEach(function (p) { box(0.6, 8.4, 0.6, dark, p[0], -4.65, p[1]); });
+    var FLOOR = -8.85;
+    /* 椅子（左右に1脚ずつ） */
+    var chair = std(0x7a5536, { roughness: 0.7 }), cushion = std(0xd8cbb3, { roughness: 1 });
+    [-1, 1].forEach(function (s) {
+      var cx = s * 9.6;
+      box(4.6, 0.4, 4.6, chair, cx, FLOOR + 5.4, 0);
+      box(4.4, 0.5, 4.4, cushion, cx, FLOOR + 5.85, 0);
+      box(0.4, 6, 4.6, chair, cx + s * 2.1, FLOOR + 8.6, 0);
+      [[-1.9, -1.9], [1.9, -1.9], [-1.9, 1.9], [1.9, 1.9]].forEach(function (p) { box(0.35, 5.2, 0.35, chair, cx + p[0], FLOOR + 2.6, p[1]); });
+    });
+    /* 床（フローリング）とラグ */
+    var ftex = canvasTex(1024, function (g, s) {
+      woodColor(g, s);
+      g.strokeStyle = "rgba(40,24,12,.5)"; g.lineWidth = 2;
+      for (var i = 0; i <= 8; i++) { g.beginPath(); g.moveTo(0, i * s / 8); g.lineTo(s, i * s / 8); g.stroke(); }
+      for (i = 0; i < 16; i++) { var y = Math.floor(i / 2) * s / 8, x = (i % 2 ? 0.3 : 0.75) * s + (i * 97 % 130); g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + s / 8); g.stroke(); }
+    }, 6);
+    ftex.colorSpace = T.SRGBColorSpace;
+    var floor = new T.Mesh(new T.PlaneGeometry(70, 70), std(0xd9c2a0, { map: ftex, roughness: 0.6 }));
+    floor.rotation.x = -Math.PI / 2; floor.position.y = FLOOR; floor.receiveShadow = true; S.add(floor);
+    var rug = new T.Mesh(new T.CircleGeometry(13, 48), std(0xb9a58c, { roughness: 1 }));
+    rug.rotation.x = -Math.PI / 2; rug.position.y = FLOOR + 0.05; rug.scale.set(1.3, 1, 1); S.add(rug);
+    /* 壁（あたたかい白）と天井 */
+    var wall = std(0xece4d6, { roughness: 0.95, side: T.BackSide });
+    var room = new T.Mesh(new T.BoxGeometry(70, 34, 70), wall);
+    room.position.y = FLOOR + 17; S.add(room);
+    /* 奥の壁の大きな窓（明るい外とレースのカーテン） */
+    var sky = new T.MeshBasicMaterial({ color: 0xdff0ff });
+    var win = new T.Mesh(new T.PlaneGeometry(22, 14), sky);
+    win.position.set(-6, FLOOR + 14, -34.9); S.add(win);
+    var frame = std(0xf5f2ec, { roughness: 0.5 });
+    box(22.8, 0.6, 0.4, frame, -6, FLOOR + 21, -34.7); box(22.8, 0.6, 0.4, frame, -6, FLOOR + 7, -34.7);
+    box(0.6, 14.6, 0.4, frame, -17.1, FLOOR + 14, -34.7); box(0.6, 14.6, 0.4, frame, 5.1, FLOOR + 14, -34.7); box(0.4, 14, 0.4, frame, -6, FLOOR + 14, -34.7);
+    var lace = new T.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, roughness: 1, side: T.DoubleSide });
+    var cur = std(0xc9b48f, { roughness: 1 });
+    box(4, 22, 0.6, cur, -19.5, FLOOR + 11.5, -34.2); box(4, 22, 0.6, cur, 7.5, FLOOR + 11.5, -34.2);
+    var l = new T.Mesh(new T.PlaneGeometry(8, 15), lace); l.position.set(-13.5, FLOOR + 13.5, -34.3); S.add(l);
+    /* 奥のソファとクッション */
+    var sofa = std(0x6e7f8c, { roughness: 1 });
+    box(20, 3.5, 7, sofa, 8, FLOOR + 3, -26, true); box(20, 6, 2.2, sofa, 8, FLOOR + 6.5, -28.6, true);
+    box(2.2, 5, 7, sofa, -1, FLOOR + 4.2, -26, true); box(2.2, 5, 7, sofa, 17, FLOOR + 4.2, -26, true);
+    box(3.6, 3.4, 1.2, std(0xe3b54a, { roughness: 1 }), 3, FLOOR + 6.4, -26.8); box(3.6, 3.4, 1.2, std(0xe9e1d2, { roughness: 1 }), 13, FLOOR + 6.4, -26.8);
+    /* 左の本棚 */
+    var shelf = std(0x8a6444, { roughness: 0.7 });
+    box(2.4, 22, 12, shelf, -33.6, FLOOR + 11, -10, true);
+    var bookCols = [0x8c3b2e, 0x2f5d6e, 0xd8c08a, 0x3e6b45, 0xa65b2a, 0x51476e, 0xe4dccb];
+    for (var row = 0; row < 4; row++) {
+      box(2.4, 0.4, 12, shelf, -32.4, FLOOR + 2 + row * 5, -10);
+      var z = -15.4;
+      for (var bk = 0; z < -4.8; bk++) {
+        var bw = 0.6 + ((bk * 7 + row * 3) % 5) * 0.15, bh = 3 + ((bk * 5 + row) % 4) * 0.35;
+        box(1.8, bh, bw, std(bookCols[(bk + row * 2) % bookCols.length], { roughness: 0.9 }), -32.2, FLOOR + 2.2 + row * 5 + bh / 2, z + bw / 2);
+        z += bw + 0.08;
+      }
+    }
+    /* 右の観葉植物 */
+    box(3, 3.6, 3, std(0xe8e2d8, { roughness: 0.6 }), 26, FLOOR + 1.8, -22, true);
+    var leaf = std(0x3f6e3a, { roughness: 0.8 });
+    for (var k = 0; k < 14; k++) {
+      var a = k * 2.4, h = 4 + (k % 5) * 1.6;
+      var lf = new T.Mesh(new T.SphereGeometry(1, 12, 8), leaf);
+      lf.scale.set(1.8, 0.5, 0.9); lf.position.set(26 + Math.cos(a) * 1.6, FLOOR + h + 2, -22 + Math.sin(a) * 1.6);
+      lf.rotation.set(0.3 * Math.sin(k), a, 0.5 * Math.cos(k)); lf.castShadow = true; S.add(lf);
+    }
+    /* 右の壁: テレビ台とテレビ、額の絵 */
+    box(3.5, 4, 18, std(0x6b4a32, { roughness: 0.7 }), 33, FLOOR + 2, 4, true);
+    box(0.6, 9, 16, std(0x111111, { roughness: 0.3 }), 33.6, FLOOR + 9.5, 4);
+    var tvGlow = new T.Mesh(new T.PlaneGeometry(15, 8.2), new T.MeshBasicMaterial({ color: 0x1b2633 }));
+    tvGlow.rotation.y = -Math.PI / 2; tvGlow.position.set(33.25, FLOOR + 9.5, 4); S.add(tvGlow);
+    function picture(x, y, z, ry, w, h, cols) {
+      var g = new T.Group(); g.position.set(x, y, z); g.rotation.y = ry; S.add(g);
+      var fr = new T.Mesh(new T.BoxGeometry(w + 0.8, h + 0.8, 0.3), std(0x3a2a1c, { roughness: 0.6 })); g.add(fr);
+      var c = document.createElement("canvas"); c.width = 128; c.height = 128;
+      var cg = c.getContext("2d"), gr = cg.createLinearGradient(0, 0, 0, 128);
+      gr.addColorStop(0, cols[0]); gr.addColorStop(0.6, cols[1]); gr.addColorStop(1, cols[2]);
+      cg.fillStyle = gr; cg.fillRect(0, 0, 128, 128);
+      cg.fillStyle = cols[3]; cg.beginPath(); cg.arc(40, 50, 14, 0, 7); cg.fill();
+      cg.fillStyle = cols[2]; cg.beginPath(); cg.moveTo(0, 128); cg.lineTo(50, 70); cg.lineTo(90, 100); cg.lineTo(128, 60); cg.lineTo(128, 128); cg.fill();
+      var tx = new T.CanvasTexture(c); tx.colorSpace = T.SRGBColorSpace;
+      var art = new T.Mesh(new T.PlaneGeometry(w, h), std(0xffffff, { map: tx, roughness: 0.9 }));
+      art.position.z = 0.16; g.add(art);
+    }
+    picture(34.7, FLOOR + 20, -12, -Math.PI / 2, 7, 5, ["#9fc3d9", "#e8d9b0", "#6d8a5a", "#f3c96b"]);
+    /* 手前の壁: ドアと時計と絵 */
+    box(8, 17, 0.4, std(0xc9ab84, { roughness: 0.6 }), 14, FLOOR + 8.5, 34.8);
+    var knob = new T.Mesh(new T.SphereGeometry(0.35, 12, 8), std(0xc8b07a, { metalness: 0.8, roughness: 0.3 }));
+    knob.position.set(11, FLOOR + 8.5, 34.4); S.add(knob);
+    var clock = new T.Mesh(new T.CylinderGeometry(2, 2, 0.4, 40), std(0xf6f3ee, { roughness: 0.5 }));
+    clock.rotation.x = Math.PI / 2; clock.position.set(-6, FLOOR + 21, 34.7); S.add(clock);
+    var rim = new T.Mesh(new T.TorusGeometry(2, 0.18, 8, 40), std(0x2b2b2b, { roughness: 0.4 }));
+    rim.position.set(-6, FLOOR + 21, 34.6); S.add(rim);
+    box(0.15, 1.4, 0.1, std(0x222222), -6, FLOOR + 21.6, 34.4).rotation.z = 0.5;
+    box(0.12, 1.0, 0.1, std(0x222222), -6.3, FLOOR + 20.6, 34.4).rotation.z = -2.2;
+    picture(-20, FLOOR + 16, 34.7, Math.PI, 9, 6, ["#f2b38a", "#f6e2c4", "#b9875a", "#ffffff"]);
+    /* 左の壁にも小さな絵 */
+    picture(-34.7, FLOOR + 20, 12, Math.PI / 2, 5, 6, ["#c7d7c0", "#e9e2d0", "#7f9a7a", "#d96c4f"]);
+    /* 食卓の上のペンダントライト */
+    var shade = new T.Mesh(new T.ConeGeometry(2.2, 1.8, 32, 1, true), std(0x2e2a26, { roughness: 0.5, side: T.DoubleSide }));
+    shade.position.set(0, 13, 0); S.add(shade);
+    var bulb = new T.Mesh(new T.SphereGeometry(0.5, 16, 10), new T.MeshBasicMaterial({ color: 0xfff1cc }));
+    bulb.position.set(0, 12.3, 0); S.add(bulb);
+    box(0.08, 12, 0.08, std(0x222222), 0, 19.9, 0);
+    var lamp = new T.PointLight(0xffd9a0, 30, 40, 2);
+    lamp.position.set(0, 12, 0); S.add(lamp);
   };
 
   /* 白い皿（ふちが少し反った楕円の平皿） */
