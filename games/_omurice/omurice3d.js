@@ -439,13 +439,90 @@
     this.strokes = [];
   };
 
+  /* ---- 後処理: ピントのぼけ・色味・周辺減光・粒子（写真らしく見せる） ----
+     一度画面外に描いてから、奥行きを見てぼかす。作れない端末ではそのまま描く */
+  OmuScene.prototype.makePost = function (w, h) {
+    if (this.postFailed) return null;
+    try {
+      if (this.rt) { this.rt.dispose(); this.rt.depthTexture.dispose(); }
+      var rt = new T.WebGLRenderTarget(w, h, { type: T.HalfFloatType, samples: 4 });
+      rt.depthTexture = new T.DepthTexture(w, h);
+      rt.depthTexture.type = T.UnsignedIntType;
+      this.rt = rt;
+      if (!this.postMat) {
+        this.postMat = new T.ShaderMaterial({
+          uniforms: {
+            tColor: { value: null }, tDepth: { value: null }, uRes: { value: new T.Vector2() },
+            uNear: { value: 1 }, uFar: { value: 100 }, uFocus: { value: 8 }, uRange: { value: 1.6 },
+            uMaxBlur: { value: 6 }, uTime: { value: 0 }
+          },
+          vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
+          fragmentShader: [
+            "uniform sampler2D tColor; uniform sampler2D tDepth; uniform vec2 uRes;",
+            "uniform float uNear, uFar, uFocus, uRange, uMaxBlur, uTime; varying vec2 vUv;",
+            "float viewZ(vec2 uv){ float d = texture2D(tDepth, uv).x; float z = d * 2.0 - 1.0;",
+            "  return 2.0 * uNear * uFar / (uFar + uNear - z * (uFar - uNear)); }",
+            "float coc(vec2 uv){ return clamp((abs(viewZ(uv) - uFocus) - uRange * 0.35) / uRange, 0.0, 1.0); }",
+            "vec3 toneMap(vec3 c){ vec3 k = max(c - 0.78, 0.0); return min(c, 0.78) + k / (1.0 + k / 0.22); }",
+            "vec3 toSRGB(vec3 c){ return mix(c * 12.92, 1.055 * pow(c, vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }",
+            "float rnd(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233)) + uTime) * 43758.5453); }",
+            "void main(){",
+            "  float c0 = coc(vUv); float r = c0 * uMaxBlur;",
+            "  vec3 sum = texture2D(tColor, vUv).rgb; float wsum = 1.0;",
+            "  if (r > 0.3) {",
+            "    for (int i = 0; i < 16; i++) {",
+            "      float a = float(i) * 2.39996; float rr = sqrt((float(i) + 0.5) / 16.0);",
+            "      vec2 o = vec2(cos(a), sin(a)) * rr * r / uRes;",
+            "      float cs = coc(vUv + o);",
+            "      float w = clamp(cs * uMaxBlur / max(rr * r, 0.001), 0.0, 1.0);",  /* 手前のくっきりした物がにじまないように */
+            "      sum += texture2D(tColor, vUv + o).rgb * w; wsum += w;",
+            "    }",
+            "  }",
+            "  vec3 col = sum / wsum;",
+            "  col = toneMap(col);",
+            "  float l = dot(col, vec3(0.2126, 0.7152, 0.0722));",
+            "  col = mix(vec3(l), col, 1.08);",                                  /* 少しだけ鮮やかに */
+            "  col *= vec3(1.03, 1.0, 0.95);",                                    /* あたたかい色味 */
+            "  col = toSRGB(clamp(col, 0.0, 1.0));",
+            "  col = mix(col, col * col * (3.0 - 2.0 * col), 0.18);",              /* 少しコントラスト */
+            "  vec2 q = vUv - 0.5; q.x *= uRes.x / uRes.y;",
+            "  col *= 1.0 - 0.32 * smoothstep(0.35, 0.95, length(q) * 1.25);",     /* 周辺を暗く */
+            "  col += (rnd(vUv * uRes) - 0.5) * 0.025;",                           /* 細かい粒子 */
+            "  gl_FragColor = vec4(col, 1.0);",
+            "}"
+          ].join("\n"),
+          depthTest: false, depthWrite: false
+        });
+        this.postScene = new T.Scene();
+        this.postScene.add(new T.Mesh(new T.PlaneGeometry(2, 2), this.postMat));
+        this.postCam = new T.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      }
+      return rt;
+    } catch (e) { this.postFailed = true; return null; }
+  };
+
   OmuScene.prototype.render = function (ctx, W, H, look, orbit) {
     var dpr = Math.min(2, global.devicePixelRatio || 1);
     var w = Math.round(W * dpr), h = Math.round(H * dpr);
-    if (w !== this.w || h !== this.h) { this.w = w; this.h = h; this.renderer.setSize(w, h, false); }
+    var r = this.renderer;
+    if (w !== this.w || h !== this.h) { this.w = w; this.h = h; r.setSize(w, h, false); this.makePost(w, h); }
     this.setView(W, H, look, orbit);
-    this.renderer.render(this.scene, this.camera);
-    ctx.drawImage(this.renderer.domElement, 0, 0, W, H);
+    if (this.rt && !this.postFailed) {
+      try {
+        var u = this.postMat.uniforms, cam = this.camera;
+        u.tColor.value = this.rt.texture; u.tDepth.value = this.rt.depthTexture;
+        u.uRes.value.set(w, h); u.uNear.value = cam.near; u.uFar.value = cam.far;
+        u.uFocus.value = cam.position.distanceTo(this.focusPoint || (this.focusPoint = new T.Vector3(0, 0.15, 0)));
+        u.uRange.value = 1.4 + u.uFocus.value * 0.06;
+        u.uMaxBlur.value = 7 * dpr;
+        u.uTime.value = (u.uTime.value + 0.37) % 100;
+        r.setRenderTarget(this.rt);
+        r.render(this.scene, cam);
+        r.setRenderTarget(null);
+        r.render(this.postScene, this.postCam);
+      } catch (e) { this.postFailed = true; r.setRenderTarget(null); r.render(this.scene, this.camera); }
+    } else r.render(this.scene, this.camera);
+    ctx.drawImage(r.domElement, 0, 0, W, H);
     return true;
   };
 
