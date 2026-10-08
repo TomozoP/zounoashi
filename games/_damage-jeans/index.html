@@ -158,7 +158,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, look = 0;
   var tool = "cut";
-  var lastXY = null, lastPick = null, lastMoveT = 0, snapT = 0;
+  var lastXY = null, lastPick = null, lastMoveT = 0, snapT = 0, snipPath = null, snipScreen = null;
   var orbit = { yaw: 0, tilt: 0, vy: 0, vt: 0 }, spin = null;   /* 完成後にドラッグで回して眺める */
 
   function newRound() {
@@ -166,7 +166,7 @@
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     score = 0; T = 0; held = false; look = 0;
-    lastXY = null; lastPick = null;
+    lastXY = null; lastPick = null; snipPath = null; snipScreen = null;
     orbit = { yaw: 0, tilt: 0, vy: 0, vt: 0 }; spin = null;
     if (scene3d) scene3d.newJeans(1 + Math.floor(Math.random() * 2147483000));
   }
@@ -182,6 +182,7 @@
   /* ============ 進行 ============ ▼UPDATE */
   function update(dt) {
     T += dt;
+    if (scene3d) scene3d.tick(dt);
     if (state === S.RESULT) {
       look = Math.min(1, look + dt * 0.8);
       if (!spin) {
@@ -208,15 +209,22 @@
     if (hitOk(x, y)) { finish(); return; }
     if (hitReset(x, y)) { newRound(); tone(330, 0.15, 0.08, "triangle", 520); return; }
     var tb = hitTool(x, y);
-    if (tb) { if (tool !== tb) { tool = tb; tone(tb === "cut" ? 880 : 520, 0.08, 0.06, "triangle"); } return; }
+    if (tb) { if (tool !== tb) { tool = tb; tone(tb === "cut" ? 880 : tb === "snip" ? 700 : 520, 0.08, 0.06, "triangle"); } return; }
     held = true;
     lastXY = { x: x, y: y, t: T }; lastMoveT = T;
     lastPick = screenPick(x, y);
+    if (tool === "snip") { snipPath = lastPick ? [lastPick] : []; snipScreen = [{ x: x, y: y }]; return; }
     rubOn();
     if (tool === "sand" && lastPick && lastPick.on) scene3d.rub(lastPick.x, lastPick.y, 0.05);
   }
   function work(x, y, speed) {
     var p = screenPick(x, y);
+    if (tool === "snip") {
+      if (p) snipPath.push(p);
+      snipScreen.push({ x: x, y: y });
+      if (T - snapT > 0.09) { snapT = T; noiseHit(0.05, 2200, 0.08, 4); }   /* チョキチョキ */
+      return;
+    }
     if (tool === "cut") {
       if (p && lastPick && (p.on || lastPick.on)) {
         var added = scene3d.slash(lastPick.x, lastPick.y, p.x, p.y);
@@ -256,6 +264,12 @@
     if (!held) return;
     held = false;
     if (scene3d) scene3d.endSlash();
+    if (snipPath && scene3d) {
+      var got = scene3d.snip(snipPath);
+      tone(1400, 0.05, 0.08, "square", 700); noiseHit(0.08, 3000, 0.15, 2);
+      if (got > 0) { noiseHit(0.35, 600, 0.12, 0.7); }
+    }
+    snipPath = null; snipScreen = null;
     lastPick = null;
     rubOff();
   }
@@ -264,6 +278,8 @@
     up();
     score = scene3d ? Math.round(scene3d.damage() * 1000) / 10 : 0;
     state = S.RESULT;
+    orbit = { yaw: 0, tilt: 0, vy: 0, vt: 0 }; zoom = 1;
+    if (scene3d) scene3d.showModel(true);
     [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.5, 0.07, "triangle", 0, i * 0.08); });
   }
 
@@ -323,7 +339,8 @@
   function debugKey(n) {
     if (n === 1) autoDamage();
     if (n === 2) finish();
-    if (n === 3) tool = tool === "cut" ? "sand" : "cut";
+    if (n === 3) tool = tool === "cut" ? "snip" : tool === "snip" ? "sand" : "cut";
+    if (n === 4 && scene3d && state === S.PLAY) scene3d.snip([{ x: 0, y: 1500 }, { x: 1024, y: 1520 }]);
   }
 
   window.addEventListener("keydown", function (e) {
@@ -377,7 +394,8 @@
     if (state === S.PLAY) {
       drawReset(); drawOk(); drawTools();
       var c = held ? lastXY : cursor;
-      if (c && !hitOk(c.x, c.y) && !hitReset(c.x, c.y) && !hitTool(c.x, c.y)) { if (tool === "cut") drawCutter(c.x, c.y); else drawSander(c.x, c.y); }
+      if (snipScreen && snipScreen.length > 1) drawSnipPath();
+      if (c && !hitOk(c.x, c.y) && !hitReset(c.x, c.y) && !hitTool(c.x, c.y)) { if (tool === "cut") drawCutter(c.x, c.y); else if (tool === "snip") drawScissors(c.x, c.y); else drawSander(c.x, c.y); }
     }
     if (state === S.RESULT) drawResult();
   }
@@ -398,6 +416,32 @@
     ctx.fillStyle = "rgba(255,255,255,.4)"; ctx.fillRect(-8, -124, 4, 90);
     ctx.restore();
   }
+  /* ハサミでなぞっている線（離すとその線で切れる） */
+  function drawSnipPath() {
+    ctx.save();
+    ctx.lineCap = ctx.lineJoin = "round";
+    ctx.beginPath(); snipScreen.forEach(function (p, i) { if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+    ctx.lineWidth = 5; ctx.strokeStyle = "rgba(22,32,46,.55)"; ctx.stroke();
+    ctx.setLineDash([10, 8]); ctx.lineWidth = 2.5; ctx.strokeStyle = "#fff"; ctx.stroke();
+    ctx.restore();
+  }
+  /* 指先の裁ちばさみ。刃先が線の上 */
+  function drawScissors(px, py) {
+    ctx.save();
+    ctx.translate(px, py); ctx.rotate(-0.5);
+    ctx.lineJoin = "round"; ctx.lineWidth = 2.5; ctx.strokeStyle = "#16202e";
+    [-1, 1].forEach(function (s) {
+      ctx.save(); ctx.rotate(s * 0.16);
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(s * 7, -58); ctx.lineTo(-s * 2, -58); ctx.closePath();
+      ctx.fillStyle = "#d9dde1"; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(s * 6, -82, 13, 19, s * 0.3, 0, Math.PI * 2);
+      ctx.lineWidth = 7; ctx.strokeStyle = "#16202e"; ctx.stroke(); ctx.lineWidth = 4.5; ctx.strokeStyle = "#c0392b"; ctx.stroke();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = "#16202e";
+      ctx.restore();
+    });
+    ctx.beginPath(); ctx.arc(0, -58, 3.5, 0, Math.PI * 2); ctx.fillStyle = "#16202e"; ctx.fill();
+    ctx.restore();
+  }
   /* 指先のやすり（当て木に紙やすり） */
   function drawSander(px, py) {
     ctx.save();
@@ -412,7 +456,7 @@
   }
 
   /* 全リセット（別のジーンズが出る）。左下、アイコンだけ */
-  function resetButton() { var b = okButton(); return { x: 20, y: b.y, w: 96, h: b.h }; }
+  function resetButton() { var b = okButton(); return { x: 16, y: b.y, w: 84, h: b.h }; }
   function hitReset(x, y) { var b = resetButton(); return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
   function iconButton(b, label, on) {
     ctx.save();
@@ -425,20 +469,20 @@
   }
   function drawReset() { iconButton(resetButton(), "もう一度", false); }
 
-  /* 道具の切り替え。右下にカッターとやすり */
+  /* 道具の切り替え。右下にカッター・ハサミ・やすり */
   function toolButtons() {
-    var b = okButton(), w = 64;
-    return [{ id: "cut", x: W - 20 - w * 2 - 8, y: b.y, w: w, h: b.h, label: "カッター" }, { id: "sand", x: W - 20 - w, y: b.y, w: w, h: b.h, label: "やすり" }];
+    var b = okButton(), w = 64, g = 8, x0 = W - 16 - w * 3 - g * 2;
+    return [{ id: "cut", x: x0, y: b.y, w: w, h: b.h, label: "カッター" }, { id: "snip", x: x0 + w + g, y: b.y, w: w, h: b.h, label: "ハサミ" }, { id: "sand", x: x0 + (w + g) * 2, y: b.y, w: w, h: b.h, label: "やすり" }];
   }
   function hitTool(x, y) {
     var bs = toolButtons();
-    for (var i = 0; i < 2; i++) { var b = bs[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id; }
+    for (var i = 0; i < bs.length; i++) { var b = bs[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id; }
     return null;
   }
   function drawTools() { toolButtons().forEach(function (b) { iconButton(b, b.label, tool === b.id); }); }
 
   /* 「完成」ボタン。下の中央 */
-  function okButton() { var w = 150, h = 62; return { x: 128, y: H - h - Math.max(28, H * 0.035), w: w, h: h }; }
+  function okButton() { var w = 132, h = 62; return { x: 108, y: H - h - Math.max(28, H * 0.035), w: w, h: h }; }
   function hitOk(x, y) { var b = okButton(); return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
   function drawOk() {
     var b = okButton();

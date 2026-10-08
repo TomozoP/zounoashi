@@ -82,13 +82,13 @@
     S.environment = new T.PMREMGenerator(r).fromScene(env, 0.02).texture;
 
     S.add(new T.HemisphereLight(0xfff4e6, 0x3a3028, 0.55));
-    var key = new T.DirectionalLight(0xfff2de, 2.4);
+    var key = this.key = new T.DirectionalLight(0xfff2de, 2.4);
     key.position.set(-7, 6.5, -3);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
     var sc = key.shadow.camera; sc.left = -4; sc.right = 4; sc.top = 6.5; sc.bottom = -6.5; sc.near = 1; sc.far = 25;
     key.shadow.radius = 4; key.shadow.bias = -0.0004; key.shadow.normalBias = 0.015;
-    S.add(key);
+    S.add(key); S.add(key.target);
     var fill = new T.DirectionalLight(0xcfe0ff, 0.35);
     fill.position.set(4, 3, 5); S.add(fill);
 
@@ -99,7 +99,8 @@
 
   /* 机とカッターマット、奥の壁 */
   JeansScene.prototype.buildRoom = function () {
-    var S = this.scene;
+    var S = this.room = new T.Group();
+    this.scene.add(S);
     var wood = canvas(512, 512), g = wood.getContext("2d");
     g.fillStyle = "#7a5638"; g.fillRect(0, 0, 512, 512);
     for (var i = 0; i < 260; i++) {
@@ -153,6 +154,7 @@
     this.area = area;
 
     this.colorCv = canvas(TW, TH); this.colorG = this.colorCv.getContext("2d");
+    this.shapeOrig = new Uint8Array(shape);
     this.cut = new Uint8Array(TW * TH);      /* 切った量（0..255 → 0..2.55） */
     this.cur = new Uint8Array(TW * TH);      /* 今の一筋で切った量（筋の中では重ねがけしない） */
     this.fade = new Uint8Array(TW * TH);     /* 削って色が落ちた量 */
@@ -160,6 +162,8 @@
     /* 表の布 */
     var geo = new T.PlaneGeometry(JW, JL, 128, 256);
     geo.rotateX(-Math.PI / 2);
+    this.flat = new T.Group(); this.scene.add(this.flat);
+    this.geo = geo;
     this.puff(geo);
     this.colorTex = new T.CanvasTexture(this.colorCv);
     this.colorTex.colorSpace = T.SRGBColorSpace; this.colorTex.anisotropy = 8;
@@ -169,7 +173,7 @@
       map: this.colorTex, bumpMap: this.bumpTex, bumpScale: 1.4, roughness: 0.93, alphaTest: 0.5, side: T.DoubleSide
     }));
     front.castShadow = true; front.receiveShadow = true;
-    this.scene.add(front);
+    this.flat.add(front);
 
     /* 裏の布（穴から見える内側。白っぽい裏地と、ポケットの袋） */
     this.backCv = canvas(512, 1024);
@@ -177,16 +181,18 @@
     var bgeo = new T.PlaneGeometry(JW, JL, 1, 1); bgeo.rotateX(-Math.PI / 2);
     var back = this.back = new T.Mesh(bgeo, new T.MeshStandardMaterial({ map: this.backTex, roughness: 0.95, alphaTest: 0.5 }));
     back.position.y = 0.004; back.receiveShadow = true;
-    this.scene.add(back);
+    this.flat.add(back);
 
     /* ボタンとリベット（金属） */
     var metal = this.metal = new T.MeshStandardMaterial({ color: 0xb8854a, metalness: 1, roughness: 0.32 });
     var self = this;
+    this.studs = [];
     function stud(px, py, r, h) {
       var m = new T.Mesh(new T.CylinderGeometry(r, r * 1.05, h, 28), metal);
       var p = self.toWorld(px, py);
       m.position.set(p.x, self.heightAt(px, py) + h / 2 - 0.004, p.z);
-      m.castShadow = true; self.scene.add(m);
+      m.castShadow = true; self.flat.add(m);
+      self.studs.push({ m: m, px: px, py: py, y: m.position.y, y0: self.heightAt(px, py) });
       return m;
     }
     stud(512, 96, 0.085, 0.035);
@@ -220,7 +226,7 @@
       if (i < NX - 1 && j < NZ - 1) dist[k] = Math.min(dist[k], dist[k + NX + 1] + 1.414);
       if (i > 0 && j < NZ - 1) dist[k] = Math.min(dist[k], dist[k + NX - 1] + 1.414);
     }
-    this.hgrid = new Float32Array(NX * NZ);
+    this.hgrid = this.hgrid || new Float32Array(NX * NZ);
     var pos = geo.attributes.position;
     /* PlaneGeometry の頂点は上の段(奥)から順。uv の v=1 が絵の上 */
     for (var n = 0; n < pos.count; n++) {
@@ -238,6 +244,7 @@
       this.hgrid[k] = h;
       pos.setY(n, h);
     }
+    pos.needsUpdate = true;
     geo.computeVertexNormals();
   };
   JeansScene.prototype.heightAt = function (px, py) {
@@ -250,6 +257,13 @@
     var rnd = rngOf(seed);
     var sh = this.shade = SHADES[Math.floor(rnd() * SHADES.length)];
     this.cut.fill(0); this.cur.fill(0); this.fade.fill(0);
+    this.shape.set(this.shapeOrig);
+    this.puff(this.geo);
+    var self = this;
+    this.studs.forEach(function (st) { st.m.visible = true; });
+    (this.pieces || []).forEach(function (pc) { self.scene.remove(pc.m); pc.m.material.map.dispose(); pc.m.material.dispose(); pc.m.geometry.dispose(); });
+    this.pieces = [];
+    this.showModel(false);
     this.paintBase(sh, rnd);
     this.paintBump();
     this.paintBack(sh);
@@ -513,11 +527,220 @@
   JeansScene.prototype.damage = function () {
     var s = 0, cut = this.cut, fade = this.fade, shp = this.shape;
     for (var n = 0; n < TW * TH; n += 3) {
-      if (shp[n] < 128) continue;
+      if (shp[n] < 128) { if (this.shapeOrig[n] > 127) s += 1; continue; }
       s += cut[n] >= 50 ? 1 : Math.max(cut[n] >= 16 ? 0.5 : 0, fade[n] / 255 * 0.5);
     }
-    return s / (this.area / 3);
+    return Math.min(1, s / (this.area / 3));
   };
+  /* ハサミ: なぞった線で布を断つ。腰とつながらなくなった（いちばん大きいかたまり以外の）布は落ちる。
+     始点の近くで線を終えると輪が閉じて、中を切り抜ける */
+  JeansScene.prototype.snip = function (path) {
+    if (!path || path.length < 2) return 0;
+    var pts = path.slice(), a = pts[0], b = pts[pts.length - 1];
+    if (pts.length > 6 && Math.hypot(a.x - b.x, a.y - b.y) < 70) pts.push(a);
+    var shp = this.shape, cut = this.cut;
+    var bx0 = TW, by0 = TH, bx1 = 0, by1 = 0;
+    for (var i = 1; i < pts.length; i++) {
+      var p = pts[i - 1], q = pts[i];
+      var dx = q.x - p.x, dy = q.y - p.y, steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 1.5));
+      for (var k = 0; k <= steps; k++) {
+        var cx = Math.round(p.x + dx * k / steps), cy = Math.round(p.y + dy * k / steps);
+        if (cx < -9 || cy < -9 || cx > TW + 9 || cy > TH + 9) continue;
+        bx0 = Math.min(bx0, cx - 9); by0 = Math.min(by0, cy - 9); bx1 = Math.max(bx1, cx + 9); by1 = Math.max(by1, cy + 9);
+        for (var oy = -9; oy <= 9; oy++) for (var ox = -9; ox <= 9; ox++) {
+          var x = cx + ox, y = cy + oy, d2 = ox * ox + oy * oy;
+          if (x < 0 || y < 0 || x >= TW || y >= TH || d2 > 81) continue;
+          var n = y * TW + x;
+          if (shp[n] < 128) continue;
+          if (d2 <= 4) shp[n] = 0;
+          else { var v = Math.round(40 - Math.sqrt(d2) * 2.5); if (cut[n] < v) cut[n] = v; }   /* 切り口のほつれ */
+        }
+      }
+    }
+    /* つながったかたまりに分ける */
+    var lab = this.lab || (this.lab = new Int32Array(TW * TH)), qu = this.qu || (this.qu = new Int32Array(TW * TH));
+    lab.fill(0);
+    var comps = [], qn = 0, id = 0;
+    for (var s0 = 0; s0 < TW * TH; s0++) {
+      if (shp[s0] < 128 || lab[s0]) continue;
+      id++; var st = qn; qu[qn++] = s0; lab[s0] = id;
+      var mnx = TW, mny = TH, mxx = 0, mxy = 0;
+      for (var h = st; h < qn; h++) {
+        var c = qu[h], X = c % TW, Y = (c - X) / TW;
+        if (X < mnx) mnx = X; if (X > mxx) mxx = X; if (Y < mny) mny = Y; if (Y > mxy) mxy = Y;
+        if (X > 0 && !lab[c - 1] && shp[c - 1] > 127) { lab[c - 1] = id; qu[qn++] = c - 1; }
+        if (X < TW - 1 && !lab[c + 1] && shp[c + 1] > 127) { lab[c + 1] = id; qu[qn++] = c + 1; }
+        if (Y > 0 && !lab[c - TW] && shp[c - TW] > 127) { lab[c - TW] = id; qu[qn++] = c - TW; }
+        if (Y < TH - 1 && !lab[c + TW] && shp[c + TW] > 127) { lab[c + TW] = id; qu[qn++] = c + TW; }
+      }
+      comps.push({ id: id, a: st, b: qn, box: [mnx, mny, mxx + 1, mxy + 1] });
+    }
+    var keep = comps.reduce(function (m, c) { return !m || c.b - c.a > m.b - m.a ? c : m; }, null);
+    var removed = 0, self = this;
+    comps.forEach(function (c) {
+      if (c === keep) return;
+      removed += c.b - c.a;
+      if (c.b - c.a > 300) self.dropPiece(c, lab);
+      for (var h = c.a; h < c.b; h++) shp[qu[h]] = 0;
+      bx0 = Math.min(bx0, c.box[0]); by0 = Math.min(by0, c.box[1]); bx1 = Math.max(bx1, c.box[2]); by1 = Math.max(by1, c.box[3]);
+    });
+    this.refresh(bx0, by0, bx1 + 1, by1 + 1);
+    this.trimBack();
+    this.puff(this.geo);
+    this.studs.forEach(function (st) { st.m.visible = shp[st.py * TW + st.px] > 127; st.m.position.y = self.heightAt(st.px, st.py) + st.y - st.y0; });
+    return removed;
+  };
+  /* 裏の布も、残った形に合わせて抜く */
+  JeansScene.prototype.trimBack = function () {
+    var mc = this.maskCv || (this.maskCv = canvas(TW, TH)), g = mc.getContext("2d");
+    var img = g.createImageData(TW, TH), d = img.data, shp = this.shape;
+    for (var n = 0; n < TW * TH; n++) d[n * 4 + 3] = shp[n];
+    g.putImageData(img, 0, 0);
+    var bg = this.backCv.getContext("2d");
+    bg.save(); bg.globalCompositeOperation = "destination-in"; bg.drawImage(mc, 0, 0, 512, 1024); bg.restore();
+    this.backTex.needsUpdate = true;
+  };
+  /* 切り落とした布が、ひらりと飛んで消える */
+  JeansScene.prototype.dropPiece = function (c, lab) {
+    var b = c.box, w = b[2] - b[0], h = b[3] - b[1];
+    var cv = canvas(w, h), g = cv.getContext("2d");
+    var img = this.colorG.getImageData(b[0], b[1], w, h), d = img.data;
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) if (lab[(y + b[1]) * TW + x + b[0]] !== c.id) d[(y * w + x) * 4 + 3] = 0;
+    g.putImageData(img, 0, 0);
+    var tex = new T.CanvasTexture(cv); tex.colorSpace = T.SRGBColorSpace;
+    var geo = new T.PlaneGeometry(w / PX, h / PX); geo.rotateX(-Math.PI / 2);
+    var m = new T.Mesh(geo, new T.MeshStandardMaterial({ map: tex, roughness: 0.93, alphaTest: 0.5, side: T.DoubleSide, transparent: true }));
+    var mid = this.toWorld(b[0] + w / 2, b[1] + h / 2);
+    m.position.set(mid.x, 0.12, mid.z); m.castShadow = true;
+    this.scene.add(m);
+    var dir = new T.Vector3(mid.x, 0, mid.z - 0.5); if (dir.length() < 0.1) dir.set(1, 0, 0);
+    dir.normalize();
+    this.pieces.push({ m: m, t: 0, v: new T.Vector3(dir.x * 3.5, 3.2, dir.z * 3.5 + 1.5), r: new T.Vector3((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 5) });
+  };
+  JeansScene.prototype.tick = function (dt) {
+    var S = this.scene;
+    this.pieces = (this.pieces || []).filter(function (pc) {
+      pc.t += dt; pc.v.y -= 9 * dt;
+      pc.m.position.addScaledVector(pc.v, dt);
+      pc.m.rotation.x += pc.r.x * dt; pc.m.rotation.y += pc.r.y * dt; pc.m.rotation.z += pc.r.z * dt;
+      pc.m.material.opacity = Math.max(0, 1 - Math.max(0, pc.t - 0.7) / 0.6);
+      pc.m.material.alphaTest = 0.5 * pc.m.material.opacity;
+      if (pc.t < 1.3) return true;
+      S.remove(pc.m); pc.m.material.map.dispose(); pc.m.material.dispose(); pc.m.geometry.dispose();
+      return false;
+    });
+  };
+
+  /* ---- 完成後: モデルに履かせる ----
+     平らなジーンズの絵を、そのまま腰と脚の筒に巻きつける（表は前、同じ絵を裏返して後ろ）。
+     穴の向こうには肌の脚が見える。高さは床が0、腰が 10.2（102cm） */
+  JeansScene.prototype.rowSegs = function (py) {
+    py = Math.max(60, Math.min(1990, Math.round(py)));
+    var so = this.shapeOrig, segs = [], inS = false, a = 0;
+    for (var x = 0; x < TW; x++) {
+      var v = so[py * TW + x] > 127;
+      if (v && !inS) { a = x; inS = true; } else if (!v && inS) { segs.push([a, x]); inS = false; }
+    }
+    if (inS) segs.push([a, TW]);
+    return segs;
+  };
+  JeansScene.prototype.wrapPos = function (px, py, back) {
+    var segs = this.rowSegs(py);
+    var H = [segs[0][0], segs[segs.length - 1][1]];
+    var legs = segs.length >= 2 ? segs : (this.legTop || (this.legTop = this.rowSegs(CROTCH + 90)));
+    var hc = (H[0] + H[1]) / 2, hw = (H[1] - H[0]) / 2;
+    var s = Math.max(-1.1, Math.min(1.1, (px - hc) / hw)), th = s * Math.PI / 2, r = hw * 2 / PX / Math.PI;
+    var hx = r * 1.2 * Math.sin(th), hz = r * 0.8 * Math.cos(th);
+    var L = px < 512 ? legs[0] : legs[legs.length - 1];
+    var c = (L[0] + L[1]) / 2, w = (L[1] - L[0]) / 2;
+    var s2 = Math.max(-1.1, Math.min(1.1, (px - c) / w)), th2 = s2 * Math.PI / 2, r2 = w * 2 / PX / Math.PI;
+    var lx = (c - 512) / PX * 0.8 + r2 * Math.sin(th2), lz = r2 * 0.95 * Math.cos(th2);
+    var t = Math.max(0, Math.min(1, (py - (CROTCH - 60)) / 200)); t = t * t * (3 - 2 * t);
+    var x = hx + (lx - hx) * t, z = hz + (lz - hz) * t;
+    return new T.Vector3(x, 10.2 - (py - 58) / PX, back ? -z : z);
+  };
+  JeansScene.prototype.buildModel = function () {
+    var G = this.model = new T.Group();
+    this.scene.add(G);
+    var self = this;
+    var mat = this.front.material;
+    [false, true].forEach(function (back) {
+      var geo = new T.PlaneGeometry(1, 1, 128, 256), pos = geo.attributes.position;
+      for (var n = 0; n < pos.count; n++) {
+        var i = n % 129, j = Math.floor(n / 129);
+        var v = self.wrapPos(i / 128 * TW, j / 256 * TH, back);
+        pos.setXYZ(n, v.x, v.y, v.z);
+      }
+      geo.computeVertexNormals();
+      var m = new T.Mesh(geo, mat);
+      m.castShadow = true; m.receiveShadow = true;
+      G.add(m);
+    });
+    /* 肌（脚と腰）。ジーンズより少し細く */
+    var skin = new T.MeshStandardMaterial({ color: 0xd9a78a, roughness: 0.6 });
+    var anat = [[0.5, 0.3], [1.2, 0.34], [2.0, 0.42], [2.9, 0.52], [3.7, 0.5], [4.6, 0.44], [5.4, 0.5], [6.4, 0.6], [7.4, 0.7], [8.1, 0.74]];
+    var legs = this.rowSegs(CROTCH + 90);
+    [legs[0], legs[legs.length - 1]].forEach(function (L) {
+      var c = (L[0] + L[1]) / 2;
+      var pts = anat.map(function (a) {
+        var py = 58 + (10.2 - a[0]) * PX, r = a[1];
+        if (py > CROTCH + 90 && py < 1990) {
+          var sg = self.rowSegs(py), LL = c < 512 ? sg[0] : sg[sg.length - 1];
+          r = Math.min(r, (LL[1] - LL[0]) / PX / Math.PI * 0.86);
+        }
+        return new T.Vector2(r, a[0]);
+      });
+      pts.unshift(new T.Vector2(0.001, 0.45));
+      var m = new T.Mesh(new T.LatheGeometry(pts, 32), skin);
+      m.position.x = (c - 512) / PX * 0.8; m.scale.z = 0.95;
+      m.castShadow = true; m.receiveShadow = true; G.add(m);
+      /* スニーカー */
+      var shoe = new T.Mesh(new T.CapsuleGeometry(0.4, 1.3, 6, 18), new T.MeshStandardMaterial({ color: 0xf3f1ec, roughness: 0.7 }));
+      shoe.rotation.x = Math.PI / 2; shoe.scale.set(1.05, 1, 0.75);
+      shoe.position.set(m.position.x, 0.34, 0.45); shoe.castShadow = true; shoe.receiveShadow = true; G.add(shoe);
+      var sole = new T.Mesh(new T.BoxGeometry(0.9, 0.14, 2.25), new T.MeshStandardMaterial({ color: 0x5a5650, roughness: 0.9 }));
+      sole.position.set(m.position.x, 0.07, 0.45); sole.receiveShadow = true; G.add(sole);
+    });
+    var tp = [];
+    for (var py = CROTCH - 30; py >= 40; py -= 40) {
+      var sg = this.rowSegs(py), hw = (sg[sg.length - 1][1] - sg[0][0]) / 2;
+      tp.push(new T.Vector2(hw * 2 / PX / Math.PI * 0.9, 10.2 - (py - 58) / PX));
+    }
+    tp.unshift(new T.Vector2(0.001, tp[0].y - 0.3));
+    var torso = new T.Mesh(new T.LatheGeometry(tp, 40), skin);
+    torso.scale.set(1.2, 1, 0.8); G.add(torso);
+    /* 白いシャツ（裾はジーンズの中） */
+    var sp = [[1.1, 9.6], [1.2, 10.3], [1.42, 10.9], [1.42, 12.0], [1.45, 13.2], [1.5, 14.6], [0.001, 14.7]].map(function (a) { return new T.Vector2(a[0], a[1]); });
+    var shirt = new T.Mesh(new T.LatheGeometry(sp, 48), new T.MeshStandardMaterial({ color: 0xf1efe9, roughness: 0.92 }));
+    shirt.scale.set(1.2, 1, 0.8); shirt.castShadow = true; shirt.receiveShadow = true; G.add(shirt);
+    /* 前のボタン */
+    var bp = this.wrapPos(512, 96, false);
+    var btn = new T.Mesh(new T.CylinderGeometry(0.085, 0.09, 0.05, 24), this.metal);
+    btn.rotation.x = Math.PI / 2; btn.position.set(bp.x, bp.y, bp.z + 0.04); G.add(btn);
+    /* 撮影スタジオの床と壁 */
+    var floor = new T.Mesh(new T.PlaneGeometry(60, 60), new T.MeshStandardMaterial({ color: 0xd6d1c8, roughness: 0.95 }));
+    floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; G.add(floor);
+    var wall = new T.Mesh(new T.PlaneGeometry(60, 40), new T.MeshStandardMaterial({ color: 0xe2ded6, roughness: 0.98 }));
+    wall.position.set(0, 20, -9); wall.receiveShadow = true; G.add(wall);
+  };
+  JeansScene.prototype.showModel = function (on) {
+    this.modelOn = !!on;
+    if (on && !this.model) this.buildModel();
+    if (this.model) this.model.visible = !!on;
+    this.room.visible = this.flat.visible = !on;
+    var k = this.key, sc = k.shadow.camera;
+    if (on) {
+      k.position.set(-9, 19, 13); k.target.position.set(0, 6, 0);
+      sc.left = -7; sc.right = 7; sc.top = 11; sc.bottom = -11; sc.near = 5; sc.far = 50;
+      this.scene.background.set(0xe2ded6);
+    } else {
+      k.position.set(-7, 6.5, -3); k.target.position.set(0, 0, 0);
+      sc.left = -4; sc.right = 4; sc.top = 6.5; sc.bottom = -6.5; sc.near = 1; sc.far = 25;
+      this.scene.background.set(0x2a221c);
+    }
+    sc.updateProjectionMatrix();
+  };
+
   JeansScene.prototype.size = function () { return { w: TW, h: TH }; };
 
   JeansScene.prototype.setView = function (W, H, look, orbit) {
@@ -525,6 +748,16 @@
     cam.aspect = W / H;
     var vf = cam.fov * Math.PI / 360;
     var hf = Math.atan(Math.tan(vf) * cam.aspect);
+    if (this.modelOn) {
+      var mt = 0.1, my = 0, md = 8 / Math.tan(vf);
+      if (orbit) { mt += orbit.tilt; my = Math.max(-1.2, Math.min(1.2, orbit.yaw)); if (orbit.zoom) md /= orbit.zoom; }
+      mt = Math.max(-0.05, Math.min(0.7, mt));
+      cam.position.set(Math.sin(my) * Math.cos(mt) * md, 5.8 + Math.sin(mt) * md, Math.cos(my) * Math.cos(mt) * md);
+      cam.lookAt(0, 5.8, 0);
+      cam.updateProjectionMatrix();
+      this.focus = md;
+      return;
+    }
     var tilt = 0.98 + 0.1 * (look || 0), yaw = 0;
     var dist = Math.max(2.9 / Math.tan(hf), 5.0 / Math.tan(vf));
     if (orbit) { tilt += orbit.tilt; yaw = orbit.yaw; if (orbit.zoom) dist /= orbit.zoom; }
