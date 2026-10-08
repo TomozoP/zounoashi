@@ -368,7 +368,7 @@
     var lst = new T.Mesh(new T.CylinderGeometry(0.009, 0.011, 0.32, 6), stemMat);
     lst.rotation.z = Math.PI / 2 - 0.25; lst.rotation.y = 0.5; lst.position.set(0.12, 0.03, 0.1);
     g.add(lst);
-    g.position.set(1.12, 0.03, 0.6); g.scale.setScalar(1.35);
+    g.position.set(1.12, 0.03, -0.5); g.scale.setScalar(1.0);
     this.parsley = g;
     this.scene.add(g);
   };
