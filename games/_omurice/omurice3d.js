@@ -215,7 +215,7 @@
     var vf = cam.fov * Math.PI / 360;
     var hf = Math.atan(Math.tan(vf) * cam.aspect);
     /* 卵がぎりぎり画面に収まる近さ */
-    var dist = Math.max(0.74 / Math.tan(hf), 1.22 / Math.tan(vf));
+    var dist = Math.max(0.9 / Math.tan(hf), 1.45 / Math.tan(vf));
     var tilt = 0.98 - 0.1 * (look || 0), yaw = 0;   /* 見下ろす角度・まわりこむ角度（ラジアン） */
     if (orbit) { tilt += orbit.tilt; yaw = orbit.yaw; }
     tilt = Math.max(0.22, Math.min(1.45, tilt));
