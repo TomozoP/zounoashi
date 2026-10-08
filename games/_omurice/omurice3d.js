@@ -68,7 +68,7 @@
     for (var y = 0; y < s; y++) for (var x = 0; x < s; x++) {
       var u = x / s, v = y / s;
       var ring = Math.sin((v * 60 + fbm(u * 4, v * 12, 1, 4) * 5) * Math.PI);
-      var fine = noise3(u * 300, v * 14, 2);
+      var fine = noise3(u * 110, v * 10, 2);
       var k = 0.62 + 0.05 * ring + 0.07 * fine + 0.1 * fbm(u * 3, v * 3, 5, 3);
       var i = (y * s + x) * 4;
       d[i] = Math.min(255, 128 * k); d[i + 1] = Math.min(255, 84 * k); d[i + 2] = Math.min(255, 52 * k); d[i + 3] = 255;
@@ -86,7 +86,7 @@
     r.shadowMap.type = T.PCFSoftShadowMap;
     var S = this.scene = new T.Scene();
     S.background = new T.Color(0x2a1c12);
-    this.camera = new T.PerspectiveCamera(30, 540 / 960, 0.1, 100);
+    this.camera = new T.PerspectiveCamera(30, 540 / 960, 0.8, 120);
 
     /* 映り込み用の部屋（明るい窓と暖かい壁） */
     var env = new T.Scene();
@@ -144,7 +144,7 @@
     var t = new T.Mesh(new T.PlaneGeometry(14.6, 9.8), wood);
     t.rotation.x = -Math.PI / 2; t.receiveShadow = true;
     this.table = t; S.add(t);
-    box(14.6, 0.45, 9.8, dark, 0, -0.23, 0);
+    box(14.6, 0.45, 9.8, dark, 0, -0.3, 0);
     [[-6.6, -4.2], [6.6, -4.2], [-6.6, 4.2], [6.6, 4.2]].forEach(function (p) { box(0.6, 8.4, 0.6, dark, p[0], -4.65, p[1]); });
     var FLOOR = -8.85;
     /* 椅子（左右に1脚ずつ） */
@@ -167,11 +167,11 @@
     var floor = new T.Mesh(new T.PlaneGeometry(70, 70), std(0xd9c2a0, { map: ftex, roughness: 0.6 }));
     floor.rotation.x = -Math.PI / 2; floor.position.y = FLOOR; floor.receiveShadow = true; S.add(floor);
     var rug = new T.Mesh(new T.CircleGeometry(13, 48), std(0xb9a58c, { roughness: 1 }));
-    rug.rotation.x = -Math.PI / 2; rug.position.y = FLOOR + 0.05; rug.scale.set(1.3, 1, 1); S.add(rug);
+    rug.rotation.x = -Math.PI / 2; rug.position.y = FLOOR + 0.2; rug.scale.set(1.3, 1, 1); S.add(rug);
     /* 壁（あたたかい白）と天井 */
     var wall = std(0xece4d6, { roughness: 0.95, side: T.BackSide });
     var room = new T.Mesh(new T.BoxGeometry(70, 34, 70), wall);
-    room.position.y = FLOOR + 17; S.add(room);
+    room.position.y = FLOOR + 16.8;   /* 床と重ならないよう少し下げる */ S.add(room);
     /* 奥の壁の大きな窓（明るい外とレースのカーテン） */
     var sky = new T.MeshBasicMaterial({ color: 0xdff0ff });
     var win = new T.Mesh(new T.PlaneGeometry(22, 14), sky);
