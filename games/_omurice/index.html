@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>リアルオムライス</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #2a1c12; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="omurice3d.js"></script>
+<script>
+/* リアルオムライス
+
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+
+    place();                                   /* 高さが決まってから置き直す */
+
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null;
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ ケチャップの音 ============ 押し出している間だけ、こもった「ぶちゅー」 */
+  var squeeze = null;
+  function squeezeOn() {
+    if (!AC || !NOISE || squeeze) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE; s.loop = true;
+    var f = AC.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 380; f.Q.value = 6;
+    var g = AC.createGain(); g.gain.value = 0.0001;
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start();
+    squeeze = { s: s, f: f, g: g };
+    tone(120, 0.12, 0.08, "sine", 70);
+  }
+  function squeezeLevel(v) {
+    if (!squeeze) return;
+    var n = AC.currentTime;
+    squeeze.g.gain.setTargetAtTime(0.02 + 0.22 * v, n, 0.03);
+    squeeze.f.frequency.setTargetAtTime(260 + 500 * v + Math.random() * 120, n, 0.03);
+  }
+  function squeezeOff() {
+    if (!squeeze) return;
+    var q = squeeze; squeeze = null;
+    q.g.gain.setTargetAtTime(0.0001, AC.currentTime, 0.04);
+    setTimeout(function () { try { q.s.stop(); } catch (e) {} }, 300);
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+  var GRAM = 8.2 * 8.2 * 8.2 * 1.1;            /* 体積（ゲームの単位）→ グラム。1単位≒8.2cm、ケチャップは1.1g/cm³ */
+  var volume = 0, stroke = null, lastPt = null, lastMoveT = 0, look = 0;
+
+  function place() {}
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    score = 0;
+    T = 0;
+    held = false;
+    volume = 0; stroke = null; lastPt = null; look = 0;
+    if (scene3d) scene3d.clear();
+  }
+
+  /* 立体の絵。作れないとき（WebGLなし）は何も描けない */
+  var scene3d = null, tries3d = 0;
+  function make3d() {
+    if (scene3d || tries3d >= 5 || !window.THREE || !window.OmuScene) return;
+    tries3d++;
+    try { scene3d = new window.OmuScene(); } catch (e) { scene3d = null; }
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    T += dt;
+    if (state === S.RESULT) look = Math.min(1, look + dt * 0.8);
+    if (state !== S.PLAY) return;
+    /* 止めたままでもケチャップは少しずつ出て、点が太る */
+    if (held && stroke && lastPt && scene3d) {
+      var still = T - lastMoveT;
+      if (still > 0.08) {
+        var last = stroke.pts[stroke.pts.length - 1];
+        if (last && last.r < 0.075) {
+          var before = last.r;
+          last.r = Math.min(0.075, last.r + dt * 0.03);
+          volume += Math.PI * (last.r * last.r - before * before) * last.r * 0.9;
+          scene3d.rebuild(stroke);
+          squeezeLevel(0.35);
+        } else squeezeLevel(0.1);
+      }
+    }
+  }
+
+  /* ============ 入力 ============ なぞったところにケチャップ。ゆっくりほど太い */
+  function screenPick(x, y) {
+    if (!scene3d) return null;
+    return scene3d.pick(x / W, y / H);
+  }
+  var lastXY = null;
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (x == null) return;
+    if (hitOk(x, y)) { finish(); return; }
+    held = true;
+    stroke = null; lastPt = null; lastXY = { x: x, y: y, t: T }; lastMoveT = T;
+    squeezeOn();
+    paintAt(x, y, 0);
+  }
+  function paintAt(x, y, speed) {
+    var h = screenPick(x, y);
+    if (!h) { stroke = null; lastPt = null; return; }
+    if (!stroke) stroke = scene3d.beginStroke();
+    /* 速さ（ゲーム座標/秒）から太さ。速いと細く、ゆっくりだと太い */
+    var r = Math.max(0.018, Math.min(0.055, 0.055 - speed * 0.00004));
+    var added = scene3d.addPoint(stroke, h, r);
+    if (added < 0) { stroke = scene3d.beginStroke(); added = scene3d.addPoint(stroke, h, r); }
+    volume += added;
+    lastPt = h;
+  }
+  function move(x, y) {
+    if (state !== S.PLAY || !held) return;
+    var dtm = Math.max(1 / 120, T - lastXY.t);
+    var dist = Math.hypot(x - lastXY.x, y - lastXY.y);
+    if (dist < 1.5) return;
+    var speed = dist / dtm;
+    /* 速く動かしても線がとぎれないよう、間を細かく埋める */
+    var n = Math.max(1, Math.ceil(dist / 6));
+    for (var i = 1; i <= n; i++) paintAt(lastXY.x + (x - lastXY.x) * i / n, lastXY.y + (y - lastXY.y) * i / n, speed);
+    squeezeLevel(Math.min(1, 0.3 + speed / 1400));
+    lastXY = { x: x, y: y, t: T }; lastMoveT = T;
+  }
+  function up() {
+    if (!held) return;
+    held = false;
+    stroke = null; lastPt = null;
+    squeezeOff();
+  }
+  function finish() {
+    if (state !== S.PLAY) return;
+    up();
+    score = Math.round(volume * GRAM * 10) / 10;
+    state = S.RESULT;
+    [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.5, 0.07, "triangle", 0, i * 0.08); });
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  /* 本番以外（手元・確認用ページ・制作中の固定リンク）だけ、数字キーで場面を飛ばせる。 */
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  /* ハートを描く（画面の真ん中あたり） */
+  function autoHeart() {
+    if (state !== S.PLAY || !scene3d) return;
+    var cx = W / 2, cy = H * 0.5, s = 7;
+    held = true; stroke = null; lastXY = null;
+    for (var i = 0; i <= 120; i++) {
+      var t = i / 120 * Math.PI * 2;
+      var x = cx + s * 16 * Math.pow(Math.sin(t), 3);
+      var y = cy - s * (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * 0.75;
+      paintAt(x, y, 500);
+    }
+    held = false; stroke = null;
+  }
+  function debugKey(n) {
+    if (n === 1) autoHeart();
+    if (n === 2) finish();
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;
+    if (state === S.PLAY) { finish(); return; }
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); }
+  });
+
+  function doShare() {
+    /* ▼SHARE */
+    var g = score.toFixed(1);
+    window.zResultActions.x({ text: zT("リアルなオムライスにケチャップを" + g + "g使って描いた", "Drew on a realistic omurice with " + g + "g of ketchup") + zT(" #リアルオムライス", " #RealOmurice") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  var hideUI = false;
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT && !hideUI);
+    make3d();
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#2a1c12"; ctx.fillRect(0, 0, W, H);
+    if (scene3d) { try { scene3d.render(ctx, W, H, look); } catch (e) {} }
+    if (hideUI) return;
+    if (state === S.PLAY) drawOk();
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 「完成」ボタン。下の中央 */
+  function okButton() { var w = 180, h = 62; return { x: W / 2 - w / 2, y: H - h - Math.max(28, H * 0.035), w: w, h: h }; }
+  function hitOk(x, y) { var b = okButton(); return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
+  function drawOk() {
+    var b = okButton();
+    ctx.save();
+    roundRect(b.x, b.y, b.w, b.h, b.h / 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+    ctx.fillStyle = "#16202e"; ctx.font = "800 30px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(zT("完成", "Done"), b.x + b.w / 2, b.y + b.h / 2 + 1);
+    ctx.restore();
+  }
+
+  /* 結果画面。絵が見えるよう暗くせず、使ったケチャップの量を上に、ボタンを下に */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H - h - Math.max(36, H * 0.05);
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.7)";
+    ctx.shadowBlur = 14;
+    ctx.textAlign = "center";
+    ctx.font = "800 96px sans-serif";
+    var num = score.toFixed(1);
+    var nw = ctx.measureText(num).width;
+    ctx.font = "800 48px sans-serif";
+    var uw = ctx.measureText("g").width;
+    var x0 = W / 2 - (nw + uw + 6) / 2, y = Math.max(150, H * 0.16);
+    ctx.textAlign = "left";
+    ctx.font = "800 96px sans-serif"; ctx.fillText(num, x0, y);
+    ctx.font = "800 48px sans-serif"; ctx.fillText("g", x0 + nw + 6, y);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, score: score, W: W, H: H, volume: volume, strokes: scene3d ? scene3d.strokes.length : 0, has3d: !!scene3d }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); },
+    hideUI: function (v) { hideUI = v !== false; }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  newRound();state=S.INTRO;startButton.hidden=false;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    /* 端末の速さで難しさが変わらないように、描画が遅れてもゲームの時間は実際の時間どおり進める。
+       1回の update は 1/60 秒までに刻む。タブから戻ってきたときの大きな空白だけは切り捨てる */
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
