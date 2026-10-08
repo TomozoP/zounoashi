@@ -795,11 +795,28 @@ var EN = {
      COUNTER_URL が空のときや、つながらなかったときは黙って諦める。 */
   var counts = {};
 
+  /* 一覧を出すたびに数えに行くと、同時に動く数の上限（1000）に近づくので、
+     読んだ数は10分のあいだ手元に覚えておき、一覧を出すときにだけ読みに行く */
+  var COUNTS_KEEP = 10 * 60 * 1000;
+  var countsAsked = false;
   function countsLoad(after) {
-    if (!COUNTER_URL) return;
+    if (!COUNTER_URL || countsAsked) return;
+    countsAsked = true;
+    try {
+      var kept = JSON.parse(localStorage.getItem("counts") || "null");
+      if (kept && Date.now() - kept.t < COUNTS_KEEP) {
+        counts = kept.d || {};
+        if (after) after();
+        return;
+      }
+    } catch (e) {}
     fetch(COUNTER_URL, { cache: "no-store" })
       .then(function (r) { return r.json(); })
-      .then(function (d) { counts = d || {}; if (after) after(); })
+      .then(function (d) {
+        counts = d || {};
+        try { localStorage.setItem("counts", JSON.stringify({ t: Date.now(), d: counts })); } catch (e) {}
+        if (after) after();
+      })
       .catch(function () {});
   }
 
@@ -1355,9 +1372,13 @@ var EN = {
     }
   }
 
-  addEventListener("hashchange", render);
+  /* 一覧が出ているときだけプレイ数を読む（ゲームを直接開いた人の分は読まない） */
+  function countsIfGrid() {
+    if ($("#grid")) countsLoad(function () { if ($("#grid")) paintGrid(); });
+  }
+  addEventListener("hashchange", function () { render(); countsIfGrid(); });
   render();
-  countsLoad(function () { if ($("#grid")) paintGrid(); });
+  countsIfGrid();
 
   /* まだ公開しない下書きのゲーム。ローカルで見たときだけ一覧に出す。
      中身は games/_local.js（_ で始まる名前は GitHub Pages が公開しない）ので、
@@ -1369,7 +1390,8 @@ var EN = {
       if (!window.DRAFT_GAMES) return;
       GAMES = window.DRAFT_GAMES.concat(GAMES);
       render();
-      countsLoad(function () { if ($("#grid")) paintGrid(); });
+      countsAsked = false;
+      countsIfGrid();
     };
     document.head.appendChild(draft);
   }

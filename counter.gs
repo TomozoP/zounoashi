@@ -22,7 +22,8 @@
      このプロジェクトには他のコードを足さないでください（権限が広がります）。
 
    counts シートに id と count が並ぶので、数字は手で直せます。
-   コードを直したときは、もう一度デプロイし直すと反映されます。
+   コードを直したときは「デプロイ → デプロイを管理 → 鉛筆 → バージョン：新バージョン → デプロイ」で
+   反映します（「新しいデプロイ」だとURLが変わるので使わない）。
    =========================================================================== */
 
 var SHEET_NAME = "counts";
@@ -80,29 +81,50 @@ function rowOf_(sh, id) {
   return row;
 }
 
+/* 全部の回数は5分のあいだ控えに置き、毎回スプレッドシートを読まない。
+   1回の実行を短くして、同時に動く数（上限1000）を増やさないため */
+var CACHE_KEY = "all";
+var CACHE_SEC = 300;
+
 function doGet(e) {
   var id = (e && e.parameter && e.parameter.hit) ? String(e.parameter.hit).trim() : "";
   if (id && !ID_OK.test(id)) id = "";     // 変な文字列は数えない
-  var sh = sheet_();
+  var cache = CacheService.getScriptCache();
   var out = {};
 
   if (id) {
-    /* 同時にアクセスされても数え落とさないように、ここだけ順番待ちにする */
+    /* 同時にアクセスされても数え落とさないように、ここだけ順番待ちにする。
+       長く待つと待っている実行が積み重なって上限に近づくので、
+       少し待って空かなければその1回は数えずにあきらめる */
     var lock = LockService.getScriptLock();
-    try { lock.waitLock(10000); } catch (err) {}
-    try {
-      var row = rowOf_(sh, id);
-      if (row) {
-        var n = (Number(sh.getRange(row, 2).getValue()) || 0) + 1;
-        sh.getRange(row, 2).setValue(n);
-        SpreadsheetApp.flush();
-        out[id] = n;
+    if (lock.tryLock(2000)) {
+      try {
+        var sh = sheet_();
+        var row = rowOf_(sh, id);
+        if (row) {
+          var n = (Number(sh.getRange(row, 2).getValue()) || 0) + 1;
+          sh.getRange(row, 2).setValue(n);
+          SpreadsheetApp.flush();
+          out[id] = n;
+          var kept = cache.get(CACHE_KEY);
+          if (kept) {
+            var all = JSON.parse(kept);
+            all[id] = n;
+            cache.put(CACHE_KEY, JSON.stringify(all), CACHE_SEC);
+          }
+        }
+      } finally {
+        lock.releaseLock();
       }
-    } finally {
-      try { lock.releaseLock(); } catch (err) {}
     }
   } else {
-    out = readAll_(sh);
+    var text = cache.get(CACHE_KEY);
+    if (!text) {
+      text = JSON.stringify(readAll_(sheet_()));
+      cache.put(CACHE_KEY, text, CACHE_SEC);
+    }
+    return ContentService.createTextOutput(text)
+      .setMimeType(ContentService.MimeType.JSON);
   }
 
   return ContentService.createTextOutput(JSON.stringify(out))
