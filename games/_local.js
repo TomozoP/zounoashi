@@ -201,5 +201,6 @@ window.DRAFT_GAMES = [
     "play": "games/_snow-pome/index.html",
     "full": true,
     "catch": "ポメラニアンが雪の坂を転がって大きくなる"
-  }
+  },
+  {"type":"lab","tags":[],"id":"muriyari-seiza","title":"むりやり星座","year":2026,"date":"2026-10-09","plays":null,"url":"","img":"games/_muriyari-seiza/img/thumb.webp","play":"games/_muriyari-seiza/index.html","full":true,"catch":"星を結んで星座を見つけまくる"},
 ];

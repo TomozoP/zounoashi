@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>むりやり星座</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #03040d; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* むりやり星座
+
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+
+    place();                                   /* 高さが決まってから置き直す */
+
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null;
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+  var LIMIT = 60;                              /* 制限時間（秒） */
+  var SNAP = 34;                               /* 星に吸い付く距離（ゲーム座標） */
+  var stars = [], dust = [], found = [], foundKeys = {}, usedNames = {};
+  var path = [], finger = null, flash = null, rnd = Math.random;
+
+  var TOP = 64;                                   /* 星を置き始める高さ（時間の帯の下） */
+  function place() {
+    TOP = 64;
+  }
+
+  /* 星を散らす。指で押し分けられるよう、星どうしは70以上離す */
+  function makeSky() {
+    stars = []; dust = [];
+    var tries = 0, want = Math.round(40 * H / 960);
+    while (stars.length < want && tries < 6000) {
+      tries++;
+      var x = 36 + rnd() * (W - 72), y = TOP + 30 + rnd() * (H - TOP - 70);
+      var ok = true;
+      for (var i = 0; i < stars.length; i++) {
+        var dx = stars[i].x - x, dy = stars[i].y - y;
+        if (dx * dx + dy * dy < 70 * 70) { ok = false; break; }
+      }
+      if (ok) stars.push({ x: x, y: y, r: 2.2 + rnd() * 2.6, ph: rnd() * 7, hue: rnd() });
+    }
+    for (var j = 0; j < 260; j++) dust.push({ x: rnd() * W, y: rnd() * H, r: 0.4 + rnd() * 1.1, ph: rnd() * 7 });
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    score = 0;
+    T = 0;
+    held = false;
+    found = []; foundKeys = {}; usedNames = {};
+    path = []; finger = null; flash = null;
+    makeSky();
+  }
+
+  /* ============ 星座の名前 ============
+     星の組み合わせ（結んだ線の組）から決まる。同じ組み合わせなら同じ名前。 */
+  var MODS = [
+    ["泣いている", "Crying"], ["二日酔いの", "Hungover"], ["遅刻した", "Late"], ["怒られた", "Scolded"],
+    ["迷子の", "Lost"], ["寝起きの", "Groggy"], ["小さすぎる", "Tiny"], ["傘を忘れた", "Umbrella-less"],
+    ["確定申告中の", "Tax-Filing"], ["歯医者帰りの", "Post-Dentist"], ["満員電車の", "Rush-Hour"], ["冷めた", "Lukewarm"],
+    ["謝っている", "Apologizing"], ["半額の", "Half-Price"], ["期限切れの", "Expired"], ["背伸びした", "Tiptoeing"],
+    ["正座した", "Kneeling"], ["逆さまの", "Upside-Down"], ["割り込む", "Line-Cutting"], ["見栄を張る", "Showing-Off"],
+    ["濡れた", "Soggy"], ["気まずい", "Awkward"], ["自称", "Self-Proclaimed"], ["引っ越し中の", "Moving"],
+    ["実家の", "Hometown"], ["筋肉痛の", "Sore"], ["電池切れの", "Dead-Battery"], ["踊る", "Dancing"],
+    ["既読無視された", "Left-on-Read"], ["伸びきった", "Overstretched"], ["大きめの", "Oversized"], ["納得いかない", "Unconvinced"]
+  ];
+  var NOUNS = [
+    ["課長", "Section Chief"], ["食パン", "Toast"], ["靴下", "Sock"], ["傘", "Umbrella"],
+    ["ちくわ", "Chikuwa"], ["洗濯ばさみ", "Clothespin"], ["掃除機", "Vacuum"], ["おじさん", "Uncle"],
+    ["自転車", "Bicycle"], ["冷蔵庫", "Fridge"], ["エビフライ", "Fried Shrimp"], ["消しゴム", "Eraser"],
+    ["ブロッコリー", "Broccoli"], ["扇風機", "Electric Fan"], ["歯ブラシ", "Toothbrush"], ["定規", "Ruler"],
+    ["ハンガー", "Hanger"], ["餃子", "Dumpling"], ["カニ", "Crab"], ["柴犬", "Shiba"],
+    ["ペンギン", "Penguin"], ["郵便ポスト", "Mailbox"], ["信号機", "Traffic Light"], ["フライパン", "Frying Pan"],
+    ["改札", "Ticket Gate"], ["炊飯器", "Rice Cooker"], ["枕", "Pillow"], ["メガネ", "Glasses"],
+    ["ラーメン", "Ramen"], ["金魚", "Goldfish"], ["大根", "Radish"], ["リモコン", "Remote"],
+    ["新入社員", "New Hire"], ["王様", "King"], ["宇宙人", "Alien"], ["アヒル", "Duck"], ["土鍋", "Clay Pot"]
+  ];
+  function hash(s) {
+    var h = 2166136261;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function nameFor(key) {
+    var h = hash(key), m, n, k = 0;
+    do {                                        /* 名前が重ならないように少しずらす */
+      m = MODS[(h + k * 7) % MODS.length]; n = NOUNS[((h >>> 8) + k * 13) % NOUNS.length]; k++;
+    } while (usedNames[m[0] + n[0]] && k < 40);
+    usedNames[m[0] + n[0]] = true;
+    return { ja: m[0] + n[0] + "座", en: m[1] + " " + n[1] };
+  }
+  function label(c) { return zT(c.name.ja, c.name.en); }
+
+  /* 結んだ線の組を、向きと順番によらない文字にする */
+  function keyOf(p) {
+    var es = [];
+    for (var i = 1; i < p.length; i++) {
+      var a = p[i - 1], b = p[i];
+      es.push(a < b ? a + "-" + b : b + "-" + a);
+    }
+    es.sort();
+    return es.join(",");
+  }
+  function hasEdge(p, a, b) {
+    for (var i = 1; i < p.length; i++) {
+      if ((p[i - 1] === a && p[i] === b) || (p[i - 1] === b && p[i] === a)) return true;
+    }
+    return false;
+  }
+  function uniqCount(p) {
+    var u = {}, n = 0;
+    p.forEach(function (i) { if (!u[i]) { u[i] = true; n++; } });
+    return n;
+  }
+
+  /* 指を離したときに星座にする。3つ以上の星を結んだら星座 */
+  function finish() {
+    var p = path; path = []; finger = null;
+    if (uniqCount(p) < 3) { return; }
+    var key = keyOf(p);
+    if (foundKeys[key]) {                        /* 見つけ済みの組み合わせ */
+      flash = { p: p, t: 0 };
+      tone(150, 0.22, 0.12, "triangle", 110);
+      return;
+    }
+    foundKeys[key] = true;
+    var cx = 0, cy = 0, minY = 1e9, u = {};
+    p.forEach(function (i) {
+      if (u[i]) return; u[i] = true;
+      cx += stars[i].x; cy += stars[i].y; minY = Math.min(minY, stars[i].y);
+    });
+    var n = uniqCount(p);
+    var c = { p: p, name: nameFor(key), x: cx / n, y: cy / n, top: minY, t: 0, n: n };
+    found.push(c);
+    score = found.length;
+    var notes = [523, 659, 784, 1047, 1319];
+    notes.forEach(function (f, i) { tone(f, 0.5, 0.06, "sine", 0, i * 0.05); });
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    found.forEach(function (c) { c.t += dt; });
+    if (flash) { flash.t += dt; if (flash.t > 0.5) flash = null; }
+    if (state !== S.PLAY) return;
+    T += dt;
+    if (T >= LIMIT) {
+      T = LIMIT;
+      if (held) { held = false; finish(); }
+      state = S.RESULT;
+      [784, 988, 1175, 1568].forEach(function (f, i) { tone(f, 0.9, 0.06, "sine", 0, i * 0.09); });
+    }
+  }
+
+  /* ============ 入力 ============
+     星の上から指をすべらせて、星から星へ線を結ぶ。離すと星座になる。 */
+  function starAt(x, y, r) {
+    var best = -1, bd = r * r;
+    for (var i = 0; i < stars.length; i++) {
+      var dx = stars[i].x - x, dy = stars[i].y - y, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+  function addStar(i) {
+    var last = path[path.length - 1];
+    if (i === last) return;
+    if (path.length && hasEdge(path, last, i)) return;
+    path.push(i);
+    var scale = [523, 587, 659, 784, 880, 1047, 1175, 1319, 1568, 1760];
+    tone(scale[Math.min(scale.length - 1, path.length - 1)], 0.35, 0.07, "sine");
+  }
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (x == null) return;
+    held = true;
+    path = []; finger = { x: x, y: y };
+    var i = starAt(x, y, SNAP + 10);
+    if (i >= 0) addStar(i);
+  }
+  function move(x, y) {
+    if (state !== S.PLAY || !held) return;
+    finger = { x: x, y: y };
+    var i = starAt(x, y, SNAP);
+    if (i >= 0) addStar(i);
+  }
+  function up() {
+    if (!held) return;
+    held = false;
+    if (state === S.PLAY) finish();
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  /* 本番以外（手元・確認用ページ・制作中の固定リンク）だけ、数字キーで場面を飛ばせる。
+     本番（www.zounoashi.com/games/ 以下）では効かない。 */
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  /* 近い星を順にたどって、まだない星座をひとつ作る */
+  function autoConstellation() {
+    for (var tryN = 0; tryN < 50; tryN++) {
+      var len = 3 + Math.floor(rnd() * 4);
+      var p = [Math.floor(rnd() * stars.length)];
+      while (p.length < len) {
+        var last = stars[p[p.length - 1]], best = -1, bd = 1e9;
+        for (var i = 0; i < stars.length; i++) {
+          if (p.indexOf(i) >= 0) continue;
+          var dx = stars[i].x - last.x, dy = stars[i].y - last.y, d = dx * dx + dy * dy + rnd() * 9000;
+          if (d < bd) { bd = d; best = i; }
+        }
+        p.push(best);
+      }
+      if (!foundKeys[keyOf(p)]) { path = p; finish(); return; }
+    }
+  }
+  function debugKey(n) {
+    if (state !== S.PLAY) return;
+    if (n === 1) autoConstellation();                         /* 星座をひとつ作る */
+    if (n === 2) T = Math.max(T, LIMIT - 3);                  /* 残り3秒 */
+    if (n === 3) { for (var i = 0; i < 12; i++) autoConstellation(); T = LIMIT; }  /* 12個作って終わり */
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); }
+  });
+
+  /* いちばん星の多い星座を代表にする */
+  function bestOne() {
+    var b = null;
+    found.forEach(function (c) { if (!b || c.n > b.n) b = c; });
+    return b;
+  }
+  function doShare() {
+    /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。 */
+    var b = bestOne(), text;
+    if (!b) text = zT("夜空にひとつも星座を見つけられなかった", "Couldn't find a single constellation in the night sky");
+    else if (score === 1) text = zT("夜空に「" + b.name.ja + "」を見つけた", "Discovered \"" + b.name.en + "\" in the night sky");
+    else text = zT("夜空に「" + b.name.ja + "」など" + score + "個の星座を見つけた",
+      "Discovered \"" + b.name.en + "\" and " + (score - 1) + " more constellations");
+    window.zResultActions.x({ text: text + zT(" #むりやり星座", " #MakeshiftConstellations") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  var clock = 0, lastDraw = 0;
+  function drawSky() {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#03040d");
+    g.addColorStop(0.55, "#0a1030");
+    g.addColorStop(1, "#1a1b45");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    /* 天の川のもや */
+    ctx.save();
+    ctx.translate(W * 0.5, H * 0.5); ctx.rotate(-0.5);
+    var mg = ctx.createRadialGradient(0, 0, 10, 0, 0, H * 0.6);
+    mg.addColorStop(0, "rgba(120,130,200,.16)");
+    mg.addColorStop(1, "rgba(120,130,200,0)");
+    ctx.scale(1, 0.28);
+    ctx.fillStyle = mg;
+    ctx.beginPath(); ctx.arc(0, 0, H * 0.6, 0, 7); ctx.fill();
+    ctx.restore();
+    dust.forEach(function (d) {
+      var a = 0.25 + 0.25 * Math.sin(clock * 1.3 + d.ph);
+      ctx.fillStyle = "rgba(220,225,255," + a.toFixed(3) + ")";
+      ctx.fillRect(d.x, d.y, d.r, d.r);
+    });
+  }
+  function linePath(p) {
+    ctx.beginPath();
+    ctx.moveTo(stars[p[0]].x, stars[p[0]].y);
+    for (var i = 1; i < p.length; i++) ctx.lineTo(stars[p[i]].x, stars[p[i]].y);
+  }
+  function drawStar(s, lit) {
+    var tw = 0.75 + 0.25 * Math.sin(clock * 2.1 + s.ph);
+    var r = s.r * (lit ? 1.5 : 1) * tw;
+    var col = s.hue < 0.2 ? "255,214,170" : s.hue < 0.4 ? "190,215,255" : "255,250,235";
+    var g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * 5);
+    g.addColorStop(0, "rgba(" + col + "," + (lit ? 0.7 : 0.45) + ")");
+    g.addColorStop(1, "rgba(" + col + ",0)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(s.x, s.y, r * 5, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgb(" + col + ")";
+    ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7); ctx.fill();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    var now = performance.now();
+    clock += Math.min(0.1, (now - (lastDraw || now)) / 1000); lastDraw = now;
+    ctx.clearRect(0, 0, W, H);
+    drawSky();
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+
+    /* 見つけた星座の線。できた直後は金色に光って、だんだん落ち着く */
+    found.forEach(function (c) {
+      var k = Math.max(0, 1 - c.t / 1.2);
+      linePath(c.p);
+      ctx.strokeStyle = "rgba(" + Math.round(150 + 105 * k) + "," + Math.round(180 + 40 * k) + "," + Math.round(255 - 135 * k) + "," + (0.32 + 0.6 * k).toFixed(3) + ")";
+      ctx.lineWidth = 1.6 + 2.4 * k;
+      ctx.stroke();
+    });
+    if (flash) {
+      linePath(flash.p);
+      ctx.strokeStyle = "rgba(255,90,90," + (0.8 * (1 - flash.t / 0.5)).toFixed(3) + ")";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+    /* 結んでいる途中の線 */
+    if (path.length) {
+      linePath(path);
+      if (finger && held) ctx.lineTo(finger.x, finger.y);
+      ctx.strokeStyle = "rgba(255,236,170,.9)";
+      ctx.lineWidth = 2.6;
+      ctx.stroke();
+    }
+
+    var lit = {};
+    path.forEach(function (i) { lit[i] = true; });
+    stars.forEach(function (s, i) { drawStar(s, lit[i]); });
+
+    /* 星座の名前。新しいものは大きく、古いものは薄く小さく */
+    ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    found.forEach(function (c, idx) {
+      var fresh = Math.max(0, 1 - Math.max(0, c.t - 1.6) / 0.8);
+      var isLast = idx === found.length - 1;
+      var a = state === S.RESULT ? 0 : isLast ? 0.45 + 0.55 * fresh : 0.12 + 0.6 * fresh;
+      if (a <= 0.01) return;
+      var pop = Math.min(1, c.t / 0.25);
+      var size = Math.round((15 + 9 * fresh) * (0.6 + 0.4 * pop));
+      ctx.font = "700 " + size + "px sans-serif";
+      var y = Math.max(TOP + size + 4, c.top - 14);
+      var x = Math.min(W - 10, Math.max(10, c.x));
+      var tw = ctx.measureText(label(c)).width;
+      x = Math.min(W - 8 - tw / 2, Math.max(8 + tw / 2, x));
+      ctx.lineWidth = 4; ctx.strokeStyle = "rgba(3,4,13," + (a * 0.8).toFixed(3) + ")";
+      ctx.strokeText(label(c), x, y);
+      ctx.fillStyle = "rgba(255,240,200," + a.toFixed(3) + ")";
+      ctx.fillText(label(c), x, y);
+    });
+    ctx.textBaseline = "alphabetic";
+
+    /* 上の帯: 見つけた数と残り時間 */
+    if (state === S.PLAY) {
+      ctx.fillStyle = "rgba(255,255,255,.14)";
+      roundRect(24, 22, W - 48, 6, 3); ctx.fill();
+      ctx.fillStyle = T > LIMIT - 10 ? "#ff8a7a" : "#ffe9a8";
+      roundRect(24, 22, (W - 48) * (1 - T / LIMIT), 6, 3); ctx.fill();
+      ctx.fillStyle = "#fff4d6";
+      ctx.font = "800 26px sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText(String(score), W - 24, 58);
+      ctx.textAlign = "center";
+    }
+
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない） */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(3,4,13,.55)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
+     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
+  window.__probe = {
+    now: function () {
+      return { state: state, score: score, W: W, H: H, T: T, stars: stars.length, path: path.slice(),
+        names: found.map(function (c) { return c.name.ja; }) };
+    },
+    star: function (i) { return stars[i] && { x: stars[i].x, y: stars[i].y }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  newRound();state=S.INTRO;startButton.hidden=false;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    /* 端末の速さで難しさが変わらないように、描画が遅れてもゲームの時間は実際の時間どおり進める。
+       1回の update は 1/60 秒までに刻む。タブから戻ってきたときの大きな空白だけは切り捨てる */
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
