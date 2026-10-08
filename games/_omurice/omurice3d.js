@@ -1,4 +1,4 @@
-/* リアルオムライスの立体の絵。卵・皿・机・ケチャップの線は、すべて基本図形と手続きの模様から自作。
+/* オム文字シミュレーターの立体の絵。卵・皿・机・ケチャップの線は、すべて基本図形と手続きの模様から自作。
    three.js は random-bowling の既存配布物（MIT）を使う。
    単位: 1 = 約8.2cm（卵の長さ 2.2 ≒ 18cm）。y が上。 */
 (function (global) {
@@ -118,6 +118,7 @@
     this.buildTable();
     this.buildPlate();
     this.buildEgg();
+    this.buildParsley();
 
     this.inkMat = new T.MeshPhysicalMaterial({ color: 0xb3120a, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.08, sheen: 0.3, sheenColor: new T.Color(0xff5030) });
     this.strokes = [];
@@ -328,6 +329,48 @@
     egg.position.y = 0.03;
     egg.castShadow = true; egg.receiveShadow = true;
     this.scene.add(egg);
+  };
+
+  /* 皿の端に添えるパセリ（縮れた葉のかたまりを、細い茎の先に付ける） */
+  OmuScene.prototype.buildParsley = function () {
+    var g = new T.Group();
+    var leafMat = new T.MeshStandardMaterial({ color: 0x2f6b22, roughness: 0.65, flatShading: true });
+    var lightMat = new T.MeshStandardMaterial({ color: 0x4f8f33, roughness: 0.6, flatShading: true });
+    var stemMat = new T.MeshStandardMaterial({ color: 0x6f9a3e, roughness: 0.7 });
+    var R = 7;
+    function rr() { R = (R * 16807) % 2147483647; return (R - 1) / 2147483646; }
+    /* 縮れた葉: でこぼこにした小さな玉を寄せ集める */
+    function curl(x, y, z, s) {
+      var geo = new T.IcosahedronGeometry(1, 2), pos = geo.attributes.position, v = new T.Vector3();
+      for (var i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i);
+        var k = 0.72 + 0.4 * fbm(v.x * 3 + x * 9, v.y * 3 + z * 9, v.z * 3, 2);
+        pos.setXYZ(i, v.x * k, v.y * k * 0.8, v.z * k);
+      }
+      geo.computeVertexNormals();
+      var m = new T.Mesh(geo, rr() < 0.35 ? lightMat : leafMat);
+      m.position.set(x, y, z); m.scale.setScalar(s); m.rotation.set(rr() * 3, rr() * 3, rr() * 3);
+      m.castShadow = true; m.receiveShadow = true; g.add(m);
+    }
+    for (var b = 0; b < 5; b++) {
+      var a = b / 5 * Math.PI * 2 + rr() * 0.6, len = 0.12 + rr() * 0.06;
+      var ex = Math.cos(a) * len, ez = Math.sin(a) * len, ey = 0.1 + rr() * 0.06;
+      /* 茎 */
+      var st = new T.Mesh(new T.CylinderGeometry(0.008, 0.012, 1, 6), stemMat);
+      var from = new T.Vector3(0, 0.02, 0), to = new T.Vector3(ex * 0.7, ey * 0.7, ez * 0.7);
+      st.position.copy(from).add(to).multiplyScalar(0.5);
+      st.scale.y = from.distanceTo(to);
+      st.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), to.clone().sub(from).normalize());
+      g.add(st);
+      for (var k = 0; k < 14; k++) curl(ex + (rr() - 0.5) * 0.11, ey + (rr() - 0.3) * 0.07, ez + (rr() - 0.5) * 0.11, 0.04 + rr() * 0.035);
+    }
+    /* 長い茎を1本、皿の上に寝かせる */
+    var lst = new T.Mesh(new T.CylinderGeometry(0.009, 0.011, 0.32, 6), stemMat);
+    lst.rotation.z = Math.PI / 2 - 0.25; lst.rotation.y = 0.5; lst.position.set(0.12, 0.03, 0.1);
+    g.add(lst);
+    g.position.set(1.12, 0.03, 0.6); g.scale.setScalar(1.35);
+    this.parsley = g;
+    this.scene.add(g);
   };
 
   /* 画面の形に合わせてカメラを置く（皿の幅が画面に収まるように） */
