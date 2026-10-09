@@ -120,7 +120,7 @@
     var key = this.key = new T.DirectionalLight(0xfff0d8, 2.6);
     key.position.set(-4, 4.5, 1.5);
     key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.mapSize.set(1024, 1024);
     var sc = key.shadow.camera; sc.left = -3; sc.right = 3; sc.top = 3; sc.bottom = -3; sc.near = 1; sc.far = 15;
     key.shadow.radius = 6; key.shadow.bias = -0.0005; key.shadow.normalBias = 0.02;
     S.add(key);
@@ -184,6 +184,7 @@
   /* 卵：ラグビーボール形のふくらみ。両端に包んだしわ、表面に焼きむら */
   OmuScene.prototype.buildEgg = function (seed) {
     /* seed ごとに形・しわ・焼き色の違うオムライスになる */
+    this.ver = (this.ver || 0) + 1;
     var R = seed || 1;
     function rr() { R = (R * 16807) % 2147483647; return (R - 1) / 2147483646; }
     var SX = rr() * 50, SY = rr() * 50, SZ = rr() * 50;
@@ -328,6 +329,7 @@
     return len * Math.PI * r * r * 0.75;                  /* 使ったケチャップの量（体積） */
   };
   OmuScene.prototype.rebuild = function (s) {
+    this.ver = (this.ver || 0) + 1;   /* 形が変わったら描き直す */
     var P = s.pts, n = P.length, SEG = 10;
     if (s.mesh) { this.scene.remove(s.mesh); s.mesh.geometry.dispose(); }
     s.caps.forEach(function (c) { this.scene.remove(c); c.geometry.dispose(); }, this);
@@ -453,9 +455,13 @@
   };
 
   OmuScene.prototype.render = function (ctx, W, H, look, orbit) {
-    var dpr = Math.min(2, global.devicePixelRatio || 1);
+    var dpr = Math.min(1.5, global.devicePixelRatio || 1);   /* 立体は少し粗く描いて軽くする（ぼかしと粒子で目立たない） */
     var w = Math.round(W * dpr), h = Math.round(H * dpr);
     var r = this.renderer;
+    /* 見る向きも形も変わっていなければ、前に描いた絵をそのまま使う */
+    var key = [w, h, look, orbit ? orbit.yaw : 0, orbit ? orbit.tilt : 0, orbit ? orbit.zoom : 1, this.ver].join();
+    if (key === this.lastKey) { ctx.drawImage(r.domElement, 0, 0, W, H); return true; }
+    this.lastKey = key;
     if (w !== this.w || h !== this.h) { this.w = w; this.h = h; r.setSize(w, h, false); this.makePost(w, h); }
     this.setView(W, H, look, orbit);
     if (this.rt && !this.postFailed) {
