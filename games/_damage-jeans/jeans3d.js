@@ -657,14 +657,17 @@
     var legs = segs.length >= 2 ? segs : (this.legTop || (this.legTop = this.rowSegs(CROTCH + 90)));
     var hc = (H[0] + H[1]) / 2, hw = (H[1] - H[0]) / 2;
     var s = Math.max(-1, Math.min(1, (px - hc) / hw));
-    var hz = hw / PX * 0.6 * Math.sqrt(1 - s * s);
+    var hz = hw / PX * 0.6 * Math.sqrt(1 - s * s), hx = hc + s * hw;
     var L = px < 512 ? legs[0] : legs[legs.length - 1];
     var c = (L[0] + L[1]) / 2, w = (L[1] - L[0]) / 2;
     var s2 = Math.max(-1, Math.min(1, (px - c) / w));
-    var lz = w / PX * 0.85 * Math.sqrt(1 - s2 * s2);
+    var lz = w / PX * 0.85 * Math.sqrt(1 - s2 * s2), lx = c + s2 * w;
     var t = Math.max(0, Math.min(1, (py - (CROTCH - 40)) / 160)); t = t * t * (3 - 2 * t);
     var z = hz + (lz - hz) * t;
-    return new T.Vector3((px - 512) / PX * XS, 10.2 - (py - 58) / PX, back ? -z : z);
+    /* 輪郭の外の頂点は縁に寄せ、絵は少し内側を読む。前と後ろが横の縫い目でぴったり閉じる */
+    var ex = hx + (lx - hx) * t;
+    this.uvX = (hc + s * hw * 0.95) + ((c + s2 * w * 0.95) - (hc + s * hw * 0.95)) * t;
+    return new T.Vector3((ex - 512) / PX * XS, 10.2 - (py - 58) / PX, back ? -z : z);
   };
   /* マネキンの関節の位置（床が0）。股関節と膝で脚を曲げる */
   var HIPY = 8.4, KNEEY = 4.6;
@@ -677,7 +680,7 @@
     this.scene.add(G);
     var self = this;
     /* ジーンズ（歩くたびに頂点を曲げ直すので、細かさは控えめ） */
-    var mat = this.front.material, NX = 64, NZ = 128;
+    var mat = this.front.material, NX = 96, NZ = 128;
     this.wear = [false, true].map(function (back) {
       var geo = new T.PlaneGeometry(1, 1, NX, NZ), pos = geo.attributes.position, cnt = pos.count;
       var rest = new Float32Array(cnt * 3), side = new Uint8Array(cnt), w = new Float32Array(cnt);
@@ -685,6 +688,7 @@
         var i = n % (NX + 1), j = Math.floor(n / (NX + 1));
         var px = i / NX * TW, py = j / NZ * TH;
         var v = self.wrapPos(px, py, back);
+        geo.attributes.uv.setX(n, self.uvX / TW);
         rest[n * 3] = v.x; rest[n * 3 + 1] = v.y; rest[n * 3 + 2] = v.z;
         side[n] = px < 512 ? 0 : 1;
         var t = Math.max(0, Math.min(1, (HIPY + 0.2 - v.y) / 1.4)); w[n] = t * t * (3 - 2 * t);
@@ -888,31 +892,60 @@
     sc.updateProjectionMatrix();
   };
 
-  /* ワッペン: 選んだ画像を角の丸い布にして、縁を刺しゅうで縫い付ける。下の穴や色落ちはふさがる */
+  /* ワッペン: 選んだ画像を布にして、縁を刺しゅうで縫い付ける。下の穴や色落ちはふさがる。
+     透過PNGなら絵の形に沿ってふち取り（ダイカット）、そうでなければ角の丸い四角 */
   JeansScene.prototype.addPatch = function (img, cx, cy) {
     var iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
     if (!iw || !ih) return false;
-    var M = 230, k = M / Math.max(iw, ih), w = Math.max(60, Math.round(iw * k)), h = Math.max(60, Math.round(ih * k));
-    var x0 = Math.round(cx - w / 2), y0 = Math.round(cy - h / 2), R = Math.min(w, h) * 0.16;
+    var M = 230, k = M / Math.max(iw, ih), w0 = Math.max(40, Math.round(iw * k)), h0 = Math.max(40, Math.round(ih * k));
+    /* 透過しているか（縁まわりに透明な所があるか） */
+    var tc = canvas(w0, h0), tg = tc.getContext("2d"); tg.drawImage(img, 0, 0, w0, h0);
+    var td = tg.getImageData(0, 0, w0, h0).data, clear = 0, sr = 0, sg = 0, sb = 0, n = 0;
+    for (var i = 0; i < td.length; i += 16) {
+      if (td[i + 3] < 40) clear++;
+      else { sr += td[i]; sg += td[i + 1]; sb += td[i + 2]; n++; }
+    }
+    n = n || 1;
+    var die = clear > td.length / 16 * 0.04;
+    var bc = "rgb(" + Math.round(sr / n * 0.45) + "," + Math.round(sg / n * 0.45) + "," + Math.round(sb / n * 0.45) + ")";
+    var P = die ? 14 : 0, w = w0 + P * 2, h = h0 + P * 2;
     var pc = canvas(w, h), g = pc.getContext("2d");
     function rr(x, y, ww, hh, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + ww, y, x + ww, y + hh, r); g.arcTo(x + ww, y + hh, x, y + hh, r); g.arcTo(x, y + hh, x, y, r); g.arcTo(x, y, x + ww, y, r); g.closePath(); }
-    g.save(); rr(0, 0, w, h, R); g.clip();
-    g.fillStyle = "#f1ece0"; g.fillRect(0, 0, w, h);          /* 透明な画像でも下地の布が見えるように */
-    g.drawImage(img, 0, 0, w, h);
-    /* 刺しゅう糸の細かい筋 */
-    for (var y = 0; y < h; y += 3) { g.fillStyle = "rgba(255,255,255," + (0.05 + (y % 6 ? 0 : 0.04)) + ")"; g.fillRect(0, y, w, 1); g.fillStyle = "rgba(0,0,0,.06)"; g.fillRect(0, y + 1, w, 1); }
-    g.restore();
-    /* 縁: 平均の色を濃くした太いふち取りと、斜めのサテン縫い */
-    var avg = g.getImageData(0, 0, w, h).data, sr = 0, sg = 0, sb = 0, n = 0;
-    for (var i = 0; i < avg.length; i += 64) if (avg[i + 3] > 128) { sr += avg[i]; sg += avg[i + 1]; sb += avg[i + 2]; n++; }
-    n = n || 1;
-    var bc = "rgb(" + Math.round(sr / n * 0.45) + "," + Math.round(sg / n * 0.45) + "," + Math.round(sb / n * 0.45) + ")";
-    g.lineWidth = 12; g.strokeStyle = bc; rr(6, 6, w - 12, h - 12, Math.max(4, R - 6)); g.stroke();
-    g.save(); rr(6, 6, w - 12, h - 12, Math.max(4, R - 6)); g.lineWidth = 12; g.setLineDash([1.5, 2.5]); g.strokeStyle = "rgba(255,255,255,.28)"; g.stroke(); g.restore();
-    g.lineWidth = 1.5; g.strokeStyle = "rgba(0,0,0,.45)"; rr(0.75, 0.75, w - 1.5, h - 1.5, R); g.stroke();
+    function threads(gg, ww, hh) {
+      for (var y = 0; y < hh; y += 3) { gg.fillStyle = "rgba(255,255,255," + (0.05 + (y % 6 ? 0 : 0.04)) + ")"; gg.fillRect(0, y, ww, 1); gg.fillStyle = "rgba(0,0,0,.06)"; gg.fillRect(0, y + 1, ww, 1); }
+    }
+    /* 絵の形を r だけ太らせた型 */
+    function grow(r, color) {
+      var c = canvas(w, h), cg = c.getContext("2d");
+      for (var a = 0; a < 32; a++) { var t = a / 32 * Math.PI * 2; cg.drawImage(tc, P + Math.cos(t) * r, P + Math.sin(t) * r); }
+      cg.drawImage(tc, P, P);
+      cg.globalCompositeOperation = "source-in"; cg.fillStyle = color; cg.fillRect(0, 0, w, h);
+      return c;
+    }
+    if (die) {
+      /* 外側: 刺しゅうのふち（斜めのサテン縫い） */
+      var edge = grow(12, bc), eg = edge.getContext("2d");
+      eg.globalCompositeOperation = "source-atop"; eg.strokeStyle = "rgba(255,255,255,.22)"; eg.lineWidth = 1.2;
+      for (var d = -h; d < w; d += 3.5) { eg.beginPath(); eg.moveTo(d, 0); eg.lineTo(d + h, h); eg.stroke(); }
+      g.drawImage(edge, 0, 0);
+      g.drawImage(grow(4, "#f1ece0"), 0, 0);                 /* ふちの内側の布 */
+      g.drawImage(tc, P, P);
+      g.save(); g.globalCompositeOperation = "source-atop"; threads(g, w, h); g.restore();
+    } else {
+      var R = Math.min(w, h) * 0.16;
+      g.save(); rr(0, 0, w, h, R); g.clip();
+      g.fillStyle = "#f1ece0"; g.fillRect(0, 0, w, h);
+      g.drawImage(img, 0, 0, w, h);
+      threads(g, w, h);
+      g.restore();
+      g.lineWidth = 12; g.strokeStyle = bc; rr(6, 6, w - 12, h - 12, Math.max(4, R - 6)); g.stroke();
+      g.save(); rr(6, 6, w - 12, h - 12, Math.max(4, R - 6)); g.lineWidth = 12; g.setLineDash([1.5, 2.5]); g.strokeStyle = "rgba(255,255,255,.28)"; g.stroke(); g.restore();
+      g.lineWidth = 1.5; g.strokeStyle = "rgba(0,0,0,.45)"; rr(0.75, 0.75, w - 1.5, h - 1.5, R); g.stroke();
+    }
+    var x0 = Math.round(cx - w / 2), y0 = Math.round(cy - h / 2);
     /* 布の絵に重ねる。ふさいだ所の切れ目と色落ちは消す */
     var pd = g.getImageData(0, 0, w, h).data, base = this.baseData, shp = this.shapeOrig, cut = this.cut, fade = this.fade, cur = this.cur;
-    for (y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
       var X = x0 + x, Y = y0 + y; if (X < 0 || Y < 0 || X >= TW || Y >= TH) continue;
       var q = (y * w + x) * 4, a = pd[q + 3] / 255; if (a <= 0) continue;
       var nn = Y * TW + X, b = nn * 4;
@@ -920,12 +953,10 @@
       base[b] = base[b] * (1 - a) + pd[q] * a; base[b + 1] = base[b + 1] * (1 - a) + pd[q + 1] * a; base[b + 2] = base[b + 2] * (1 - a) + pd[q + 2] * a;
       if (a > 0.5) { cut[nn] = 0; fade[nn] = 0; cur[nn] = 0; }
     }
-    /* 盛り上がり */
-    var bg = this.bumpCv.getContext("2d");
-    bg.save(); bg.translate(x0, y0);
-    bg.beginPath(); bg.moveTo(R, 0); bg.arcTo(w, 0, w, h, R); bg.arcTo(w, h, 0, h, R); bg.arcTo(0, h, 0, 0, R); bg.arcTo(0, 0, w, 0, R); bg.closePath();
-    bg.fillStyle = "rgba(200,200,200,.6)"; bg.fill(); bg.lineWidth = 12; bg.strokeStyle = "rgba(255,255,255,.8)"; bg.stroke();
-    bg.restore();
+    /* 盛り上がり（ワッペンの形のまま） */
+    var sil = canvas(w, h), sg2 = sil.getContext("2d");
+    sg2.drawImage(pc, 0, 0); sg2.globalCompositeOperation = "source-in"; sg2.fillStyle = "rgba(205,205,205,.65)"; sg2.fillRect(0, 0, w, h);
+    this.bumpCv.getContext("2d").drawImage(sil, x0, y0);
     this.bumpTex.needsUpdate = true;
     this.refresh(x0, y0, x0 + w, y0 + h);
     return true;
