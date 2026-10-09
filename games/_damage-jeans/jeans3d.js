@@ -664,7 +664,7 @@
     return segs;
   };
   /* 正面から見た輪郭は平らなジーンズのまま（横の位置はそのまま）。奥行きだけを足して筒にする */
-  var XS = 0.92;
+  var XS = 0.92, LEGGAP = 0.22;
   JeansScene.prototype.wrapPos = function (px, py, back) {
     var segs = this.rowSegs(py);
     var H = [segs[0][0], segs[segs.length - 1][1]];
@@ -681,13 +681,15 @@
     /* 輪郭の外の頂点は縁に寄せ、絵は少し内側を読む。前と後ろが横の縫い目でぴったり閉じる */
     var ex = hx + (lx - hx) * t;
     this.uvX = (hc + s * hw * 0.95) + ((c + s2 * w * 0.95) - (hc + s * hw * 0.95)) * t;
-    return new T.Vector3((ex - 512) / PX * XS, 10.2 - (py - 58) / PX, back ? -z : z);
+    /* 左右の脚は少し離して立たせる（脚どうしが重なって見えないように） */
+    var spread = (px < 512 ? -LEGGAP : LEGGAP) * t;
+    return new T.Vector3((ex - 512) / PX * XS + spread, 10.2 - (py - 58) / PX, back ? -z : z);
   };
   /* マネキンの関節の位置（床が0）。股関節と膝で脚を曲げる */
   var HIPY = 8.4, KNEEY = 4.6;
   JeansScene.prototype.legX = function (side) {
     var L = this.rowSegs(CROTCH + 90), seg = side ? L[L.length - 1] : L[0];
-    return ((seg[0] + seg[1]) / 2 - 512) / PX * XS;
+    return ((seg[0] + seg[1]) / 2 - 512) / PX * XS + (side ? LEGGAP : -LEGGAP);
   };
   JeansScene.prototype.buildModel = function () {
     var G = this.model = new T.Group();
