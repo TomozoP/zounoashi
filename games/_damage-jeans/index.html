@@ -26,6 +26,7 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
   <button id="save-button" type="button" aria-label="画像を保存" hidden></button>
+  <input id="patch-file" type="file" accept="image/*" hidden>
 </div></div>
 <script src="../start.js"></script>
 <script src="../view.js"></script>
@@ -220,6 +221,16 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, look = 0;
   var tool = "cut";
+  /* ワッペンにする画像。選ぶと道具がワッペンになり、タップした所に縫い付ける */
+  var patchImg = null, patchFile = document.getElementById("patch-file");
+  patchFile.addEventListener("change", function () {
+    var f = patchFile.files && patchFile.files[0];
+    if (!f) return;
+    var im = new Image();
+    im.onload = function () { patchImg = im; tool = "patch"; tone(660, 0.08, 0.06, "triangle"); };
+    im.src = URL.createObjectURL(f);
+    patchFile.value = "";
+  });
   var lastXY = null, lastPick = null, lastMoveT = 0, snapT = 0, snipPath = null, snipScreen = null;
   var orbit = { yaw: 0, tilt: 0, vy: 0, vt: 0 }, spin = null;   /* 完成後にドラッグで回して眺める */
 
@@ -273,11 +284,17 @@
     if (hitOk(x, y)) { finish(); return; }
     if (hitReset(x, y)) { newRound(); tone(330, 0.15, 0.08, "triangle", 520); return; }
     var tb = hitTool(x, y);
+    if (tb === "patch") { if (patchImg && tool !== "patch") tool = "patch"; else patchFile.click(); return; }
     if (tb) { if (tool !== tb) { tool = tb; tone(tb === "cut" ? 880 : tb === "snip" ? 700 : 520, 0.08, 0.06, "triangle"); } return; }
     held = true;
     lastXY = { x: x, y: y, t: T }; lastMoveT = T;
     lastPick = screenPick(x, y);
     if (tool === "snip") { snipPath = lastPick ? [lastPick] : []; snipScreen = [{ x: x, y: y }]; return; }
+    if (tool === "patch") {
+      held = false;
+      if (patchImg && lastPick && lastPick.on && scene3d.addPatch(patchImg, lastPick.x, lastPick.y)) { tone(220, 0.08, 0.12, "sine", 140); noiseHit(0.06, 1800, 0.1, 2); }
+      return;
+    }
     rubOn();
     if (tool === "sand" && lastPick && lastPick.on) scene3d.rub(lastPick.x, lastPick.y, 0.05);
   }
@@ -460,7 +477,7 @@
       drawReset(); drawOk(); drawTools();
       var c = held ? lastXY : cursor;
       if (snipScreen && snipScreen.length > 1) drawSnipPath();
-      if (c && !hitOk(c.x, c.y) && !hitReset(c.x, c.y) && !hitTool(c.x, c.y)) { if (tool === "cut") drawCutter(c.x, c.y); else if (tool === "snip") drawScissors(c.x, c.y); else drawSander(c.x, c.y); }
+      if (c && !hitOk(c.x, c.y) && !hitReset(c.x, c.y) && !hitTool(c.x, c.y)) { if (tool === "cut") drawCutter(c.x, c.y); else if (tool === "snip") drawScissors(c.x, c.y); else if (tool === "patch") drawPatch(c.x, c.y); else drawSander(c.x, c.y); }
     }
     if (state === S.RESULT) drawResult();
   }
@@ -479,6 +496,15 @@
     ctx.fillStyle = "#f4c21c"; ctx.fill(); ctx.lineWidth = 3; ctx.stroke();
     ctx.fillStyle = "#16202e"; ctx.fillRect(-3, -110, 6, 26);
     ctx.fillStyle = "rgba(255,255,255,.4)"; ctx.fillRect(-8, -124, 4, 90);
+    ctx.restore();
+  }
+  /* ワッペンを置く位置の目安（半透明） */
+  function drawPatch(px, py) {
+    if (!patchImg) return;
+    var iw = patchImg.naturalWidth, ih = patchImg.naturalHeight, k = 84 / Math.max(iw, ih), w = iw * k, h = ih * k;
+    ctx.save(); ctx.globalAlpha = 0.6;
+    roundRect(px - w / 2, py - h / 2, w, h, Math.min(w, h) * 0.16); ctx.clip();
+    ctx.drawImage(patchImg, px - w / 2, py - h / 2, w, h);
     ctx.restore();
   }
   /* ハサミでなぞっている線（離すとその線で切れる） */
@@ -521,7 +547,7 @@
   }
 
   /* 全リセット（別のジーンズが出る）。左下、アイコンだけ */
-  function resetButton() { var b = okButton(); return { x: 16, y: b.y, w: 84, h: b.h }; }
+  function resetButton() { var b = okButton(); return { x: 16, y: b.y, w: 80, h: b.h }; }
   function hitReset(x, y) { var b = resetButton(); return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
   function iconButton(b, label, on) {
     ctx.save();
@@ -534,10 +560,12 @@
   }
   function drawReset() { iconButton(resetButton(), "もう一度", false); }
 
-  /* 道具の切り替え。右下にカッター・ハサミ・やすり */
+  /* 道具の切り替え。右下にカッター・ハサミ・やすり・ワッペン（画像を選ぶ） */
   function toolButtons() {
-    var b = okButton(), w = 64, g = 8, x0 = W - 16 - w * 3 - g * 2;
-    return [{ id: "cut", x: x0, y: b.y, w: w, h: b.h, label: "カッター" }, { id: "snip", x: x0 + w + g, y: b.y, w: w, h: b.h, label: "ハサミ" }, { id: "sand", x: x0 + (w + g) * 2, y: b.y, w: w, h: b.h, label: "やすり" }];
+    var b = okButton(), w = 58, g = 6, x0 = W - 16 - w * 4 - g * 3;
+    return [{ id: "cut", label: "カッター" }, { id: "snip", label: "ハサミ" }, { id: "sand", label: "やすり" }, { id: "patch", label: "画像を選ぶ" }].map(function (t, i) {
+      t.x = x0 + (w + g) * i; t.y = b.y; t.w = w; t.h = b.h; return t;
+    });
   }
   function hitTool(x, y) {
     var bs = toolButtons();
@@ -547,7 +575,7 @@
   function drawTools() { toolButtons().forEach(function (b) { iconButton(b, b.label, tool === b.id); }); }
 
   /* 「完成」ボタン。下の中央 */
-  function okButton() { var w = 132, h = 62; return { x: 108, y: H - h - Math.max(28, H * 0.035), w: w, h: h }; }
+  function okButton() { var w = 120, h = 62; return { x: 104, y: H - h - Math.max(28, H * 0.035), w: w, h: h }; }
   function hitOk(x, y) { var b = okButton(); return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; }
   function drawOk() {
     var b = okButton();
