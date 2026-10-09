@@ -182,6 +182,9 @@
     var back = this.back = new T.Mesh(bgeo, new T.MeshStandardMaterial({ map: this.backTex, roughness: 0.95, alphaTest: 0.5 }));
     back.position.y = 0.004; back.receiveShadow = true;
     this.flat.add(back);
+    /* 履かせたときの後ろ側（ポケットもダメージもない無地のデニム） */
+    this.plainCv = canvas(TW, TH);
+    this.plainTex = new T.CanvasTexture(this.plainCv); this.plainTex.colorSpace = T.SRGBColorSpace; this.plainTex.anisotropy = 8;
 
     /* ボタンとリベット（金属） */
     var metal = this.metal = new T.MeshStandardMaterial({ color: 0xb8854a, metalness: 1, roughness: 0.32 });
@@ -290,6 +293,10 @@
       }
     }
     g.putImageData(img, 0, 0);
+    var pg = this.plainCv.getContext("2d");
+    pg.putImageData(img, 0, 0);
+    stitch(pg, line(pg, [112, 1956, 474, 1962]));
+    stitch(pg, line(pg, [550, 1962, 912, 1956]));
 
     var pr = sh.pale, paleC = "rgba(" + pr[0] + "," + pr[1] + "," + pr[2] + ",";
     g.save();
@@ -372,6 +379,10 @@
     for (var n = 0; n < TW * TH; n++) ad[n * 4 + 3] = shp[n];
     this.baseData = ad;
     this.img = all;
+    var pim = pg.getImageData(0, 0, TW, TH), pd = pim.data;
+    for (n = 0; n < TW * TH; n++) pd[n * 4 + 3] = shp[n];
+    pg.putImageData(pim, 0, 0);
+    this.plainTex.needsUpdate = true;
   };
 
   /* 凹凸: 綾の目、縫い目の盛り上がり、しわ */
@@ -603,6 +614,9 @@
     var bg = this.backCv.getContext("2d");
     bg.save(); bg.globalCompositeOperation = "destination-in"; bg.drawImage(mc, 0, 0, 512, 1024); bg.restore();
     this.backTex.needsUpdate = true;
+    var pg = this.plainCv.getContext("2d");
+    pg.save(); pg.globalCompositeOperation = "destination-in"; pg.drawImage(mc, 0, 0); pg.restore();
+    this.plainTex.needsUpdate = true;
   };
   /* 切り落とした布が、ひらりと飛んで消える */
   JeansScene.prototype.dropPiece = function (c, lab) {
@@ -680,7 +694,7 @@
     this.scene.add(G);
     var self = this;
     /* ジーンズ（歩くたびに頂点を曲げ直すので、細かさは控えめ） */
-    var mat = this.front.material, NX = 96, NZ = 128;
+    var mat = this.front.material, plain = new T.MeshStandardMaterial({ map: this.plainTex, roughness: 0.93, alphaTest: 0.5, side: T.DoubleSide }), NX = 96, NZ = 128;
     this.wear = [false, true].map(function (back) {
       var geo = new T.PlaneGeometry(1, 1, NX, NZ), pos = geo.attributes.position, cnt = pos.count;
       var rest = new Float32Array(cnt * 3), side = new Uint8Array(cnt), w = new Float32Array(cnt);
@@ -695,7 +709,7 @@
         pos.setXYZ(n, v.x, v.y, v.z);
       }
       geo.computeVertexNormals();
-      var m = new T.Mesh(geo, mat);
+      var m = new T.Mesh(geo, back ? plain : mat);
       m.castShadow = true; m.receiveShadow = true;
       G.add(m);
       return { geo: geo, rest: rest, side: side, w: w };
