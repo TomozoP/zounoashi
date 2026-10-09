@@ -676,9 +676,6 @@
     var c = (L[0] + L[1]) / 2, w = (L[1] - L[0]) / 2;
     var s2 = Math.max(-1, Math.min(1, (px - c) / w));
     var lz = w / PX * 0.85 * Math.sqrt(1 - s2 * s2), lx = c + s2 * w;
-    /* すそが足まで届くときは、前を足の甲にかぶせる（つま先が布を突き抜けないように） */
-    var yy = 10.2 - (py - 58) / PX;
-    if (!back && yy < 1.2) { var fc = Math.min(1, (1.2 - yy) / 0.6); lz += fc * fc * (3 - 2 * fc) * 0.7 * Math.sqrt(1 - s2 * s2); }
     var t = Math.max(0, Math.min(1, (py - (CROTCH - 40)) / 160)); t = t * t * (3 - 2 * t);
     var z = hz + (lz - hz) * t;
     /* 輪郭の外の頂点は縁に寄せ、絵は少し内側を読む。前と後ろが横の縫い目でぴったり閉じる */
@@ -687,7 +684,7 @@
     return new T.Vector3((ex - 512) / PX * XS, 10.2 - (py - 58) / PX, back ? -z : z);
   };
   /* マネキンの関節の位置（床が0）。股関節と膝で脚を曲げる */
-  var HIPY = 8.4, KNEEY = 4.6;
+  var HIPY = 8.4, KNEEY = 4.6, LIFT = 0.3;
   JeansScene.prototype.legX = function (side) {
     var L = this.rowSegs(CROTCH + 90), seg = side ? L[L.length - 1] : L[0];
     return ((seg[0] + seg[1]) / 2 - 512) / PX * XS;
@@ -731,6 +728,7 @@
       geo.setAttribute("color", new T.Float32BufferAttribute(cols, 3));
       var m = new T.Mesh(geo, brief); m.castShadow = true; m.receiveShadow = true; return m;
     }
+    var shoeMat = new T.MeshStandardMaterial({ color: 0x17161a, roughness: 0.38, metalness: 0.05 });
     function capsule(r, len) { var m = new T.Mesh(new T.CapsuleGeometry(r, len, 6, 18), body); m.castShadow = true; m.receiveShadow = true; return m; }
     /* 胴: 腰まわりはジーンズより少し細く、上は胸と肩 */
     var tp = [];
@@ -771,7 +769,10 @@
       knee.add(sn);
       /* 膝の丸み（曲げても折れ目に見えないように） */
       var kb = new T.Mesh(new T.SphereGeometry(0.425, 24, 16), body); kb.scale.set(1, 1, 0.95); kb.castShadow = true; knee.add(kb);
-      var foot = capsule(0.3, 1.1); foot.rotation.x = Math.PI / 2 + 0.12; foot.scale.set(1.15, 1, 0.75); foot.position.set(0, 0.32 - KNEEY, 0.42); knee.add(foot);
+      /* 足首と靴（体ごと少し持ち上げて、すその下から靴がのぞくようにする） */
+      var ank = new T.Mesh(new T.CapsuleGeometry(0.27, 0.5, 6, 18), shoeMat); ank.position.set(0, 0.62 - LIFT - KNEEY, 0.02); knee.add(ank);
+      var shoe = new T.Mesh(new T.CapsuleGeometry(0.28, 1.1, 6, 18), shoeMat); shoe.castShadow = true; shoe.receiveShadow = true;
+      shoe.rotation.x = Math.PI / 2; shoe.scale.set(1.2, 1, 0.95); shoe.position.set(0, 0.27 - LIFT - KNEEY, 0.42); knee.add(shoe);
       return { hip: hip, knee: knee };
     });
     var bp = this.wrapPos(512, 96, false);
@@ -866,7 +867,7 @@
     this.pose(hl, hr, kl, kr);
     this.arms[0].rotation.x = 0.32 * sp * a; this.arms[1].rotation.x = -0.32 * sp * a;
     var M = this.model;
-    M.position.set(0, -0.12 * a * (1 - Math.abs(Math.cos(p))) , wk.z);
+    M.position.set(0, LIFT - 0.12 * a * (1 - Math.abs(Math.cos(p))) , wk.z);
     M.rotation.y = 0.06 * sp * a;
     /* 立ち止まったら少し腰を振ってポーズ */
     if (wk.z >= END && a < 0.05) { wk.pose = Math.min(1, (wk.pose || 0) + dt * 1.5); M.rotation.y = 0.18 * Math.sin(wk.pose * Math.PI / 2); this.arms[1].rotation.z = 0.1 + 0.2 * wk.pose; }
