@@ -260,7 +260,7 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
         <div class="subgroup" style="margin-top:0;padding-top:0;border-top:0">
           <h4>画面</h4>
           <div class="row"><label>画面サイズ</label>
-            <select id="stOut" style="flex:1"><option value="source">元の動画のまま</option><option value="vertical">縦 1080×1920</option></select></div>
+            <select id="stOut" style="flex:1"><option value="source">元の動画のまま</option><option value="vertical">縦 1080×1920</option><option value="horizontal">横 1920×1080</option></select></div>
           <div class="row"><label>映像の配置</label>
             <select id="stFit" style="flex:1"><option value="blur">収める（背景ぼかし）</option><option value="cover">画面いっぱい</option></select></div>
           <button id="stLayout23" type="button" style="width:100%;margin-top:4px" title="縦1080×1920にして、上の帯を23%・黒背景にする">上の帯23%の配置にする</button>
@@ -349,7 +349,7 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
       <button id="bUndo" title="元に戻す (Ctrl+Z)">↶</button>
       <button id="bRedo" title="やり直し (Ctrl+Shift+Z)">↷</button>
       <div class="sp"></div>
-      <span style="color:var(--dim)">ズーム</span><input type="range" id="zoom" min="8" max="400" value="60">
+      <span style="color:var(--dim)">ズーム</span><input type="range" id="zoom" min="2" max="400" value="60">
     </div>
     <div id="tlbody">
       <div id="labels"><div class="rl"></div>
@@ -507,7 +507,7 @@ function restore(s) { const o = JSON.parse(s); vclips = o.vclips; aclips = o.acl
 function undo() { if (!undoStack.length) return; redoStack.push(snap()); restore(undoStack.pop()); changed(true); }
 function redo() { if (!redoStack.length) return; undoStack.push(snap()); restore(redoStack.pop()); changed(true); }
 // call commit() BEFORE mutating; changed() after mutation to refresh
-function changed(after) { vclips.sort((a, b) => a.at - b.at); mixDirty = true; if (playing && !recording) pause(); if (after !== undefined) refresh(); }
+function changed(after) { vclips.sort((a, b) => a.at - b.at); scheduleMix(); if (playing && !recording) pause(); if (after !== undefined) refresh(); }
 function refresh() { applyOutSize(); renderTimeline(); renderInspector(); renderSubList(); loadFonts(); drawStill(); }
 
 /* ---------- helpers ---------- */
@@ -669,11 +669,25 @@ async function normalizeLoudness(buf) {
   for (let i = 0; i < n; i++) { const t = minAhead[i]; g = t < g ? att * g + (1 - att) * t : rel * g + (1 - rel) * t; if (g > need[i]) g = need[i]; env[i] = g; }
   for (const d of chs) for (let i = 0; i < n; i++) d[i] *= gain * env[i];
 }
+// 音に関わるものだけを並べた目印。字幕だけを直したときは、全体の音を作り直さない
+function mixKey() {
+  return JSON.stringify([Math.round(Math.max(totalDur(), 0.1) * 1000), opt,
+    vclips.map(c => [c.src, c.in, c.out, c.at, c.gain, !!(sources.get(c.src) || {}).audio]),
+    aclips.map(a => [a.buf, a.in, a.out, a.at, a.gain, a.lane])]);
+}
+let mixFor = null;
 async function ensureMix() {
-  if (!mixDirty && mix) return mix;
-  if (mixBuilding) return mixBuilding;
-  mixBuilding = buildMix().then(m => { mix = m; mixDirty = false; mixBuilding = null; return m; });
-  return mixBuilding;
+  for (;;) {
+    const k = mixKey();
+    if (mix && !mixDirty && k === mixFor) return mix;
+    if (!mixBuilding) { mixDirty = false; mixBuilding = buildMix().then(m => { mix = m; mixFor = k; }).finally(() => { mixBuilding = null; }); }
+    await mixBuilding;
+  }
+}
+// 長い動画では全体の音を作るのに数秒かかるので、編集が落ち着いたら裏で作っておき、再生をすぐ始められるようにする
+function scheduleMix() {
+  clearTimeout(scheduleMix.t);
+  scheduleMix.t = setTimeout(() => { if (!exporting && !recording) ensureMix().catch(() => {}); }, 600);
 }
 
 /* ---------- video / drawing ---------- */
@@ -683,7 +697,7 @@ const base = document.createElement('canvas'); base.width = W; base.height = H; 
 let BAND = 0; // 画面上部でヘッダー帯に使う高さ
 function outSize() {
   const c = vclips[0], src = c && sources.get(c.src);
-  const base = (style.out === 'vertical' || !src || !src.w) ? [1080, 1920] : [src.w - src.w % 2, src.h - src.h % 2];
+  const base = style.out === 'horizontal' ? [1920, 1080] : (style.out === 'vertical' || !src || !src.w) ? [1080, 1920] : [src.w - src.w % 2, src.h - src.h % 2];
   const band = (!isOff('header') && subs.some(isHeader)) ? Math.round(base[1] * style.headH / 2) * 2 : 0;
   return [base[0], base[1] + (style.headLayout === 'inside' ? 0 : band), band];
 }
@@ -1340,14 +1354,15 @@ function seekExport(clip, time) {
   });
 }
 // 録画した webm は区切りの絵が少なく、1コマずつ頭出しすると毎回はじめから読み直して遅い。
-// webm の中身を自分で読み、はじめから順に1回だけ読み解いて使う
+// mp4 も長いと1コマずつの頭出しでは何十分もかかる。
+// 動画の中身を自分で読み、はじめから順に1回だけ読み解いて使う
 const webmCache = new Map();
 async function readWebm(src) {
   if (webmCache.has(src)) return webmCache.get(src);
   const p = (async () => {
     const s = sources.get(src); if (!s) return null;
     const b = new Uint8Array(await (await fetch(s.url)).arrayBuffer());
-    if (b[0] !== 0x1A || b[1] !== 0x45 || b[2] !== 0xDF || b[3] !== 0xA3) return null;
+    if (b[0] !== 0x1A || b[1] !== 0x45 || b[2] !== 0xDF || b[3] !== 0xA3) return readMp4(b);
     const vint = (i, keep) => {
       let n = 1, m = 0x80; while (n <= 8 && !(b[i] & m)) { n++; m >>= 1; }
       if (n > 8) throw Error('webm');
@@ -1395,6 +1410,82 @@ async function readWebm(src) {
   })().catch(() => null);
   webmCache.set(src, p);
   return p;
+}
+// mp4・mov の中身を読み、映像の絵の一覧（時刻・区切りの絵か・中身）を返す。読めなければ null
+async function readMp4(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const u32 = i => dv.getUint32(i), type = i => String.fromCharCode(b[i], b[i + 1], b[i + 2], b[i + 3]);
+  // [start, end) の中の箱を { type, s: 中身の始まり, e: 終わり } で並べる
+  const kids = (start, end) => {
+    const out = [];
+    for (let i = start; i + 8 <= end;) {
+      let size = u32(i), h = 8;
+      if (size === 1) { size = dv.getUint32(i + 8) * 2 ** 32 + dv.getUint32(i + 12); h = 16; } else if (size === 0) size = end - i;
+      if (size < h) break;
+      out.push({ type: type(i + 4), s: i + h, e: Math.min(end, i + size) }); i += size;
+    }
+    return out;
+  };
+  const one = (box, t) => box && kids(box.s, box.e).find(x => x.type === t);
+  const moov = kids(0, b.length).find(x => x.type === 'moov'); if (!moov) return null;
+  for (const trak of kids(moov.s, moov.e).filter(x => x.type === 'trak')) {
+    const mdia = one(trak, 'mdia'), hdlr = one(mdia, 'hdlr');
+    if (!hdlr || type(hdlr.s + 8) !== 'vide') continue;
+    const mdhd = one(mdia, 'mdhd'), scale = b[mdhd.s] === 1 ? u32(mdhd.s + 20) : u32(mdhd.s + 12);
+    const stbl = one(one(mdia, 'minf'), 'stbl'), stsd = one(stbl, 'stsd'); if (!stsd) return null;
+    // 映像の見出し：78 バイトの後ろに、読み解きに要る設定の箱が続く
+    const ent = { type: type(stsd.s + 12), s: stsd.s + 16 }, ew = dv.getUint16(ent.s + 24), eh = dv.getUint16(ent.s + 26);
+    const cfgs = kids(ent.s + 78, stsd.s + 8 + u32(stsd.s + 8));
+    const cfg = t => { const x = cfgs.find(y => y.type === t); return x && b.slice(x.s, x.e); };
+    const hex = v => v.toString(16).padStart(2, '0');
+    let codec = null, description;
+    if (/^avc[13]$/.test(ent.type) && (description = cfg('avcC'))) codec = 'avc1.' + [...description.subarray(1, 4)].map(hex).join('');
+    else if (/^(hvc1|hev1)$/.test(ent.type) && (description = cfg('hvcC'))) {
+      const d = description; let compat = (d[2] << 24 | d[3] << 16 | d[4] << 8 | d[5]) >>> 0, rev = 0;
+      for (let k = 0; k < 32; k++) { rev = rev * 2 + (compat & 1); compat >>>= 1; }
+      const cons = [...d.subarray(6, 12)]; while (cons.length && !cons[cons.length - 1]) cons.pop();
+      codec = [ent.type, ['', 'A', 'B', 'C'][d[1] >> 6] + (d[1] & 31), rev.toString(16), ((d[1] >> 5) & 1 ? 'H' : 'L') + d[12], ...cons.map(x => x.toString(16))].join('.');
+    } else if (ent.type === 'vp09') { const d = cfg('vpcC'); if (d) codec = `vp09.${String(d[4]).padStart(2, '0')}.${String(d[5]).padStart(2, '0')}.${String(d[6] >> 4).padStart(2, '0')}`; }
+    else if (ent.type === 'av01') { const d = cfg('av1C'); if (d) codec = `av01.${d[1] >> 5}.${String(d[1] & 31).padStart(2, '0')}${d[2] >> 7 ? 'H' : 'M'}.${(d[2] >> 5) & 1 ? 12 : (d[2] >> 6) & 1 ? 10 : '08'}`; }
+    if (!codec || !window.VideoDecoder) return null;
+    const box = t => one(stbl, t);
+    const stsz = box('stsz'), stco = box('stco') || box('co64'), stsc = box('stsc'), stts = box('stts');
+    if (!stsz || !stco || !stsc || !stts) return null; // 細切れの mp4 は頭出しに任せる
+    const n = u32(stsz.s + 8), fixed = u32(stsz.s + 4); if (!n) return null;
+    const size = i => fixed || u32(stsz.s + 12 + i * 4);
+    const big = stco.type === 'co64', nChunk = u32(stco.s + 4);
+    const chunkAt = c => big ? u32(stco.s + 8 + c * 8) * 2 ** 32 + u32(stco.s + 12 + c * 8) : u32(stco.s + 8 + c * 4);
+    // 絵ごとの置き場所
+    const off = new Float64Array(n), nsc = u32(stsc.s + 4);
+    for (let e = 0, i = 0; e < nsc; e++) {
+      const first = u32(stsc.s + 8 + e * 12) - 1, per = u32(stsc.s + 12 + e * 12), last = e + 1 < nsc ? u32(stsc.s + 8 + (e + 1) * 12) - 1 : nChunk;
+      for (let c = first; c < last && i < n; c++) { let o = chunkAt(c); for (let k = 0; k < per && i < n; k++) { off[i] = o; o += size(i); i++; } }
+    }
+    // 時刻：stts の並び＋ctts のずらし−編集リストの頭
+    const ts = new Float64Array(n);
+    for (let e = 0, i = 0, t = 0, ne = u32(stts.s + 4); e < ne; e++) { const cnt = u32(stts.s + 8 + e * 8), d = u32(stts.s + 12 + e * 8); for (let k = 0; k < cnt && i < n; k++) { ts[i++] = t; t += d; } }
+    const ctts = box('ctts');
+    if (ctts) for (let e = 0, i = 0, ne = u32(ctts.s + 4); e < ne; e++) { const cnt = u32(ctts.s + 8 + e * 8), d = dv.getInt32(ctts.s + 12 + e * 8); for (let k = 0; k < cnt && i < n; k++) ts[i++] += d; }
+    let shift = 0;
+    const elst = one(one(trak, 'edts'), 'elst');
+    if (elst) {
+      const v1 = b[elst.s] === 1, cnt = u32(elst.s + 4);
+      for (let e = 0, p = elst.s + 8; e < cnt; e++, p += v1 ? 20 : 12) {
+        const mt = v1 ? dv.getInt32(p + 8) * 2 ** 32 + u32(p + 12) : dv.getInt32(p + 4);
+        if (mt >= 0) { shift = mt; break; } // 頭の空白（-1）は飛ばし、最初に映す位置を 0 秒にする
+      }
+    }
+    const stss = box('stss'), keys = stss && new Set([...Array(u32(stss.s + 4))].map((_, k) => u32(stss.s + 8 + k * 4) - 1));
+    const blocks = [];
+    for (let i = 0; i < n; i++) {
+      if (off[i] + size(i) > b.length) return null;
+      blocks.push({ ts: Math.round((ts[i] - shift) * 1e6 / scale), key: keys ? keys.has(i) : true, data: b.subarray(off[i], off[i] + size(i)) });
+    }
+    const config = { codec, codedWidth: ew, codedHeight: eh, ...(description ? { description } : {}) };
+    try { if (!(await VideoDecoder.isConfigSupported(config)).supported) return null; } catch (e) { return null; }
+    return { config, blocks };
+  }
+  return null;
 }
 // 色の変換の式は、動画の中に書かれていないと読み解き側と表示側で食い違い、色がずれる。
 // 最初の絵を両方の式で読み解き、編集画面（video 要素）の色に近いほうを使う
@@ -1514,7 +1605,8 @@ async function exportFrames() {
     if (!xCanceled && !fail) { await venc.flush(); await aenc.flush(); }
   } catch (e) { fail = fail || e; }
   try { venc.close(); aenc.close(); } catch (e) {}
-  exporting = false; xv.removeAttribute('src'); delete xv.dataset.src; xv.load();
+  // 長い動画は読み込んだ中身が大きいので、書き出しが終わったら手放す
+  exporting = false; webmCache.clear(); xv.removeAttribute('src'); delete xv.dataset.src; xv.load();
   if (xCanceled) { $('ov').classList.remove('on'); drawStill(); return true; }
   if (fail) { console.error(fail); $('ov').classList.remove('on'); toast('書き出しに失敗しました'); drawStill(); return true; }
   muxer.finalize();
