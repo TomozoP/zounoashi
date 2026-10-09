@@ -216,5 +216,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
   },
-  {"type":"lab","tags":[],"id":"damage-jeans","title":"ダメージジーンズシミュレーター","year":2026,"date":"2026-10-08","plays":null,"url":"","img":"games/_damage-jeans/img/thumb.webp","play":"games/_damage-jeans/index.html","full":true,"catch":"ジーンズを切ってダメージジーンズにする"},
+  {"type":"lab","tags":[],"id":"damage-jeans","title":"ダメージジーンズメーカー","year":2026,"date":"2026-10-08","plays":null,"url":"","img":"games/_damage-jeans/img/thumb.webp","play":"games/_damage-jeans/index.html","full":true,"catch":"ジーンズを切ってダメージジーンズにする"},
 ];
