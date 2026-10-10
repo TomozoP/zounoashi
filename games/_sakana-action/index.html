@@ -222,7 +222,7 @@
     restT = 0; flopT = 0.8; onGround = false; bend = 0; splashes = [];
     drag = null; keyCharge = -1;
     camX = startX - W / Z * 0.4; camY = startY - H / Z * 0.55;
-    bird = { mode: "back", side: 1, wait: 5, t: 0, x: camX + W / Z + 150, y: camY + 60, face: -1 };
+    bird = { mode: "away", side: 1, wait: 3, t: 0, x: 0, y: 0, face: -1 };
   }
 
   /* 引っぱり量（0〜1）と、跳ぶ向き */
@@ -324,21 +324,29 @@
      つかまると連れ去られ、最後に止まった場所へ戻される */
   var SWOOP_T = 1.5;                           /* 端から端まで弧を描く秒数 */
   var CARRY_V = 700;
+  var WARN_T = 1.0;                            /* 襲う前に震える秒数 */
   function birdAnchor(side) { return { x: camX + W / Z * (0.5 + side * 0.36), y: camY + H / Z * 0.14 }; }
   function bez(a, c, b, t) { var u = 1 - t; return u * u * a + 2 * u * t * c + t * t * b; }
   function updateBird(dt) {
     var b = bird, c = center(), i, k;
     b.t += dt;
+    if (b.mode === "away") {
+      /* コースの1/3を過ぎたら、右上の外から入ってくる */
+      if (state !== S.PLAY || c.x < seaX / 3) return;
+      b.mode = "back"; b.x = camX + W / Z + 150; b.y = camY + 40;
+    }
     if (b.mode === "back" || b.mode === "hover") {
       /* 隅へ戻って、ふわふわ待つ */
       var A = birdAnchor(b.side);
       k = Math.min(1, dt * (b.mode === "back" ? 3 : 8));
-      var wob = b.wait < 0.8 ? 16 : 6;         /* 来る直前は大きく回って知らせる */
-      b.x += (A.x + Math.cos(b.t * 7) * wob - b.x) * k;
-      b.y += (A.y + Math.sin(b.t * 7) * wob - b.y) * k;
+      b.x += (A.x + Math.cos(b.t * 2) * 6 - b.x) * k;
+      b.y += (A.y + Math.sin(b.t * 3) * 6 - b.y) * k;
       if (Math.hypot(A.x - b.x, A.y - b.y) < 40) b.mode = "hover";
       b.face = c.x > b.x ? 1 : -1;
-      if (state === S.PLAY) b.wait -= dt;
+      if (state === S.PLAY && b.mode === "hover") {
+        if (b.wait > WARN_T && b.wait - dt <= WARN_T) for (var r = 0; r < 6; r++) noiseHit(0.05, 1800, 0.12, 2, r * 0.13);   /* ばたばた */
+        b.wait -= dt;
+      }
       if (state === S.PLAY && b.mode === "hover" && b.wait <= 0) {
         /* 魚のいる所を通って、反対の隅へ */
         var P = { x: c.x, y: c.y - 40 }, S0 = { x: b.x, y: b.y };
@@ -383,9 +391,18 @@
   }
   function drawBird() {
     if (!bird) return;
-    var b = bird, fl = Math.sin(b.t * (b.mode === "hover" && b.wait > 0.8 ? 12 : 26));
+    if (bird.mode === "away") return;
+    var b = bird, warn = b.mode === "hover" && b.wait < WARN_T;
+    var fl = warn ? 0.9 : Math.sin(b.t * (b.mode === "hover" ? 12 : 26));
     ctx.save();
     ctx.translate(b.x, b.y);
+    if (warn) {
+      /* 来る直前は全身をぶるぶる震わせて、少しふくらむ */
+      ctx.translate((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12);
+      ctx.rotate((Math.random() - 0.5) * 0.35);
+      var sw = 1 + 0.15 * Math.min(1, (WARN_T - b.wait) / 0.3);
+      ctx.scale(sw, sw);
+    }
     ctx.scale(1.8 * b.face, 1.8);
     ctx.fillStyle = "#3b3530"; ctx.strokeStyle = "#3b3530"; ctx.lineCap = "round"; ctx.lineJoin = "round";
     /* 翼 */
@@ -539,7 +556,7 @@
     if (n === 1) warp(seaX - 4 * T);                   /* 海の手前へ */
     if (n === 4) warp(fans[0].x0 - 5 * T);               /* 送風機の手前へ */
     if (n === 5) warp(plats[0].bx - 6 * T);              /* 動く足場の手前へ */
-    if (n === 6) bird.wait = Math.min(bird.wait, 0.8);   /* 鳥をすぐ来させる */
+    if (n === 6) { if (bird.mode === "away") { bird.mode = "back"; bird.x = camX + W / Z + 150; bird.y = camY + 40; } bird.wait = Math.min(bird.wait, 1.6); }   /* 鳥をすぐ来させる */
     if (n === 3) { state = S.GOAL; endT = 0; sSplash(); }   /* ゴール */
   }
 
