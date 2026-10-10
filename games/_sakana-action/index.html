@@ -115,70 +115,62 @@
 
   /* ============ 面 ============
      1マス48。列ごとの地面の高さ（下から何マス、0は穴）。右の端は海。 */
-  var T = 48, R = 24, COLS = 0;
-  var solid = [], seaX = 0, seaY = 0, startX = 0, startY = 0;
+  var T = 48, R = 84, COLS = 16;
+  var solid = [], sea = null, startX = 0, startY = 0, spots = {};
   /* 地面の種類（いちばん上のマスだけ変わる） */
   var SAND = 1, ICE = 3, CONV_R = 4, CONV_L = 5;
   var pools = [], fans = [], plats = [], flags = [];
+  /* 縦に登るコース。左右は壁、高さ h は下から数えたマス */
   function build() {
-    var c = 0, hs = [], ts = [];
-    function g(len, h, type) { for (var i = 0; i < len; i++) { ts[c] = type || SAND; hs[c++] = h; } }
-    /* 水たまり：c0〜c1列、下から h マスの高さまで水 */
-    function pool(c0, c1, h) { pools.push({ x0: c0 * T, x1: c1 * T, y: (R - h) * T }); }
-    /* 送風機：c0〜c1列の穴の底から上向きの風 */
-    function fan(c0, c1, top) { fans.push({ x0: c0 * T, x1: c1 * T, y0: (R - top) * T, y1: R * T }); }
-    /* 動く足場：中心(col, h)、幅 w マス、左右 ax・上下 ay マス、周期 per 秒 */
-    function plat(col, h, w, ax, ay, per, ph) { plats.push({ bx: col * T, by: (R - h) * T, w: w * T, h: 22, ax: ax * T, ay: ay * T, per: per, ph: ph || 0, x: 0, y: 0, dx: 0, dy: 0 }); }
-    /* 中間地点：直前に置いた地面 len マスのまんなかに旗 */
-    function flag(len) { var col = c - len / 2; flags.push({ x: col * T, y: (R - hs[Math.floor(col)]) * T }); }
-    pools = []; fans = []; plats = []; flags = [];
-
-    /* はじまり：段差と穴 */
-    g(10, 4); g(4, 6); g(2, 0); g(6, 6); g(3, 9); g(6, 9); g(3, 0); g(5, 5);
-    /* 高い段へ */
-    g(2, 5); g(4, 7); g(7, 10); flag(7);
-    /* 氷：すべって止まらない */
-    g(9, 10, ICE); g(2, 0); g(3, 8, ICE); g(5, 8);
-    /* 向かい風のベルトコンベア */
-    g(10, 8, CONV_L); g(2, 10); g(4, 10); flag(4);
-    /* 段と穴 */
-    g(2, 0); g(5, 11);
-    /* 送風機：広い穴を風に乗って越える */
-    var f0 = c; g(9, 0); fan(f0 + 1, f0 + 8, 17); g(5, 13); flag(5);
-    /* 動く足場 */
-    var m0 = c; g(16, 0);
-    plat(m0 + 4, 12, 2, 2, 0, 3.2); plat(m0 + 11, 13, 2, 0, 3, 2.6, 1.5);
-    g(5, 12); flag(5);
-    /* 追い風のベルトと飛び石 */
-    g(8, 12, CONV_R); g(2, 0); g(3, 12); g(2, 0); g(3, 13); g(6, 14); flag(6);
-    /* 氷の段を上る */
-    g(2, 0); g(4, 15, ICE); g(2, 0); g(4, 16, ICE); g(6, 16); flag(6);
-    /* 長い向かい風のベルト */
-    g(8, 16, CONV_L); g(2, 0); g(6, 16, CONV_L); g(5, 17); flag(5);
-    /* もっと広い穴を風で越える */
-    var f1 = c; g(10, 0); fan(f1 + 1, f1 + 9, 21); g(5, 17); flag(5);
-    /* 3つの動く足場 */
-    var m1 = c; g(18, 0);
-    plat(m1 + 4, 16, 2, 2, 0, 2.8); plat(m1 + 10, 17, 2, 0, 2.5, 2.4, 0.7); plat(m1 + 15, 16, 2, 2, 0, 3, 1.2);
-    g(5, 15); flag(5);
-    /* 飛び石を下りて追い風へ */
-    g(2, 0); g(3, 14, ICE); g(2, 0); g(3, 13); g(2, 0); g(6, 14, CONV_R); g(4, 14); flag(4);
-    /* 小さな足場を渡って下りる */
-    g(2, 0); g(3, 11); g(2, 0); g(3, 10, ICE); g(2, 0); g(3, 9); g(2, 0);
-    g(9, 8);
-    seaX = c * T;
-    g(16, 0);
-    COLS = c;
+    var x, y;
     solid = [];
-    for (var x = 0; x < COLS; x++) {
-      solid[x] = [];
-      for (var y = 0; y < R; y++) solid[x][y] = hs[x] > 0 && y >= R - hs[x] ? (y === R - hs[x] ? ts[x] : SAND) : 0;
+    for (x = 0; x < COLS; x++) { solid[x] = []; for (y = 0; y < R; y++) solid[x][y] = 0; }
+    function box(c0, c1, h0, h1, type) {
+      for (var cx = c0; cx <= c1; cx++) for (var hh = h0; hh <= h1; hh++) solid[cx][R - hh] = hh === h1 ? (type || SAND) : SAND;
     }
-    seaY = (R - 6) * T;
+    /* 段の高さ：下書きの3段ぶんを2マスに詰める（跳べる高さに合わせる） */
+    function S(h) { return Math.round(2 + (h - 2) * 2 / 3); }
+    /* 足場：c0〜c1列、上面の高さ h、厚さ1マス */
+    function L(c0, c1, h, type) { box(c0, c1, S(h), S(h), type); }
+    /* 送風機：c0〜c1列、高さ h0 から h1 まで上向きの風 */
+    function fan(c0, c1, h0, h1) { fans.push({ x0: c0 * T, x1: (c1 + 1) * T, y0: (R - S(h1)) * T, y1: (R - S(h0)) * T }); }
+    /* 動く足場：中心(col, h)、幅 w マス、左右 ax・上下 ay マス、周期 per 秒 */
+    function plat(col, h, w, ax, ay, per, ph) { plats.push({ bx: col * T, by: (R - S(h)) * T, w: w * T, h: 22, ax: ax * T, ay: ay * T * 2 / 3, per: per, ph: ph || 0, x: 0, y: 0, dx: 0, dy: 0 }); }
+    /* 中間地点：足場の上(col, h)に旗 */
+    function flag(col, h) { flags.push({ x: col * T, y: (R - S(h)) * T }); }
+    function spot(name, col, h) { spots[name] = { x: col * T, y: (R - S(h)) * T }; }
+    pools = []; fans = []; plats = []; flags = []; spots = {};
+
+    box(0, 0, 1, R, SAND); box(COLS - 1, COLS - 1, 1, R, SAND);   /* 左右の壁 */
+    box(1, COLS - 2, 1, 2);                                       /* 底 */
+    /* はじまり：左右に段を登る */
+    L(8, 14, 5); L(1, 6, 8); L(8, 14, 11); flag(12, 11);
+    /* 氷 */
+    L(1, 6, 14, ICE); L(8, 14, 17, ICE); L(1, 6, 20); flag(3, 20);
+    /* 端へ運ぶベルト */
+    L(8, 14, 23, CONV_R); L(1, 7, 26, CONV_R); L(10, 14, 29); flag(12, 29); spot("fan1", 11, 29);
+    /* 送風機で吹き上がる */
+    fan(5, 8, 31, 44); L(1, 3, 41); flag(2, 41);
+    /* 動く足場 */
+    spot("plat1", 2, 41);
+    plat(7, 44, 2, 2.5, 0, 3); plat(3, 47, 2, 0, 2, 2.6, 1); L(8, 14, 52); L(1, 6, 55); flag(3, 55);
+    /* 飛び石 */
+    L(9, 11, 58); L(13, 14, 61); L(8, 9, 64); L(2, 5, 67); flag(3, 67);
+    /* 端へ運ぶベルト */
+    L(7, 14, 70, CONV_L); L(1, 4, 73); L(8, 14, 76); flag(12, 76); spot("fan2", 11, 76);
+    /* もう一つの送風機 */
+    fan(5, 8, 78, 92); L(1, 3, 89); flag(2, 89);
+    /* 3つの動く足場 */
+    spot("plat2", 2, 89);
+    plat(7, 92, 2, 2.5, 0, 2.8); plat(12, 95, 2, 0, 2.2, 2.4, 0.7); plat(8, 99, 2, 2.5, 0, 3, 1.2);
+    L(1, 4, 102); L(8, 14, 105, ICE); L(1, 6, 108); flag(3, 108);
+    /* てっぺんの水：左のふちを越えて飛びこむ */
+    box(9, 14, 75, 75); box(1, 7, 77, 77); box(7, 7, 78, 78); box(12, 14, 76, 76);
+    spots.top = { x: 10 * T, y: (R - 75) * T };
+    sea = { x0: T, x1: 7 * T, y: (R - 78) * T + 6, yb: (R - 77) * T };
     /* はじまりは魚のパック（白いトレー）の上 */
-    plat(4, 4 + 36 / T, 3.6, 0, 0, 1);
-    plats[plats.length - 1].tray = true; plats[plats.length - 1].h = 36;
-    startX = 4 * T; startY = (R - 4) * T - 36;
+    plats.push({ bx: 4 * T, by: (R - 2) * T - 36, w: 3.6 * T, h: 36, ax: 0, ay: 0, per: 1, ph: 0, x: 0, y: 0, dx: 0, dy: 0, tray: true });
+    startX = 4 * T; startY = (R - 2) * T - 36;
     movePlats(0);
   }
   function movePlats(t) {
@@ -190,13 +182,13 @@
     });
   }
   function inWater(x, y) {
-    if (x > seaX && y > seaY) return true;
+    if (sea && x > sea.x0 && x < sea.x1 && y > sea.y && y < sea.yb) return true;
     for (var i = 0; i < pools.length; i++) { var w = pools[i]; if (x > w.x0 && x < w.x1 && y > w.y) return true; }
     return false;
   }
   function isSolid(col, row) {
-    if (col < 0) return true;
-    if (col >= COLS || row < 0 || row >= R) return 0;
+    if (col < 0 || col >= COLS || row >= R) return SAND;
+    if (row < 0) return 0;
     return solid[col][row];
   }
 
@@ -239,7 +231,7 @@
     safe = { x: startX, y: startY }; cp = -1;
     restT = 0; flopT = 0.8; onGround = false; bend = 0; splashes = [];
     drag = null; keyCharge = -1;
-    camX = startX - W / Z * 0.4; camY = startY - H / Z * 0.55;
+    camX = (COLS * T - W / Z) / 2; camY = camTarget(startY);
     bird = { mode: "away", side: 1, wait: 3, t: 0, x: 0, y: 0, face: -1 };
   }
 
@@ -259,10 +251,10 @@
   function launch() {
     var v = pullVec();
     if (!v || v.p < 0.06 || !canJump()) return;
-    var sp = 200 + 720 * v.p;
+    var sp = 200 + 840 * v.p;
     var vx = v.ux * sp, vy = v.uy * sp;
     /* 横に大きく跳んで仕掛けを飛ばさないよう、横の速さには上限を付ける（高さは変えない） */
-    vx = Math.max(-300, Math.min(300, vx));
+    vx = Math.max(-560, Math.min(560, vx));
     /* 体を弓なりにひと振りする：頭と尾を同じ側へ、胴を反対側へ（S字にならないように） */
     var head = F[0], tail = F[N - 1];
     var ax = tail.x - head.x, ay = tail.y - head.y, al = Math.hypot(ax, ay) || 1;
@@ -305,7 +297,7 @@
     updateBird(dt);
     /* 中間地点は、地面に触れていなくても通り過ぎたら記録 */
     var cc = center();
-    while (state === S.PLAY && cp + 1 < flags.length && cc.x >= flags[cp + 1].x) {
+    while (state === S.PLAY && cp + 1 < flags.length && cc.y < flags[cp + 1].y - 10) {
       cp++; safe = { x: flags[cp].x, y: flags[cp].y };
       tone(880, 0.1, 0.08, "triangle"); tone(1320, 0.14, 0.08, "triangle", null, 0.08);
     }
@@ -332,17 +324,15 @@
       fishAt(safe.x, safe.y, 1);
     }
     /* 海へ */
-    if (state === S.PLAY && cx.x > seaX + T && cx.y > seaY - 10) {
+    if (state === S.PLAY && inWater(cx.x, cx.y)) {
       state = S.GOAL; endT = 0; sSplash();
-      for (i = 0; i < 26; i++) splashes.push({ x: cx.x + (Math.random() - 0.5) * 60, y: seaY, vx: (Math.random() - 0.5) * 400, vy: -250 - Math.random() * 500, t: 1 });
+      for (i = 0; i < 26; i++) splashes.push({ x: cx.x + (Math.random() - 0.5) * 60, y: sea.y, vx: (Math.random() - 0.5) * 400, vy: -250 - Math.random() * 500, t: 1 });
     }
     splashes = splashes.filter(function (s) { s.t -= dt; s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 1400 * dt; return s.t > 0; });
 
-    var vw = W / Z, vh = H / Z;
-    /* 魚を画面の中央やや左に保つ */
-    var tx = cx.x - vw * 0.4, ty = cx.y - vh * 0.55;
-    camX += (tx - camX) * Math.min(1, dt * 7);
-    camY += (ty - camY) * Math.min(1, dt * 7);
+    /* 横は固定、縦は魚を追う */
+    camX = (COLS * T - W / Z) / 2;
+    camY += (camTarget(cx.y) - camY) * Math.min(1, dt * 7);
   }
   /* 鳥：マリオ3の太陽のように、画面の上の隅で待っては、魚めがけて弧を描いて飛び抜ける。
      つかまると連れ去られ、最後に止まった場所へ戻される */
@@ -356,7 +346,7 @@
     b.t += dt;
     if (b.mode === "away") {
       /* コースの1/3を過ぎたら、右上の外から入ってくる */
-      if (state !== S.PLAY || c.x < seaX / 3) return;
+      if (state !== S.PLAY || c.y > startY - (startY - sea.y) / 3) return;
       b.mode = "back"; b.x = camX + W / Z + 150; b.y = camY + 40;
     }
     if (b.mode === "back" || b.mode === "hover") {
@@ -444,6 +434,7 @@
     ctx.beginPath(); ctx.moveTo(-6, 14); ctx.lineTo(-10, 24); ctx.moveTo(6, 14); ctx.lineTo(4, 24); ctx.stroke();
     ctx.restore();
   }
+  function camTarget(y) { var vh = H / Z; return Math.min(R * T + 30 - vh, y - vh * 0.55); }
   function center() {
     var x = 0, y = 0;
     for (var i = 0; i < N; i++) { x += F[i].x; y += F[i].y; }
@@ -569,18 +560,17 @@
   window.addEventListener("blur", function () { drag = null; keyCharge = -1; });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
-  function warp(x) {
-    var y = groundY(x);
-    fishAt(x, y, 1);
-    var c = center(); camX = c.x - W / Z * 0.4; camY = c.y - H / Z * 0.55;
+  function warp(sp) {
+    fishAt(sp.x, sp.y, 1);
+    camY = camTarget(center().y);
   }
   function debugKey(n) {
     if (state !== S.PLAY) return;
-    if (n === 1) warp(seaX - 4 * T);                   /* 海の手前へ */
-    if (n === 4) warp(fans[0].x0 - 5 * T);               /* 送風機の手前へ */
-    if (n === 5) warp(plats[0].bx - 6 * T);
-    if (n === 7) warp(fans[1].x0 - 5 * T);               /* 2つめの送風機の手前へ */
-    if (n === 8) warp(plats[2].bx - 6 * T);              /* 3つの動く足場の手前へ */              /* 動く足場の手前へ */
+    if (n === 1) warp(spots.top);                        /* てっぺんの手前へ */
+    if (n === 4) warp(spots.fan1);                       /* 送風機の手前へ */
+    if (n === 5) warp(spots.plat1);                      /* 動く足場の手前へ */
+    if (n === 7) warp(spots.fan2);                       /* 2つめの送風機の手前へ */
+    if (n === 8) warp(spots.plat2);                      /* 3つの動く足場の手前へ */
     if (n === 6) { if (bird.mode === "away") { bird.mode = "back"; bird.x = camX + W / Z + 150; bird.y = camY + 40; } bird.wait = Math.min(bird.wait, 1.6); }   /* 鳥をすぐ来させる */
     if (n === 3) { state = S.GOAL; endT = 0; sSplash(); }   /* ゴール */
   }
@@ -635,32 +625,38 @@
 
   function drawWorld() {
     var vw = W / Z, vh = H / Z;
-    var c0 = Math.max(0, Math.floor(camX / T) - 1), c1 = Math.min(COLS - 1, Math.ceil((camX + vw) / T) + 1);
-    /* 海 */
     var t = T0;
+    /* 壁の外と底の下 */
+    ctx.fillStyle = "#c9a167";
+    ctx.fillRect(camX - 10, camY - 10, -camX + 10, vh + 20);
+    ctx.fillRect(COLS * T, camY - 10, vw, vh + 20);
+    ctx.fillRect(camX - 10, R * T, vw + 20, vh);
+    /* 送風機の台（足場の後ろ） */
+    fans.forEach(function (fz) {
+      var w = fz.x1 - fz.x0, cx = fz.x0 + w / 2;
+      ctx.fillStyle = "#6f7c86"; ctx.fillRect(cx - 6, fz.y1, 12, 3 * T);
+      ctx.fillStyle = "#8a98a3"; ctx.fillRect(fz.x0 + 6, fz.y1 - 10, w - 12, 30);
+      ctx.save(); ctx.translate(cx, fz.y1 + 5); ctx.scale(1, 0.3); ctx.rotate(t * 20);
+      ctx.fillStyle = "#c9d3da";
+      for (var i = 0; i < 3; i++) { ctx.rotate(Math.PI * 2 / 3); ctx.beginPath(); ctx.ellipse(18, 0, 18, 7, 0, 0, 7); ctx.fill(); }
+      ctx.restore();
+    });
+    /* てっぺんの水 */
     ctx.fillStyle = "#2f86c4";
-    ctx.beginPath(); ctx.moveTo(seaX, R * T + vh);
-    for (var x = seaX; x <= COLS * T + 40; x += 12) ctx.lineTo(x, seaY + Math.sin(x / 40 + t * 2) * 5);
-    ctx.lineTo(COLS * T + 40, R * T + vh); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(sea.x0, sea.yb);
+    for (var x = sea.x0; x <= sea.x1; x += 12) ctx.lineTo(x, sea.y + Math.sin(x / 40 + t * 2) * 4);
+    ctx.lineTo(sea.x1, sea.yb); ctx.fill();
     ctx.fillStyle = "rgba(255,255,255,.35)";
-    for (x = seaX + 20; x < COLS * T; x += 70) ctx.fillRect(x + Math.sin(t + x) * 6, seaY + 18 + (x % 3) * 14, 26, 3);
-    if (camX < 0) { ctx.fillStyle = "#d3ad70"; ctx.fillRect(camX - 10, camY - 10, -camX + 10, vh + 20); }   /* 左端の壁 */
-    ctx.fillStyle = "#2f86c4"; ctx.fillRect(COLS * T, seaY, vw, vh + R * T);                         /* 右の海の続き */
-    /* 地面の下 */
-    for (var c = c0; c <= c1; c++) {
-      if (c * T >= seaX) continue;
-      if (!solid[c][R - 1]) continue;          /* 穴はそのまま空を見せる */
-      ctx.fillStyle = "#d3ad70";
-      ctx.fillRect(c * T, R * T, T + 0.5, vh);
-    }
-    for (c = c0; c <= c1; c++) for (var r = 0; r < R; r++) {
+    for (x = sea.x0 + 20; x < sea.x1 - 30; x += 70) ctx.fillRect(x + Math.sin(t + x) * 6, sea.y + 18 + (x % 3) * 10, 26, 3);
+    var r0 = Math.max(0, Math.floor(camY / T) - 1), r1 = Math.min(R - 1, Math.ceil((camY + vh) / T) + 1);
+    for (var c = 0; c < COLS; c++) for (var r = r0; r <= r1; r++) {
       if (!solid[c][r]) continue;
       var X = c * T, Y = r * T;
       ctx.fillStyle = "#d9b77e"; ctx.fillRect(X, Y, T + 0.5, T + 0.5);
       ctx.fillStyle = "rgba(120,80,30,.07)";
       if ((c + r) % 2) ctx.fillRect(X, Y, T + 0.5, T + 0.5);
       var k = solid[c][r];
-      if (k === ICE) { ctx.fillStyle = "#bfe6f5"; ctx.fillRect(X, Y, T + 0.5, T + 0.5); ctx.fillStyle = "rgba(255,255,255,.8)"; ctx.fillRect(X + 8, Y + 8, 14, 3); ctx.fillRect(X + 26, Y + 20, 10, 3); }
+      if (k === ICE) { ctx.fillStyle = "#8fcbe6"; ctx.fillRect(X, Y, T + 0.5, T + 0.5); ctx.fillStyle = "rgba(255,255,255,.8)"; ctx.fillRect(X + 8, Y + 8, 14, 3); ctx.fillRect(X + 26, Y + 20, 10, 3); }
       else if (k === CONV_R || k === CONV_L) drawConv(X, Y, k === CONV_R ? 1 : -1);
       else if (!isSolid(c, r - 1)) { ctx.fillStyle = "#f0d9a4"; ctx.fillRect(X, Y, T + 0.5, 9); }
     }
@@ -671,21 +667,15 @@
       for (var x = w.x0; x <= w.x1; x += 12) ctx.lineTo(x, w.y + Math.sin(x / 30 + t * 2.4) * 3);
       ctx.lineTo(w.x1, R * T); ctx.fill();
     });
-    /* 送風機と風 */
+    /* 風 */
     fans.forEach(function (fz) {
-      var w = fz.x1 - fz.x0, cx = fz.x0 + w / 2;
+      var w = fz.x1 - fz.x0;
       ctx.fillStyle = "rgba(255,255,255,.12)"; ctx.fillRect(fz.x0, fz.y0, w, fz.y1 - fz.y0);
       ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = 4; ctx.lineCap = "round";
       for (var i = 0; i < 18; i++) {
         var lx = fz.x0 + 14 + (i % 6) * (w - 28) / 5, ly = fz.y1 - ((t * 520 + i * 197) % (fz.y1 - fz.y0));
         ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx, ly + 40); ctx.stroke();
       }
-      ctx.fillStyle = "#6f7c86"; ctx.fillRect(cx - 6, fz.y1 - 3 * T + 30, 12, vh);
-      ctx.fillStyle = "#8a98a3"; ctx.fillRect(fz.x0 + 6, fz.y1 - 3 * T, w - 12, 30);
-      ctx.save(); ctx.translate(cx, fz.y1 - 3 * T + 15); ctx.scale(1, 0.3); ctx.rotate(t * 20);
-      ctx.fillStyle = "#c9d3da";
-      for (i = 0; i < 3; i++) { ctx.rotate(Math.PI * 2 / 3); ctx.beginPath(); ctx.ellipse(18, 0, 18, 7, 0, 0, 7); ctx.fill(); }
-      ctx.restore();
     });
     /* 動く足場 */
     plats.forEach(function (q) {
@@ -732,13 +722,13 @@
 
   /* アジの絵（持ち主が用意した生成画像）を、背骨に沿った三角形の網に貼って曲げる。
      絵の中の目印: 鼻先 x=798、尾の付け根 x=150、背骨の高さ y=205（幅800・高さ401の絵） */
-  var AJI = new Image();
-  AJI.src = "img/aji.webp";
-  var NOSE_X = 798, BASE_X = 150, SPINE_Y = 205, IMG_H = 401;
-  var ROWS = [0, 110, SPINE_Y, 300, IMG_H];
+  var SAKE = new Image();
+  SAKE.src = "img/sake.webp";
+  var NOSE_X = 798, BASE_X = 160, SPINE_Y = 170, IMG_H = 314;
+  var ROWS = [0, 85, SPINE_Y, 250, IMG_H];
   function drawFishImage() {
-    if (!AJI.complete || !AJI.naturalWidth) return false;
-    var k = AJI.naturalWidth / 800;
+    if (!SAKE.complete || !SAKE.naturalWidth) return false;
+    var k = SAKE.naturalWidth / 800;
     var s = (SEG * (N - 1)) / (NOSE_X - BASE_X);             /* 絵1pxあたりの長さ */
     function unit(ax, ay, bx, by) { var d = Math.hypot(bx - ax, by - ay) || 1; return [(bx - ax) / d, (by - ay) / d]; }
     var t0 = unit(F[0].x, F[0].y, F[1].x, F[1].y), t6 = unit(F[N - 2].x, F[N - 2].y, F[N - 1].x, F[N - 1].y);
@@ -786,7 +776,7 @@
     ctx.save();
     ctx.beginPath(); ctx.moveTo(ga[0], ga[1]); ctx.lineTo(gb[0], gb[1]); ctx.lineTo(gc[0], gc[1]); ctx.closePath(); ctx.clip();
     ctx.transform(m11, m12, m21, m22, a.x - m11 * a.u - m21 * a.v, a.y - m12 * a.u - m22 * a.v);
-    ctx.drawImage(AJI, 0, 0, AJI.naturalWidth, AJI.naturalHeight, 0, 0, AJI.naturalWidth / k, AJI.naturalHeight / k);
+    ctx.drawImage(SAKE, 0, 0, SAKE.naturalWidth, SAKE.naturalHeight, 0, 0, SAKE.naturalWidth / k, SAKE.naturalHeight / k);
     ctx.restore();
   }
 
@@ -888,7 +878,7 @@
   /* 画面上の進捗バー（海までどれだけ来たか） */
   function drawProgress() {
     var x0 = 84, x1 = W - 28, y = 33, h = 14;
-    var p = Math.max(0, Math.min(1, (center().x - startX) / (seaX + T - startX)));
+    var p = Math.max(0, Math.min(1, (startY - center().y) / (startY - sea.y)));
     roundRect(x0, y, x1 - x0, h, h / 2);
     ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fill();
     ctx.lineWidth = 2.5; ctx.strokeStyle = "#16202e"; ctx.stroke();
@@ -990,13 +980,14 @@
   window.__probe = {
     now: function () {
       var c = center();
-      return { state: state, jumps: jumps, x: c.x, y: c.y, ground: onGround, bird: bird.mode, seaX: seaX, W: W, H: H, pools: pools, fans: fans, plats: plats };
+      return { state: state, jumps: jumps, x: c.x, y: c.y, ground: onGround, bird: bird.mode, sea: sea, spots: spots, flags: flags, cp: cp, W: W, H: H, pools: pools, fans: fans, plats: plats };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     /* 画面座標で引っぱって離す */
     fling: function (dx, dy) { drag = { id: -1, x0: 270, y0: 500, x: 270 - dx, y: 500 - dy }; launch(); drag = null; },
     aim: function (dx, dy) { drag = dx == null ? null : { id: -1, x0: 270, y0: 500, x: 270 - dx, y: 500 - dy }; },
+    put: function (x, y, d) { fishAt(x, y, d || 1); },
     debug: debugKey
   };
 
