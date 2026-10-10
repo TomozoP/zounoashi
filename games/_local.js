@@ -215,5 +215,6 @@ window.DRAFT_GAMES = [
     "play": "games/_muriyari-seiza/index.html",
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
-  }
+  },
+  {"type":"lab","tags":[],"id":"honeore","title":"骨が折れるアクション","year":2026,"date":"2026-10-10","plays":null,"url":"","img":"games/_honeore/img/thumb.webp","play":"games/_honeore/index.html","full":true,"catch":"骨が折れないように右へ進む"},
 ];
