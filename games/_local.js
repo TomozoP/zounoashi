@@ -216,5 +216,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
   },
-  {"type":"lab","tags":[],"id":"honeore","title":"骨が折れるアクション","year":2026,"date":"2026-10-10","plays":null,"url":"","img":"games/_honeore/img/thumb.webp","play":"games/_honeore/index.html","full":true,"catch":"骨が折れないように右へ進む"},
+  {"type":"lab","tags":[],"id":"sakana-action","title":"サカナアクション","year":2026,"date":"2026-10-11","plays":null,"url":"","img":"games/_sakana-action/img/thumb.webp","play":"games/_sakana-action/index.html","full":true,"catch":"魚を跳ねさせて右へ進む"},
 ];

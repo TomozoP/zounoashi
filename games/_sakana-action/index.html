@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>サカナアクション</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #7cc8ef; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* サカナアクション
+
+   陸に上がった魚を、引っぱって離した量だけ跳ねさせ、右の海まで運ぶ。
+   魚は点と棒でできていて、跳ねるたびに体をくねらせる。
+   結果は跳ねた回数。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  var Z = 0.8;                                 /* 世界を縮めて見せる倍率 */
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q, delay) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  function sSlap(v) { noiseHit(0.06, 1400, Math.min(0.5, 0.08 + v / 3000), 1.4); noiseHit(0.05, 500, Math.min(0.3, v / 4000), 1, 0.01); }
+  function sJump(p) { tone(260 + p * 300, 0.12, 0.09, "sine", 520 + p * 500); noiseHit(0.05, 2200, 0.15, 2); }
+  function sPull(p) { tone(180 + p * 260, 0.03, 0.025, "triangle"); }
+  function sSplash() { noiseHit(0.5, 900, 0.5, 0.6); noiseHit(0.3, 2600, 0.25, 1, 0.05); [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.22, 0.12, "triangle", null, 0.25 + i * 0.11); }); }
+  function sFall() { tone(500, 0.5, 0.1, "sine", 120); }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 面 ============
+     1マス48。列ごとの地面の高さ（下から何マス、0は穴）。右の端は海。 */
+  var T = 48, R = 24, COLS = 0;
+  var solid = [], seaX = 0, seaY = 0, startX = 0, startY = 0;
+  function build() {
+    var c = 0, hs = [];
+    function g(len, h) { for (var i = 0; i < len; i++) hs[c++] = h; }
+    g(10, 4);
+    g(4, 6);
+    g(3, 0);
+    g(6, 6);
+    g(3, 9); g(6, 9);
+    g(4, 0);
+    g(5, 5);
+    g(2, 8); g(2, 11); g(7, 11);
+    g(5, 0);
+    g(7, 7);
+    g(2, 9); g(3, 0); g(2, 10); g(3, 0); g(2, 11); g(3, 0);
+    g(9, 8);
+    seaX = c * T;
+    g(16, 0);
+    COLS = c;
+    solid = [];
+    for (var x = 0; x < COLS; x++) {
+      solid[x] = [];
+      for (var y = 0; y < R; y++) solid[x][y] = hs[x] > 0 && y >= R - hs[x];
+    }
+    seaY = (R - 6) * T;
+    startX = 4 * T; startY = (R - 4) * T;
+  }
+  function isSolid(col, row) {
+    if (col < 0) return true;
+    if (col >= COLS || row < 0 || row >= R) return false;
+    return solid[col][row];
+  }
+
+  /* ============ 魚 ============
+     頭から尾まで8つの点。となり同士の棒と、ひとつ飛ばしの棒（しなる背骨）でつなぐ。 */
+  var N = 8, SEG = 18;
+  var WIDTH = [11, 18, 20, 19, 16, 12, 7, 4];       /* 体の太さ（半分） */
+  var F = [], links = [];
+  function fishAt(x, y, d) {
+    F = [];
+    for (var i = 0; i < N; i++) {
+      var px = x + d * (SEG * (N - 1) / 2 - i * SEG);
+      F.push({ x: px, y: y - 12, px: px, py: y - 12, ground: false });
+    }
+    links = [];
+    for (i = 0; i < N - 1; i++) links.push({ a: i, b: i + 1, len: SEG, k: 1 });
+    for (i = 0; i < N - 2; i++) links.push({ a: i, b: i + 2, len: SEG * 2 * 0.985, k: 0.22 });
+    for (i = 0; i < N - 3; i++) links.push({ a: i, b: i + 3, len: SEG * 3 * 0.97, k: 0.08 });
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", GOAL: "goal", RESULT: "result" };
+  var state, T0, endT, jumps, keyMode = false;
+  var camX = 0, camY = 0;
+  var drag = null;                             /* 引っぱり中 {x0,y0,x,y} 画面座標 */
+  var restT, flopT, onGround, safe, bend, splashes, lastPullStep;
+  var keyCharge = -1, keyDir = 1;
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    build();
+    state = S.PLAY;
+    T0 = 0; endT = 0; jumps = 0;
+    fishAt(startX, startY, 1);
+    safe = { x: startX, y: startY };
+    restT = 0; flopT = 0.8; onGround = false; bend = 0; splashes = [];
+    drag = null; keyCharge = -1;
+    camX = startX - W / Z * 0.3; camY = startY - H / Z * 0.62;
+  }
+
+  /* 引っぱり量（0〜1）と、跳ぶ向き */
+  var PULL_MAX = 210;                          /* 画面上でこれだけ引くと最大 */
+  function pullVec() {
+    var dx, dy;
+    if (drag) { dx = drag.x0 - drag.x; dy = drag.y0 - drag.y; }
+    else if (keyCharge >= 0) { var a = keyDir > 0 ? -0.95 : Math.PI + 0.95; dx = Math.cos(a) * keyCharge * PULL_MAX; dy = Math.sin(a) * keyCharge * PULL_MAX; }
+    else return null;
+    var L = Math.hypot(dx, dy);
+    if (L < 12) return { p: 0, ux: 0, uy: 0 };
+    var p = Math.min(1, L / PULL_MAX);
+    return { p: p, ux: dx / L, uy: dy / L };
+  }
+  function canJump() { return state === S.PLAY && onGround; }
+  function launch() {
+    var v = pullVec();
+    if (!v || v.p < 0.06 || !canJump()) return;
+    var sp = 240 + 920 * v.p;
+    var vx = v.ux * sp, vy = v.uy * sp;
+    /* 跳ぶ向きに頭を向け、尾を強く振ってくねらせる */
+    var head = F[0], tail = F[N - 1];
+    var face = Math.sign(vx || (head.x - tail.x)) || 1;
+    var dt = 1 / 60;
+    for (var i = 0; i < N; i++) {
+      var p = F[i], t = i / (N - 1);
+      var spin = (t - 0.5) * 2;                /* 頭と尾で少し差をつけて回す */
+      var bx = vx, by = vy + spin * -120 * face * (vx >= 0 ? 1 : -1);
+      p.px = p.x - bx * dt;
+      p.py = p.y - by * dt;
+    }
+    bend = 1;
+    jumps++;
+    onGround = false; restT = 0;
+    sJump(v.p);
+  }
+
+  /* ============ 進行 ============ */
+  var G = 2000;
+  function update(dt) {
+    if (state === S.INTRO || state === S.RESULT) { stepFish(dt); return; }
+    T0 += dt;
+    if (state === S.GOAL) {
+      endT += dt;
+      if (endT > 1.6) { state = S.RESULT; shareButton.hidden = false; }
+    }
+    if (keyCharge >= 0) {
+      keyCharge = Math.min(1, keyCharge + dt * 0.9);
+    }
+    var v = pullVec();
+    if (v && v.p > 0) {
+      var st = Math.floor(v.p * 10);
+      if (st !== lastPullStep) { lastPullStep = st; sPull(v.p); }
+    } else lastPullStep = -1;
+
+    stepFish(dt);
+
+    /* 地面でじっとしているとき、ときどきぴちぴち跳ねる */
+    if (onGround && state === S.PLAY && !drag && keyCharge < 0) {
+      flopT -= dt;
+      if (flopT <= 0) {
+        flopT = 0.9 + Math.random() * 1.3;
+        var side = Math.random() < 0.5 ? -1 : 1, kick = 70 + Math.random() * 90;
+        for (var i = 0; i < N; i++) {
+          var t = Math.abs(i / (N - 1) - 0.5) * 2;
+          F[i].py += (kick * (0.3 + t)) / 60;
+          F[i].px -= side * (i / (N - 1) - 0.5) * 60 / 60;
+        }
+        sSlap(200);
+      }
+    }
+
+    /* 落ちたら最後に止まった場所へ戻す */
+    var cx = center();
+    if (state === S.PLAY && cx.y > R * T + 200) {
+      sFall();
+      fishAt(safe.x, safe.y, 1);
+    }
+    /* 海へ */
+    if (state === S.PLAY && cx.x > seaX + T && cx.y > seaY - 10) {
+      state = S.GOAL; endT = 0; sSplash();
+      for (i = 0; i < 26; i++) splashes.push({ x: cx.x + (Math.random() - 0.5) * 60, y: seaY, vx: (Math.random() - 0.5) * 400, vy: -250 - Math.random() * 500, t: 1 });
+    }
+    splashes = splashes.filter(function (s) { s.t -= dt; s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 1400 * dt; return s.t > 0; });
+
+    var vw = W / Z, vh = H / Z;
+    var tx = cx.x - vw * 0.35, ty = cx.y - vh * 0.6;
+    camX += (tx - camX) * Math.min(1, dt * 3);
+    camY += (ty - camY) * Math.min(1, dt * 3);
+    camX = Math.max(0, Math.min(COLS * T - vw, camX));
+    camY = Math.min(R * T - vh + 150 / Z, camY);
+  }
+  function center() {
+    var x = 0, y = 0;
+    for (var i = 0; i < N; i++) { x += F[i].x; y += F[i].y; }
+    return { x: x / N, y: y / N };
+  }
+
+  function stepFish(dt) {
+    var gy = G * dt * dt, i, inSea = false;
+    var touching = 0, speed = 0;
+    for (i = 0; i < N; i++) {
+      var p = F[i];
+      var damp = p.y > seaY && p.x > seaX ? 0.9 : 0.997;
+      if (damp < 0.99) inSea = true;
+      var vx = (p.x - p.px) * damp, vy = (p.y - p.py) * damp;
+      p.px = p.x; p.py = p.y;
+      p.x += vx; p.y += vy + (damp < 0.99 ? gy * 0.2 : gy);
+      p.ground = false;
+    }
+    /* 跳んだ直後は背骨を大きくしならせる（尾びれのひと振り） */
+    bend = Math.max(0, bend - dt * 3);
+    for (var it = 0; it < 10; it++) {
+      for (var s = 0; s < links.length; s++) {
+        var k = links[s], a = F[k.a], b = F[k.b];
+        var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.001;
+        var len = k.len * (k.k < 1 ? 1 - bend * 0.12 * (k.k > 0.1 ? 1 : 1.6) : 1);
+        var diff = (d - len) / d * 0.5 * k.k;
+        a.x += dx * diff; a.y += dy * diff;
+        b.x -= dx * diff; b.y -= dy * diff;
+      }
+      for (i = 0; i < N; i++) collide(F[i]);
+    }
+    for (i = 0; i < N; i++) {
+      if (F[i].ground) touching++;
+      speed = Math.max(speed, Math.hypot(F[i].x - F[i].px, F[i].y - F[i].py) / dt);
+    }
+    var was = onGround;
+    onGround = touching >= 1 && speed < 900;
+    if (touching && !was && speed > 150) sSlap(speed);
+    if (touching >= 2 && speed < 40) {
+      restT += dt;
+      if (restT > 0.3) { var c = center(); safe = { x: c.x, y: groundY(c.x) }; }
+    } else restT = 0;
+    void inSea;
+  }
+  function collide(p) {
+    var c = Math.floor(p.x / T), r = Math.floor((p.y + 4) / T);
+    if (!isSolid(c, r)) return;
+    var y4 = p.y + 4;
+    var best = 1e9, mx = 0, my = 0, top = false;
+    var dl = p.x - c * T, dr = (c + 1) * T - p.x, dtp = y4 - r * T, db = (r + 1) * T - y4;
+    if (!isSolid(c, r - 1) && dtp < best) { best = dtp; mx = 0; my = -dtp; top = true; }
+    if (!isSolid(c - 1, r) && dl < best) { best = dl; mx = -dl; my = 0; top = false; }
+    if (!isSolid(c + 1, r) && dr < best) { best = dr; mx = dr; my = 0; top = false; }
+    if (!isSolid(c, r + 1) && db < best) { best = db; mx = 0; my = db; top = false; }
+    if (best === 1e9) { my = -dtp; top = true; }
+    p.x += mx; p.y += my;
+    if (top) {
+      p.ground = true;
+      p.px += (p.x - p.px) * 0.25;             /* 地面の摩擦 */
+      var vy = p.y - p.py; if (vy < 0) p.py = p.y + vy * 0.25;   /* ほとんど弾まない */
+    }
+  }
+  function groundY(x) {
+    var c = Math.floor(x / T);
+    for (var r = 0; r < R; r++) if (isSolid(c, r)) return r * T;
+    return R * T;
+  }
+
+  /* ============ 入力 ============ */
+  var RETRY = { x: 40, y: 40, r: 26 };
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    if (state === S.INTRO) return;
+    audioOn();
+    var p = atCanvas(e);
+    if (state === S.RESULT) { if (hitButton(p.x, p.y) === "retry") newRound(); return; }
+    if (state !== S.PLAY) return;
+    if (Math.hypot(p.x - RETRY.x, p.y - RETRY.y) < RETRY.r + 14) { newRound(); return; }
+    drag = { id: e.pointerId, x0: p.x, y0: p.y, x: p.x, y: p.y };
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    if (!drag || drag.id !== e.pointerId) return;
+    var p = atCanvas(e); drag.x = p.x; drag.y = p.y;
+  });
+  wrap.addEventListener("pointerup", function (e) {
+    e.preventDefault();
+    if (!drag || drag.id !== e.pointerId) return;
+    var p = atCanvas(e); drag.x = p.x; drag.y = p.y;
+    launch(); drag = null;
+  });
+  wrap.addEventListener("pointercancel", function () { drag = null; });
+  window.addEventListener("blur", function () { drag = null; keyCharge = -1; });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function warp(x) {
+    var y = groundY(x);
+    fishAt(x, y, 1);
+    var c = center(); camX = c.x - W / Z * 0.35; camY = c.y - H / Z * 0.6;
+  }
+  function debugKey(n) {
+    if (state !== S.PLAY) return;
+    if (n === 1) warp(seaX - 4 * T);                   /* 海の手前へ */
+    if (n === 2) warp(29 * T);                          /* 中ほど（高い段）へ */
+    if (n === 3) { state = S.GOAL; endT = 0; sSplash(); }   /* ゴール */
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var k = e.key;
+    var left = k === "ArrowLeft" || k === "a" || k === "A";
+    var right = k === "ArrowRight" || k === "d" || k === "D";
+    var go = e.code === "Space" || k === " " || k === "Enter";
+    if (k === "Escape") { e.preventDefault(); if (state !== S.INTRO) newRound(); return; }
+    if (!left && !right && !go) return;
+    e.preventDefault(); keyMode = true;
+    if (state === S.INTRO) return;
+    if (state === S.RESULT) { if (!e.repeat && go) newRound(); return; }
+    if (left) keyDir = -1;
+    if (right) keyDir = 1;
+    if (go && !e.repeat && keyCharge < 0) keyCharge = 0;   /* 押している長さで強さが決まる */
+  });
+  window.addEventListener("keyup", function (e) {
+    var k = e.key;
+    var go = e.code === "Space" || k === " " || k === "Enter";
+    if (state === S.INTRO && go) { startButton.click(); return; }
+    if (go && keyCharge >= 0) { launch(); keyCharge = -1; }
+  });
+
+  function doShare() {
+    window.zResultActions.x({ text: zT(jumps + "回跳ねて海に帰った", "Flopped back to the sea in " + jumps + " jumps") + zT(" #サカナアクション", " #SakanaAction") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawBack() {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#7cc8ef"); g.addColorStop(1, "#e9f6f7");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(255,255,255,.85)";
+    [[80, 0.18], [330, 0.1], [600, 0.26]].forEach(function (c, i) {
+      var x = ((c[0] - camX * Z * 0.1) % (W + 260) + W + 260) % (W + 260) - 130, y = H * c[1];
+      ctx.beginPath(); ctx.arc(x, y, 30, 0, 7); ctx.arc(x + 34, y - 12, 36, 0, 7); ctx.arc(x + 72, y, 28, 0, 7); ctx.fill();
+    });
+  }
+
+  function drawWorld() {
+    var vw = W / Z, vh = H / Z;
+    var c0 = Math.max(0, Math.floor(camX / T) - 1), c1 = Math.min(COLS - 1, Math.ceil((camX + vw) / T) + 1);
+    /* 海 */
+    var t = T0;
+    ctx.fillStyle = "#2f86c4";
+    ctx.beginPath(); ctx.moveTo(seaX, R * T + vh);
+    for (var x = seaX; x <= COLS * T + 40; x += 12) ctx.lineTo(x, seaY + Math.sin(x / 40 + t * 2) * 5);
+    ctx.lineTo(COLS * T + 40, R * T + vh); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.35)";
+    for (x = seaX + 20; x < COLS * T; x += 70) ctx.fillRect(x + Math.sin(t + x) * 6, seaY + 18 + (x % 3) * 14, 26, 3);
+    /* 地面の下（穴は暗く） */
+    for (var c = c0; c <= c1; c++) {
+      if (c * T >= seaX) continue;
+      var deep = !solid[c][R - 1];
+      ctx.fillStyle = deep ? "#3b2f25" : "#d3ad70";
+      ctx.fillRect(c * T, deep ? R * T - 3 * T : R * T, T + 0.5, vh + 3 * T);
+    }
+    for (c = c0; c <= c1; c++) for (var r = 0; r < R; r++) {
+      if (!solid[c][r]) continue;
+      var X = c * T, Y = r * T;
+      ctx.fillStyle = "#d9b77e"; ctx.fillRect(X, Y, T + 0.5, T + 0.5);
+      ctx.fillStyle = "rgba(120,80,30,.07)";
+      if ((c + r) % 2) ctx.fillRect(X, Y, T + 0.5, T + 0.5);
+      if (!isSolid(c, r - 1)) { ctx.fillStyle = "#f0d9a4"; ctx.fillRect(X, Y, T + 0.5, 9); }
+    }
+  }
+
+  function drawFish() {
+    var L = [], Rt = [], i;
+    for (i = 0; i < N; i++) {
+      var a = F[Math.max(0, i - 1)], b = F[Math.min(N - 1, i + 1)];
+      var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
+      var nx = -dy / d, ny = dx / d, w = WIDTH[i];
+      L.push([F[i].x + nx * w, F[i].y + ny * w]);
+      Rt.push([F[i].x - nx * w, F[i].y - ny * w]);
+    }
+    /* 尾びれ */
+    var tl = F[N - 1], tb = F[N - 2];
+    var tdx = tl.x - tb.x, tdy = tl.y - tb.y, td = Math.hypot(tdx, tdy) || 1;
+    var ux = tdx / td, uy = tdy / td, nx2 = -uy, ny2 = ux;
+    ctx.beginPath();
+    ctx.moveTo(tl.x, tl.y);
+    ctx.lineTo(tl.x + ux * 24 + nx2 * 18, tl.y + uy * 24 + ny2 * 18);
+    ctx.quadraticCurveTo(tl.x + ux * 14, tl.y + uy * 14, tl.x + ux * 24 - nx2 * 18, tl.y + uy * 24 - ny2 * 18);
+    ctx.closePath();
+    ctx.fillStyle = "#5d7f9a"; ctx.fill(); ctx.strokeStyle = "#2c4253"; ctx.lineWidth = 2; ctx.stroke();
+    /* 背びれ（L 側を背中とする） */
+    var b0 = L[2], b1 = L[4], bt = [(L[2][0] + L[4][0]) / 2, (L[2][1] + L[4][1]) / 2];
+    var mid = F[3], dxm = bt[0] - mid.x, dym = bt[1] - mid.y, dm = Math.hypot(dxm, dym) || 1;
+    ctx.beginPath(); ctx.moveTo(b0[0], b0[1]);
+    ctx.lineTo(bt[0] + dxm / dm * 14 - (b1[0] - b0[0]) * 0.2, bt[1] + dym / dm * 14 - (b1[1] - b0[1]) * 0.2);
+    ctx.lineTo(b1[0], b1[1]); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    /* 体 */
+    ctx.beginPath();
+    ctx.moveTo(F[0].x + (F[0].x - F[1].x) * 0.6, F[0].y + (F[0].y - F[1].y) * 0.6);
+    for (i = 0; i < N; i++) ctx.lineTo(L[i][0], L[i][1]);
+    ctx.lineTo(tl.x, tl.y);
+    for (i = N - 1; i >= 0; i--) ctx.lineTo(Rt[i][0], Rt[i][1]);
+    ctx.closePath();
+    var g = ctx.createLinearGradient(L[3][0], L[3][1], Rt[3][0], Rt[3][1]);
+    g.addColorStop(0, "#4f7590"); g.addColorStop(0.45, "#a9c3d3"); g.addColorStop(1, "#f2f5f4");
+    ctx.fillStyle = g; ctx.fill();
+    ctx.lineJoin = "round"; ctx.strokeStyle = "#2c4253"; ctx.lineWidth = 2.4; ctx.stroke();
+    /* 側線とうろこ */
+    ctx.beginPath(); ctx.moveTo(F[1].x, F[1].y);
+    for (i = 2; i < N; i++) ctx.lineTo(F[i].x, F[i].y);
+    ctx.strokeStyle = "rgba(44,66,83,.45)"; ctx.lineWidth = 1.5; ctx.stroke();
+    /* えら */
+    var h = F[1], hn = [L[1][0] - h.x, L[1][1] - h.y];
+    ctx.beginPath(); ctx.moveTo(h.x + hn[0] * 0.9, h.y + hn[1] * 0.9);
+    ctx.quadraticCurveTo(h.x + (h.x - F[0].x) * 0.3, h.y + (h.y - F[0].y) * 0.3, h.x - hn[0] * 0.9, h.y - hn[1] * 0.9);
+    ctx.strokeStyle = "#2c4253"; ctx.lineWidth = 2; ctx.stroke();
+    /* 目 */
+    var e = [F[0].x * 0.6 + L[0][0] * 0.4 + (F[1].x - F[0].x) * 0.15, F[0].y * 0.6 + L[0][1] * 0.4 + (F[1].y - F[0].y) * 0.15];
+    ctx.beginPath(); ctx.arc(e[0], e[1], 5.2, 0, 7); ctx.fillStyle = "#fff"; ctx.fill(); ctx.strokeStyle = "#2c4253"; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(e[0], e[1], 2.6, 0, 7); ctx.fillStyle = "#111"; ctx.fill();
+  }
+
+  /* 引っぱり中は、跳ぶ向きと強さを矢印で見せる */
+  function drawAim() {
+    var v = pullVec();
+    if (!v || v.p <= 0 || state !== S.PLAY) return;
+    var c = center(), sx = (c.x - camX) * Z, sy = (c.y - camY) * Z;
+    var len = 40 + v.p * 150;
+    var ex = sx + v.ux * len, ey = sy + v.uy * len;
+    ctx.save();
+    ctx.globalAlpha = onGround ? 0.95 : 0.4;
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 9; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.strokeStyle = "#16202e"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+    var a = Math.atan2(v.uy, v.ux);
+    ctx.fillStyle = "#16202e";
+    ctx.beginPath(); ctx.moveTo(ex + Math.cos(a) * 14, ey + Math.sin(a) * 14);
+    ctx.lineTo(ex + Math.cos(a + 2.4) * 16, ey + Math.sin(a + 2.4) * 16);
+    ctx.lineTo(ex + Math.cos(a - 2.4) * 16, ey + Math.sin(a - 2.4) * 16); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+    drawBack();
+    ctx.save();
+    ctx.scale(Z, Z);
+    ctx.translate(-camX, -camY);
+    drawWorld();
+    if (state !== S.GOAL && state !== S.RESULT || endT < 0.15) drawFish();
+    ctx.fillStyle = "#e6f4ff";
+    splashes.forEach(function (s) { ctx.globalAlpha = Math.min(1, s.t * 2); ctx.beginPath(); ctx.arc(s.x, s.y, 5, 0, 7); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    drawAim();
+    if (state === S.PLAY) {
+      ctx.beginPath(); ctx.arc(RETRY.x, RETRY.y, RETRY.r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.fill();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      if (window.zActionIcon) window.zActionIcon(ctx, "もう一度", RETRY.x, RETRY.y + 1, 26);
+    }
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 結果画面。跳ねた回数と「もう一度」「Xでシェア」だけ */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(jumps), W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () {
+      var c = center();
+      return { state: state, jumps: jumps, x: c.x, y: c.y, ground: onGround, seaX: seaX, W: W, H: H };
+    },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); },
+    /* 画面座標で引っぱって離す */
+    fling: function (dx, dy) { drag = { id: -1, x0: 270, y0: 500, x: 270 - dx, y: 500 - dy }; launch(); drag = null; },
+    aim: function (dx, dy) { drag = dx == null ? null : { id: -1, x0: 270, y0: 500, x: 270 - dx, y: 500 - dy }; },
+    debug: debugKey
+  };
+
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(800);
+      r.key();
+      for (var i = 0; i < 4; i++) {
+        await r.wait(1400);
+        window.__probe.fling(120, -150);
+      }
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  layout();
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (dt > 0.0001) { var st = Math.min(1 / 60, dt); update(st); dt -= st; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
