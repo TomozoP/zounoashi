@@ -185,6 +185,7 @@
   /* ============ 魚 ============
      頭から尾まで8つの点。となり同士の棒と、ひとつ飛ばしの棒（しなる背骨）でつなぐ。 */
   var N = 8, SEG = 18;
+  var RAD = 13;                                /* 体の厚みの半分。地面からこれだけ浮かせる */
   var WIDTH = [10, 16, 18, 17, 14, 10, 6, 3];       /* 体の太さ（半分） */
   var F = [], links = [];
   function fishAt(x, y, d) {
@@ -369,10 +370,10 @@
     } else restT = 0;
   }
   function collide(p) {
-    var c = Math.floor(p.x / T), r = Math.floor((p.y + 4) / T);
+    var c = Math.floor(p.x / T), r = Math.floor((p.y + RAD) / T);
     var kind = isSolid(c, r);
     if (kind) {
-      var y4 = p.y + 4;
+      var y4 = p.y + RAD;
       var best = 1e9, mx = 0, my = 0, top = false;
       var dl = p.x - c * T, dr = (c + 1) * T - p.x, dtp = y4 - r * T, db = (r + 1) * T - y4;
       if (!isSolid(c, r - 1) && dtp < best) { best = dtp; mx = 0; my = -dtp; top = true; }
@@ -385,8 +386,8 @@
     }
     for (var i = 0; i < plats.length; i++) {
       var q = plats[i];
-      if (p.x < q.x || p.x > q.x + q.w || p.y + 4 < q.y || p.y + 4 > q.y + q.h) continue;
-      var up = p.y + 4 - q.y, dn = q.y + q.h - p.y - 4, lf = p.x - q.x, rt = q.x + q.w - p.x;
+      if (p.x < q.x || p.x > q.x + q.w || p.y + RAD < q.y || p.y + RAD > q.y + q.h) continue;
+      var up = p.y + RAD - q.y, dn = q.y + q.h - p.y - RAD, lf = p.x - q.x, rt = q.x + q.w - p.x;
       var m = Math.min(up, dn, lf, rt);
       if (m === up) { p.y -= up; onTop(p, SAND); p.plat = q; }
       else if (m === dn) p.y += dn;
@@ -571,6 +572,37 @@
     }
   }
 
+  /* アジの絵（持ち主が用意した生成画像）を、背骨の曲がりに合わせて短冊に切って貼る。
+     絵の中の目印: 鼻先 x=798、尾の付け根 x=150、背骨の高さ y=205（幅800の絵） */
+  var AJI = new Image();
+  AJI.src = "img/aji.webp";
+  var NOSE_X = 798, BASE_X = 150, SPINE_Y = 205;
+  function drawFishImage() {
+    if (!AJI.complete || !AJI.naturalWidth) return false;
+    var k = AJI.naturalWidth / 800;
+    var s = (SEG * (N - 1)) / (NOSE_X - BASE_X);             /* 絵1pxあたりの長さ */
+    function unit(ax, ay, bx, by) { var d = Math.hypot(bx - ax, by - ay) || 1; return [(bx - ax) / d, (by - ay) / d]; }
+    var t0 = unit(F[0].x, F[0].y, F[1].x, F[1].y), t6 = unit(F[N - 2].x, F[N - 2].y, F[N - 1].x, F[N - 1].y);
+    var noseLen = 13, tailLen = BASE_X * s;
+    var pts = [[F[0].x - t0[0] * noseLen, F[0].y - t0[1] * noseLen]], us = [0];
+    for (var i = 0; i < N; i++) { pts.push([F[i].x, F[i].y]); us.push(noseLen + i * SEG); }
+    pts.push([F[N - 1].x + t6[0] * tailLen, F[N - 1].y + t6[1] * tailLen]); us.push(noseLen + (N - 1) * SEG + tailLen);
+    for (i = 0; i < pts.length - 1; i++) {
+      var A = pts[i], B = pts[i + 1];
+      var T2 = unit(A[0], A[1], B[0], B[1]), Nn = [-T2[1], T2[0]];
+      var xA = NOSE_X - us[i] / s;                             /* 鼻先が u=0 */
+      var xB = NOSE_X - us[i + 1] / s;
+      var len = Math.hypot(B[0] - A[0], B[1] - A[1]), sx = len / (xA - xB);
+      ctx.save();
+      ctx.transform(-T2[0] * sx, -T2[1] * sx, -Nn[0] * s, -Nn[1] * s,
+        A[0] + T2[0] * xA * sx + Nn[0] * SPINE_Y * s, A[1] + T2[1] * xA * sx + Nn[1] * SPINE_Y * s);
+      var x0 = Math.max(0, xB - 0.8), x1 = Math.min(800, xA + 0.8);
+      ctx.drawImage(AJI, x0 * k, 0, (x1 - x0) * k, AJI.naturalHeight, x0, 0, x1 - x0, AJI.naturalHeight / k);
+      ctx.restore();
+    }
+    return true;
+  }
+
   /* アジ。背は青みがかった灰色、腹は銀、ひれは黄みがかった半透明、側線にぜいご、大きな目 */
   var FIN = "rgba(206,190,120,.82)", FIN_EDGE = "#7d6f3c", EDGE = "#22323d";
   function drawFish() {
@@ -705,7 +737,7 @@
     ctx.scale(Z, Z);
     ctx.translate(-camX, -camY);
     drawWorld();
-    if (state !== S.GOAL && state !== S.RESULT || endT < 0.15) drawFish();
+    if (state !== S.GOAL && state !== S.RESULT || endT < 0.15) (drawFishImage() || drawFish());
     ctx.fillStyle = "#e6f4ff";
     splashes.forEach(function (s) { ctx.globalAlpha = Math.min(1, s.t * 2); ctx.beginPath(); ctx.arc(s.x, s.y, 5, 0, 7); ctx.fill(); });
     ctx.globalAlpha = 1;
