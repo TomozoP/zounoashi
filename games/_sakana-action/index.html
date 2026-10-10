@@ -196,8 +196,8 @@
     }
     links = [];
     for (i = 0; i < N - 1; i++) links.push({ a: i, b: i + 1, len: SEG, k: 1 });
-    for (i = 0; i < N - 2; i++) links.push({ a: i, b: i + 2, len: SEG * 2 * 0.985, k: 0.22 });
-    for (i = 0; i < N - 3; i++) links.push({ a: i, b: i + 3, len: SEG * 3 * 0.97, k: 0.08 });
+    for (i = 0; i < N - 2; i++) links.push({ a: i, b: i + 2, len: SEG * 2 * 0.985, k: 0.32 });
+    for (i = 0; i < N - 3; i++) links.push({ a: i, b: i + 3, len: SEG * 3 * 0.97, k: 0.14 });
   }
 
   /* ============ 状態 ============ */
@@ -242,14 +242,16 @@
     var vx = v.ux * sp, vy = v.uy * sp;
     /* 横に大きく跳んで仕掛けを飛ばさないよう、横の速さには上限を付ける（高さは変えない） */
     vx = Math.max(-300, Math.min(300, vx));
-    /* 跳ぶ向きに頭を向け、尾を強く振ってくねらせる */
+    /* 体を弓なりにひと振りする：頭と尾を同じ側へ、胴を反対側へ（S字にならないように） */
     var head = F[0], tail = F[N - 1];
-    var face = Math.sign(vx || (head.x - tail.x)) || 1;
+    var ax = tail.x - head.x, ay = tail.y - head.y, al = Math.hypot(ax, ay) || 1;
+    var nx = -ay / al, ny = ax / al;
+    if (nx * vx + ny * vy < 0) { nx = -nx; ny = -ny; }   /* 跳ぶ向きの側へ反らす */
     var dt = 1 / 60;
     for (var i = 0; i < N; i++) {
       var p = F[i], t = i / (N - 1);
-      var spin = (t - 0.5) * 2;                /* 頭と尾で少し差をつけて回す */
-      var bx = vx, by = vy + spin * -120 * face * (vx >= 0 ? 1 : -1);
+      var c = 4 * (t - 0.5) * (t - 0.5) - 0.34;          /* 両端は +、まんなかは − */
+      var bx = vx - nx * c * 260, by = vy - ny * c * 260;
       p.px = p.x - bx * dt;
       p.py = p.y - by * dt;
     }
@@ -348,7 +350,7 @@
       for (var s = 0; s < links.length; s++) {
         var k = links[s], a = F[k.a], b = F[k.b];
         var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.001;
-        var len = k.len * (k.k < 1 ? 1 - bend * 0.12 * (k.k > 0.1 ? 1 : 1.6) : 1);
+        var len = k.len;
         var diff = (d - len) / d * 0.5 * k.k;
         a.x += dx * diff; a.y += dy * diff;
         b.x -= dx * diff; b.y -= dy * diff;
@@ -572,35 +574,64 @@
     }
   }
 
-  /* アジの絵（持ち主が用意した生成画像）を、背骨の曲がりに合わせて短冊に切って貼る。
-     絵の中の目印: 鼻先 x=798、尾の付け根 x=150、背骨の高さ y=205（幅800の絵） */
+  /* アジの絵（持ち主が用意した生成画像）を、背骨に沿った三角形の網に貼って曲げる。
+     絵の中の目印: 鼻先 x=798、尾の付け根 x=150、背骨の高さ y=205（幅800・高さ401の絵） */
   var AJI = new Image();
   AJI.src = "img/aji.webp";
-  var NOSE_X = 798, BASE_X = 150, SPINE_Y = 205;
+  var NOSE_X = 798, BASE_X = 150, SPINE_Y = 205, IMG_H = 401;
+  var ROWS = [0, 110, SPINE_Y, 300, IMG_H];
   function drawFishImage() {
     if (!AJI.complete || !AJI.naturalWidth) return false;
     var k = AJI.naturalWidth / 800;
     var s = (SEG * (N - 1)) / (NOSE_X - BASE_X);             /* 絵1pxあたりの長さ */
     function unit(ax, ay, bx, by) { var d = Math.hypot(bx - ax, by - ay) || 1; return [(bx - ax) / d, (by - ay) / d]; }
     var t0 = unit(F[0].x, F[0].y, F[1].x, F[1].y), t6 = unit(F[N - 2].x, F[N - 2].y, F[N - 1].x, F[N - 1].y);
-    var noseLen = 13, tailLen = BASE_X * s;
-    var pts = [[F[0].x - t0[0] * noseLen, F[0].y - t0[1] * noseLen]], us = [0];
-    for (var i = 0; i < N; i++) { pts.push([F[i].x, F[i].y]); us.push(noseLen + i * SEG); }
-    pts.push([F[N - 1].x + t6[0] * tailLen, F[N - 1].y + t6[1] * tailLen]); us.push(noseLen + (N - 1) * SEG + tailLen);
-    for (i = 0; i < pts.length - 1; i++) {
-      var A = pts[i], B = pts[i + 1];
-      var T2 = unit(A[0], A[1], B[0], B[1]), Nn = [-T2[1], T2[0]];
-      var xA = NOSE_X - us[i] / s;                             /* 鼻先が u=0 */
-      var xB = NOSE_X - us[i + 1] / s;
-      var len = Math.hypot(B[0] - A[0], B[1] - A[1]), sx = len / (xA - xB);
-      ctx.save();
-      ctx.transform(-T2[0] * sx, -T2[1] * sx, -Nn[0] * s, -Nn[1] * s,
-        A[0] + T2[0] * xA * sx + Nn[0] * SPINE_Y * s, A[1] + T2[1] * xA * sx + Nn[1] * SPINE_Y * s);
-      var x0 = Math.max(0, xB - 0.8), x1 = Math.min(800, xA + 0.8);
-      ctx.drawImage(AJI, x0 * k, 0, (x1 - x0) * k, AJI.naturalHeight, x0, 0, x1 - x0, AJI.naturalHeight / k);
-      ctx.restore();
+    var noseLen = (800 - NOSE_X) * s + 13, tailLen = BASE_X * s;
+    var P = [[F[0].x - t0[0] * 13, F[0].y - t0[1] * 13]], U = [0];
+    for (var i = 0; i < N; i++) { P.push([F[i].x, F[i].y]); U.push(13 + i * SEG); }
+    P.push([F[N - 1].x + t6[0] * tailLen, F[N - 1].y + t6[1] * tailLen]); U.push(13 + (N - 1) * SEG + tailLen);
+    void noseLen;
+    /* なめらかな曲線にするため、点のあいだを3つに分ける（カトマル・ロム） */
+    var Q = [], V = [];
+    for (i = 0; i < P.length - 1; i++) {
+      var p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(P.length - 1, i + 2)];
+      for (var q = 0; q < 3; q++) {
+        var t = q / 3, t2 = t * t, t3 = t2 * t;
+        Q.push([0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+                0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)]);
+        V.push(U[i] + (U[i + 1] - U[i]) * t);
+      }
+    }
+    Q.push(P[P.length - 1]); V.push(U[U.length - 1]);
+    /* 網の頂点：列ごとに背骨から法線の向きへずらす */
+    var M = [];
+    for (i = 0; i < Q.length; i++) {
+      var a = Q[Math.max(0, i - 1)], b = Q[Math.min(Q.length - 1, i + 1)], tg = unit(a[0], a[1], b[0], b[1]);
+      var nx = -tg[1], ny = tg[0], ix = NOSE_X - V[i] / s;
+      M.push(ROWS.map(function (y) { var o = (SPINE_Y - y) * s; return { x: Q[i][0] + nx * o, y: Q[i][1] + ny * o, u: ix, v: y }; }));
+    }
+    for (i = 0; i < M.length - 1; i++) for (var r = 0; r < ROWS.length - 1; r++) {
+      var A = M[i][r], B = M[i + 1][r], C = M[i + 1][r + 1], D = M[i][r + 1];
+      tri(A, B, C, k); tri(A, C, D, k);
     }
     return true;
+  }
+  /* 絵の三角形 (u,v) を画面の三角形 (x,y) へ貼る。継ぎ目が出ないよう少し広げて切り抜く */
+  function tri(a, b, c, k) {
+    var cx = (a.x + b.x + c.x) / 3, cy = (a.y + b.y + c.y) / 3;
+    function grow(p) { var dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy) || 1; return [p.x + dx / d * 0.7, p.y + dy / d * 0.7]; }
+    var ga = grow(a), gb = grow(b), gc = grow(c);
+    var du1 = b.u - a.u, dv1 = b.v - a.v, du2 = c.u - a.u, dv2 = c.v - a.v;
+    var det = du1 * dv2 - du2 * dv1;
+    if (Math.abs(det) < 1e-6) return;
+    var dx1 = b.x - a.x, dy1 = b.y - a.y, dx2 = c.x - a.x, dy2 = c.y - a.y;
+    var m11 = (dx1 * dv2 - dx2 * dv1) / det, m12 = (dy1 * dv2 - dy2 * dv1) / det;
+    var m21 = (dx2 * du1 - dx1 * du2) / det, m22 = (dy2 * du1 - dy1 * du2) / det;
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(ga[0], ga[1]); ctx.lineTo(gb[0], gb[1]); ctx.lineTo(gc[0], gc[1]); ctx.closePath(); ctx.clip();
+    ctx.transform(m11, m12, m21, m22, a.x - m11 * a.u - m21 * a.v, a.y - m12 * a.u - m22 * a.v);
+    ctx.drawImage(AJI, 0, 0, AJI.naturalWidth, AJI.naturalHeight, 0, 0, AJI.naturalWidth / k, AJI.naturalHeight / k);
+    ctx.restore();
   }
 
   /* アジ。背は青みがかった灰色、腹は銀、ひれは黄みがかった半透明、側線にぜいご、大きな目 */
