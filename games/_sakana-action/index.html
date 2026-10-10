@@ -106,6 +106,7 @@
   function sSplash() { noiseHit(0.5, 900, 0.5, 0.6); noiseHit(0.3, 2600, 0.25, 1, 0.05); [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.22, 0.12, "triangle", null, 0.25 + i * 0.11); }); }
   function sSplashSmall() { noiseHit(0.25, 1100, 0.25, 0.8); }
   function sFall() { tone(500, 0.5, 0.1, "sine", 120); }
+  function sBird() { tone(1300, 0.09, 0.08, "sawtooth", 900); tone(1250, 0.12, 0.07, "sawtooth", 800, 0.13); }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -208,6 +209,7 @@
   var wasWet = false, swimT = 0;
   var restT, flopT, onGround, safe, bend, splashes, lastPullStep;
   var keyCharge = -1, keyDir = 1;
+  var bird = null;                             /* 高く跳びすぎたときにさらいに来る鳥 */
 
   function newRound() {
     shareButton.hidden = true;
@@ -218,7 +220,7 @@
     fishAt(startX, startY, 1);
     safe = { x: startX, y: startY };
     restT = 0; flopT = 0.8; onGround = false; bend = 0; splashes = [];
-    drag = null; keyCharge = -1;
+    drag = null; keyCharge = -1; bird = null;
     camX = startX - W / Z * 0.4; camY = startY - H / Z * 0.55;
   }
 
@@ -234,7 +236,7 @@
     var p = Math.min(1, L / PULL_MAX);
     return { p: p, ux: dx / L, uy: dy / L };
   }
-  function canJump() { return state === S.PLAY && onGround; }
+  function canJump() { return state === S.PLAY && onGround && !bird; }
   function launch() {
     var v = pullVec();
     if (!v || v.p < 0.06 || !canJump()) return;
@@ -279,7 +281,13 @@
       if (st !== lastPullStep) { lastPullStep = st; sPull(v.p); }
     } else lastPullStep = -1;
 
+    if (bird) { updateBird(dt); return; }
     stepFish(dt);
+    if (state === S.PLAY && tooHigh()) {
+      var c0 = center();
+      bird = { t: 0, x: c0.x + 260, y: c0.y - 320, fx: c0.x, fy: c0.y };
+      drag = null; keyCharge = -1; sBird();
+    }
 
     /* 地面でじっとしているとき、ときどきぴちぴち跳ねる */
     if (onGround && state === S.PLAY && !drag && keyCharge < 0) {
@@ -314,6 +322,66 @@
     var tx = cx.x - vw * 0.4, ty = cx.y - vh * 0.55;
     camX += (tx - camX) * Math.min(1, dt * 7);
     camY += (ty - camY) * Math.min(1, dt * 7);
+  }
+  /* 高く跳びすぎたか：近くのいちばん高い足場（と最後に止まった場所）から3.6マスより上 */
+  var TOO_HIGH = 3.6 * T;
+  function tooHigh() {
+    var c = center(), base = safe.y, i;
+    for (i = -3; i <= 3; i++) base = Math.min(base, groundY(c.x + i * T));
+    plats.forEach(function (q) { if (c.x > q.x - 3 * T && c.x < q.x + q.w + 3 * T) base = Math.min(base, q.y); });
+    fans.forEach(function (fz) { if (c.x > fz.x0 - 2 * T && c.x < fz.x1 + 2 * T) base = Math.min(base, fz.y0); });
+    return c.y < base - TOO_HIGH;
+  }
+  /* 鳥が来て魚をつかみ、空へ運んで、最後に止まった場所へ戻す */
+  function updateBird(dt) {
+    var b = bird, c = center(), i;
+    b.t += dt;
+    if (b.t < 0.35) {
+      /* 魚はその場で止まり、鳥が飛んでくる */
+      var k = b.t / 0.35;
+      b.x += (c.x + 10 - b.x) * Math.min(1, k * 0.9 + dt * 8);
+      b.y += (c.y - 46 - b.y) * Math.min(1, k * 0.9 + dt * 8);
+      for (i = 0; i < N; i++) { F[i].px = F[i].x; F[i].py = F[i].y; }
+    } else {
+      /* つかんで右上へ連れ去る */
+      var mx = 260 * dt, my = -420 * dt;
+      b.x += mx; b.y += my;
+      for (i = 0; i < N; i++) { F[i].x += mx; F[i].y += my; F[i].px = F[i].x; F[i].py = F[i].y; }
+      /* 体を吊られた形にゆらす */
+      var hx = b.x - 10, hy = b.y + 46;
+      for (i = 0; i < N; i++) {
+        var tx = hx + (i - 3.5) * SEG * 0.95 * Math.cos(Math.sin(b.t * 9) * 0.25), ty = hy + Math.sin(b.t * 9 + i * 0.5) * 4;
+        F[i].x += (tx - F[i].x) * 0.3; F[i].y += (ty - F[i].y) * 0.3; F[i].px = F[i].x; F[i].py = F[i].y;
+      }
+    }
+    if (b.t > 1.5) {
+      bird = null;
+      fishAt(safe.x, safe.y, 1);
+      restT = 0; onGround = false;
+      var s = center(); camX = s.x - W / Z * 0.4; camY = s.y - H / Z * 0.55;
+    }
+  }
+  function drawBird() {
+    if (!bird) return;
+    var b = bird, fl = Math.sin(b.t * 26);
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.scale(1.8, 1.8);
+    ctx.fillStyle = "#3b3530"; ctx.strokeStyle = "#3b3530"; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    /* 翼 */
+    ctx.beginPath(); ctx.moveTo(-14, -4); ctx.quadraticCurveTo(-40, -30 * fl - 10, -78, -44 * fl); ctx.quadraticCurveTo(-46, -8 * fl + 4, -10, 8); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(14, -4); ctx.quadraticCurveTo(40, -30 * fl - 10, 78, -44 * fl); ctx.quadraticCurveTo(46, -8 * fl + 4, 10, 8); ctx.fill();
+    /* 胴と頭 */
+    ctx.beginPath(); ctx.ellipse(0, 2, 24, 15, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(22, -8, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#f2c14e"; ctx.beginPath(); ctx.moveTo(30, -12); ctx.lineTo(44, -6); ctx.lineTo(30, -3); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(25, -10, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(26, -10, 1.5, 0, Math.PI * 2); ctx.fill();
+    /* 尾と足 */
+    ctx.fillStyle = "#3b3530"; ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(-40, -4); ctx.lineTo(-38, 10); ctx.fill();
+    ctx.strokeStyle = "#f2c14e"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-6, 14); ctx.lineTo(-10, 24); ctx.moveTo(6, 14); ctx.lineTo(4, 24); ctx.stroke();
+    ctx.restore();
   }
   function center() {
     var x = 0, y = 0;
@@ -451,6 +519,7 @@
     if (n === 1) warp(seaX - 4 * T);                   /* 海の手前へ */
     if (n === 4) warp(fans[0].x0 - 5 * T);               /* 送風機の手前へ */
     if (n === 5) warp(plats[0].bx - 6 * T);              /* 動く足場の手前へ */
+    if (n === 6) { var c6 = center(); for (var i6 = 0; i6 < N; i6++) F[i6].py = F[i6].y + 16; }   /* 真上に強く跳ばす（鳥） */
     if (n === 3) { state = S.GOAL; endT = 0; sSplash(); }   /* ゴール */
   }
 
@@ -769,6 +838,7 @@
     ctx.translate(-camX, -camY);
     drawWorld();
     if (state !== S.GOAL && state !== S.RESULT || endT < 0.15) (drawFishImage() || drawFish());
+    drawBird();
     ctx.fillStyle = "#e6f4ff";
     splashes.forEach(function (s) { ctx.globalAlpha = Math.min(1, s.t * 2); ctx.beginPath(); ctx.arc(s.x, s.y, 5, 0, 7); ctx.fill(); });
     ctx.globalAlpha = 1;
@@ -833,7 +903,7 @@
   window.__probe = {
     now: function () {
       var c = center();
-      return { state: state, jumps: jumps, x: c.x, y: c.y, ground: onGround, seaX: seaX, W: W, H: H, pools: pools, fans: fans, plats: plats };
+      return { state: state, jumps: jumps, x: c.x, y: c.y, ground: onGround, bird: !!bird, seaX: seaX, W: W, H: H, pools: pools, fans: fans, plats: plats };
     },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
