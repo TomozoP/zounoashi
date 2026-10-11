@@ -238,7 +238,7 @@
     fishAt(startX, startY, 1);
     safe = { x: startX, y: startY }; cp = -1;
     restT = 0; flopT = 0.8; onGround = false; bend = 0; splashes = [];
-    drag = null; keyCharge = -1;
+    drag = null; keyCharge = -1; groundT = 0; pending = null; jumpLock = 0;
     camX = startX - W / Z * 0.4; camY = startY - H / Z * 0.55;
     bird = { mode: "away", side: 1, wait: 3, t: 0, x: 0, y: 0, face: -1 };
   }
@@ -255,10 +255,15 @@
     var p = Math.min(1, L / PULL_MAX);
     return { p: p, ux: dx / L, uy: dy / L };
   }
-  function canJump() { return state === S.PLAY && onGround && bird.mode !== "carry"; }
-  function launch() {
-    var v = pullVec();
-    if (!v || v.p < 0.06 || !canJump()) return;
+  /* 着地が一瞬切れても跳べるように、最後に着地していた時から少しの間は跳べる。
+     空中で離したときは、少しの間だけ覚えておいて着地した瞬間に跳ぶ */
+  var GRACE = 0.2, groundT = 0, pending = null, pendT = 0, jumpLock = 0;
+  function canJump() { return state === S.PLAY && groundT > 0 && bird.mode !== "carry"; }
+  function launch(given) {
+    var v = given || pullVec();
+    if (!v || v.p < 0.06) return;
+    if (!canJump()) { if (state === S.PLAY) { pending = v; pendT = 0.25; } return; }
+    pending = null; groundT = 0; jumpLock = 0.15;
     var sp = 200 + 720 * v.p;
     var vx = v.ux * sp, vy = v.uy * sp;
     /* 横に大きく跳んで仕掛けを飛ばさないよう、横の速さには上限を付ける（高さは変えない） */
@@ -492,6 +497,10 @@
     }
     var was = onGround;
     onGround = (touching >= 1 || wet >= 3) && speed < 900;
+    jumpLock = Math.max(0, jumpLock - dt);
+    if (jumpLock > 0) onGround = false;          /* 跳んだ直後に足が地面に残っても二段跳びにしない */
+    groundT = onGround ? GRACE : Math.max(0, groundT - dt);
+    if (pending) { pendT -= dt; if (pendT <= 0) pending = null; else if (canJump()) launch(pending); }
     if (touching && !was && speed > 150) sSlap(speed);
     if (wet && !wasWet && speed > 200) sSplashSmall();
     wasWet = wet > 0;
@@ -997,6 +1006,7 @@
     /* 画面座標で引っぱって離す */
     fling: function (dx, dy) { drag = { id: -1, x0: 270, y0: 500, x: 270 - dx, y: 500 - dy }; launch(); drag = null; },
     aim: function (dx, dy) { drag = dx == null ? null : { id: -1, x0: 270, y0: 500, x: 270 - dx, y: 500 - dy }; },
+    put: function (x, y, d) { fishAt(x, y, d || 1); },
     debug: debugKey
   };
 
