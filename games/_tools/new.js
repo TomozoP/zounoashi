@@ -1,6 +1,7 @@
 /* あたらしいゲームの置き場所を作る。
 
      node games/_tools/new.js hoge "ほげゲーム" "ひとこと説明"
+     node games/_tools/new.js hoge "ほげゲーム" "ひとこと説明" --3d   立体（three.js）で描く
 
    やること
      1. games/_template を games/_hoge に写して、題名を入れる
@@ -10,9 +11,11 @@
 var fs = require("fs");
 var path = require("path");
 
-var id = process.argv[2];
-var title = process.argv[3];
-var note = process.argv[4] || "";
+var three = process.argv.includes("--3d");
+var args = process.argv.slice(2).filter(function (a) { return a !== "--3d"; });
+var id = args[0];
+var title = args[1];
+var note = args[2] || "";
 if (!id || !title) {
   console.log('使い方: node games/_tools/new.js <id> "<題名>" "<ひとこと>"');
   console.log('  id は半角小文字の英数字・ハイフン（URLとプレイ数の集計に使う）');
@@ -36,7 +39,29 @@ var tpl = fs.readFileSync(path.join(root, "games", "_template", "index.html"), "
 var htmlTitle = title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 var safeTitle = JSON.stringify(title).slice(1, -1).replace(/</g, "\\u003c");
 tpl = tpl.replace("<title>__TITLE__</title>", () => "<title>" + htmlTitle + "</title>").replace("/* __TITLE__", () => "/* " + title.replace(/\*\//g, "＊／").replace(/</g, "＜"));
-fs.writeFileSync(path.join(dir, "index.html"), tpl.split("__TITLE__").join(safeTitle));
+tpl = tpl.split("__TITLE__").join(safeTitle);
+/* 立体で描くとき：three.js と共通の土台（games/three-base.js）と、場面の見本（scene3d.js）を足す */
+if (three) {
+  var pad = '<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->\n';
+  var drawHead = '    /* ▼DRAW: ここに絵 */\n    ctx.fillStyle = "#1d1714";\n    ctx.fillRect(0, 0, W, H);\n';
+  if (tpl.indexOf(pad) < 0 || tpl.indexOf(drawHead) < 0 || tpl.indexOf("  function draw() {") < 0) { console.log("雛形の形が変わっていて、立体の準備を入れられません"); process.exit(1); }
+  tpl = tpl.replace(pad, function () {
+    return pad + '<script src="../random-bowling/vendor/three.min.js"></script>\n<script src="../three-base.js"></script>\n<script src="scene3d.js"></script>\n';
+  });
+  tpl = tpl.replace("  function draw() {", function () {
+    return "  /* 立体の場面。three.js が使えないときは平面の絵のまま */\n" +
+      "  var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene(); }) : function () { return null; };\n\n" +
+      "  function draw() {";
+  });
+  tpl = tpl.replace(drawHead, function () {
+    return '    /* ▼DRAW: ここに絵。立体の上に、文字やボタンを2Dで描く */\n' +
+      '    var s3 = scene3d(), drew = false;\n' +
+      '    if (s3) { try { s3.sync({ t: T || 0, state: state }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }\n' +
+      '    if (!drew) { ctx.fillStyle = "#1d1714"; ctx.fillRect(0, 0, W, H); }\n';
+  });
+  fs.copyFileSync(path.join(root, "games", "_template", "scene3d.js"), path.join(dir, "scene3d.js"));
+}
+fs.writeFileSync(path.join(dir, "index.html"), tpl);
 
 /* 一覧用の1行を games/_local.js に足す */
 var localPath = path.join(root, "games", "_local.js");
@@ -61,6 +86,7 @@ fs.writeFileSync(localPath, body + "\n" + entry + "];\n");
 
 console.log("できました:");
 console.log("  games/_" + id + "/index.html   ← ここを書く（▼UPDATE ▼DRAW ▼SHARE）");
+if (three) console.log("  games/_" + id + "/scene3d.js    ← 立体の見た目（▼3D）。土台は games/three-base.js");
 console.log("  games/_local.js               ← 一覧に足しました");
 console.log("");
 console.log("次にやること:");

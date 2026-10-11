@@ -9,7 +9,14 @@
 
 ```bash
 node games/_tools/new.js hoge "ほげゲーム" "ひとこと説明"
+node games/_tools/new.js hoge "ほげゲーム" "ひとこと説明" --3d   # 立体（three.js）で描くとき
 ```
+
+`--3d` を付けると、three.js と共通の土台 `games/three-base.js`（`window.Z3`）を読み込み、
+場面の見本 `scene3d.js`（床と箱）を写して、`▼DRAW` で立体を描いてから2Dの文字やボタンを重ねる形になります。
+土台がやること：画面外で描いて canvas に写す（録画・画像保存にも入る）、スマホは描く細かさを下げる、
+開いた直後の失敗で平面に落ちないよう作り直す（`Z3.lazy`）、明かり・材質・2Dの絵の貼り物・仕上げ（コントラスト・周辺を暗く・粒子）。
+床などの大きい板はカメラの後ろまで伸ばさないこと（クラウドの確認用ブラウザの描画では、手前の物が板に隠れて写る）。
 
 これで `games/_hoge/index.html` ができて、**手元の実験場タブにすぐカードが出ます**
 （`_` で始まるフォルダは GitHub Pages が配信しないので、公開サイトには出ません）。
@@ -32,7 +39,30 @@ node games/_tools/check.js hoge                   # 共通・専用の確認と�
 git add -A && git commit && git push origin main    # 制作中の確認用。追加の承認は不要
 ```
 
-完成して正式公開の指示を受けたら、
+Claude のクラウドから作るときは、確認用ページ（Claude の非公開ページ）で遊んでもらいます。
+一式を集めるのは1コマンドです。
+
+```bash
+node games/_tools/artifact.js hoge   # games/_tools/_bin/artifact/hoge/ に一式。Artifact に渡す file_path と files を表示
+```
+
+共通の部品・3Dの部品・絵を参照からたどって集め、`../start.js` などは `shared/` に書き換え、
+すべての参照に同じ版の `?v=` を付けます（部品の入れ忘れと古い版の残りを防ぐ）。原本は書き換えません。
+2回目からは同じページの場所で上書きすれば、同じリンクのまま更新されます。
+
+完成して正式公開の指示を受けたら、まとめて1回でできます。
+
+```bash
+node games/_tools/release.js hoge --check           # 何が変わるかを見るだけ
+node games/_tools/release.js hoge                   # サムネ → 公開の形 → 固定リンク（Cake Cut）の差し替え
+git add -A && git commit && git push origin main    # 新しいゲームの公開は承認を受けてから
+node games/_tools/verify-deploy.js hoge             # 配信がコミットと一致するか
+```
+
+`release.js` は、サムネがなければ `thumb.js` で撮り（撮ったサムネは自作の撮影として素材の記録に足す）、
+`publish.js`、`preview-link.js` の順に実行します。素材や表現の確認が未記録なら `publish.js` で止まります。
+サムネを撮り直したいとき・切り取り位置を変えたいときは、先に `thumb.js` を単独で使います。
+1つずつ実行するときの順番は次のとおりです。
 
 ```bash
 node games/_tools/thumb.js hoge                     # サムネを画面から作る
@@ -125,6 +155,9 @@ SVGのサムネは事前に `node games/_tools/img.js games/_hoge/img/thumb.svg 
 ## 制作中の固定リンク
 
 **通常はローカルプレビューを使います。以下は外部確認用の固定リンクが必要な場合の手順です。**
+
+差し替えは `node games/_tools/preview-link.js <id>` で1回です（下の1〜4をまとめて行い、取り違え防止の表示が入ったかも確かめます）。
+OGPの位置に左右されず、録画パネルの読み込み・`recorder-ui.js` の写し・版の番号もそろえます。
 制作・修正を頼まれたら、このページへの反映まで行います。毎回の公開確認は不要です。
 一覧には載せず、ゲームが変わっても同じリンクを使います。
 
@@ -421,11 +454,15 @@ node games/_tools/img.js 拾った絵/ -o games/_hoge/img -w 1080   # 横1080ま
 | `new.js` | 雛形を写して、手元の一覧に登録する |
 | `smoke.js` | 落ちないかの共通確認（読み込み・30秒・画面6通り・でたらめ操作・やり直し） |
 | `harness.js` | 偽DOMの台。ゲームごとのテストはこれを使って書く |
-| `thumb.js` | 動いている画面からサムネ（600x600 webp）を作る |
+| `thumb.js` | 動いている画面からサムネ（600x600 webp）を作る。クラウドでは /opt/pw-browsers/chromium を使う |
 | `record.js` | ゲームを自動運転し、手元用の縦動画を撮る |
 | `img.js` | 素材の png/jpg を webp にする（縮小もできる） |
 | `browser-stop.js` | 裏で借りたブラウザを残さず止め、一時フォルダも消す（`thumb.js` `img.js` `record.js` が使う） |
 | `publish.js` | `_` を外して `GAMES` に入れる（commit と push はしない） |
+| `preview-link.js` | 制作中の固定リンク（Cake Cut が中に開くページ）を指定のゲームに差し替える |
+| `release.js` | 正式公開を1回で：サムネ（なければ）→ `publish.js` → `preview-link.js`（commit と push はしない） |
+| `artifact.js` | Claude の確認用ページに載せる一式を1つのフォルダに集める |
+| `refs.js` | 手元のファイルへの参照を拾って書き換える（`artifact.js` `preview-link.js` が使う） |
 | `tests/` | ゲームごとのテスト。`wanko-*.js` が書き方の見本、`pad.js` は全ゲーム共通の確認 |
 
 `smoke.js` は `window.__probe` があるとより詳しく見ます。雛形には入っています。

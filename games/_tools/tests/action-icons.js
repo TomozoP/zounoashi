@@ -35,8 +35,8 @@ var server=http.createServer(function(req,res){
 });
 function finish(code,message){clearTimeout(timer);if(child)child.kill();server.close();console.log(message);console.log(out);process.exit(code);}
 server.listen(0,'127.0.0.1',function(){
-  var exe=['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(fs.existsSync);
+  var exe=[process.env.CHROME||'','C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe','/opt/pw-browsers/chromium'].find(fs.existsSync);
   if(!exe)return finish(1,'ブラウザが見つからない');
-  child=cp.spawn(exe,['--headless=new','--no-first-run','--no-default-browser-check','--enable-unsafe-swiftshader','--window-size=540,1080','--user-data-dir='+path.join(out,'profile'),'http://127.0.0.1:'+server.address().port+'/games/_template/index.html'],{stdio:'ignore'});
+  child=cp.spawn(exe,['--headless=new',...(process.platform==='linux'?['--no-sandbox']:[]),'--no-first-run','--no-default-browser-check','--enable-unsafe-swiftshader','--window-size=540,1080','--user-data-dir='+path.join(out,'profile'),'http://127.0.0.1:'+server.address().port+'/games/_template/index.html'],{stdio:'ignore'});
   child.on('error',function(e){finish(1,e.message);});timer=setTimeout(function(){finish(1,'時間切れ');},90000);
 });

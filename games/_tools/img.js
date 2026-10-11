@@ -169,6 +169,8 @@ var server = http.createServer(function (req, res) {
 function browser() {
   var cands = [
     "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "/opt/pw-browsers/chromium",   // クラウドの作業環境
+    "/usr/bin/chromium", "/usr/bin/google-chrome",
     "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
     "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
     "C:/Program Files/Microsoft/Edge/Application/msedge.exe"
@@ -188,7 +190,8 @@ server.listen(0, "127.0.0.1", function () {
   }
   var profile = usedProfile = fs.mkdtempSync(path.join(os.tmpdir(), "zimg-"));
   child = cp.spawn(exe, [
-    "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+    "--headless=new", "--disable-gpu",
+    ...(process.platform === "linux" ? ["--no-sandbox"] : []),   /* クラウドの Linux（管理者で動く）ではこれがないと起動しない */ "--no-first-run", "--no-default-browser-check",
     "--user-data-dir=" + profile, url
   ], { stdio: "ignore" });
   child.on("error", function (e) {

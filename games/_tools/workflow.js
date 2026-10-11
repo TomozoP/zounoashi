@@ -22,7 +22,7 @@ function files(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? files(path.join(dir, e.name)) : [path.join(dir, e.name)]);
 }
 function resourceRefs(text) {
-  text = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '');
+  text = text.replace(/(^|[^\w/"'])\/\*[\s\S]*?\*\//g, '$1')   /* accept="image/*" をコメントの始まりと見ない */.replace(/<!--[\s\S]*?-->/g, '');
   const re = /(?:\b(?:src|poster)\s*=\s*["']([^"']+)["']|\bhref\s*=\s*["']([^"']+\.(?:css|ico)(?:\?[^"']*)?)["']|url\(\s*["']?([^\s)'";]+)["']?\s*\)|(?:\bimport\s*(?:[^;\n]*?\bfrom\s*)?|\bimportScripts\s*\()\s*["']([^"']+)["'])/g;
   return [...text.matchAll(re)].map(m => m[1] || m[2] || m[3] || m[4]);
 }

@@ -207,15 +207,14 @@ GitHub Pages（Jekyll）は `_` で始まるファイル・フォルダを配信
 くわしくは [games/README.md](games/README.md)。いちばん短い形は：
 
 ```bash
-node games/_tools/new.js hoge "ほげゲーム" "ひとこと説明"   # 雛形を写す
+node games/_tools/new.js hoge "ほげゲーム" "ひとこと説明"   # 雛形を写す（立体なら --3d）
 # index.html の ▼UPDATE ▼DRAW ▼SHARE を書く
 node games/_tools/img.js 素材/ -o games/_hoge/img -w 1080  # 絵を webp に
 node games/_tools/smoke.js games/_hoge/index.html          # 壊れていないか
 # ローカルHTTP配信の最新版を開いて確認する
 git add -A && git commit && git push origin main          # 変更を保存・反映
 # 以下は正式公開の指示を受けてから
-node games/_tools/thumb.js hoge                            # サムネ
-node games/_tools/publish.js hoge                          # 公開の形にする
+node games/_tools/release.js hoge                          # サムネ → 公開の形 → 固定リンク差し替え
 git add -A && git commit && git push origin main          # 正式公開
 ```
 
@@ -262,6 +261,9 @@ g.until(function () { return g.probe.now().state === "result"; });
 | `harness.js` | 偽DOMの台。ゲームごとのテストはこれで書く |
 | `thumb.js` | 動いている画面からサムネ（600x600 webp）を作る |
 | `publish.js` | `_` を外して `GAMES` に入れる（commit と push はしない） |
+| `release.js` | 正式公開を1回で（サムネ → `publish.js` → 固定リンクの差し替え） |
+| `preview-link.js` | 制作中の固定リンクを指定のゲームに差し替える |
+| `artifact.js` | Claude の確認用ページに載せる一式を集める |
 | `tests/` | ゲームごとのテスト |
 
 ### 要るもの
