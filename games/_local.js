@@ -215,6 +215,5 @@ window.DRAFT_GAMES = [
     "play": "games/_muriyari-seiza/index.html",
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
-  },
-  {"type":"lab","tags":[],"id":"sakana-action","title":"サカナアクション","year":2026,"date":"2026-10-11","plays":null,"url":"","img":"games/_sakana-action/img/thumb.webp","play":"games/_sakana-action/index.html","full":true,"catch":"魚を跳ねさせて右へ進む"},
+  }
 ];
