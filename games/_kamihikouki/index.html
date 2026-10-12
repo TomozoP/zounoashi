@@ -290,6 +290,7 @@
   var S = { INTRO: "intro", FOLD: "fold", MAKE: "make", AIM: "aim", FLY: "fly", LAND: "land", RESULT: "result" };
   var state, score, T, held, keyMode = false;
   var faces, folds, preview, grab, planeFaces, aero, morph, fl, landT, trail, swipe;
+  var orbit, spin;                             /* 着地後のカメラ：機体のまわりを回す角度。spin は指で回した後 false */
 
   var FS, PCY;                                 /* 折る画面：紙1あたりの画素と、紙の中心の高さ */
   function place() {
@@ -306,6 +307,7 @@
     score = 0; T = 0; held = false;
     faces = sheet(); folds = 0; preview = null; grab = null;
     planeFaces = null; aero = null; morph = 0; fl = null; landT = 0; trail = []; swipe = null;
+    orbit = { yaw: 0.6, pitch: 0.42, at: null }; spin = true;
     windStop();
   }
 
@@ -325,6 +327,15 @@
     makePlane();
   }
 
+  /* 同じ機体で、投げる前に戻る */
+  function rethrow() {
+    shareButton.hidden = true;
+    state = S.AIM; T = 0; score = 0; held = false;
+    fl = null; landT = 0; trail = []; swipe = null;
+    orbit = { yaw: 0.6, pitch: 0.42, at: null }; spin = true;
+    windStop();
+  }
+
   function makePlane() {
     planeFaces = splitForPlane(faces);
     aero = measure(faces);
@@ -341,6 +352,7 @@
 
   /* ============ 進行 ============ */
   function update(dt) {
+    if ((state === S.LAND || state === S.RESULT) && spin) orbit.yaw += dt * 0.25;   /* 触るまではゆっくり回る */
     if (state === S.INTRO || state === S.RESULT) return;
     T += dt;
     if (state === S.MAKE) {
@@ -354,7 +366,8 @@
       windSet(fl.v);
       if ((trail.length === 0 || fl.t - trail[trail.length - 1].t > 0.05)) trail.push({ x: fl.x, y: fl.y, z: fl.z, t: fl.t });
       if (fl.y <= 0.02 || fl.t > 40) {
-        fl.y = Math.max(0.02, fl.y);
+        /* 地面に置く：機首を少し下げ、傾きを戻して胴の下を地面に付ける */
+        fl.y = 0.03; fl.gam = -0.06; fl.phi = 0;
         score = Math.round(Math.hypot(fl.x, fl.z) * 10) / 10;
         state = S.LAND; landT = 0;
         windStop(); landSound();
@@ -375,8 +388,10 @@
     if (state === S.INTRO) return;
     audioOn();
     if (state === S.RESULT) {
-      var hit = x == null ? "retry" : hitButton(x, y);
-      if (hit === "retry") newRound();
+      var hit = x == null ? "throw" : hitButton(x, y);
+      if (hit === "throw") { rethrow(); return; }
+      if (hit === "fold") { newRound(); return; }
+      if (!hit && x != null) { held = true; orbit.at = [x, y]; spin = false; }
       return;
     }
     if (x == null) {
@@ -396,6 +411,12 @@
   }
   function move(x, y) {
     if (!held) return;
+    if (state === S.RESULT && orbit.at) {
+      orbit.yaw -= (x - orbit.at[0]) * 0.012;
+      orbit.pitch = Math.max(0.08, Math.min(1.4, orbit.pitch + (y - orbit.at[1]) * 0.008));
+      orbit.at = [x, y];
+      return;
+    }
     if (state === S.FOLD && grab) {
       grab.at = toPaper(x, y);
       var d = Math.hypot(grab.at[0] - grab.p[0], grab.at[1] - grab.p[1]);
@@ -410,6 +431,7 @@
   function up() {
     if (!held) return;
     held = false;
+    if (orbit) orbit.at = null;
     if (state === S.FOLD && grab) {
       if (preview) {
         folds++;
@@ -515,12 +537,12 @@
   function view() {
     return {
       state: state, t: T || 0, W: W, H: H, fs: FS, pcy: PCY, mid: MID, keel: KEEL,
-      faces: preview || faces, planeFaces: planeFaces, morph: morph, half: half, fl: fl, trail: trail
+      faces: preview || faces, planeFaces: planeFaces, morph: morph, half: half, orbit: orbit, fl: fl, trail: trail
     };
   }
 
   function draw() {
-    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(shareButton, resultButtons()[2], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
 
     var s3 = scene3d(), drew = false;
@@ -572,11 +594,13 @@
   }
 
   function resultButtons() {
-    var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    /* 作り直す・もう一度投げる・Xでシェア を画面下に並べる */
+    var h = 54, gap = 12, w = 150;
+    var x0 = W / 2 - (w * 3 + gap * 2) / 2, y = H - h - Math.max(28, H * 0.05);
     return [
-      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
-      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+      { id: "fold", x: x0, y: y, w: w, h: h, label: "作り直す" },
+      { id: "throw", x: x0 + w + gap, y: y, w: w, h: h, label: "もう一度投げる" },
+      { id: "share", x: x0 + (w + gap) * 2, y: y, w: w, h: h, label: "Xでシェア" }
     ];
   }
   function hitButton(x, y) {
@@ -588,8 +612,6 @@
     return null;
   }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.55)";
-    ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.fillStyle = "#fff";
     ctx.shadowColor = "rgba(0,0,0,.6)";
@@ -601,9 +623,9 @@
     var uw = ctx.measureText("m").width;
     ctx.textAlign = "left";
     ctx.font = "800 108px sans-serif";
-    ctx.fillText(num, W / 2 - (nw + uw + 6) / 2, H * 0.45);
+    ctx.fillText(num, W / 2 - (nw + uw + 6) / 2, H * 0.17);
     ctx.font = "800 54px sans-serif";
-    ctx.fillText("m", W / 2 - (nw + uw + 6) / 2 + nw + 6, H * 0.45);
+    ctx.fillText("m", W / 2 - (nw + uw + 6) / 2 + nw + 6, H * 0.17);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();

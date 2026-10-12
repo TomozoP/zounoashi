@@ -206,11 +206,11 @@
         look.set(f.x + hx * 1.5, f.y, f.z + hz * 1.5);
         this.camPos.lerp(want, 0.12); this.camLook.lerp(look, 0.2);
       } else {
-        /* 着地したら横から引いて、飛んだ跡を見せる */
-        var d = Math.hypot(f.x, f.z), mx = f.x / 2, mz = f.z / 2;
-        want.set(mx + Math.min(9, 0.3 * d + 2.5), 0.45 * d + 3, mz + 0.4 * d + 3);
-        look.set(mx, 0.6, mz);
-        this.camPos.lerp(want, 0.05); this.camLook.lerp(look, 0.06);
+        /* 着地したら落ちた機体に寄り、まわりを回る（向きは指で変えられる） */
+        var o = s.orbit, R = 1.3, yaw = f.psi + o.yaw;
+        want.set(f.x + Math.sin(yaw) * Math.cos(o.pitch) * R, 0.03 + Math.sin(o.pitch) * R, f.z + Math.cos(yaw) * Math.cos(o.pitch) * R);
+        look.set(f.x, 0.04, f.z);
+        this.camPos.lerp(want, s.state === "land" ? 0.06 : 0.3); this.camLook.lerp(look, 0.15);
       }
       cam.position.copy(this.camPos); cam.up.set(0, 1, 0); cam.lookAt(this.camLook);
       var a = this.trail.geometry.attributes.position, n = Math.min(this.trailMax, s.trail.length);
