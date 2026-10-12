@@ -216,5 +216,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
   },
-  {"type":"lab","tags":[],"id":"konnyaku","title":"こんにゃく10等分","year":2026,"date":"2026-10-12","plays":null,"url":"","img":"games/_konnyaku/img/thumb.webp","play":"games/_konnyaku/index.html","full":true,"catch":"すべるこんにゃくを10等分する"},
+  {"type":"lab","tags":[],"id":"konnyaku","title":"こんにゃく8等分","year":2026,"date":"2026-10-12","plays":null,"url":"","img":"games/_konnyaku/img/thumb.webp","play":"games/_konnyaku/index.html","full":true,"catch":"すべるこんにゃくを8等分する"},
 ];
