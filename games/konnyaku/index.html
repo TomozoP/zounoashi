@@ -286,7 +286,12 @@
   var FRICTION = 0.9;   /* まな板の上の止まりにくさ（大きいほど早く止まる） */
 
   function update(dt) {
-    if (state === S.RESULT) { T += dt; return; }   /* 結果でもカメラを引くために時間だけ進める */
+    if (state === S.RESULT) {
+      var was = T - resultT;
+      T += dt;
+      if (was < BTN_AT && T - resultT >= BTN_AT) tone(990, 0.08, 0.06, "triangle");
+      return;
+    }   /* 結果でもカメラを引くために時間だけ進める */
     if (state !== S.PLAY) return;
     T += dt;
 
@@ -329,7 +334,10 @@
 
   }
 
-  var FREEZE_SHOW = 0.15;  /* 並べ終わって（カメラを引き終わって）から評価を出すまで（秒） */
+  var FREEZE_SHOW = 0.35;  /* 並べ終わって（カメラを引き終わって）から評価を出すまで（秒） */
+  /* 結果の出る順：評価（finish の瞬間）→ ボタン（finish からの秒） */
+  var BTN_AT = 0.7;
+  function resultAge() { return state === S.RESULT ? T - resultT : -1; }
   function freeze() {
     endT = T;
     held = false; knife = null; trail = [];
@@ -473,7 +481,7 @@
     if (state === S.INTRO) return;
     audioOn();
     if (state === S.RESULT) {
-      if (zoomK() < 1) return;
+      if (resultAge() < BTN_AT) return;
       var hit = x == null ? (canNext() ? "next" : "retry") : hitButton(x, y);
       if (hit === "next") { stage++; newRound(); }
       if (hit === "retry") { stage = 0; newRound(); }
@@ -821,7 +829,7 @@
     if (arranged() || state === S.RESULT) drawPercents(s3);
     measureBoard(s3);
     if (state === S.RESULT) drawResult();
-    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT && zoomK() >= 1);
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, resultAge() >= BTN_AT);
   }
   /* 今の目標（何等分か） */
   function drawGoal() {
@@ -866,20 +874,29 @@
     return null;
   }
   function drawResult() {
-    if (zoomK() < 1) return;
+    var age = resultAge();
     ctx.save();
     ctx.fillStyle = "#fff";
     ctx.shadowColor = "rgba(0,0,0,.6)";
     ctx.shadowBlur = 10;
     ctx.textAlign = "center";
-    var by = Math.max(150, boardTop - 18);
-    ctx.font = "800 40px sans-serif";
-    ctx.fillText(zT("誤差 ", "Error ") + errText(), W / 2, by);
+    var by = Math.max(120, boardTop - 30);
+    /* 評価：大きめから縮んで止まる */
+    var k = Math.min(1, age / 0.22);
+    ctx.save();
+    ctx.globalAlpha = k;
+    ctx.translate(W / 2, by - 34);
+    var sc = 1 + 0.5 * (1 - k) * (1 - k);
+    ctx.scale(sc, sc);
     ctx.font = "800 96px sans-serif";
-    ctx.fillText(rankName(), W / 2, by - 56);
+    ctx.fillText(rankName(), 0, 34);
     ctx.restore();
+    ctx.restore();
+    if (age < BTN_AT) return;
+    var bk = Math.min(1, (age - BTN_AT) / 0.2);
     resultButtons().forEach(function (b) {
       ctx.save();
+      ctx.globalAlpha = bk;
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
       roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
       ctx.fillStyle = "#fff"; ctx.fill();
