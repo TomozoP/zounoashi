@@ -13,9 +13,9 @@
     T = global.THREE;
     this.KW = o.KW; this.KH = o.KH; this.specks = o.specks;
     var st = this.stage = new Z3.Stage({
-      renderer: { shadows: true, tone: "aces", exposure: 1.05 },
+      renderer: { shadows: true, tone: "aces", exposure: 0.85 },
       camera: { fov: 30, near: 1, far: 60 },
-      finish: Z3.mobile ? null : { contrast: 0.12, vignette: 0.3, grain: 0.02 }
+      finish: null   /* 仕上げ（半精度の描き先）はつやの強い光があふれて黒い筋になるので使わない */
     });
     this.scene = st.scene; this.camera = st.camera;
     this.scene.background = new T.Color(0x1d1a18);
@@ -49,7 +49,7 @@
     panel(1.2, 6, -4, 6.8, 2, Math.PI / 2, 0, 0xffffff);
     var pm = new T.PMREMGenerator(this.stage.renderer);
     this.scene.environment = pm.fromScene(es, 0.03).texture;
-    this.scene.environmentIntensity = 1.0;
+    this.scene.environmentIntensity = 0.7;
     pm.dispose();
   };
 
@@ -60,19 +60,19 @@
     var w = KW * PX, h = KH * PX;
     /* 細かいつぶ（ひじき）。色と、でこぼこの両方で同じ場所を使う */
     var dots = [];
-    for (var i = 0; i < 2600; i++) dots.push({ x: r() * w, y: r() * h, r: 0.7 + Math.pow(r(), 3) * 2.4, a: 0.45 + r() * 0.5 });
+    for (var i = 0; i < 4200; i++) dots.push({ x: r() * w, y: r() * h, r: 0.6 + Math.pow(r(), 3) * 2.2, a: 0.55 + r() * 0.45 });
     /* 色：灰色がかった薄茶のむら＋小さな黒茶のつぶ（写真のこんにゃくに寄せる） */
     var col = Z3.canvasTex(w, h, function (g) {
-      g.fillStyle = "#9a8a77"; g.fillRect(0, 0, w, h);
+      g.fillStyle = "#7a6a6c"; g.fillRect(0, 0, w, h);
       for (var i = 0; i < 300; i++) {
         var x = r() * w, y = r() * h, rr = 14 + r() * 70;
         var gr = g.createRadialGradient(x, y, 0, x, y, rr);
-        var d = r() < 0.5 ? "rgba(110,98,86," : "rgba(176,164,148,";
+        var d = r() < 0.5 ? "rgba(112,98,100," : "rgba(170,158,160,";
         gr.addColorStop(0, d + (0.12 + r() * 0.14) + ")"); gr.addColorStop(1, d + "0)");
         g.fillStyle = gr; g.fillRect(x - rr, y - rr, rr * 2, rr * 2);
       }
       dots.forEach(function (s) {
-        g.fillStyle = "rgba(52,38,30," + s.a + ")";
+        g.fillStyle = "rgba(48,28,24," + s.a + ")";
         g.beginPath(); g.ellipse(s.x, s.y, s.r, s.r * (0.6 + r() * 0.4), r() * 3, 0, Math.PI * 2); g.fill();
       });
     });
@@ -107,10 +107,9 @@
     /* ぬれたつや：上に透明な層（clearcoat）。その層もでこぼこを拾って、光がゆらぐ */
     this.konMat = new T.MeshPhysicalMaterial({
       map: col, color: 0xd6cdc2, roughness: 0.42, metalness: 0,
-      normalMap: nrm, normalScale: new T.Vector2(0.7, 0.7),
+      normalMap: nrm, normalScale: new T.Vector2(0.35, 0.35),
       clearcoat: 1, clearcoatRoughness: 0.14,
-      sheen: 0.4, sheenColor: new T.Color(0xc8b9a4), sheenRoughness: 0.4,
-      emissive: new T.Color(0x2a2219)     /* 影の側も真っ暗にしない（少し透けて見える感じ） */
+      emissive: new T.Color(0x2c2224)     /* 影の側も真っ暗にしない（少し透けて見える感じ） */
     });
   };
 
@@ -189,7 +188,7 @@
   /* こんにゃく1切れの形。p.poly はゲーム座標（重心が原点）、p.c は元のこんにゃくでの重心。
      元のこんにゃくの外側だった辺は、上の肩をゆるい楕円で丸め、下も少し丸める（ぷるんとした形）。
      切り口の辺はまっすぐ縦に下ろし、切った角は鋭くする */
-  var RX = 0.30, RY = 0.2, RB = 0.06, CR = 34;   /* CR はゲーム側の四隅の丸みと同じ（RX/S より大きくして、肩の内側の形が裏返らないように） */
+  var RX = 0.4, RY = 0.2, RB = 0.07, CR = 0, FLARE = 0.05;   /* 肩は横に広くゆるく（上がふくらんで見える）。FLARE: すそが少し広がる */
   KonScene.prototype.pieceMesh = function (p) {
     var KW = this.KW, KH = this.KH;
     var P = p.poly, n = P.length, cx = p.c.x, cy = p.c.y;
@@ -211,7 +210,7 @@
     function vn(e, end) {
       var v = end ? (e + 1) % n : e, o = end ? v : (e - 1 + n) % n;   /* o: 頂点 v のもう一方の辺 */
       var A = nor[e], B = nor[o];
-      if (orig[e] && orig[o] && A.x * B.x + A.y * B.y > 0.8) { var x = A.x + B.x, y = A.y + B.y, l = Math.hypot(x, y); return { x: x / l, y: y / l }; }
+      if (orig[e] && orig[o] && A.x * B.x + A.y * B.y > -0.1) { var x = A.x + B.x, y = A.y + B.y, l = Math.hypot(x, y); return { x: x / l, y: y / l }; }
       return A;
     }
     function inset(d) {
@@ -227,21 +226,44 @@
     }
     /* 小さい切れは丸みも小さく */
     var k0 = Math.min(1, minR * S / (RX * 1.6));
-    var rx = RX * k0, ry = RY * Math.max(0.5, k0), rb = RB;
     var SEG = Z3.mobile ? 5 : 8;
+    /* 内側にずらした形が裏返っていないか（辺の向きが元と同じで、面積も正） */
+    function ok(pts) {
+      if (polyArea(pts) <= 0) return false;
+      for (var i = 0; i < n; i++) {
+        var a = P[i], b = P[(i + 1) % n], c = pts[i], d = pts[(i + 1) % n];
+        if (!isFinite(c.x) || !isFinite(c.y)) return false;
+        if ((b.x - a.x) * (d.x - c.x) + (b.y - a.y) * (d.y - c.y) < -1e-6) return false;
+      }
+      return true;
+    }
     /* 断面の道すじ：上の面の縁 → 肩の楕円 → 縦の壁 → 下の丸み。h,v は外向きの法線（横・縦） */
-    var prof = [];
-    for (var k = 0; k <= SEG; k++) {
-      var ph = k / SEG * Math.PI / 2, sx = Math.sin(ph) / rx, sy = Math.cos(ph) / ry, l = Math.hypot(sx, sy);
-      prof.push({ d: rx * (1 - Math.sin(ph)), y: THICK - ry + ry * Math.cos(ph), h: sx / l, v: sy / l });
+    function build(rx, ry, force) {
+      var flat = rx <= 0;
+      rx = Math.max(rx, 0.002);
+      var prof = [];
+      for (var k = 0; k <= SEG; k++) {
+        var ph = k / SEG * Math.PI / 2, sx = Math.sin(ph) / rx, sy = Math.cos(ph) / ry, l = Math.hypot(sx, sy);
+        prof.push({ d: flat ? 0 : rx * (1 - Math.sin(ph)), y: THICK - ry + ry * Math.cos(ph), h: sx / l, v: sy / l });
+      }
+      /* 壁はすそへ向かって少し広がり、床ぎわで丸く入る */
+      var rb = RB, fl = FLARE * Math.max(0.5, k0), wl = Math.atan2(fl, THICK - ry - rb);
+      for (var k2 = 0; k2 <= 3; k2++) {
+        var ph2 = k2 / 3 * Math.PI / 2;
+        prof.push({ d: -fl + rb * (1 - Math.cos(ph2)), y: rb - rb * Math.sin(ph2), h: Math.cos(ph2 + wl), v: -Math.sin(ph2) + (k2 === 0 ? Math.sin(wl) : 0) });
+      }
+      var rings = [];
+      for (var q = 0; q < prof.length; q++) {
+        var pr = prof[q];
+        var pts = inset(orig.map(function (o) { return o ? pr.d / S : 0; }));   /* d は立体の単位、形はゲーム座標 */
+        if (pr.d > 0 && !force && !ok(pts)) return null;
+        rings.push({ pts: pts, y: pr.y, h: pr.h, v: pr.v, top: q === 0 });
+      }
+      return rings;
     }
-    for (var k2 = 0; k2 <= 3; k2++) {
-      var ph2 = k2 / 3 * Math.PI / 2;
-      prof.push({ d: rb * (1 - Math.cos(ph2)), y: rb - rb * Math.sin(ph2), h: Math.cos(ph2), v: -Math.sin(ph2) });
-    }
-    var rings = prof.map(function (q) {
-      return { pts: inset(orig.map(function (o) { return o ? q.d : 0; })), y: q.y, h: q.h, v: q.v, top: q === prof[0] };
-    });
+    var rx = RX * k0, ry = RY * Math.max(0.5, k0), rings = null;
+    for (var tr = 0; tr < 8 && !rings; tr++) { rings = build(rx, ry); rx *= 0.55; }
+    if (!rings) rings = build(0, ry, true);   /* どうしても裏返るときは丸めない */
     var pos = [], nrm = [], uv = [];
     function uvTop(v) { return [(v.x + cx) / KW + 0.5, 1 - ((v.y + cy) / KH + 0.5)]; }
     function vert(v, y, nx, ny, nz, u, w) { pos.push(v.x * S, y, v.y * S); nrm.push(nx, ny, nz); uv.push(u, w); }
@@ -262,7 +284,10 @@
         if (!orig[e] && A.top) { a0n = a1n = [Nf.x, 0, Nf.y]; }
         var a0 = A.pts[e], a1 = A.pts[f], b0 = B.pts[e], b1 = B.pts[f];
         function uvS(v, y) { return [((v.x + cx) * Math.abs(Nf.y) / KW + (v.y + cy) * Math.abs(Nf.x) / KH) + 0.5, 0.3 + y / S / KH]; }
-        var ua0 = uvS(a0, A.y), ua1 = uvS(a1, A.y), ub0 = uvS(b0, B.y), ub1 = uvS(b1, B.y);
+        /* 上を向いた肩は上の面と同じ貼り方にする（横の貼り方だと模様が伸び、つやの向きも崩れる） */
+        var flatUV = orig[e] && A.v > 0.45;
+        function U(v, y) { return flatUV ? uvTop(v) : uvS(v, y); }
+        var ua0 = U(a0, A.y), ua1 = U(a1, A.y), ub0 = U(b0, B.y), ub1 = U(b1, B.y);
         vert(a0, A.y, a0n[0], a0n[1], a0n[2], ua0[0], ua0[1]); vert(a1, A.y, a1n[0], a1n[1], a1n[2], ua1[0], ua1[1]); vert(b0, B.y, b0n[0], b0n[1], b0n[2], ub0[0], ub0[1]);
         vert(a1, A.y, a1n[0], a1n[1], a1n[2], ua1[0], ua1[1]); vert(b1, B.y, b1n[0], b1n[1], b1n[2], ub1[0], ub1[1]); vert(b0, B.y, b0n[0], b0n[1], b0n[2], ub0[0], ub0[1]);
       }
