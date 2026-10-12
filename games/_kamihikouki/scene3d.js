@@ -127,9 +127,20 @@
     this.plane.add(inner);
     fly.add(this.plane);
     /* 地面の影 */
-    this.blob = new T.Mesh(new T.CircleGeometry(0.16, 20), new T.MeshBasicMaterial({ color: 0x1f3312, transparent: true, opacity: 0.35, depthWrite: false }));
-    this.blob.rotation.x = -Math.PI / 2; this.blob.scale.set(0.7, 1.4, 1);
-    fly.add(this.blob);
+    /* 地面の影：機体の形を太陽の向きに地面へ押しつぶして描く。
+       紙の重なりで濃くならないよう、同じ深さの2枚目は描かない（LessDepth） */
+    this.inner = inner;
+    this.shadow = new T.Mesh(new T.BufferGeometry(), new T.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.32, side: T.DoubleSide, depthFunc: T.LessDepth, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    this.shadow.renderOrder = 1;
+    this.shadow.matrixAutoUpdate = false;
+    this.shadow.frustumCulled = false;
+    var L = sun.position.clone().normalize(), h = 0.012;
+    this.flatten = new T.Matrix4().set(
+      L.y, -L.x, 0, L.x * h,
+      0, 0, 0, L.y * h,
+      0, -L.z, L.y, L.z * h,
+      0, 0, 0, L.y);
+    fly.add(this.shadow);
     /* 飛んだ跡 */
     this.trailMax = 1200;
     var tg = new T.BufferGeometry();
@@ -218,10 +229,9 @@
       a.needsUpdate = true;
       this.trail.geometry.setDrawRange(0, n);
     }
-    this.blob.position.set(p.position.x, 0.015, p.position.z);
-    this.blob.rotation.z = p.rotation.y;
-    var hk = Math.max(0.25, 1 - p.position.y / 6);
-    this.blob.material.opacity = 0.35 * hk;
+    this.shadow.geometry = this.planeMesh.geometry;
+    p.updateMatrixWorld(true);
+    this.shadow.matrix.multiplyMatrices(this.flatten, this.inner.matrixWorld);
   };
 
   GameScene.prototype.draw = function (ctx, W, H) { return this.stage.draw(ctx, W, H); };
