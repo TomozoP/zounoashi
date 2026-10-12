@@ -8,12 +8,13 @@
 
   /* 紙の面（凸の多角形）を三角形と縁の線にする。map(x, y, l) → [x, y, z] */
   function paperGeometry(faces, map, maxL) {
-    var pos = [], col = [], line = [];
+    var pos = [], col = [], uv = [], line = [];
     faces.forEach(function (f) {
       var v = f.p.map(function (p) { return map(p[0], p[1], f.l); });
+      var t = f.p.map(function (p) { return [p[2] || 0, p[3] || 0]; });
       var c = 0.86 + 0.14 * (maxL ? f.l / maxL : 1);
       for (var i = 1; i < v.length - 1; i++) {
-        [v[0], v[i], v[i + 1]].forEach(function (q) { pos.push(q[0], q[1], q[2]); col.push(c, c, c * 0.985); });
+        [0, i, i + 1].forEach(function (k) { var q = v[k]; pos.push(q[0], q[1], q[2]); col.push(c, c, c * 0.985); uv.push(t[k][0], t[k][1]); });
       }
       for (var j = 0; j < v.length; j++) {
         var a = v[j], b = v[(j + 1) % v.length];
@@ -23,6 +24,7 @@
     var g = new T.BufferGeometry();
     g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
     g.setAttribute("color", new T.Float32BufferAttribute(col, 3));
+    g.setAttribute("uv", new T.Float32BufferAttribute(uv, 2));
     g.computeVertexNormals();
     var lg = new T.BufferGeometry();
     lg.setAttribute("position", new T.Float32BufferAttribute(line, 3));
@@ -42,6 +44,38 @@
       var w = ax - keel;
       return [sg * w * cs, w * sn + l * 0.0025, -(y - mid)];
     };
+  }
+
+  /* 紙ごとの模様（文字は入れない） */
+  function paperTexture(id, ratio) {
+    return Z3.canvasTex(256, Math.round(256 * ratio), function (g, w, h) {
+      var r = Z3.rng(id.length * 7 + 3), i;
+      var base = { copy: "#fbfaf6", origami: "#e04a3c", news: "#e9e5d9", drawing: "#f4ecd4", tissue: "#ffffff", cardboard: "#bb8b55" }[id];
+      g.fillStyle = base; g.fillRect(0, 0, w, h);
+      if (id === "news") {
+        /* 見出しの太い帯・写真・細い行の段組み（読める文字は描かない） */
+        g.fillStyle = "#3a3a3a"; g.fillRect(w * 0.08, h * 0.05, w * 0.84, h * 0.045);
+        g.fillStyle = "#9a978e"; g.fillRect(w * 0.08, h * 0.13, w * 0.5, h * 0.22);
+        g.fillStyle = "rgba(60,60,60,.55)";
+        for (var col = 0; col < 4; col++) {
+          var x0 = w * (0.08 + col * 0.215);
+          for (var y = h * 0.13; y < h * 0.95; y += 5) {
+            if (col < 2 && y < h * 0.36) continue;
+            g.fillRect(x0, y, w * (0.18 - r() * 0.03), 2);
+          }
+        }
+      } else if (id === "cardboard") {
+        for (i = 0; i < w; i += 9) { g.fillStyle = "rgba(120,80,40,.25)"; g.fillRect(i, 0, 3, h); }
+        for (i = 0; i < 500; i++) { g.fillStyle = "rgba(90,60,30,.15)"; g.fillRect(r() * w, r() * h, 2, 2); }
+      } else if (id === "tissue") {
+        g.strokeStyle = "rgba(200,205,215,.5)"; g.lineWidth = 2;
+        for (i = 0; i < h; i += 16) { g.beginPath(); for (var x = 0; x <= w; x += 8) g.lineTo(x, i + Math.sin(x / 14) * 4); g.stroke(); }
+      } else if (id === "drawing") {
+        for (i = 0; i < 900; i++) { g.fillStyle = r() < 0.5 ? "rgba(170,150,110,.25)" : "rgba(255,255,255,.4)"; g.fillRect(r() * w, r() * h, 1.5, 1.5); }
+      } else {
+        for (i = 0; i < 600; i++) { g.fillStyle = id === "origami" ? "rgba(120,20,20,.12)" : "rgba(150,145,135,.08)"; g.fillRect(r() * w, r() * h, 2, 2); }
+      }
+    });
   }
 
   function GameScene() {
@@ -122,7 +156,7 @@
     this.plane.rotation.order = "YXZ";
     this.planeMesh = new T.Mesh(new T.BufferGeometry(), this.paperMat);
     this.planeLine = new T.LineSegments(new T.BufferGeometry(), this.lineMat);
-    var inner = new T.Group(); inner.scale.setScalar(PAPER_M);
+    var inner = this.planeInner = new T.Group(); inner.scale.setScalar(PAPER_M);
     inner.add(this.planeMesh); inner.add(this.planeLine);
     this.plane.add(inner);
     fly.add(this.plane);
@@ -151,6 +185,7 @@
 
     this.camPos = new T.Vector3(); this.camLook = new T.Vector3();
     this.lastFaces = null; this.lastMorph = -1; this.lastPlane = null;
+    this.tex = {}; this.shelf = null; this.lastPaper = -1;
   }
 
   GameScene.prototype.setPaper = function (mesh, line, faces, map) {
@@ -161,12 +196,56 @@
     mesh.geometry = g.mesh; line.geometry = g.line;
   };
 
+  GameScene.prototype.texFor = function (pp) {
+    return this.tex[pp.id] || (this.tex[pp.id] = paperTexture(pp.id, pp.ratio));
+  };
+
+  /* 紙を選ぶ：机の上に紙を横一列に並べ、流した位置に合わせてずらす（端と端はつながっている） */
+  GameScene.prototype.syncShelf = function (s) {
+    var self = this, n = s.papers.length, gap = 0.95;
+    if (!this.shelf) {
+      this.shelf = s.papers.map(function (pp) {
+        var k = Math.min(1.3, pp.m / 0.21);
+        var m = new T.Mesh(new T.PlaneGeometry(k, k * pp.ratio), new T.MeshLambertMaterial({ map: self.texFor(pp) }));
+        m.rotation.x = -Math.PI / 2;
+        var e = new T.LineSegments(new T.EdgesGeometry(m.geometry), self.lineMat);
+        m.add(e);
+        self.foldScene.add(m);
+        return m;
+      });
+    }
+    this.shelf.forEach(function (m, i) {
+      var d = i - s.sel;
+      d -= Math.round(d / n) * n;
+      m.visible = true;
+      /* 真ん中に来た紙ほど大きく */
+      var near = Math.max(0, 1 - Math.abs(d));
+      m.scale.setScalar(0.6 + 0.25 * near);
+      m.position.set(d * gap, 0.002 + near * 0.02, 0);
+    });
+  };
+
   GameScene.prototype.sync = function (s) {
     var cam = this.camera;
-    var onDesk = s.state === "intro" || s.state === "fold" || s.state === "make";
+    var selecting = s.state === "select" || s.state === "intro";
+    if (selecting) this.syncShelf(s);
+    else if (this.shelf) this.shelf.forEach(function (m) { m.visible = false; });
+    this.foldPaper.visible = this.foldLine.visible = !selecting;
+    if (this.lastPaper !== s.paper) {
+      var pp = s.papers[s.paper];
+      this.paperMat.map = this.texFor(pp); this.paperMat.needsUpdate = true;
+      this.planeInner.scale.setScalar(pp.m);
+      this.crease.geometry.attributes.position.setZ(0, -pp.ratio / 2);
+      this.crease.geometry.attributes.position.setZ(1, pp.ratio / 2);
+      this.crease.geometry.attributes.position.needsUpdate = true;
+      this.lastPaper = s.paper;
+    }
+    var onDesk = selecting || s.state === "fold" || s.state === "make";
     this.stage.scene = onDesk ? this.foldScene : this.flyScene;
     if (onDesk) {
-      if (s.state === "make") {
+      if (selecting) {
+        this.crease.visible = false;
+      } else if (s.state === "make") {
         if (this.lastFaces !== s.planeFaces || this.lastMorph !== s.morph) {
           var e = s.morph * s.morph * (3 - 2 * s.morph), fm = flatMap(s.mid), pm = planeMap(s.mid, s.keel);
           this.setPaper(this.foldPaper, this.foldLine, s.planeFaces, function (x, y, l) {
