@@ -261,7 +261,7 @@
     pieces.splice(idx, 1, made[0], made[1]);
     cuts++;
     sndCut();
-    if (pieces.length >= GOAL && endT < 0) endT = T;
+    if (pieces.length >= GOAL && endT < 0) freeze();
     return true;
   }
 
@@ -294,6 +294,10 @@
       knife.vx *= Math.exp(-10 * dt); knife.vy *= Math.exp(-10 * dt);
     }
 
+    if (endT >= 0) {                           /* 10切れになったら全部止めて、それぞれの％を見せる */
+      if (T - endT > FREEZE_SHOW) finish();
+      return;
+    }
     pieces.forEach(function (p) {
       p.x += p.vx * dt; p.y += p.vy * dt; p.a += p.va * dt;
       var f = Math.exp(-FRICTION * dt);
@@ -307,7 +311,14 @@
 
     trail = trail.filter(function (t) { return T - t.t < 0.25; });
 
-    if (endT >= 0 && T - endT > 1.2) finish();
+  }
+
+  var FREEZE_SHOW = 2.2;   /* 止めて％を見せてから結果を出すまで（秒） */
+  function freeze() {
+    endT = T;
+    held = false; knife = null; trail = [];
+    pieces.forEach(function (p) { p.vx = p.vy = p.va = 0; p.wob = 0; p.entry = null; });
+    tone(880, 0.12, 0.12, "triangle"); tone(1320, 0.18, 0.1, "triangle", null, 0.08);
   }
 
   function walls(p) {
@@ -364,12 +375,13 @@
   }
 
   function finish() {
-    var dev = 0, target = total / GOAL;
-    pieces.forEach(function (p) { dev += Math.abs(p.area - target); });
-    /* ぴったりなら100、ひとつも切らない（1切れ＋空き9つ）と0 */
-    if (pieces.length < GOAL) dev += (GOAL - pieces.length) * target;
-    score = Math.max(0, 100 * (1 - dev / (2 * total * (1 - 1 / GOAL))));
-    score = Math.floor(score * 10) / 10;
+    /* 点数：各切れが10%からずれた量（%）の平均で決める。ぴったりで100点。
+       平均0.5%ずれで約84点、1%で70点、2%で50点、4%で25点 */
+    var dev = 0;
+    pieces.forEach(function (p) { dev += Math.abs(p.area / total * 100 - 100 / GOAL); });
+    if (pieces.length < GOAL) dev += (GOAL - pieces.length) * 100 / GOAL;
+    dev /= Math.max(GOAL, pieces.length);
+    score = Math.round(100 * Math.exp(-0.35 * dev));
     state = S.RESULT;
     held = false; knife = null;
     sndDone();
@@ -494,13 +506,13 @@
 
   function shareLine() {
     var s = score;
-    if (s >= 98) return zT("すべるこんにゃくを寸分の狂いなく10等分した", "Split a slippery konjac into 10 perfectly equal pieces");
-    if (s >= 90) return zT("すべるこんにゃくをほぼ10等分した", "Nearly split a slippery konjac into 10 equal pieces");
-    if (s >= 75) return zT("こんにゃくがすべって10等分にならなかった", "The konjac slipped and the 10 pieces came out uneven");
+    if (s >= 95) return zT("すべるこんにゃくを寸分の狂いなく10等分した", "Split a slippery konjac into 10 perfectly equal pieces");
+    if (s >= 80) return zT("すべるこんにゃくをほぼ10等分した", "Nearly split a slippery konjac into 10 equal pieces");
+    if (s >= 50) return zT("こんにゃくがすべって10等分にならなかった", "The konjac slipped and the 10 pieces came out uneven");
     return zT("こんにゃくにもてあそばれた", "Got toyed with by a konjac");
   }
   function doShare() {
-    window.zResultActions.x({ text: shareLine() + zT("（均等度" + score.toFixed(1) + "%）", " (" + score.toFixed(1) + "% even)") + zT(" #こんにゃく10等分", " #Konjac10Cuts") });
+    window.zResultActions.x({ text: shareLine() + zT("（" + score + "点）", " (" + score + " pts)") + zT(" #こんにゃく10等分", " #Konjac10Cuts") });
   }
 
   /* ============ 描画 ============ */
@@ -615,6 +627,39 @@
     ctx.restore();
   }
 
+  /* 止めたあと、各切れの上に大きさ（全体の何%か）を出す */
+  function drawPercents(s3) {
+    if (!pieces) return;
+    ctx.save();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    pieces.forEach(function (p) {
+      var at = drew3d && s3 ? s3.project(p.x, p.y, W, H, CY) : { x: p.x, y: p.y };
+      var pct = p.area / total * 100, txt = pct.toFixed(1) + "%";
+      /* 細長い切れは長い向きに沿って書く（となりの切れと重ならないように） */
+      var sxx = 0, syy = 0, sxy = 0;
+      p.poly.forEach(function (v) { sxx += v.x * v.x; syy += v.y * v.y; sxy += v.x * v.y; });
+      var ax = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+      var ux = Math.cos(ax), uy = Math.sin(ax), lo = 1e9, hi = -1e9, wlo = 1e9, whi = -1e9;
+      p.poly.forEach(function (v) {
+        var a = v.x * ux + v.y * uy, b = -v.x * uy + v.y * ux;
+        lo = Math.min(lo, a); hi = Math.max(hi, a); wlo = Math.min(wlo, b); whi = Math.max(whi, b);
+      });
+      var ang = ax + p.a;
+      while (ang > Math.PI / 2) ang -= Math.PI;
+      while (ang <= -Math.PI / 2) ang += Math.PI;
+      var fs = Math.max(12, Math.min(26, (whi - wlo) * 0.8, (hi - lo) / 3.2));
+      ctx.save();
+      ctx.translate(at.x, at.y);
+      if (hi - lo > (whi - wlo) * 1.3) ctx.rotate(ang);
+      ctx.font = "800 " + Math.round(fs) + "px sans-serif";
+      ctx.lineWidth = Math.max(3, fs * 0.22); ctx.strokeStyle = "rgba(20,14,12,.85)"; ctx.strokeText(txt, 0, 0);
+      ctx.fillStyle = "#fff"; ctx.fillText(txt, 0, 0);
+      ctx.restore();
+    });
+    ctx.restore();
+  }
+
   /* 立体のときの刃の通り道（画面に写した白い筋） */
   function drawTrail3d(s3) {
     if (trail.length < 2) return;
@@ -676,6 +721,7 @@
       } catch (e) { scene3d.drop(); drew3d = false; }
     }
     if (drew3d) drawTrail3d(s3);
+    if (endT >= 0 || state === S.RESULT) drawPercents(s3);
     else {
       drawBoard();
       if (pieces) pieces.forEach(drawPiece);
@@ -708,17 +754,17 @@
     ctx.shadowColor = "rgba(0,0,0,.6)";
     ctx.shadowBlur = 10;
     ctx.textAlign = "center";
-    var txt = score.toFixed(1);
+    var txt = String(score), unit = zT("点", "pts");
     ctx.font = "800 108px sans-serif";
     var tw = ctx.measureText(txt).width;
     ctx.font = "800 54px sans-serif";
-    var uw = ctx.measureText("%").width;
+    var uw = ctx.measureText(unit).width;
     var x0 = W / 2 - (tw + uw) / 2;
     ctx.textAlign = "left";
     ctx.font = "800 108px sans-serif";
     ctx.fillText(txt, x0, H * 0.45);
     ctx.font = "800 54px sans-serif";
-    ctx.fillText("%", x0 + tw + 4, H * 0.45);
+    ctx.fillText(unit, x0 + tw + 4, H * 0.45);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
