@@ -162,8 +162,8 @@
     top.position.set(cx, -0.15, cz);
     top.receiveShadow = true;
     g.add(top);
-    /* 台所の台（まな板より少し広いだけにする） */
-    var counter = new T.Mesh(new T.BoxGeometry(bw + 6, 0.2, bd + 4), Z3.std(0x3a3632, { roughness: 0.4, metalness: 0.2 }));
+    /* 台所の台（カメラを引いても画面の外まで埋まる広さ） */
+    var counter = new T.Mesh(new T.BoxGeometry(bw + 60, 0.2, bd + 60), Z3.std(0x3a3632, { roughness: 0.4, metalness: 0.2 }));
     counter.position.set(cx, -0.4, cz);
     counter.receiveShadow = true;
     g.add(counter);
