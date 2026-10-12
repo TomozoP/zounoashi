@@ -32,7 +32,10 @@
 <script src="../share.js"></script>
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
-<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../pad.js"></script>
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="../three-base.js"></script>
+<script src="konnyaku3d.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* こんにゃく10等分
    まな板の上のこんにゃくを包丁でなぞって切り、10切れにする。
@@ -398,6 +401,7 @@
     if (vs > 6000) { vx *= 6000 / vs; vy *= 6000 / vs; }
     knife.vx = knife.vx * 0.5 + vx * 0.5; knife.vy = knife.vy * 0.5 + vy * 0.5;
     knife.x = x; knife.y = y; knife.t = T;
+    if (Math.hypot(knife.vx, knife.vy) > 30) knife.dir = Math.atan2(knife.vy, knife.vx);
     trail.push({ x: x, y: y, t: T });
 
     pieces.slice().forEach(function (p) {
@@ -431,7 +435,13 @@
     knife = null;
   }
 
-  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  /* 画面の点 → まな板の上のゲーム座標（立体で描けているときはカメラの傾きぶんを直す） */
+  function atCanvas(e) {
+    var p = window.zGameView.point(canvas, e, W, H);
+    var s3 = scene3d();
+    if (s3 && drew3d) { var b = s3.pick(p.x, p.y, W, H, CY); if (b) return b; }
+    return p;
+  }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault(); keyMode = false;
     /* 画面の外で指を離しても受け取れるようにつかんでおく */
@@ -503,6 +513,9 @@
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
   }
+
+  var drew3d = false;
+  var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.KonScene({ KW: KW, KH: KH, specks: SPECK }); }) : function () { return null; };
 
   var GRAIN = [], DROPS = [];
   (function () {
@@ -602,6 +615,21 @@
     ctx.restore();
   }
 
+  /* 立体のときの刃の通り道（画面に写した白い筋） */
+  function drawTrail3d(s3) {
+    if (trail.length < 2) return;
+    ctx.save();
+    ctx.lineCap = "round";
+    var pts = trail.map(function (t) { return s3.project(t.x, t.y, W, H, CY); });
+    for (var i = 1; i < trail.length; i++) {
+      var k = 1 - (T - trail[i].t) / 0.25;
+      ctx.strokeStyle = "rgba(255,255,255," + (0.5 * k) + ")";
+      ctx.lineWidth = 1.5 + 4 * k;
+      ctx.beginPath(); ctx.moveTo(pts[i - 1].x, pts[i - 1].y); ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawKnife() {
     if (trail.length > 1) {
       ctx.save();
@@ -616,8 +644,6 @@
       ctx.restore();
     }
     if (!knife || !held) return;
-    var sp = Math.hypot(knife.vx, knife.vy);
-    if (sp > 30) knife.dir = Math.atan2(knife.vy, knife.vx);
     var ang = knife.dir == null ? -Math.PI / 2 : knife.dir;
     ctx.save();
     ctx.translate(knife.x, knife.y);
@@ -641,9 +667,20 @@
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
-    drawBoard();
-    if (pieces) pieces.forEach(drawPiece);
-    drawKnife();
+    var s3 = scene3d();
+    drew3d = false;
+    if (s3) {
+      try {
+        s3.sync({ t: T || 0, W: W, H: H, CY: CY, board: { x0: BX0, x1: BX1, y0: BY0, y1: BY1 }, pieces: pieces, knife: held ? knife : null });
+        drew3d = s3.draw(ctx, W, H);
+      } catch (e) { scene3d.drop(); drew3d = false; }
+    }
+    if (drew3d) drawTrail3d(s3);
+    else {
+      drawBoard();
+      if (pieces) pieces.forEach(drawPiece);
+      drawKnife();
+    }
     if (state === S.RESULT) drawResult();
   }
 
