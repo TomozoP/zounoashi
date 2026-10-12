@@ -215,5 +215,6 @@ window.DRAFT_GAMES = [
     "play": "games/_muriyari-seiza/index.html",
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
-  }
+  },
+  {"type":"lab","tags":[],"id":"kamihikouki","title":"紙飛行機","year":2026,"date":"2026-10-12","plays":null,"url":"","img":"games/_kamihikouki/img/thumb.webp","play":"games/_kamihikouki/index.html","full":true,"catch":"折って飛ばす"},
 ];

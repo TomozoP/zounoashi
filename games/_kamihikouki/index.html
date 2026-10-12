@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>紙飛行機</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="../three-base.js"></script>
+<script src="scene3d.js"></script>
+<script>
+/* 紙飛行機
+
+   紙をなぞって折り（指で掴んだ所を、離した所へ重ねる折り方）、
+   4回折ったら機体になる。上へはじいて投げ、着地までの距離が点数。
+   折った形から、翼の広さ・重心・左右のずれを測って飛び方を決める。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q, delay) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+  }
+  /* 紙を折る音：かさっ → すっ（指でなぞる） */
+  function foldSound() { noiseHit(0.09, 3200, 0.22, 0.8); noiseHit(0.22, 1800, 0.12, 0.6, 0.06); }
+  /* 風を切る音（投げた瞬間） */
+  function throwSound(k) { noiseHit(0.35, 900 + 600 * k, 0.18 + 0.12 * k, 0.7); }
+  /* 着地のぱさっ */
+  function landSound() { noiseHit(0.12, 2400, 0.2, 0.9); }
+  /* 飛んでいる間の風（速さで強さが変わる） */
+  var wind = null;
+  function windStart() {
+    if (!AC || !NOISE || wind) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE; s.loop = true;
+    var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 700; f.Q.value = 0.5;
+    var g = AC.createGain(); g.gain.value = 0.0001;
+    s.connect(f); f.connect(g); g.connect(AC.destination); s.start();
+    wind = { s: s, f: f, g: g };
+  }
+  function windSet(v) {
+    if (!wind) return;
+    var n = AC.currentTime;
+    wind.g.gain.setTargetAtTime(Math.min(0.16, 0.0001 + v * v * 0.0006), n, 0.08);
+    wind.f.frequency.setTargetAtTime(400 + v * 60, n, 0.08);
+  }
+  function windStop() {
+    if (!wind) return;
+    var w = wind; wind = null;
+    try { w.g.gain.setTargetAtTime(0.0001, AC.currentTime, 0.05); w.s.stop(AC.currentTime + 0.3); } catch (e) {}
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 紙 ============
+     紙の座標は横1・縦1.414（A4の比）。x は -0.5〜0.5、y は 0（下）〜1.414（上＝機首）。
+     紙は「平らな面」の集まりで、面ごとに重なりの段（layer）を持つ。どの面も凸の多角形 */
+  var PH = 1.414, MID = PH / 2;
+  var FOLDS = 4;                               /* この回数折ったら機体にする */
+  var KEEL = 0.12;                             /* 真ん中から翼を折り返すまでの幅（胴の深さ） */
+
+  function sheet() { return [{ p: [[-0.5, 0], [0.5, 0], [0.5, PH], [-0.5, PH]], l: 0 }]; }
+
+  /* 多角形を直線 a*x+b*y+c >= 0 の側だけ残す */
+  function clip(pts, a, b, c) {
+    var out = [];
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i], q = pts[(i + 1) % pts.length];
+      var sp = a * p[0] + b * p[1] + c, sq = a * q[0] + b * q[1] + c;
+      if (sp >= 0) out.push(p);
+      if ((sp >= 0) !== (sq >= 0)) {
+        var t = sp / (sp - sq);
+        out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+      }
+    }
+    return out.length >= 3 ? out : null;
+  }
+  function area(pts) {
+    var s = 0;
+    for (var i = 0; i < pts.length; i++) { var p = pts[i], q = pts[(i + 1) % pts.length]; s += p[0] * q[1] - q[0] * p[1]; }
+    return s / 2;
+  }
+  function inside(pts, x, y) {
+    var c = false;
+    for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      var a = pts[i], b = pts[j];
+      if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c;
+    }
+    return c;
+  }
+  function onPaper(fs, x, y) {
+    for (var i = 0; i < fs.length; i++) if (inside(fs[i].p, x, y)) return true;
+    return false;
+  }
+
+  /* 点Pを点Qに重ねるように折る。折り目はPとQの垂直二等分線。Pの側の紙が全部めくれて重なる */
+  function fold(fs, P, Q) {
+    var dx = Q[0] - P[0], dy = Q[1] - P[1], d = Math.hypot(dx, dy);
+    if (d < 1e-4) return fs;
+    var nx = dx / d, ny = dy / d, mx = (P[0] + Q[0]) / 2, my = (P[1] + Q[1]) / 2;
+    var c = -(nx * mx + ny * my);
+    var stay = [], moved = [], maxL = 0, maxM = 0;
+    fs.forEach(function (f) {
+      maxL = Math.max(maxL, f.l);
+      var s = clip(f.p, nx, ny, c), m = clip(f.p, -nx, -ny, -c);
+      if (s && Math.abs(area(s)) > 1e-6) stay.push({ p: s, l: f.l });
+      if (m && Math.abs(area(m)) > 1e-6) { moved.push({ p: m, l: f.l }); maxM = Math.max(maxM, f.l); }
+    });
+    moved.forEach(function (f) {
+      f.p = f.p.map(function (p) { var s = nx * p[0] + ny * p[1] + c; return [p[0] - 2 * s * nx, p[1] - 2 * s * ny]; }).reverse();
+      f.l = maxL + 1 + (maxM - f.l);
+    });
+    return stay.concat(moved);
+  }
+
+  /* 機体にするため、真ん中と翼の折り目で面を切り分ける */
+  function splitForPlane(fs) {
+    var out = fs;
+    [[1, 0, 0], [1, 0, -KEEL], [1, 0, KEEL]].forEach(function (L) {
+      var next = [];
+      out.forEach(function (f) {
+        var a = clip(f.p, L[0], L[1], L[2]), b = clip(f.p, -L[0], -L[1], -L[2]);
+        if (a && Math.abs(area(a)) > 1e-7) next.push({ p: a, l: f.l });
+        if (b && Math.abs(area(b)) > 1e-7) next.push({ p: b, l: f.l });
+      });
+      out = next;
+    });
+    return out;
+  }
+
+  /* 折った形から飛び方を決める。翼（胴より外）の広さは重なりを1枚と数え、重さは重なりの枚数どおり */
+  function measure(fs) {
+    var minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9, mass = 0, cx = 0, cy = 0;
+    fs.forEach(function (f) {
+      var a = Math.abs(area(f.p)), sx = 0, sy = 0;
+      f.p.forEach(function (p) {
+        sx += p[0]; sy += p[1];
+        minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]); minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]);
+      });
+      mass += a; cx += a * sx / f.p.length; cy += a * sy / f.p.length;
+    });
+    cx /= mass; cy /= mass;
+    var N = 56, dx = (maxX - minX) / N, dy = (maxY - minY) / N, L = 0, R = 0, ly = 0, cell = dx * dy;
+    for (var i = 0; i < N; i++) for (var j = 0; j < N; j++) {
+      var x = minX + (i + 0.5) * dx, y = minY + (j + 0.5) * dy;
+      if (Math.abs(x) < KEEL || !onPaper(fs, x, y)) continue;
+      if (x < 0) L += cell; else R += cell;
+      ly += y * cell;
+    }
+    var wing = L + R;
+    ly = wing > 0 ? ly / wing : cy;
+    var margin = cy - ly;                      /* 正：重心が翼の中心より前（機首寄り）で安定 */
+    var asym = wing > 0 ? (R - L) / wing : 0;  /* 正：右の翼が広い → 右が持ち上がって左へ傾く */
+    asym += -cx * 1.2;                         /* 重さが左に寄ると左へ傾く */
+    var span = maxX - minX, length = maxY - minY;
+    return {
+      wing: wing, left: L, right: R, cgX: cx, cgY: cy, liftY: ly, margin: margin, asym: asym,
+      /* 滑空の速さ：翼が狭いほど速く落ちる */
+      vt: 4.6 * Math.sqrt(0.42 / Math.max(0.06, wing)),
+      /* 揚がりの強さ：重心が後ろだと過敏になって宙返り・失速しやすい */
+      pitch: Math.max(0.35, Math.min(1.9, 1.15 - margin * 5)),
+      /* 滑空比：左右のずれ・重心の悪さ・ずんぐりした形で落ちる */
+      ld: Math.max(1.6, 7.2 - 6 * Math.abs(asym) - (margin < 0 ? 2 : 0) - Math.max(0, span / Math.max(0.2, length) - 0.9) * 2.5)
+    };
+  }
+
+  /* ============ 飛ぶ ============
+     重さのある点として、速さ v・上下の角度 gam・向き psi・傾き phi で進める。単位はメートルと秒 */
+  var G = 9.8, HAND = 1.6;
+  function flyStep(f, A, dt) {
+    var q = (f.v / A.vt) * (f.v / A.vt);
+    var cg = Math.cos(f.gam);
+    /* 速すぎて揚がりすぎる分は頭打ちにする（重心が悪いほど上限が高く、宙返りしやすい） */
+    var ex = (G * q - G * cg) * A.pitch, cap = G * A.pitch * 2.2;
+    var lift = G * cg + Math.max(-cap, Math.min(cap, ex));
+    var drag = G * q / A.ld;
+    f.v = Math.max(0.6, f.v + (-G * Math.sin(f.gam) - drag) * dt);
+    f.gam += (lift * Math.cos(f.phi) - G * cg) / f.v * dt;
+    if (f.gam > Math.PI) f.gam -= 2 * Math.PI;
+    if (f.gam < -Math.PI) f.gam += 2 * Math.PI;
+    f.psi += lift * Math.sin(f.phi) / (f.v * Math.max(0.25, Math.abs(cg))) * dt;
+    f.phi += (2.2 * A.asym * f.v - 1.6 * f.phi) * dt;
+    f.phi = Math.max(-1.3, Math.min(1.3, f.phi));
+    var h = Math.cos(f.gam);
+    f.x += -Math.sin(f.psi) * h * f.v * dt;
+    f.z += -Math.cos(f.psi) * h * f.v * dt;
+    f.y += Math.sin(f.gam) * f.v * dt;
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", FOLD: "fold", MAKE: "make", AIM: "aim", FLY: "fly", LAND: "land", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+  var faces, folds, preview, grab, planeFaces, aero, morph, fl, landT, trail, swipe;
+
+  var FS, PCY;                                 /* 折る画面：紙1あたりの画素と、紙の中心の高さ */
+  function place() {
+    FS = Math.min(W * 0.74, H * 0.6 / PH);
+    PCY = Math.round(H * 0.47);
+  }
+  function toPaper(x, y) { return [(x - W / 2) / FS, MID + (PCY - y) / FS]; }
+  function toScreen(p) { return [W / 2 + p[0] * FS, PCY - (p[1] - MID) * FS]; }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.FOLD;
+    score = 0; T = 0; held = false;
+    faces = sheet(); folds = 0; preview = null; grab = null;
+    planeFaces = null; aero = null; morph = 0; fl = null; landT = 0; trail = []; swipe = null;
+    windStop();
+  }
+
+  function makePlane() {
+    planeFaces = splitForPlane(faces);
+    aero = measure(faces);
+    state = S.MAKE; morph = 0;
+    noiseHit(0.3, 2200, 0.2, 0.7);
+  }
+
+  function launch(speed, side) {
+    fl = { v: speed, gam: 0.09, psi: side, phi: 0, x: 0, y: HAND, z: 0, t: 0 };
+    state = S.FLY; trail = [];
+    throwSound(Math.min(1, speed / 16));
+    windStart();
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    if (state === S.INTRO || state === S.RESULT) return;
+    T += dt;
+    if (state === S.MAKE) {
+      morph = Math.min(1, morph + dt / 1.1);
+      if (morph >= 1 && T > 0) { state = S.AIM; T = 0; }
+      return;
+    }
+    if (state === S.FLY) {
+      flyStep(fl, aero, dt);
+      fl.t += dt;
+      windSet(fl.v);
+      if ((trail.length === 0 || fl.t - trail[trail.length - 1].t > 0.05)) trail.push({ x: fl.x, y: fl.y, z: fl.z, t: fl.t });
+      if (fl.y <= 0.02 || fl.t > 40) {
+        fl.y = Math.max(0.02, fl.y);
+        score = Math.round(Math.hypot(fl.x, fl.z) * 10) / 10;
+        state = S.LAND; landT = 0;
+        windStop(); landSound();
+      }
+      return;
+    }
+    if (state === S.LAND) {
+      landT += dt;
+      if (landT > 1.4) {
+        state = S.RESULT;
+        tone(523, 0.12, 0.12, "triangle"); tone(784, 0.2, 0.12, "triangle", null, 0.12);
+      }
+    }
+  }
+
+  /* ============ 入力 ============ */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (x == null) {
+      if (state === S.AIM) launch(10, 0);
+      return;
+    }
+    held = true;
+    if (state === S.FOLD) {
+      var p = toPaper(x, y);
+      if (!onPaper(faces, p[0], p[1])) { held = false; return; }
+      grab = { p: p, at: p };
+      noiseHit(0.05, 4000, 0.08, 1);
+      return;
+    }
+    if (state === S.AIM) swipe = { pts: [{ x: x, y: y, t: T }] };
+  }
+  function move(x, y) {
+    if (!held) return;
+    if (state === S.FOLD && grab) {
+      grab.at = toPaper(x, y);
+      var d = Math.hypot(grab.at[0] - grab.p[0], grab.at[1] - grab.p[1]);
+      preview = d > 0.03 ? fold(faces, grab.p, grab.at) : null;
+      return;
+    }
+    if (state === S.AIM && swipe) {
+      swipe.pts.push({ x: x, y: y, t: T });
+      if (swipe.pts.length > 30) swipe.pts.shift();
+    }
+  }
+  function up() {
+    if (!held) return;
+    held = false;
+    if (state === S.FOLD && grab) {
+      if (preview) {
+        faces = preview; folds++;
+        foldSound();
+        if (folds >= FOLDS) makePlane();
+      }
+      grab = null; preview = null;
+      return;
+    }
+    if (state === S.AIM && swipe) {
+      /* 離す直前0.1秒の動きで、はじいた速さと向きを決める */
+      var pts = swipe.pts, b = pts[pts.length - 1], a = b;
+      for (var i = pts.length - 1; i >= 0; i--) { a = pts[i]; if (b.t - a.t >= 0.1) break; }
+      swipe = null;
+      var dtm = Math.max(1 / 60, b.t - a.t), vx = (b.x - a.x) / dtm, vy = (b.y - a.y) / dtm;
+      if (vy > -150) return;                   /* 上へはじいていない */
+      var spd = Math.hypot(vx, vy);
+      launch(Math.max(2.5, Math.min(18, spd / 110)), Math.max(-0.5, Math.min(0.5, -Math.atan2(vx, -vy) * 0.6)));
+    }
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { held = false; grab = null; preview = null; swipe = null; });
+  window.addEventListener("blur", function () { held = false; grab = null; preview = null; swipe = null; });
+
+  /* 本番以外だけ、数字キーで場面を飛ばせる */
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  /* お手本どおりの4回（角を真ん中へ ×2 → 斜めの辺を真ん中へ ×2） */
+  var GOOD = [
+    [[-0.5, PH], [0, PH - 0.5]], [[0.5, PH], [0, PH - 0.5]],
+    [[-0.5, PH - 0.5], [0, PH - Math.SQRT1_2]], [[0.5, PH - 0.5], [0, PH - Math.SQRT1_2]]
+  ];
+  function autoFold(sloppy) {
+    if (state !== S.FOLD) newRound();
+    GOOD.forEach(function (g, i) {
+      var q = g[1].slice();
+      if (sloppy) { q[0] += (i % 2 ? 0.09 : -0.02); q[1] += (i % 2 ? -0.08 : 0.05); }
+      faces = fold(faces, g[0], q);
+    });
+    folds = FOLDS; makePlane(); morph = 1; state = S.AIM; T = 0;
+  }
+  function debugKey(n) {
+    if (n === 1) autoFold(false);              /* きれいに折って投げる直前へ */
+    if (n === 2) autoFold(true);               /* ずれた折り方で投げる直前へ */
+    if (n === 3) { autoFold(false); launch(12, 0); }   /* きれいに折って強めに投げる */
+    if (n === 4) { autoFold(false); launch(12, 0); for (var i = 0; i < 6000 && state === S.FLY; i++) update(1 / 60); }  /* 着地まで */
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function shareLine() {
+    var d = score.toFixed(1);
+    if (score < 3) return zT("自作の紙飛行機が" + d + "mで墜落した", "My homemade paper plane crashed after " + d + "m");
+    if (score < 20) return zT("自作の紙飛行機を" + d + "m飛ばした", "My homemade paper plane flew " + d + "m");
+    if (score < 40) return zT("自作の紙飛行機が" + d + "m先まで滑空した", "My homemade paper plane glided " + d + "m");
+    return zT("自作の紙飛行機が" + d + "mの大飛行をした", "My homemade paper plane made an epic " + d + "m flight");
+  }
+  function doShare() {
+    window.zResultActions.x({ text: shareLine() + zT(" #紙飛行機", " #PaperPlane") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  /* 立体の場面。three.js が使えないときは平面の絵のまま */
+  var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene(); }) : function () { return null; };
+
+  function view() {
+    return {
+      state: state, t: T || 0, W: W, H: H, fs: FS, pcy: PCY, mid: MID, keel: KEEL,
+      faces: preview || faces, planeFaces: planeFaces, morph: morph, fl: fl, trail: trail
+    };
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+
+    var s3 = scene3d(), drew = false;
+    if (s3) { try { s3.sync(view()); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (!drew) drawFlat();
+
+    if (state === S.FOLD && !grab && folds < FOLDS && !hideUI) drawHint();
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* three.js が使えないときの平らな絵（折る画面だけ） */
+  function drawFlat() {
+    ctx.fillStyle = state === S.FOLD || state === S.INTRO ? "#b98a5a" : "#9fd0f0";
+    ctx.fillRect(0, 0, W, H);
+    if (state !== S.FOLD && state !== S.INTRO) return;
+    var fs = (preview || faces).slice().sort(function (a, b) { return a.l - b.l; });
+    fs.forEach(function (f) {
+      ctx.beginPath();
+      f.p.forEach(function (p, i) { var s = toScreen(p); if (i) ctx.lineTo(s[0], s[1]); else ctx.moveTo(s[0], s[1]); });
+      ctx.closePath();
+      ctx.fillStyle = f.l % 2 ? "#eeeae2" : "#fbf9f4"; ctx.fill();
+      ctx.strokeStyle = "#a8a39a"; ctx.lineWidth = 1.5; ctx.stroke();
+    });
+  }
+
+  /* 次に折る所の手本：つまむ角から重ねる先へ、点線の矢印 */
+  function drawHint() {
+    var g = GOOD[folds], a = toScreen(g[0]), b = toScreen(g[1]);
+    var k = (T % 1.6) / 1.6, e = k < 0.7 ? k / 0.7 : 1;
+    ctx.save();
+    ctx.globalAlpha = k < 0.85 ? 1 : (1 - k) / 0.15;
+    ctx.setLineDash([12, 9]); ctx.lineWidth = 5; ctx.strokeStyle = "#e0533a"; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    ctx.setLineDash([]);
+    var ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    ctx.fillStyle = "#e0533a";
+    ctx.beginPath();
+    ctx.moveTo(b[0], b[1]);
+    ctx.lineTo(b[0] - 18 * Math.cos(ang - 0.45), b[1] - 18 * Math.sin(ang - 0.45));
+    ctx.lineTo(b[0] - 18 * Math.cos(ang + 0.45), b[1] - 18 * Math.sin(ang + 0.45));
+    ctx.closePath(); ctx.fill();
+    /* 動く指先の丸 */
+    var x = a[0] + (b[0] - a[0]) * e, y = a[1] + (b[1] - a[1]) * e;
+    ctx.beginPath(); ctx.arc(x, y, 15, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#e0533a"; ctx.stroke();
+    ctx.restore();
+  }
+
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.55)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.textAlign = "center";
+    ctx.font = "800 108px sans-serif";
+    var num = score.toFixed(1), nw = ctx.measureText(num).width;
+    ctx.font = "800 54px sans-serif";
+    var uw = ctx.measureText("m").width;
+    ctx.textAlign = "left";
+    ctx.font = "800 108px sans-serif";
+    ctx.fillText(num, W / 2 - (nw + uw + 6) / 2, H * 0.45);
+    ctx.font = "800 54px sans-serif";
+    ctx.fillText("m", W / 2 - (nw + uw + 6) / 2 + nw + 6, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () {
+      return { state: state, score: score, W: W, H: H, folds: folds, aero: aero, fl: fl && { v: fl.v, x: fl.x, y: fl.y, z: fl.z, gam: fl.gam, phi: fl.phi, t: fl.t } };
+    },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); },
+    screen: function (p) { return toScreen(p); },
+    good: GOOD,
+    debug: function (n) { debugKey(n); },
+    /* サムネ用：文字と手本を消す */
+    hideUI: function () { hideUI = true; }
+  };
+  var hideUI = false;
+
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(800);
+      debugKey(3);
+      if (!await r.until(function () { return state === S.RESULT; }, 40)) throw Error("着地しない");
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  layout();
+  var last = performance.now(), acc = 0;
+  function loop(now) {
+    /* 端末の速さで変わらないように、update はいつも 1/60 秒ずつ。余りは次のコマへ持ち越す */
+    acc += Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      while (acc >= 1 / 60) { update(1 / 60); acc -= 1 / 60; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
