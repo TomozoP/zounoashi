@@ -294,8 +294,9 @@
       knife.vx *= Math.exp(-10 * dt); knife.vy *= Math.exp(-10 * dt);
     }
 
-    if (endT >= 0) {                           /* 8切れになったら全部止めて、それぞれの％を見せる */
-      if (T - endT > FREEZE_SHOW) finish();
+    if (endT >= 0) {                           /* 8切れになったら全部止めて整列し、それぞれの％を見せる */
+      moveToArranged();
+      if (T - endT > ALIGN_WAIT + ALIGN_MOVE + FREEZE_SHOW) finish();
       return;
     }
     pieces.forEach(function (p) {
@@ -313,13 +314,64 @@
 
   }
 
-  var FREEZE_SHOW = 2.2;   /* 止めて％を見せてから結果を出すまで（秒） */
+  var FREEZE_SHOW = 2.0;   /* 並べて％を見せてから結果を出すまで（秒） */
   function freeze() {
     endT = T;
     held = false; knife = null; trail = [];
     pieces.forEach(function (p) { p.vx = p.vy = p.va = 0; p.wob = 0; p.entry = null; });
     tone(880, 0.12, 0.12, "triangle"); tone(1320, 0.18, 0.1, "triangle", null, 0.08);
+    arrange();
   }
+
+  /* 切り終わったら整列：大きい順に、長い向きを縦にそろえて、左上から棚に並べるように置く */
+  var ALIGN_WAIT = 0.35, ALIGN_MOVE = 0.9;
+  function longAxis(p) {
+    var sxx = 0, syy = 0, sxy = 0;
+    p.poly.forEach(function (v) { sxx += v.x * v.x; syy += v.y * v.y; sxy += v.x * v.y; });
+    return 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  }
+  function arrange() {
+    var gap = 14, maxW = BX1 - BX0 - gap * 2;
+    var list = pieces.slice().sort(function (a, b) { return b.area - a.area; });
+    var rows = [], row = null;
+    list.forEach(function (p) {
+      var ta = Math.PI / 2 - longAxis(p);
+      while (ta - p.a > Math.PI / 2) ta -= Math.PI;   /* いまの向きから近いほうへ回す */
+      while (ta - p.a < -Math.PI / 2) ta += Math.PI;
+      var x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+      p.poly.forEach(function (v) {
+        var r = rot(v.x, v.y, ta);
+        x0 = Math.min(x0, r.x); x1 = Math.max(x1, r.x); y0 = Math.min(y0, r.y); y1 = Math.max(y1, r.y);
+      });
+      var it = { p: p, a: ta, x0: x0, x1: x1, y0: y0, y1: y1, w: x1 - x0, h: y1 - y0 };
+      if (!row || row.w + gap + it.w > maxW) { row = { items: [], w: -gap, h: 0 }; rows.push(row); }
+      row.items.push(it); row.w += gap + it.w; row.h = Math.max(row.h, it.h);
+    });
+    var totalH = rows.reduce(function (s, r) { return s + r.h; }, 0) + gap * (rows.length - 1);
+    var y = CY - totalH / 2;
+    rows.forEach(function (r) {
+      var x = W / 2 - r.w / 2;
+      r.items.forEach(function (it) {
+        var p = it.p;
+        p.from = { x: p.x, y: p.y, a: p.a };
+        p.to = { x: x - it.x0, y: y + r.h / 2 - (it.y0 + it.y1) / 2, a: it.a };
+        x += it.w + gap;
+      });
+      y += r.h + gap;
+    });
+  }
+  function moveToArranged() {
+    var k = Math.max(0, Math.min(1, (T - endT - ALIGN_WAIT) / ALIGN_MOVE));
+    var e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+    pieces.forEach(function (p) {
+      if (!p.to) return;
+      p.x = p.from.x + (p.to.x - p.from.x) * e;
+      p.y = p.from.y + (p.to.y - p.from.y) * e;
+      p.a = p.from.a + (p.to.a - p.from.a) * e;
+      p.wob = k > 0 && k < 1 ? 0.25 : p.wob * 0.9;
+    });
+  }
+  function arranged() { return endT >= 0 && T - endT >= ALIGN_WAIT + ALIGN_MOVE; }
 
   function walls(p) {
     var minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
@@ -726,7 +778,7 @@
       if (pieces) pieces.forEach(drawPiece);
       drawKnife();
     }
-    if (endT >= 0 || state === S.RESULT) drawPercents(s3);
+    if (arranged() || state === S.RESULT) drawPercents(s3);
     if (state === S.RESULT) drawResult();
   }
 
