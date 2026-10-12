@@ -180,7 +180,7 @@
     var hf = 2 * Math.atan(Math.tan(vf / 2) * aspect);
     var dW = (bw / 2 * 1.04) / Math.tan(hf / 2);
     var dH = (bd / 2 * 1.06) / Math.tan(vf / 2);
-    var d = (Math.max(dW, dH) + THICK) * (1 + 0.45 * (this.zoom || 0));   /* zoom: 終わったら引く（0〜1） */
+    var d = (Math.max(dW, dH) + THICK) * (1 + 0.3 * (this.zoom || 0));   /* zoom: 終わったら引く（0〜1） */
     cam.position.set(cx, Math.cos(TILT) * d, cz + Math.sin(TILT) * d);
     cam.lookAt(cx, 0, cz - 0.15);
     cam.updateMatrixWorld();
