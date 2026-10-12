@@ -23,6 +23,7 @@
     L.key.position.set(1, 9, -4);
     L.key.shadow.radius = 4;
     L.rim.intensity = 0.3;
+    L.fill.intensity = 0.9;
     this.makeEnv();
     this.makeMaterials();
     this.meshes = new Map();
@@ -42,7 +43,7 @@
     }
     panel(8, 2.2, -2, 6.8, -2, Math.PI / 2, 0, 0xffffff);     /* 天井の蛍光灯 */
     panel(3, 1.2, 4, 6.8, 3, Math.PI / 2, 0, 0xfff1dc);
-    panel(10, 5, 0, 4, -14.8, 0, 0, 0xcfe0ff);                 /* 窓 */
+    panel(10, 5, 0, 4, -14.8, 0, 0, 0xfff4e6);                 /* 窓 */
     panel(5, 3, 1.5, 6.8, 6, Math.PI / 2, 0, 0xffffff);        /* カメラ側の明かり（上の面のつやになる） */
     panel(1.2, 6, -4, 6.8, 2, Math.PI / 2, 0, 0xffffff);
     var pm = new T.PMREMGenerator(this.stage.renderer);
@@ -52,50 +53,63 @@
   };
 
   KonScene.prototype.makeMaterials = function () {
-    var KW = this.KW, KH = this.KH, specks = this.specks;
+    var KW = this.KW, KH = this.KH;
     var r = Z3.rng(31);
     var PX = 2;   /* 貼り物の細かさ（ゲーム座標1あたり） */
-    /* 色：灰色がかった茶色のむら＋ひじきの黒いつぶ */
-    var col = Z3.canvasTex(KW * PX, KH * PX, function (g, w, h) {
-      g.fillStyle = "#5f5852"; g.fillRect(0, 0, w, h);
-      for (var i = 0; i < 260; i++) {
-        var x = r() * w, y = r() * h, rr = 10 + r() * 50;
+    var w = KW * PX, h = KH * PX;
+    /* 細かいつぶ（ひじき）。色と、でこぼこの両方で同じ場所を使う */
+    var dots = [];
+    for (var i = 0; i < 2600; i++) dots.push({ x: r() * w, y: r() * h, r: 0.7 + Math.pow(r(), 3) * 2.4, a: 0.45 + r() * 0.5 });
+    /* 色：灰色がかった薄茶のむら＋小さな黒茶のつぶ（写真のこんにゃくに寄せる） */
+    var col = Z3.canvasTex(w, h, function (g) {
+      g.fillStyle = "#9a8a77"; g.fillRect(0, 0, w, h);
+      for (var i = 0; i < 300; i++) {
+        var x = r() * w, y = r() * h, rr = 14 + r() * 70;
         var gr = g.createRadialGradient(x, y, 0, x, y, rr);
-        var d = r() < 0.5 ? "rgba(60,54,50," : "rgba(150,142,132,";
-        gr.addColorStop(0, d + (0.08 + r() * 0.1) + ")"); gr.addColorStop(1, d + "0)");
+        var d = r() < 0.5 ? "rgba(110,98,86," : "rgba(176,164,148,";
+        gr.addColorStop(0, d + (0.12 + r() * 0.14) + ")"); gr.addColorStop(1, d + "0)");
         g.fillStyle = gr; g.fillRect(x - rr, y - rr, rr * 2, rr * 2);
       }
-      specks.forEach(function (s) {
-        g.fillStyle = "rgba(22,19,18," + Math.min(1, s.a + 0.25) + ")";
-        g.beginPath(); g.ellipse((s.x + KW / 2) * PX, (s.y + KH / 2) * PX, s.r * PX, s.r * PX * (0.6 + 0.4 * ((s.x * 7) % 1 + 1) % 1), s.x, 0, Math.PI * 2); g.fill();
+      dots.forEach(function (s) {
+        g.fillStyle = "rgba(52,38,30," + s.a + ")";
+        g.beginPath(); g.ellipse(s.x, s.y, s.r, s.r * (0.6 + r() * 0.4), r() * 3, 0, Math.PI * 2); g.fill();
       });
     });
     col.wrapS = col.wrapT = T.MirroredRepeatWrapping;
-    /* でこぼこ：つぶは少しへこみ、全体に細かいざらつき */
-    var bump = Z3.canvasTex(KW * PX / 2, KH * PX / 2, function (g, w, h) {
-      g.fillStyle = "#808080"; g.fillRect(0, 0, w, h);
-      for (var i = 0; i < 2600; i++) {
-        var v = 110 + Math.floor(r() * 40);
-        g.fillStyle = "rgba(" + v + "," + v + "," + v + ",.5)";
-        g.fillRect(r() * w, r() * h, 1 + r() * 2, 1 + r() * 2);
-      }
-      specks.forEach(function (s) {
-        g.fillStyle = "rgba(40,40,40,.8)";
-        g.beginPath(); g.arc((s.x + KW / 2) * PX / 2, (s.y + KH / 2) * PX / 2, s.r * PX / 2, 0, Math.PI * 2); g.fill();
-      });
-    });
-    bump.colorSpace = T.NoColorSpace;
-    bump.wrapS = bump.wrapT = T.MirroredRepeatWrapping;
-    /* ぬれたつや：上に透明な層（clearcoat）をのせる */
+    /* でこぼこ：高さの絵を作り、そこから法線（ノーマルマップ）を計算する */
+    var nw = Math.round(w / 2), nh = Math.round(h / 2);
+    var hc = document.createElement("canvas"); hc.width = nw; hc.height = nh;
+    var hg = hc.getContext("2d");
+    hg.fillStyle = "#808080"; hg.fillRect(0, 0, nw, nh);
+    for (var j = 0; j < 700; j++) {            /* ゆるいうねり */
+      var x = r() * nw, y = r() * nh, rr = 6 + r() * 26, up = r() < 0.5;
+      var gr = hg.createRadialGradient(x, y, 0, x, y, rr);
+      var c0 = up ? "rgba(255,255,255," : "rgba(0,0,0,";
+      gr.addColorStop(0, c0 + (0.05 + r() * 0.07) + ")"); gr.addColorStop(1, c0 + "0)");
+      hg.fillStyle = gr; hg.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+    }
+    var hd = hg.getImageData(0, 0, nw, nh).data;
+    var nc = document.createElement("canvas"); nc.width = nw; nc.height = nh;
+    var ng = nc.getContext("2d"), img = ng.createImageData(nw, nh), od = img.data;
+    function H(x, y) { x = (x + nw) % nw; y = (y + nh) % nh; return hd[(y * nw + x) * 4] / 255; }
+    var K = 3.4;
+    for (var y2 = 0; y2 < nh; y2++) for (var x2 = 0; x2 < nw; x2++) {
+      var dx = (H(x2 + 1, y2) - H(x2 - 1, y2)) * K, dy = (H(x2, y2 + 1) - H(x2, y2 - 1)) * K;
+      var l = Math.sqrt(dx * dx + dy * dy + 1), o = (y2 * nw + x2) * 4;
+      od[o] = (-dx / l * 0.5 + 0.5) * 255; od[o + 1] = (dy / l * 0.5 + 0.5) * 255; od[o + 2] = (1 / l * 0.5 + 0.5) * 255; od[o + 3] = 255;
+    }
+    ng.putImageData(img, 0, 0);
+    var nrm = new T.CanvasTexture(nc);
+    nrm.colorSpace = T.NoColorSpace;
+    nrm.wrapS = nrm.wrapT = T.MirroredRepeatWrapping;
+    nrm.anisotropy = 4;
+    /* ぬれたつや：上に透明な層（clearcoat）。その層もでこぼこを拾って、光がゆらぐ */
     this.konMat = new T.MeshPhysicalMaterial({
-      map: col, bumpMap: bump, bumpScale: 0.6,
-      color: 0x9a948e, roughness: 0.45, metalness: 0,
-      clearcoat: 1, clearcoatRoughness: 0.22,
-      sheen: 0.3, sheenColor: new T.Color(0x9a948c), sheenRoughness: 0.5
+      map: col, color: 0xd6cdc2, roughness: 0.42, metalness: 0,
+      normalMap: nrm, normalScale: new T.Vector2(0.7, 0.7),
+      clearcoat: 1, clearcoatRoughness: 0.14,
+      sheen: 0.4, sheenColor: new T.Color(0xc8b9a4), sheenRoughness: 0.4
     });
-    /* 切り口：中も同じ色。つぶが少し大きく見える */
-    this.cutMat = this.konMat.clone();
-    this.cutMat.clearcoat = 0.7; this.cutMat.clearcoatRoughness = 0.2;
   };
 
   /* まな板（ゲームの壁の内側＋縁14） */
@@ -170,38 +184,92 @@
     cam.updateMatrixWorld();
   };
 
-  /* こんにゃく1切れの形。p.poly はゲーム座標（重心が原点）、p.c は元のこんにゃくでの重心 */
+  /* こんにゃく1切れの形。p.poly はゲーム座標（重心が原点）、p.c は元のこんにゃくでの重心。
+     元のこんにゃくの外側だった辺だけ上の角を丸め、切り口の辺はまっすぐ縦に（切った角は鋭く）する */
+  var ROUND = 0.09;      /* 元の角の丸み */
   KonScene.prototype.pieceMesh = function (p) {
     var KW = this.KW, KH = this.KH;
-    var shape = new T.Shape();
-    p.poly.forEach(function (v, i) { if (i) shape.lineTo(v.x * S, -v.y * S); else shape.moveTo(v.x * S, -v.y * S); });
-    shape.closePath();
-    var cx = p.c.x, cy = p.c.y;
-    function uvTop(x, y) { return new T.Vector2((x / S + cx) / KW + 0.5, 1 - ((-y / S + cy) / KH + 0.5)); }
-    var gen = {
-      generateTopUV: function (geo, v, a, b, c) {
-        return [uvTop(v[a * 3], v[a * 3 + 1]), uvTop(v[b * 3], v[b * 3 + 1]), uvTop(v[c * 3], v[c * 3 + 1])];
-      },
-      generateSideWallUV: function (geo, v, a, b, c, d) {
-        function u(i) { return ((v[i * 3] / S + cx) - (v[i * 3 + 1] / S - cy)) / KW; }
-        function w(i) { return 0.3 + v[i * 3 + 2] * 0.5; }
-        return [new T.Vector2(u(a), w(a)), new T.Vector2(u(b), w(b)), new T.Vector2(u(c), w(c)), new T.Vector2(u(d), w(d))];
+    var P = p.poly, n = P.length, cx = p.c.x, cy = p.c.y;
+    /* 向きをそろえる（ゲーム座標で面積が正＝画面で時計回り） */
+    if (polyArea(P) < 0) P = P.slice().reverse();
+    /* 辺が元の外側か */
+    var orig = [], nor = [];
+    for (var i = 0; i < n; i++) {
+      var a = P[i], b = P[(i + 1) % n];
+      var ax = a.x + cx, ay = a.y + cy, bx = b.x + cx, by = b.y + cy, e = 0.6;
+      orig.push((Math.abs(ax - KW / 2) < e && Math.abs(bx - KW / 2) < e) || (Math.abs(ax + KW / 2) < e && Math.abs(bx + KW / 2) < e) ||
+        (Math.abs(ay - KH / 2) < e && Math.abs(by - KH / 2) < e) || (Math.abs(ay + KH / 2) < e && Math.abs(by + KH / 2) < e));
+      var ex = b.x - a.x, ey = b.y - a.y, l = Math.hypot(ex, ey) || 1;
+      nor.push({ x: ey / l, y: -ex / l });     /* 外向き（ゲーム座標） */
+    }
+    /* 辺ごとに内側へ d[i] だけずらした多角形 */
+    function inset(d) {
+      var out = [];
+      for (var i = 0; i < n; i++) {
+        var j = (i - 1 + n) % n;              /* 頂点 i は辺 j と辺 i の間 */
+        var n1 = nor[j], n2 = nor[i], v = P[i];
+        var det = n1.x * n2.y - n1.y * n2.x;
+        if (Math.abs(det) < 1e-4) { out.push({ x: v.x - n2.x * d[i], y: v.y - n2.y * d[i] }); continue; }
+        /* (v - q)・n1 = d[j], (v - q)・n2 = d[i] を満たす q */
+        var c1 = d[j], c2 = d[i];
+        var qx = (c1 * n2.y - c2 * n1.y) / det, qy = (n1.x * c2 - n2.x * c1) / det;
+        out.push({ x: v.x - qx, y: v.y - qy });
       }
-    };
-    var bev = 0.05;
-    var geo = new T.ExtrudeGeometry(shape, {
-      depth: THICK - bev * 2, bevelEnabled: true, bevelThickness: bev, bevelSize: bev * 0.9, bevelOffset: -bev * 0.9,
-      bevelSegments: Z3.mobile ? 2 : 3, curveSegments: 1, UVGenerator: gen
-    });
-    var mesh = new T.Mesh(geo, [this.konMat, this.cutMat]);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = bev;
+      return out;
+    }
+    var R = ROUND / S, SEG = Z3.mobile ? 4 : 6;
+    var rings = [];                            /* 上の面の縁 → 丸み → 縦の壁 → 床 */
+    for (var k = 0; k <= SEG; k++) {
+      var th = k / SEG * Math.PI / 2;
+      var d = orig.map(function (o) { return o ? R * (1 - Math.sin(th)) : 0; });
+      rings.push({ pts: inset(d), y: THICK - ROUND + ROUND * Math.cos(th), th: th });
+    }
+    rings.push({ pts: P, y: 0, th: Math.PI / 2 });
+    var pos = [], nrm = [], uv = [];
+    function uvTop(v) { return [(v.x + cx) / KW + 0.5, 1 - ((v.y + cy) / KH + 0.5)]; }
+    function vert(v, y, nx, ny, nz, u, w) { pos.push(v.x * S, y, v.y * S); nrm.push(nx, ny, nz); uv.push(u, w); }
+    /* 上の面（凸なので扇形） */
+    var top = rings[0].pts;
+    for (var t = 1; t < n - 1; t++) {
+      [top[0], top[t + 1], top[t]].forEach(function (v) { var q = uvTop(v); vert(v, THICK, 0, 1, 0, q[0], q[1]); });
+    }
+    /* 横の面。辺ごとに頂点を分け、切った角は鋭くする */
+    for (var e = 0; e < n; e++) {
+      var f = (e + 1) % n, N = nor[e];
+      var len = 0;
+      for (var rk = 0; rk < rings.length - 1; rk++) {
+        var A = rings[rk], B = rings[rk + 1];
+        function nrmAt(ring) {
+          if (!orig[e] || ring === rings[rings.length - 1]) return [N.x, 0, N.y];
+          var s1 = Math.sin(ring.th), c1 = Math.cos(ring.th);
+          return [N.x * s1, c1, N.y * s1];
+        }
+        var na = nrmAt(A), nb = B === rings[rings.length - 1] ? nrmAt(A) : nrmAt(B);
+        if (!orig[e] && rk === 0) na = nb = [N.x, 0, N.y];
+        var a0 = A.pts[e], a1 = A.pts[f], b0 = B.pts[e], b1 = B.pts[f];
+        /* 切り口の模様：辺に沿った位置と高さ（元のこんにゃくの座標で続くように） */
+        function uvS(v, y) { return [((v.x + cx) * Math.abs(N.y) + (v.y + cy) * Math.abs(N.x)) / KW + 0.5, 0.3 + y / S / KH]; }
+        var ua0 = uvS(a0, A.y), ua1 = uvS(a1, A.y), ub0 = uvS(b0, B.y), ub1 = uvS(b1, B.y);
+        vert(a0, A.y, na[0], na[1], na[2], ua0[0], ua0[1]); vert(a1, A.y, na[0], na[1], na[2], ua1[0], ua1[1]); vert(b0, B.y, nb[0], nb[1], nb[2], ub0[0], ub0[1]);
+        vert(a1, A.y, na[0], na[1], na[2], ua1[0], ua1[1]); vert(b1, B.y, nb[0], nb[1], nb[2], ub1[0], ub1[1]); vert(b0, B.y, nb[0], nb[1], nb[2], ub0[0], ub0[1]);
+      }
+    }
+    var geo = new T.BufferGeometry();
+    geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new T.Float32BufferAttribute(nrm, 3));
+    geo.setAttribute("uv", new T.Float32BufferAttribute(uv, 2));
+    var mesh = new T.Mesh(geo, this.konMat);
     mesh.castShadow = true; mesh.receiveShadow = true;
     var grp = new T.Group();
     grp.add(mesh);
     this.scene.add(grp);
     return grp;
   };
+  function polyArea(P) {
+    var a = 0;
+    for (var i = 0; i < P.length; i++) { var p = P[i], q = P[(i + 1) % P.length]; a += p.x * q.y - q.x * p.y; }
+    return a / 2;
+  }
 
   KonScene.prototype.makeKnife = function () {
     var k = this.knife = new T.Group();
