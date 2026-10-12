@@ -159,7 +159,9 @@
         if (this.lastFaces !== s.planeFaces || this.lastMorph !== s.morph) {
           var e = s.morph * s.morph * (3 - 2 * s.morph), fm = flatMap(s.mid), pm = planeMap(s.mid, s.keel);
           this.setPaper(this.foldPaper, this.foldLine, s.planeFaces, function (x, y, l) {
+            /* 半分に折って重なった形から、胴と翼を開いていく */
             var a = fm(x, y, l), b = pm(x, y, l);
+            if (x * s.half > 0) { a[0] = -x; a[1] = 0.05 + l * 0.004; }
             return [a[0] + (b[0] - a[0]) * e, a[1] + (b[1] + s.keel + 0.01 - a[1]) * e, a[2] + (b[2] - a[2]) * e];
           });
           this.lastFaces = s.planeFaces; this.lastMorph = s.morph;
@@ -175,7 +177,7 @@
       var z0 = (s.H / 2 - s.pcy) / s.fs;
       var k = s.state === "make" ? Math.max(0, (s.morph - 0.3) / 0.7) : 0;
       k = k * k * (3 - 2 * k);
-      cam.position.set(1.1 * k, D + (0.9 - D) * k, z0 + (1.6 - z0) * k);
+      cam.position.set(1.5 * k, D + (1.3 - D) * k, z0 + (2.3 - z0) * k);
       cam.up.set(0, k, -(1 - k)).normalize();
       cam.lookAt(0, 0.12 * k, z0 * (1 - k));
       return;

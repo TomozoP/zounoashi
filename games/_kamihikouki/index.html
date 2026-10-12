@@ -141,7 +141,7 @@
      紙の座標は横1・縦1.414（A4の比）。x は -0.5〜0.5、y は 0（下）〜1.414（上＝機首）。
      紙は「平らな面」の集まりで、面ごとに重なりの段（layer）を持つ。どの面も凸の多角形 */
   var PH = 1.414, MID = PH / 2;
-  var FOLDS = 4;                               /* この回数折ったら機体にする */
+  var FOLDS = 5;                               /* 4回折って、5回目の真ん中折りで機体にする */
   var KEEL = 0.12;                             /* 真ん中から翼を折り返すまでの幅（胴の深さ） */
 
   function sheet() { return [{ p: [[-0.5, 0], [0.5, 0], [0.5, PH], [-0.5, PH]], l: 0 }]; }
@@ -176,6 +176,18 @@
   function onPaper(fs, x, y) {
     for (var i = 0; i < fs.length; i++) if (inside(fs[i].p, x, y)) return true;
     return false;
+  }
+
+  /* 指の近く（画面で約28px以内）にある紙の角 */
+  function nearCorner(fs, p) {
+    var best = null, bd = 28 / FS;
+    fs.forEach(function (f) {
+      f.p.forEach(function (q) {
+        var d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        if (d < bd) { bd = d; best = [q[0], q[1]]; }
+      });
+    });
+    return best;
   }
 
   /* 点Pを点Qに重ねるように折る。折り目はPとQの垂直二等分線。Pの側の紙が全部めくれて重なる */
@@ -295,6 +307,22 @@
     windStop();
   }
 
+  /* 5回目は真ん中で半分に折る。その折り目を機体の背骨にするので、折り目が x=0・機首が上になるように紙を置き直す。
+     ずれたり斜めだったりすると、左右の翼の広さがそのまま変わる */
+  var half = 1;                                /* 半分に折ったとき、めくった側（1: 右、-1: 左） */
+  function centerFold(P, Q) {
+    var dx = Q[0] - P[0], dy = Q[1] - P[1], d = Math.hypot(dx, dy);
+    var nx = dx / d, ny = dy / d, mx = (P[0] + Q[0]) / 2, my = (P[1] + Q[1]) / 2;
+    var ux = -ny, uy = nx;                     /* 折り目の向き。機首（上）側を正にする */
+    if (uy < 0) { ux = -ux; uy = -uy; }
+    var rx = uy, ry = -ux;                     /* 折り目から見た右 */
+    half = (P[0] - mx) * rx + (P[1] - my) * ry > 0 ? 1 : -1;
+    faces = faces.map(function (f) {
+      return { l: f.l, p: f.p.map(function (p) { return [(p[0] - mx) * rx + (p[1] - my) * ry, p[0] * ux + p[1] * uy]; }) };
+    });
+    makePlane();
+  }
+
   function makePlane() {
     planeFaces = splitForPlane(faces);
     aero = measure(faces);
@@ -355,8 +383,9 @@
     }
     held = true;
     if (state === S.FOLD) {
-      var p = toPaper(x, y);
-      if (!onPaper(faces, p[0], p[1])) { held = false; return; }
+      var p = toPaper(x, y), near = nearCorner(faces, p);
+      if (near) p = near;                      /* 角の近くを触ったら角をつまむ */
+      else if (!onPaper(faces, p[0], p[1])) { held = false; return; }
       grab = { p: p, at: p };
       noiseHit(0.05, 4000, 0.08, 1);
       return;
@@ -381,9 +410,10 @@
     held = false;
     if (state === S.FOLD && grab) {
       if (preview) {
-        faces = preview; folds++;
+        folds++;
         foldSound();
-        if (folds >= FOLDS) makePlane();
+        if (folds >= FOLDS) centerFold(grab.p, grab.at);
+        else faces = preview;
       }
       grab = null; preview = null;
       return;
@@ -414,19 +444,21 @@
 
   /* 本番以外だけ、数字キーで場面を飛ばせる */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
-  /* お手本どおりの4回（角を真ん中へ ×2 → 斜めの辺を真ん中へ ×2） */
+  /* お手本どおりの5回（角を真ん中へ ×2 → 斜めの辺を真ん中へ ×2 → 右を左へ重ねて半分に） */
   var GOOD = [
     [[-0.5, PH], [0, PH - 0.5]], [[0.5, PH], [0, PH - 0.5]],
-    [[-0.5, PH - 0.5], [0, PH - Math.SQRT1_2]], [[0.5, PH - 0.5], [0, PH - Math.SQRT1_2]]
+    [[-0.5, PH - 0.5], [0, PH - Math.SQRT1_2]], [[0.5, PH - 0.5], [0, PH - Math.SQRT1_2]],
+    [[0.5, 0], [-0.5, 0]]
   ];
   function autoFold(sloppy) {
     if (state !== S.FOLD) newRound();
     GOOD.forEach(function (g, i) {
       var q = g[1].slice();
       if (sloppy) { q[0] += (i % 2 ? 0.09 : -0.02); q[1] += (i % 2 ? -0.08 : 0.05); }
-      faces = fold(faces, g[0], q);
+      if (i < FOLDS - 1) faces = fold(faces, g[0], q);
+      else centerFold(g[0], q);
     });
-    folds = FOLDS; makePlane(); morph = 1; state = S.AIM; T = 0;
+    folds = FOLDS; morph = 1; state = S.AIM; T = 0;
   }
   function debugKey(n) {
     if (n === 1) autoFold(false);              /* きれいに折って投げる直前へ */
@@ -478,7 +510,7 @@
   function view() {
     return {
       state: state, t: T || 0, W: W, H: H, fs: FS, pcy: PCY, mid: MID, keel: KEEL,
-      faces: preview || faces, planeFaces: planeFaces, morph: morph, fl: fl, trail: trail
+      faces: preview || faces, planeFaces: planeFaces, morph: morph, half: half, fl: fl, trail: trail
     };
   }
 
@@ -490,7 +522,9 @@
     if (s3) { try { s3.sync(view()); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
     if (!drew) drawFlat();
 
-    if (state === S.FOLD && !grab && folds < FOLDS && !hideUI) drawHint();
+    if (state === S.FOLD && !grab && folds < FOLDS && !hideUI) { var g = GOOD[folds]; drawHint(toScreen(g[0]), toScreen(g[1])); }
+    /* 投げる手本：下から上へはじく */
+    if (state === S.AIM && !swipe && !hideUI) drawHint([W * 0.8, H * 0.9], [W * 0.8, H * 0.62]);
     if (state === S.RESULT) drawResult();
   }
 
@@ -509,9 +543,8 @@
     });
   }
 
-  /* 次に折る所の手本：つまむ角から重ねる先へ、点線の矢印 */
-  function drawHint() {
-    var g = GOOD[folds], a = toScreen(g[0]), b = toScreen(g[1]);
+  /* 手本：つまむ所から離す所へ、点線の矢印と動く指先 */
+  function drawHint(a, b) {
     var k = (T % 1.6) / 1.6, e = k < 0.7 ? k / 0.7 : 1;
     ctx.save();
     ctx.globalAlpha = k < 0.85 ? 1 : (1 - k) / 0.15;
