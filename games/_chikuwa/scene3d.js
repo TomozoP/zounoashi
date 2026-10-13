@@ -206,7 +206,7 @@
   /* カメラ。手前の椅子に座って、テーブルの向こうの仮面を見上げる */
   var CAM = { fov: 50, pos: [0, 8.6, 9.4], at: [0, 1.5, -1.0] };          /* 男を写す（開始画面・失敗したとき） */
   var PLATE = { fov: 44, pos: [0, 10.6, 6.0], at: [0, 0.45, -0.95] };          /* 遊んでいる間は皿を大きく */
-  var MASK_Z = -3.5;
+  var MASK_Z = -4.2;   /* 体の前（半径1.35）が机の奥の端（z=-2.7）より向こうになる位置 */
   /* 殴られる流れ（失敗してからの秒数） */
   var TURN = 0.4, WIND = 0.82, HIT = 1.0;   /* カメラが男へ向く → 振りかぶる → 殴る */
 
@@ -389,7 +389,7 @@
     var m = this.mask, br = Math.sin(t * 1.6) * 0.04;
     m.head.rotation.set(-0.38 + nod * 0.35, Math.sin(t * 0.5) * 0.08, Math.sin(t * 0.7) * 0.04);
     m.head.position.y = 2.95 + br;
-    var restL = [-1.35, 0.3, 1.25], restR = [1.35, 0.3, 1.25];
+    var restL = [-1.35, 0.3, 1.7], restR = [1.35, 0.3, 1.7];   /* 手は机の奥の端に置く */
     placeArm(m.arms[0], lerp3(restL, restL, 0).add(new T.Vector3(0, br, 0)));
     if (miss < 0) { placeArm(m.arms[1], lerp3(restR, restR, 0).add(new T.Vector3(0, br, 0))); this.aimCamera(0, 0, intro ? 1 : 0); return; }
     /* 振りかぶって（WIND）、カメラめがけて殴る（HIT）、倒れる */
@@ -448,7 +448,7 @@
       if (s.leave && s.leave.item === this.leaveItem) {
         var q = s.leave.t / 0.22;
         this.leaveObj.visible = true;
-        this.leaveObj.position.set(s.leave.dir * q * 4.5, q * (s.leave.dir ? 1.6 : 2.6), -q * (s.leave.dir ? 0.8 : 2.4));
+        this.leaveObj.position.set(s.leave.dir * q * 4.5, s.leave.dir ? q * 1.6 : -q * 1.2, s.leave.dir ? -q * 0.8 : q * 5.5);   /* それ以外は手前の下へ */
         this.leaveObj.scale.setScalar(this.leaveItem.scale * (1 - q * 0.3));
       } else { this.drop(this.leaveObj); this.leaveObj = null; this.leaveItem = null; }
     }
