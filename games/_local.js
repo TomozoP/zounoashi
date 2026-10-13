@@ -216,5 +216,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
   },
-  {"type":"lab","tags":[],"id":"chikuwa","title":"ちくわかちくわぶかゲーム","year":2026,"date":"2026-10-13","plays":null,"url":"","img":"games/_chikuwa/img/thumb.webp","play":"games/_chikuwa/index.html","full":true,"catch":"ちくわかちくわぶか見分ける"},
+  {"type":"lab","tags":[],"id":"chikuwa","title":"ちくわかちくわぶかデスゲーム","year":2026,"date":"2026-10-13","plays":null,"url":"","img":"games/_chikuwa/img/thumb.webp","play":"games/_chikuwa/index.html","full":true,"catch":"ちくわかちくわぶか見分ける"},
 ];

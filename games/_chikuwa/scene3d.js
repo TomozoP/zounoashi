@@ -189,20 +189,31 @@
   };
   for (var key in OTHER) if (!OTHER[key].shape) OTHER[key].shape = "circle";
 
+  /* カメラ。手前の椅子に座って、テーブルの向こうの仮面を見上げる */
+  var CAM = { fov: 42, pos: [0, 8.2, 8.8], at: [0, 1.7, -1.2] };
+  var MASK_Z = -3.5;
+  /* 殴られる流れ（失敗してからの秒数） */
+  var WIND = 0.42, HIT = 0.6;
+
   function GameScene() {
     T = global.THREE;
-    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.05 }, camera: { fov: 30 } });
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.05 }, camera: { fov: CAM.fov } });
     this.scene = st.scene;
     this.camera = st.camera;
-    this.scene.background = new T.Color(0x6b4426);
-    Z3.lights(this.scene, { shadows: true, shadowSize: 4 });
-    this.camera.position.set(0, 15.5, 8.6);
-    this.camera.lookAt(0, 0, 0.75);
+    /* 暗い部屋。テーブルの上だけ明るい */
+    this.scene.background = new T.Color(0x0d0b0c);
+    Z3.lights(this.scene, { shadows: true, shadowSize: 5, scale: 0.8 });
+    var spot = new T.SpotLight(0xfff1d8, 60, 18, 0.62, 0.5, 1.6);
+    spot.position.set(0, 9, -0.5); spot.target.position.set(0, 0, -1);
+    this.scene.add(spot); this.scene.add(spot.target);
+    this.aimCamera(0, 0);
 
-    /* 木のカウンター（カメラの後ろまでは伸ばさない） */
-    var table = new T.Mesh(new T.PlaneGeometry(12, 12), Z3.std(0xffffff, { map: woodTex(), roughness: 0.75 }));
-    table.rotation.x = -Math.PI / 2; table.position.z = 0; table.receiveShadow = true;
+    /* 木のテーブル。向こう側の端の奥に仮面が立つ（カメラの後ろまでは伸ばさない） */
+    var table = new T.Mesh(new T.BoxGeometry(9, 0.4, 7.2), Z3.std(0xffffff, { map: woodTex(), roughness: 0.75 }));
+    table.position.set(0, -0.2, 0.9); table.receiveShadow = true;
     this.scene.add(table);
+    this.mask = this.makeMask();
+    this.scene.add(this.mask.root);
 
     /* 皿 */
     var prof = [[0, 0.02], [1.7, 0.02], [2.05, 0.1], [2.35, 0.22], [2.42, 0.25], [2.44, 0.2], [2.3, 0.12], [1.8, 0.05], [1.7, 0.0], [0, 0.0]]
@@ -294,9 +305,85 @@
 
   GameScene.prototype.reset = function () {};
 
+  /* カメラを置く。knock: 殴られて倒れる量 0〜1 */
+  GameScene.prototype.aimCamera = function (knock, jolt) {
+    var c = this.camera, k = knock;
+    c.up.set(0, 1, 0);
+    c.position.set(CAM.pos[0] + jolt * 0.3, CAM.pos[1] - k * 3.2, CAM.pos[2] + k * 1.5);
+    c.lookAt(CAM.at[0] - k * 2.5, CAM.at[1] + k * 3.5, CAM.at[2]);
+    if (k > 0) c.rotateZ(k * 1.25);
+  };
+
+  /* ちくわちくわぶ仮面。黒い頭巾、白い仮面、左目がちくわ・右目がちくわぶの筒 */
+  GameScene.prototype.makeMask = function () {
+    var root = new T.Group(), cloth = Z3.std(0x17161a, { roughness: 0.9 }), glove = Z3.std(0x2b1d17, { roughness: 0.6 });
+    root.position.z = MASK_Z;
+    var body = new T.Mesh(new T.CylinderGeometry(1.0, 1.35, 3.4, 20), cloth);
+    body.position.y = 0.3; root.add(body);
+    var sh = new T.Mesh(new T.SphereGeometry(1.0, 20, 12), cloth);
+    sh.scale.set(1.45, 0.55, 0.85); sh.position.y = 1.95; root.add(sh);
+    var head = new T.Group(); head.position.y = 2.95; root.add(head);
+    var hood = new T.Mesh(new T.SphereGeometry(0.86, 24, 16), cloth);
+    hood.scale.set(1, 1.12, 1); head.add(hood);
+    var face = new T.Mesh(new T.SphereGeometry(0.7, 24, 16), Z3.std(0xf1ede2, { roughness: 0.35 }));
+    face.scale.set(0.95, 1.12, 0.45); face.position.z = 0.55; head.add(face);
+    /* 目の筒（穴の奥は暗い） */
+    var cw = tubeGeo({ shape: "circle", R: 0.2, L: 0.55, hole: 0.5 });
+    var cb = tubeGeo({ shape: "gear", n: 8, depth: 0.16, R: 0.22, L: 0.5, hole: 0.27 });
+    var eyeW = new T.Mesh(cw, [Z3.std(0xf6ecd4), Z3.std(0xffffff, { map: grillTex(11, 1), roughness: 0.55 })]);
+    var eyeB = new T.Mesh(cb, [Z3.std(0xf4eedf), Z3.std(0xffffff, { map: wheatTex(5), roughness: 0.8 })]);
+    eyeW.position.set(-0.27, 0.12, 0.82); eyeB.position.set(0.27, 0.12, 0.82);
+    head.add(eyeW); head.add(eyeB);
+    var mouth = new T.Mesh(new T.BoxGeometry(0.42, 0.05, 0.05), Z3.std(0x2a1f1a));
+    mouth.position.set(0, -0.38, 0.86); mouth.rotation.z = 0.04; head.add(mouth);
+    /* 腕：肩から拳までの棒と拳。毎コマつなぎ直す */
+    var arms = [-1, 1].map(function (side) {
+      var arm = new T.Mesh(new T.CylinderGeometry(0.2, 0.24, 1, 10), cloth);
+      var fist = new T.Mesh(new T.SphereGeometry(0.36, 16, 12), glove);
+      fist.scale.set(1, 0.85, 1.05);
+      root.add(arm); root.add(fist);
+      return { side: side, arm: arm, fist: fist, shoulder: new T.Vector3(side * 1.25, 1.85, 0.1) };
+    });
+    root.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
+    return { root: root, head: head, arms: arms };
+  };
+
+  var UP = null;
+  function placeArm(a, hand) {
+    UP = UP || new T.Vector3(0, 1, 0);
+    var d = hand.clone().sub(a.shoulder), len = d.length();
+    a.arm.position.copy(a.shoulder).addScaledVector(d, 0.5);
+    a.arm.quaternion.setFromUnitVectors(UP, d.normalize());
+    a.arm.scale.set(1, len, 1);
+    a.fist.position.copy(hand);
+  }
+  function lerp3(a, b, k) { return new T.Vector3(a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k); }
+  function ease(k) { k = Math.max(0, Math.min(1, k)); return k * k * (3 - 2 * k); }
+
+  /* 仮面の動き。t: 時刻、miss: 失敗してからの秒数（失敗していなければ -1）、nod: うなずき 0〜1 */
+  GameScene.prototype.poseMask = function (t, miss, nod) {
+    var m = this.mask, br = Math.sin(t * 1.6) * 0.04;
+    m.head.rotation.set(0.18 + nod * 0.35, Math.sin(t * 0.5) * 0.08, Math.sin(t * 0.7) * 0.04);
+    m.head.position.y = 2.95 + br;
+    var restL = [-1.35, 0.3, 1.25], restR = [1.35, 0.3, 1.25];
+    placeArm(m.arms[0], lerp3(restL, restL, 0).add(new T.Vector3(0, br, 0)));
+    if (miss < 0) { placeArm(m.arms[1], lerp3(restR, restR, 0).add(new T.Vector3(0, br, 0))); this.aimCamera(0, 0); return; }
+    /* 振りかぶって（WIND）、カメラめがけて殴る（HIT）、倒れる */
+    var up = [1.9, 3.4, -0.6];
+    var c = CAM.pos, cam = [c[0] + 0.25, c[1] - 0.35, c[2] - MASK_Z - 1.3];
+    var hand = miss < WIND ? lerp3(restR, up, ease(miss / WIND)) : lerp3(up, cam, Math.min(1, Math.pow((miss - WIND) / (HIT - WIND), 2)));
+    if (miss > HIT) hand = lerp3(cam, [1.6, 2.2, 3.5], ease((miss - HIT) / 0.5));
+    placeArm(m.arms[1], hand);
+    m.head.rotation.x = 0.05 - ease(miss / WIND) * 0.15;
+    var knock = miss > HIT ? ease((miss - HIT) / 0.7) : 0;
+    var jolt = miss > HIT && miss < HIT + 0.25 ? Math.sin(miss * 90) * (1 - (miss - HIT) / 0.25) : 0;
+    this.aimCamera(knock, jolt);
+  };
+
   /* s: { state, T, item, leave, intro } */
   GameScene.prototype.sync = function (s) {
     var self = this;
+    this.poseMask(s.T, s.miss == null ? -1 : s.miss, s.nod || 0);
     if (s.intro) {
       if (!this.intro) {
         this.intro = new T.Group();
