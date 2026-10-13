@@ -208,7 +208,7 @@
   var PLATE = { fov: 46, pos: [0, 10.6, 6.6], at: [0, 0.3, -0.3] };          /* 遊んでいる間は皿を大きく */
   var MASK_Z = -4.2;   /* 体の前（半径1.35）が机の奥の端（z=-2.7）より向こうになる位置 */
   /* 殴られる流れ（失敗してからの秒数） */
-  var TURN = 0.4, WIND = 0.95, HIT = 1.17;
+  var TURN = 0.4, WIND = 0.95, HIT = 1.17, HOLD = 0.28;   /* HOLD: 拳で画面が埋まったまま止まる間 */
   var PUSH_IN = 0.1, PUSH_HIT = 0.05;       /* 振りかぶる間・殴る間にカメラが男へ寄る割合 */   /* カメラが男へ向く → 振りかぶる → 殴る */
 
   function GameScene() {
@@ -478,16 +478,18 @@
     var up = [1.5, 3.3, -0.4];
     /* 拳の行き先：殴る瞬間のカメラ（男へ寄った位置）の少し手前。体の座標に直す */
     var cp = new T.Vector3(CAM.pos[0], CAM.pos[1], CAM.pos[2]).lerp(new T.Vector3(0, 2.6, MASK_Z), PUSH_IN + PUSH_HIT);
-    var toward = new T.Vector3(0, 2.6, MASK_Z).sub(cp).normalize().multiplyScalar(1.1);
+    var toward = new T.Vector3(0, 2.6, MASK_Z).sub(cp).normalize().multiplyScalar(0.8);
     var cam = [cp.x + toward.x + 0.15, cp.y + toward.y - 0.25, cp.z + toward.z - MASK_Z];
     var hand = miss < TURN ? restR.slice() && lerp3(restR, restR, 0) : miss < WIND ? lerp3(restR, up, ease((miss - TURN) / (WIND - TURN))) : lerp3(up, cam, punchCurve((miss - WIND) / (HIT - WIND)));
-    if (miss > HIT) hand = lerp3(cam, [1.6, 2.2, 3.5], ease((miss - HIT) / 0.5));
+    if (miss > HIT + HOLD) hand = lerp3(cam, [1.6, 2.2, 3.5], ease((miss - HIT - HOLD) / 0.5));
+    else if (miss > HIT) hand = lerp3(cam, cam, 0);
     placeArm(m.arms[1], hand);
     m.head.rotation.x = -0.38 - ease((miss - TURN) / (WIND - TURN)) * 0.12;
     /* 振りかぶる間はじわっと男へ寄って震え、拳が来る瞬間に画角を絞る。当たったら首が横へ飛んで倒れる */
-    var after = miss - HIT;
+    var hold = miss > HIT && miss < HIT + HOLD;
+    var after = miss < HIT ? miss - HIT : Math.max(0.0001, miss - HIT - HOLD);
     var knock = after > 0 ? ease((after - 0.12) / 0.75) : 0;
-    var jolt = after > 0 && after < 0.35 ? Math.sin(after * 80) * (1 - after / 0.35) : 0;
+    var jolt = hold ? Math.sin(miss * 90) * 0.35 : after > 0 && after < 0.35 ? Math.sin(after * 80) * (1 - after / 0.35) : 0;
     var push = ease((miss - TURN) / (WIND - TURN)) * PUSH_IN + (miss > WIND ? ease((miss - WIND) / (HIT - WIND)) * PUSH_HIT : 0);
     if (after > 0) push *= 1 - ease(after / 0.3);
     var zoom = miss > WIND && after < 0 ? ease((miss - WIND) / (HIT - WIND)) * 10 : after > 0 ? 10 * (1 - ease(after / 0.2)) : 0;
