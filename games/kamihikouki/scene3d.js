@@ -303,7 +303,7 @@
         this.camPos.lerp(want, s.state === "land" ? 0.06 : 0.3); this.camLook.lerp(look, 0.15);
       }
       /* サムネ用：飛んでいる機体を斜め前から撮る */
-      if (s.photo) { this.camPos.set(f.x + hx * 0.55 - hz * 0.6, f.y + 0.06, f.z + hz * 0.55 + hx * 0.6); this.camLook.set(f.x - hx * 0.08, f.y + 0.02, f.z - hz * 0.08); }
+      if (s.photo) { this.camPos.set(f.x - hx * 1.2 + hz * 0.35, f.y + 0.3, f.z - hz * 1.2 - hx * 0.35); this.camLook.set(f.x + hx * 0.3, f.y - 0.05, f.z + hz * 0.3); }
       cam.position.copy(this.camPos); cam.up.set(0, 1, 0); cam.lookAt(this.camLook);
       this.trail.visible = !s.photo;
       var a = this.trail.geometry.attributes.position, n = Math.min(this.trailMax, s.trail.length);
