@@ -204,10 +204,11 @@
   for (var key in OTHER) if (!OTHER[key].shape) OTHER[key].shape = "circle";
 
   /* カメラ。手前の椅子に座って、テーブルの向こうの仮面を見上げる */
-  var CAM = { fov: 50, pos: [0, 8.6, 9.4], at: [0, 1.5, -1.0] };
+  var CAM = { fov: 50, pos: [0, 8.6, 9.4], at: [0, 1.5, -1.0] };          /* 男を写す（開始画面・失敗したとき） */
+  var PLATE = { fov: 44, pos: [0, 10.6, 6.0], at: [0, 0.45, -0.95] };          /* 遊んでいる間は皿を大きく */
   var MASK_Z = -3.5;
   /* 殴られる流れ（失敗してからの秒数） */
-  var WIND = 0.42, HIT = 0.6;
+  var TURN = 0.4, WIND = 0.82, HIT = 1.0;   /* カメラが男へ向く → 振りかぶる → 殴る */
 
   function GameScene() {
     T = global.THREE;
@@ -220,7 +221,7 @@
     var spot = new T.SpotLight(0xfff1d8, 60, 18, 0.62, 0.5, 1.6);
     spot.position.set(0, 9, -0.5); spot.target.position.set(0, 0, -1);
     this.scene.add(spot); this.scene.add(spot.target);
-    this.aimCamera(0, 0);
+    this.aimCamera(0, 0, 1);
 
     /* 木のテーブル。向こう側の端の奥に仮面が立つ（カメラの後ろまでは伸ばさない） */
     var table = new T.Mesh(new T.BoxGeometry(9, 0.4, 7.2), Z3.std(0xffffff, { map: woodTex(), roughness: 0.75 }));
@@ -320,11 +321,14 @@
   GameScene.prototype.reset = function () {};
 
   /* カメラを置く。knock: 殴られて倒れる量 0〜1 */
-  GameScene.prototype.aimCamera = function (knock, jolt) {
-    var c = this.camera, k = knock;
+  /* view: 0=皿 1=男 */
+  GameScene.prototype.aimCamera = function (knock, jolt, view) {
+    var c = this.camera, k = knock, v = view || 0;
+    var pos = lerp3(PLATE.pos, CAM.pos, v), at = lerp3(PLATE.at, CAM.at, v), fov = PLATE.fov + (CAM.fov - PLATE.fov) * v;
+    if (c.fov !== fov) { c.fov = fov; c.updateProjectionMatrix(); }
     c.up.set(0, 1, 0);
-    c.position.set(CAM.pos[0] + jolt * 0.3, CAM.pos[1] - k * 3.2, CAM.pos[2] + k * 1.5);
-    c.lookAt(CAM.at[0] - k * 2.5, CAM.at[1] + k * 3.5, CAM.at[2]);
+    c.position.set(pos.x + jolt * 0.3, pos.y - k * 3.2, pos.z + k * 1.5);
+    c.lookAt(at.x - k * 2.5, at.y + k * 3.5, at.z);
     if (k > 0) c.rotateZ(k * 1.25);
   };
 
@@ -381,29 +385,29 @@
   function ease(k) { k = Math.max(0, Math.min(1, k)); return k * k * (3 - 2 * k); }
 
   /* 仮面の動き。t: 時刻、miss: 失敗してからの秒数（失敗していなければ -1）、nod: うなずき 0〜1 */
-  GameScene.prototype.poseMask = function (t, miss, nod) {
+  GameScene.prototype.poseMask = function (t, miss, nod, intro) {
     var m = this.mask, br = Math.sin(t * 1.6) * 0.04;
     m.head.rotation.set(-0.38 + nod * 0.35, Math.sin(t * 0.5) * 0.08, Math.sin(t * 0.7) * 0.04);
     m.head.position.y = 2.95 + br;
     var restL = [-1.35, 0.3, 1.25], restR = [1.35, 0.3, 1.25];
     placeArm(m.arms[0], lerp3(restL, restL, 0).add(new T.Vector3(0, br, 0)));
-    if (miss < 0) { placeArm(m.arms[1], lerp3(restR, restR, 0).add(new T.Vector3(0, br, 0))); this.aimCamera(0, 0); return; }
+    if (miss < 0) { placeArm(m.arms[1], lerp3(restR, restR, 0).add(new T.Vector3(0, br, 0))); this.aimCamera(0, 0, intro ? 1 : 0); return; }
     /* 振りかぶって（WIND）、カメラめがけて殴る（HIT）、倒れる */
     var up = [1.9, 3.4, -0.6];
     var c = CAM.pos, cam = [c[0] + 0.25, c[1] - 0.35, c[2] - MASK_Z - 1.3];
-    var hand = miss < WIND ? lerp3(restR, up, ease(miss / WIND)) : lerp3(up, cam, Math.min(1, Math.pow((miss - WIND) / (HIT - WIND), 2)));
+    var hand = miss < TURN ? restR.slice() && lerp3(restR, restR, 0) : miss < WIND ? lerp3(restR, up, ease((miss - TURN) / (WIND - TURN))) : lerp3(up, cam, Math.min(1, Math.pow((miss - WIND) / (HIT - WIND), 2)));
     if (miss > HIT) hand = lerp3(cam, [1.6, 2.2, 3.5], ease((miss - HIT) / 0.5));
     placeArm(m.arms[1], hand);
-    m.head.rotation.x = -0.38 - ease(miss / WIND) * 0.12;
+    m.head.rotation.x = -0.38 - ease((miss - TURN) / (WIND - TURN)) * 0.12;
     var knock = miss > HIT ? ease((miss - HIT) / 0.7) : 0;
     var jolt = miss > HIT && miss < HIT + 0.25 ? Math.sin(miss * 90) * (1 - (miss - HIT) / 0.25) : 0;
-    this.aimCamera(knock, jolt);
+    this.aimCamera(knock, jolt, ease(miss / TURN));
   };
 
   /* s: { state, T, item, leave, intro } */
   GameScene.prototype.sync = function (s) {
     var self = this;
-    this.poseMask(s.T, s.miss == null ? -1 : s.miss, s.nod || 0);
+    this.poseMask(s.T, s.miss == null ? -1 : s.miss, s.nod || 0, s.intro);
     if (s.intro) {
       if (!this.intro) {
         this.intro = new T.Group();
