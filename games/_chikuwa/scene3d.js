@@ -208,7 +208,8 @@
   var PLATE = { fov: 46, pos: [0, 10.6, 6.6], at: [0, 0.3, -0.3] };          /* 遊んでいる間は皿を大きく */
   var MASK_Z = -4.2;   /* 体の前（半径1.35）が机の奥の端（z=-2.7）より向こうになる位置 */
   /* 殴られる流れ（失敗してからの秒数） */
-  var TURN = 0.4, WIND = 0.82, HIT = 1.0;   /* カメラが男へ向く → 振りかぶる → 殴る */
+  var TURN = 0.4, WIND = 0.95, HIT = 1.22;
+  var PUSH_IN = 0.1, PUSH_HIT = 0.05;       /* 振りかぶる間・殴る間にカメラが男へ寄る割合 */   /* カメラが男へ向く → 振りかぶる → 殴る */
 
   function GameScene() {
     T = global.THREE;
@@ -323,14 +324,20 @@
 
   /* カメラを置く。knock: 殴られて倒れる量 0〜1 */
   /* view: 0=皿 1=男 */
-  GameScene.prototype.aimCamera = function (knock, jolt, view) {
+  /* knock: 倒れる量、jolt: 殴られた揺れ、view: 0=皿 1=男、fx: { push 男へ寄る, zoom 画角を絞る, whip 首が横へ飛ぶ, tremble 震え } */
+  GameScene.prototype.aimCamera = function (knock, jolt, view, fx) {
     var c = this.camera, k = knock, v = view || 0;
+    fx = fx || {};
     var pos = lerp3(PLATE.pos, CAM.pos, v), at = lerp3(PLATE.at, CAM.at, v), fov = PLATE.fov + (CAM.fov - PLATE.fov) * v;
-    if (c.fov !== fov) { c.fov = fov; c.updateProjectionMatrix(); }
+    if (fx.push) { var head = new T.Vector3(0, 2.6, MASK_Z); pos.lerp(head, fx.push); }
+    if (fx.zoom) fov -= fx.zoom;
+    if (Math.abs(c.fov - fov) > 0.01) { c.fov = fov; c.updateProjectionMatrix(); }
+    var tr = fx.tremble || 0, t = performance.now() / 1000;
     c.up.set(0, 1, 0);
-    c.position.set(pos.x + jolt * 0.3, pos.y - k * 3.2, pos.z + k * 1.5);
+    c.position.set(pos.x + jolt * 0.6 + Math.sin(t * 37) * tr * 0.05, pos.y - k * 3.2 + jolt * 0.35 + Math.sin(t * 29) * tr * 0.05, pos.z + k * 1.5);
     c.lookAt(at.x - k * 2.5, at.y + k * 3.5, at.z);
-    if (k > 0) c.rotateZ(k * 1.25);
+    if (fx.whip) c.rotateY(fx.whip);
+    if (k > 0 || fx.whip) c.rotateZ(k * 1.25 + (fx.whip || 0) * 0.5);
   };
 
   /* ちくわちくわぶ仮面。黒い頭巾、白い仮面、左目がちくわ・右目がちくわぶの筒 */
@@ -441,6 +448,11 @@
     a.fist.position.copy(hand);
   }
   function lerp3(a, b, k) { return new T.Vector3(a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k); }
+  /* 拳の進み：一気に目の前まで来て、顔の前で一瞬ためてから当たる */
+  function punchCurve(p) {
+    p = Math.max(0, Math.min(1, p));
+    return p < 0.5 ? 0.86 * (1 - Math.pow(1 - p / 0.5, 3)) : 0.86 + 0.14 * Math.pow((p - 0.5) / 0.5, 3);
+  }
   function ease(k) { k = Math.max(0, Math.min(1, k)); return k * k * (3 - 2 * k); }
 
   /* 仮面の動き。t: 時刻、miss: 失敗してからの秒数（失敗していなければ -1）、nod: うなずき 0〜1 */
@@ -463,15 +475,25 @@
     placeArm(m.arms[0], lerp3(restL, restL, 0).add(new T.Vector3(0, br, 0)));
     if (miss < 0) { placeArm(m.arms[1], lerp3(restR, restR, 0).add(new T.Vector3(0, br, 0))); this.aimCamera(0, 0, intro ? 1 : 0); return; }
     /* 振りかぶって（WIND）、カメラめがけて殴る（HIT）、倒れる */
-    var up = [1.9, 3.4, -0.6];
-    var c = CAM.pos, cam = [c[0] + 0.25, c[1] - 0.35, c[2] - MASK_Z - 1.3];
-    var hand = miss < TURN ? restR.slice() && lerp3(restR, restR, 0) : miss < WIND ? lerp3(restR, up, ease((miss - TURN) / (WIND - TURN))) : lerp3(up, cam, Math.min(1, Math.pow((miss - WIND) / (HIT - WIND), 2)));
+    var up = [1.5, 3.3, -0.4];
+    /* 拳の行き先：殴る瞬間のカメラ（男へ寄った位置）の少し手前。体の座標に直す */
+    var cp = new T.Vector3(CAM.pos[0], CAM.pos[1], CAM.pos[2]).lerp(new T.Vector3(0, 2.6, MASK_Z), PUSH_IN + PUSH_HIT);
+    var toward = new T.Vector3(0, 2.6, MASK_Z).sub(cp).normalize().multiplyScalar(1.1);
+    var cam = [cp.x + toward.x + 0.15, cp.y + toward.y - 0.25, cp.z + toward.z - MASK_Z];
+    var hand = miss < TURN ? restR.slice() && lerp3(restR, restR, 0) : miss < WIND ? lerp3(restR, up, ease((miss - TURN) / (WIND - TURN))) : lerp3(up, cam, punchCurve((miss - WIND) / (HIT - WIND)));
     if (miss > HIT) hand = lerp3(cam, [1.6, 2.2, 3.5], ease((miss - HIT) / 0.5));
     placeArm(m.arms[1], hand);
     m.head.rotation.x = -0.38 - ease((miss - TURN) / (WIND - TURN)) * 0.12;
-    var knock = miss > HIT ? ease((miss - HIT) / 0.7) : 0;
-    var jolt = miss > HIT && miss < HIT + 0.25 ? Math.sin(miss * 90) * (1 - (miss - HIT) / 0.25) : 0;
-    this.aimCamera(knock, jolt, ease(miss / TURN));
+    /* 振りかぶる間はじわっと男へ寄って震え、拳が来る瞬間に画角を絞る。当たったら首が横へ飛んで倒れる */
+    var after = miss - HIT;
+    var knock = after > 0 ? ease((after - 0.12) / 0.75) : 0;
+    var jolt = after > 0 && after < 0.35 ? Math.sin(after * 80) * (1 - after / 0.35) : 0;
+    var push = ease((miss - TURN) / (WIND - TURN)) * PUSH_IN + (miss > WIND ? ease((miss - WIND) / (HIT - WIND)) * PUSH_HIT : 0);
+    if (after > 0) push *= 1 - ease(after / 0.3);
+    var zoom = miss > WIND && after < 0 ? ease((miss - WIND) / (HIT - WIND)) * 10 : after > 0 ? 10 * (1 - ease(after / 0.2)) : 0;
+    var whip = after > 0 ? -0.75 * Math.sin(Math.min(1, after / 0.1) * Math.PI / 2) * (1 - ease((after - 0.1) / 0.8)) : 0;
+    var tremble = miss > TURN && after < 0 ? ease((miss - TURN) / (WIND - TURN)) : 0;
+    this.aimCamera(knock, jolt, ease(miss / TURN), { push: push, zoom: zoom, whip: whip, tremble: tremble });
   };
 
   /* s: { state, T, item, leave, intro } */
