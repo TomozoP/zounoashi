@@ -88,6 +88,20 @@
     });
   }
 
+  /* ちくわぶの縦の筋（仮面男の右半身） */
+  function ridgeTex() {
+    return Z3.canvasTex(256, 256, function (g, w, h) {
+      var r = Z3.rng(77);
+      g.fillStyle = CREAM_B; g.fillRect(0, 0, w, h);
+      for (var i = 0; i < 6; i++) {
+        var x = (i + 0.5) * w / 6;
+        g.fillStyle = "rgba(150,128,90,.55)"; g.fillRect(x - 5, 0, 10, h);
+        g.fillStyle = "rgba(255,252,240,.8)"; g.fillRect(x + 6, 0, 5, h);
+      }
+      for (i = 0; i < 500; i++) { g.fillStyle = "rgba(205,186,146," + (0.2 + r() * 0.3) + ")"; g.fillRect(r() * w, r() * h, 1.5, 1.5); }
+    });
+  }
+
   function woodTex() {
     return Z3.canvasTex(512, 512, function (g, w, h) {
       var r = Z3.rng(9);
@@ -316,15 +330,21 @@
 
   /* ちくわちくわぶ仮面。黒い頭巾、白い仮面、左目がちくわ・右目がちくわぶの筒 */
   GameScene.prototype.makeMask = function () {
-    var root = new T.Group(), cloth = Z3.std(0x17161a, { roughness: 0.9 }), glove = Z3.std(0x2b1d17, { roughness: 0.6 });
+    /* 体は向かって左半分がちくわ、右半分がちくわぶ（左目・右目と同じ側） */
+    var root = new T.Group();
+    var matW = Z3.std(0xffffff, { map: grillTex(13, 1), roughness: 0.55 });
+    var matB = Z3.std(0xffffff, { map: ridgeTex(), roughness: 0.8 });
     root.position.z = MASK_Z;
-    var body = new T.Mesh(new T.CylinderGeometry(1.0, 1.35, 3.4, 20), cloth);
-    body.position.y = 0.3; root.add(body);
-    var sh = new T.Mesh(new T.SphereGeometry(1.0, 20, 12), cloth);
-    sh.scale.set(1.45, 0.55, 0.85); sh.position.y = 1.95; root.add(sh);
+    /* 半分ずつ作る。x<0 側=ちくわ、x>0 側=ちくわぶ */
+    function halves(make, parent, setup) {
+      [[matW, -1], [matB, 1]].forEach(function (h) {
+        var m = new T.Mesh(make(h[1]), h[0]); setup(m); parent.add(m);
+      });
+    }
+    halves(function (side) { return new T.CylinderGeometry(1.0, 1.35, 3.4, 20, 1, false, side > 0 ? 0 : Math.PI, Math.PI); }, root, function (m) { m.position.y = 0.3; });
+    halves(function (side) { return new T.SphereGeometry(1.0, 20, 12, side > 0 ? Math.PI / 2 : -Math.PI / 2, Math.PI); }, root, function (m) { m.scale.set(1.45, 0.55, 0.85); m.position.y = 1.95; });
     var head = new T.Group(); head.position.y = 2.95; root.add(head);
-    var hood = new T.Mesh(new T.SphereGeometry(0.86, 24, 16), cloth);
-    hood.scale.set(1, 1.12, 1); head.add(hood);
+    halves(function (side) { return new T.SphereGeometry(0.86, 24, 16, side > 0 ? Math.PI / 2 : -Math.PI / 2, Math.PI); }, head, function (m) { m.scale.set(1, 1.12, 1); });
     var face = new T.Mesh(new T.SphereGeometry(0.7, 24, 16), Z3.std(0xf1ede2, { roughness: 0.35 }));
     face.scale.set(0.95, 1.12, 0.45); face.position.z = 0.55; head.add(face);
     /* 目の筒（穴の奥は暗い） */
@@ -338,8 +358,8 @@
     mouth.position.set(0, -0.38, 0.86); mouth.rotation.z = 0.04; head.add(mouth);
     /* 腕：肩から拳までの棒と拳。毎コマつなぎ直す */
     var arms = [-1, 1].map(function (side) {
-      var arm = new T.Mesh(new T.CylinderGeometry(0.2, 0.24, 1, 10), cloth);
-      var fist = new T.Mesh(new T.SphereGeometry(0.36, 16, 12), glove);
+      var arm = new T.Mesh(new T.CylinderGeometry(0.2, 0.24, 1, 10), side < 0 ? matW : matB);
+      var fist = new T.Mesh(new T.SphereGeometry(0.36, 16, 12), side < 0 ? matW : matB);
       fist.scale.set(1, 0.85, 1.05);
       root.add(arm); root.add(fist);
       return { side: side, arm: arm, fist: fist, shoulder: new T.Vector3(side * 1.25, 1.85, 0.1) };
