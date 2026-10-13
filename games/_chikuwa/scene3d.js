@@ -205,7 +205,7 @@
 
   /* カメラ。手前の椅子に座って、テーブルの向こうの仮面を見上げる */
   var CAM = { fov: 50, pos: [0, 8.6, 9.4], at: [0, 1.5, -1.0] };          /* 男を写す（開始画面・失敗したとき） */
-  var PLATE = { fov: 44, pos: [0, 10.6, 6.0], at: [0, 0.45, -0.95] };          /* 遊んでいる間は皿を大きく */
+  var PLATE = { fov: 46, pos: [0, 10.6, 6.6], at: [0, 0.3, -0.3] };          /* 遊んでいる間は皿を大きく */
   var MASK_Z = -4.2;   /* 体の前（半径1.35）が机の奥の端（z=-2.7）より向こうになる位置 */
   /* 殴られる流れ（失敗してからの秒数） */
   var TURN = 0.4, WIND = 0.82, HIT = 1.0;   /* カメラが男へ向く → 振りかぶる → 殴る */
@@ -229,6 +229,7 @@
     this.scene.add(table);
     this.mask = this.makeMask();
     this.scene.add(this.mask.root);
+    this.buttons = this.makeButtons();
 
     /* 皿 */
     var prof = [[0, 0.02], [1.7, 0.02], [2.05, 0.1], [2.35, 0.22], [2.42, 0.25], [2.44, 0.2], [2.3, 0.12], [1.8, 0.05], [1.7, 0.0], [0, 0.0]]
@@ -372,6 +373,64 @@
     return { root: root, head: head, arms: arms };
   };
 
+  /* 机の手前の押しボタン2つ。左がちくわ、右がちくわぶ。上の面に名前 */
+  var BTN = { w: [-1.3, 3.05], b: [1.3, 3.05] }, BTN_R = 0.62;
+  function labelTex(text, bg, fg) {
+    var t = Z3.canvasTex(256, 256, function (g, w, h) {
+      g.fillStyle = bg; g.fillRect(0, 0, w, h);
+      g.fillStyle = fg; g.textAlign = "center"; g.textBaseline = "middle";
+      var size = 64; g.font = "900 " + size + "px sans-serif";
+      while (g.measureText(text).width > w * 0.8 && size > 20) { size -= 4; g.font = "900 " + size + "px sans-serif"; }
+      g.fillText(text, w / 2, h / 2 + 4);
+    });
+    /* 円柱の上の面の貼り方に合わせて、文字が手前から読める向きに回す */
+    t.center.set(0.5, 0.5); t.rotation = Math.PI / 2;
+    return t;
+  }
+  GameScene.prototype.makeButtons = function () {
+    var self = this, out = {};
+    var lang = global.zT || function (a) { return a; };
+    [["w", lang("ちくわ", "Chikuwa"), "#cf8640", grillTex(19, 0.8)], ["b", lang("ちくわぶ", "Chikuwabu"), "#efe6cf", ridgeTex()]].forEach(function (d) {
+      var g = new T.Group(), p = BTN[d[0]];
+      g.position.set(p[0], 0, p[1]);
+      var base = new T.Mesh(new T.CylinderGeometry(BTN_R + 0.14, BTN_R + 0.2, 0.22, 32), Z3.std(0x1d1c22, { roughness: 0.45, metalness: 0.3 }));
+      base.position.y = 0.11; base.castShadow = base.receiveShadow = true; g.add(base);
+      var top = Z3.std(0xffffff, { map: labelTex(d[1], d[2], "#16202e"), roughness: 0.4 });
+      var side = Z3.std(0xffffff, { map: d[3], roughness: 0.5 });
+      var cap = new T.Mesh(new T.CylinderGeometry(BTN_R, BTN_R, 0.24, 32), [side, top, side]);
+      cap.position.y = 0.34; cap.castShadow = true; g.add(cap);
+      self.scene.add(g);
+      out[d[0]] = { group: g, cap: cap, top: top, side: side };
+    });
+    return out;
+  };
+  /* 押しボタンの画面上の位置（ゲームの座標）。押す判定に使う */
+  GameScene.prototype.buttonRects = function (W, H) {
+    var c = this.camera, res = [];
+    c.updateMatrixWorld();
+    for (var k in BTN) {
+      var p = new T.Vector3(BTN[k][0], 0.45, BTN[k][1]).project(c);
+      var q = new T.Vector3(BTN[k][0] + BTN_R, 0.45, BTN[k][1]).project(c);
+      var cx = (p.x + 1) / 2 * W, cy = (1 - p.y) / 2 * H, r = Math.abs((q.x - p.x) / 2 * W);
+      res.push({ kind: k, cx: cx, cy: cy, r: r });
+    }
+    return res;
+  };
+  /* 押した沈みと、失敗したときの色（正解のボタンは点滅、押し間違えたボタンは赤） */
+  GameScene.prototype.poseButtons = function (s) {
+    for (var k in this.buttons) {
+      var b = this.buttons[k], dn = 0;
+      if (s.press && s.press.kind === k) { var a = s.T - s.press.t; dn = a < 0.18 ? Math.sin(Math.PI * a / 0.18) : 0; }
+      b.cap.position.y = 0.34 - dn * 0.14;
+      var col = 0xffffff;
+      if (s.state === "miss" && s.item) {
+        if (k === s.picked) col = 0xff6655;
+        else if (k === s.item.kind && Math.floor(s.missT * 8) % 2 === 0) col = 0xffe066;
+      }
+      b.top.color.setHex(col);
+    }
+  };
+
   var UP = null;
   function placeArm(a, hand) {
     UP = UP || new T.Vector3(0, 1, 0);
@@ -385,8 +444,19 @@
   function ease(k) { k = Math.max(0, Math.min(1, k)); return k * k * (3 - 2 * k); }
 
   /* 仮面の動き。t: 時刻、miss: 失敗してからの秒数（失敗していなければ -1）、nod: うなずき 0〜1 */
-  GameScene.prototype.poseMask = function (t, miss, nod, intro) {
+  GameScene.prototype.poseMask = function (t, miss, nod, intro, clear) {
     var m = this.mask, br = Math.sin(t * 1.6) * 0.04;
+    if (clear >= 0) {
+      /* 100本クリア：カメラが男へ向き、胸の前で拍手する（0.5秒から0.26秒ごとに手が合う。音はゲーム側） */
+      m.head.rotation.set(-0.38 + Math.sin(clear * 12) * 0.05, 0, Math.sin(clear * 3) * 0.08);
+      m.head.position.y = 2.95;
+      var ph = clear < 0.5 ? 1 : Math.abs(Math.sin(Math.PI * (clear - 0.5) / 0.26));
+      var gap = 0.12 + 0.5 * ph * ease(clear / 0.5);
+      placeArm(m.arms[0], new T.Vector3(-gap - 0.24, 1.95, 1.45));
+      placeArm(m.arms[1], new T.Vector3(gap + 0.24, 1.95, 1.45));
+      this.aimCamera(0, 0, ease(clear / 0.4));
+      return;
+    }
     m.head.rotation.set(-0.38 + nod * 0.35, Math.sin(t * 0.5) * 0.08, Math.sin(t * 0.7) * 0.04);
     m.head.position.y = 2.95 + br;
     var restL = [-1.35, 0.3, 1.7], restR = [1.35, 0.3, 1.7];   /* 手は机の奥の端に置く */
@@ -407,7 +477,8 @@
   /* s: { state, T, item, leave, intro } */
   GameScene.prototype.sync = function (s) {
     var self = this;
-    this.poseMask(s.T, s.miss == null ? -1 : s.miss, s.nod || 0, s.intro);
+    this.poseMask(s.T, s.miss == null ? -1 : s.miss, s.nod || 0, s.intro, s.clear == null ? -1 : s.clear);
+    this.poseButtons(s);
     if (s.intro) {
       if (!this.intro) {
         this.intro = new T.Group();

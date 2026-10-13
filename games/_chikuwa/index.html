@@ -112,11 +112,13 @@
     else { try { AC.resume(); } catch (e) {} }
   });
   function soundRight() { tone(880, 0.07, 0.07, "triangle"); tone(1320, 0.12, 0.06, "triangle", null, 0.06); }
+  function clapSound() { noiseHit(0.07, 1400 + Math.random() * 400, 0.9, 1.1); noiseHit(0.05, 700, 0.4, 1.5); }
   function punchSound() { noiseHit(0.3, 160, 1.1, 0.6); noiseHit(0.08, 1800, 0.5, 1); tone(80, 0.35, 0.5, "sine", 35); }
   function soundWrong() { tone(160, 0.45, 0.16, "square", 110, 0.3); tone(170, 0.45, 0.1, "sawtooth", 115, 0.3); }
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", MISS: "miss", RESULT: "result" };
+  var S = { INTRO: "intro", PLAY: "play", MISS: "miss", CLEAR: "clear", RESULT: "result" };
+  var won = false, clearT = 0, press = null, rects3d = null;
   var state, score, T, held, keyMode = false;
   var item, nextT, limit, leave, missT, picked, shake;
   var CY;
@@ -134,7 +136,9 @@
   function pickKind() { var r = Math.random(); return r < 0.44 ? "w" : r < 0.88 ? "b" : "o";   /* それ以外は12% */ }
 
   /* 進むほど見分けにくく、早くする */
-  function timeLimit(n) { return Math.max(0.85, 2.6 - n * 0.065); }
+  /* 100本でクリア。100本目まで届くように、変化は間をあけて足し、時間は1.1秒より短くしない */
+  var GOAL = 100;
+  function timeLimit(n) { return Math.max(1.1, 2.6 - n * 0.016); }
   function makeItem(n, force) {
     var it = {
       kind: pickKind(),                           /* w=ちくわ b=ちくわぶ o=それ以外 */
@@ -143,11 +147,11 @@
       simmer: 0, grill: 1, ridge: 1, seed: (Math.random() * 1e9) | 0,
       flip: Math.random() < 0.5, spin: 0, count: 1, born: 0
     };
-    if (n >= 4) { it.ang = rand(-Math.PI, Math.PI); it.scale = rand(0.72, 1.08); }
-    if (n >= 8 && Math.random() < 0.38) { it.view = "slice"; it.count = 1 + ((Math.random() * 4) | 0); }
-    if (n >= 12) it.simmer = rand(0.2, 0.85);
-    if (n >= 18) { it.grill = rand(0.35, 0.9); it.ridge = rand(0.45, 0.85); it.scale *= rand(0.65, 1); }
-    if (n >= 25) it.spin = rand(-2.5, 2.5);
+    if (n >= 10) { it.ang = rand(-Math.PI, Math.PI); it.scale = rand(0.72, 1.08); }
+    if (n >= 25 && Math.random() < 0.35) { it.view = "slice"; it.count = 1 + ((Math.random() * 4) | 0); }
+    if (n >= 40) it.simmer = rand(0.2, 0.85);
+    if (n >= 60) { it.grill = rand(0.5, 0.95); it.ridge = rand(0.6, 0.9); it.scale *= rand(0.75, 1); }
+    if (n >= 80) it.spin = rand(-1.8, 1.8);
     if (force) for (var k in force) it[k] = force[k];
     if (it.kind === "o") it.view = "side";        /* それ以外は横向きだけ */
     /* 輪切りの置き場所 */
@@ -164,7 +168,7 @@
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     score = 0; T = 0; held = false;
-    leave = null; missT = 0; picked = null; shake = 0;
+    leave = null; missT = 0; picked = null; shake = 0; won = false; clearT = 0; press = null;
     nextItem();
   }
   function nextItem(force) {
@@ -184,6 +188,13 @@
       leave.t += dt;
       if (leave.t >= 0.22) leave = null;
     }
+    if (state === S.CLEAR) {
+      var w0 = clearT; clearT += dt;
+      /* 仮面男が拍手する。手が合うたびに音（見た目は scene3d.js の CLAP と同じ間隔） */
+      if (clearT > 0.5 && Math.floor((clearT - 0.5) / 0.26) !== Math.floor((w0 - 0.5) / 0.26)) clapSound();
+      if (clearT > 3.2) state = S.RESULT;
+      return;
+    }
     if (state === S.MISS) {
       missT += dt;
       var was = missT - dt;
@@ -194,7 +205,10 @@
       return;
     }
     nextT -= dt;
-    if (nextT <= 0) miss(null);
+    if (nextT <= 0) {
+      if (item.kind === "o") correct(0);       /* それ以外は押さずに見送れば正解 */
+      else miss(null);
+    }
   }
 
   /* 押したボタンの名前を読み上げる。連打したら前の声は止める */
@@ -203,7 +217,7 @@
     if (!AC || !window.zVoice) return;
     if (voiceStop) { try { voiceStop(); } catch (e) {} voiceStop = null; }
     try {
-      var r = window.zVoice.speak(AC, AC.currentTime + 0.01, 210 + Math.random() * 20, window.zVoice.kana(kind === "w" ? "ちくわ" : kind === "b" ? "ちくわぶ" : "それいがい", 0.085), { volume: 0.42 });
+      var r = window.zVoice.speak(AC, AC.currentTime + 0.01, 210 + Math.random() * 20, window.zVoice.kana(kind === "w" ? "ちくわ" : "ちくわぶ", 0.085), { volume: 0.42 });
       voiceStop = r && r.stop;
     } catch (e) {}
   }
@@ -211,12 +225,17 @@
   function answer(kind) {
     if (state !== S.PLAY) return;
     say(kind);
-    if (kind === item.kind) {
-      score++;
-      soundRight();
-      leave = { item: item, dir: kind === "w" ? -1 : kind === "b" ? 1 : 0, t: 0 };
-      nextItem();
-    } else miss(kind);
+    press = { kind: kind, t: T };
+    if (kind === item.kind) correct(kind === "w" ? -1 : 1);
+    else miss(kind);
+  }
+  /* 正解。dir: 品物の飛ぶ向き（-1 左、1 右、0 手前の下） */
+  function correct(dir) {
+    score++;
+    soundRight();
+    leave = { item: item, dir: dir, t: 0 };
+    if (score >= GOAL) { state = S.CLEAR; won = true; clearT = 0; item = null; return; }
+    nextItem();
   }
   function miss(kind) {
     state = S.MISS; missT = 0; picked = kind; shake = 0;
@@ -224,12 +243,13 @@
   }
 
   /* ============ 入力 ============ */
+  /* 押しボタン2つ。立体で描けたときは机の上のボタンの画面上の位置（cx, cy, r）、描けないときは平面の丸 */
   function playButtons() {
-    var w = 162, h = 96, gap = 12, y = H - h - Math.max(44, H * 0.06), x0 = W / 2 - w * 1.5 - gap;
+    if (rects3d) return rects3d;
+    var r = 82, cy = H - r - Math.max(70, H * 0.08);
     return [
-      { kind: "w", x: x0, y: y, w: w, h: h, ja: "ちくわ", en: "Chikuwa" },
-      { kind: "o", x: x0 + w + gap, y: y, w: w, h: h, ja: "それ以外", en: "Other" },
-      { kind: "b", x: x0 + (w + gap) * 2, y: y, w: w, h: h, ja: "ちくわぶ", en: "Chikuwabu" }
+      { kind: "w", cx: W / 2 - 130, cy: cy, r: r },
+      { kind: "b", cx: W / 2 + 130, cy: cy, r: r }
     ];
   }
   function down(x, y) {
@@ -243,8 +263,8 @@
     if (state !== S.PLAY || x == null) return;
     var bs = playButtons();
     for (var i = 0; i < bs.length; i++) {
-      var b = bs[i];
-      if (x >= b.x - 5 && x <= b.x + b.w + 5 && y >= b.y - 30 && y <= b.y + b.h + 20) { answer(b.kind); return; }
+      var b = bs[i], dx = x - b.cx, dy = y - b.cy;
+      if (dx * dx + dy * dy < Math.pow(Math.max(b.r * 1.35, 70), 2)) { answer(b.kind); return; }
     }
   }
   function up() {}
@@ -266,6 +286,7 @@
     if (n === 4) nextItem({ simmer: 0.8 });                 /* おでんの汁 */
     if (n === 5) { score = 30; nextItem(); }                /* 30本目 */
     if (n === 6) nextItem({ kind: "o" });                   /* それ以外 */
+    if (n === 7) { score = GOAL - 1; nextItem(); }          /* クリア直前 */
   }
 
   window.addEventListener("keydown", function (e) {
@@ -274,13 +295,12 @@
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
     var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
     var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
-    var mid = e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "s" || e.key === "S";
-    if (!esc && !go && !left && !right && !mid) return;
+    if (!esc && !go && !left && !right) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
     if (e.repeat) return;
-    if (left || right || mid) { if (state === S.PLAY) answer(left ? "w" : right ? "b" : "o"); return; }
+    if (left || right) { if (state === S.PLAY) answer(left ? "w" : "b"); return; }
     if (state === S.RESULT) down();
   });
   window.addEventListener("keyup", function (e) {
@@ -300,7 +320,8 @@
   function doShare() {
     var r = rank();
     window.zResultActions.x({ text:
-      zT("ちくわとちくわぶを" + score + "本見分けた【" + r[1] + "】", "Told chikuwa from chikuwabu " + score + " times [" + r[2] + "]") +
+      (won ? zT("ちくわとちくわぶを100本見分けて、仮面男に拍手された", "Told chikuwa from chikuwabu 100 times and got a standing ovation from the masked man") :
+      zT("ちくわとちくわぶを" + score + "本見分けた【" + r[1] + "】", "Told chikuwa from chikuwabu " + score + " times [" + r[2] + "]")) +
       zT(" #ちくわちくわぶデスゲーム", " #ChikuwaChikuwabuDeathGame") });
   }
 
@@ -532,35 +553,46 @@
     ctx.restore();
   }
 
-  function drawPlayButtons() {
+  function drawPlayButtons(flat) {
     var bs = playButtons();
-    bs.forEach(function (b) {
-      var correct = state === S.MISS && b.kind === item.kind;
+    if (flat) bs.forEach(function (b) {   /* 立体で描けないときだけ平面の丸ボタン */
+      var correct = state === S.MISS && item && b.kind === item.kind;
       var wrong = state === S.MISS && b.kind === picked;
       var blink = correct ? (Math.floor(missT * 8) % 2 === 0) : false;
-      ctx.save();
-      roundRect(b.x, b.y, b.w, b.h, b.h / 2);
-      ctx.fillStyle = wrong ? "#e0574a" : (blink ? "#ffd84a" : "#fff");
-      ctx.fill();
-      ctx.lineWidth = 4; ctx.strokeStyle = "#16202e"; ctx.stroke();
-      ctx.fillStyle = "#16202e";
-      ctx.font = "900 " + (zLang === "en" ? (b.kind === "b" ? 26 : 30) : 34) + "px sans-serif";
+      ctx.beginPath(); ctx.arc(b.cx, b.cy, b.r, 0, Math.PI * 2);
+      ctx.fillStyle = wrong ? "#e0574a" : (blink ? "#ffd84a" : b.kind === "w" ? "#d08a44" : "#f1e9d6"); ctx.fill();
+      ctx.lineWidth = 6; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e"; ctx.font = "900 " + (zLang === "en" ? 24 : 32) + "px sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(zT(b.ja, b.en), b.x + b.w / 2, b.y + b.h / 2 + 2);
-      ctx.restore();
-      if (keyMode && state === S.PLAY) {
-        ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.font = "700 20px sans-serif"; ctx.textAlign = "center";
-        ctx.fillText(b.kind === "w" ? "◀" : b.kind === "b" ? "▶" : "▼", b.x + b.w / 2, b.y - 12);
-      }
+      ctx.fillText(b.kind === "w" ? zT("ちくわ", "Chikuwa") : zT("ちくわぶ", "Chikuwabu"), b.cx, b.cy + 2);
+      ctx.textBaseline = "alphabetic";
     });
-    ctx.textBaseline = "alphabetic";
-    /* 残り時間 */
+    if (keyMode && state === S.PLAY) bs.forEach(function (b) {
+      ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.font = "700 22px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(b.kind === "w" ? "◀" : "▶", b.cx, b.cy - b.r - 14);
+    });
+    /* 残り時間（いちばん下） */
     if (state === S.PLAY || state === S.MISS) {
-      var bw = 440, bh = 12, bx = W / 2 - bw / 2, by = bs[0].y + bs[0].h + 18;   /* ボタンの下 */
+      var bw = 440, bh = 12, bx = W / 2 - bw / 2, by = H - Math.max(34, H * 0.035);
       var f = state === S.PLAY ? Math.max(0, nextT / limit) : 0;
       roundRect(bx, by, bw, bh, bh / 2); ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.fill();
       if (f > 0) { roundRect(bx, by, Math.max(bh, bw * f), bh, bh / 2); ctx.fillStyle = f < 0.3 ? "#ff7a5c" : "#fff2c8"; ctx.fill(); }
     }
+  }
+
+  /* 開始画面のルール */
+  function drawRules() {
+    var lines = [zT("ちくわかちくわぶかを見分け、ボタンを押す", "Tell chikuwa from chikuwabu and press the button"),
+                 zT("それ以外の場合は、ボタンを押さない", "If it's neither, don't press anything")];
+    ctx.save();
+    ctx.font = "800 " + (zLang === "en" ? 21 : 25) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    var w = 500, h = 112, x = W / 2 - w / 2, y = H * 0.68;
+    roundRect(x, y, w, h, 18); ctx.fillStyle = "rgba(10,8,6,.78)"; ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.fillText(lines[0], W / 2, y + h * 0.31);
+    ctx.fillText(lines[1], W / 2, y + h * 0.69);
+    ctx.restore();
   }
 
   /* 立体の場面。three.js が使えないときは平面の絵のまま */
@@ -574,7 +606,7 @@
     ctx.translate(sx, 0);
     /* 立体で描けたら平面の絵は描かない（three.js が使えないときの控え） */
     var s3 = scene3d(), drew = false;
-    if (s3) { try { s3.sync({ T: T, state: state, item: item, leave: leave, intro: state === S.INTRO, miss: state === S.MISS || state === S.RESULT ? missT : -1, nod: leave ? Math.sin(Math.PI * leave.t / 0.22) : 0 }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (s3) { try { s3.sync({ T: T, state: state, item: item, leave: leave, intro: state === S.INTRO, press: press, picked: picked, missT: missT, miss: !won && (state === S.MISS || state === S.RESULT) ? missT : -1, clear: won ? clearT : -1, nod: leave ? Math.sin(Math.PI * leave.t / 0.22) : 0 }); drew = s3.draw(ctx, W, H); rects3d = drew ? s3.buttonRects(W, H) : null; } catch (e) { scene3d.drop(); rects3d = null; } }
     if (drew) { /* 立体のみ */ }
     else { drawTable();
     if (state === S.INTRO) {
@@ -585,7 +617,7 @@
         var k = leave.t / 0.22;
         drawItem(leave.item, W / 2 + leave.dir * k * 420, CY - k * 60, 1 - k * 0.3, 1 - k * 0.6);
       }
-      if (state !== S.RESULT || true) {
+      if (item) {
         var pop = Math.min(1, (T - item.born) / 0.1);
         drawItem(item, W / 2, CY, 0.7 + 0.3 * pop, pop);
       }
@@ -607,8 +639,9 @@
       ctx.font = "800 64px sans-serif"; ctx.textAlign = "left";   /* 真ん中は仮面の顔にかぶるので左上 */
       ctx.fillText(String(score), 32, 84);
       ctx.restore();
-      drawPlayButtons();
+      drawPlayButtons(!drew);
     }
+    if (state === S.INTRO) drawRules();
     if (state === S.RESULT) drawResult();
   }
 
@@ -678,7 +711,8 @@
       r.key();
       for (var i = 0; i < 8; i++) {
         await r.wait(700);
-        answer(item.kind);
+        if (item.kind !== "o") answer(item.kind);
+        else await r.until(function () { return item.kind !== "o"; }, 5);
       }
       await r.wait(800);
       answer(item.kind === "w" ? "b" : "w");  /* わざと外す */
