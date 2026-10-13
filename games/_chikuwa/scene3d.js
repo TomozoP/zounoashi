@@ -190,7 +190,7 @@
   for (var key in OTHER) if (!OTHER[key].shape) OTHER[key].shape = "circle";
 
   /* カメラ。手前の椅子に座って、テーブルの向こうの仮面を見上げる */
-  var CAM = { fov: 42, pos: [0, 8.2, 8.8], at: [0, 1.7, -1.2] };
+  var CAM = { fov: 50, pos: [0, 8.6, 9.4], at: [0, 1.5, -1.0] };
   var MASK_Z = -3.5;
   /* 殴られる流れ（失敗してからの秒数） */
   var WIND = 0.42, HIT = 0.6;
@@ -363,7 +363,7 @@
   /* 仮面の動き。t: 時刻、miss: 失敗してからの秒数（失敗していなければ -1）、nod: うなずき 0〜1 */
   GameScene.prototype.poseMask = function (t, miss, nod) {
     var m = this.mask, br = Math.sin(t * 1.6) * 0.04;
-    m.head.rotation.set(0.18 + nod * 0.35, Math.sin(t * 0.5) * 0.08, Math.sin(t * 0.7) * 0.04);
+    m.head.rotation.set(-0.38 + nod * 0.35, Math.sin(t * 0.5) * 0.08, Math.sin(t * 0.7) * 0.04);
     m.head.position.y = 2.95 + br;
     var restL = [-1.35, 0.3, 1.25], restR = [1.35, 0.3, 1.25];
     placeArm(m.arms[0], lerp3(restL, restL, 0).add(new T.Vector3(0, br, 0)));
@@ -374,7 +374,7 @@
     var hand = miss < WIND ? lerp3(restR, up, ease(miss / WIND)) : lerp3(up, cam, Math.min(1, Math.pow((miss - WIND) / (HIT - WIND), 2)));
     if (miss > HIT) hand = lerp3(cam, [1.6, 2.2, 3.5], ease((miss - HIT) / 0.5));
     placeArm(m.arms[1], hand);
-    m.head.rotation.x = 0.05 - ease(miss / WIND) * 0.15;
+    m.head.rotation.x = -0.38 - ease(miss / WIND) * 0.12;
     var knock = miss > HIT ? ease((miss - HIT) / 0.7) : 0;
     var jolt = miss > HIT && miss < HIT + 0.25 ? Math.sin(miss * 90) * (1 - (miss - HIT) / 0.25) : 0;
     this.aimCamera(knock, jolt);
