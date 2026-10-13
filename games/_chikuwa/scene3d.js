@@ -8,42 +8,45 @@
   var T, Z3 = global.Z3;
   var CREAM_W = "#f1e2bb", CREAM_B = "#efe7d2";
 
-  /* 断面の形。ちくわ=丸、ちくわぶ=8つ山の歯車（ridge で山の深さ） */
-  function outline(kind, R, ridge) {
-    var pts = [], n = kind === "w" ? 48 : 96;
+  /* 断面の形。o.shape: "circle" 丸 / "gear" n個の山（depth で山の深さ）/ "hex" 六角 */
+  function outline(o) {
+    var pts = [], n = o.shape === "hex" ? 6 : o.shape === "gear" ? 96 : 48, R = o.R;
     for (var i = 0; i < n; i++) {
-      var a = i / n * Math.PI * 2;
-      var r = kind === "w" ? R : R * (1 - 0.16 * ridge * (0.5 - 0.5 * Math.cos(a * 8)));
+      var a = i / n * Math.PI * 2, r = R;
+      if (o.shape === "gear") r = R * (1 - o.depth * (0.5 - 0.5 * Math.cos(a * o.n)));
       pts.push(new T.Vector2(Math.cos(a) * r, Math.sin(a) * r));
     }
     return pts;
   }
 
-  /* 押し出した筒。slice のときは短い輪切りで、外側の皮が焼き色になるようにする */
-  function tubeGeo(kind, R, L, ridge, slice) {
-    var shape = new T.Shape(outline(kind, R, ridge));
-    var hr = R * (kind === "w" ? 0.5 : 0.27), hole = new T.Path();
-    hole.absarc(0, 0, hr, 0, Math.PI * 2, true);
-    shape.holes.push(hole);
-    var bev = slice ? 0.015 : 0.05;
-    var g = new T.ExtrudeGeometry(shape, { depth: L, bevelEnabled: true, bevelThickness: bev, bevelSize: bev * 0.8, bevelSegments: 2, curveSegments: 24, steps: 1 });
+  /* 押し出した筒。o: { shape, n, depth, R, L, hole（半径の割合、0で穴なし）, slice（輪切りで外側を焼き色に） } */
+  function tubeGeo(o) {
+    var shape = new T.Shape(outline(o)), R = o.R, L = o.L, hr = R * (o.hole || 0);
+    if (hr > 0) {
+      var hole = new T.Path();
+      hole.absarc(0, 0, hr, 0, Math.PI * 2, true);
+      shape.holes.push(hole);
+    }
+    var bev = o.bevel != null ? o.bevel : o.slice ? 0.015 : Math.min(0.05, R * 0.12);
+    var g = new T.ExtrudeGeometry(shape, { depth: L, bevelEnabled: bev > 0, bevelThickness: bev, bevelSize: bev * 0.8, bevelSegments: 2, curveSegments: 24, steps: 1 });
     g.translate(0, 0, -L / 2);
-    /* 貼り絵の位置を自分で決める。断面（群0）と穴の内側は u=0（白い端）、外側は長さ方向と角度 */
-    var pos = g.attributes.position, uv = g.attributes.uv, mid = (R + hr) / 2;
+    /* 貼り絵の位置を自分で決める。穴の内側は u=0（端の色）、外側は u=長さ方向、v=ぐるり一周。断面は別の材質 */
+    var pos = g.attributes.position, uv = g.attributes.uv, mid = hr > 0 ? (R + hr) / 2 : -1;
     var caps = g.groups[0] ? g.groups[0].count : 0;
     for (var t = 0; t < pos.count; t += 3) {
       var vs = [];
       for (var k = 0; k < 3; k++) {
         var i = t + k, x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
         var inner = Math.sqrt(x * x + y * y) < mid;
-        var u = (i < caps || inner) ? 0 : (slice ? 0.5 : Math.min(1, Math.max(0, z / L + 0.5)));
-        var v = Math.atan2(y, x) / (Math.PI * 2) + 0.5;
+        var u = (i < caps || inner) ? 0 : (o.slice ? 0.5 : Math.min(1, Math.max(0, z / L + 0.5)));
+        var v = i < caps ? (x / R + 1) / 2 : Math.atan2(y, x) / (Math.PI * 2) + 0.5;
+        if (i < caps) u = (y / R + 1) / 2;
         vs.push([u, v]);
       }
       /* 角度の継ぎ目をまたぐ三角は、小さい側に1を足して絵がつぶれないようにする */
       var vmax = Math.max(vs[0][1], vs[1][1], vs[2][1]);
       for (k = 0; k < 3; k++) {
-        if (vmax - vs[k][1] > 0.5) vs[k][1] += 1;
+        if (t >= caps && vmax - vs[k][1] > 0.5) vs[k][1] += 1;
         uv.setXY(t + k, vs[k][0], vs[k][1]);
       }
     }
@@ -100,6 +103,92 @@
     });
   }
 
+  /* それ以外の筒状のもの。貼り絵は横＝長さ方向、縦＝ぐるり一周 */
+  function speck(g, w, h, n, col, seed) {
+    var r = Z3.rng(seed);
+    for (var i = 0; i < n; i++) { g.fillStyle = col(r); g.fillRect(r() * w, r() * h, 1.5 + r() * 1.5, 1.5 + r()); }
+  }
+  var OTHER = {
+    /* 竹 */
+    bamboo: { R: 0.44, L: 2.7, hole: 0.78, cap: 0xe9e2b8, rough: 0.45, paint: function (g, w, h) {
+      var r = Z3.rng(21);
+      g.fillStyle = "#6e9a3c"; g.fillRect(0, 0, w, h);
+      for (var i = 0; i < 40; i++) { g.fillStyle = "rgba(" + (r() < 0.5 ? "40,80,20," : "150,190,90,") + (0.15 + r() * 0.2) + ")"; g.fillRect(0, r() * h, w, 1 + r() * 2); }
+      [0.34, 0.74].forEach(function (x) {
+        g.fillStyle = "rgba(60,90,30,.5)"; g.fillRect(w * x - 5, 0, 10, h);
+        g.fillStyle = "rgba(220,230,170,.8)"; g.fillRect(w * x - 1, 0, 3, h);
+      });
+    } },
+    /* トイレットペーパーの芯 */
+    core: { R: 0.52, L: 1.05, hole: 0.93, cap: 0xa87b4f, rough: 0.95, paint: function (g, w, h) {
+      g.fillStyle = "#c69766"; g.fillRect(0, 0, w, h);
+      speck(g, w, h, 500, function (r) { return "rgba(120,80,40," + (0.1 + r() * 0.15) + ")"; }, 4);
+      g.strokeStyle = "rgba(110,70,35,.55)"; g.lineWidth = 2;
+      for (var k = -2; k < 3; k++) { g.beginPath(); g.moveTo(k * w * 0.5, 0); g.lineTo(k * w * 0.5 + w * 0.9, h); g.stroke(); }
+    } },
+    /* 白い塩ビ管 */
+    pvc: { R: 0.44, L: 2.7, hole: 0.82, cap: 0xdcdad2, rough: 0.35, paint: function (g, w, h) {
+      g.fillStyle = "#ebe9e3"; g.fillRect(0, 0, w, h);
+      g.fillStyle = "rgba(90,90,100,.6)";
+      for (var x = 20; x < w - 30; x += 14) g.fillRect(x, h * 0.25, 9, 4);
+    } },
+    /* リガトーニ（筋の入ったパスタ） */
+    rigatoni: { shape: "gear", n: 14, depth: 0.07, R: 0.36, L: 1.3, hole: 0.68, cap: 0xe8c26c, rough: 0.6, paint: function (g, w, h) {
+      g.fillStyle = "#e7bf69"; g.fillRect(0, 0, w, h);
+      speck(g, w, h, 400, function (r) { return "rgba(" + (r() < 0.5 ? "190,140,60," : "255,230,160,") + (0.2 + r() * 0.3) + ")"; }, 8);
+    } },
+    /* ストロー */
+    straw: { R: 0.13, L: 3.4, hole: 0.82, cap: 0xffffff, rough: 0.3, paint: function (g, w, h) {
+      g.fillStyle = "#fafafa"; g.fillRect(0, 0, w, h);
+      g.strokeStyle = "#e0453a"; g.lineWidth = 14;
+      for (var k = -4; k < 12; k++) { g.beginPath(); g.moveTo(k * 40, 0); g.lineTo(k * 40 + 80, h); g.stroke(); }
+    } },
+    /* 乾電池 */
+    battery: { R: 0.3, L: 1.5, hole: 0, cap: 0xc8c8cc, capMetal: 0.8, rough: 0.35, paint: function (g, w, h) {
+      g.fillStyle = "#1c1c20"; g.fillRect(0, 0, w, h);
+      g.fillStyle = "#d4a73c"; g.fillRect(w * 0.68, 0, w * 0.3, h);
+      g.fillStyle = "#c8c8cc"; g.fillRect(0, 0, w * 0.03, h); g.fillRect(w * 0.97, 0, w * 0.03, h);
+      g.fillStyle = "rgba(255,255,255,.75)";
+      for (var x = w * 0.12; x < w * 0.6; x += 16) g.fillRect(x, h * 0.45, 10, 10);
+    } },
+    /* 鉛筆 */
+    pencil: { shape: "hex", R: 0.28, L: 3.0, hole: 0, cap: 0xe6c38c, rough: 0.45, paint: function (g, w, h) {
+      g.fillStyle = "#2f6b3c"; g.fillRect(0, 0, w, h);
+      g.fillStyle = "#d8b24a"; g.fillRect(w * 0.9, 0, 6, h);
+      g.fillStyle = "rgba(216,178,74,.9)";
+      for (var x = w * 0.6; x < w * 0.85; x += 10) g.fillRect(x, h * 0.05, 6, h * 0.08);
+    } },
+    /* ねぎ */
+    negi: { R: 0.3, L: 3.3, hole: 0, cap: 0xeef2e0, rough: 0.5, paint: function (g, w, h) {
+      var gr = g.createLinearGradient(0, 0, w, 0);
+      gr.addColorStop(0, "#f4f4ea"); gr.addColorStop(0.55, "#eef0d8"); gr.addColorStop(0.75, "#a9c86a"); gr.addColorStop(1, "#4f8a32");
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      var r = Z3.rng(31);
+      for (var i = 0; i < 30; i++) { g.fillStyle = "rgba(160,170,120," + (0.1 + r() * 0.15) + ")"; g.fillRect(0, r() * h, w, 1); }
+    } },
+    /* きりたんぽ */
+    kiritanpo: { R: 0.42, L: 2.5, hole: 0.32, cap: 0xf3ead6, rough: 0.8, paint: function (g, w, h) {
+      var r = Z3.rng(41);
+      g.fillStyle = "#f1e6cc"; g.fillRect(0, 0, w, h);
+      for (var i = 0; i < 260; i++) {
+        g.fillStyle = "rgba(" + (r() < 0.3 ? "200,140,70," : "255,250,235,") + (0.4 + r() * 0.4) + ")";
+        g.beginPath(); g.ellipse(r() * w, r() * h, 5, 2.5, r() * 3, 0, Math.PI * 2); g.fill();
+      }
+      for (i = 0; i < 40; i++) {
+        g.fillStyle = "rgba(170,100,40," + (0.25 + r() * 0.35) + ")";
+        g.beginPath(); g.arc(w * 0.08 + r() * w * 0.84, r() * h, 4 + r() * 9, 0, Math.PI * 2); g.fill();
+      }
+    } },
+    /* 鉄パイプ */
+    pipe: { R: 0.4, L: 2.7, hole: 0.82, cap: 0x8d9096, capMetal: 0.7, metal: 0.65, rough: 0.45, paint: function (g, w, h) {
+      g.fillStyle = "#9a9ea5"; g.fillRect(0, 0, w, h);
+      var r = Z3.rng(51);
+      for (var i = 0; i < 30; i++) { g.fillStyle = "rgba(255,255,255," + (0.05 + r() * 0.1) + ")"; g.fillRect(0, r() * h, w, 1 + r() * 3); }
+      for (i = 0; i < 25; i++) { g.fillStyle = "rgba(150,70,30," + (0.2 + r() * 0.4) + ")"; g.beginPath(); g.arc(r() * w, r() * h, 2 + r() * 8, 0, Math.PI * 2); g.fill(); }
+    } }
+  };
+  for (var key in OTHER) if (!OTHER[key].shape) OTHER[key].shape = "circle";
+
   function GameScene() {
     T = global.THREE;
     var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.05 }, camera: { fov: 30 } });
@@ -149,30 +238,36 @@
   }
 
   GameScene.prototype.level = function (x) { return x > 0.8 ? 1 : x > 0.6 ? 0.7 : 0.45; };
-  GameScene.prototype.geometry = function (kind, ridge, slice) {
-    var key = kind + ridge + (slice ? "s" : "");
+  GameScene.prototype.geometry = function (it, ridge, slice) {
+    var key = it.kind === "o" ? "o" + it.other : it.kind + ridge + (slice ? "s" : "");
     if (!this.geo[key]) {
-      this.geo[key] = kind === "w" ? tubeGeo("w", 0.42, slice ? 0.22 : 2.7, 1, slice) : tubeGeo("b", 0.48, slice ? 0.24 : 2.45, ridge, slice);
+      this.geo[key] = it.kind === "o" ? tubeGeo(OTHER[it.other]) :
+        it.kind === "w" ? tubeGeo({ shape: "circle", R: 0.42, L: slice ? 0.22 : 2.7, hole: 0.5, slice: slice }) :
+        tubeGeo({ shape: "gear", n: 8, depth: 0.16 * ridge, R: 0.48, L: slice ? 0.24 : 2.45, hole: 0.27, slice: slice });
     }
     return this.geo[key];
   };
-  GameScene.prototype.texture = function (kind, grill, seed) {
-    var key = kind + grill + "_" + (seed % 3);
-    if (!this.tex[key]) this.tex[key] = kind === "w" ? grillTex(11 + seed % 3 * 17, grill) : wheatTex(5 + seed % 3);
+  GameScene.prototype.texture = function (it, grill) {
+    var key = it.kind === "o" ? "o" + it.other : it.kind + grill + "_" + (it.seed % 3), seed = it.seed;
+    if (!this.tex[key]) this.tex[key] = it.kind === "o" ? Z3.canvasTex(256, 256, OTHER[it.other].paint) :
+      it.kind === "w" ? grillTex(11 + seed % 3 * 17, grill) : wheatTex(5 + seed % 3);
     return this.tex[key];
   };
 
   /* 1品ぶんの立体を作る */
   GameScene.prototype.build = function (it) {
     var grill = this.level(it.grill), ridge = this.level(it.ridge), slice = it.view === "slice";
-    var mat = Z3.std(0xffffff, { map: this.texture(it.kind, grill, it.seed), roughness: it.kind === "w" ? 0.55 : 0.8 });
+    var o = it.kind === "o" ? OTHER[it.other] : null;
+    var side = Z3.std(0xffffff, { map: this.texture(it, grill), roughness: o ? o.rough : it.kind === "w" ? 0.55 : 0.8, metalness: o && o.metal || 0 });
+    var cap = Z3.std(o ? o.cap : it.kind === "w" ? 0xf6ecd4 : 0xf4eedf, { roughness: o ? o.rough : 0.8, metalness: o && o.capMetal || 0 });
     /* おでんの汁がしみた色 */
     var s = it.simmer || 0;
-    mat.color.setRGB(1 - 0.18 * s, 1 - 0.38 * s, 1 - 0.68 * s);
-    var geo = this.geometry(it.kind, ridge, slice);
-    var root = new T.Group(), R = it.kind === "w" ? 0.42 : 0.48, sunk = s > 0 ? 0.25 : 0;
+    [side, cap].forEach(function (m) { m.color.multiply(new T.Color(1 - 0.18 * s, 1 - 0.38 * s, 1 - 0.68 * s)); });
+    var mats = [cap, side];
+    var geo = this.geometry(it, ridge, slice);
+    var root = new T.Group(), R = o ? o.R : it.kind === "w" ? 0.42 : 0.48, sunk = s > 0 ? 0.25 : 0;
     if (!slice) {
-      var m = new T.Mesh(geo, mat);
+      var m = new T.Mesh(geo, mats);
       m.rotation.z = (it.seed % 628) / 100;     /* ぐるりの向きをばらす（先に軸まわり） */
       m.rotation.y = Math.PI / 2;
       m.position.y = R + 0.12 + sunk;
@@ -180,7 +275,7 @@
       root.add(m);
     } else {
       it.slices.forEach(function (sl) {
-        var p = new T.Mesh(geo, mat);
+        var p = new T.Mesh(geo, mats);
         p.position.set(sl.x / 95, 0.24 + sunk + 0.12, sl.y / 95);
         p.rotation.x = -Math.PI / 2 + (1 - sl.tilt) * 0.9;
         p.rotation.z = sl.a;
@@ -188,13 +283,13 @@
         root.add(p);
       });
     }
-    root.userData.mat = mat;
+    root.userData.mats = mats;
     return root;
   };
   GameScene.prototype.drop = function (obj) {
     if (!obj) return;
     this.scene.remove(obj);
-    if (obj.userData.mat) obj.userData.mat.dispose();
+    if (obj.userData.mats) obj.userData.mats.forEach(function (m) { m.dispose(); });
   };
 
   GameScene.prototype.reset = function () {};
@@ -242,7 +337,7 @@
       if (s.leave && s.leave.item === this.leaveItem) {
         var q = s.leave.t / 0.22;
         this.leaveObj.visible = true;
-        this.leaveObj.position.set(s.leave.dir * q * 4.5, q * 1.6, -q * 0.8);
+        this.leaveObj.position.set(s.leave.dir * q * 4.5, q * (s.leave.dir ? 1.6 : 2.6), -q * (s.leave.dir ? 0.8 : 2.4));
         this.leaveObj.scale.setScalar(this.leaveItem.scale * (1 - q * 0.3));
       } else { this.drop(this.leaveObj); this.leaveObj = null; this.leaveItem = null; }
     }
