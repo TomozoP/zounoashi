@@ -208,7 +208,7 @@
   var PLATE = { fov: 46, pos: [0, 10.6, 6.6], at: [0, 0.3, -0.3] };          /* 遊んでいる間は皿を大きく */
   var MASK_Z = -4.2;   /* 体の前（半径1.35）が机の奥の端（z=-2.7）より向こうになる位置 */
   /* 殴られる流れ（失敗してからの秒数） */
-  var TURN = 0.4, WIND = 0.95, HIT = 1.22;
+  var TURN = 0.4, WIND = 0.95, HIT = 1.17;
   var PUSH_IN = 0.1, PUSH_HIT = 0.05;       /* 振りかぶる間・殴る間にカメラが男へ寄る割合 */   /* カメラが男へ向く → 振りかぶる → 殴る */
 
   function GameScene() {
@@ -448,10 +448,10 @@
     a.fist.position.copy(hand);
   }
   function lerp3(a, b, k) { return new T.Vector3(a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k); }
-  /* 拳の進み：一気に目の前まで来て、顔の前で一瞬ためてから当たる */
+  /* 拳の進み：振りかぶりから止まらずに、加速しながら一直線に当たる */
   function punchCurve(p) {
     p = Math.max(0, Math.min(1, p));
-    return p < 0.5 ? 0.86 * (1 - Math.pow(1 - p / 0.5, 3)) : 0.86 + 0.14 * Math.pow((p - 0.5) / 0.5, 3);
+    return Math.pow(p, 1.7);
   }
   function ease(k) { k = Math.max(0, Math.min(1, k)); return k * k * (3 - 2 * k); }
 
