@@ -155,7 +155,7 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", MISS: "miss", CLEAR: "clear", RESULT: "result" };
-  var won = false, clearT = 0, press = null, rects3d = null;
+  var won = false, clearT = 0, press = null, rects3d = null, runT = 0;   /* runT: 完走までの時間 */
   var state, score, T, held, keyMode = false;
   var item, nextT, limit, leave, missT, picked, shake;
   var CY;
@@ -168,10 +168,7 @@
   }
   function rand(a, b) { return a + Math.random() * (b - a); }
 
-  /* それ以外の筒状のもの（見た目は scene3d.js） */
-  var OTHERS = ["bamboo", "core", "pvc", "rigatoni", "straw", "battery", "pencil", "negi", "kiritanpo", "pipe"];
-  /* それ以外は12%。最初の10本は出さない */
-  function pickKind(n) { var r = Math.random(); if (n < 10) return r < 0.5 ? "w" : "b"; return r < 0.44 ? "w" : r < 0.88 ? "b" : "o"; }
+  function pickKind() { return Math.random() < 0.5 ? "w" : "b"; }
 
   /* 進むほど見分けにくく、早くする */
   /* 100本でクリア。100本目まで届くように、変化は間をあけて足し、時間は1.1秒より短くしない */
@@ -179,8 +176,7 @@
   function timeLimit(n) { return Math.max(1.1, 2.6 - n * 0.016); }
   function makeItem(n, force) {
     var it = {
-      kind: pickKind(n),                           /* w=ちくわ b=ちくわぶ o=それ以外 */
-      other: OTHERS[(Math.random() * OTHERS.length) | 0],
+      kind: pickKind(),                            /* w=ちくわ b=ちくわぶ */
       view: "side", ang: rand(-0.2, 0.2), scale: rand(0.92, 1.05),
       simmer: 0, grill: 1, ridge: 1, seed: (Math.random() * 1e9) | 0,
       flip: Math.random() < 0.5, spin: 0, count: 1, born: 0
@@ -191,7 +187,6 @@
     if (n >= 60) { it.grill = rand(0.5, 0.95); it.ridge = rand(0.6, 0.9); it.scale *= rand(0.75, 1); }
     if (n >= 80) it.spin = rand(-1.8, 1.8);
     if (force) for (var k in force) it[k] = force[k];
-    if (it.kind === "o") it.view = "side";        /* それ以外は横向きだけ */
     /* 輪切りの置き場所 */
     var r = rng(it.seed + 7);
     it.slices = [];
@@ -206,7 +201,7 @@
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     score = 0; T = 0; held = false;
-    leave = null; missT = 0; picked = null; shake = 0; won = false; confetti = []; clearT = 0; press = null;
+    leave = null; missT = 0; picked = null; shake = 0; won = false; confetti = []; runT = 0; clearT = 0; press = null;
     nextItem();
   }
   function nextItem(force) {
@@ -244,11 +239,9 @@
       if (missT > 3.1) { state = S.RESULT; }
       return;
     }
+    runT += dt;
     nextT -= dt;
-    if (nextT <= 0) {
-      if (item.kind === "o") correct(0);       /* それ以外は押さずに見送れば正解 */
-      else miss(null);
-    }
+    if (nextT <= 0) miss(null);
   }
 
   /* 押したボタンの名前を読み上げる。連打したら前の声は止める */
@@ -325,7 +318,6 @@
     if (n === 3) nextItem({ view: "slice", count: 1 });     /* 輪切り */
     if (n === 4) nextItem({ simmer: 0.8 });                 /* おでんの汁 */
     if (n === 5) { score = 30; nextItem(); }                /* 30本目 */
-    if (n === 6) nextItem({ kind: "o" });                   /* それ以外 */
     if (n === 7) { score = GOAL - 1; nextItem(); }          /* クリア直前 */
   }
 
@@ -357,10 +349,11 @@
     [40, "ちくわの穴から世界を見た者", "One Who Has Seen the World Through a Chikuwa"]
   ];
   function rank() { var r = RANKS[0]; for (var i = 0; i < RANKS.length; i++) if (score >= RANKS[i][0]) r = RANKS[i]; return r; }
+  function clearTime() { return runT.toFixed(2); }
   function doShare() {
     var r = rank();
     window.zResultActions.x({ text:
-      (won ? zT("ちくわとちくわぶを100本見分けて、仮面男に拍手された", "Told chikuwa from chikuwabu 100 times and got a standing ovation from the masked man") :
+      (won ? zT("ちくわとちくわぶ100本を" + clearTime() + "秒で見分け、仮面男に拍手された", "Told 100 chikuwa from chikuwabu in " + clearTime() + "s and got a standing ovation from the masked man") :
       zT("ちくわとちくわぶを" + score + "本見分けた【" + r[1] + "】", "Told chikuwa from chikuwabu " + score + " times [" + r[2] + "]")) +
       zT(" #ちくわちくわぶデスゲーム", " #ChikuwaChikuwabuDeathGame") });
   }
@@ -540,7 +533,6 @@
   }
 
   function drawItem(it, x, y, extraScale, alpha) {
-    if (it.kind === "o") { var c = {}; for (var k in it) c[k] = it[k]; c.kind = "w"; c.grill = 0.15; it = c; }  /* 平面の控えでは簡単に */
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(x, y);
@@ -620,21 +612,6 @@
     }
   }
 
-  /* 開始画面のルール */
-  function drawRules() {
-    var lines = [zT("ちくわかちくわぶかを見分け、ボタンを押す", "Tell chikuwa from chikuwabu and press the button"),
-                 zT("それ以外の場合は、ボタンを押さない", "If it's neither, don't press anything")];
-    ctx.save();
-    ctx.font = "800 " + (zLang === "en" ? 20 : 23) + "px sans-serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    var w = 500, h = 112, x = W / 2 - w / 2, y = Math.max(28, H * 0.035);   /* 画面の上 */
-    roundRect(x, y, w, h, 18); ctx.fillStyle = "rgba(10,8,6,.78)"; ctx.fill();
-    ctx.fillStyle = "#fff";
-    ctx.fillText(lines[0], W / 2, y + h * 0.31);
-    ctx.fillText(lines[1], W / 2, y + h * 0.69);
-    ctx.restore();
-  }
-
   /* 立体の場面。three.js が使えないときは平面の絵のまま */
   var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene(); }) : function () { return null; };
 
@@ -679,12 +656,11 @@
     if (state === S.PLAY || state === S.MISS) {
       ctx.save();
       ctx.fillStyle = "#fff"; ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = 8;
-      ctx.font = "800 64px sans-serif"; ctx.textAlign = "left";   /* 真ん中は仮面の顔にかぶるので左上 */
-      ctx.fillText(String(score), 32, 84);
+      ctx.font = "800 64px sans-serif"; ctx.textAlign = "left";   /* 真ん中は仮面の顔にかぶるので左上。100から数え下げる */
+      ctx.fillText(String(GOAL - score), 32, 84);
       ctx.restore();
       drawPlayButtons(!drew);
     }
-    if (state === S.INTRO) drawRules();
     if (state === S.RESULT) drawResult();
     if (won) drawConfetti();
   }
@@ -715,7 +691,7 @@
     ctx.shadowBlur = 10;
     ctx.font = "800 108px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(String(score), W / 2, H * 0.45);
+    ctx.fillText(won ? zT(clearTime() + "秒", clearTime() + "s") : String(GOAL - score), W / 2, H * 0.45);   /* 完走はクリアタイム、途中は残りの本数 */
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
@@ -735,7 +711,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, kind: item && item.kind, other: item && item.kind === "o" ? item.other : null, view: item && item.view, limit: limit, left: nextT, W: W, H: H }; },
+    now: function () { return { state: state, score: score, kind: item && item.kind, view: item && item.view, limit: limit, left: nextT, W: W, H: H }; },
     buttons: function () { return playButtons(); },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
@@ -755,8 +731,7 @@
       r.key();
       for (var i = 0; i < 8; i++) {
         await r.wait(700);
-        if (item.kind !== "o") answer(item.kind);
-        else await r.until(function () { return item.kind !== "o"; }, 5);
+        answer(item.kind);
       }
       await r.wait(800);
       answer(item.kind === "w" ? "b" : "w");  /* わざと外す */
