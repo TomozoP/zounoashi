@@ -4,7 +4,7 @@
 (function (global) {
   "use strict";
   var T, Z3 = global.Z3;
-  var CX = 270, CZ = 400, TH = 14;            /* 箱の中心と歯車の厚み */
+  var CX = 270, CZ = 400, TH = 28;            /* 箱の中心と歯車の厚み */
 
   function GearScene(PITCH) {
     T = global.THREE;
@@ -25,10 +25,10 @@
     var tex = Z3.canvasTex(512, 512, function (g, w, h) {
       g.fillStyle = "#3a3029"; g.fillRect(0, 0, w, h);
       var r = Z3.rng(3);
-      for (var i = 0; i < 2600; i++) { g.fillStyle = "rgba(" + (r() < 0.5 ? "0,0,0," : "255,220,180,") + (r() * 0.06) + ")"; g.fillRect(r() * w, r() * h, 2 + r() * 6, 1 + r() * 2); }
-      g.strokeStyle = "rgba(0,0,0,.55)"; g.lineWidth = 4;
+      for (var i = 0; i < 2600; i++) { g.fillStyle = "rgba(" + (r() < 0.5 ? "0,0,0," : "255,220,180,") + (r() * 0.03) + ")"; g.fillRect(r() * w, r() * h, 2 + r() * 6, 1 + r() * 2); }
+      g.strokeStyle = "rgba(0,0,0,.18)"; g.lineWidth = 3;
       g.strokeRect(2, 2, w - 4, h - 4);
-      g.fillStyle = "rgba(190,160,120,.5)";
+      g.fillStyle = "rgba(190,160,120,.12)";
       for (var k = 0; k < 8; k++) {
         [[16 + k * 68, 16], [16 + k * 68, h - 16], [16, 16 + k * 68], [w - 16, 16 + k * 68]].forEach(function (p) { g.beginPath(); g.arc(p[0], p[1], 5, 0, 7); g.fill(); });
       }
@@ -219,10 +219,10 @@
         o.fire = fire;
         /* 煙突は歯車の横 */
         var dr = o.drv, cxp = dr.x + dr.r + 26 > 520 ? dr.x - dr.r - 26 : dr.x + dr.r + 26;
-        var ch = new T.Mesh(new T.CylinderGeometry(12, 14, 120, 16), M.iron);
-        ch.position.set(cxp - CX, 60, dr.y + 20 - CZ); ch.castShadow = true; self.root.add(ch);
-        var lip = new T.Mesh(new T.CylinderGeometry(17, 17, 10, 16), M.iron); lip.position.set(ch.position.x, 122, ch.position.z); self.root.add(lip);
-        o.chimney = new T.Vector3(ch.position.x, 128, ch.position.z);
+        var ch = new T.Mesh(new T.CylinderGeometry(12, 14, 70, 16), M.iron);
+        ch.position.set(cxp - CX, 35, dr.y + 20 - CZ); ch.castShadow = true; self.root.add(ch);
+        var lip = new T.Mesh(new T.CylinderGeometry(17, 17, 10, 16), M.iron); lip.position.set(ch.position.x, 72, ch.position.z); self.root.add(lip);
+        o.chimney = new T.Vector3(ch.position.x, 78, ch.position.z);
       } else {
         var h = 46;
         var m = new T.Mesh(new T.BoxGeometry(o.w, h, o.h), M.iron);
@@ -354,7 +354,7 @@
     this.camKey = key;
     var aspect = W / H, t = Math.tan(15 * Math.PI / 180);
     var D = Math.max(292 / (t * aspect), 470 / t);
-    var tilt = 18 * Math.PI / 180;
+    var tilt = 0.5 * Math.PI / 180;            /* 2Dのときと同じく、ほぼ真上から */
     var look = new T.Vector3(0, 0, -10);
     this.camera.position.set(0, Math.cos(tilt) * D, look.z + Math.sin(tilt) * D);
     this.camera.lookAt(look);
