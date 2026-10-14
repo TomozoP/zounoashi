@@ -48,10 +48,10 @@
     panel(14, 1.6, -3, 6.8, -4, 0xffffff);
     panel(2.2, 12, 5, 6.8, 1, 0xfff0d8);
     panel(9, 1.2, 1, 6.8, 6, 0xffffff);
-    panel(30, 30, 0, 6.9, 0, 0x5a5048);
+    panel(30, 30, 0, 6.9, 0, 0xa89c8e);
     var pm = new T.PMREMGenerator(st.renderer);
     this.scene.environment = pm.fromScene(es, 0.04).texture;
-    this.scene.environmentIntensity = 1.45;
+    this.scene.environmentIntensity = 1.7;
     pm.dispose();
 
     /* 旋盤で削ったような細かい同心円の筋（歯車の上の面のつや） */
