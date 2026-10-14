@@ -215,5 +215,6 @@ window.DRAFT_GAMES = [
     "play": "games/_muriyari-seiza/index.html",
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
-  }
+  },
+  {"type":"lab","tags":[],"id":"haguruma","title":"歯車機関","year":2026,"date":"2026-10-14","plays":null,"url":"","img":"games/_haguruma/img/thumb.webp","play":"games/_haguruma/index.html","full":true,"catch":"歯車を描いて機関を完成させる"},
 ];

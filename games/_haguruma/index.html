@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>歯車機関</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #2a221c; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 歯車機関
+
+   指を置いた所が軸、引っぱった長さが半径の歯車を描く。
+   動力の歯車から、機械の歯車まで噛み合わせて、決められた向きに回せば機関が動く。
+   描いた歯車はタップで外せる。5台そろえるまでの時間が結果。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q, delay) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime + (delay || 0);
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+  function sndPlace() { noiseHit(0.12, 2600, 0.35, 3); tone(520, 0.12, 0.08, "triangle", 380); }
+  function sndMesh() { noiseHit(0.06, 4200, 0.3, 6); noiseHit(0.06, 4200, 0.25, 6, 0.07); }
+  function sndBad() { tone(140, 0.18, 0.12, "sawtooth", 90); }
+  function sndRemove() { tone(700, 0.08, 0.08, "square", 1100); noiseHit(0.05, 3000, 0.15, 4); }
+  function sndJam() { noiseHit(0.35, 900, 0.3, 8); tone(110, 0.3, 0.08, "sawtooth", 80); }
+  function sndClear() {
+    /* 汽笛 */
+    tone(523, 0.9, 0.09, "sine", 0, 0); tone(659, 0.9, 0.07, "sine", 0, 0); tone(784, 0.9, 0.05, "sine", 0, 0);
+    noiseHit(1.0, 1800, 0.2, 1.5);
+  }
+  function sndTick(v) { noiseHit(0.03, 5200, v || 0.06, 8); }
+
+  /* ============ 歯車の寸法 ============
+     歯の間隔は全部同じ。半径は歯の数で決まるので、半径の和の距離に置けば必ず噛み合う。 */
+  var PITCH = 16, NMIN = 10, NMAX = 50, TOL = 5;
+  function rOf(n) { return n * PITCH / (2 * Math.PI); }
+  function nOf(r) { return Math.max(NMIN, Math.min(NMAX, Math.round(r * 2 * Math.PI / PITCH))); }
+  var RMIN = rOf(NMIN), RMAX = rOf(NMAX);
+  var SPEED = 70;                              /* 歯の先が動く速さ（ゲーム座標/秒） */
+
+  /* ============ 面 ============
+     540×800 の箱の中の座標。need は機械を回す向き（1=右回り、-1=左回り）。
+     kind: fan=羽根、lamp=電球、whistle=汽笛、wheel=車輪 */
+  var STAGES = [
+    { drv: [150, 610], tg: [{ x: 360, y: 340, n: 20, need: 1, kind: "fan" }], ob: [] },
+    { drv: [130, 640], tg: [{ x: 410, y: 210, n: 20, need: -1, kind: "lamp" }], ob: [[220, 370, 110, 80]] },
+    { drv: [270, 650], tg: [{ x: 110, y: 230, n: 18, need: 1, kind: "fan" }, { x: 430, y: 230, n: 18, need: -1, kind: "lamp" }], ob: [[240, 300, 60, 140]] },
+    { drv: [110, 680], tg: [{ x: 430, y: 170, n: 20, need: 1, kind: "whistle" }], ob: [[0, 430, 310, 34], [230, 270, 310, 34]] },
+    { drv: [270, 690], tg: [{ x: 90, y: 170, n: 16, need: 1, kind: "fan" }, { x: 270, y: 130, n: 16, need: -1, kind: "whistle" }, { x: 450, y: 170, n: 16, need: 1, kind: "lamp" }], ob: [[150, 400, 240, 30], [0, 330, 70, 30], [470, 330, 70, 30]] }
+  ];
+  var BOX_H = 800;
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", CLEAR: "clear", RESULT: "result" };
+  var state, T, held = false, keyMode = false;
+  var stageNo, gears, obs, clearT, totalT, placedCount, wall, flash;
+  var OY = 80;
+  function place() { OY = Math.max(64, Math.round((H - BOX_H) / 2 + 24)); }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    T = 0; totalT = 0; placedCount = 0;
+    held = false;
+    loadStage(0);
+  }
+  function loadStage(i) {
+    stageNo = i;
+    var st = STAGES[i];
+    gears = [];
+    gears.push(mk(st.drv[0], st.drv[1], 24, "drv"));
+    st.tg.forEach(function (t) { var g = mk(t.x, t.y, t.n, "tg"); g.need = t.need; g.kind = t.kind; gears.push(g); });
+    obs = st.ob.map(function (o) { return { x: o[0], y: o[1], w: o[2], h: o[3] }; });
+    /* 動力の釜。歯車の下から箱の底まで */
+    obs.push({ x: st.drv[0] - 58, y: st.drv[1] + 52, w: 116, h: BOX_H - st.drv[1] - 52, boiler: true });
+    drag = null; flash = [];
+    solve();
+  }
+  function mk(x, y, n, type) {
+    return { x: x, y: y, n: n, r: rOf(n), type: type, a0: 0, w: 0, dir: 0, jam: false, shake: 0, born: T, t0: T };
+  }
+
+  /* ============ 噛み合わせ ============ */
+  var wasJam = false, wasOk = [];
+  function meshes(a, b) { return Math.abs(Math.hypot(a.x - b.x, a.y - b.y) - (a.r + b.r)) <= TOL; }
+  function solve() {
+    var i, j, drv = gears[0];
+    gears.forEach(function (g) { g.dir = 0; g.w = 0; g.jam = false; });
+    drv.dir = 1;
+    var q = [drv], comp = [drv], bad = false;
+    while (q.length) {
+      var a = q.shift();
+      for (j = 0; j < gears.length; j++) {
+        var b = gears[j];
+        if (b === a || !meshes(a, b)) continue;
+        if (b.dir === 0) {
+          b.dir = -a.dir;
+          /* 噛み合う角度に歯をそろえる */
+          var phi = Math.atan2(b.y - a.y, b.x - a.x);
+          var u = ((phi - a.a0) * a.n / (2 * Math.PI)) % 1; if (u < 0) u += 1;
+          b.a0 = phi + Math.PI - (2 * Math.PI / b.n) * (0.5 - u); b.t0 = a.t0;
+          q.push(b); comp.push(b);
+        } else if (b.dir === a.dir) bad = true;
+      }
+    }
+    for (i = 0; i < comp.length; i++) {
+      var g = comp[i];
+      if (bad) { g.jam = true; g.w = 0; }
+      else g.w = g.dir * SPEED / g.r;
+    }
+    if (bad && !wasJam) sndJam();
+    wasJam = bad;
+  }
+  function targetsOk() {
+    for (var i = 0; i < gears.length; i++) {
+      var g = gears[i];
+      if (g.type === "tg" && (g.jam || g.dir !== g.need)) return false;
+    }
+    return true;
+  }
+  function angleOf(g) { return g.a0 + g.w * (T - (g.t0 || 0)); }
+
+  /* ============ 描いている途中の歯車 ============ */
+  var drag = null;
+  function circleRect(x, y, r, o) {
+    var cx = Math.max(o.x, Math.min(x, o.x + o.w)), cy = Math.max(o.y, Math.min(y, o.y + o.h));
+    return Math.hypot(x - cx, y - cy) < r;
+  }
+  /* 指の位置と半径から、近くの歯車にぴたりと噛むように半径と軸を寄せる */
+  function fit(cx, cy, r) {
+    var best = null, i, g;
+    for (i = 0; i < gears.length; i++) {
+      g = gears[i];
+      var rr = Math.hypot(cx - g.x, cy - g.y) - g.r;
+      if (rr < RMIN - 4 || rr > RMAX + 4) continue;
+      var e = Math.abs(rr - r);
+      if (e < 24 && (!best || e < best.e)) best = { g: g, rr: rr, e: e };
+    }
+    var n = nOf(r), x = cx, y = cy;
+    if (best) {
+      n = nOf(best.rr);
+      var R = best.g.r + rOf(n), d = Math.hypot(cx - best.g.x, cy - best.g.y) || 1;
+      x = best.g.x + (cx - best.g.x) / d * R; y = best.g.y + (cy - best.g.y) / d * R;
+      /* もう1つにも届きそうなら、両方に噛む位置へ */
+      var rn = rOf(n), pick = null;
+      for (i = 0; i < gears.length; i++) {
+        var h = gears[i];
+        if (h === best.g) continue;
+        var e2 = Math.hypot(x - h.x, y - h.y) - (h.r + rn);
+        if (Math.abs(e2) > 22) continue;
+        var p = twoCircle(best.g.x, best.g.y, best.g.r + rn, h.x, h.y, h.r + rn, x, y);
+        if (p && Math.hypot(p[0] - x, p[1] - y) < 26 && (!pick || Math.abs(e2) < pick.e)) pick = { p: p, e: Math.abs(e2) };
+      }
+      if (pick) { x = pick.p[0]; y = pick.p[1]; }
+    }
+    var c = { x: x, y: y, n: n, r: rOf(n), ok: true, mesh: false };
+    if (x - c.r < 4 || x + c.r > W - 4 || y - c.r < -OY + 70 || y + c.r > BOX_H + 40) c.ok = false;
+    for (i = 0; i < obs.length && c.ok; i++) if (circleRect(x, y, c.r - 3, obs[i])) c.ok = false;
+    for (i = 0; i < gears.length && c.ok; i++) {
+      g = gears[i];
+      var dd = Math.hypot(x - g.x, y - g.y);
+      if (dd < g.r + c.r - TOL) c.ok = false;
+      else if (dd <= g.r + c.r + TOL) c.mesh = true;
+    }
+    return c;
+  }
+  function twoCircle(x1, y1, r1, x2, y2, r2, px, py) {
+    var d = Math.hypot(x2 - x1, y2 - y1);
+    if (d > r1 + r2 || d < Math.abs(r1 - r2) || d === 0) return null;
+    var a = (r1 * r1 - r2 * r2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, r1 * r1 - a * a));
+    var mx = x1 + a * (x2 - x1) / d, my = y1 + a * (y2 - y1) / d;
+    var ox = -(y2 - y1) / d * h, oy = (x2 - x1) / d * h;
+    var p1 = [mx + ox, my + oy], p2 = [mx - ox, my - oy];
+    return Math.hypot(p1[0] - px, p1[1] - py) < Math.hypot(p2[0] - px, p2[1] - py) ? p1 : p2;
+  }
+  function gearAt(x, y) {
+    for (var i = gears.length - 1; i >= 0; i--) {
+      var g = gears[i];
+      if (Math.hypot(x - g.x, y - g.y) < g.r + 4) return g;
+    }
+    return null;
+  }
+  function addGear(c) {
+    var g = mk(c.x, c.y, c.n, "my");
+    gears.push(g);
+    placedCount++;
+    var before = gears.filter(function (k) { return k.dir !== 0; }).length;
+    reanchor(); solve();
+    var after = gears.filter(function (k) { return k.dir !== 0; }).length;
+    sndPlace();
+    if (after > before && !wasJam) sndMesh();
+  }
+  /* 解き直す前に今の角度を残しておき、置き直しで歯がぱっと跳ばないようにする */
+  function reanchor() {
+    gears.forEach(function (g) { g.a0 = angleOf(g); g.t0 = T; });
+  }
+
+  /* ============ 進行 ============ */
+  var tickAcc = 0;
+  function update(dt) {
+    if (state !== S.PLAY && state !== S.CLEAR) return;
+    T += dt;
+    var i;
+    for (i = 0; i < gears.length; i++) if (gears[i].shake > 0) gears[i].shake = Math.max(0, gears[i].shake - dt);
+    for (i = flash.length - 1; i >= 0; i--) { flash[i].t -= dt; if (flash[i].t <= 0) flash.splice(i, 1); }
+    if (state === S.PLAY) {
+      totalT += dt;
+      tickAcc += dt;
+      if (tickAcc > 0.22) { tickAcc = 0; if (!wasJam) sndTick(0.03); }
+      if (!drag && targetsOk()) {
+        state = S.CLEAR; clearT = 0; sndClear();
+      }
+    } else {
+      clearT += dt;
+      if (clearT > 2.6) {
+        if (stageNo + 1 < STAGES.length) loadStage(stageNo + 1), state = S.PLAY;
+        else finish();
+      }
+    }
+  }
+  function finish() {
+    state = S.RESULT;
+    tone(523, 0.15, 0.1, "triangle", 0, 0); tone(659, 0.15, 0.1, "triangle", 0, 0.15); tone(784, 0.4, 0.1, "triangle", 0, 0.3);
+  }
+
+  /* ============ 入力 ============ */
+  var tapStart = null;
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (state !== S.PLAY || x == null) return;
+    held = true;
+    var by = y - OY;
+    var g = gearAt(x, by);
+    tapStart = { x: x, y: by, g: g };
+    drag = g ? null : { cx: x, cy: by, r: 0, fit: null };
+    lastP = { x: x, y: y };
+  }
+  var lastP = null;
+  function move(x, y) {
+    if (state !== S.PLAY || !held) return;
+    lastP = { x: x, y: y };
+    if (!drag) return;
+    drag.r = Math.hypot(x - drag.cx, y - OY - drag.cy);
+    drag.fit = drag.r >= RMIN * 0.6 ? fit(drag.cx, drag.cy, Math.max(RMIN, drag.r)) : null;
+  }
+  function up() {
+    if (!held) return;
+    held = false;
+    if (state !== S.PLAY) { drag = null; return; }
+    var moved = lastP ? Math.hypot(lastP.x - tapStart.x, lastP.y - OY - tapStart.y) : 0;
+    if (tapStart && tapStart.g && moved < 14) {
+      if (tapStart.g.type === "my") {
+        gears.splice(gears.indexOf(tapStart.g), 1);
+        reanchor(); solve(); sndRemove();
+        flash.push({ x: tapStart.g.x, y: tapStart.g.y, r: tapStart.g.r, t: 0.25 });
+      } else { tapStart.g.shake = 0.3; sndBad(); }
+    } else if (drag && drag.fit) {
+      if (drag.fit.ok) addGear(drag.fit);
+      else sndBad();
+    }
+    drag = null; tapStart = null;
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  /* 本番以外だけ、数字キーで場面を飛ばせる。 */
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    if (state === S.INTRO) newRound();
+    if (n === 1 && state === S.PLAY) { state = S.CLEAR; clearT = 0; forceRun(); sndClear(); }
+    if (n === 2) { loadStage(STAGES.length - 1); state = S.PLAY; }
+    if (n === 3) { totalT = 83.4; placedCount = 21; finish(); }
+  }
+  /* 1キー用。機械を正しい向きに回して見せる */
+  function forceRun() {
+    reanchor();
+    gears.forEach(function (g) { g.jam = false; if (g.type === "tg") { g.dir = g.need; g.w = g.need * SPEED / g.r; } });
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function scoreText() { return totalT.toFixed(1); }
+  function doShare() {
+    var t = scoreText();
+    var ja, en;
+    if (totalT < 40) { ja = "歯車" + placedCount + "枚で、" + t + "秒で機関を組み上げた天才技師"; en = "Built the engine in " + t + "s with " + placedCount + " gears. Genius engineer."; }
+    else if (totalT < 90) { ja = "歯車" + placedCount + "枚を描いて、" + t + "秒で機関を動かした"; en = "Drew " + placedCount + " gears and got the engine running in " + t + "s"; }
+    else { ja = "歯車" + placedCount + "枚を描き、" + t + "秒かけてようやく機関が動いた"; en = "Drew " + placedCount + " gears. The engine finally ran after " + t + "s"; }
+    window.zResultActions.x({ text: zT(ja, en) + zT(" #歯車機関", " #GearEngine") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  var COL = {
+    my: ["#d8a94a", "#9a6b22"], drv: ["#b9bec4", "#6c737b"], tg: ["#c97b4a", "#844521"]
+  };
+  function gearPath(r, n, a) {
+    var ro = r + PITCH * 0.32, ri = r - PITCH * 0.36, step = 2 * Math.PI / n;
+    ctx.beginPath();
+    for (var k = 0; k < n; k++) {
+      var b = a + k * step;
+      ctx.lineTo(Math.cos(b - step * 0.32) * ri, Math.sin(b - step * 0.32) * ri);
+      ctx.lineTo(Math.cos(b - step * 0.17) * ro, Math.sin(b - step * 0.17) * ro);
+      ctx.lineTo(Math.cos(b + step * 0.17) * ro, Math.sin(b + step * 0.17) * ro);
+      ctx.lineTo(Math.cos(b + step * 0.32) * ri, Math.sin(b + step * 0.32) * ri);
+    }
+    ctx.closePath();
+  }
+  function drawGear(g, alpha, colors, a) {
+    var c = colors || COL[g.type];
+    ctx.save();
+    var sx = 0, sy = 0;
+    if (g.jam || g.shake > 0) { sx = (Math.random() - 0.5) * 3; sy = (Math.random() - 0.5) * 3; }
+    ctx.translate(g.x + sx, g.y + sy);
+    if (alpha != null) ctx.globalAlpha = alpha;
+    /* 影 */
+    ctx.save(); ctx.translate(4, 6); gearPath(g.r, g.n, a); ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.fill(); ctx.restore();
+    gearPath(g.r, g.n, a);
+    var gr = ctx.createRadialGradient(-g.r * 0.3, -g.r * 0.4, g.r * 0.1, 0, 0, g.r * 1.2);
+    gr.addColorStop(0, lighten(c[0])); gr.addColorStop(1, c[0]);
+    ctx.fillStyle = gr; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = c[1]; ctx.stroke();
+    /* 抜き穴とスポーク */
+    var hub = Math.max(7, g.r * 0.22);
+    if (g.r > 34) {
+      ctx.save(); ctx.rotate(a);
+      var holes = g.r > 70 ? 6 : 4, hr = (g.r - PITCH * 0.6 - hub) * 0.42;
+      for (var k = 0; k < holes; k++) {
+        var b = k * 2 * Math.PI / holes, m = (hub + g.r - PITCH * 0.6) / 2;
+        ctx.beginPath(); ctx.arc(Math.cos(b) * m, Math.sin(b) * m, hr, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(25,18,14,.85)"; ctx.fill();
+        ctx.strokeStyle = c[1]; ctx.lineWidth = 2; ctx.stroke();
+      }
+      ctx.restore();
+    } else {
+      ctx.save(); ctx.rotate(a);
+      ctx.strokeStyle = c[1]; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(-g.r * 0.6, 0); ctx.lineTo(g.r * 0.6, 0); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(0, 0, g.r - PITCH * 0.55, 0, Math.PI * 2); ctx.strokeStyle = c[1]; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, hub, 0, Math.PI * 2); ctx.fillStyle = c[1]; ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, hub * 0.45, 0, Math.PI * 2); ctx.fillStyle = "#2a1d14"; ctx.fill();
+    ctx.restore();
+  }
+  function lighten(hex) {
+    var v = parseInt(hex.slice(1), 16), r = v >> 16, g = (v >> 8) & 255, b = v & 255;
+    r = Math.min(255, r + 60); g = Math.min(255, g + 55); b = Math.min(255, b + 45);
+    return "rgb(" + r + "," + g + "," + b + ")";
+  }
+
+  /* 回す向きの矢印（機械の歯車のまわり） */
+  function drawNeed(g) {
+    var ok = !g.jam && g.dir === g.need, wrong = !g.jam && g.dir === -g.need;
+    var R = g.r + 18, a0 = -Math.PI * 0.85, a1 = -Math.PI * 0.15;
+    ctx.save(); ctx.translate(g.x, g.y);
+    ctx.strokeStyle = ok ? "#7be07b" : wrong || g.jam ? (Math.floor(T * 4) % 2 ? "#ff5a4a" : "#a83228") : "#f2c14e";
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 6; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(0, 0, R, a0, a1); ctx.stroke();
+    var e = g.need > 0 ? a1 : a0, tdir = g.need > 0 ? 1 : -1;
+    var px = Math.cos(e) * R, py = Math.sin(e) * R;
+    var tx = -Math.sin(e) * tdir, ty = Math.cos(e) * tdir;
+    var nx = Math.cos(e), ny = Math.sin(e);
+    ctx.beginPath();
+    ctx.moveTo(px + tx * 14, py + ty * 14);
+    ctx.lineTo(px + nx * 10 - tx * 2, py + ny * 10 - ty * 2);
+    ctx.lineTo(px - nx * 10 - tx * 2, py - ny * 10 - ty * 2);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  /* 機械の付属物（歯車と一緒に回る・光る） */
+  function drawMachine(g, running) {
+    var a = angleOf(g);
+    ctx.save(); ctx.translate(g.x, g.y);
+    if (g.kind === "fan") {
+      ctx.rotate(a);
+      for (var k = 0; k < 3; k++) {
+        ctx.save(); ctx.rotate(k * Math.PI * 2 / 3);
+        ctx.beginPath(); ctx.ellipse(g.r * 0.48, 0, g.r * 0.42, g.r * 0.16, 0.3, 0, Math.PI * 2);
+        ctx.fillStyle = "#e9e1cf"; ctx.fill(); ctx.strokeStyle = "#7a6a52"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+      }
+      ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fillStyle = "#5a4630"; ctx.fill();
+    } else if (g.kind === "lamp") {
+      var on = running ? 1 : 0;
+      var by = -g.r - 34;
+      ctx.fillStyle = "#3b3129"; ctx.fillRect(-5, -g.r - 12, 10, 14);
+      ctx.fillStyle = "#6b5a46"; ctx.fillRect(-11, by + 12, 22, 12);
+      if (on) {
+        var gl = ctx.createRadialGradient(0, by, 4, 0, by, 90);
+        gl.addColorStop(0, "rgba(255,230,140,.75)"); gl.addColorStop(1, "rgba(255,200,80,0)");
+        ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(0, by, 90, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.beginPath(); ctx.arc(0, by, 16, 0, Math.PI * 2);
+      ctx.fillStyle = on ? "#fff3b8" : "rgba(210,220,225,.35)"; ctx.fill();
+      ctx.strokeStyle = "#cfd6da"; ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = on ? "#ff9a2a" : "#6a5a4a"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(-5, by + 8); ctx.lineTo(-3, by - 4); ctx.lineTo(0, by + 2); ctx.lineTo(3, by - 4); ctx.lineTo(5, by + 8); ctx.stroke();
+    } else if (g.kind === "whistle") {
+      ctx.fillStyle = "#b08a3c"; ctx.strokeStyle = "#5e4419"; ctx.lineWidth = 2;
+      roundRect(-9, -g.r - 58, 18, 50, 4); ctx.fill(); ctx.stroke();
+      roundRect(-14, -g.r - 66, 28, 12, 4); ctx.fill(); ctx.stroke();
+      if (running) {
+        for (var p = 0; p < 6; p++) {
+          var t = (T * 1.4 + p / 6) % 1;
+          ctx.beginPath(); ctx.arc(Math.sin(p * 2.1 + T) * 8 * t, -g.r - 70 - t * 70, 8 + t * 18, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(240,240,240," + (0.55 * (1 - t)) + ")"; ctx.fill();
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawBoiler(o, drv, running) {
+    var x = o.x, y = o.y - 12, w = o.w, h = Math.max(o.h + 40, H - OY - y + 20);
+    ctx.save();
+    var gr = ctx.createLinearGradient(x, 0, x + w, 0);
+    gr.addColorStop(0, "#3f4a52"); gr.addColorStop(0.45, "#7d8a93"); gr.addColorStop(1, "#38424a");
+    roundRect(x, y, w, h, 16); ctx.fillStyle = gr; ctx.fill();
+    ctx.strokeStyle = "#1f262b"; ctx.lineWidth = 3; ctx.stroke();
+    for (var k = 0; y + 34 + k * 46 < y + h - 30; k++) {
+      ctx.fillStyle = "#c8a046"; ctx.fillRect(x, y + 34 + k * 46, w, 5);
+    }
+    /* 焚き口 */
+    var fy = y + Math.min(h - 70, 120);
+    roundRect(x + w / 2 - 28, fy, 56, 40, 8); ctx.fillStyle = "#1b1410"; ctx.fill();
+    var fl = 0.6 + 0.4 * Math.sin(T * 13) * Math.sin(T * 7.3);
+    ctx.fillStyle = "rgba(255," + Math.round(120 + 60 * fl) + ",40," + (0.75 + 0.25 * fl) + ")";
+    ctx.beginPath(); ctx.ellipse(x + w / 2, fy + 30, 22, 9 + 6 * fl, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    /* 煙突は歯車の横 */
+    var cx = drv.x + drv.r + 22 > W - 20 ? drv.x - drv.r - 22 : drv.x + drv.r + 22;
+    ctx.fillStyle = "#2c3338"; ctx.fillRect(cx - 10, drv.y - 10, 20, o.y - drv.y + 10);
+    ctx.fillRect(cx - 15, drv.y - 18, 30, 12);
+    var puff = running ? 10 : 4;
+    for (var p = 0; p < puff; p++) {
+      var t = (T * (running ? 1.6 : 0.5) + p / puff) % 1;
+      ctx.beginPath(); ctx.arc(cx + Math.sin(p * 1.7 + T) * 10 * t, drv.y - 24 - t * (running ? 120 : 60), 6 + t * (running ? 22 : 12), 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(200,200,200," + ((running ? 0.5 : 0.25) * (1 - t)) + ")"; ctx.fill();
+    }
+  }
+
+  function drawPlate(o) {
+    ctx.save();
+    roundRect(o.x, o.y, o.w, o.h, 6);
+    var gr = ctx.createLinearGradient(0, o.y, 0, o.y + o.h);
+    gr.addColorStop(0, "#5b5148"); gr.addColorStop(1, "#3a332d");
+    ctx.fillStyle = gr; ctx.fill(); ctx.strokeStyle = "#1c1814"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#8a7c6c";
+    var cols = Math.max(1, Math.floor(o.w / 40)), rows = Math.max(1, Math.floor(o.h / 40));
+    for (var i = 0; i <= cols; i++) for (var j = 0; j <= rows; j++) {
+      var rx = o.x + 8 + (o.w - 16) * (cols ? i / cols : 0.5), ry = o.y + 8 + (o.h - 16) * (rows ? j / rows : 0.5);
+      if (i === 0 || i === cols || j === 0 || j === rows) { ctx.beginPath(); ctx.arc(rx, ry, 2.5, 0, Math.PI * 2); ctx.fill(); }
+    }
+    ctx.restore();
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = "#2a221c"; ctx.fillRect(0, 0, W, H);
+    /* 板の継ぎ目と鋲 */
+    ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.lineWidth = 2;
+    ctx.fillStyle = "rgba(160,130,95,.22)";
+    for (var y = 0; y < H; y += 180) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      for (var x = 14; x < W; x += 52) { ctx.beginPath(); ctx.arc(x, y + 12, 3, 0, Math.PI * 2); ctx.fill(); }
+    }
+  }
+
+  function drawHud() {
+    /* 何台目か（丸の数） と 経過時間 */
+    var n = STAGES.length, gap = 26, x0 = W / 2 - (n - 1) * gap / 2;
+    for (var i = 0; i < n; i++) {
+      ctx.beginPath(); ctx.arc(x0 + i * gap, 62, 7, 0, Math.PI * 2);
+      ctx.fillStyle = i < stageNo || (i === stageNo && state === S.CLEAR) ? "#f2c14e" : i === stageNo ? "#fff" : "rgba(255,255,255,.25)";
+      ctx.fill();
+    }
+    ctx.fillStyle = "#f2ede4"; ctx.font = "800 30px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(scoreText(), W / 2, 38);
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+    if (state === S.INTRO) { drawIntro(); return; }
+    var running = state === S.CLEAR || (state === S.RESULT);
+    ctx.save(); ctx.translate(0, OY);
+    var i, boiler = obs[obs.length - 1];
+    for (i = 0; i < obs.length - 1; i++) drawPlate(obs[i]);
+    drawBoiler(boiler, gears[0], running);
+    for (i = 0; i < gears.length; i++) {
+      var g = gears[i];
+      var born = Math.min(1, (T - g.born) / 0.12);
+      ctx.save();
+      if (g.type === "my" && born < 1) { ctx.translate(g.x, g.y); ctx.scale(0.85 + 0.15 * born, 0.85 + 0.15 * born); ctx.translate(-g.x, -g.y); }
+      drawGear(g, null, null, angleOf(g));
+      ctx.restore();
+    }
+    for (i = 0; i < gears.length; i++) if (gears[i].type === "tg") { drawMachine(gears[i], running); if (state === S.PLAY) drawNeed(gears[i]); }
+    for (i = 0; i < flash.length; i++) {
+      var f = flash[i];
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (1 + (0.25 - f.t) * 2), 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,255,255," + (f.t * 3) + ")"; ctx.lineWidth = 3; ctx.stroke();
+    }
+    if (drag) {
+      ctx.beginPath(); ctx.arc(drag.cx, drag.cy, 5, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill();
+      if (drag.fit) {
+        var c = drag.fit;
+        var col = !c.ok ? ["#d94a3a", "#7a1d14"] : c.mesh ? ["#9be27b", "#3d7a2a"] : ["#d8a94a", "#9a6b22"];
+        drawGear(c, 0.72, col, 0);
+      }
+    }
+    ctx.restore();
+    drawHud();
+    if (state === S.CLEAR) {
+      var k = Math.min(1, clearT / 0.3) * (clearT > 2.2 ? Math.max(0, (2.6 - clearT) / 0.4) : 1);
+      ctx.fillStyle = "rgba(255,240,200," + (0.12 * k) + ")"; ctx.fillRect(0, 0, W, H);
+    }
+    if (state === S.RESULT) drawResult();
+  }
+  function drawIntro() {
+    /* 開始前は最初の機械を見せておく */
+    if (!gears) loadStage(0);
+    ctx.save(); ctx.translate(0, OY);
+    for (var i = 0; i < obs.length - 1; i++) drawPlate(obs[i]);
+    drawBoiler(obs[obs.length - 1], gears[0], false);
+    gears.forEach(function (g) { drawGear(g, null, null, angleOf(g)); });
+    gears.forEach(function (g) { if (g.type === "tg") drawMachine(g, false); });
+    ctx.restore();
+  }
+
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.textAlign = "center";
+    ctx.font = "800 108px sans-serif";
+    var s = scoreText(), u = zT("秒", "s");
+    var sw = ctx.measureText(s).width;
+    ctx.font = "800 44px sans-serif";
+    var uw = ctx.measureText(u).width;
+    ctx.textAlign = "left";
+    ctx.font = "800 108px sans-serif";
+    ctx.fillText(s, W / 2 - (sw + uw + 6) / 2, H * 0.45);
+    ctx.font = "800 44px sans-serif";
+    ctx.fillText(u, W / 2 - (sw + uw + 6) / 2 + sw + 6, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () {
+      return { state: state, stage: stageNo, time: totalT, gears: gears ? gears.length : 0, jam: wasJam,
+        targets: gears ? gears.filter(function (g) { return g.type === "tg"; }).map(function (g) { return { x: g.x, y: g.y + OY, r: g.r, need: g.need, dir: g.dir }; }) : [],
+        driver: gears ? { x: gears[0].x, y: gears[0].y + OY, r: gears[0].r } : null, OY: OY, W: W, H: H };
+    },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); },
+    rOf: rOf
+  };
+
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(2000);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById('start');
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener('click', function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  T = 0; totalT = 0; placedCount = 0; stageNo = 0;
+  layout();
+  loadStage(0);
+  state = S.INTRO; startButton.hidden = false;
+  var last = performance.now();
+  var stepAcc = 0;
+  function loop(now) {
+    /* update はいつもちょうど 1/60 秒ずつ（余りは次へ持ち越す） */
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      stepAcc += dt;
+      while (stepAcc >= 1 / 60) { update(1 / 60); stepAcc -= 1 / 60; }
+      if (state === S.INTRO) T += dt;
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
