@@ -38,18 +38,48 @@
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true;
     this.scene.add(floor);
 
+    /* 金属に映り込む周り（暗い部屋に、上の明かりが何本か） */
+    var es = new T.Scene();
+    es.add(new T.Mesh(new T.BoxGeometry(30, 14, 30), new T.MeshBasicMaterial({ color: 0x2a241f, side: T.BackSide })));
+    function panel(w, h, x, y, z, color) {
+      var m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshBasicMaterial({ color: color, side: T.DoubleSide }));
+      m.position.set(x, y, z); m.rotation.x = Math.PI / 2; es.add(m);
+    }
+    panel(14, 1.6, -3, 6.8, -4, 0xffffff);
+    panel(2.2, 12, 5, 6.8, 1, 0xfff0d8);
+    panel(9, 1.2, 1, 6.8, 6, 0xffffff);
+    panel(30, 30, 0, 6.9, 0, 0x5a5048);
+    var pm = new T.PMREMGenerator(st.renderer);
+    this.scene.environment = pm.fromScene(es, 0.04).texture;
+    this.scene.environmentIntensity = 1.45;
+    pm.dispose();
+
+    /* 旋盤で削ったような細かい同心円の筋（歯車の上の面のつや） */
+    var lathe = Z3.canvasTex(512, 512, function (g, w, h) {
+      g.fillStyle = "#808080"; g.fillRect(0, 0, w, h);
+      var r = Z3.rng(9);
+      for (var k = 2; k < 256; k += 1.5) {
+        g.strokeStyle = "rgba(" + (r() < 0.5 ? "255,255,255," : "0,0,0,") + (0.08 + r() * 0.22) + ")";
+        g.lineWidth = 0.6 + r(); g.beginPath(); g.arc(256, 256, k, 0, Math.PI * 2); g.stroke();
+      }
+    });
+    lathe.colorSpace = T.NoColorSpace;
+    lathe.repeat.set(1 / 270, 1 / 270); lathe.offset.set(0.5, 0.5);
+    function metal(color, rough, metalness) {
+      return Z3.std(color, { roughness: rough, metalness: metalness, bumpMap: lathe, bumpScale: 0.6, roughnessMap: lathe });
+    }
     this.mat = {
-      my: Z3.std(0xd6a640, { roughness: 0.32, metalness: 0.55 }),
-      drv: Z3.std(0xc4cbd2, { roughness: 0.28, metalness: 0.6 }),
-      tg: Z3.std(0xc87444, { roughness: 0.35, metalness: 0.55 }),
-      fix: Z3.std(0x5a5650, { roughness: 0.6, metalness: 0.5 }),
-      stop: Z3.std(0x8d9aa6, { roughness: 0.3, metalness: 0.5 }),
+      my: metal(0xe0b04c, 0.42, 0.9),
+      drv: metal(0xd2d8de, 0.36, 0.92),
+      tg: metal(0xd07a48, 0.44, 0.88),
+      fix: metal(0x6a655e, 0.7, 0.85),
+      stop: metal(0x9aa6b2, 0.4, 0.88),
       ok: Z3.std(0x8be070, { roughness: 0.5, transparent: true, opacity: 0.7 }),
       bad: Z3.std(0xe0503c, { roughness: 0.5, transparent: true, opacity: 0.7 }),
       plain: Z3.std(0xd6a640, { roughness: 0.5, transparent: true, opacity: 0.7 }),
       hub: Z3.std(0x2c241e, { roughness: 0.5, metalness: 0.4 }),
       iron: Z3.std(0x4e463f, { roughness: 0.55, metalness: 0.45 }),
-      boiler: Z3.std(0x6f7c86, { roughness: 0.35, metalness: 0.6 }),
+      boiler: Z3.std(0x7d8a94, { roughness: 0.3, metalness: 0.85 }),
       brassBand: Z3.std(0xc8a046, { roughness: 0.3, metalness: 0.7 }),
       dark: Z3.std(0x26201b, { roughness: 0.7 }),
       fire: new T.MeshBasicMaterial({ color: 0xff8a2a }),
@@ -109,14 +139,16 @@
     s.closePath();
     var hub = Math.max(7, r * 0.22);
     if (r > 34) {
-      var holes = r > 70 ? 6 : 4, hr = (r - P * 0.6 - hub) * 0.42, m = (hub + r - P * 0.6) / 2;
+      /* 穴どうし・縁と重ならない大きさにする（重なると面が崩れる） */
+      var holes = r > 70 ? 6 : 4, m = (hub + r - P * 0.6) / 2;
+      var hr = Math.min((r - P * 0.6 - hub) * 0.36, m * Math.sin(Math.PI / holes) * 0.78);
       for (var j = 0; j < holes; j++) {
         var a = j * 2 * Math.PI / holes, h = new T.Path();
         h.absarc(Math.cos(a) * m, Math.sin(a) * m, hr, 0, Math.PI * 2, true);
         s.holes.push(h);
       }
     }
-    var g = new T.ExtrudeGeometry(s, { depth: TH, bevelEnabled: true, bevelThickness: 1.5, bevelSize: 1.2, bevelSegments: 1, curveSegments: 10 });
+    var g = new T.ExtrudeGeometry(s, { depth: TH, bevelEnabled: true, bevelThickness: 2.5, bevelSize: 1.8, bevelSegments: 2, curveSegments: 10 });
     g.rotateX(Math.PI / 2); g.translate(0, TH + 1.5, 0);
     this.geoCache[n] = g;
     return g;
