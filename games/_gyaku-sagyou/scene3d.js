@@ -79,7 +79,7 @@
         g.add(p); s.pend = p;
       },
       anim: function (g, e, s) { s.pend.rotation.z = e.on ? Math.sin(e.t * Math.PI / 0.19) * 0.5 : 0; } },
-    cuckoo: { pos: [2.55, 2.75, -1.12], a: [0, 0, 0],
+    cuckoo: { pos: [2.15, 2.85, -1.12], a: [0, 0, 0],
       make: function (g, s) {
         g.add(box(0.26, 0.24, 0.1, 0x6b4227));
         var roof = cone(0.22, 0.14, 0x4a2a18, 0, 0.19, 0, 4); roof.rotation.y = Math.PI / 4; roof.scale.z = 0.45; g.add(roof);
@@ -159,26 +159,26 @@
     disco: { pos: [-1.0, 2.95, -0.3], a: [0, 0, 0],
       make: function (g) { g.add(cyl(0.004, 0.004, 0.4, 0x888888, 0, 0.25, 0)); g.add(ball(0.09, 0xc9d2e0, 0, 0, 0, { metalness: 0.9, roughness: 0.25 })); },
       anim: function (g, e) { if (e.on) g.rotation.y = e.t * 2; } },
-    drip: { pos: [-0.95, 0, 0.35], a: [0, 0.1, 0],
+    drip: { pos: [-0.55, 0, 0.5], a: [0, 0.1, 0],
       make: function (g, s) {
         g.add(cyl(0.11, 0.09, 0.18, 0x6b7a8f, 0, 0.09, 0, 18, { side: T.DoubleSide }));
         var dr = ball(0.02, 0x8fd3ff, 0, 3.1, 0); dr.visible = false; g.add(dr); s.drop = dr;
       },
       anim: function (g, e, s) { s.drop.visible = e.on; if (e.on) s.drop.position.y = 3.1 - ((e.t % 0.55) / 0.55) * 2.95; } },
-    cracker: { pos: [1.35, 0.5, 0.45], a: [0, 0.08, 0],
+    cracker: { pos: [1.05, 0.5, 0.0], a: [0, 0.08, 0],
       make: function (g) {
         g.add(cyl(0.16, 0.16, 0.04, 0xe6533b, 0, -0.02, 0)); g.add(cyl(0.025, 0.025, 0.48, 0x6b3f2a, 0, -0.26, 0));
         var c = cone(0.045, 0.14, 0xe85a8a, 0, 0.07, 0); c.rotation.z = Math.PI; g.add(c);
       },
       anim: function (g, e) { g.rotation.z = e.on && (e.t % 0.9) < 0.1 ? 0.15 : 0; } },
-    vacuum: { pos: [2.3, 0.03, 0.2], a: [0, 0.03, 0], move: true,
+    vacuum: { pos: [1.55, 0.03, -0.45], a: [0, 0.03, 0], move: true,
       make: function (g) { g.add(cyl(0.17, 0.17, 0.06, 0x3a3d44, 0, 0, 0, 24)); g.add(cyl(0.15, 0.15, 0.02, 0xcfd3da, 0, 0.035, 0, 24)); },
       anim: function (g, e) {
-        if (!e.on) { g.position.set(2.3, 0.03, 0.2); return; }
+        if (!e.on) { g.position.set(1.55, 0.03, -0.45); return; }
         var ph = (e.t * 0.35) % 2, u = ph < 1 ? ph : 2 - ph;
-        g.position.set(2.3 - u * 3.4, 0.03, 0.2 + Math.sin(e.t * 1.3) * 0.25); g.rotation.y = e.t * 2;
+        g.position.set(1.55 - u * 3.0, 0.03, -0.2 + Math.sin(e.t * 1.3) * 0.2); g.rotation.y = e.t * 2;
       } },
-    cat: { pos: [0.95, 0.04, 0.55], a: [0, 0.1, 0], move: true,
+    cat: { pos: [0.3, 0.04, 0.5], a: [0, 0.1, 0], move: true,
       make: function (g, s) {
         var b = ball(0.12, 0xe9e2d6); b.scale.set(1.4, 0.8, 0.9); b.position.y = 0.08; g.add(b);
         g.add(ball(0.075, 0xe9e2d6, -0.15, 0.15, 0));
@@ -186,12 +186,12 @@
         var tail = cyl(0.015, 0.015, 0.2, 0xe9e2d6, 0.2, 0.15, 0); tail.rotation.z = -0.6; g.add(tail);
       },
       anim: function (g, e) {
-        if (!e.on) { g.position.set(0.95, 0.04, 0.55); g.rotation.set(0, 0.3, 0); return; }
+        if (!e.on) { g.position.set(0.3, 0.04, 0.5); g.rotation.set(0, 0.3, 0); return; }
         var ph = (e.t * 0.25) % 2, u = ph < 1 ? ph : 2 - ph;
         g.position.set(-0.9 + u * 1.6, DESK + 0.02 + Math.abs(Math.sin(e.t * 8)) * 0.015, -0.53);
         g.rotation.set(0, (ph < 1 ? Math.PI : 0), 0);
       } },
-    dog: { pos: [-2.15, 0.04, 0.35], a: [0, 0.18, 0],
+    dog: { pos: [-1.3, 0.04, 0.6], a: [0, 0.18, 0],
       make: function (g) {
         g.add(cyl(0.3, 0.3, 0.06, 0x5a4a7a, 0, -0.01, 0, 24));
         var b = ball(0.13, 0xb07a46, 0, 0.12, 0); b.scale.set(1.3, 0.9, 0.9); g.add(b);
@@ -219,7 +219,7 @@
         var bk = cone(0.025, 0.06, 0xff8a2a, -0.14, 0.16, 0, 10); bk.rotation.z = Math.PI / 2; g.add(bk);
       },
       anim: function (g, e) { var q = e.on ? Math.max(0, Math.sin(e.t * Math.PI / 0.48 * 2)) : 0; g.scale.set(1.2 * (1 + q * 0.12), 1.2 * (1 - q * 0.2), 1.2 * (1 + q * 0.12)); } },
-    chair: { pos: [2.65, 0, 0.35], a: [0, 0.55, 0],
+    chair: { pos: [-2.25, 0, 0.15], a: [0, 0.55, 0],
       make: function (g) {
         g.add(box(0.36, 0.04, 0.36, 0xc9824a, 0, 0.42, 0)); g.add(box(0.04, 0.45, 0.36, 0xc9824a, 0.16, 0.66, 0));
         var r1 = new T.Mesh(new T.TorusGeometry(0.6, 0.015, 6, 24, 0.9), mat(0x8a5a30)); r1.rotation.z = Math.PI * 1.5 - 0.45; r1.position.set(0, 0.6, 0.15); g.add(r1);
@@ -349,8 +349,8 @@
       selfArms.push({ arm: arm, fore: fore });
     });
 
-    this.camera.position.set(0.35, 1.95, 5.7);
-    this.camera.lookAt(0.1, 1.38, -0.5);
+    this.camera.position.set(2.3, 1.85, 3.9);
+    this.camera.lookAt(-0.05, 1.42, -0.55);
     this.v = new T.Vector3();
   }
 
