@@ -91,9 +91,9 @@
       peg: Z3.std(0xb8923e, { roughness: 0.3, metalness: 0.7 })
     };
     this.arrowMat = {
-      need: new T.MeshBasicMaterial({ color: 0xf2c14e }),
-      ok: new T.MeshBasicMaterial({ color: 0x7be07b }),
-      bad: new T.MeshBasicMaterial({ color: 0xff5a4a })
+      need: new T.MeshBasicMaterial({ color: 0xf2c14e, side: T.DoubleSide }),
+      ok: new T.MeshBasicMaterial({ color: 0x7be07b, side: T.DoubleSide }),
+      bad: new T.MeshBasicMaterial({ color: 0xff5a4a, side: T.DoubleSide })
     };
     this.geoCache = {};
     this.root = new T.Group(); this.scene.add(this.root);       /* 面ごとの物 */
@@ -204,12 +204,20 @@
     tor.rotation.x = Math.PI / 2; tor.scale.z = 0.35;
     grp.add(tor);
     var e = g.need > 0 ? arc : 0, d = g.need > 0 ? 1 : -1;
-    var cone = new T.Mesh(new T.ConeGeometry(w * 3.4, w * 6.5, 3), mat);
-    cone.scale.z = 0.35;
-    var tx = -Math.sin(e) * d, tz = Math.cos(e) * d;
-    cone.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), new T.Vector3(tx, 0, tz));
-    cone.position.set(Math.cos(e) * R + tx * w * 2.4, 0, Math.sin(e) * R + tz * w * 2.4);
-    grp.add(cone);
+    /* 矢じり：面に貼った平たい三角（向きで潰れないように板で作る） */
+    var tx = -Math.sin(e) * d, tz = Math.cos(e) * d;          /* 進む向き */
+    var nx = Math.cos(e), nz = Math.sin(e);                   /* 外向き */
+    var bx = Math.cos(e) * R - tx * w, bz = Math.sin(e) * R - tz * w, L = w * 6, B = w * 3.6;
+    var hg = new T.BufferGeometry();
+    hg.setAttribute("position", new T.Float32BufferAttribute([
+      bx + tx * L, 0, bz + tz * L,
+      bx + nx * B, 0, bz + nz * B,
+      bx - nx * B, 0, bz - nz * B
+    ], 3));
+    hg.computeVertexNormals();
+    var head = new T.Mesh(hg, mat);
+    head.position.y = w * 0.4;
+    grp.add(head);
     grp.position.y = TH + 4;
     return grp;
   };
