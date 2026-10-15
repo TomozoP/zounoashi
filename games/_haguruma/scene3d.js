@@ -13,7 +13,7 @@
     this.scene = st.scene;
     this.camera = st.camera;
     this.scene.background = new T.Color(0x1c1612);
-    var L = Z3.lights(this.scene, { shadows: true, shadowSize: 10 });
+    var L = this.L = Z3.lights(this.scene, { shadows: true, shadowSize: 10 });
     L.key.position.set(-260, 900, 380);
     L.key.target.position.set(0, 0, 0); this.scene.add(L.key.target);
     var sc = L.key.shadow.camera; sc.left = -480; sc.right = 480; sc.top = 560; sc.bottom = -560; sc.near = 100; sc.far = 2400;
@@ -410,7 +410,124 @@
     return { x: (v.x + 1) / 2 * W, y: (1 - v.y) / 2 * H };
   };
 
-  GearScene.prototype.draw = function (ctx, W, H) { this.fit(W, H); return this.stage.draw(ctx, W, H); };
+
+  /* ============ 全部の機関が動いたあとの工場 ============
+     盤から離れた所（x = FX）に建てておき、終わりの演出のときだけカメラを向ける */
+  var FX = 4000;
+  GearScene.prototype.buildFactory = function () {
+    if (this.fac) return this.fac;
+    var M = this.mat, f = { grp: new T.Group(), windows: [], chimneys: [], gears: [] };
+    f.grp.position.set(FX, 0, 0);
+    this.scene.add(f.grp);
+    var wallM = Z3.std(0x5b4a3e, { roughness: 0.85 }), roofM = Z3.std(0x3a3632, { roughness: 0.7, metalness: 0.3 });
+    var ground = new T.Mesh(new T.PlaneGeometry(9000, 9000), Z3.std(0x2a2622, { roughness: 0.95 }));
+    ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; f.grp.add(ground);
+    /* 本棟：のこぎり屋根 */
+    var bw = 720, bh = 230, bd = 320;
+    var body = new T.Mesh(new T.BoxGeometry(bw, bh, bd), wallM);
+    body.position.set(0, bh / 2, 0); body.castShadow = body.receiveShadow = true; f.grp.add(body);
+    for (var k = 0; k < 6; k++) {
+      var sh = new T.Shape(); sh.moveTo(0, 0); sh.lineTo(bw / 6, 0); sh.lineTo(bw / 6, 70); sh.closePath();
+      var roof = new T.Mesh(new T.ExtrudeGeometry(sh, { depth: bd, bevelEnabled: false }), roofM);
+      roof.position.set(-bw / 2 + k * bw / 6, bh, -bd / 2); roof.castShadow = true; f.grp.add(roof);
+      /* 屋根の明かり取り */
+      var sky = new T.Mesh(new T.PlaneGeometry(bd - 20, 60), new T.MeshBasicMaterial({ color: 0x222830 }));
+      sky.rotation.y = Math.PI / 2; sky.position.set(-bw / 2 + (k + 1) * bw / 6 + 1, bh + 34, 0); f.grp.add(sky);
+      f.windows.push({ m: sky, at: 0, lit: 0xffe2a0, dark: 0x222830 });
+    }
+    /* 正面の窓 2段×8 */
+    for (var row = 0; row < 2; row++) for (var c = 0; c < 8; c++) {
+      var w = new T.Mesh(new T.PlaneGeometry(56, 52), new T.MeshBasicMaterial({ color: 0x1c2026 }));
+      w.position.set(-bw / 2 + 60 + c * 85, 70 + row * 92, bd / 2 + 1);
+      if (row === 0 && (c === 3 || c === 4)) continue;
+      f.grp.add(w);
+      f.windows.push({ m: w, at: 0, lit: 0xffd889, dark: 0x1c2026 });
+    }
+    /* 大きな扉 */
+    var door = new T.Mesh(new T.PlaneGeometry(150, 120), Z3.std(0x2c2420, { roughness: 0.6 }));
+    door.position.set(0, 60, bd / 2 + 1); f.grp.add(door);
+    /* 正面の大歯車2つ（噛み合って回る） */
+    var self = this;
+    /* 削り跡の凹凸は近くの明かりでちらつくので、工場の歯車には付けない */
+    var plain = function (m) { var c = m.clone(); c.bumpMap = null; c.roughnessMap = null; c.envMapIntensity = 2.2; return c; };
+    var g1 = new T.Mesh(this.gearGeo(40), plain(M.my)), g2 = new T.Mesh(this.gearGeo(24), plain(M.drv));
+    [g1, g2].forEach(function (g) { g.rotation.x = Math.PI / 2; g.castShadow = true; });
+    var p1 = new T.Group(), p2 = new T.Group();
+    p1.add(g1); p2.add(g2);
+    var r1 = 40 * this.PITCH / (2 * Math.PI), r2 = 24 * this.PITCH / (2 * Math.PI);
+    p1.position.set(-60, bh + 150, bd / 2 - 20); p2.position.set(-60 + r1 + r2, bh + 150 - 0, bd / 2 - 20);
+    f.grp.add(p1); f.grp.add(p2);
+    var frame = new T.Mesh(new T.BoxGeometry(320, 230, 16), wallM);
+    frame.position.set(-20, bh + 130, bd / 2 - 52); frame.castShadow = true; f.grp.add(frame);
+    f.gears = [{ g: p1, w: 0.8 }, { g: p2, w: -0.8 * r1 / r2 }];
+    /* 煙突 */
+    [[250, 520], [320, 440], [-300, 380]].forEach(function (c2) {
+      var ch = new T.Mesh(new T.CylinderGeometry(22, 30, c2[1], 18), Z3.std(0x6a4a3a, { roughness: 0.8 }));
+      ch.position.set(c2[0], c2[1] / 2, -80); ch.castShadow = true; f.grp.add(ch);
+      var band = new T.Mesh(new T.CylinderGeometry(25, 25, 14, 18), M.iron); band.position.set(c2[0], c2[1] - 30, -80); f.grp.add(band);
+      f.chimneys.push(new T.Vector3(FX + c2[0], c2[1] + 6, -80));
+    });
+    /* 窓の光のにじみ */
+    f.glow = [];
+    var gm = this.glowMat;
+    f.windows.forEach(function (wd, i) {
+      if (i < 6) return;
+      var sp = new T.Sprite(gm); sp.scale.set(95, 95, 1); sp.position.copy(wd.m.position); sp.position.z += 6; sp.visible = false; f.grp.add(sp); wd.glow = sp;
+    });
+    /* 灯りがつく順番：左下から右上へ、ばらけさせる */
+    var order = f.windows.map(function (w, i) { return i; });
+    var rnd = Z3.rng(5);
+    order.sort(function (a, b) { return (a < 6 ? 8 : 0) + rnd() * 2 - ((b < 6 ? 8 : 0) + rnd() * 2) + (a - b) * 0.1; });
+    order.forEach(function (idx, j) { f.windows[idx].at = 0.9 + j * 0.11; });
+    this.fac = f;
+    return f;
+  };
+
+  /* e: 演出が始まってからの秒数（-1 で盤に戻す）。点いた窓の数を返す */
+  GearScene.prototype.ending = function (e, dt, W, H) {
+    var f = this.buildFactory(), self = this;
+    if (e < 0) {
+      if (this.inEnding) {
+        this.inEnding = false; this.camKey = "";
+        this.scene.background.set(0x1c1612);
+        this.L.key.intensity = this.keyI; this.scene.environmentIntensity = this.envI;
+        this.L.key.position.set(-260, 900, 380); this.L.key.target.position.set(0, 0, 0);
+        f.windows.forEach(function (w) { w.m.material.color.setHex(w.dark); if (w.glow) w.glow.visible = false; });
+      }
+      return 0;
+    }
+    if (!this.inEnding) {
+      this.inEnding = true; this.keyI = this.L.key.intensity; this.envI = this.scene.environmentIntensity;
+    }
+    /* 夜の工場。火が入ると少しずつ空が明ける */
+    var run = Math.max(0, Math.min(1, (e - 3.0) / 1.5));
+    this.scene.background.setRGB(0.04 + 0.1 * run, 0.05 + 0.08 * run, 0.1 + 0.12 * run);
+    this.L.key.intensity = this.keyI * (0.25 + 0.3 * run);
+    this.L.key.position.set(FX - 400, 900, 700); this.L.key.target.position.set(FX, 0, 0);
+    this.scene.environmentIntensity = this.envI * (0.7 + 0.3 * run);
+    var lit = 0;
+    f.windows.forEach(function (w) {
+      var on = e >= w.at;
+      if (on) lit++;
+      var fl = on && e - w.at < 0.12 ? (Math.random() < 0.5 ? 0.4 : 1) : 1;
+      w.m.material.color.setHex(on ? w.lit : w.dark);
+      if (on && fl < 1) w.m.material.color.multiplyScalar(fl);
+      if (w.glow) w.glow.visible = on;
+    });
+    f.gears.forEach(function (g) { g.g.rotation.z = -g.w * Math.max(0, e - 2.6) * Math.min(1, Math.max(0, e - 2.6)); });
+    if (e > 2.8) f.chimneys.forEach(function (c) { if (Math.random() < dt * 14) self.puff(c, 60, 260, 60); });
+    /* カメラ：少し寄りながら工場の正面を見上げ気味に */
+    var k = Math.min(1, e / 6), ease = k * k * (3 - 2 * k);
+    this.camera.aspect = W / H;
+    this.camera.fov = 30; this.camera.updateProjectionMatrix();
+    var dist = 3700 - 500 * ease;
+    this.camera.position.set(FX + 120 - 80 * ease, 700 + 80 * ease, dist);
+    this.camera.lookAt(FX, 200, 0);
+    this.camKey = "ending";
+    return lit;
+  };
+
+  GearScene.prototype.draw = function (ctx, W, H) { if (!this.inEnding) this.fit(W, H); return this.stage.draw(ctx, W, H); };
 
   global.GearScene = GearScene;
 })(window);

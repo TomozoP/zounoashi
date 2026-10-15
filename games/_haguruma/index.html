@@ -152,9 +152,9 @@
   var BOX_H = 800;
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", CLEAR: "clear", RESULT: "result" };
+  var S = { INTRO: "intro", PLAY: "play", CLEAR: "clear", ENDING: "ending", RESULT: "result" };
   var state, T = 0, held = false, keyMode = false;
-  var stageNo = 0, gears = null, obs = [], pegs = null, limit = 0, clearT = 0, usedTotal = 0, flash = [];
+  var stageNo = 0, gears = null, obs = [], pegs = null, limit = 0, clearT = 0, usedTotal = 0, flash = [], endT = 0, litCount = 0;
 
   function newRound() {
     shareButton.hidden = true;
@@ -356,7 +356,8 @@
   /* ============ 進行 ============ */
   var tickAcc = 0;
   function update(dt) {
-    if (state === S.INTRO || state === S.RESULT) { T += dt; return; }
+    if (state === S.ENDING || state === S.RESULT) { T += dt; updateEnding(dt); return; }
+    if (state === S.INTRO) { T += dt; return; }
     T += dt;
     var i;
     for (i = 0; i < gears.length; i++) if (gears[i].shake > 0) gears[i].shake = Math.max(0, gears[i].shake - dt);
@@ -371,9 +372,25 @@
       clearT += dt;
       if (clearT > 2.6) {
         if (stageNo + 1 < STAGES.length) { loadStage(stageNo + 1); state = S.PLAY; }
-        else finish();
+        else startEnding();
       }
     }
+  }
+  /* 全部動いたら、工場に明かりがついて動き出す */
+  function startEnding() {
+    state = S.ENDING; endT = 0; litCount = 0;
+    tone(70, 1.2, 0.12, "sine", 110);                     /* 電源が入る低い音 */
+  }
+  function updateEnding(dt) {
+    var before = endT;
+    endT += dt;
+    if (before < 2.8 && endT >= 2.8) {
+      sndClear();
+      /* 工場のうなり */
+      tone(55, 3.5, 0.07, "sawtooth", 58); tone(110, 3.5, 0.03, "square", 112);
+      for (var k = 0; k < 8; k++) noiseHit(0.06, 3000, 0.12, 6, 0.25 * k);
+    }
+    if (endT >= 4.3 && state === S.ENDING) finish();
   }
   function finish() {
     state = S.RESULT;
@@ -407,7 +424,11 @@
     if (!drag) return;
     if (drag.peg) drag.r = Math.hypot(x - drag.cx, y - drag.cy);
     else { drag.cx = (drag.sx + x) / 2; drag.cy = (drag.sy + y) / 2; drag.r = Math.hypot(x - drag.sx, y - drag.sy) / 2; }
+    var pn = drag.fit ? drag.fit.n : 0;
     drag.fit = drag.r >= RMIN * 0.6 ? fit(drag.cx, drag.cy, Math.max(RMIN, drag.r), drag.peg) : null;
+    /* 大きさ（歯の数）が変わるたびにカチッ */
+    var nn = drag.fit ? drag.fit.n : 0;
+    if (nn !== pn && nn) { noiseHit(0.025, 4600 + nn * 30, 0.22, 9); tone(1800 + nn * 20, 0.02, 0.025, "square"); }
   }
   function up() {
     if (!held) return;
@@ -457,7 +478,7 @@
     if (state === S.INTRO) newRound();
     if (n === 1 && state === S.PLAY) { forceRun(); state = S.CLEAR; clearT = 0; sndClear(); }
     if (n === 2 && stageNo + 1 < STAGES.length) { loadStage(stageNo + 1); state = S.PLAY; }
-    if (n === 3) { usedTotal = 27; finish(); }
+    if (n === 3) { loadStage(STAGES.length - 1); startEnding(); }
     if (n === 4) { loadStage(STAGES.length - 1); state = S.PLAY; }
   }
   /* 1キー用。機械を正しい向きに回して見せる */
@@ -486,11 +507,7 @@
   });
 
   function doShare() {
-    var n = usedTotal, ja, en;
-    if (n <= 16) { ja = "歯車たった" + n + "枚で10台の機関を動かした天才技師"; en = "A genius engineer who ran 10 engines with only " + n + " gears"; }
-    else if (n <= 26) { ja = "歯車を" + n + "枚描いて10台の機関を動かした"; en = "Drew " + n + " gears and got 10 engines running"; }
-    else { ja = "歯車を" + n + "枚も描いて、なんとか10台の機関を動かした"; en = "Drew a whole " + n + " gears and somehow got 10 engines running"; }
-    window.zResultActions.x({ text: zT(ja, en) + zT(" #歯車機関", " #GearEngine") });
+    window.zResultActions.x({ text: zT("歯車を描いて描いて描きまくり、止まっていた工場を動かした", "Drew gear after gear until the dead factory roared back to life") + zT(" #歯車機関", " #GearEngine") });
   }
 
   /* ============ 描画 ============ */
@@ -531,6 +548,10 @@
           }),
           preview: drag && drag.fit && state === S.PLAY ? drag.fit : null
         });
+        var ending = state === S.ENDING || state === S.RESULT;
+        var lit = sc.ending(ending ? endT : -1, Math.max(0, Math.min(0.1, T - lastDrawT)), W, H);
+        if (lit > litCount) { noiseHit(0.04, 2200, 0.25, 5); tone(1400, 0.05, 0.03, "square"); }
+        litCount = lit;
         lastDrawT = T;
         drew = sc.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); loadedFor = -1; }
@@ -546,7 +567,7 @@
       var c = sc.toScreen(drag.sx, drag.sy, 8, W, H);
       ctx.beginPath(); ctx.arc(c.x, c.y, 5, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill();
     }
-    if (state !== S.INTRO && state !== S.RESULT) drawHud();
+    if (state === S.PLAY || state === S.CLEAR) drawHud();
     if (state === S.CLEAR) {
       var k = Math.min(1, clearT / 0.3) * (clearT > 2.2 ? Math.max(0, (2.6 - clearT) / 0.4) : 1);
       ctx.fillStyle = "rgba(255,240,200," + (0.12 * k) + ")"; ctx.fillRect(0, 0, W, H);
@@ -572,7 +593,7 @@
 
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.82;
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -587,20 +608,12 @@
     return null;
   }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.66)";
-    ctx.fillRect(0, 0, W, H);
-    ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
-    ctx.textAlign = "left";
-    var s = String(usedTotal), u = zT("枚", usedTotal === 1 ? " gear" : " gears");
-    ctx.font = "800 108px sans-serif"; var sw = ctx.measureText(s).width;
-    ctx.font = "800 44px sans-serif"; var uw = ctx.measureText(u).width;
-    var x = W / 2 - (sw + uw + 6) / 2;
-    ctx.font = "800 108px sans-serif"; ctx.fillText(s, x, H * 0.45);
-    ctx.font = "800 44px sans-serif"; ctx.fillText(u, x + sw + 6, H * 0.45);
-    ctx.restore();
+    /* 今回は点数なし。動き出した工場を見せたまま、下にボタンだけ */
+    var k = Math.min(1, (endT - 4.3) / 0.5);
+    var gr = ctx.createLinearGradient(0, H * 0.6, 0, H);
+    gr.addColorStop(0, "rgba(10,8,6,0)"); gr.addColorStop(1, "rgba(10,8,6," + (0.55 * k) + ")");
+    ctx.fillStyle = gr; ctx.fillRect(0, H * 0.6, W, H * 0.4);
+    ctx.globalAlpha = k;
     resultButtons().forEach(function (b) {
       ctx.save();
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
@@ -615,6 +628,7 @@
       ctx.restore();
       ctx.textBaseline = "alphabetic";
     });
+    ctx.globalAlpha = 1;
   }
 
   /* ============ 覗き穴 ============
