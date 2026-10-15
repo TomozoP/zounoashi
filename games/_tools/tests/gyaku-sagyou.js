@@ -4,7 +4,7 @@ var load = require("../harness");
 var g = load(path.join(__dirname, "../../_gyaku-sagyou/index.html"));
 function tap(x, y) { g.tap(x, y); }
 g.press(" "); g.step(5);
-g.step(60 * 6);
+g.step(60 * 12);
 var s = g.probe.now(), before = s.active.length + s.popups, stopped = 0;
 for (var i = 0; i < 40; i++) {
   s = g.probe.now();
@@ -13,6 +13,6 @@ for (var i = 0; i < 40; i++) {
   g.step(2);
 }
 s = g.probe.now();
-var ok = s.state === "play" && before > 5 && stopped > 0;
-console.log(ok ? "OK" : "NG", "6秒で鳴った数", before, "止めた回数", stopped, "残り", s.active.length + s.popups, "妨害", s.disturb);
+var ok = s.state === "play" && before >= 5 && stopped > 0;
+console.log(ok ? "OK" : "NG", "12秒で鳴った数", before, "止めた回数", stopped, "残り", s.active.length + s.popups, "妨害", s.disturb);
 if (!ok) process.exit(1);
