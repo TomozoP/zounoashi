@@ -237,7 +237,7 @@
     var st = this.stage = new Z3.Stage({
       renderer: { shadows: true, tone: "aces", exposure: 1.2 },
       camera: { fov: 40, near: 0.3, far: 40 },
-      finish: { contrast: 0.1, vignette: 0.32, grain: 0.008 }
+      finish: { contrast: 0, vignette: 0.32, grain: 0.008 }   /* 明るい所が緑に化けるので、コントラストの仕上げは使わない */
     });
     var S = this.scene = st.scene;
     this.camera = st.camera;
@@ -248,14 +248,14 @@
     var front = new T.DirectionalLight(0xb8a8ff, 0.5); front.position.set(1, 2.5, 5); S.add(front);
     var moon = new T.DirectionalLight(0x8fa2ff, 1.3); moon.position.set(-0.5, 3.5, -4); moon.target.position.set(0.2, 1, 0.5);
     S.add(moon); S.add(moon.target);
-    var lamp = new T.SpotLight(0xffb066, 22, 5, 1.0, 0.6, 1.5);
+    var lamp = new T.SpotLight(0xffb066, 14, 5, 1.0, 0.6, 1.5);
     lamp.position.set(-0.85, 1.6, -0.8); lamp.target.position.set(-0.3, DESK, -0.65);
     lamp.castShadow = true;
     lamp.shadow.mapSize.set(Z3.mobile ? 512 : 1024, Z3.mobile ? 512 : 1024);
     lamp.shadow.bias = -0.002;
     S.add(lamp); S.add(lamp.target);
     var bulb = new T.PointLight(0xffa860, 2.2, 3.2, 2); bulb.position.set(-0.85, 1.55, -0.7); S.add(bulb);
-    this.screenLight = new T.PointLight(0x7fd0ff, 1.2, 1.6, 2); this.screenLight.position.set(0.0, 1.25, -0.55); S.add(this.screenLight);
+    this.screenLight = new T.PointLight(0xffe2c8, 0.5, 1.2, 2); this.screenLight.position.set(0.05, 1.35, -0.5); S.add(this.screenLight);
     var warm2 = new T.PointLight(0xff8fb0, 1.2, 4, 2); warm2.position.set(1.2, 2.6, 0.2); S.add(warm2);
 
     /* 部屋 */
@@ -451,7 +451,7 @@
       if (s.done) { A.arm.rotation.z = -2.4; A.fore.rotation.z = 0.3; A.fore.position.y = -0.2; }
       else { A.arm.rotation.z = 0; A.fore.rotation.z = 0; A.fore.position.y = -0.2 + (i === (s.typeSide || 0) ? tap : 0); }
     });
-    this.screenLight.intensity = 1.2 + s.type * 0.6;
+    this.screenLight.intensity = 0.5 + s.type * 0.2;
   };
 
   GameScene.prototype.screen = function (v, W, H) {
