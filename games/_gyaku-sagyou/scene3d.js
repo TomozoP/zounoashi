@@ -237,14 +237,21 @@
         s.speakerRing = ring;
       },
       anim: function (g, e, s) { s.speakerRing.material.color.setHex(e.on ? 0x5fd0ff : 0x2a2f3a); g.scale.y = 1.3 * (e.on ? 1 + Math.sin(e.t * 14) * 0.03 : 1); } },
-    /* 髪のない、上半身はだかで叫びながら部屋の手前を横切るおじさん（鳴っていない間はいない） */
+    /* 髪もひげも眉もない、上半身はだかで叫びながら部屋の手前を横切るおじさん（鳴っていない間はいない） */
     ojisan: { big: 0.62, pos: [-3, 0, 0.95], a: [0, 0.6, 0], move: true,
       make: function (g, s) {
         var skin = 0xe8b48a, dark = 0x1a1620, o = s.oji = {};
         var body = new T.Group(); g.add(body); o.body = body;
         var belly = ball(0.2, skin, 0, 0.78, 0.02); belly.scale.set(1, 1.15, 0.9); body.add(belly);
         body.add(ball(0.17, skin, 0, 1.0, 0));
-        body.add(box(0.36, 0.2, 0.26, dark, 0, 0.55, 0));
+        /* 腰：はだの円柱に黒いパンツを絵で描く（前と後ろは深く、横は脚の切れ込みで浅い） */
+        var hip = new T.Mesh(new T.CylinderGeometry(0.19, 0.15, 0.26, 24), new T.MeshStandardMaterial({ roughness: 0.8, map: Z3.canvasTex(256, 64, function (c, w, h) {
+          c.fillStyle = "#e8b48a"; c.fillRect(0, 0, w, h);
+          c.fillStyle = "#1a1620"; c.beginPath(); c.moveTo(0, 0);
+          for (var i = 0; i <= 64; i++) { var u = i / 64; c.lineTo(u * w, h * (0.45 + 0.55 * Math.pow((Math.cos(u * Math.PI * 4) + 1) / 2, 2))); }
+          c.lineTo(w, 0); c.fill();
+        }) }));
+        hip.position.y = 0.57; hip.castShadow = true; body.add(hip);
         o.legs = [-0.09, 0.09].map(function (x) {
           var L = new T.Group(); L.position.set(x, 0.5, 0); body.add(L);
           L.add(cyl(0.055, 0.05, 0.46, skin, 0, -0.24, 0)); L.add(box(0.09, 0.04, 0.16, skin, 0, -0.47, 0.03));
@@ -258,11 +265,9 @@
         var head = new T.Group(); head.position.set(0, 1.27, 0); body.add(head); o.head = head;
         head.add(ball(0.15, skin, 0, 0, 0));
         [-1, 1].forEach(function (sd) {
-          var br = box(0.08, 0.03, 0.02, dark, sd * 0.06, 0.05, 0.14); br.rotation.z = -sd * 0.35; head.add(br);
           head.add(ball(0.022, 0xffffff, sd * 0.055, 0.0, 0.135));
         });
         var mouth = ball(0.045, 0x5a1a22, 0, -0.08, 0.13); mouth.scale.set(1.2, 1, 0.5); head.add(mouth); o.mouth = mouth;
-        head.add(box(0.14, 0.025, 0.02, dark, 0, -0.03, 0.145));
       },
       anim: function (g, e, s) {
         var o = s.oji;
