@@ -237,7 +237,7 @@
         s.speakerRing = ring;
       },
       anim: function (g, e, s) { s.speakerRing.material.color.setHex(e.on ? 0x5fd0ff : 0x2a2f3a); g.scale.y = 1.3 * (e.on ? 1 + Math.sin(e.t * 14) * 0.03 : 1); } },
-    /* 上半身はだかで叫びながら部屋の手前を横切るおじさん（鳴っていない間はいない） */
+    /* 髪のない、上半身はだかで叫びながら部屋の手前を横切るおじさん（鳴っていない間はいない） */
     ojisan: { big: 0.62, pos: [-3, 0, 0.95], a: [0, 0.6, 0], move: true,
       make: function (g, s) {
         var skin = 0xe8b48a, dark = 0x1a1620, o = s.oji = {};
@@ -257,9 +257,6 @@
         });
         var head = new T.Group(); head.position.set(0, 1.27, 0); body.add(head); o.head = head;
         head.add(ball(0.15, skin, 0, 0, 0));
-        /* 頭のてっぺんは無く、横と後ろだけ長い髪 */
-        [-1, 1].forEach(function (sd) { var hr = box(0.06, 0.3, 0.2, dark, sd * 0.14, -0.07, -0.03); hr.rotation.z = sd * 0.1; head.add(hr); });
-        head.add(box(0.26, 0.3, 0.06, dark, 0, -0.07, -0.13));
         [-1, 1].forEach(function (sd) {
           var br = box(0.08, 0.03, 0.02, dark, sd * 0.06, 0.05, 0.14); br.rotation.z = -sd * 0.35; head.add(br);
           head.add(ball(0.022, 0xffffff, sd * 0.055, 0.0, 0.135));
