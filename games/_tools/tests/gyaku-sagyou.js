@@ -2,8 +2,7 @@
 var path = require("path");
 var load = require("../harness");
 var g = load(path.join(__dirname, "../../_gyaku-sagyou/index.html"));
-/* 台はタテ540の座標で触るので、ヨコ960×540のゲーム座標に直して触る */
-function tap(x, y) { g.tap(x * 540 / 960, y * g.H / 540); }
+function tap(x, y) { g.tap(x, y); }
 g.press(" "); g.step(5);
 g.step(60 * 6);
 var s = g.probe.now(), before = s.active.length + s.popups, stopped = 0;
