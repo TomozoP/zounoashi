@@ -274,6 +274,14 @@
     var sky = new T.Mesh(new T.PlaneGeometry(2.6, 1.9), new T.MeshBasicMaterial({ map: skyTex() }));
     sky.position.set((wx0 + wx1) / 2, (wy0 + wy1) / 2, -1.9); S.add(sky);
     this.win = [new T.Vector3(wx0, wy1, wz), new T.Vector3(wx1, wy0, wz)];
+    /* 窓の外の出来事を描く板（空と壁のあいだ。壁と枠の奥に見える） */
+    var OW = 1.9, OH = 1.6, oc = document.createElement("canvas");
+    oc.width = 512; oc.height = Math.round(512 * OH / OW);
+    var otex = new T.CanvasTexture(oc); otex.colorSpace = T.SRGBColorSpace;
+    var outside = new T.Mesh(new T.PlaneGeometry(OW, OH), new T.MeshBasicMaterial({ map: otex, transparent: true, depthWrite: false }));
+    outside.position.set((wx0 + wx1) / 2, (wy0 + wy1) / 2, -1.6); S.add(outside);
+    var iw = (wx1 - wx0) / OW * oc.width, ih = (wy1 - wy0) / OH * oc.height;
+    this.outside = { ctx: oc.getContext("2d"), tex: otex, w: oc.width, h: oc.height, inner: { x: (oc.width - iw) / 2, y: (oc.height - ih) / 2, w: iw, h: ih } };
     /* 窓の上の電球の飾り（点けっぱなし） */
     var fairyCols = [0xffd27a, 0xff9ab8, 0x9fe0ff];
     for (var i = 0; i < 14; i++) {
