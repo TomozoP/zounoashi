@@ -16,7 +16,7 @@
     var L = this.L = Z3.lights(this.scene, { shadows: true, shadowSize: 10 });
     L.key.position.set(-260, 900, 380);
     L.key.target.position.set(0, 0, 0); this.scene.add(L.key.target);
-    var sc = L.key.shadow.camera; sc.left = -480; sc.right = 480; sc.top = 560; sc.bottom = -560; sc.near = 100; sc.far = 2400;
+    var sc = L.key.shadow.camera; sc.left = -900; sc.right = 900; sc.top = 1000; sc.bottom = -1000; sc.near = 100; sc.far = 2400;
     L.key.shadow.bias = -0.0008;
     L.rim.position.set(500, 300, -600);
     L.fill.position.set(400, 200, 600);
@@ -123,8 +123,9 @@
   }
 
   /* 歯車の形（歯の数ごとに使い回す） */
-  GearScene.prototype.gearGeo = function (n) {
-    if (this.geoCache[n]) return this.geoCache[n];
+  GearScene.prototype.gearGeo = function (n, solid) {
+    var ck = n + (solid ? "s" : "");
+    if (this.geoCache[ck]) return this.geoCache[ck];
     var P = this.PITCH, r = n * P / (2 * Math.PI);
     var ro = r + P * 0.32, ri = r - P * 0.36, step = 2 * Math.PI / n;
     var s = new T.Shape();
@@ -138,7 +139,7 @@
     }
     s.closePath();
     var hub = Math.max(7, r * 0.22);
-    if (r > 34) {
+    if (r > 34 && !solid) {
       /* 穴どうし・縁と重ならない大きさにする（重なると面が崩れる） */
       var holes = r > 70 ? 6 : 4, m = (hub + r - P * 0.6) / 2;
       var hr = Math.min((r - P * 0.6 - hub) * 0.36, m * Math.sin(Math.PI / holes) * 0.78);
@@ -150,7 +151,7 @@
     }
     var g = new T.ExtrudeGeometry(s, { depth: TH, bevelEnabled: true, bevelThickness: 2.5, bevelSize: 1.8, bevelSegments: 2, curveSegments: 10 });
     g.rotateX(Math.PI / 2); g.translate(0, TH + 1.5, 0);
-    this.geoCache[n] = g;
+    this.geoCache[ck] = g;
     return g;
   };
 
@@ -167,8 +168,8 @@
     if (g.kind === "fan") {
       var spin = new T.Group(); spin.position.y = TH + 18;
       for (var k = 0; k < 3; k++) {
-        var bl = new T.Mesh(new T.BoxGeometry(g.r * 0.85, 3, g.r * 0.32), M.blade);
-        bl.geometry.translate(g.r * 0.45, 0, 0);
+        var bl = new T.Mesh(new T.BoxGeometry(g.r * 0.5, 3, g.r * 0.24), M.blade);
+        bl.geometry.translate(g.r * 0.28, 0, 0);
         bl.rotation.y = k * Math.PI * 2 / 3; bl.rotation.x = 0.35;
         bl.castShadow = true; spin.add(bl);
       }
@@ -195,30 +196,21 @@
   };
 
   /* 回す向きの矢印（機械の歯車のまわりの弧と先端）。need=0 は「回すな」の輪と斜線 */
+  /* 回す向きの矢印。ゴールの歯車の上の面に描いて、歯車と一緒に回す */
   GearScene.prototype.arrow = function (g) {
-    var grp = new T.Group(), R = g.r + 22, mat = this.arrowMat.need;
-    if (g.need === 0) {
-      var ring = new T.Mesh(new T.TorusGeometry(R, 5, 8, 48), mat);
-      ring.rotation.x = Math.PI / 2; grp.add(ring);
-      var bar = new T.Mesh(new T.BoxGeometry(R * 2, 6, 10), mat); bar.rotation.y = Math.PI / 4; grp.add(bar);
-    } else {
-      var arc = Math.PI * 0.7;
-      var tor = new T.Mesh(new T.TorusGeometry(R, 5, 8, 32, arc), mat);
-      tor.rotation.x = Math.PI / 2;
-      /* 画面の上側（奥）に弧を置く。床の上で見て2Dの角度 -0.85π〜-0.15π */
-      tor.rotation.z = -Math.PI * 0.85;
-      grp.add(tor);
-      var e = g.need > 0 ? -Math.PI * 0.15 : -Math.PI * 0.85, d = g.need > 0 ? 1 : -1;
-      var cone = new T.Mesh(new T.ConeGeometry(11, 24, 12), mat);
-      cone.position.set(Math.cos(e) * R, 0, Math.sin(e) * R);
-      /* 先端を進む向き（接線）へ */
-      var tx = -Math.sin(e) * d, tz = Math.cos(e) * d;
-      cone.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), new T.Vector3(tx, 0, tz));
-      cone.position.x += tx * 8; cone.position.z += tz * 8;
-      grp.add(cone);
-    }
-    grp.position.set(g.x - CX, TH + 40, g.y - CZ);
-    grp.userData.parts = grp.children;
+    var grp = new T.Group(), R = g.r * 0.7, mat = this.arrowMat.need, w = Math.max(3.5, g.r * 0.08);
+    var arc = Math.PI * 1.45;
+    var tor = new T.Mesh(new T.TorusGeometry(R, w, 6, 40, arc), mat);
+    tor.rotation.x = Math.PI / 2; tor.scale.z = 0.35;
+    grp.add(tor);
+    var e = g.need > 0 ? arc : 0, d = g.need > 0 ? 1 : -1;
+    var cone = new T.Mesh(new T.ConeGeometry(w * 3.4, w * 6.5, 3), mat);
+    cone.scale.z = 0.35;
+    var tx = -Math.sin(e) * d, tz = Math.cos(e) * d;
+    cone.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), new T.Vector3(tx, 0, tz));
+    cone.position.set(Math.cos(e) * R + tx * w * 2.4, 0, Math.sin(e) * R + tz * w * 2.4);
+    grp.add(cone);
+    grp.position.y = TH + 4;
     return grp;
   };
 
@@ -284,14 +276,15 @@
     if (o) return o;
     var grp = new T.Group();
     var key = g.type === "tg" && g.need === 0 ? "stop" : g.type;
-    var body = new T.Mesh(this.gearGeo(g.n), this.mat[key]);
+    /* ゴールの歯車は矢印を描くので穴なし */
+    var body = new T.Mesh(this.gearGeo(g.n, g.type === "tg"), this.mat[key]);
     body.castShadow = true; body.receiveShadow = true;
     grp.add(body);
     grp.add(hubMesh(g.r, this.mat.hub));
     var mach = null, arrow = null;
     if (g.type === "tg") {
       mach = this.machine(g); grp.add(mach);
-      arrow = this.arrow(g); this.root.add(arrow);
+      arrow = this.arrow(g); grp.add(arrow);
     }
     grp.position.set(g.x - CX, 0, g.y - CZ);
     this.gearRoot.add(grp);
@@ -336,17 +329,15 @@
         }
       }
       if (o.arrow) {
-        o.arrow.visible = s.showArrows;
         var m = g.need === 0 ? (it.turning ? (Math.floor(s.t * 4) % 2 ? self.arrowMat.bad : self.arrowMat.need) : self.arrowMat.ok)
           : (!it.jam && g.dir === g.need) ? self.arrowMat.ok : (g.dir !== 0 || it.jam) ? (Math.floor(s.t * 4) % 2 ? self.arrowMat.bad : self.arrowMat.need) : self.arrowMat.need;
         o.arrow.children.forEach(function (c) { c.material = m; });
-        o.arrow.position.y = TH + 40 + Math.sin(s.t * 3 + g.x) * 3;
+        o.arrow.rotation.y = -it.angle;
       }
     });
     this.gearMesh.forEach(function (o, g) {
       if (live.has(g)) return;
       self.gearRoot.remove(o.grp);
-      if (o.arrow) self.root.remove(o.arrow);
       self.gearMesh.delete(g);
     });
     /* 描いている途中の歯車 */
