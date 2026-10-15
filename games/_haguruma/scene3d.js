@@ -270,11 +270,29 @@
         }
       }
     });
+    this.pegGlow = [];
+    if (pegs) {
+      /* 軸の穴の面：床一面に斜線の網をかけて「ここには立てられない」見た目にし、穴の所だけ真鍮の台を出す */
+      if (!this.hatchTex) {
+        this.hatchTex = Z3.canvasTex(64, 64, function (g, w, h) {
+          g.clearRect(0, 0, w, h);
+          g.strokeStyle = "rgba(0,0,0,.55)"; g.lineWidth = 9;
+          for (var k = -2; k < 4; k++) { g.beginPath(); g.moveTo(k * 32 - 8, -8); g.lineTo(k * 32 + 72, 72); g.stroke(); }
+        });
+        this.hatchTex.wrapS = this.hatchTex.wrapT = T.RepeatWrapping; this.hatchTex.repeat.set(30, 45);
+      }
+      var hatch = new T.Mesh(new T.PlaneGeometry(1200, 1800), new T.MeshBasicMaterial({ map: this.hatchTex, transparent: true, depthWrite: false }));
+      hatch.rotation.x = -Math.PI / 2; hatch.position.y = 0.6; self.root.add(hatch);
+    }
     (pegs || []).forEach(function (p) {
-      var m = new T.Mesh(new T.CylinderGeometry(9, 12, 10, 16), M.peg);
-      m.position.set(p[0] - CX, 5, p[1] - CZ); m.castShadow = true; self.root.add(m);
-      var ring = new T.Mesh(new T.TorusGeometry(16, 2, 6, 24), M.peg); ring.rotation.x = Math.PI / 2;
-      ring.position.set(p[0] - CX, 1, p[1] - CZ); self.root.add(ring);
+      var plate = new T.Mesh(new T.CylinderGeometry(30, 32, 4, 32), M.brassBand);
+      plate.position.set(p[0] - CX, 2, p[1] - CZ); plate.receiveShadow = true; self.root.add(plate);
+      var m = new T.Mesh(new T.CylinderGeometry(10, 13, 14, 16), M.peg);
+      m.position.set(p[0] - CX, 9, p[1] - CZ); m.castShadow = true; self.root.add(m);
+      var ring = new T.Mesh(new T.TorusGeometry(22, 2.5, 6, 32), M.peg); ring.rotation.x = Math.PI / 2;
+      ring.position.set(p[0] - CX, 4.5, p[1] - CZ); self.root.add(ring);
+      var gl = new T.Sprite(self.glowMat); gl.position.set(p[0] - CX, 12, p[1] - CZ); self.root.add(gl);
+      self.pegGlow.push(gl);
     });
     this.obs = obs;
   };
@@ -360,6 +378,12 @@
       this.preview.position.set(pv.x - CX, 6, pv.y - CZ);
       this.preview.visible = true;
     } else if (this.preview) { this.preview.visible = false; this.previewKey = ""; this.scene.remove(this.preview); this.preview = null; }
+    /* 軸の穴の光：ゆっくり明滅、ほかの所を押したら強く点滅 */
+    (this.pegGlow || []).forEach(function (gl, i) {
+      var k = 0.5 + 0.5 * Math.sin(s.t * 3 + i * 0.7), f = s.pegFlash || 0;
+      var sz = 70 + 20 * k + 90 * f * (0.6 + 0.4 * Math.sin(s.t * 30));
+      gl.scale.set(sz, sz, 1);
+    });
     /* 釜の火と煙 */
     (this.obs || []).forEach(function (o) {
       if (!o.boiler) return;
