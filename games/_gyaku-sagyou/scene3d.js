@@ -228,7 +228,59 @@
         var r2 = r1.clone(); r2.position.z = -0.15; g.add(r2);
         [[-0.15, 0.15], [0.15, 0.15], [-0.15, -0.15], [0.15, -0.15]].forEach(function (p) { g.add(box(0.03, 0.38, 0.03, 0x8a5a30, p[0], 0.21, p[1])); });
       },
-      anim: function (g, e) { g.rotation.z = e.on ? Math.sin(e.t * 8) * 0.12 : 0; } }
+      anim: function (g, e) { g.rotation.z = e.on ? Math.sin(e.t * 8) * 0.12 : 0; } },
+    /* 窓辺の小さな話す箱（読み上げ）。鳴っている間は上の輪が点けっぱなしで光る */
+    speaker: { big: 1.3, pos: [-0.12, 1.5, -1.1], a: [0, 0.1, 0],
+      make: function (g, s) {
+        g.add(cyl(0.055, 0.06, 0.15, 0x3a3f4a, 0, 0.075, 0, 24, { roughness: 0.8 }));
+        var ring = new T.Mesh(new T.CylinderGeometry(0.056, 0.056, 0.015, 24), glowMat(0x2a2f3a)); ring.position.y = 0.152; g.add(ring);
+        s.speakerRing = ring;
+      },
+      anim: function (g, e, s) { s.speakerRing.material.color.setHex(e.on ? 0x5fd0ff : 0x2a2f3a); g.scale.y = 1.3 * (e.on ? 1 + Math.sin(e.t * 14) * 0.03 : 1); } },
+    /* 上半身はだかで叫びながら部屋の手前を横切るおじさん（鳴っていない間はいない） */
+    ojisan: { big: 0.62, pos: [-3, 0, 0.95], a: [0, 0.6, 0], move: true,
+      make: function (g, s) {
+        var skin = 0xe8b48a, dark = 0x1a1620, o = s.oji = {};
+        var body = new T.Group(); g.add(body); o.body = body;
+        var belly = ball(0.2, skin, 0, 0.78, 0.02); belly.scale.set(1, 1.15, 0.9); body.add(belly);
+        body.add(ball(0.17, skin, 0, 1.0, 0));
+        body.add(box(0.36, 0.2, 0.26, dark, 0, 0.55, 0));
+        o.legs = [-0.09, 0.09].map(function (x) {
+          var L = new T.Group(); L.position.set(x, 0.5, 0); body.add(L);
+          L.add(cyl(0.055, 0.05, 0.46, skin, 0, -0.24, 0)); L.add(box(0.09, 0.04, 0.16, skin, 0, -0.47, 0.03));
+          return L;
+        });
+        o.arms = [-1, 1].map(function (sd) {
+          var A = new T.Group(); A.position.set(sd * 0.2, 1.05, 0); body.add(A);
+          A.add(cyl(0.05, 0.045, 0.42, skin, 0, -0.2, 0)); A.add(ball(0.05, skin, 0, -0.42, 0));
+          return A;
+        });
+        var head = new T.Group(); head.position.set(0, 1.27, 0); body.add(head); o.head = head;
+        head.add(ball(0.15, skin, 0, 0, 0));
+        /* 頭のてっぺんは無く、横と後ろだけ長い髪 */
+        [-1, 1].forEach(function (sd) { var hr = box(0.06, 0.3, 0.2, dark, sd * 0.14, -0.07, -0.03); hr.rotation.z = sd * 0.1; head.add(hr); });
+        head.add(box(0.26, 0.3, 0.06, dark, 0, -0.07, -0.13));
+        [-1, 1].forEach(function (sd) {
+          var br = box(0.08, 0.03, 0.02, dark, sd * 0.06, 0.05, 0.14); br.rotation.z = -sd * 0.35; head.add(br);
+          head.add(ball(0.022, 0xffffff, sd * 0.055, 0.0, 0.135));
+        });
+        var mouth = ball(0.045, 0x5a1a22, 0, -0.08, 0.13); mouth.scale.set(1.2, 1, 0.5); head.add(mouth); o.mouth = mouth;
+        head.add(box(0.14, 0.025, 0.02, dark, 0, -0.03, 0.145));
+      },
+      anim: function (g, e, s) {
+        var o = s.oji;
+        if (!e.on) { g.visible = false; g.position.set(-3, 0, 0.95); return; }
+        g.visible = true;
+        var ph = (e.t * 0.13) % 2, u = ph < 1 ? ph : 2 - ph, dir = ph < 1 ? 1 : -1;
+        g.position.set(-1.3 + u * 2.6, Math.abs(Math.sin(e.t * 7)) * 0.04, 0.95);
+        g.rotation.y = dir * 0.7;
+        var sw = Math.sin(e.t * 7);
+        o.legs[0].rotation.x = sw * 0.6; o.legs[1].rotation.x = -sw * 0.6;
+        o.arms[0].rotation.x = -sw * 1.1; o.arms[1].rotation.x = sw * 1.1;
+        o.arms[0].rotation.z = -0.3; o.arms[1].rotation.z = 0.3;
+        o.head.rotation.z = Math.sin(e.t * 3.5) * 0.15;
+        o.mouth.scale.y = 0.6 + Math.abs(Math.sin(e.t * 9)) * 0.9;
+      } }
   };
   delete MODELS.laptopNo;
 
