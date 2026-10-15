@@ -283,8 +283,8 @@
   var S = { INTRO: "intro", PLAY: "play", DONE: "done", RESULT: "result" };
   var state, score, T, held, keyMode = false;
   /* 鳴り出す間隔: ふだんは一定の間隔で1つずつ（止めないと溜まっていく）、たまにフィーバーで次々に */
-  var GAP = 2.0, FEVER_EVERY = 35, FEVER_LEN = 7;
-  var fever, nextFever;
+  var GAP = 2.0, FEVER_EVERY = 45, FEVER_LEN = 15;
+  var fever, nextFever, countdown = 0;   /* countdown: フィーバー前の 3・2・1 の残り秒 */
   var progress, popups, nextSpawn, disturb, doneT, shake, typeFlash, typeSide;
   var E = {};                                   /* 道具ごとの { on, t, k, snd } */
   ALL.forEach(function (id) { E[id] = { id: id, on: false, t: 0, k: 0, snd: 0 }; });
@@ -295,7 +295,7 @@
     state = S.PLAY;
     score = 0; T = 0; held = false;
     progress = 0; popups = []; nextSpawn = 7; disturb = 0; doneT = 0;   /* 開始直後の7秒は静か */
-    fever = 0; nextFever = 30;
+    fever = 0; nextFever = 30; countdown = 0;
     shake = 0; typeFlash = 0; typeSide = 0;
     ALL.forEach(function (id) { var e = E[id]; e.on = false; e.t = 0; e.k = 0; e.snd = 0; });
   }
@@ -327,6 +327,15 @@
     disturb++;
   }
 
+  /* フィーバーが終わったら、いったん全部止める */
+  function endFever() {
+    ALL.forEach(function (id) { E[id].on = false; });
+    popups = []; danmaku = [];
+    nextSpawn = GAP;
+    tone(784, 0.14, 0.1, "square"); tone(523, 0.3, 0.1, "square", null, 0.12);
+  }
+  function startCount() { countdown = 3; nextFever = FEVER_EVERY; countBeep(); }
+  function countBeep() { tone(880, 0.16, 0.12, "square"); }
   function startFever() {
     fever = FEVER_LEN; nextFever = FEVER_EVERY; nextSpawn = 0.6;
     /* 止まっている物が一斉に鳴り出す（更新の画面は出さない。通知は2つまで） */
@@ -346,9 +355,19 @@
     }
     if (state !== S.PLAY) return;
     T += dt;
-    nextFever -= dt;
-    if (nextFever <= 0) { startFever(); }
-    if (fever > 0) fever = Math.max(0, fever - dt);
+    if (countdown > 0) {
+      var before = Math.ceil(countdown);
+      countdown -= dt;
+      if (countdown <= 0) { countdown = 0; startFever(); }
+      else if (Math.ceil(countdown) !== before) countBeep();
+    } else {
+      nextFever -= dt;
+      if (nextFever <= 0) startCount();
+    }
+    if (fever > 0) {
+      fever -= dt;
+      if (fever <= 0) { fever = 0; endFever(); }
+    }
     nextSpawn -= dt;
     if (nextSpawn <= 0) {
       spawn();
@@ -487,8 +506,8 @@
       while (popups.length < 3) addPopup();
     } else if (n === 2) {                         /* 全部止める */
       ALL.forEach(function (id) { E[id].on = false; }); popups = [];
-    } else if (n === 3) {                         /* フィーバー */
-      startFever();
+    } else if (n === 3) {                         /* フィーバー（3・2・1 から） */
+      startCount();
     }
   }
 
@@ -679,7 +698,26 @@
 
   /* フィーバー中は虹色の大きな文字が右から左へ流れる（色はなめらかに移るだけで、明滅はさせない） */
   function drawFever() {
+    if (countdown > 0 && state === S.PLAY) {        /* 3・2・1。数字ごとに少し大きく出て縮む */
+      var k = countdown - Math.floor(countdown), sc = 1 + Math.max(0, k - 0.75) * 1.6;
+      ctx.save();
+      ctx.translate(W / 2, H * 0.42); ctx.scale(sc, sc);
+      ctx.font = "italic 900 200px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+      ctx.lineWidth = 22; ctx.strokeStyle = "#16202e"; ctx.strokeText(String(Math.ceil(countdown)), 0, 0);
+      ctx.lineWidth = 8; ctx.strokeStyle = "#fff"; ctx.strokeText(String(Math.ceil(countdown)), 0, 0);
+      var gr = ctx.createLinearGradient(-60, -90, 60, 90);
+      for (var j = 0; j <= 6; j++) gr.addColorStop(j / 6, "hsl(" + ((j * 60 + T * 90) % 360) + ",100%,60%)");
+      ctx.fillStyle = gr; ctx.fillText(String(Math.ceil(countdown)), 0, 0);
+      ctx.restore();
+    }
     if (!(fever > 0) || state !== S.PLAY) return;
+    /* 残り秒数（上の真ん中） */
+    ctx.save();
+    ctx.font = "900 72px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+    var rest = String(Math.ceil(fever));
+    ctx.lineWidth = 14; ctx.strokeStyle = "#16202e"; ctx.strokeText(rest, W / 2, 70);
+    ctx.fillStyle = "#fff"; ctx.fillText(rest, W / 2, 70);
+    ctx.restore();
     var el = FEVER_LEN - fever, txt = "SUPER NOISY TIME!!";
     ctx.save();
     ctx.font = "italic 900 92px system-ui, sans-serif";
