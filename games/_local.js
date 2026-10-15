@@ -215,5 +215,6 @@ window.DRAFT_GAMES = [
     "play": "games/_muriyari-seiza/index.html",
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
-  }
+  },
+  {"type":"lab","tags":[],"id":"gyaku-sagyou","title":"逆・作業支援ツール","year":2026,"date":"2026-10-15","plays":null,"url":"","img":"games/_gyaku-sagyou/img/thumb.webp","play":"games/_gyaku-sagyou/index.html","full":true,"catch":""},
 ];
