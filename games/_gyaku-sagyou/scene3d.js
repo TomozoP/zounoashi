@@ -401,7 +401,12 @@
     /* 壁の絵（文字なしの形だけ） */
     poster(-0.35, 3.75, 0.5, 0.65, function (g, w, h) { g.fillStyle = "#f2c3a0"; g.fillRect(0, 0, w, h); g.fillStyle = "#e85a6a"; g.beginPath(); g.arc(w / 2, h * 0.42, w * 0.28, 0, 7); g.fill(); g.fillStyle = "#3a3f78"; g.fillRect(0, h * 0.7, w, h * 0.3); });
     poster(0.35, 3.6, 0.42, 0.42, function (g, w, h) { g.fillStyle = "#2a5a6a"; g.fillRect(0, 0, w, h); g.fillStyle = "#f2d37a"; for (var i = 0; i < 4; i++) g.fillRect(14 + i * 26, h - 20 - i * 20, 18, 20 + i * 20); });
-    poster(-0.1, 4.45, 0.36, 0.3, function (g, w, h) { g.fillStyle = "#e9e2d6"; g.fillRect(0, 0, w, h); g.strokeStyle = "#7c5fa0"; g.lineWidth = 8; g.beginPath(); g.moveTo(10, h - 20); g.quadraticCurveTo(w / 2, 0, w - 10, h - 20); g.stroke(); });
+    /* 合計の作業時間を出す壁の時計（数字は1秒ごとに描き直す。点滅はさせない） */
+    var tc = document.createElement("canvas"); tc.width = 320; tc.height = 112;
+    var ttex = new T.CanvasTexture(tc); ttex.colorSpace = T.SRGBColorSpace;
+    S.add(box(0.74, 0.28, 0.06, 0x1a1528, -0.1, 4.45, wz + 0.07));
+    var tm = new T.Mesh(new T.PlaneGeometry(0.66, 0.22), new T.MeshBasicMaterial({ map: ttex })); tm.position.set(-0.1, 4.45, wz + 0.105); S.add(tm);
+    this.timer = { ctx: tc.getContext("2d"), tex: ttex, sec: -1 };
     /* 付箋（文字なし） */
     [[0.82, 1.35, 0xffe46b], [0.9, 1.2, 0xff9ab8], [-0.92, 1.3, 0x9fe0ff], [-0.86, 1.15, 0xffe46b], [0.78, 1.1, 0x9dff9b]].forEach(function (p) { var n = box(0.08, 0.08, 0.005, p[2], p[0], p[1], wz + 0.06); n.rotation.z = (R() - 0.5) * 0.3; S.add(n); });
     /* 棚の上・机・窓辺 */
@@ -495,6 +500,17 @@
   /* s: { t, done, type, radioBeat, items: { id: {on,t,k} } } */
   GameScene.prototype.sync = function (s) {
     var self = this;
+    var sec = Math.floor(s.work || 0), tmr = this.timer;
+    if (tmr && sec !== tmr.sec) {
+      tmr.sec = sec;
+      var c = tmr.ctx, h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, ss = sec % 60;
+      var txt = (h ? h + ":" : "") + (m < 10 ? "0" : "") + m + ":" + (ss < 10 ? "0" : "") + ss;
+      c.fillStyle = "#120e1e"; c.fillRect(0, 0, 320, 112);
+      c.font = "bold 76px ui-monospace, Menlo, Consolas, monospace"; c.textAlign = "center"; c.textBaseline = "middle";
+      c.fillStyle = "#ff8a5c"; c.shadowColor = "#ff5a3a"; c.shadowBlur = 14;
+      c.fillText(txt, 160, 60); c.shadowBlur = 0;
+      tmr.tex.needsUpdate = true;
+    }
     /* 縦長の画面でも、部屋の幅（左右の棚まで）と高さ（天井の物から床の物まで）が収まるように引く */
     var asp = this.camera.aspect || 0.56, d = 5.6;
     var hh = Math.max(2.2, 1.45 / asp) * K;

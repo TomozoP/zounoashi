@@ -3,7 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>逆・作業支援ツール</title>
+<title>作業妨害ツール NOISE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- 題名だけに使う丸いフォント（M PLUS Rounded 1c、SIL Open Font License）。使う字だけを読み込む -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@800&display=swap&text=%E4%BD%9C%E6%A5%AD%E5%A6%A8%E5%AE%B3%E3%83%84%E3%83%BC%E3%83%ABNOISEWorkDisruptionTol%20">
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -14,6 +18,10 @@
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
   #start[hidden] { display:none; }
+  #title { position:absolute; left:0; right:0; top:30%; text-align:center; color:#fff; font-family:"M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", "Arial Rounded MT Bold", sans-serif; font-weight:800; line-height:1.05; pointer-events:none; text-shadow:0 0.06em 0.18em rgba(10,6,30,.75); }
+  #title .sub { font-size:0.36em; letter-spacing:0.08em; }
+  #title .main { font-size:1em; letter-spacing:0.06em; }
+  #title[hidden] { display:none; }
   #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #share-button[hidden] { display:none; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
@@ -22,6 +30,7 @@
 <body>
 <div id="stage"><div id="wrap">
   <canvas id="c"></canvas>
+  <div id="title"><div class="sub" id="title-sub">作業妨害ツール</div><div class="main">NOISE</div></div>
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
@@ -38,7 +47,7 @@
 <script src="../three-base.js"></script>
 <script src="scene3d.js"></script>
 <script>
-/* 逆・作業支援ツール
+/* 作業妨害ツール NOISE（旧題 逆・作業支援ツール）
    机に向かう子の部屋。部屋じゅうの道具が次々に鳴り出す。押すと止まる。空いている所を押すとタイピング。
    ゲームではなく道具なので、ゲージ・完成・結果はない（2026-10-15 持ち主の指定）。 */
 (function () {
@@ -56,6 +65,8 @@
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+    var tt = document.getElementById("title");            /* 題名はゲームの横幅に合わせた大きさ */
+    if (tt) tt.style.fontSize = (canvas.getBoundingClientRect().width / W * 150) + "px";
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
@@ -297,6 +308,7 @@
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
+    document.getElementById("title").hidden = true;
     state = S.PLAY;
     score = 0; T = 0; held = false;
     progress = 0; popups = []; nextSpawn = 7; disturb = 0; doneT = 0;   /* 開始直後の7秒は静か */
@@ -344,11 +356,10 @@
   }
   function spawn() {
     var pool = [];
-    if (popups.length + (E.update.on ? 1 : 0) < 2) pool.push("popup");   /* 画面が見えなくなりすぎないよう、通知は同時に2つまで */
-    ALL.forEach(function (id) { if (!E[id].on && !(id === "update" && popups.length)) pool.push(id); });
+    /* 画面をふさぐ小窓（ポップアップ・更新の画面）は出さず、通知は上から降りてくる帯だけ（2026-10-16 持ち主の指定） */
+    ALL.forEach(function (id) { if (!E[id].on && id !== "update") pool.push(id); });
     if (!pool.length) return;
-    var c = pick(pool);
-    if (c === "popup") addPopup(); else turnOn(c);
+    turnOn(pick(pool));
     disturb++;
   }
 
@@ -363,9 +374,8 @@
   function countBeep() { tone(880, 0.16, 0.12, "square"); }
   function startFever() {
     fever = FEVER_LEN; nextFever = FEVER_EVERY; nextSpawn = 0.6;
-    /* 止まっている物が一斉に鳴り出す（更新の画面は出さない。通知は2つまで） */
+    /* 止まっている物が一斉に鳴り出す（更新の画面やポップアップは出さない） */
     ALL.forEach(function (id) { if (!E[id].on && id !== "update") { turnOn(id); disturb++; } });
-    while (popups.length < 2) { addPopup(); disturb++; }
     [523.25, 659.25, 783.99, 1046.5].forEach(function (f, i) { tone(f, 0.14, 0.1, "square", null, i * 0.09); });
   }
 
@@ -531,7 +541,6 @@
     if (state !== S.PLAY) newRound();
     if (n === 1) {                                /* 全部いっぺんに鳴る */
       ALL.forEach(function (id) { if (!E[id].on && id !== "update") turnOn(id); });
-      while (popups.length < 3) addPopup();
     } else if (n === 2) {                         /* 全部止める */
       ALL.forEach(function (id) { E[id].on = false; }); popups = [];
     } else if (n === 3) {                         /* フィーバー（3・2・1 から） */
@@ -557,9 +566,9 @@
   function doShare() {
     /* 英語のときのハッシュタグは英語のゲーム名にする（空白・記号は除く） */
     window.zResultActions.x({ text:
-      zT("作業支援ツールに" + disturb + "回妨害されながら、" + score.toFixed(1) + "秒で作業を終わらせた",
+      zT("作業妨害ツールに" + disturb + "回妨害されながら、" + score.toFixed(1) + "秒で作業を終わらせた",
          "My productivity tool interrupted me " + disturb + " times, but I finished my work in " + score.toFixed(1) + "s") +
-      zT(" #逆作業支援ツール", " #AntiProductivityTool") });
+      zT(" #作業妨害ツールNOISE", " #WorkDisruptionToolNOISE") });
   }
 
   /* ============ 描画 ============ */
@@ -811,7 +820,7 @@
     if (s3) {
       try {
         drawWindow();
-        s3.sync({ t: T || 0, done: state === S.DONE || state === S.RESULT, type: typeFlash, typeSide: typeSide, items: items });
+        s3.sync({ work: state === S.INTRO ? 0 : T, t: T || 0, done: state === S.DONE || state === S.RESULT, type: typeFlash, typeSide: typeSide, items: items });
         ctx.save();
         if (shake > 0) ctx.translate((Math.random() * 2 - 1) * shake, (Math.random() * 2 - 1) * shake);
         drew = s3.draw(ctx, W, H);
@@ -922,7 +931,7 @@
 
   ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
   startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();bgmStart();newRound();});
-  newRound();state=S.INTRO;startButton.hidden=false;
+  document.getElementById('title-sub').textContent=zT('作業妨害ツール','Work Disruption Tool');newRound();state=S.INTRO;startButton.hidden=false;document.getElementById('title').hidden=false;
   layout();
   var last = performance.now();
   var stepAcc = 0;
