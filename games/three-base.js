@@ -15,7 +15,9 @@
   Z3.mobile = !!(global.matchMedia && global.matchMedia("(pointer: coarse)").matches);
 
   /* 描く細かさ。max は PC での上限（既定 1.5）。スマホは 1 まで */
-  Z3.dpr = function (max) { return Math.min(Z3.mobile ? 1 : (max || 1.5), global.devicePixelRatio || 1); };
+  /* 手元・固定リンク・Cake Cut の中では録画用に、ゲームの横540に対して2倍（横1080相当）で描く */
+  Z3.hd = global !== global.top || /^(localhost|127\.0\.0\.1)$/.test(global.location.hostname) || /shisaku-/.test(global.location.pathname);
+  Z3.dpr = function (max) { return Z3.hd ? 2 : Math.min(Z3.mobile ? 1 : (max || 1.5), global.devicePixelRatio || 1); };
 
   /* 描画係。shadows: 影、tone: "aces" / "linear"、exposure、alpha: 背景を透かす */
   Z3.renderer = function (o) {
