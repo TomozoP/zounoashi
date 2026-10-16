@@ -12,6 +12,9 @@
     fit: function (canvas, wrap, ctx, width, height, view) {
       var scale = Math.min(view.width / width, view.height / height);
       var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // 手元・固定リンク・Cake Cut の中では録画用に、画面が小さくても横1080相当で描く（本番の一覧から遊ぶときは今までどおり）
+      if (window !== window.top || /^(localhost|127\.0\.0\.1)$/.test(location.hostname) || /shisaku-/.test(location.pathname))
+        dpr = Math.max(dpr, 1080 / (width * scale));
       wrap.style.width = canvas.style.width = Math.round(width * scale) + "px";
       wrap.style.height = canvas.style.height = Math.round(height * scale) + "px";
       canvas.width = Math.round(width * scale * dpr);
