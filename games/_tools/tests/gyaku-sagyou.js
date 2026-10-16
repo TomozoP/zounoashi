@@ -1,7 +1,7 @@
 /* 逆・作業支援ツール: 落ちずに妨害が出続けるか、押すと止まるか（ゲージや結果はない）。 */
 var path = require("path");
 var load = require("../harness");
-var g = load(path.join(__dirname, "../../_gyaku-sagyou/index.html"));
+var g = load(path.join(__dirname, "../../gyaku-sagyou/index.html"));
 function tap(x, y) { g.tap(x, y); }
 g.press(" "); g.step(5);
 g.step(60 * 18);
