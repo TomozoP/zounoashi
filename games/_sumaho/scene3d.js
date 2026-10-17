@@ -43,7 +43,7 @@
     sc.fog = new T.Fog(0xcfd8e0, 14, 34);
     this.lights = Z3.lights(sc, { shadows: true, shadowSize: 6 });
     sc.add(this.lights.key.target);
-    this.camX = null; this.camGoal = 0; this.camV = 0; this.lastT = 0;
+    this.camX = null; this.camGoal = 0; this.camV = 0; this.camVel = 0; this.lastMid = 0; this.lastT = 0;
 
     /* 床（板張り）。カメラについて動かし、模様だけずらす */
     /* 板は進む向きと直角に並べる（継ぎ目が流れて、進んでいるのが分かるように） */
@@ -159,9 +159,12 @@
     var mid = (hip[0] + top[0]) / 2;
     /* カメラ：ゆるいばねでなめらかに追う（一歩ごとの腰の揺れは拾わない） */
     var dt = Math.max(0, Math.min(0.1, (s.t || 0) - this.lastT)); this.lastT = s.t || 0;
-    if (this.camX == null || s.intro || dt === 0 && Math.abs(this.camX - mid) > 3) { this.camX = this.camGoal = mid; this.camV = 0; }
-    this.camGoal = mid;
+    if (this.camX == null || s.intro || dt === 0 && Math.abs(this.camX - mid) > 3) { this.camX = this.camGoal = this.lastMid = mid; this.camV = this.camVel = 0; }
+    /* 進む速さをならして、その分だけ先を狙う（速く歩いても置いていかれない） */
+    if (dt > 0) { var v = (mid - this.lastMid) / dt; this.camVel += (v - this.camVel) * (1 - Math.exp(-dt * 2)); }
+    this.lastMid = mid;
     var kc = 9;
+    this.camGoal = mid + this.camVel * 2 / Math.sqrt(kc);
     this.camV += (kc * (this.camGoal - this.camX) - 2 * Math.sqrt(kc) * this.camV) * dt;
     this.camX += this.camV * dt;
     var x = this.camX;

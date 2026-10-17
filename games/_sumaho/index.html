@@ -133,7 +133,7 @@
      スマホの上の端が地面に当たると画面が割れる。大きさは本物の10倍（スマホの高さ15cm → 1.5）。進んだ距離は本物の cm で数える。 */
   var G = 9.8, PH = 1.5, THIGH = 0.53, SHIN = 0.53, FOOT_R = 0.06;
   var P = { mHip: 1, mPhone: 1.5, damp: 0.999, iters: 6, hipF: 0.55, hipB: 0.35, kHip: 40, dHip: 3, maxHip: 80,
-    kKnee: 40, dKnee: 3, maxKnee: 80, kneeSwing: 1.0, swingTime: 0.18, kUp: 55, dUp: 9, maxUp: 85, leanT: 0.2, idle: 1.2, tire: 100, fric: 0.9 };
+    kKnee: 40, dKnee: 3, maxKnee: 80, kneeSwing: 1.5, swingTime: 0.24, hipLift: 1.1, kUp: 55, dUp: 9, maxUp: 85, leanT: 0.12, idle: 1.2, tire: 100, fric: 0.9, kneeMax: 2.3, hipMax: 1.4, hipMin: 0.9 };
   var wk;
   function newWalker() {
     var hy = FOOT_R + THIGH + SHIN;
@@ -146,6 +146,8 @@
   function angUp(a, b) { return Math.atan2(b[0] - a[0], b[1] - a[1]); }   /* 上向き0、前へ倒れると正 */
   function angDn(a, b) { return Math.atan2(b[0] - a[0], a[1] - b[1]); }   /* 下向き0、前へ出ると正 */
   function wrapA(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
+  /* c を軸に p を時計回り（上の点は前へ、下の点は後ろへ）に d だけ回す */
+  function rot(c, p, d) { var dx = p[0] - c[0], dy = p[1] - c[1], cs = Math.cos(d), sn = Math.sin(d); p[0] = c[0] + dx * cs + dy * sn; p[1] = c[1] - dx * sn + dy * cs; }
   function phoneAngle(w) { return angUp(w.p[0], w.p[1]); }
   /* タップ：前に出す脚を入れ替える */
   function stepLeg() {
@@ -171,12 +173,12 @@
     }
     var phA = angUp(p[0], p[1]), phA0 = angUp(q[0], q[1]);
     /* 最後のタップから間が空くと、手助けも筋肉も抜けていく（止まると倒れる） */
-    var fade = Math.max(0, Math.min(1, (P.idle - swingT) / 0.4)), mf = 0.25 + 0.75 * fade;
+    var fade = Math.max(0, Math.min(1, (P.idle - swingT) / 0.4)), mf = fade;
     if (live) {
       for (k = 0; k < 2; k++) {
         var front = k === w.front, swing = front && swingT < P.swingTime;
         var rel = wrapA(angDn(p[0], p[2 + k]) + phA), rel0 = wrapA(angDn(q[0], q[2 + k]) + phA0);
-        var tau = P.kHip * wrapA(rel - (front ? P.hipF : -P.hipB)) + P.dHip * (rel - rel0) / dt;
+        var tau = P.kHip * wrapA(rel - (swing ? P.hipLift : front ? P.hipF : -P.hipB)) + P.dHip * (rel - rel0) / dt;
         torque(0, 1, 2 + k, Math.max(-P.maxHip, Math.min(P.maxHip, tau)) * mf);
         var kn = wrapA(angDn(p[2 + k], p[4 + k]) - angDn(p[0], p[2 + k])), kn0 = wrapA(angDn(q[2 + k], q[4 + k]) - angDn(q[0], q[2 + k]));
         var kt = P.kKnee * wrapA(kn - (swing ? -P.kneeSwing : -0.03)) + P.dKnee * (kn - kn0) / dt;
@@ -184,7 +186,7 @@
       }
       /* スマホを起こす弱い手助け（最後のタップから少しの間だけ） */
       var ut = -P.kUp * (phA - P.leanT) - P.dUp * (phA - phA0) / dt;
-      var mu = P.maxUp * Math.max(0.1, 1 - w.steps / P.tire);   /* 歩くほど手助けが弱まる */
+      var mu = P.maxUp * Math.max(0, 1 - w.steps / P.tire);   /* 歩くほど手助けが弱まる */
       ut = Math.max(-mu, Math.min(mu, ut)) * fade;
       F[1][0] += ut / PH;
     }
@@ -199,6 +201,16 @@
         var A = p[LINKS[c][0]], B = p[LINKS[c][1]], wa = 1 / m[LINKS[c][0]], wb = 1 / m[LINKS[c][1]];
         var dx = B[0] - A[0], dy = B[1] - A[1], d = Math.sqrt(dx * dx + dy * dy) || 1e-6, e = (d - LINKS[c][2]) / d / (wa + wb);
         A[0] += dx * e * wa; A[1] += dy * e * wa; B[0] -= dx * e * wb; B[1] -= dy * e * wb;
+      }
+      /* 関節の曲がる範囲：膝は前へ折れるだけ（すねが腿より前へ出ない）。腰も人の脚の範囲だけ */
+      var pa = angUp(p[0], p[1]);
+      for (k = 0; k < 2; k++) {
+        var kn1 = wrapA(angDn(p[2 + k], p[4 + k]) - angDn(p[0], p[2 + k]));
+        var kOver = kn1 > 0 ? kn1 : kn1 < -P.kneeMax ? kn1 + P.kneeMax : 0;
+        if (kOver) { rot(p[2 + k], p[4 + k], kOver * 0.5); rot(p[0], p[2 + k], -kOver * 0.5); }
+        var hr = wrapA(angDn(p[0], p[2 + k]) + pa);
+        var hOver = hr > P.hipMax ? hr - P.hipMax : hr < -P.hipMin ? hr + P.hipMin : 0;
+        if (hOver) { rot(p[0], p[2 + k], hOver * 0.7); rot(p[0], p[4 + k], hOver * 0.7); rot(p[0], p[1], -hOver * 0.3); }
       }
       for (i = 0; i < 6; i++) {
         var r = i >= 4 ? FOOT_R : 0.04;

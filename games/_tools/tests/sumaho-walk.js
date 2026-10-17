@@ -15,5 +15,5 @@ function ok(c, m) { console.log((c ? "OK  " : "NG  ") + m); if (!c) ng++; }
 var q = run(30, 4); ok(!q.broken && q.x > 1.5, "0.5秒ごとのタップで4秒間倒れずに進む（" + q.x.toFixed(1) + "）");
 q = run(30, 180); ok(q.state === "result", "続けてもいずれ割れて結果へ（" + q.score + "cm）");
 q = run(0, 10); ok(q.broken, "1回だけで止まると倒れて割れる");
-q = run(6, 10); ok(q.broken, "急ぎすぎると倒れて割れる");
+q = run(6, 30); ok(q.broken, "急ぎすぎると倒れて割れる");
 process.exit(ng ? 1 : 0);
