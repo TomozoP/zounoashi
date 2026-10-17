@@ -188,7 +188,9 @@
     /* スマホ：腰から上の端へ向ける。前に倒れるときは半回転して、割れた画面が上を向いて落ちる */
     var a = Math.atan2(top[0] - hip[0], top[1] - hip[1]);
     this.tilt.position.set(hip[0], hip[1], 0);
-    this.tilt.rotation.set(0, a > 0.5 ? Math.PI * Math.min(1, (a - 0.5) / 0.9) : 0, -a);
+    /* 地面に近づいたときだけ半回転させる（歩いている間に前へ傾いても、ねじれない） */
+    var low = Math.max(0, Math.min(1, (1.1 - top[1]) / 0.8));
+    this.tilt.rotation.set(0, a > 0.5 ? Math.PI * Math.min(1, (a - 0.5) / 0.9) * low : 0, -a);
 
     for (var i = 0; i < 2; i++) {
       var lg = this.legs[i], knee = P[2 + i], ankle = P[4 + i], z = lg.z;
