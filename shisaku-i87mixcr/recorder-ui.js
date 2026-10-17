@@ -76,7 +76,7 @@
       ['横 960×540','960x540'],['横 1280×720','1280x720'],['横 1920×1080','1920x1080'],
       ['正方形 720×720','720x720']
     ],'size'));
-    panel.appendChild(row('画質',[['最高画質','14'],['高画質','8'],['標準','4']],'quality'));
+    panel.appendChild(row('画質',[['最高画質','25'],['高画質','12'],['標準','6']],'quality'));
     panel.appendChild(row('マイク',[['入れない','off'],['一緒に録る','on']],'microphone'));
     panel.appendChild(row('保存',[['動画にまとめる','combined'],['マイクを別ファイル','microphone'],['音声を別ファイル','audio']],'separate'));
     status = make('div','ゲーム画面と音を保存します');
@@ -143,7 +143,9 @@
     var fc=frame.getContext('2d'),sw=source.width,sh=source.height;
     fc.fillStyle='#12100e';fc.fillRect(0,0,frame.width,frame.height);
     var fit=Math.min(frame.width/sw,frame.height/sh);
-    fc.drawImage(source,(frame.width-sw*fit)/2,(frame.height-sh*fit)/2,sw*fit,sh*fit);
+    // ほぼ同じ大きさなら拡大縮小せず1画素ずつ写す（わずかな拡大でも全体がぼやけるため）
+    if(Math.abs(fit-1)<0.02)fit=1;
+    fc.drawImage(source,Math.round((frame.width-sw*fit)/2),Math.round((frame.height-sh*fit)/2),sw*fit,sh*fit);
     frames.push({time:now,image:frame});
     while(frames.length>1&&frames[1].time<=now-delay)frames.shift();
     var c=output.getContext('2d');
@@ -169,11 +171,12 @@
       var gameSize=window.__recording&&window.__recording.frame?null:window.__probe&&window.__probe.now?window.__probe.now():null;
       var sw=gameSize&&gameSize.W||source.width,sh=gameSize&&gameSize.H||source.height;
       var scale=1920/Math.max(sw,sh);
+      if(Math.abs(scale-1)<0.05)scale=1;   /* 長い辺がほぼ1920なら、ゲームの画素のまま録る */
       width=Math.max(2,Math.round(sw*scale/2)*2);height=Math.max(2,Math.round(sh*scale/2)*2);
     }else{
       var pair=size.split('x');width=Number(pair[0]);height=Number(pair[1]);
     }
-    var rate=Number(panel.querySelector('[name=quality]').value)*1000000;
+    var rate=(Number(panel.querySelector('[name=quality]').value)||25)*1000000;
     var type=mime();if(!type)throw Error('このブラウザでは録画できません');
     var recipe=window.__recording,context=recipe&&recipe.sound?recipe.sound():null;
     audioClock=context;frames=[];

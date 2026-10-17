@@ -211,7 +211,7 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
         <div id="recPane" hidden>
           <label for="rec_mode">操作</label><select id="rec_mode" name="mode"><option value="manual">自分で操作</option><option value="auto">自動運転</option></select>
           <label for="rec_size">大きさ</label><select id="rec_size" name="size"><option value="auto">ゲームに合わせる</option><option value="540x960">縦 540×960</option><option value="720x1280">縦 720×1280</option><option value="1080x1920">縦 1080×1920</option><option value="960x540">横 960×540</option><option value="1280x720">横 1280×720</option><option value="1920x1080">横 1920×1080</option><option value="720x720">正方形 720×720</option></select>
-          <label for="rec_quality">画質</label><select id="rec_quality" name="quality"><option value="14">最高画質</option><option value="8">高画質</option><option value="4">標準</option></select>
+          <label for="rec_quality">画質</label><select id="rec_quality" name="quality"><option value="25">最高画質</option><option value="12">高画質</option><option value="6">標準</option></select>
           <label for="rec_microphone">マイク</label><select id="rec_microphone" name="microphone"><option value="off">入れない</option><option value="on">一緒に録る</option></select>
           <label for="rec_separate">保存</label><select id="rec_separate" name="separate"><option value="combined">動画にまとめる</option><option value="microphone">マイクを別ファイル</option><option value="audio">音声を別ファイル</option></select>
         </div></div>
@@ -727,9 +727,11 @@ function drawVideoFrame(el) {
     bg.drawImage(blurC, -60, -60, W + 120, H + 120); bg.restore();
   }
   if (BAND && style.headBg !== 'blur') { bg.fillStyle = style.headBg === 'white' ? '#fff' : '#000'; bg.fillRect(0, 0, W, BAND); }
-  const s = style.fit === 'cover' ? Math.max(W / vw, ah / vh) : Math.min(W / vw, ah / vh);
+  let s = style.fit === 'cover' ? Math.max(W / vw, ah / vh) : Math.min(W / vw, ah / vh);
+  // ほぼ同じ大きさなら拡大縮小せず1画素ずつ写す（わずかな拡大でも全体がぼやけるため）
+  if (Math.abs(s - 1) < 0.02) s = 1;
   bg.save(); bg.beginPath(); bg.rect(0, BAND, W, ah); bg.clip();
-  bg.drawImage(el, (W - vw * s) / 2, BAND + (ah - vh * s) / 2, vw * s, vh * s);
+  bg.drawImage(el, Math.round((W - vw * s) / 2), Math.round(BAND + (ah - vh * s) / 2), vw * s, vh * s);
   bg.restore();
 }
 function compose(t) {
@@ -1324,9 +1326,11 @@ $('wBtn').onclick = runWhisper;
 let recChunksX = [], xCanceled = false;
 // 1コマずつ描いて符号化する。画面の描画や実時間に頼らないので、別のタブを見ていても進む。
 const MUXERS = { mp4: 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.mjs', webm: 'https://cdn.jsdelivr.net/npm/webm-muxer@5.1.4/build/webm-muxer.mjs' };
+// 書き出しの画質。縦1080×1920で 24Mbps を基準に、画面の大きさに合わせる（YouTube などで再圧縮されても粗くならないように）
+const exportRate = () => Math.round(Math.max(8e6, 24e6 * W * H / (1080 * 1920)));
 async function pickCodecs(sr) {
   if (!window.VideoEncoder || !window.AudioEncoder) return null;
-  const v = { width: W, height: H, bitrate: 10e6, framerate: FPS };
+  const v = { width: W, height: H, bitrate: exportRate(), framerate: FPS, latencyMode: 'quality' };
   const a = { sampleRate: sr, numberOfChannels: 2, bitrate: 192e3 };
   const ok = async (E, c) => { try { return (await E.isConfigSupported(c)).supported; } catch (e) { return false; } };
   const plans = [
@@ -1768,7 +1772,7 @@ async function startExport() {
   const types = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
   const mime = types.find(t => MediaRecorder.isTypeSupported(t));
   const stream = new MediaStream([...view.captureStream(FPS).getVideoTracks(), ...exportDest.stream.getAudioTracks()]);
-  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10e6, audioBitsPerSecond: 192e3 });
+  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: exportRate(), audioBitsPerSecond: 192e3 });
   recChunksX = []; xCanceled = false;
   recorder.ondataavailable = e => e.data.size && recChunksX.push(e.data);
   recorder.onstop = () => {
