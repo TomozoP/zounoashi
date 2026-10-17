@@ -133,14 +133,14 @@
      スマホの上の端が地面に当たると画面が割れる。大きさは本物の10倍（スマホの高さ15cm → 1.5）。進んだ距離は本物の cm で数える。 */
   var G = 9.8, PH = 1.5, THIGH = 0.53, SHIN = 0.53, FOOT_R = 0.06;
   var P = { mHip: 1, mPhone: 1.5, damp: 0.999, iters: 6, hipF: 0.55, hipB: 0.35, kHip: 40, dHip: 3, maxHip: 80,
-    kKnee: 40, dKnee: 3, maxKnee: 80, kneeSwing: 1.5, swingTime: 0.24, hipLift: 1.1, kUp: 55, dUp: 9, maxUp: 85, leanT: 0.12, idle: 1.2, tire: 100, fric: 0.9, kneeMax: 2.3, hipMax: 1.4, hipMin: 0.9 };
-  var wk;
+    kKnee: 40, dKnee: 3, maxKnee: 80, kneeSwing: 1.5, swingTime: 0.24, hipLift: 1.1, kUp: 27, dUp: 5, maxUp: 36, leanT: 0.12, idle: 1.2, tire: 1e9, kickTime: 0.12, hipKick: 0.9, fric: 0.9, kneeMax: 2.3, hipMax: 1.4, hipMin: 0.9 };
+  var wk, GOAL = 10, cleared = false;
   function newWalker() {
     var hy = FOOT_R + THIGH + SHIN;
     var p = [[0, hy], [0, hy + PH], [0.02, FOOT_R + SHIN], [0.02, FOOT_R + SHIN], [0, FOOT_R], [0, FOOT_R]];
     return {
       p: p, q: p.map(function (a) { return a.slice(); }), m: [P.mHip, P.mPhone, 0.25, 0.25, 0.2, 0.2],
-      front: 0, t: 0, tapT: -9, started: false, broken: false, brokeT: 0, steps: 0, ground: [true, true]
+      front: 0, t: 0, tapT: -9, goalT: 0, goalAt: 0, started: false, broken: false, brokeT: 0, steps: 0, ground: [true, true]
     };
   }
   function angUp(a, b) { return Math.atan2(b[0] - a[0], b[1] - a[1]); }   /* 上向き0、前へ倒れると正 */
@@ -152,7 +152,7 @@
   /* タップ：前に出す脚を入れ替える */
   function stepLeg() {
     var w = wk;
-    if (w.broken) return;
+    if (w.broken || w.goalT) return;
     if (!w.started) w.started = true;
     w.front = w.steps === 0 ? 0 : 1 - w.front;
     w.tapT = w.t; w.steps++;
@@ -173,12 +173,13 @@
     }
     var phA = angUp(p[0], p[1]), phA0 = angUp(q[0], q[1]);
     /* 最後のタップから間が空くと、手助けも筋肉も抜けていく（止まると倒れる） */
-    var fade = Math.max(0, Math.min(1, (P.idle - swingT) / 0.4)), mf = fade;
+    var fade = w.goalT ? 1 : Math.max(0, Math.min(1, (P.idle - swingT) / 0.4)), mf = fade;
     if (live) {
       for (k = 0; k < 2; k++) {
         var front = k === w.front, swing = front && swingT < P.swingTime;
         var rel = wrapA(angDn(p[0], p[2 + k]) + phA), rel0 = wrapA(angDn(q[0], q[2 + k]) + phA0);
-        var tau = P.kHip * wrapA(rel - (swing ? P.hipLift : front ? P.hipF : -P.hipB)) + P.dHip * (rel - rel0) / dt;
+        var kick = !front && swingT < P.kickTime;      /* タップの直後は後ろの脚で地面を蹴る */
+        var tau = P.kHip * wrapA(rel - (swing ? P.hipLift : front ? P.hipF : kick ? -P.hipKick : -P.hipB)) + P.dHip * (rel - rel0) / dt;
         torque(0, 1, 2 + k, Math.max(-P.maxHip, Math.min(P.maxHip, tau)) * mf);
         var kn = wrapA(angDn(p[2 + k], p[4 + k]) - angDn(p[0], p[2 + k])), kn0 = wrapA(angDn(q[2 + k], q[4 + k]) - angDn(q[0], q[2 + k]));
         var kt = P.kKnee * wrapA(kn - (swing ? -P.kneeSwing : -0.03)) + P.dKnee * (kn - kn0) / dt;
@@ -223,7 +224,7 @@
       if (g && !w.ground[k] && live) { noiseHit(0.06, 260, 0.25, 1.2); tone(90, 0.08, 0.12, "sine", 60); }
       w.ground[k] = g;
     }
-    if (live && p[1][1] < 0.25) breakPhone();
+    if (live && !w.goalT && p[1][1] < 0.25) breakPhone();   /* ゴールの後に転んでも割れない */
   }
   function hipOf(w) { return w.p[0]; }
 
@@ -260,7 +261,7 @@
     score = 0;
     T = 0;
     held = false;
-    wk = newWalker(); shards = [];
+    wk = newWalker(); shards = []; cleared = false;
   }
 
   /* ============ 進行 ============ */
@@ -271,8 +272,11 @@
     var n = 4;
     for (var i = 0; i < n; i++) walkStep(dt / n);
     moveShards(dt);
-    if (wk.broken && T - wk.brokeT > 1.6) {
-      state = S.RESULT;
+    /* 1m（10倍で10）先のゴール：腰が越えたらタイムが決まる */
+    if (!wk.broken && !wk.goalT && hipOf(wk)[0] >= GOAL) { wk.goalT = wk.t; wk.goalAt = T; tone(880, 0.12, 0.12, "sine"); tone(1320, 0.25, 0.1, "sine", 1320, 0.1); }
+    if (wk.goalT && T - wk.goalAt > 0.8) { state = S.RESULT; cleared = true; score = Math.round(wk.goalT * 100) / 100; }
+    else if (wk.broken && T - wk.brokeT > 1.6) {
+      state = S.RESULT; cleared = false;
       score = Math.round(distanceCm() * 10) / 10;
     }
   }
@@ -318,7 +322,7 @@
   function debugKey(n) {
     if (state !== S.PLAY) return;
     if (n === 1) { if (!wk.started) stepLeg(); wk.q[1][0] -= 0.015; wk.tapT = -9; }   /* スマホを前へ突き飛ばして割る */
-    if (n === 2) { for (var i = 0; i < 6; i++) { wk.p[i][0] += 100; wk.q[i][0] += 100; } }   /* 10m先へ */
+    if (n === 2) { for (var i = 0; i < 6; i++) { wk.p[i][0] += 8; wk.q[i][0] += 8; } }   /* ゴールの手前へ */
   }
 
   window.addEventListener("keydown", function (e) {
@@ -343,12 +347,16 @@
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
   });
 
-  function scoreText() { return score.toFixed(1) + "cm"; }
+  /* ゴールしたらタイム、途中で割れたら進んだ距離 */
+  function scoreText() { return cleared ? score.toFixed(2) + zT("秒", "s") : score.toFixed(1) + "cm"; }
   function doShare() {
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
     /* 英語のときのハッシュタグは英語のゲーム名にする（空白・記号は除く） */
-    window.zResultActions.x({ text: zT("脚の生えたスマホが" + scoreText() + "歩いて、画面が割れた", "My phone grew legs, walked " + scoreText() + ", and cracked its screen") + zT(" #スマホ歩き", " #PhoneWalk") });
+    var text = cleared
+      ? zT("脚の生えたスマホが1mを" + scoreText() + "で駆け抜けた", "My phone grew legs and ran 1m in " + scoreText())
+      : zT("脚の生えたスマホが" + scoreText() + "走って、画面が割れた", "My phone grew legs, ran " + scoreText() + ", and cracked its screen");
+    window.zResultActions.x({ text: text + zT(" #スマホ歩き", " #PhoneWalk") });
   }
 
   /* ============ 描画 ============ */
@@ -365,7 +373,7 @@
   /* 立体へ渡す形：腰・左右の足先・スマホの傾き・破片 */
   function viewState() {
     var w = wk;
-    return { t: T || 0, state: state, pts: w.p, broken: w.broken, shards: shards, intro: state === S.INTRO };
+    return { t: T || 0, state: state, pts: w.p, goal: GOAL, broken: w.broken, shards: shards, intro: state === S.INTRO };
   }
 
   /* 立体の場面。three.js が使えないときは平面の絵のまま */
@@ -431,7 +439,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { var h = hipOf(wk); return { state: state, score: score, W: W, H: H, x: h[0], y: h[1], phone: phoneAngle(wk), steps: wk.steps, broken: wk.broken }; },
+    now: function () { var h = hipOf(wk); return { state: state, score: score, W: W, H: H, x: h[0], y: h[1], phone: phoneAngle(wk), steps: wk.steps, broken: wk.broken, goalT: wk.goalT || 0, cleared: cleared }; },
     tap: function () { stepLeg(); },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }

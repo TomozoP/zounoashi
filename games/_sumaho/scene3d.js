@@ -82,6 +82,16 @@
     wall.position.set(0, 3, -3.5); wall.receiveShadow = true;
     sc.add(wall);
 
+    /* スタートとゴールの線（床に貼ったテープ）。ゴールは市松模様 */
+    var checker = canvasTex(64, 512, function (g, w, h) {
+      for (var y = 0; y < 16; y++) for (var x = 0; x < 2; x++) { g.fillStyle = (x + y) % 2 ? "#1b1b1f" : "#ffffff"; g.fillRect(x * 32, y * 32, 32, 32); }
+    });
+    this.goalLine = new T.Mesh(new T.PlaneGeometry(0.3, 2.4), Z3.std(0xffffff, { map: checker, roughness: 0.7 }));
+    this.goalLine.rotation.x = -Math.PI / 2; this.goalLine.position.set(10, 0.004, 0); this.goalLine.receiveShadow = true;
+    sc.add(this.goalLine);
+    var startLine = new T.Mesh(new T.PlaneGeometry(0.08, 2.4), Z3.std(0xf4f4f0, { roughness: 0.7 }));
+    startLine.rotation.x = -Math.PI / 2; startLine.position.set(0, 0.004, 0); startLine.receiveShadow = true;
+    sc.add(startLine);
     this.buildPhone();
     this.shardMeshes = [];
     var shardGeo = new T.BufferGeometry();
@@ -156,6 +166,7 @@
 
   GameScene.prototype.sync = function (s) {
     var P = s.pts, hip = P[0], top = P[1];
+    if (s.goal != null) this.goalLine.position.x = s.goal;
     var mid = (hip[0] + top[0]) / 2;
     /* カメラ：ゆるいばねでなめらかに追う（一歩ごとの腰の揺れは拾わない） */
     var dt = Math.max(0, Math.min(0.1, (s.t || 0) - this.lastT)); this.lastT = s.t || 0;
@@ -163,7 +174,7 @@
     /* 進む速さをならして、その分だけ先を狙う（速く歩いても置いていかれない） */
     if (dt > 0) { var v = (mid - this.lastMid) / dt; this.camVel += (v - this.camVel) * (1 - Math.exp(-dt * 2)); }
     this.lastMid = mid;
-    var kc = 9;
+    var kc = 16;
     this.camGoal = mid + this.camVel * 2 / Math.sqrt(kc);
     this.camV += (kc * (this.camGoal - this.camX) - 2 * Math.sqrt(kc) * this.camV) * dt;
     this.camX += this.camV * dt;
