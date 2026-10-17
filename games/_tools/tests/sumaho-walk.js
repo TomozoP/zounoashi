@@ -5,7 +5,7 @@ function run(gap, sec, jitter) {
   var g = load(__dirname + "/../../_sumaho/index.html");
   g.probe.reset(); var next = 0;
   for (var i = 0; i < 60 * sec; i++) {
-    if (i >= next && (gap || i === 0)) { g.probe.tap(); next = i + (gap ? gap * (jitter ? 0.8 + Math.random() * 0.4 : 1) : 1e9); }
+    if (i >= next && (gap || i === 0)) { g.probe.tap(0.3); next = i + (gap ? gap * (jitter ? 0.8 + Math.random() * 0.4 : 1) : 1e9); }
     g.probe.step(1);
     if (g.probe.now().state === "result") break;
   }

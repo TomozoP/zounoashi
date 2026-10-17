@@ -186,7 +186,7 @@
     var x = this.camX;
     this.lights.key.position.set(x - 4, 8, 6); this.lights.key.target.position.set(x, 0, 0);
     this.camera.position.set(x + 4.0, 2.5, 8.4);
-    this.camera.lookAt(x + 0.1, 1.15, 0);
+    this.camera.lookAt(x + 0.45, 1.15, 0);
     this.floor.position.x = x; this.wood.offset.x = x / 13;
     this.wall.position.x = x; this.wallTex.offset.x = x / 5.2;
 
