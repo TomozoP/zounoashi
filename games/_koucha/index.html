@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>高いところから紅茶を注ぐ</title>
+<title>スカイダイビング紅茶</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -323,17 +323,20 @@
   }
 
   var api = { create: create, CUP: CUP };
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
-  else root.TeaSim = api;
+  root.TeaSim = api;
 })(typeof window !== "undefined" ? window : this);
 </script>
 <script>
-/* 高いところから紅茶を注ぐ
+/* スカイダイビング紅茶
 
-   押している間、ポットから紅茶が出て、ポットはどんどん高く上がる。
-   指を左右に動かすとポットが動く。カップがいっぱいになったら終わり。
+   飛行機から飛び降りる。押すとパラシュートが開く。
+   開いたあとは、押している間ポットから紅茶が出て、指を左右に動かすと進む向きが変わる。
+   地上のテーブルのカップに紅茶を入れる。
    記録は「カップに入った紅茶が、平均で何mの高さから注がれたか」。
-   紅茶の動きは tea.js（粒の流体計算）。 */
+
+   空の動きは本当の物理（落ちる人は約55m/s、開くと約5m/s、紅茶の粒は約9m/sまで）。
+   高いところでは、空の時間だけを早送りにする（低くなるほど本当の速さに戻る）。
+   カップのまわりの紅茶は tea の流体計算で、いつも本当の速さで動く。 */
 (function () {
   "use strict";
 
@@ -345,8 +348,8 @@
 
   /* ============ 画面 ============ */
   var W = 540, H = 960;
-  var SC = 13;                                 /* 地面近くの 1cm が何ドットか（横は全体でこれ） */
-  var GY, TOPY;                                /* テーブルの面・ポットの最高位置（画面） */
+  var SC = 13;                                 /* カップのあたりの 1cm が何ドットか */
+  var GY, TOPY;
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
@@ -356,8 +359,7 @@
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
 
-  /* 高さの写し方：カップのあたり（14cmまで）はそのままの縮尺、その上は対数で縮めて
-     どんなに高くてもポットとカップが同じ画面に入るようにする（横の縮尺は変えない） */
+  /* 縦：カップのあたり（14cmまで）はそのまま、上は対数で縮めて、落ちる人がいつも画面の上に入るようにする */
   var Y1 = 14, Y0 = 1e9, LIN = true;
   function setCamera(h) {
     var A = GY - TOPY;
@@ -375,15 +377,20 @@
     if (LIN || y <= Y1) return y * SC;
     return SC * Y1 + SC * Y0 * Math.log(1 + (y - Y1) / Y0);
   }
-  function dfy(y) {                            /* その高さでの縦の縮尺（ドット/cm） */
+  function dfy(y) {
     if (LIN || y <= Y1) return SC;
     return SC * Y0 / (Y0 + y - Y1);
   }
+  /* 横：カップの真上を見上げたように、高いところほど横を縮める（真上にあるものは画面の真ん中）。
+     カップのあたり（14cmまで）はそのままの縮尺 */
+  var XS = 30;
+  function hs(y) { return y <= Y1 ? SC : SC * XS / (XS + y - Y1); }
+  function sxy(x, y) { return W / 2 + x * hs(y); }
   function sx(x) { return W / 2 + x * SC; }
   function sy(y) { return GY - fy(y); }
 
   /* ============ 音 ============ */
-  var AC = null, NOISE = null, pourGain = null, pourBand = null, spillGain = null;
+  var AC = null, NOISE = null, pourGain = null, pourBand = null, windGain = null, windBand = null;
   function resumeAudio() { window.zAudioResume(AC); }
   wrap.addEventListener("touchstart", audioOn, { passive: true });
   wrap.addEventListener("touchend", resumeAudio, { passive: true });
@@ -398,15 +405,16 @@
     NOISE = AC.createBuffer(1, len, AC.sampleRate);
     var d = NOISE.getChannelData(0);
     for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-    /* 注ぐ音：カップに当たる音は、たまるほど高くなる。こぼれる音は低く鈍い */
+    /* カップに当たる音：たまるほど高くなる */
     var s1 = AC.createBufferSource(); s1.buffer = NOISE; s1.loop = true;
     pourBand = AC.createBiquadFilter(); pourBand.type = "bandpass"; pourBand.frequency.value = 500; pourBand.Q.value = 2.2;
     pourGain = AC.createGain(); pourGain.gain.value = 0;
     s1.connect(pourBand); pourBand.connect(pourGain); pourGain.connect(AC.destination); s1.start();
-    var s2 = AC.createBufferSource(); s2.buffer = NOISE; s2.loop = true; s2.playbackRate.value = 0.7;
-    var f2 = AC.createBiquadFilter(); f2.type = "lowpass"; f2.frequency.value = 700;
-    spillGain = AC.createGain(); spillGain.gain.value = 0;
-    s2.connect(f2); f2.connect(spillGain); spillGain.connect(AC.destination); s2.start();
+    /* 風を切る音 */
+    var s2 = AC.createBufferSource(); s2.buffer = NOISE; s2.loop = true; s2.playbackRate.value = 0.6;
+    windBand = AC.createBiquadFilter(); windBand.type = "lowpass"; windBand.frequency.value = 600;
+    windGain = AC.createGain(); windGain.gain.value = 0;
+    s2.connect(windBand); windBand.connect(windGain); windGain.connect(AC.destination); s2.start();
   }
   function tone(freq, dur, vol, type, to, delay) {
     if (!AC) return;
@@ -421,14 +429,27 @@
     o.connect(g); g.connect(AC.destination);
     o.start(n); o.stop(n + dur + 0.05);
   }
-  var cupRate = 0, outRate = 0;
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  var cupRate = 0;
   function sound() {
     if (!AC || !pourGain) return;
     var n = AC.currentTime;
     var fill = Math.min(1, inCup / CAP);
     pourGain.gain.setTargetAtTime(Math.min(0.32, cupRate * 0.006), n, 0.04);
     pourBand.frequency.setTargetAtTime(380 + 1900 * fill * fill, n, 0.08);
-    spillGain.gain.setTargetAtTime(Math.min(0.22, outRate * 0.004), n, 0.05);
+    var sp = state === S.PLAY && !dv.landed ? Math.sqrt(dv.vx * dv.vx + dv.vy * dv.vy) : 0;
+    windGain.gain.setTargetAtTime(Math.min(0.3, sp / 55 * 0.28 + (sp > 1 ? 0.03 : 0)), n, 0.15);
+    windBand.frequency.setTargetAtTime(300 + sp * 12, n, 0.2);
   }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
@@ -440,19 +461,26 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
   var CAP = 270;                               /* これだけ入ったら満杯 */
-  var POT = 900;                               /* ポットの紅茶（粒の数） */
-  var RATE = 70;                               /* 1秒に出る粒 */
-  var H0 = 22;                                 /* 最初のポットの高さ cm */
-  var tea, potX, potH, potVX, pourLeft, emitAcc, pouring, done, endT, inCup, avgH, shakeX, shakeY, wind;
+  var POT = 1400;                              /* ポットの紅茶（粒の数） */
+  var RATE = 45;                               /* 1秒に出る粒 */
+  var JUMP = 1000;                             /* 飛び降りる高さ m */
+  var AAD = 250;                               /* 開かないままここまで来たら自動で開く m */
+  var GV = 9.8;
+  var C_FALL = GV / (55 * 55);                 /* 人：落ちる速さの上限 55m/s */
+  var C_DROP = GV / (9 * 9);                   /* 紅茶の粒：9m/s */
+  var CANOPY = 5;                              /* 開いたあとの落ちる速さ m/s */
+  var drops = 0, landT = 0, tea, dv, plane, pourLeft, emitAcc, done, endT, inCup, avgH, TS, gust;
   var ph = [];
   var keyL = false, keyR = false, lastPX = null;
-  var stainCv = document.createElement("canvas"), sctx = stainCv.getContext("2d"), stainList = [];
+  /* 空の紅茶の粒（m 単位） */
+  var MAXS = 4000;
+  var PX = new Float32Array(MAXS), PY = new Float32Array(MAXS), PVX = new Float32Array(MAXS), PVY = new Float32Array(MAXS), PH = new Float32Array(MAXS);
+  var sn = 0;
+  var spots = [];                              /* 地面に落ちた跡（カップの外） */
 
   function place() {
     GY = Math.round(H * 0.8);
-    TOPY = 190;
-    stainCv.width = W; stainCv.height = H;
-    for (var i = 0; i < stainList.length; i++) paintStain(stainList[i]);
+    TOPY = 210;
   }
 
   function newRound() {
@@ -461,65 +489,125 @@
     state = S.PLAY;
     score = 0; T = 0; held = false;
     tea = window.TeaSim.create();
-    potX = 1; potH = H0; potVX = 0; pourLeft = POT; emitAcc = 0; pouring = false;
-    done = false; endT = 0; inCup = 0; avgH = 0; shakeX = 0; shakeY = 0; wind = 0;
     for (var i = 0; i < 8; i++) ph[i] = Math.random() * 6.283;
-    stainList = []; sctx.clearRect(0, 0, W, H);
+    var x0 = (Math.random() < 0.5 ? -1 : 1) * (60 + Math.random() * 120);
+    dv = { x: x0, y: JUMP, vx: 0, vy: 0, chute: 0, open: 0, steer: 0, landed: false };
+    plane = { x: x0, y: JUMP + 4, vx: 60 };
+    pourLeft = POT; emitAcc = 0; done = false; endT = 0; landT = 0; inCup = 0; avgH = 0; TS = 1; gust = 0;
+    sn = 0; spots = [];
     lastPX = null;
   }
+  function jump() {
+    dv.vx = 0; dv.vy = -2;
+    tone(300, 0.4, 0.06, "sine", 120);
+  }
 
-  /* 手のふるえ（高いほど大きい）と上空の風 */
-  function shake(t, h) {
-    var a = 0.1 + 0.0032 * h;
-    shakeX = a * (Math.sin(t * 1.9 + ph[0]) * 0.5 + Math.sin(t * 3.7 + ph[1]) * 0.3 + Math.sin(t * 6.1 + ph[2]) * 0.2);
-    shakeY = a * 0.4 * Math.sin(t * 2.3 + ph[3]);
-    var wk = Math.min(1, h / 500);
-    wind = wk * (45 * Math.sin(t * 0.37 + ph[4]) + 25 * Math.sin(t * 0.91 + ph[5]));
+  /* 風：高いほど強く、ゆっくり強弱がある（m/s、+が右） */
+  function windAt(y) {
+    var r = Math.min(1, y / 800);
+    var base = 0.15 + 4 * r * Math.sqrt(r);        /* 地面の近くはほぼ無風 */
+    return base * (1 + gust) * (ph[6] < 3.14 ? 1 : -1);
+  }
+
+  function openChute() {
+    if (dv.chute) return;
+    dv.chute = 1; dv.open = 0;
+    noiseHit(0.7, 400, 0.35, 0.7);
+    tone(110, 0.35, 0.1, "sine", 70, 0.15);
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
-    if (state === S.INTRO) { T += dt; shake(T, potH); return; }
-    if (state !== S.PLAY) { tea.step(0); return; }
+    if (state === S.INTRO) { T += dt; return; }
+    if (state !== S.PLAY) return;
     T += dt;
-    var px0 = potX;
-    if (keyL) potX -= 14 * dt;
-    if (keyR) potX += 14 * dt;
-    var lim = W / 2 / SC - 1;
-    potX = Math.max(-lim, Math.min(lim, potX));
-    potVX = potVX * 0.6 + (potX - px0) / dt * 0.4;
-    shake(T, potH);
+    gust = 0.07 * Math.sin(T * 0.21 + ph[4]) + 0.04 * Math.sin(T * 0.53 + ph[5]);
 
-    pouring = held && pourLeft > 0 && !done;
+    /* 高いところほど空の時間を早送りにする */
+    TS = dv.landed ? 1 : Math.max(1, Math.min(9, 1 + dv.y / 30));
+    var sdt = dt * TS, nsub = Math.ceil(sdt / 0.02), h = sdt / nsub;
+
+    if (keyL) dv.steer -= 2.5 * dt;
+    if (keyR) dv.steer += 2.5 * dt;
+    dv.steer = Math.max(-7, Math.min(7, dv.steer));
+    plane.x += plane.vx * sdt;
+
+    var pouring = held && dv.chute === 2 && pourLeft > 0 && !done && !dv.landed;
     if (pouring) {
-      potH += (6 + 0.35 * potH) * dt;          /* 注いでいる間、ポットは上がり続ける */
       emitAcc += RATE * dt;
-      var tipX = potX + shakeX, tipY = potH + shakeY;
-      while (emitAcc >= 1 && pourLeft > 0) {
+      while (emitAcc >= 1 && pourLeft > 0 && sn < MAXS) {
         emitAcc -= 1; pourLeft--;
-        tea.emit(tipX + (Math.random() - 0.5) * 0.25, tipY, -11 + potVX * 0.9, -22, potH, true);
+        var k = sn++;
+        PX[k] = dv.x + (Math.random() - 0.5) * 0.01; PY[k] = dv.y - 0.15;
+        PVX[k] = dv.vx - 0.4; PVY[k] = dv.vy - 0.5; PH[k] = dv.y;
       }
-    } else tea.cut();
+    }
 
-    tea.step(wind);
+    for (var s = 0; s < nsub; s++) {
+      skyDiver(h);
+      skyTea(h);
+    }
+
+    tea.step(0);
     cupRate = cupRate * 0.8 + tea.hits.joinCup * 60 * 0.2 * 0.2;
-    outRate = outRate * 0.8 + (tea.hits.joinOut + tea.hits.table * 0.3) * 60 * 0.2 * 0.2;
     sound();
-    while (tea.stains.length) { var st = tea.stains.pop(); var o = { x: st.x, r: Math.random() }; stainList.push(o); paintStain(o); }
+    tea.stains.length = 0;
 
-    var s = tea.stats();
-    inCup = s.inCup; avgH = s.avgH;
-    if (!done && (inCup >= CAP || pourLeft <= 0)) { done = true; held = false; tea.cut(); }
-    if (done) {
-      if (s.flying === 0) endT += dt; else endT = 0;
-      if (endT > 1.2) finish();
+    var st = tea.stats();
+    inCup = st.inCup; avgH = st.avgH;
+    if (!done && inCup >= CAP) { done = true; held = false; tone(880, 0.5, 0.1, "sine", 0, 0); }
+    if (dv.landed) { landT += dt; if (sn === 0 && st.flying === 0) endT += dt; else endT = 0; }
+    if (endT > 1.5 || landT > 10) finish();
+  }
+
+  function skyDiver(h) {
+    if (dv.landed) return;
+    var w = windAt(dv.y);
+    if (dv.chute === 0) {
+      var rvx = dv.vx - w, rvy = dv.vy, sp = Math.sqrt(rvx * rvx + rvy * rvy);
+      dv.vx += -C_FALL * sp * rvx * 3 * h;     /* 横は体が広い分よく止まる */
+      dv.vy += (-GV - C_FALL * sp * rvy) * h;
+      if (dv.y < AAD) openChute();
+    } else {
+      if (dv.chute === 1) { dv.open += h / 2.2; if (dv.open >= 1) { dv.open = 1; dv.chute = 2; } }
+      /* パラシュート：落ちる速さは 5m/s へ、横は「舵の速さ＋風」へ近づく */
+      var k = dv.chute === 1 ? 1.2 + 2.5 * dv.open : 1.5;
+      dv.vy += (-CANOPY - dv.vy) * Math.min(1, k * h);
+      dv.vx += (dv.steer + w - dv.vx) * Math.min(1, 1.2 * h);
+    }
+    dv.x += dv.vx * h; dv.y += dv.vy * h;
+    if (dv.y <= 0) {
+      dv.y = 0; dv.vx = 0; dv.vy = 0; dv.landed = true; held = false;
+      noiseHit(0.35, 180, 0.4, 0.8);
     }
   }
+
+  function randn() { return (Math.random() + Math.random() + Math.random() - 1.5) * 2; }
+  function skyTea(h) {
+    var sq = Math.sqrt(h);
+    for (var i = 0; i < sn; i++) {
+      var w = windAt(PY[i]);
+      var rvx = PVX[i] - w, rvy = PVY[i], sp = Math.sqrt(rvx * rvx + rvy * rvy);
+      PVX[i] += (-C_DROP * sp * rvx) * h + randn() * 0.007 * sq;
+      PVY[i] += (-GV - C_DROP * sp * rvy) * h;
+      PX[i] += PVX[i] * h; PY[i] += PVY[i] * h;
+      if (!(PY[i] >= 0.16)) {
+        /* カップのまわり（±37cm）に来た粒は流体の計算へ。外は地面の跡 */
+        if (Math.abs(PX[i]) < 0.37) tea.emit(PX[i] * 100, PY[i] * 100, PVX[i] * 100, PVY[i] * 100, PH[i] * 100, false);
+        else if (Math.abs(PX[i]) < 0.6 && spots.length < 600) spots.push(PX[i]);
+        sn--;
+        PX[i] = PX[sn]; PY[i] = PY[sn]; PVX[i] = PVX[sn]; PVY[i] = PVY[sn]; PH[i] = PH[sn];
+        i--;
+      }
+    }
+    tea.cut();
+  }
+
   function finish() {
     state = S.RESULT;
-    score = Math.round(avgH * Math.min(1, inCup / CAP)) / 100;  /* m */
-    if (pourGain) { pourGain.gain.setTargetAtTime(0, AC.currentTime, 0.05); spillGain.gain.setTargetAtTime(0, AC.currentTime, 0.05); }
-    if (inCup >= CAP) { tone(880, 0.5, 0.1, "sine", 0, 0); tone(1320, 0.7, 0.08, "sine", 0, 0.08); }
+    drops = inCup; score = Math.round(avgH) / 100;   /* カップに入った紅茶の、注いだ高さの平均（m） */
+    if (pourGain) pourGain.gain.setTargetAtTime(0, AC.currentTime, 0.05);
+    if (inCup > 0) { tone(880, 0.5, 0.1, "sine", 0, 0); tone(1320, 0.7, 0.08, "sine", 0, 0.08); }
   }
 
   /* ============ 入力 ============ */
@@ -528,15 +616,17 @@
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
-      if (hit === "retry") newRound();
+      if (hit === "retry") { newRound(); jump(); }
       return;
     }
+    if (dv.landed) return;
+    if (dv.chute === 0) { openChute(); return; }    /* 落ちている間は、押すと開く */
     held = true;
     lastPX = x == null ? null : x;
   }
   function move(x, y) {
     if (state !== S.PLAY || !held || lastPX == null) return;
-    potX += (x - lastPX) / SC;
+    dv.steer = Math.max(-7, Math.min(7, dv.steer + (x - lastPX) / 45));
     lastPX = x;
   }
   function up() {
@@ -559,9 +649,9 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (state !== S.PLAY) return;
-    if (n === 1) potH = Math.max(potH, 300);                 /* 3mへ */
-    if (n === 2) { tea.fillTo(CAP - 25); }                   /* 満杯の手前 */
-    if (n === 3) { potH = 500; tea.fillTo(CAP + 5); done = true; endT = 1.2; } /* 結果へ */
+    if (n === 1) { dv.y = 60; dv.x = 0.3; dv.vx = 0; dv.vy = -CANOPY; dv.chute = 2; dv.open = 1; dv.steer = -windAt(60); }  /* 60mでカップの上 */
+    if (n === 2) { tea.fillTo(CAP - 25); }
+    if (n === 3) { tea.fillTo(CAP - 60); for (var i = 0; i < tea.n; i++) tea.hgt[i] = 4000; dv.y = 0; dv.landed = true; sn = 0; }
   }
 
   window.addEventListener("keydown", function (e) {
@@ -573,7 +663,7 @@
     if (!esc && !go && !left && !right) return;
     e.preventDefault();
     if (!esc) keyMode = true;
-    if (esc) { if (!e.repeat) newRound(); return; }
+    if (esc) { if (!e.repeat) { newRound(); jump(); } return; }
     if (left) { keyL = true; return; }
     if (right) { keyR = true; return; }
     if (e.repeat) return;
@@ -587,19 +677,13 @@
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
   });
 
-  function shareLine(m, full) {
-    if (!full) return zT("紅茶をテーブルにぶちまけた", "Spilled tea all over the table");
-    if (m < 0.5) return zT("ふつうに紅茶を注いだ", "Poured tea like a normal person");
-    if (m < 1.5) return zT("ちょっと高いところから紅茶を注いだ", "Poured tea from a little up high");
-    if (m < 3) return zT("一流の執事の高さから紅茶を注いだ", "Poured tea from first-class butler height");
-    if (m < 300) { var f = Math.floor(m / 3) + 1; return zT("ビルの" + f + "階から紅茶を注いだ", "Poured tea from the " + ord(f) + " floor of a building"); }
-    return zT("雲の上から紅茶を注いだ", "Poured tea from above the clouds");
+  function shareLine(m) {
+    if (drops === 0) return zT("スカイダイビングで紅茶を注いだが、一滴も入らなかった", "Poured tea while skydiving and missed every drop");
+    return zT("上空" + scoreText() + "から注いだ紅茶が" + drops + "滴カップに入った", drops + (drops === 1 ? " drop" : " drops") + " of tea poured from " + scoreText() + " up landed in the cup");
   }
-  function ord(n) { var s = ["th", "st", "nd", "rd"], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
-  function scoreText() { return score.toFixed(2) + "m"; }
+  function scoreText() { return (score >= 100 ? score.toFixed(1) : score.toFixed(2)) + "m"; }
   function doShare() {
-    var full = inCup >= CAP;
-    window.zResultActions.x({ text: shareLine(score, full) + zT("（" + scoreText() + "）", " (" + scoreText() + ")") + zT(" #高いところから紅茶を注ぐ", " #PourTeaFromUpHigh") });
+    window.zResultActions.x({ text: shareLine(score) + zT(" #スカイダイビング紅茶", " #SkydivingTea") });
   }
 
   /* ============ 描画 ============ */
@@ -615,71 +699,51 @@
   function mix(a, b, t) { return Math.round(a + (b - a) * t); }
   function rgb(c1, c2, t) { return "rgb(" + mix(c1[0], c2[0], t) + "," + mix(c1[1], c2[1], t) + "," + mix(c1[2], c2[2], t) + ")"; }
 
+  function camH() { return Math.max(300, (state === S.INTRO ? JUMP + 4 : dv.y) * 100); }
+
   function drawSky() {
-    var t = Math.min(1, Math.log(1 + potH / 100) / Math.log(1 + 300));   /* 高いほど空が濃い */
+    var t = Math.min(1, Math.log(1 + camH() / 100) / Math.log(1 + JUMP));
     var g = ctx.createLinearGradient(0, 0, 0, GY);
-    g.addColorStop(0, rgb([126, 190, 236], [24, 52, 120], t));
-    g.addColorStop(1, rgb([214, 236, 248], [140, 186, 228], t));
+    g.addColorStop(0, rgb([150, 205, 240], [58, 120, 200], t));
+    g.addColorStop(1, rgb([222, 240, 250], [190, 222, 245], t));
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, GY);
-    /* 雲：本当の高さに置く */
-    var clouds = [[-14, 2200, 9], [12, 5200, 13], [-6, 12000, 16], [16, 26000, 20]];
-    ctx.fillStyle = "rgba(255,255,255,.85)";
+    /* 雲：本当の高さに置く（横は画面に固定） */
+    var clouds = [[90, 450, 70], [420, 700, 90], [200, 1200, 110], [470, 280, 50], [40, 850, 80]];
     for (var i = 0; i < clouds.length; i++) {
-      var c = clouds[i]; var Y = sy(c[1]);
-      if (Y < -40 || Y > GY - 10) continue;
-      var w = c[2] * SC * 0.9, hh = Math.max(4, Math.min(26, dfy(c[1]) * 400));
-      ctx.beginPath(); ctx.ellipse(sx(c[0]), Y, w, hh, 0, 0, 6.283); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(sx(c[0]) + w * 0.5, Y - hh * 0.5, w * 0.6, hh * 0.9, 0, 0, 6.283); ctx.fill();
+      var c = clouds[i], Y = sy(c[1] * 100);
+      if (Y < -60 || Y > GY - 30) continue;
+      var w = c[2], hh = Math.max(5, Math.min(22, dfy(c[1] * 100) * 600));
+      ctx.fillStyle = "rgba(255,255,255,.82)";
+      ctx.beginPath(); ctx.ellipse(c[0], Y, w, hh, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(c[0] + w * 0.4, Y - hh * 0.6, w * 0.55, hh, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(c[0] - w * 0.45, Y - hh * 0.3, w * 0.45, hh * 0.8, 0, 0, 6.283); ctx.fill();
     }
-  }
-  /* 奥のビル：3mごとの階を本当の高さに描くので、上がるほど縮んで見える */
-  function drawBuildings() {
-    drawTower(W - 150, W - 20, 45, [176, 190, 206], [150, 166, 186]);
-    drawTower(14, 120, 12, [196, 186, 176], [172, 160, 150]);
-  }
-  function drawTower(x0, x1, floors, c1, c2) {
-    var top = sy(floors * 300);
-    ctx.fillStyle = rgb(c1, c1, 0); ctx.fillRect(x0, top, x1 - x0, GY - top);
-    ctx.fillStyle = rgb(c2, c2, 0);
-    var prev = GY;
-    for (var f = 1; f <= floors; f++) {
-      var Y = sy(f * 300);
-      var gap = prev - Y;
-      if (gap > 3) {
-        var wy = Y + gap * 0.25, wh = Math.max(1, gap * 0.45);
-        for (var wx = x0 + 8; wx < x1 - 12; wx += 22) ctx.fillRect(wx, wy, 13, wh);
-      } else { ctx.fillRect(x0, Y, x1 - x0, 1); }
-      prev = Y;
-    }
+    /* 遠くの山と木：地面の少し上 */
+    ctx.fillStyle = "#9cc0a4";
+    ctx.beginPath(); ctx.moveTo(0, GY);
+    for (var x = 0; x <= W; x += 30) ctx.lineTo(x, GY - 14 - 10 * Math.sin(x * 0.013 + 1) - 6 * Math.sin(x * 0.041));
+    ctx.lineTo(W, GY); ctx.fill();
   }
 
-  function drawTable() {
-    /* テーブルクロス */
+  function drawGround() {
+    /* テーブルクロス（画面いっぱい） */
     ctx.fillStyle = "#f4f1ea"; ctx.fillRect(0, GY, W, H - GY);
     var g = ctx.createLinearGradient(0, GY, 0, GY + 26);
     g.addColorStop(0, "rgba(0,0,0,.10)"); g.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = g; ctx.fillRect(0, GY, W, 26);
     ctx.fillStyle = "#e3ddd0"; ctx.fillRect(0, GY - 1, W, 2);
-    ctx.drawImage(stainCv, 0, 0, W, H);
-  }
-  function paintStain(o) {
-    var X = sx(o.x), Y = GY + 6 + o.r * 26, r = 10 + o.r * 10;
-    var g = sctx.createRadialGradient(X, Y, 0, X, Y, r);
-    g.addColorStop(0, "rgba(150,78,30,.16)"); g.addColorStop(0.7, "rgba(150,78,30,.10)"); g.addColorStop(1, "rgba(150,78,30,0)");
-    sctx.fillStyle = g; sctx.beginPath(); sctx.ellipse(X, Y, r * 1.6, r, 0, 0, 6.283); sctx.fill();
-  }
-
-  function cupPath(inner) {
-    /* 側面から見たガラスのカップ（外形 or 内側） */
-    var C = tea.CUP;
-    ctx.beginPath();
-    if (inner) {
-      ctx.moveTo(sx(-C.inTop), sy(C.top)); ctx.lineTo(sx(-C.inBot), sy(C.base));
-      ctx.lineTo(sx(C.inBot), sy(C.base)); ctx.lineTo(sx(C.inTop), sy(C.top));
-    } else {
-      ctx.moveTo(sx(-4.44), sy(9.1)); ctx.lineTo(sx(-3.75), sy(0.45));
-      ctx.lineTo(sx(3.75), sy(0.45)); ctx.lineTo(sx(4.44), sy(9.1));
+    /* カップの外に落ちた紅茶の跡 */
+    ctx.fillStyle = "rgba(150,78,30,.28)";
+    for (var j = 0; j < spots.length; j++) {
+      var X = sx(spots[j] * 100);
+      if (X < -10 || X > W + 10) continue;
+      ctx.beginPath(); ctx.ellipse(X, GY + 4 + (j * 7) % 9, 7, 2.5, 0, 0, 6.283); ctx.fill();
     }
+  }
+  function cupPath() {
+    ctx.beginPath();
+    ctx.moveTo(sx(-4.44), sy(9.1)); ctx.lineTo(sx(-3.75), sy(0.45));
+    ctx.lineTo(sx(3.75), sy(0.45)); ctx.lineTo(sx(4.44), sy(9.1));
   }
   function drawSaucer() {
     ctx.save();
@@ -695,43 +759,34 @@
     ctx.restore();
   }
   function drawCupBack() {
-    ctx.save();
-    cupPath(false);
-    ctx.fillStyle = "rgba(225,240,248,.35)"; ctx.fill();
-    ctx.restore();
+    cupPath(); ctx.fillStyle = "rgba(225,240,248,.35)"; ctx.fill();
   }
   function drawCupFront() {
     var C = tea.CUP;
     ctx.save();
-    /* 持ち手（ガラス） */
     ctx.strokeStyle = "rgba(230,244,250,.75)"; ctx.lineWidth = 0.55 * SC;
     ctx.beginPath();
     ctx.moveTo(sx(4.25), sy(7.6));
     ctx.bezierCurveTo(sx(7.6), sy(8.2), sx(7.8), sy(2.6), sx(3.9), sy(2.6));
     ctx.stroke();
     ctx.strokeStyle = "rgba(120,150,170,.45)"; ctx.lineWidth = 1.2; ctx.stroke();
-    /* 壁と底の厚み */
     ctx.fillStyle = "rgba(220,238,246,.42)";
     ctx.beginPath();
     ctx.moveTo(sx(-4.44), sy(9.1)); ctx.lineTo(sx(-3.75), sy(0.45)); ctx.lineTo(sx(3.75), sy(0.45)); ctx.lineTo(sx(4.44), sy(9.1));
     ctx.lineTo(sx(C.inTop), sy(C.top)); ctx.lineTo(sx(C.inBot), sy(C.base)); ctx.lineTo(sx(-C.inBot), sy(C.base)); ctx.lineTo(sx(-C.inTop), sy(C.top));
     ctx.closePath(); ctx.fill();
-    cupPath(false);
+    cupPath();
     ctx.strokeStyle = "rgba(110,140,160,.55)"; ctx.lineWidth = 1.4; ctx.stroke();
-    /* 光の筋 */
     ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.moveTo(sx(-3.55), sy(8.2)); ctx.lineTo(sx(-3.05), sy(2.4)); ctx.stroke();
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(sx(3.2), sy(8.0)); ctx.lineTo(sx(2.9), sy(5.0)); ctx.stroke();
-    /* 縁 */
-    ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(sx(-4.44), sy(9.1)); ctx.lineTo(sx(-4.0), sy(9.0)); ctx.moveTo(sx(4.0), sy(9.0)); ctx.lineTo(sx(4.44), sy(9.1)); ctx.stroke();
     ctx.restore();
   }
 
   /* 紅茶：粒を柔らかい点で別の板に描き、濃さでしきって液体の形にする */
   var buf = document.createElement("canvas"), bctx = buf.getContext("2d", { willReadFrequently: true });
-  var BF = 0.5;                                /* 板の細かさ（画面の半分） */
+  var BF = 0.5;
   var blob = document.createElement("canvas");
   (function () {
     blob.width = blob.height = 32;
@@ -743,26 +798,14 @@
     var bw = Math.ceil(W * BF), bh = Math.ceil(H * BF);
     if (buf.width !== bw || buf.height !== bh) { buf.width = bw; buf.height = bh; }
     bctx.clearRect(0, 0, bw, bh);
-    var n = tea.n, X = tea.x, Y = tea.y, M = tea.mode, L = tea.link, VX = tea.vx, VY = tea.vy;
+    var n = tea.n, X = tea.x, Y = tea.y, M = tea.mode;
     var minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
     var R = 6.2 * BF;
-    bctx.strokeStyle = "#fff"; bctx.lineCap = "round";
     for (var i = 0; i < n; i++) {
       if (!M[i]) continue;
-      var px = sx(X[i]) * BF, py = sy(Y[i]) * BF;
+      var px = sxy(X[i], Y[i]) * BF, py = sy(Y[i]) * BF;
       if (py < -10 || py > bh + 10) continue;
-      var sp = Math.sqrt(VX[i] * VX[i] + VY[i] * VY[i]);
-      /* 落ちて速くなるほど流れは細くなる（流れる量は同じ） */
-      var w = Math.max(1.8, Math.min(8, 0.75 * SC * Math.sqrt(22 / Math.max(22, sp)))) * BF;
-      var r = M[i] === 1 ? Math.max(R * 0.55, w * 1.1) : R;
-      bctx.drawImage(blob, px - r * 1.6, py - r * 1.6, r * 3.2, r * 3.2);
-      var j = L[i];
-      if (j >= 0 && M[j] && (M[i] === 1 || M[j] === 1)) {
-        var qx = sx(X[j]) * BF, qy = sy(Y[j]) * BF;
-        bctx.lineWidth = w * 1.5;
-        bctx.beginPath(); bctx.moveTo(px, py); bctx.lineTo(qx, qy); bctx.stroke();
-        if (qx < minx) minx = qx; if (qx > maxx) maxx = qx; if (qy < miny) miny = qy; if (qy > maxy) maxy = qy;
-      }
+      bctx.drawImage(blob, px - R * 1.6, py - R * 1.6, R * 3.2, R * 3.2);
       if (px < minx) minx = px; if (px > maxx) maxx = px; if (py < miny) miny = py; if (py > maxy) maxy = py;
     }
     if (maxx < minx) return;
@@ -773,8 +816,8 @@
     for (var p = 0; p < d.length; p += 4) {
       var a = d[p + 3];
       if (a < 70) { d[p + 3] = 0; continue; }
-      var e = a < 120 ? (a - 70) / 50 : 1;     /* ふちは柔らかく */
-      var k = Math.min(1, (a - 70) / 185);     /* 厚いところほど濃い */
+      var e = a < 120 ? (a - 70) / 50 : 1;
+      var k = Math.min(1, (a - 70) / 185);
       d[p] = 226 - 86 * k; d[p + 1] = 132 - 82 * k; d[p + 2] = 52 - 40 * k;
       d[p + 3] = (165 + 65 * k) * e;
     }
@@ -785,73 +828,121 @@
     ctx.drawImage(buf, 0, 0, bw, bh, 0, 0, bw / BF, bh / BF);
     ctx.restore();
   }
+  /* 空を落ちている紅茶の粒 */
+  function drawSkyTea() {
+    ctx.fillStyle = "rgba(150,70,22,.9)";
+    for (var i = 0; i < sn; i++) {
+      var X = sxy(PX[i] * 100, PY[i] * 100), Y = sy(PY[i] * 100);
+      if (Y < -4 || Y > H) continue;
+      ctx.fillRect(X - 1.6, Y - 1.6, 3.2, 3.2);
+    }
+  }
 
-  /* ポット：白い磁器。注ぎ口の先が (tx, ty) に来るように、傾けて描く */
-  function drawPot(tx, ty) {
-    var ps = Math.max(3.6, Math.min(SC * 0.9, dfy(potH)));      /* 1cm のドット数 */
-    var tilt = 0.55 + 0.5 * (1 - pourLeft / POT);               /* 減るほど傾ける */
-    var tipL = [-13.5, 4.5];                                     /* 本体の中心から見た注ぎ口の先 */
-    var c = Math.cos(-tilt), s = Math.sin(-tilt);
-    var rx = (tipL[0] * c - tipL[1] * s) * ps, ry = (tipL[0] * s + tipL[1] * c) * ps;
-    var cx = tx - rx, cy = ty - ry;
-    /* 腕：上の外から持ち手へ */
-    var hx = 10.5, hy = -1;
-    var hX = cx + (hx * c - hy * s) * ps, hY = cy + (hx * s + hy * c) * ps;
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.strokeStyle = "#1c1c22"; ctx.lineWidth = ps * 7.5;
-    ctx.beginPath(); ctx.moveTo(hX + ps * 4, hY - ps * 3); ctx.lineTo(hX + ps * 30, hY - ps * 70); ctx.stroke();
-    ctx.strokeStyle = "#fbfbfb"; ctx.lineWidth = ps * 5.2;
-    ctx.beginPath(); ctx.moveTo(hX + ps * 1.5, hY - ps * 1.5); ctx.lineTo(hX + ps * 6, hY - ps * 9); ctx.stroke();
+  function drawPlane() {
+    if (state === S.PLAY && dv.y < JUMP - 300) return;
+    var X = sxy(plane.x * 100, plane.y * 100) + 40, Y = sy(plane.y * 100) - 20;
+    if (X < -200 || X > W + 200) return;
+    ctx.save(); ctx.translate(X, Y);
+    ctx.fillStyle = "#eef1f4";
+    ctx.beginPath(); ctx.ellipse(0, 0, 92, 16, 0, 0, 6.283); ctx.fill();
+    ctx.fillStyle = "#d4dae0";
+    ctx.beginPath(); ctx.moveTo(-20, 2); ctx.lineTo(20, 2); ctx.lineTo(-5, 34); ctx.lineTo(-30, 34); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-78, -4); ctx.lineTo(-96, -38); ctx.lineTo(-80, -38); ctx.lineTo(-60, -6); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#4a6b8a";
+    for (var i = 0; i < 5; i++) ctx.fillRect(20 + i * 12 - 40, -7, 7, 6);
+    ctx.fillStyle = "#2b3a4a"; ctx.fillRect(-48, -10, 14, 20);   /* 開いた扉 */
     ctx.restore();
+  }
 
+  /* 人：注ぎ口の先がいつも (tx, ty) に来るように描く。u は 1cm のドット数 */
+  function drawDiver(tx, ty, u) {
     ctx.save();
-    ctx.translate(cx, cy); ctx.rotate(-tilt); ctx.scale(ps, ps);
-    ctx.lineWidth = 0.35; ctx.strokeStyle = "#b9b4aa";
-    /* 持ち手 */
+    ctx.translate(tx, ty); ctx.scale(u, u);
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    var free = dv.chute === 0 && !dv.landed;
+    if (dv.chute && !dv.landed) {
+      /* パラシュート：開くにつれて広がる */
+      var o = dv.chute === 1 ? dv.open : 1;
+      var cw = 260 * (0.25 + 0.75 * o), cy = -300;
+      ctx.strokeStyle = "rgba(60,60,60,.6)"; ctx.lineWidth = 1.2;
+      for (var i = 0; i <= 6; i++) { ctx.beginPath(); ctx.moveTo(25, -120); ctx.lineTo(25 - cw / 2 + cw * i / 6, cy + 12); ctx.stroke(); }
+      var cols = ["#e8483b", "#f6c344", "#2f8ad8", "#f6c344", "#e8483b", "#2f8ad8"];
+      for (var j = 0; j < 6; j++) {
+        ctx.fillStyle = cols[j];
+        var x0 = 25 - cw / 2 + cw * j / 6, x1 = x0 + cw / 6;
+        ctx.beginPath(); ctx.moveTo(x0, cy + 12); ctx.quadraticCurveTo((x0 + x1) / 2, cy - 30 * o - 8, x1, cy + 12);
+        ctx.lineTo(x1, cy + 18); ctx.lineTo(x0, cy + 18); ctx.closePath(); ctx.fill();
+      }
+    }
+    if (free) {
+      /* うつぶせで落ちる姿勢。ポットは右手 */
+      ctx.translate(30, -40);
+      ctx.fillStyle = "#e8483b"; roundRect(-10, -14, 90, 28, 14); ctx.fill();           /* 胴 */
+      ctx.strokeStyle = "#e8483b"; ctx.lineWidth = 14;
+      ctx.beginPath(); ctx.moveTo(70, -6); ctx.lineTo(120, -30); ctx.moveTo(70, 6); ctx.lineTo(120, 30); ctx.stroke();  /* 脚 */
+      ctx.beginPath(); ctx.moveTo(10, -8); ctx.lineTo(-5, -50); ctx.stroke();            /* 左腕 */
+      ctx.beginPath(); ctx.moveTo(10, 8); ctx.lineTo(-20, 22); ctx.stroke();             /* 右腕（ポット） */
+      ctx.fillStyle = "#e9b892"; ctx.beginPath(); ctx.arc(-24, 0, 13, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#2b2b2b"; ctx.beginPath(); ctx.arc(-26, 0, 13, 1.6, 4.7); ctx.fill();  /* ヘルメット */
+      ctx.translate(-30, 40);
+      drawPotAt(0, 0, 0.2);
+    } else {
+      /* 座って吊られる姿勢（着地したら立つ） */
+      var by = dv.landed ? -80 : -110;
+      ctx.translate(26, 0);
+      ctx.strokeStyle = "#e8483b"; ctx.lineWidth = 15;
+      if (dv.landed) { ctx.beginPath(); ctx.moveTo(5, by + 70); ctx.lineTo(-2, 0); ctx.moveTo(15, by + 70); ctx.lineTo(24, 0); ctx.stroke(); }
+      else { ctx.beginPath(); ctx.moveTo(5, by + 70); ctx.lineTo(-10, by + 115); ctx.moveTo(15, by + 70); ctx.lineTo(28, by + 112); ctx.stroke(); }
+      ctx.fillStyle = "#e8483b"; roundRect(-6, by, 32, 76, 14); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(4, by + 18); ctx.lineTo(-8, by + 64); ctx.stroke();      /* ポットを持つ腕 */
+      ctx.beginPath(); ctx.moveTo(22, by + 14); ctx.lineTo(dv.landed ? 30 : 0, by - (dv.landed ? -40 : 10)); ctx.stroke();
+      ctx.fillStyle = "#e9b892"; ctx.beginPath(); ctx.arc(10, by - 14, 14, 0, 6.283); ctx.fill();
+      ctx.fillStyle = "#2b2b2b"; ctx.beginPath(); ctx.arc(10, by - 17, 14.5, 3.3, 6.1); ctx.fill();
+      ctx.translate(-26, 0);
+      drawPotAt(0, 0, dv.landed ? 0 : 0.55 + 0.5 * (1 - pourLeft / POT));
+    }
+    ctx.restore();
+  }
+  /* ポット（白い磁器）。注ぎ口の先が原点。tilt で傾ける */
+  function drawPotAt(ox, oy, tilt) {
+    ctx.save();
+    var tipL = [-13.5, 4.5];
+    var c = Math.cos(-tilt), s = Math.sin(-tilt);
+    var rx = tipL[0] * c - tipL[1] * s, ry = tipL[0] * s + tipL[1] * c;
+    ctx.translate(ox - rx * 1.6, oy - ry * 1.6); ctx.rotate(-tilt); ctx.scale(1.6, 1.6);
+    ctx.lineWidth = 0.6;
     ctx.strokeStyle = "#f2efe8"; ctx.lineWidth = 1.6;
     ctx.beginPath(); ctx.moveTo(6.5, -4); ctx.bezierCurveTo(13, -6, 13, 4, 6.5, 3.5); ctx.stroke();
-    /* 手（持ち手を握る） */
-    ctx.fillStyle = "#e9b892";
-    ctx.beginPath(); ctx.ellipse(10.4, -1, 2.4, 3.0, 0.3, 0, 6.283); ctx.fill();
-    /* 注ぎ口 */
-    var g = ctx.createLinearGradient(-14, 0, -4, 0);
-    g.addColorStop(0, "#e6e2da"); g.addColorStop(1, "#ffffff");
-    ctx.fillStyle = g;
+    ctx.fillStyle = "#ffffff";
     ctx.beginPath();
     ctx.moveTo(-5.5, 3.5); ctx.quadraticCurveTo(-10.5, 3.2, -13.8, 4.0);
     ctx.lineTo(-13.2, 5.2); ctx.quadraticCurveTo(-10, 5.4, -5.5, 6.6); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = "#c8c2b6"; ctx.lineWidth = 0.3; ctx.stroke();
-    /* 本体 */
-    var g2 = ctx.createRadialGradient(-2.5, -2.5, 1, 0, 0, 8.5);
-    g2.addColorStop(0, "#ffffff"); g2.addColorStop(0.7, "#eeebe4"); g2.addColorStop(1, "#cfc9bd");
-    ctx.fillStyle = g2;
+    ctx.fillStyle = "#f4f1ea";
     ctx.beginPath(); ctx.ellipse(0, 1, 7.6, 6.4, 0, 0, 6.283); ctx.fill();
-    ctx.strokeStyle = "#c8c2b6"; ctx.lineWidth = 0.3; ctx.stroke();
-    /* 金の線と台 */
-    ctx.strokeStyle = "#c9a94e"; ctx.lineWidth = 0.45;
+    ctx.strokeStyle = "#c9a94e"; ctx.lineWidth = 0.6;
     ctx.beginPath(); ctx.ellipse(0, 1, 7.6, 6.4, 0, 3.6, 5.82); ctx.stroke();
-    ctx.fillStyle = "#e9e5dc"; ctx.fillRect(-4, 6.9, 8, 1.3);
-    /* ふたとつまみ */
-    ctx.fillStyle = "#f6f4ef";
-    ctx.beginPath(); ctx.ellipse(0, -5.2, 4.6, 1.3, 0, 0, 6.283); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = "#c9a94e";
-    ctx.beginPath(); ctx.arc(0, -6.8, 1.1, 0, 6.283); ctx.fill();
+    ctx.fillStyle = "#f6f4ef"; ctx.beginPath(); ctx.ellipse(0, -5.2, 4.6, 1.3, 0, 0, 6.283); ctx.fill();
+    ctx.fillStyle = "#c9a94e"; ctx.beginPath(); ctx.arc(0, -6.8, 1.1, 0, 6.283); ctx.fill();
     ctx.restore();
   }
 
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
-    setCamera(potH);
+    setCamera(camH());
     ctx.clearRect(0, 0, W, H);
     drawSky();
-    drawBuildings();
-    drawTable();
+    drawGround();
+    drawPlane();
     drawSaucer();
     drawCupBack();
     drawTea();
     drawCupFront();
-    drawPot(sx(potX + shakeX), sy(potH + shakeY));
+    drawSkyTea();
+    if (state !== S.INTRO) {
+      var y = dv.y * 100;
+      var u = Math.max(0.45, Math.min(0.9, dfy(y)));
+      drawDiver(sxy(dv.x * 100, y - 15), sy(y - 15), u);
+    }
     if (state === S.RESULT) drawResult();
   }
 
@@ -900,11 +991,13 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, W: W, H: H, h: potH, x: potX, inCup: inCup, cap: CAP, left: pourLeft, n: tea.n, avgH: avgH }; },
+    now: function () { var st = tea.stats(); return { fly: st.flying, state: state, score: score, W: W, H: H, y: dv.y, x: dv.x, vx: dv.vx, chute: dv.chute, landed: dv.landed, steer: dv.steer, wind: windAt(dv.y), inCup: inCup, cap: CAP, left: pourLeft, sky: sn, n: tea.n, avgH: avgH, TS: TS }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
-    reset: function () { newRound(); },
+    reset: function () { newRound(); jump(); },
     hold: function (on) { if (on) down(); else up(); },
-    moveTo: function (x) { potX = x; }
+    steer: function (v) { dv.steer = v; },
+    spots: function () { return spots; },
+    windAt: function (y) { return windAt(y); }
   };
 
   window.__recording = {
@@ -912,9 +1005,7 @@
     run: async function (r) {
       await r.wait(800);
       r.key();
-      await r.wait(500);
-      held = true;
-      if (!await r.until(function () { return state === S.RESULT; }, 20)) throw Error("終わらない");
+      if (!await r.until(function () { return state === S.RESULT; }, 90)) throw Error("終わらない");
       await r.wait(1500);
     }
   };
@@ -923,7 +1014,7 @@
   var startButton = document.getElementById('start');
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
   ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener('click', function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  startButton.addEventListener('click', function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); jump(); });
   newRound(); state = S.INTRO; startButton.hidden = false;
   layout();
   var last = performance.now();

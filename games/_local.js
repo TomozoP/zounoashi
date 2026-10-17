@@ -216,5 +216,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
   },
-  {"type":"lab","tags":[],"id":"koucha","title":"高いところから紅茶を注ぐ","year":2026,"date":"2026-10-17","plays":null,"url":"","img":"games/_koucha/img/thumb.webp","play":"games/_koucha/index.html","full":true,"catch":"高いところから紅茶を注ぐ"},
+  {"type":"lab","tags":[],"id":"koucha","title":"スカイダイビング紅茶","year":2026,"date":"2026-10-17","plays":null,"url":"","img":"games/_koucha/img/thumb.webp","play":"games/_koucha/index.html","full":true,"catch":"スカイダイビング紅茶"},
 ];
