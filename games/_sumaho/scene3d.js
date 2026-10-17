@@ -41,22 +41,29 @@
     this.camera = st.camera;
     sc.background = new T.Color(0xcfd8e0);
     sc.fog = new T.Fog(0xcfd8e0, 14, 34);
-    Z3.lights(sc, { shadows: true, shadowSize: 6 });
+    this.lights = Z3.lights(sc, { shadows: true, shadowSize: 6 });
+    sc.add(this.lights.key.target);
+    this.camX = null; this.lastT = 0;
 
     /* 床（板張り）。カメラについて動かし、模様だけずらす */
+    /* 板は進む向きと直角に並べる（継ぎ目が流れて、進んでいるのが分かるように） */
     var wood = canvasTex(512, 512, function (g, w, h) {
-      g.fillStyle = "#b98a5c"; g.fillRect(0, 0, w, h);
-      for (var i = 0; i < 70; i++) {
-        var y = Math.random() * h, a = 0.04 + Math.random() * 0.1;
-        g.strokeStyle = "rgba(80,45,20," + a + ")"; g.lineWidth = 1 + Math.random() * 3;
-        g.beginPath(); g.moveTo(0, y);
-        for (var x = 0; x <= w; x += 32) g.lineTo(x, y + Math.sin(x * 0.02 + i) * 4);
-        g.stroke();
+      var cols = ["#b98a5c", "#ad7f52", "#c29466", "#b3845a"];
+      for (var b = 0; b < 8; b++) {
+        var x0 = b * w / 8;
+        g.fillStyle = cols[b % cols.length]; g.fillRect(x0, 0, w / 8, h);
+        for (var i = 0; i < 9; i++) {
+          var x = x0 + Math.random() * w / 8, a = 0.05 + Math.random() * 0.1;
+          g.strokeStyle = "rgba(80,45,20," + a + ")"; g.lineWidth = 1 + Math.random() * 2;
+          g.beginPath(); g.moveTo(x, 0);
+          for (var y = 0; y <= h; y += 32) g.lineTo(x + Math.sin(y * 0.02 + i + b) * 3, y);
+          g.stroke();
+        }
+        g.fillStyle = "rgba(60,30,10,.45)"; g.fillRect(x0, 0, 3, h);
+        g.fillRect(x0, (b * 0.37 % 1) * h, w / 8, 3);
       }
-      g.fillStyle = "rgba(60,30,10,.35)";
-      for (var b = 0; b < 4; b++) g.fillRect(0, b * h / 4, w, 3);
     });
-    wood.wrapS = wood.wrapT = T.RepeatWrapping; wood.repeat.set(4, 2);
+    wood.wrapS = wood.wrapT = T.RepeatWrapping; wood.repeat.set(2, 1);
     this.wood = wood;
     var floor = this.floor = new T.Mesh(new T.PlaneGeometry(26, 14), Z3.std(0xffffff, { map: wood, roughness: 0.65 }));
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.position.z = -3;
@@ -65,7 +72,8 @@
     /* 奥の壁と幅木（進んだ感じを出す縦の継ぎ目） */
     var wallTex = canvasTex(512, 256, function (g, w, h) {
       g.fillStyle = "#eef0ea"; g.fillRect(0, 0, w, h);
-      g.fillStyle = "rgba(0,0,0,.06)"; g.fillRect(0, 0, 3, h);
+      g.fillStyle = "rgba(0,0,0,.12)"; g.fillRect(0, 0, 4, h); g.fillRect(w / 2, 0, 4, h);
+      g.fillStyle = "#f6f4ee"; g.fillRect(w * 0.2, h * 0.62, 26, 36); g.strokeStyle = "rgba(0,0,0,.25)"; g.strokeRect(w * 0.2, h * 0.62, 26, 36);
       g.fillStyle = "#d8d2c4"; g.fillRect(0, h - 22, w, 22);
     });
     wallTex.wrapS = T.RepeatWrapping; wallTex.repeat.set(5, 1);
@@ -153,9 +161,15 @@
     if (!s.fall) fa = 0;
     /* 倒れたらスマホの落ちた所を追う */
     x += Math.sin(Math.max(-1.52, Math.min(1.52, (s.th || 0) + fa))) * 1.4 - (s.fall ? Math.sin(s.th || 0) * 1.4 : 0);
+    /* カメラはなめらかに追う（足を着くたびのガクつきを消す）。時間は実時間で */
+    var dt = Math.max(0, Math.min(0.1, (s.t || 0) - this.lastT)); this.lastT = s.t || 0;
+    if (this.camX == null || s.intro || dt === 0 && Math.abs(this.camX - x) > 3) this.camX = x;
+    this.camX += (x - this.camX) * (1 - Math.exp(-dt * 8));
+    x = this.camX;
+    this.lights.key.position.set(x - 4, 8, 6); this.lights.key.target.position.set(x, 0, 0);
     this.camera.position.set(x + 4.6, 2.3, 7.4);
     this.camera.lookAt(x + 0.6, 1.15, 0);
-    this.floor.position.x = x; this.wood.offset.x = x / 6.5;
+    this.floor.position.x = x; this.wood.offset.x = x / 13;
     this.wall.position.x = x; this.wallTex.offset.x = x / 5.2;
 
     /* 倒れ：立っている足を中心に回す */
