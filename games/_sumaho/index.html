@@ -125,104 +125,96 @@
   function place() {}
 
   /* ============ スマホの歩き ============
-     スマホの下から生えた人の脚で歩く。左の脚・右の脚を交互に出す。
-     立っている脚は、足先を支点に倒れる振り子（倒立振子）。重力で前後へ倒れる。
-     出す脚を押すと、後ろの足で地面を蹴って前へ勢いをつけ、その脚を前へ振り出して、体が追いついたところで着く。
-     着くたびに勢いは少し減る。続けて歩くほど蹴りが強くなり、ペースが上がる。
-     出さずにいると前へ倒れ、立っている脚を出そうとする（同じ脚を2回）とつまずく。
-     倒れてスマホが地面に当たると画面が割れる。
-     大きさは本物の10倍（スマホの高さ15cm → 1.5）で計算する。進んだ距離は本物の cm で数える。 */
-  var L = 1.0, G = 9.8, PH = 1.5;                /* 脚の長さ・重力・スマホの高さ */
-  var P = { tangle: 0.2, push: 0.3, kick: 1.05, kickUp: 0.02, kickMax: 3.5, reach: 0.42, rate: 3.2, limF: 0.85, limB: -0.9 };
+     スマホの下から生えた人の脚で歩く。体は関節でつないだ点の集まりで、重力・地面との摩擦・筋肉の力で動く（位置ベースの物理）。
+     点は 0: 腰 1: スマホの上の端 2,3: 左右の膝 4,5: 左右の足首。腿とすねは長さの決まった棒、スマホは腰から上へ伸びる棒。
+     筋肉は腰（スマホに対する腿の角度）と膝の関節にかかる力のモーメント。両側の部位に逆向きに効くので、体全体の勢いは筋肉だけでは変わらず、
+     前へ進むのは地面を後ろへ押す足の摩擦のおかげ。タップするたびに前に出す脚が入れ替わり、出す脚は少しの間だけ膝を曲げて振り出す。
+     スマホを起こす弱い手助けは、最後のタップから少しの間だけ効く。止まっていたり、間が悪かったりすると、重いスマホに振られて倒れる。
+     スマホの上の端が地面に当たると画面が割れる。大きさは本物の10倍（スマホの高さ15cm → 1.5）。進んだ距離は本物の cm で数える。 */
+  var G = 9.8, PH = 1.5, THIGH = 0.53, SHIN = 0.53, FOOT_R = 0.06;
+  var P = { mHip: 1, mPhone: 1.5, damp: 0.999, iters: 6, hipF: 0.55, hipB: 0.35, kHip: 40, dHip: 3, maxHip: 80,
+    kKnee: 40, dKnee: 3, maxKnee: 80, kneeSwing: 1.0, swingTime: 0.18, kUp: 55, dUp: 9, maxUp: 85, leanT: 0.2, idle: 1.2, tire: 100, fric: 0.9 };
   var wk;
   function newWalker() {
+    var hy = FOOT_R + THIGH + SHIN;
+    var p = [[0, hy], [0, hy + PH], [0.02, FOOT_R + SHIN], [0.02, FOOT_R + SHIN], [0, FOOT_R], [0, FOOT_R]];
     return {
-      footX: 0, th: 0, thd: 0, phi: 0, dragX: 0,
-      swing: false, started: false, fall: 0, broken: false, steps: 0,
-      stance: 0,                     /* 立っている脚（0: 左 1: 右） */
-      prog: 0, lean: 0, leand: 0, hvx: 0, brokeT: 0, fallA: 0, fallAd: 0, trip: false
+      p: p, q: p.map(function (a) { return a.slice(); }), m: [P.mHip, P.mPhone, 0.25, 0.25, 0.2, 0.2],
+      front: 0, t: 0, tapT: -9, started: false, broken: false, brokeT: 0, steps: 0, ground: [true, true]
     };
   }
-  function hipOf(w) { return [w.footX + L * Math.sin(w.th), L * Math.cos(w.th)]; }
-  /* 脚を出す。k は 0: 左 1: 右 */
-  function trip(w) { w.trip = true; w.fall = 1; w.thd = Math.max(w.thd, 0.8); noiseHit(0.12, 500, 0.2, 1); }
-  /* 次に出す脚：振り出し中ならもう片方（着いて次へ）、立っているときは後ろの脚 */
-  function nextLeg() { return !wk.started ? 0 : wk.swing ? wk.stance : 1 - wk.stance; }
-  function stepLeg(k) {
+  function angUp(a, b) { return Math.atan2(b[0] - a[0], b[1] - a[1]); }   /* 上向き0、前へ倒れると正 */
+  function angDn(a, b) { return Math.atan2(b[0] - a[0], a[1] - b[1]); }   /* 下向き0、前へ出ると正 */
+  function wrapA(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
+  function phoneAngle(w) { return angUp(w.p[0], w.p[1]); }
+  /* タップ：前に出す脚を入れ替える */
+  function stepLeg() {
     var w = wk;
-    if (w.fall || w.broken) return;
-    if (!w.started) {
-      /* 最初の一歩：押した脚を出し、もう片方で立つ */
-      w.started = true; w.stance = 1 - k; w.th = 0; w.phi = 0;
-    } else if (w.swing) {
-      /* 振り出し中にもう片方：前に出ていればその場で着いて次の脚へ（小走り）。まだ前に出ていなければ脚がもつれる */
-      if (k !== w.stance) return;
-      if (w.phi > P.tangle) strike(w, hipOf(w)); else { trip(w); return; }
-    } else if (k === w.stance) {
-      /* 着いたばかりの脚をまた出そうとした：つまずく */
-      if (w.thd > 0.4) trip(w);
-      return;
-    }
-    w.swing = true; w.prog = 0;
-    var kick = Math.min(P.kickMax, P.kick + P.kickUp * w.steps);
-    w.thd = Math.max(w.thd, kick) + P.push;        /* 後ろの足で蹴る。急ぐほど勢いがつく */
+    if (w.broken) return;
+    if (!w.started) w.started = true;
+    w.front = w.steps === 0 ? 0 : 1 - w.front;
+    w.tapT = w.t; w.steps++;
     noiseHit(0.05, 700, 0.1, 1.2);
   }
-  function strike(w, h) {
-    /* 着く：振り出した脚が立つ脚になり、今までの脚は後ろに残る */
-    var nf = h[0] + L * Math.sin(w.phi);
-    w.dragX = w.footX; w.footX = nf;
-    w.thd *= Math.pow(Math.max(0, Math.cos(w.th + w.phi)), 0.3);
-    w.th = -Math.asin(Math.max(-1, Math.min(1, (nf - h[0]) / L)));
-    w.phi = Math.asin(Math.max(-1, Math.min(1, (w.dragX - h[0]) / L)));
-    w.steps++; w.stance = 1 - w.stance; w.swing = false;
-    noiseHit(0.06, 260, 0.25, 1.2); tone(90, 0.08, 0.12, "sine", 60);
-  }
   function walkStep(dt) {
-    var w = wk;
-    if (!w.started || w.broken) return;
-    var h0 = hipOf(w);
-    if (w.fall) {
-      /* 倒れる：全体が足先を支点に倒れ、スマホが地面に当たったら割れる */
-      w.fallAd += (G / (L + PH * 0.5)) * Math.sin(w.fallA + w.th) * dt * 1.2;
-      w.fallA += w.fallAd * dt;
-      var tip = Math.abs(w.th + w.fallA);
-      if (tip > 1.45) breakPhone();
-      return;
+    var w = wk, p = w.p, q = w.q, m = w.m, i, k;
+    if (!w.started) return;
+    w.t += dt;
+    var swingT = w.t - w.tapT, dt2 = dt * dt, F = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]];
+    var live = !w.broken;      /* 割れたら力が抜ける */
+    function torque(j, a, b, tau) {   /* j を軸に、b 側を時計回り（正）、a 側を反時計回りに回す */
+      var dxa = p[a][0] - p[j][0], dya = p[a][1] - p[j][1], la = dxa * dxa + dya * dya;
+      var dxb = p[b][0] - p[j][0], dyb = p[b][1] - p[j][1], lb = dxb * dxb + dyb * dyb;
+      var fb = [tau * dyb / lb, -tau * dxb / lb], fa = [-tau * dya / la, tau * dxa / la];
+      F[b][0] += fb[0]; F[b][1] += fb[1]; F[a][0] += fa[0]; F[a][1] += fa[1];
+      F[j][0] -= fa[0] + fb[0]; F[j][1] -= fa[1] + fb[1];
     }
-    w.thd += (G / L) * Math.sin(w.th) * dt;
-    w.th += w.thd * dt;
-    var h = hipOf(w);
-    if (w.swing) {
-      /* 振り出す脚：狙いの角度へ */
-      w.phi += Math.max(-P.rate * dt, Math.min(P.rate * dt, P.reach - w.phi));
-      w.prog = Math.min(1, w.prog + dt * 3.4);
-      var ready = w.phi >= P.reach - 1e-3;
-      if (ready && (w.th >= w.phi || w.thd <= 0.05)) {
-        strike(w, h);
+    var phA = angUp(p[0], p[1]), phA0 = angUp(q[0], q[1]);
+    /* 最後のタップから間が空くと、手助けも筋肉も抜けていく（止まると倒れる） */
+    var fade = Math.max(0, Math.min(1, (P.idle - swingT) / 0.4)), mf = 0.25 + 0.75 * fade;
+    if (live) {
+      for (k = 0; k < 2; k++) {
+        var front = k === w.front, swing = front && swingT < P.swingTime;
+        var rel = wrapA(angDn(p[0], p[2 + k]) + phA), rel0 = wrapA(angDn(q[0], q[2 + k]) + phA0);
+        var tau = P.kHip * wrapA(rel - (front ? P.hipF : -P.hipB)) + P.dHip * (rel - rel0) / dt;
+        torque(0, 1, 2 + k, Math.max(-P.maxHip, Math.min(P.maxHip, tau)) * mf);
+        var kn = wrapA(angDn(p[2 + k], p[4 + k]) - angDn(p[0], p[2 + k])), kn0 = wrapA(angDn(q[2 + k], q[4 + k]) - angDn(q[0], q[2 + k]));
+        var kt = P.kKnee * wrapA(kn - (swing ? -P.kneeSwing : -0.03)) + P.dKnee * (kn - kn0) / dt;
+        torque(2 + k, 0, 4 + k, Math.max(-P.maxKnee, Math.min(P.maxKnee, kt)) * mf);
       }
-    } else if (w.thd < 0 && w.phi < 0 && w.th <= w.phi) {
-      /* 後ろへ揺り戻した：後ろの足が受け止める */
-      var of = w.footX; w.footX = w.dragX; w.dragX = of;
-      w.thd *= Math.pow(Math.max(0, Math.cos(w.th + w.phi)), 0.3) * 0.5;
-      w.th = Math.asin(Math.max(-1, Math.min(1, (h[0] - w.footX) / L)));
-      w.phi = Math.asin(Math.max(-1, Math.min(1, (w.dragX - h[0]) / L)));
-      w.stance = 1 - w.stance;
-      noiseHit(0.05, 260, 0.15, 1.2);
-    } else {
-      /* 後ろに残った足は地面に着けたまま。届かなくなったら引きずる */
-      var d = Math.sqrt(Math.max(0, L * L - h[1] * h[1]));
-      if (h[0] - w.dragX > d) w.dragX = h[0] - d;
-      if (w.dragX - h[0] > d) w.dragX = h[0] + d;
-      w.phi = Math.asin(Math.max(-1, Math.min(1, (w.dragX - h[0]) / L)));
+      /* スマホを起こす弱い手助け（最後のタップから少しの間だけ） */
+      var ut = -P.kUp * (phA - P.leanT) - P.dUp * (phA - phA0) / dt;
+      var mu = P.maxUp * Math.max(0.1, 1 - w.steps / P.tire);   /* 歩くほど手助けが弱まる */
+      ut = Math.max(-mu, Math.min(mu, ut)) * fade;
+      F[1][0] += ut / PH;
     }
-    if (w.th > P.limF || w.th < P.limB) { w.fall = w.th > 0 ? 1 : -1; w.fallAd = w.thd * 0.5; }
-    /* スマホは腰の上で、腰の動きに少し揺れる */
-    var vx = (h[0] - h0[0]) / dt, ax = Math.max(-30, Math.min(30, (vx - w.hvx) / dt));
-    w.hvx = vx;
-    w.leand += (-60 * w.lean - 9 * w.leand - ax * 0.25) * dt;
-    w.lean += w.leand * dt;
+    for (i = 0; i < 6; i++) {
+      var vx = (p[i][0] - q[i][0]) * P.damp, vy = (p[i][1] - q[i][1]) * P.damp;
+      q[i][0] = p[i][0]; q[i][1] = p[i][1];
+      p[i][0] += vx + F[i][0] / m[i] * dt2; p[i][1] += vy + (F[i][1] / m[i] - G) * dt2;
+    }
+    var LINKS = [[0, 1, PH], [0, 2, THIGH], [0, 3, THIGH], [2, 4, SHIN], [3, 5, SHIN]];
+    for (var it = 0; it < P.iters; it++) {
+      for (var c = 0; c < LINKS.length; c++) {
+        var A = p[LINKS[c][0]], B = p[LINKS[c][1]], wa = 1 / m[LINKS[c][0]], wb = 1 / m[LINKS[c][1]];
+        var dx = B[0] - A[0], dy = B[1] - A[1], d = Math.sqrt(dx * dx + dy * dy) || 1e-6, e = (d - LINKS[c][2]) / d / (wa + wb);
+        A[0] += dx * e * wa; A[1] += dy * e * wa; B[0] -= dx * e * wb; B[1] -= dy * e * wb;
+      }
+      for (i = 0; i < 6; i++) {
+        var r = i >= 4 ? FOOT_R : 0.04;
+        if (p[i][1] < r) { p[i][1] = r; p[i][0] -= (p[i][0] - q[i][0]) * P.fric; }
+      }
+    }
+    /* 足が着いた音 */
+    for (k = 0; k < 2; k++) {
+      var g = p[4 + k][1] < FOOT_R + 0.01;
+      if (g && !w.ground[k] && live) { noiseHit(0.06, 260, 0.25, 1.2); tone(90, 0.08, 0.12, "sine", 60); }
+      w.ground[k] = g;
+    }
+    if (live && p[1][1] < 0.25) breakPhone();
   }
+  function hipOf(w) { return w.p[0]; }
+
   var shards = [];
   function breakPhone() {
     var w = wk;
@@ -230,10 +222,10 @@
     w.broken = true; w.brokeT = T; held = false;
     noiseHit(0.45, 4000, 0.5, 0.8); noiseHit(0.2, 1800, 0.4, 1.2); noiseHit(0.15, 300, 0.4, 1);
     tone(2800, 0.3, 0.05, "sine", 2100); tone(3900, 0.22, 0.04, "sine", 3000, 0.03);
-    var h = hipOf(w), dir = w.fall > 0 ? 1 : -1;
+    var top = w.p[1], dir = top[0] > w.p[0][0] ? 1 : -1;
     shards = [];
     for (var i = 0; i < 24; i++) {
-      shards.push({ x: h[0] + dir * PH * 0.9, y: 0.1, z: 0.1 + Math.random() * 0.3,
+      shards.push({ x: (top[0] + w.p[0][0]) / 2 + dir * 0.3, y: 0.1, z: 0.1 + Math.random() * 0.3,
         vx: dir * Math.random() * 2, vy: 1 + Math.random() * 2.2, vz: (Math.random() - 0.2) * 2.5,
         r: Math.random() * 6, vr: (Math.random() - 0.5) * 20, s: 0.03 + Math.random() * 0.06 });
     }
@@ -285,7 +277,7 @@
       return;
     }
     held = true;
-    stepLeg(nextLeg());   /* どこを押しても左右交互に出す */
+    stepLeg();   /* どこを押しても左右交互に出す */
   }
   function move(x, y) {
     if (state !== S.PLAY || !held) return;
@@ -313,8 +305,8 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (state !== S.PLAY) return;
-    if (n === 1) { if (!wk.started) stepLeg(0); wk.fall = 1; wk.fallAd = 1; }  /* 前へ倒れて割れる */
-    if (n === 2) { wk.footX += 100; wk.dragX += 100; }                    /* 10m先へ */
+    if (n === 1) { if (!wk.started) stepLeg(); wk.q[1][0] -= 0.015; wk.tapT = -9; }   /* スマホを前へ突き飛ばして割る */
+    if (n === 2) { for (var i = 0; i < 6; i++) { wk.p[i][0] += 100; wk.q[i][0] += 100; } }   /* 10m先へ */
   }
 
   window.addEventListener("keydown", function (e) {
@@ -329,7 +321,7 @@
     if (esc) { if (!e.repeat) newRound(); return; }
     if (left || right) {
       if (state !== S.PLAY) return;
-      if (!e.repeat) { audioOn(); stepLeg(nextLeg()); }
+      if (!e.repeat) { audioOn(); stepLeg(); }
       return;
     }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
@@ -360,15 +352,8 @@
 
   /* 立体へ渡す形：腰・左右の足先・スマホの傾き・破片 */
   function viewState() {
-    var w = wk, h = hipOf(w);
-    var st = [w.footX, 0];
-    var sw = [h[0] + L * Math.sin(w.phi), Math.max(0, h[1] - L * Math.cos(w.phi))];
-    if (w.swing) sw[1] += 0.16 * Math.sin(Math.PI * w.prog);   /* 振り出す足は膝を曲げて上げる */
-    var feet = w.stance === 0 ? [st, sw] : [sw, st];
-    return {
-      t: T || 0, state: state, hip: h, lean: w.lean, fallA: w.fall ? w.fallA + (w.th - Math.max(P.limB, Math.min(P.limF, w.th))) : 0,
-      fall: w.fall, th: w.th, feet: feet, stance: w.stance, broken: w.broken, shards: shards, intro: state === S.INTRO
-    };
+    var w = wk;
+    return { t: T || 0, state: state, pts: w.p, broken: w.broken, shards: shards, intro: state === S.INTRO };
   }
 
   /* 立体の場面。three.js が使えないときは平面の絵のまま */
@@ -434,9 +419,8 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { var h = hipOf(wk); return { state: state, score: score, W: W, H: H, x: h[0], y: h[1], th: wk.th, thd: wk.thd, phi: wk.phi, steps: wk.steps, broken: wk.broken, fall: wk.fall, stance: wk.stance, swing: wk.swing }; },
-    leg: function (k) { stepLeg(k); },
-    tap: function () { stepLeg(nextLeg()); },
+    now: function () { var h = hipOf(wk); return { state: state, score: score, W: W, H: H, x: h[0], y: h[1], phone: phoneAngle(wk), steps: wk.steps, broken: wk.broken }; },
+    tap: function () { stepLeg(); },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };

@@ -43,7 +43,7 @@
     sc.fog = new T.Fog(0xcfd8e0, 14, 34);
     this.lights = Z3.lights(sc, { shadows: true, shadowSize: 6 });
     sc.add(this.lights.key.target);
-    this.camX = null; this.lastT = 0;
+    this.camX = null; this.camGoal = 0; this.camV = 0; this.lastT = 0;
 
     /* 床（板張り）。カメラについて動かし、模様だけずらす */
     /* 板は進む向きと直角に並べる（継ぎ目が流れて、進んでいるのが分かるように） */
@@ -65,8 +65,8 @@
     });
     wood.wrapS = wood.wrapT = T.RepeatWrapping; wood.repeat.set(2, 1);
     this.wood = wood;
-    var floor = this.floor = new T.Mesh(new T.PlaneGeometry(26, 14), Z3.std(0xffffff, { map: wood, roughness: 0.65 }));
-    floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.position.z = -3;
+    var floor = this.floor = new T.Mesh(new T.PlaneGeometry(30, 17), Z3.std(0xffffff, { map: wood, roughness: 0.65 }));
+    floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.position.z = -2;
     sc.add(floor);
 
     /* 奥の壁と幅木（進んだ感じを出す縦の継ぎ目） */
@@ -93,7 +93,7 @@
 
   GameScene.prototype.buildPhone = function () {
     var sc = this.scene;
-    /* 倒れるときは立っている足を中心に全体を回す */
+    /* 体全体の入れ物 */
     var pivot = this.pivot = new T.Group(); sc.add(pivot);
     var body = this.body = new T.Group(); pivot.add(body);
 
@@ -155,45 +155,34 @@
   GameScene.prototype.reset = function () {};
 
   GameScene.prototype.sync = function (s) {
-    var hip = s.hip, x = hip[0];
-    var piv = s.feet[s.stance || 0];
-    var fa = Math.max(-1.52, Math.min(1.52, (s.th || 0) + (s.fallA || 0))) - (s.th || 0);
-    if (!s.fall) fa = 0;
-    /* 倒れたらスマホの落ちた所を追う */
-    x += Math.sin(Math.max(-1.52, Math.min(1.52, (s.th || 0) + fa))) * 1.4 - (s.fall ? Math.sin(s.th || 0) * 1.4 : 0);
-    /* カメラはなめらかに追う（足を着くたびのガクつきを消す）。時間は実時間で */
+    var P = s.pts, hip = P[0], top = P[1];
+    var mid = (hip[0] + top[0]) / 2;
+    /* カメラ：ゆるいばねでなめらかに追う（一歩ごとの腰の揺れは拾わない） */
     var dt = Math.max(0, Math.min(0.1, (s.t || 0) - this.lastT)); this.lastT = s.t || 0;
-    if (this.camX == null || s.intro || dt === 0 && Math.abs(this.camX - x) > 3) this.camX = x;
-    this.camX += (x - this.camX) * (1 - Math.exp(-dt * 8));
-    x = this.camX;
+    if (this.camX == null || s.intro || dt === 0 && Math.abs(this.camX - mid) > 3) { this.camX = this.camGoal = mid; this.camV = 0; }
+    this.camGoal = mid;
+    var kc = 9;
+    this.camV += (kc * (this.camGoal - this.camX) - 2 * Math.sqrt(kc) * this.camV) * dt;
+    this.camX += this.camV * dt;
+    var x = this.camX;
     this.lights.key.position.set(x - 4, 8, 6); this.lights.key.target.position.set(x, 0, 0);
-    this.camera.position.set(x + 4.6, 2.3, 7.4);
-    this.camera.lookAt(x + 0.6, 1.15, 0);
+    this.camera.position.set(x + 4.0, 2.5, 8.4);
+    this.camera.lookAt(x + 0.1, 1.15, 0);
     this.floor.position.x = x; this.wood.offset.x = x / 13;
     this.wall.position.x = x; this.wallTex.offset.x = x / 5.2;
 
-    /* 倒れ：立っている足を中心に回す */
-    this.pivot.position.set(piv[0], 0, 0);
-    this.body.position.set(-piv[0], 0, 0);
-    this.pivot.rotation.z = -fa;
-
+    /* スマホ：腰から上の端へ向ける。前に倒れるときは半回転して、割れた画面が上を向いて落ちる */
+    var a = Math.atan2(top[0] - hip[0], top[1] - hip[1]);
     this.tilt.position.set(hip[0], hip[1], 0);
-    this.tilt.rotation.z = -(s.lean || 0);
-    /* 前に倒れるときは半回転して、画面を上にして落ちる（割れた画面が見えるように） */
-    this.tilt.rotation.y = fa > 0 ? Math.PI * Math.min(1, fa / 1.2) : 0;
+    this.tilt.rotation.set(0, a > 0.5 ? Math.PI * Math.min(1, (a - 0.5) / 0.9) : 0, -a);
 
     for (var i = 0; i < 2; i++) {
-      var lg = this.legs[i], f = s.feet[i], z = lg.z;
-      var dx = f[0] - hip[0], dy = f[1] + ANK - hip[1];
-      var d = Math.sqrt(dx * dx + dy * dy), dd = Math.min(d, (THIGH + SHIN) * 0.999);
-      var ux = dx / d, uy = dy / d, half = dd / 2, k = Math.sqrt(Math.max(0, THIGH * THIGH - half * half));
-      var knee = [hip[0] + ux * half - uy * k, hip[1] + uy * half + ux * k];
-      var ankle = [hip[0] + ux * dd, hip[1] + uy * dd];
+      var lg = this.legs[i], knee = P[2 + i], ankle = P[4 + i], z = lg.z;
       bone(lg.thigh, hip, knee, z);
       bone(lg.shin, knee, ankle, z);
       lg.knee.position.set(knee[0], knee[1], z);
-      lg.sock.position.set(ankle[0], ankle[1] + 0.02, z);
-      lg.foot.position.set(ankle[0], Math.max(0, ankle[1] - ANK), z);
+      lg.sock.position.set(ankle[0], ankle[1] + 0.03, z);
+      lg.foot.position.set(ankle[0], Math.max(0, ankle[1] - 0.06), z);
     }
     this.screen.material = s.broken ? this.crackMat : this.screenMat;
 
