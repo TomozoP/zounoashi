@@ -122,39 +122,85 @@
       }
       for (var r = 22; r < 160; r += 34) { g.beginPath(); g.arc(cx, cy, r, 0, 6.283); g.stroke(); }
     });
-    var frameMat = Z3.std(0x2a2c31, { roughness: 0.3, metalness: 0.6 });
-    this.screenMat = new T.MeshStandardMaterial({ map: screenTex, roughness: 0.15, emissive: 0xffffff, emissiveMap: screenTex, emissiveIntensity: 0.35 });
+    this.screenMat = new T.MeshStandardMaterial({ map: screenTex, roughness: 0.12, emissive: 0xffffff, emissiveMap: screenTex, emissiveIntensity: 0.35 });
     this.crackMat = new T.MeshStandardMaterial({ map: crackTex, roughness: 0.2 });
-    var phone = this.phone = new T.Mesh(new T.BoxGeometry(PD, PH, PW), frameMat);
+    /* 本体：角の丸い板に、縁の丸み（面取り）。外枠は金属、背面はつや消しのガラス */
+    var R = 0.11, BV = 0.02, D = PD - BV * 2;
+    function rounded(w, h, r) {
+      var sh = new T.Shape(), x = -w / 2, y = -h / 2;
+      sh.moveTo(x + r, y); sh.lineTo(x + w - r, y); sh.quadraticCurveTo(x + w, y, x + w, y + r);
+      sh.lineTo(x + w, y + h - r); sh.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      sh.lineTo(x + r, y + h); sh.quadraticCurveTo(x, y + h, x, y + h - r);
+      sh.lineTo(x, y + r); sh.quadraticCurveTo(x, y, x + r, y);
+      return sh;
+    }
+    function flat(w, h, r, mat, x) {   /* +x を向いた角丸の板。絵が全面に貼れるよう UV を 0〜1 にする */
+      var g = new T.ShapeGeometry(rounded(w, h, r), 6), uv = g.attributes.uv, pos = g.attributes.position;
+      for (var i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / w + 0.5, pos.getY(i) / h + 0.5);
+      g.rotateY(Math.PI / 2);
+      var m = new T.Mesh(g, mat); m.position.x = x; return m;
+    }
+    var bodyGeo = new T.ExtrudeGeometry(rounded(PW - BV * 2, PH - BV * 2, R), { depth: D, bevelEnabled: true, bevelThickness: BV, bevelSize: BV, bevelSegments: 3, curveSegments: 8 });
+    bodyGeo.translate(0, 0, -D / 2); bodyGeo.rotateY(Math.PI / 2);
+    var frameMat = Z3.std(0x9aa0a8, { roughness: 0.25, metalness: 0.85 });
+    var phone = this.phone = new T.Mesh(bodyGeo, frameMat);
     phone.position.y = PH / 2 + 0.03; phone.castShadow = true;
-    var scr = this.screen = new T.Mesh(new T.PlaneGeometry(PW * 0.9, PH * 0.94), this.screenMat);
-    scr.rotation.y = Math.PI / 2; scr.position.x = PD / 2 + 0.002;
+    var glass = new T.MeshStandardMaterial({ color: 0x0b0c0f, roughness: 0.08, metalness: 0.2 });
+    phone.add(flat(PW - 0.03, PH - 0.03, R, glass, PD / 2 + 0.001));                    /* 表の黒いガラス（縁） */
+    var scr = this.screen = flat(PW - 0.08, PH - 0.08, R - 0.03, this.screenMat, PD / 2 + 0.003);
     phone.add(scr);
-    /* 背面 */
-    this.backMat = Z3.std(0x3a3d44, { roughness: 0.4, metalness: 0.3 });
-    var back = this.back = new T.Mesh(new T.PlaneGeometry(PW * 0.9, PH * 0.94), this.backMat);
-    back.rotation.y = -Math.PI / 2; back.position.x = -PD / 2 - 0.002;
-    phone.add(back);
+    var island = new T.Mesh(new T.CapsuleGeometry(0.022, 0.09, 4, 8), glass);            /* 画面上の黒い切り欠き */
+    island.rotation.x = Math.PI / 2; island.position.set(PD / 2 + 0.005, PH / 2 - 0.09, 0); island.scale.set(1, 1, 0.5);
+    phone.add(island);
+    this.backMat = Z3.std(0x4a5260, { roughness: 0.45, metalness: 0.2 });
+    var back = flat(PW - 0.03, PH - 0.03, R, this.backMat, 0);
+    back.rotation.y = Math.PI; back.position.x = -PD / 2 - 0.001; phone.add(back);
+    /* 背面のカメラ：角丸の台にレンズ3つ */
+    var bump = new T.Mesh(new T.ExtrudeGeometry(rounded(0.3, 0.3, 0.07), { depth: 0.012, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 6 }), this.backMat);
+    bump.geometry.rotateY(-Math.PI / 2); bump.position.set(-PD / 2, PH / 2 - 0.2, -PW / 2 + 0.2); phone.add(bump);
+    var lensRing = Z3.std(0x8a9098, { roughness: 0.2, metalness: 0.9 }), lensGlass = new T.MeshStandardMaterial({ color: 0x05070a, roughness: 0.05, metalness: 0.5 });
+    [[0.065, 0.065], [-0.065, 0.065], [0.065, -0.065]].forEach(function (o) {
+      var ring = new T.Mesh(new T.CylinderGeometry(0.048, 0.05, 0.02, 16), lensRing);
+      ring.rotation.z = Math.PI / 2; ring.position.set(-PD / 2 - 0.025, PH / 2 - 0.2 + o[1], -PW / 2 + 0.2 + o[0]); phone.add(ring);
+      var lens = new T.Mesh(new T.CircleGeometry(0.034, 16), lensGlass);
+      lens.rotation.y = -Math.PI / 2; lens.position.set(-PD / 2 - 0.036, ring.position.y, ring.position.z); phone.add(lens);
+    });
+    /* 横のボタン（音量2つと電源） */
+    [[PH / 2 - 0.32, 0.12, -1], [PH / 2 - 0.48, 0.12, -1], [PH / 2 - 0.38, 0.2, 1]].forEach(function (o) {
+      var bt = new T.Mesh(new T.CapsuleGeometry(0.012, o[1], 3, 6), frameMat);
+      bt.position.set(0, o[0], o[2] * (PW / 2 + 0.004)); phone.add(bt);
+    });
     var tilt = this.tilt = new T.Group(); body.add(tilt);
     tilt.add(phone);
 
-    /* 脚：太もも・すね・ひざ・靴下・靴 */
-    var skin = Z3.std(0xe3b08c, { roughness: 0.7 });
+    /* 脚：回転体で太さを変える（太ももは付け根が太く膝へ細く、すねはふくらはぎでふくらみ足首で締まる） */
+    var skin = new T.MeshStandardMaterial({ color: 0xe6b48f, roughness: 0.62 });
     var sock = Z3.std(0xf4f4f0, { roughness: 0.9 });
-    var shoe = Z3.std(0x2d3a52, { roughness: 0.6 });
+    var shoe = Z3.std(0x2d3a52, { roughness: 0.55 });
     var sole = Z3.std(0xf2f2f2, { roughness: 0.8 });
+    var lace = Z3.std(0xffffff, { roughness: 0.8 });
+    function limb(len, prof) {   /* prof: [下からの割合, 太さ] の並び。+y の端が先（膝・足首） */
+      var pts = prof.map(function (q) { return new T.Vector2(q[1], -len / 2 + q[0] * len); });
+      return new T.LatheGeometry(pts, 14);
+    }
+    var thighGeo = limb(THIGH + 0.04, [[0, 0], [0.02, 0.1], [0.2, 0.112], [0.5, 0.1], [0.8, 0.08], [0.96, 0.068], [1, 0]]);
+    var shinGeo = limb(SHIN, [[0, 0], [0.03, 0.068], [0.18, 0.075], [0.35, 0.078], [0.6, 0.06], [0.85, 0.045], [0.97, 0.043], [1, 0]]);
     this.legs = [];
     for (var i = 0; i < 2; i++) {
       var leg = {};
-      leg.thigh = new T.Mesh(new T.CapsuleGeometry(0.085, THIGH, 6, 12), skin);
-      leg.shin = new T.Mesh(new T.CapsuleGeometry(0.065, SHIN - 0.02, 6, 12), skin);
-      leg.knee = new T.Mesh(new T.SphereGeometry(0.075, 12, 10), skin);
-      leg.sock = new T.Mesh(new T.CylinderGeometry(0.07, 0.07, 0.14, 12), sock);
+      leg.thigh = new T.Mesh(thighGeo, skin);
+      leg.shin = new T.Mesh(shinGeo, skin);
+      leg.knee = new T.Mesh(new T.SphereGeometry(0.068, 12, 10), skin);   /* 膝のお皿 */
+      leg.knee.scale.set(1, 1.1, 0.95);
+      leg.sock = new T.Mesh(new T.CylinderGeometry(0.05, 0.047, 0.1, 12), sock);
       leg.foot = new T.Group();
-      var up = new T.Mesh(new T.BoxGeometry(0.3, 0.07, 0.14), shoe); up.position.set(0.07, 0.055, 0);
-      var bt = new T.Mesh(new T.BoxGeometry(0.33, 0.03, 0.15), sole); bt.position.set(0.07, 0.015, 0);
-      leg.foot.add(up); leg.foot.add(bt);
-      [leg.thigh, leg.shin, leg.knee, leg.sock, up, bt].forEach(function (m) { m.castShadow = true; });
+      /* スニーカー：平たい底、丸いつま先、かかと、ひも */
+      var sl = new T.Mesh(new T.CapsuleGeometry(0.028, 0.27, 4, 10), sole); sl.rotation.z = Math.PI / 2; sl.scale.set(1, 1, 2.6); sl.position.set(0.06, 0.028, 0);
+      var up = new T.Mesh(new T.SphereGeometry(1, 14, 10), shoe); up.scale.set(0.16, 0.065, 0.068); up.position.set(0.07, 0.07, 0);
+      var heel = new T.Mesh(new T.SphereGeometry(1, 10, 8), shoe); heel.scale.set(0.07, 0.07, 0.066); heel.position.set(-0.03, 0.08, 0);
+      var tie = new T.Mesh(new T.BoxGeometry(0.09, 0.012, 0.06), lace); tie.position.set(0.1, 0.128, 0); tie.rotation.z = -0.35;
+      [sl, up, heel, tie].forEach(function (m) { m.castShadow = true; leg.foot.add(m); });
+      [leg.thigh, leg.shin, leg.knee, leg.sock].forEach(function (m) { m.castShadow = true; });
       body.add(leg.thigh); body.add(leg.shin); body.add(leg.knee); body.add(leg.sock); body.add(leg.foot);
       leg.z = i === 0 ? HIPZ : -HIPZ;     /* 左脚は手前 */
       this.legs.push(leg);
@@ -199,8 +245,9 @@
       var lg = this.legs[i], knee = P[2 + i], ankle = P[4 + i], z = lg.z;
       bone(lg.thigh, hip, knee, z);
       bone(lg.shin, knee, ankle, z);
-      lg.knee.position.set(knee[0], knee[1], z);
-      lg.sock.position.set(ankle[0], ankle[1] + 0.03, z);
+      var kd = Math.atan2(knee[1] - hip[1], knee[0] - hip[0]);
+      lg.knee.position.set(knee[0] + 0.02 * Math.cos(kd + Math.PI / 2), knee[1] + 0.02 * Math.sin(kd + Math.PI / 2), z);
+      lg.sock.position.set(ankle[0], ankle[1] + 0.05, z);
       lg.foot.position.set(ankle[0], Math.max(0, ankle[1] - 0.06), z);
     }
     this.screen.material = s.broken ? this.crackMat : this.screenMat;
