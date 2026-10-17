@@ -86,11 +86,13 @@
     var checker = canvasTex(64, 512, function (g, w, h) {
       for (var y = 0; y < 16; y++) for (var x = 0; x < 2; x++) { g.fillStyle = (x + y) % 2 ? "#1b1b1f" : "#ffffff"; g.fillRect(x * 32, y * 32, 32, 32); }
     });
-    this.goalLine = new T.Mesh(new T.PlaneGeometry(0.3, 2.4), Z3.std(0xffffff, { map: checker, roughness: 0.7 }));
-    this.goalLine.rotation.x = -Math.PI / 2; this.goalLine.position.set(10, 0.004, 0); this.goalLine.receiveShadow = true;
+    checker.wrapS = checker.wrapT = T.RepeatWrapping; checker.repeat.set(1, 10 / 2.4);
+    /* 線は奥の壁から手前の床の端まで、横いっぱい */
+    this.goalLine = new T.Mesh(new T.PlaneGeometry(0.3, 10), Z3.std(0xffffff, { map: checker, roughness: 0.7 }));
+    this.goalLine.rotation.x = -Math.PI / 2; this.goalLine.position.set(10, 0.004, 1.5); this.goalLine.receiveShadow = true;
     sc.add(this.goalLine);
-    var startLine = new T.Mesh(new T.PlaneGeometry(0.08, 2.4), Z3.std(0xf4f4f0, { roughness: 0.7 }));
-    startLine.rotation.x = -Math.PI / 2; startLine.position.set(0, 0.004, 0); startLine.receiveShadow = true;
+    var startLine = new T.Mesh(new T.PlaneGeometry(0.08, 10), Z3.std(0xf4f4f0, { roughness: 0.7 }));
+    startLine.rotation.x = -Math.PI / 2; startLine.position.set(0, 0.004, 1.5); startLine.receiveShadow = true;
     sc.add(startLine);
     this.buildPhone();
     this.shardMeshes = [];
