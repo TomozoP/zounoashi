@@ -130,6 +130,11 @@
     var scr = this.screen = new T.Mesh(new T.PlaneGeometry(PW * 0.9, PH * 0.94), this.screenMat);
     scr.rotation.y = Math.PI / 2; scr.position.x = PD / 2 + 0.002;
     phone.add(scr);
+    /* 背面。割れたら背面にもひびを出す（うつぶせに倒れても割れたのが分かるように） */
+    this.backMat = Z3.std(0x3a3d44, { roughness: 0.4, metalness: 0.3 });
+    var back = this.back = new T.Mesh(new T.PlaneGeometry(PW * 0.9, PH * 0.94), this.backMat);
+    back.rotation.y = -Math.PI / 2; back.position.x = -PD / 2 - 0.002;
+    phone.add(back);
     var tilt = this.tilt = new T.Group(); body.add(tilt);
     tilt.add(phone);
 
@@ -174,8 +179,8 @@
     /* 進む速さをならして、その分だけ先を狙う（速く歩いても置いていかれない） */
     if (dt > 0) { var v = (mid - this.lastMid) / dt; this.camVel += (v - this.camVel) * (1 - Math.exp(-dt * 2)); }
     this.lastMid = mid;
-    var kc = 16;
-    this.camGoal = mid + this.camVel * 2 / Math.sqrt(kc);
+    var kc = 30;
+    this.camGoal = mid + (s.broken ? 0 : Math.max(0, Math.min(1, this.camVel * 2 / Math.sqrt(kc))));   /* 先を狙うのは前へ進むときだけ、少しまで */
     this.camV += (kc * (this.camGoal - this.camX) - 2 * Math.sqrt(kc) * this.camV) * dt;
     this.camX += this.camV * dt;
     var x = this.camX;
@@ -185,12 +190,10 @@
     this.floor.position.x = x; this.wood.offset.x = x / 13;
     this.wall.position.x = x; this.wallTex.offset.x = x / 5.2;
 
-    /* スマホ：腰から上の端へ向ける。前に倒れるときは半回転して、割れた画面が上を向いて落ちる */
+    /* スマホ：腰から上の端へ向ける（ねじらない） */
     var a = Math.atan2(top[0] - hip[0], top[1] - hip[1]);
     this.tilt.position.set(hip[0], hip[1], 0);
-    /* 地面に近づいたときだけ半回転させる（歩いている間に前へ傾いても、ねじれない） */
-    var low = Math.max(0, Math.min(1, (1.1 - top[1]) / 0.8));
-    this.tilt.rotation.set(0, a > 0.5 ? Math.PI * Math.min(1, (a - 0.5) / 0.9) * low : 0, -a);
+    this.tilt.rotation.set(0, 0, -a);
 
     for (var i = 0; i < 2; i++) {
       var lg = this.legs[i], knee = P[2 + i], ankle = P[4 + i], z = lg.z;
@@ -201,6 +204,7 @@
       lg.foot.position.set(ankle[0], Math.max(0, ankle[1] - 0.06), z);
     }
     this.screen.material = s.broken ? this.crackMat : this.screenMat;
+    this.back.material = s.broken ? this.crackMat : this.backMat;
 
     /* 破片 */
     while (this.shardMeshes.length < s.shards.length) {
