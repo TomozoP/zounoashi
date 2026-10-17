@@ -1,8 +1,8 @@
-/* スマホ歩き：10m（ゲームの中で100）先のゴールまでのタイム競争。
+/* 歩くスマホ：10m（ゲームの中で100）先のゴールまでのタイム競争。
    リズムよくタップすればゴールできる。止まると倒れる。 */
 var load = require("../harness");
 function run(gap, sec, jitter) {
-  var g = load(__dirname + "/../../_sumaho/index.html");
+  var g = load(__dirname + "/../../sumaho/index.html");
   g.probe.reset(); var next = 0;
   for (var i = 0; i < 60 * sec; i++) {
     if (i >= next && (gap || i === 0)) { g.probe.tap(0.3); next = i + (gap ? gap * (jitter ? 0.8 + Math.random() * 0.4 : 1) : 1e9); }

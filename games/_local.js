@@ -216,7 +216,32 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "星を結んで星座を見つけまくる"
   },
-  {"type":"lab","tags":[],"id":"koucha","title":"スカイダイビング紅茶","year":2026,"date":"2026-10-17","plays":null,"url":"","img":"games/_koucha/img/thumb.webp","play":"games/_koucha/index.html","full":true,"catch":"スカイダイビング紅茶"},
-  {"type":"lab","tags":[],"id":"megane","title":"メガネウォーク","year":2026,"date":"2026-10-17","plays":null,"url":"","img":"games/_megane/img/thumb.webp","play":"games/_megane/index.html","full":true,"catch":"メガネウォーク"},
-  {"type":"lab","tags":[],"id":"sumaho","title":"スマホ歩き","year":2026,"date":"2026-10-17","plays":null,"url":"","img":"games/_sumaho/img/thumb.webp","play":"games/_sumaho/index.html","full":true,"catch":"スマホ歩き"},
+  {
+    "type": "lab",
+    "tags": [],
+    "id": "koucha",
+    "title": "スカイダイビング紅茶",
+    "year": 2026,
+    "date": "2026-10-17",
+    "plays": null,
+    "url": "",
+    "img": "games/_koucha/img/thumb.webp",
+    "play": "games/_koucha/index.html",
+    "full": true,
+    "catch": "スカイダイビング紅茶"
+  },
+  {
+    "type": "lab",
+    "tags": [],
+    "id": "megane",
+    "title": "メガネウォーク",
+    "year": 2026,
+    "date": "2026-10-17",
+    "plays": null,
+    "url": "",
+    "img": "games/_megane/img/thumb.webp",
+    "play": "games/_megane/index.html",
+    "full": true,
+    "catch": "メガネウォーク"
+  }
 ];

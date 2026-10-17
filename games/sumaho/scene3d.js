@@ -1,4 +1,4 @@
-/* スマホ歩きの立体（three.js）。games/three-base.js の Z3 を土台にする。
+/* 歩くスマホの立体（three.js）。games/three-base.js の Z3 を土台にする。
    床の上を、人の脚が生えたスマホが歩く。動きはゲーム側（index.html）が決め、ここは見た目だけ。
    脚の長さが1。スマホは +x の向きに画面を向けて歩く。 */
 (function (global) {

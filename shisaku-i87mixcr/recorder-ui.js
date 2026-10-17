@@ -76,7 +76,7 @@
       ['横 960×540','960x540'],['横 1280×720','1280x720'],['横 1920×1080','1920x1080'],
       ['正方形 720×720','720x720']
     ],'size'));
-    panel.appendChild(row('画質',[['標準','4'],['高画質','8'],['最高画質','14']],'quality'));
+    panel.appendChild(row('画質',[['最高画質','14'],['高画質','8'],['標準','4']],'quality'));
     panel.appendChild(row('マイク',[['入れない','off'],['一緒に録る','on']],'microphone'));
     panel.appendChild(row('保存',[['動画にまとめる','combined'],['マイクを別ファイル','microphone'],['音声を別ファイル','audio']],'separate'));
     status = make('div','ゲーム画面と音を保存します');
@@ -168,7 +168,7 @@
       if(window.__recording&&window.__recording.frame)source=window.__recording.frame();
       var gameSize=window.__recording&&window.__recording.frame?null:window.__probe&&window.__probe.now?window.__probe.now():null;
       var sw=gameSize&&gameSize.W||source.width,sh=gameSize&&gameSize.H||source.height;
-      var scale=960/Math.max(sw,sh);
+      var scale=1920/Math.max(sw,sh);
       width=Math.max(2,Math.round(sw*scale/2)*2);height=Math.max(2,Math.round(sh*scale/2)*2);
     }else{
       var pair=size.split('x');width=Number(pair[0]);height=Number(pair[1]);
