@@ -139,13 +139,20 @@
   var P = { mHip: 1, mPhone: 1.5, damp: 0.999, iters: 6, hipF: 0.7, hipB: 0.45, kHip: 60, dHip: 4, maxHip: 120,
     kKnee: 40, dKnee: 3, maxKnee: 80, kneeSwing: 1.5, swingTime: 0.24, hipLift: 1.2, liftTime: 0.3, kUp: 32, dUp: 6, maxUp: 44, leanT: 0.12, idle: 1.2, tire: 1e9, kickTime: 0.12, hipKick: 1.3, fric: 0.9, kneeMax: 2.3, hipMax: 1.4, hipMin: 0.9 };
   var wk, GOAL = 100, cleared = false;
+  /* 道の途中の物（家にあるもの）。1/3の所に重ねた漫画の段差、2/3の所に寝かせた歯みがき粉の箱（蹴ると転がる） */
+  var STEP = { x0: 33, x1: 34.1, h: 0.26 }, BOX = { x: 66.5, s: 0.42, m: 0.3 };
   function newWalker() {
     var hy = FOOT_R + THIGH + SHIN;
     var p = [[0, hy], [0, hy + PH], [0.02, FOOT_R + SHIN], [0.02, FOOT_R + SHIN], [0, FOOT_R], [0, FOOT_R]];
     return {
       p: p, q: p.map(function (a) { return a.slice(); }), m: [P.mHip, P.mPhone, 0.25, 0.25, 0.2, 0.2],
+      box: boxPts(),
       front: 0, t: 0, tapT: -9, goalT: 0, goalAt: 0, started: false, broken: false, brokeT: 0, steps: 0, ground: [true, true], stepT: [0, 0]
     };
+  }
+  function boxPts() {
+    var x0 = BOX.x - BOX.s / 2, x1 = BOX.x + BOX.s / 2, c = [[x0, 0], [x1, 0], [x1, BOX.s], [x0, BOX.s]];
+    return { p: c, q: c.map(function (a) { return a.slice(); }) };
   }
   function angUp(a, b) { return Math.atan2(b[0] - a[0], b[1] - a[1]); }   /* 上向き0、前へ倒れると正 */
   function angDn(a, b) { return Math.atan2(b[0] - a[0], a[1] - b[1]); }   /* 下向き0、前へ出ると正 */
@@ -209,6 +216,12 @@
       q[i][0] = p[i][0]; q[i][1] = p[i][1];
       p[i][0] += vx + F[i][0] / m[i] * dt2; p[i][1] += vy + (F[i][1] / m[i] - G) * dt2;
     }
+    var bp = w.box.p, bq = w.box.q, bm = BOX.m / 4;
+    for (i = 0; i < 4; i++) {
+      var bvx = (bp[i][0] - bq[i][0]) * P.damp, bvy = (bp[i][1] - bq[i][1]) * P.damp;
+      bq[i][0] = bp[i][0]; bq[i][1] = bp[i][1];
+      bp[i][0] += bvx; bp[i][1] += bvy - G * dt2;
+    }
     var LINKS = [[0, 1, PH], [0, 2, THIGH], [0, 3, THIGH], [2, 4, SHIN], [3, 5, SHIN]];
     for (var it = 0; it < P.iters; it++) {
       for (var c = 0; c < LINKS.length; c++) {
@@ -231,7 +244,16 @@
       for (i = 0; i < 6; i++) {
         var r = i >= 4 ? FOOT_R : 0.04;
         if (p[i][1] < r) { p[i][1] = r; p[i][0] -= (p[i][0] - q[i][0]) * P.fric; }
+        hitStep(p[i], q[i], r);
+        hitBox(p[i], q[i], r, 1 / m[i], bp, 1 / bm);
       }
+      /* 箱：形を保つ（辺と対角線）、床に乗る */
+      var bs = BOX.s, bd = bs * Math.SQRT2, BL = [[0, 1, bs], [1, 2, bs], [2, 3, bs], [3, 0, bs], [0, 2, bd], [1, 3, bd]];
+      for (c = 0; c < BL.length; c++) {
+        var A2 = bp[BL[c][0]], B2 = bp[BL[c][1]], dx2 = B2[0] - A2[0], dy2 = B2[1] - A2[1], d2 = Math.sqrt(dx2 * dx2 + dy2 * dy2) || 1e-6, e2 = (d2 - BL[c][2]) / d2 / 2;
+        A2[0] += dx2 * e2; A2[1] += dy2 * e2; B2[0] -= dx2 * e2; B2[1] -= dy2 * e2;
+      }
+      for (i = 0; i < 4; i++) if (bp[i][1] < 0) { bp[i][1] = 0; bp[i][0] -= (bp[i][0] - bq[i][0]) * P.fric; }
     }
     /* 足が着いた音 */
     for (k = 0; k < 2; k++) {
@@ -242,6 +264,31 @@
     if (live && !w.goalT && p[1][1] < 0.25) breakPhone();   /* ゴールの後に転んでも割れない */
   }
   function hipOf(w) { return w.p[0]; }
+  /* 漫画の段差（動かない）。上に乗るか、横の面で止められる */
+  function hitStep(pt, pq, r) {
+    var a = STEP.x0 - r, b = STEP.x1 + r, h = STEP.h + r;
+    if (pt[0] <= a || pt[0] >= b || pt[1] >= h) return;
+    var up = h - pt[1], l = pt[0] - a, rr = b - pt[0];
+    if (up <= l && up <= rr) { pt[1] = h; pt[0] -= (pt[0] - pq[0]) * P.fric; }
+    else if (l < rr) pt[0] = a; else pt[0] = b;
+  }
+  /* 箱（四隅の点）。脚やスマホの点がめり込んだら、いちばん浅い面から押し戻し、箱の方も押す */
+  function hitBox(pt, pq, r, wp, c, wc) {
+    var best = -1e9, bj = -1, nx = 0, ny = 0;
+    for (var j = 0; j < 4; j++) {
+      var a = c[j], b = c[(j + 1) % 4], ex = b[0] - a[0], ey = b[1] - a[1], el = Math.sqrt(ex * ex + ey * ey) || 1e-6;
+      var ux = ey / el, uy = -ex / el, d = (pt[0] - a[0]) * ux + (pt[1] - a[1]) * uy - r;
+      if (d >= 0) return;
+      if (d > best) { best = d; bj = j; nx = ux; ny = uy; }
+    }
+    var A = c[bj], B = c[(bj + 1) % 4], fx = B[0] - A[0], fy = B[1] - A[1];
+    var t = Math.max(0, Math.min(1, ((pt[0] - A[0]) * fx + (pt[1] - A[1]) * fy) / (fx * fx + fy * fy)));
+    var lam = -best / (wp + wc * ((1 - t) * (1 - t) + t * t));
+    pt[0] += nx * lam * wp; pt[1] += ny * lam * wp;
+    A[0] -= nx * lam * wc * (1 - t); A[1] -= ny * lam * wc * (1 - t);
+    B[0] -= nx * lam * wc * t; B[1] -= ny * lam * wc * t;
+    if (ny > 0.7) pt[0] -= (pt[0] - pq[0]) * P.fric * 0.5;    /* 上に乗ったら少し滑りにくく */
+  }
 
   var shards = [];
   function breakPhone() {
@@ -338,7 +385,8 @@
   function debugKey(n) {
     if (state !== S.PLAY) return;
     if (n === 1) { if (!wk.started) stepLeg(); wk.holding = false; wk.q[1][0] -= 0.015; wk.tapT = -9; }   /* スマホを前へ突き飛ばして割る */
-    if (n === 2) { for (var i = 0; i < 6; i++) { wk.p[i][0] += GOAL - 8; wk.q[i][0] += GOAL - 8; } }   /* ゴールの手前へ */
+    var to = n === 2 ? GOAL - 8 : n === 3 ? STEP.x0 - 3 : n === 4 ? BOX.x - 3 : null;   /* 2:ゴール 3:漫画 4:箱 の手前へ */
+    if (to != null) { var dx = to - wk.p[0][0]; for (var i = 0; i < 6; i++) { wk.p[i][0] += dx; wk.q[i][0] += dx; } }
   }
 
   window.addEventListener("keydown", function (e) {
@@ -390,7 +438,7 @@
   /* 立体へ渡す形：腰・左右の足先・スマホの傾き・破片 */
   function viewState() {
     var w = wk;
-    return { t: T || 0, state: state, pts: w.p, goal: GOAL, broken: w.broken, shards: shards, intro: state === S.INTRO };
+    return { t: T || 0, state: state, pts: w.p, box: w.box.p, step: STEP, goal: GOAL, broken: w.broken, shards: shards, intro: state === S.INTRO };
   }
 
   /* 立体の場面。three.js が使えないときは平面の絵のまま */
@@ -472,7 +520,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { var h = hipOf(wk); return { state: state, score: score, W: W, H: H, x: h[0], y: h[1], phone: phoneAngle(wk), steps: wk.steps, broken: wk.broken, goalT: wk.goalT || 0, cleared: cleared }; },
+    now: function () { var h = hipOf(wk); return { state: state, score: score, W: W, H: H, x: h[0], y: h[1], phone: phoneAngle(wk), steps: wk.steps, broken: wk.broken, goalT: wk.goalT || 0, cleared: cleared, box: wk.box.p.map(function (c) { return c.map(function (v) { return +v.toFixed(2); }); }), feet: [wk.p[4].map(function (v) { return +v.toFixed(2); }), wk.p[5].map(function (v) { return +v.toFixed(2); })] }; },
     tap: function (hold) { stepLeg(); if (wk.holding) wk.autoRel = wk.t + (hold == null ? 0.15 : hold); },   /* hold 秒押して離す */
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }

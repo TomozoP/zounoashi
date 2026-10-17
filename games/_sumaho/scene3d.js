@@ -94,6 +94,7 @@
     var startLine = new T.Mesh(new T.PlaneGeometry(0.08, 10), Z3.std(0xf4f4f0, { roughness: 0.7 }));
     startLine.rotation.x = -Math.PI / 2; startLine.position.set(0, 0.004, 1.5); startLine.receiveShadow = true;
     sc.add(startLine);
+    this.buildProps();
     this.buildPhone();
     this.shardMeshes = [];
     var shardGeo = new T.BufferGeometry();
@@ -102,6 +103,36 @@
     this.shardGeo = shardGeo;
     this.shardMat = new T.MeshStandardMaterial({ color: 0xe8f4ff, roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.8, side: T.DoubleSide });
   }
+
+  /* 道の途中の物：重ねた漫画2冊（段差）と、寝かせた歯みがき粉の箱（蹴ると転がる） */
+  GameScene.prototype.buildProps = function () {
+    var sc = this.scene;
+    this.books = new T.Group(); sc.add(this.books);
+    var pages = Z3.std(0xf3eedf, { roughness: 0.9 });
+    var covers = [[0xd8473a, 0xf1d24a], [0x2f6fb5, 0xffffff]];
+    for (var i = 0; i < 2; i++) {
+      var cov = canvasTex(256, 384, function (g, w, h) {
+        g.fillStyle = "#" + covers[i][0].toString(16).padStart(6, "0"); g.fillRect(0, 0, w, h);
+        g.fillStyle = "#" + covers[i][1].toString(16).padStart(6, "0"); g.fillRect(0, h * 0.08, w, h * 0.16);
+        g.fillStyle = "rgba(255,255,255,.85)"; g.beginPath(); g.arc(w * 0.5, h * 0.6, w * 0.26, 0, Math.PI * 2); g.fill();
+        g.fillStyle = "rgba(0,0,0,.15)"; g.fillRect(0, h * 0.9, w, h * 0.1);
+      });
+      var cm = Z3.std(0xffffff, { map: cov, roughness: 0.6 }), sp = Z3.std(covers[i][0], { roughness: 0.6 });
+      /* 背の面だけ表紙の色、ほかの3面は紙の色 */
+      var b = new T.Mesh(new T.BoxGeometry(1.1, 0.13, 1.7), [pages, pages, cm, cm, sp, pages]);
+      b.position.set(0, 0.065 + i * 0.13, 0); b.rotation.y = i ? 0.06 : -0.03;
+      b.castShadow = b.receiveShadow = true; this.books.add(b);
+    }
+    var side = canvasTex(512, 128, function (g, w, h) {
+      g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
+      g.fillStyle = "#1f62c9"; g.fillRect(0, h * 0.62, w, h * 0.38);
+      g.fillStyle = "#e23b3b"; g.fillRect(0, h * 0.5, w, h * 0.12);
+      g.fillStyle = "#1f62c9"; g.beginPath(); g.ellipse(w * 0.3, h * 0.3, w * 0.12, h * 0.14, 0, 0, Math.PI * 2); g.fill();
+    });
+    var end = Z3.std(0xffffff, { roughness: 0.7 }), sm = Z3.std(0xffffff, { map: side, roughness: 0.55 });
+    this.box = new T.Mesh(new T.BoxGeometry(0.42, 0.42, 1.8), [end, end, sm, sm, sm, sm]);
+    this.box.castShadow = this.box.receiveShadow = true; sc.add(this.box);
+  };
 
   GameScene.prototype.buildPhone = function () {
     var sc = this.scene;
@@ -220,10 +251,15 @@
   GameScene.prototype.sync = function (s) {
     var P = s.pts, hip = P[0], top = P[1];
     if (s.goal != null) this.goalLine.position.x = s.goal;
+    if (s.step) this.books.position.x = (s.step.x0 + s.step.x1) / 2;
+    if (s.box) {
+      var c = s.box, bx = (c[0][0] + c[2][0]) / 2, by = (c[0][1] + c[2][1]) / 2;
+      this.box.position.set(bx, by, 0); this.box.rotation.set(0, 0, Math.atan2(c[1][1] - c[0][1], c[1][0] - c[0][0]));
+    }
     var mid = (hip[0] + top[0]) / 2;
     /* カメラ：ゆるいばねでなめらかに追う（一歩ごとの腰の揺れは拾わない） */
     var dt = Math.max(0, Math.min(0.1, (s.t || 0) - this.lastT)); this.lastT = s.t || 0;
-    if (this.camX == null || s.intro || dt === 0 && Math.abs(this.camX - mid) > 3) { this.camX = this.camGoal = this.lastMid = mid; this.camV = this.camVel = 0; }
+    if (this.camX == null || s.intro || Math.abs(this.camX - mid) > 3) { this.camX = this.camGoal = this.lastMid = mid; this.camV = this.camVel = 0; }
     /* 進む速さをならして、その分だけ先を狙う（速く歩いても置いていかれない） */
     if (dt > 0) { var v = (mid - this.lastMid) / dt; this.camVel += (v - this.camVel) * (1 - Math.exp(-dt * 2)); }
     this.lastMid = mid;
