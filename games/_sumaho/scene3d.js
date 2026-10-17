@@ -130,7 +130,7 @@
     var scr = this.screen = new T.Mesh(new T.PlaneGeometry(PW * 0.9, PH * 0.94), this.screenMat);
     scr.rotation.y = Math.PI / 2; scr.position.x = PD / 2 + 0.002;
     phone.add(scr);
-    /* 背面。割れたら背面にもひびを出す（うつぶせに倒れても割れたのが分かるように） */
+    /* 背面 */
     this.backMat = Z3.std(0x3a3d44, { roughness: 0.4, metalness: 0.3 });
     var back = this.back = new T.Mesh(new T.PlaneGeometry(PW * 0.9, PH * 0.94), this.backMat);
     back.rotation.y = -Math.PI / 2; back.position.x = -PD / 2 - 0.002;
@@ -204,7 +204,6 @@
       lg.foot.position.set(ankle[0], Math.max(0, ankle[1] - 0.06), z);
     }
     this.screen.material = s.broken ? this.crackMat : this.screenMat;
-    this.back.material = s.broken ? this.crackMat : this.backMat;
 
     /* 破片 */
     while (this.shardMeshes.length < s.shards.length) {
