@@ -48,18 +48,18 @@
     /* 床（板張り）。カメラについて動かし、模様だけずらす */
     /* 板は進む向きと直角に並べる（継ぎ目が流れて、進んでいるのが分かるように） */
     var wood = canvasTex(512, 512, function (g, w, h) {
-      var cols = ["#b98a5c", "#ad7f52", "#c29466", "#b3845a"];
+      var cols = ["#8f8a84", "#857f79", "#98938c", "#8a847d"];   /* 灰色寄りの木（肌色の脚が溶けないように） */
       for (var b = 0; b < 8; b++) {
         var x0 = b * w / 8;
         g.fillStyle = cols[b % cols.length]; g.fillRect(x0, 0, w / 8, h);
         for (var i = 0; i < 9; i++) {
           var x = x0 + Math.random() * w / 8, a = 0.05 + Math.random() * 0.1;
-          g.strokeStyle = "rgba(80,45,20," + a + ")"; g.lineWidth = 1 + Math.random() * 2;
+          g.strokeStyle = "rgba(40,36,32," + a + ")"; g.lineWidth = 1 + Math.random() * 2;
           g.beginPath(); g.moveTo(x, 0);
           for (var y = 0; y <= h; y += 32) g.lineTo(x + Math.sin(y * 0.02 + i + b) * 3, y);
           g.stroke();
         }
-        g.fillStyle = "rgba(60,30,10,.45)"; g.fillRect(x0, 0, 3, h);
+        g.fillStyle = "rgba(30,28,26,.45)"; g.fillRect(x0, 0, 3, h);
         g.fillRect(x0, (b * 0.37 % 1) * h, w / 8, 3);
       }
     });
