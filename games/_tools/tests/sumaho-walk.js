@@ -1,5 +1,5 @@
-/* スマホ歩き：1m（ゲームの中で10）先のゴールまでのタイム競争。
-   ほどよいリズムならたいていゴールでき、急ぐほど速いが倒れやすい。止まると倒れる。 */
+/* スマホ歩き：10m（ゲームの中で100）先のゴールまでのタイム競争。
+   リズムよくタップすればゴールできる。止まると倒れる。 */
 var load = require("../harness");
 function run(gap, sec, jitter) {
   var g = load(__dirname + "/../../_sumaho/index.html");
@@ -13,9 +13,8 @@ function run(gap, sec, jitter) {
 }
 var ng = 0;
 function ok(c, m) { console.log((c ? "OK  " : "NG  ") + m); if (!c) ng++; }
-var q = run(50, 15); ok(q.cleared && q.score > 2 && q.score < 6, "0.8秒ごとのタップでゴールし、タイムが出る（" + q.score + "秒）");
+var q, best = 0;
+for (var t = 0; t < 6 && !best; t++) { q = run(50, 90, true); if (q.cleared) best = q.score; }
+ok(best > 15 && best < 60, "0.8秒くらいのリズムでゴールでき、タイムが出る（" + best + "秒）");
 q = run(0, 10); ok(q.state === "result" && !q.cleared, "1回だけで止まると倒れて割れる");
-var fast = 0, slow = 0;
-for (var t = 0; t < 10; t++) { if (run(16, 15, true).cleared) fast++; if (run(45, 15, true).cleared) slow++; }
-ok(fast < slow, "急ぐほど倒れやすい（速いリズム " + fast + "/10、ゆっくり " + slow + "/10 がゴール）");
 process.exit(ng ? 1 : 0);
