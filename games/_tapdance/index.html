@@ -132,7 +132,7 @@
   function place() {
     MY1 = H - 140;
     if (notes) notes.forEach(function (n) {
-      var fp = footPos(n.t, n.foot, n.toe ? -26 : 0);
+      var fp = footPos(n.t, n.foot, n.toe ? 26 : 0);
       n.x = fp.x; n.y = fp.y; n.a = fp.a;
     });
   }
@@ -147,8 +147,8 @@
     var c = center(t);
     var a = Math.sin(t * 0.45 + 0.7) * 0.5;    /* 体の向きを少し回す */
     var side = foot === "L" ? -1 : 1;
-    var ox = side * 58, oy = (lift || 0);
-    return { x: c.x + ox * Math.cos(a) - oy * Math.sin(a), y: c.y + ox * Math.sin(a) + oy * Math.cos(a), a: a };
+    var ox = side * 72, oy = (lift || 0);
+    return { x: c.x + ox * Math.cos(a) - oy * Math.sin(a), y: c.y + ox * Math.sin(a) + oy * Math.cos(a), a: a + Math.PI };  /* つま先は手前（撮る側）へ */
   }
 
   /* 小節ごとの踏み方（1小節を8分割した位置。sは16分の半分ずらし） */
@@ -167,7 +167,7 @@
     for (var b = 0; b < BARS; b++) {
       barPattern(b).forEach(function (p) {
         var t = b * BAR + p[0] * BEAT / 2;
-        var lift = (p[0] % 2) ? -26 : 0;                   /* 裏拍はつま先側 */
+        var lift = (p[0] % 2) ? 26 : 0;                    /* 裏拍はつま先側（手前） */
         p[1].split("").forEach(function (f) {
           var fp = footPos(t, f, lift);
           out.push({ t: t, foot: f, x: fp.x, y: fp.y, a: fp.a, hit: 0, done: false, toe: !!(p[0] % 2) });
@@ -189,7 +189,7 @@
     score = 0; T = 0;
     combo = 0; maxCombo = 0; perfectN = goodN = missN = 0;
     notes = makeNotes();
-    scuffs = []; sparks = []; hits = [];
+    scuffs = []; sparks = []; hits = []; resetShoes();
     songT0 = AC ? AC.currentTime + 0.1 : 0;
     T = -0.1;
     schedUntil = 0;
@@ -304,6 +304,7 @@
       sparks.push({ x: x, y: y, vx: Math.cos(r) * v, vy: Math.sin(r) * v, life: 0.25 + Math.random() * 0.2, gold: good === 2 });
     }
     addScuff(n.x, n.y, n.a);
+    stomp(n.foot === "R" ? "R" : "L", n.x, n.y, n.a);
   }
   function addScuff(x, y, a) {
     scuffs.push({ x: x + (Math.random() - 0.5) * 10, y: y + (Math.random() - 0.5) * 10, a: a + (Math.random() - 0.5) * 0.6, l: 10 + Math.random() * 16 });
@@ -336,6 +337,8 @@
     if (x != null) {
       addScuff(x, y, Math.random() * 3);
       hits.push({ x: x, y: y, a: 0, foot: "", life: 0.2, good: 0 });
+      var f = Math.hypot(shoes.L.x - x, shoes.L.y - y) < Math.hypot(shoes.R.x - x, shoes.R.y - y) ? "L" : "R";
+      stomp(f, x, y, shoes[f].a);
     }
   }
   function move() {}
@@ -361,6 +364,9 @@
     if (n === 1 && state === S.PLAY) jumpTo(13 * BAR - 0.5);       /* 後半へ */
     if (n === 2 && state === S.PLAY) jumpTo(SONG_END - 0.2);        /* 結果へ */
     if (n === 3) autoPlay = !autoPlay;                               /* 自動で全部踏む */
+    if (n === 4) solid = !solid;                                     /* 立つ靴 ⇔ 平らな靴 */
+    if (n === 5) { EYE_H = Math.max(400, EYE_H - 200); }             /* 撮る角度を低く */
+    if (n === 6) { EYE_H = Math.min(4000, EYE_H + 200); }            /* 撮る角度を高く */
   }
 
   window.addEventListener("keydown", function (e) {
@@ -387,6 +393,101 @@
     else if (r < 1) { ja = "指2本でブロードウェイに立った"; en = "Two fingers made it to Broadway"; }
     else { ja = "指がタップダンスの神になった"; en = "My fingers became the god of tap dance"; }
     window.zResultActions.x({ text: zT(ja + "（" + score + "点）", en + " (" + score + " pts)") + zT(" #指タップダンス", " #FingerTapDance") });
+  }
+
+  /* ============ 立って見える靴 ============
+     スマホを机に置き、画面の下の辺の側から斜めに撮ると、靴が床から立って見えるように、
+     その目の位置から床へ投げた影の形で描く（だまし絵）。真上から見ると前へ引き伸びて見える。
+     目の位置は画面の下の辺から EYE_D 手前・EYE_H 上（どちらもゲーム座標。横540≒スマホの幅） */
+  var EYE_D = 1500, EYE_H = 1300, solid = true;
+  var SC = 1.35;                               /* 靴の大きさ */
+  var shoes;
+  function resetShoes() {
+    var l = footPos(0, "L", 0), r = footPos(0, "R", 0);
+    shoes = { L: { x: l.x, y: l.y, a: l.a, t: -9 }, R: { x: r.x, y: r.y, a: r.a, t: -9 } };
+  }
+  function stomp(foot, x, y, a) {
+    var s = shoes[foot];
+    s.x = x; s.y = y; s.a = a; s.t = T;
+  }
+  /* 床の上の点(x, y)と高さzを、画面の点へ */
+  function proj(x, y, z) {
+    var ex = W / 2, ey = H + EYE_D, k = EYE_H / (EYE_H - z);
+    return [ex + (x - ex) * k, ey + (y - ey) * k];
+  }
+  /* 靴底の輪郭。上がつま先（-y）。左右の足で内側をふくらませる */
+  var SOLE = (function () {
+    var pts = [], n = 28;
+    for (var i = 0; i < n; i++) {
+      var u = i / n * Math.PI * 2;
+      var y = -Math.cos(u) * 64;                       /* -64(つま先)〜64(かかと) */
+      var t = (y + 64) / 128;
+      var hw = 24 * Math.sqrt(Math.max(0, Math.sin(u) * Math.sin(u)));
+      hw *= t < 0.45 ? 1 : 1 - (t - 0.45) * 0.55;      /* かかとは細め */
+      pts.push([Math.sin(u) >= 0 ? hw : -hw, y, Math.sin(u) >= 0 ? 1 : -1]);
+    }
+    return pts;
+  })();
+  var SHOE_TOP = 46;
+  /* 高さzでの靴の輪切り。つま先は低く、足首の所が一番高い */
+  function sliceAt(z, foot) {
+    var front;
+    if (z <= 9) front = -64;
+    else if (z <= 26) front = -64 + (z - 9) * 1.4;
+    else front = -40 + (z - 26) * 2.6;
+    var back = z < 30 ? 64 : 64 - (z - 30) * 0.35;
+    var shrink = z <= 9 ? 1 : 0.93 - (z - 9) * 0.004;
+    var m = foot === "L" ? 1 : -1;
+    var out = [], n = 16, mid = (front + back) / 2, half = (back - front) / 2;
+    function hw(y) { var t = (y + 64) / 128; return 24 * (t < 0.45 ? 1 : 1 - (t - 0.45) * 0.55) * shrink; }
+    function cap(y) { var q = Math.abs((y - mid) / half); return Math.pow(Math.max(0, 1 - Math.pow(q, 3)), 1 / 3); }
+    for (var i = 0; i <= n; i++) { var y = front + (back - front) * i / n; out.push([hw(y) * cap(y) + m * 2, y]); }
+    for (i = n; i >= 0; i--) { y = front + (back - front) * i / n; out.push([-hw(y) * cap(y) + m * 2, y]); }
+    return out;
+  }
+  function drawSolidShoe(s, foot) {
+    var since = T - s.t, lift = since < 0.09 ? (1 - since / 0.09) * 26 : 0;
+    var ca = Math.cos(s.a), sa = Math.sin(s.a);
+    function world(px, py, z) { px *= SC; py *= SC; return proj(s.x + px * ca - py * sa, s.y + px * sa + py * ca, z * SC + lift); }
+    /* 床の影 */
+    ctx.save();
+    ctx.translate(s.x, s.y); ctx.rotate(s.a); ctx.scale(SC, SC);
+    ctx.fillStyle = "rgba(0,0,0," + (0.35 - lift * 0.006) + ")";
+    ctx.beginPath(); ctx.ellipse(0, 4, 30, 70, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    for (var z = 0; z <= SHOE_TOP; z += 1) {
+      var sl = sliceAt(z, foot);
+      ctx.beginPath();
+      sl.forEach(function (p, i) { var q = world(p[0], p[1], z); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+      ctx.closePath();
+      var c;
+      if (z <= 3) c = "#b9bcc2";                         /* 金具 */
+      else if (z <= 8) c = "#2a1d14";                    /* 靴底 */
+      else { var l = 6 + (z / SHOE_TOP) * 16; c = "hsl(220,8%," + l + "%)"; }
+      ctx.fillStyle = c; ctx.fill();
+    }
+    /* てっぺん：つやと履き口 */
+    var top = sliceAt(SHOE_TOP, foot);
+    ctx.beginPath();
+    top.forEach(function (p, i) { var q = world(p[0], p[1], SHOE_TOP); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+    ctx.closePath(); ctx.fillStyle = "#3d4048"; ctx.fill();
+    ctx.beginPath();
+    for (var i = 0; i < 20; i++) {
+      var u = i / 20 * Math.PI * 2, q = world(Math.cos(u) * 15, 34 + Math.sin(u) * 19, SHOE_TOP);
+      if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]);
+    }
+    ctx.closePath(); ctx.fillStyle = "#0b0b0d"; ctx.fill();
+    /* つま先の光 */
+    ctx.beginPath();
+    for (i = 0; i < 14; i++) {
+      u = i / 14 * Math.PI * 2; q = world(Math.cos(u) * 7, -30 + Math.sin(u) * 11, 27);
+      if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]);
+    }
+    ctx.closePath(); ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.fill();
+  }
+  function drawShoes() {
+    var arr = [["L", shoes.L], ["R", shoes.R]].sort(function (a, b) { return a[1].y - b[1].y; });
+    arr.forEach(function (e) { drawSolidShoe(e[1], e[0]); });
   }
 
   /* ============ 描画 ============ */
@@ -442,7 +543,7 @@
 
   /* タップシューズの靴底（上から）。原点は足の真ん中、上がつま先 */
   function solePath(foot) {
-    var m = foot === "L" ? -1 : 1;
+    var m = foot === "L" ? 1 : -1;
     ctx.beginPath();
     ctx.moveTo(0, -62);
     ctx.bezierCurveTo(m * 26, -62, m * 30, -30, m * 24, -6);
@@ -454,7 +555,7 @@
   }
   function plates(foot, fill) {
     /* つま先とかかとの金具 */
-    var m = foot === "L" ? -1 : 1;
+    var m = foot === "L" ? 1 : -1;
     ctx.fillStyle = fill;
     ctx.beginPath(); ctx.ellipse(m * 3, -40, 18, 16, 0, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.ellipse(0, 46, 14, 12, 0, 0, Math.PI * 2); ctx.fill();
@@ -468,6 +569,7 @@
     ctx.save();
     ctx.translate(n.x, n.y);
     ctx.rotate(n.a);
+    ctx.scale(SC, SC);
     var col = n.foot === "L" ? "#7fd6ff" : "#ffb36b";
     if (n.hit) {
       ctx.globalAlpha = 0;
@@ -478,11 +580,12 @@
       ctx.fillStyle = "rgba(20,10,5,.35)"; ctx.fill();
       ctx.lineWidth = 4; ctx.strokeStyle = col; ctx.stroke();
       ctx.save(); ctx.globalAlpha *= 0.85;
-      if (n.toe) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse((n.foot === "L" ? -3 : 3), -40, 18, 16, 0, 0, Math.PI * 2); ctx.fill(); }
+      if (n.toe) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse((n.foot === "L" ? 3 : -3), -40, 18, 16, 0, 0, Math.PI * 2); ctx.fill(); }
       else { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(0, 46, 14, 12, 0, 0, Math.PI * 2); ctx.fill(); }
       ctx.restore();
       /* 縮んでくる輪 */
-      var r = 70 + 150 * (1 - p);
+      var r = 90 + 150 * (1 - p);
+      ctx.scale(1 / SC, 1 / SC);
       ctx.rotate(-n.a);
       ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
       ctx.lineWidth = 4 + 4 * p; ctx.strokeStyle = col; ctx.globalAlpha = Math.min(1, p * 2) * 0.9; ctx.stroke();
@@ -490,6 +593,11 @@
     ctx.restore();
   }
 
+  function drawRing(h) {
+    var k = h.life / 0.35;
+    ctx.beginPath(); ctx.arc(h.x, h.y, 70 + (1 - k) * 50, 0, Math.PI * 2);
+    ctx.lineWidth = 6 * k; ctx.strokeStyle = h.good === 2 ? "#ffe27a" : "#ffffff"; ctx.stroke();
+  }
   function drawShoe(h) {
     /* 踏んだ瞬間に靴が床に乗る（指＝足） */
     var k = h.life / 0.35;
@@ -498,12 +606,13 @@
     if (h.foot) {
       ctx.rotate(h.a);
       ctx.globalAlpha = Math.min(1, k * 2);
-      var s = 1 + (1 - k) * 0.08;
+      var s = SC * (1 + (1 - k) * 0.08);
       ctx.scale(s, s);
       solePath(h.foot);
       ctx.fillStyle = "#151515"; ctx.fill();
       ctx.lineWidth = 3; ctx.strokeStyle = "#3a3a3a"; ctx.stroke();
       plates(h.foot, "#d9d9d9");
+      ctx.scale(1 / s, 1 / s);
       ctx.rotate(-h.a);
       ctx.beginPath(); ctx.arc(0, 0, 70 + (1 - k) * 50, 0, Math.PI * 2);
       ctx.lineWidth = 6 * k; ctx.strokeStyle = h.good === 2 ? "#ffe27a" : "#ffffff"; ctx.stroke();
@@ -539,7 +648,8 @@
         drawNote(n, st);
       }
     }
-    hits.forEach(drawShoe);
+    if (solid && shoes) { hits.forEach(function (h) { if (!h.foot) drawShoe(h); else drawRing(h); }); drawShoes(); }
+    else hits.forEach(drawShoe);
     sparks.forEach(function (s) {
       ctx.globalAlpha = Math.min(1, s.life * 4);
       ctx.fillStyle = s.gold ? "#ffe27a" : "#ffffff";
