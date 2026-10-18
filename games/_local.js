@@ -247,4 +247,5 @@ window.DRAFT_GAMES = [
   {"type":"lab","tags":[],"id":"haeru-button","title":"ボタンが生える","year":2026,"date":"2026-10-18","plays":null,"url":"","img":"games/_haeru-button/img/thumb.webp","play":"games/_haeru-button/index.html","full":true,"catch":""},
   {"type":"lab","tags":[],"id":"nanno-tama","title":"クイズ！何の球？","year":2026,"date":"2026-10-18","plays":null,"url":"","img":"games/_nanno-tama/img/thumb.webp","play":"games/_nanno-tama/index.html","full":true,"catch":""},
   {"type":"lab","tags":[],"id":"nazo-ui","title":"謎にUIが多い","year":2026,"date":"2026-10-18","plays":null,"url":"","img":"games/_nazo-ui/img/thumb.webp","play":"games/_nazo-ui/index.html","full":true,"catch":""},
+  {"type":"lab","tags":[],"id":"chameleon","title":"カメレオン","year":2026,"date":"2026-10-18","plays":null,"url":"","img":"games/_chameleon/img/thumb.webp","play":"games/_chameleon/index.html","full":true,"catch":""},
 ];
