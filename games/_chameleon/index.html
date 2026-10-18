@@ -323,61 +323,129 @@
     if (state === S.RESULT) drawResult();
   }
 
-  /* ドット絵：画面は 1/DOT の大きさの裏の画面に描いて、ぼかさずに引き伸ばす */
-  var DOT = 5, off = document.createElement("canvas"), main = ctx;
-  function drawScreen() {
-    var ow = Math.ceil(SW / DOT), oh = Math.ceil(SH / DOT);
-    if (off.width !== ow || off.height !== oh) { off.width = ow; off.height = oh; }
-    var o = off.getContext("2d");
-    if (o && o.setTransform) {
-      ctx = o;
-      ctx.setTransform(1 / DOT, 0, 0, 1 / DOT, -SX / DOT, -SY / DOT);
-      drawScene();
-      ctx = main;
-      ctx.save();
-      roundRect(SX, SY, SW, SH, 14); ctx.clip();
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(off, SX, SY, ow * DOT, oh * DOT);
-      ctx.imageSmoothingEnabled = true;
-      ctx.restore();
-    } else drawScene();
-  }
-  function drawScene() {
-    ctx.save();
-    /* 背景（1ドットずつ、その場所の色で塗る） */
-    for (var cx = 0; cx < SW; cx += DOT) {
-      ctx.fillStyle = colOf(colorAt(walk + (SX + cx - CX)));
-      ctx.fillRect(SX + cx, SY, DOT + 0.5, SH);
-    }
-    /* 葉っぱの模様（世界に固定。色は下の背景より少し暗く） */
-    var t0 = Math.floor((walk - CX + SX - 60) / 60), t1 = Math.ceil((walk - CX + SX + SW + 60) / 60);
-    for (var tile = t0; tile <= t1; tile++) {
-      for (var li = 0; li < 3; li++) {
-        var hsh = Math.abs(Math.sin(tile * 12.9898 + li * 78.233) * 43758.5453) % 1;
-        var hs2 = Math.abs(Math.sin(tile * 39.3468 + li * 11.135) * 24634.6345) % 1;
-        var wx = tile * 60 + hsh * 60, sx = CX + (wx - walk), sy = SY + hs2 * SH;
-        var c = rgbOf(colorAt(wx));
-        ctx.fillStyle = "rgb(" + Math.round(c[0] * 0.84) + "," + Math.round(c[1] * 0.84) + "," + Math.round(c[2] * 0.84) + ")";
-        ctx.beginPath(); ctx.ellipse(sx, sy, 24, 10, (hsh * 6) - 3, 0, Math.PI * 2); ctx.fill();
+  /* ============ ドット絵 ============
+     画面は 1ドット＝DOT の小さな裏の画面に、1ドットずつ四角で打ってから、ぼかさずに引き伸ばす。
+     絵はすべて下の文字の絵（1文字＝1ドット）から描く。 */
+  var DOT = 5, off = document.createElement("canvas"), o = null, GW = 100, GH = 60;
+  function px(x, y, w, h, c) { o.fillStyle = c; o.fillRect(Math.round(x), Math.round(y), w, h); }
+  /* 文字の絵を打つ。pal は文字→色。flip で左右反転 */
+  function spr(rows, x, y, pal, flip) {
+    x = Math.round(x); y = Math.round(y);
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r], n = row.length;
+      for (var i = 0; i < n; i++) {
+        var col = pal[row[i]];
+        if (!col) continue;
+        o.fillStyle = col; o.fillRect(flip ? x + n - 1 - i : x + i, y + r, 1, 1);
       }
     }
-    /* 枝 */
-    ctx.strokeStyle = "#6b4a2e"; ctx.lineWidth = 14;
-    ctx.beginPath(); ctx.moveTo(SX - 10, CY + 42); ctx.lineTo(SX + SW + 10, CY + 42); ctx.stroke();
-    ctx.fillStyle = "#5a3c24";
-    for (var j = 0; j < 8; j++) { var kx = SX + ((j * 97 - walk) % (SW + 60) + SW + 60) % (SW + 60) - 30; ctx.fillRect(kx, CY + 37, 10, 3); }
-    drawChameleon();
-    drawBird();
-    fx.forEach(function (e) { ctx.fillStyle = e.c; ctx.beginPath(); ctx.arc(e.x, e.y, 5, 0, Math.PI * 2); ctx.fill(); });
-    if (state === S.PLAY || state === S.OVER) {
-      ctx.fillStyle = "rgba(20,30,24,.8)"; ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 5;
-      ctx.font = "800 60px sans-serif"; ctx.textAlign = "center";
-      ctx.strokeText(String(score), SX + SW / 2, SY + 66); ctx.fillText(String(score), SX + SW / 2, SY + 66);
-    }
+  }
+  /* カメレオン（右向き。脚と目は別に打つ） */
+  var CHAM = [
+    "..........................oo........",
+    "........................oolbo.......",
+    "...............ooooooooolbbbo.......",
+    "...........oooobdbbdbbdbbbbbboooo...",
+    ".........oobbbbbbbbbbbbbbbbbbbbbboo.",
+    "........obbbbbbbbbbbbbbbbbbbbbbbbbbo",
+    ".......obbbbbbbbbbbbbbbbbbbbbbbbbbbo",
+    "..oooo.obbbbbbbbbbbbbbbbbbbbbbbbbbo.",
+    ".obbbbobllllbbbbbbbbbbbbbbbbbbdddo..",
+    "obooobbollllllllllllllbbbbbbbbbbo...",
+    "obo..obboollllllllllllllllbbbboo....",
+    "obo...oooobbbbbbbbbbbbbbbbbooo......",
+    "obboo...............................",
+    ".obbbo..............................",
+    "..ooo..............................."
+  ];
+  var LEG = ["obbo", "obbo", "obdo", "oooo"];
+  var EYE = [".ooo.", "odddo", "odddo", "odddo", ".ooo."];
+  /* 鳥（右向き。羽が上と下の2コマ） */
+  var BIRD = [[
+    "..oo..........oo.....",
+    "...ooo......ooo......",
+    "....oooo..oooo.......",
+    "......oooooooo..ooo..",
+    "oo..ogggggggggoowooyy",
+    ".oooggggggggggoooyy..",
+    "...ooggggggggoo......",
+    ".....oo....oo........",
+    ".....y.....y........."
+  ], [
+    ".....................",
+    ".....................",
+    ".....................",
+    "......oooooooo..ooo..",
+    "oo..ogggggggggoowooyy",
+    ".oooggggggggggoooyy..",
+    "...oooooooooooooo....",
+    "....oooo..oooo.......",
+    "...ooo......ooo......",
+    "..oo..........oo....."
+  ]];
+  var BIRD_PAL = { o: "#2a2422", g: "#4d433e", y: "#e8b030", w: "#ffffff" };
+  var LEAF = [".ddd...", "ddddddd", "...ddd."];
+  /* 数字（3×5） */
+  var DIGIT = ["111101101101111", "010110010010111", "111001111100111", "111001111001111", "101101111001001",
+    "111100111001111", "111100111101111", "111001010010010", "111101111101111", "111101111001111"];
+  function shadeRGB(c, f) { return "rgb(" + Math.min(255, Math.round(c[0] * f)) + "," + Math.min(255, Math.round(c[1] * f)) + "," + Math.min(255, Math.round(c[2] * f)) + ")"; }
+
+  function drawScreen() {
+    GW = Math.ceil(SW / DOT); GH = Math.ceil(SH / DOT);
+    if (off.width !== GW || off.height !== GH) { off.width = GW; off.height = GH; }
+    o = off.getContext("2d");
+    if (!o || !o.fillRect) return;
+    drawScene();
+    ctx.save();
+    roundRect(SX, SY, SW, SH, 14); ctx.clip();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, SX, SY, GW * DOT, GH * DOT);
+    ctx.imageSmoothingEnabled = true;
     ctx.restore();
   }
+  /* 画面の座標 → ドットの座標 */
+  function gx(x) { return (x - SX) / DOT; }
+  function gy(y) { return (y - SY) / DOT; }
+  var BRANCH = 0;
+  function drawScene() {
+    BRANCH = Math.round(gy(CY + 40));
+    /* 背景（1列ずつ、その場所の色） */
+    for (var i = 0; i < GW; i++) px(i, 0, 1, GH, colOf(colorAt(walk + (SX + i * DOT + DOT / 2 - CX))));
+    /* 葉っぱ（世界に固定。下の背景より少し暗く） */
+    var wg = walk / DOT, cg = gx(CX);
+    var t0 = Math.floor((wg - cg - 12) / 12), t1 = Math.ceil((wg - cg + GW + 12) / 12);
+    for (var tile = t0; tile <= t1; tile++) {
+      for (var li = 0; li < 3; li++) {
+        var h1 = Math.abs(Math.sin(tile * 12.9898 + li * 78.233) * 43758.5453) % 1;
+        var h2 = Math.abs(Math.sin(tile * 39.3468 + li * 11.135) * 24634.6345) % 1;
+        var lx = Math.round(tile * 12 + h1 * 12 - wg + cg), ly = Math.round(h2 * (GH - 3));
+        if (Math.abs(ly - BRANCH) < 3) continue;
+        var c = rgbOf(colorAt(walk + (SX + (lx + 3) * DOT - CX)));
+        spr(LEAF, lx, ly, { d: shadeRGB(c, 0.84) }, h1 > 0.5);
+      }
+    }
+    /* 枝（3ドット。こぶは世界に固定） */
+    px(0, BRANCH, GW, 1, "#8a6240"); px(0, BRANCH + 1, GW, 2, "#6b4a2e"); px(0, BRANCH + 3, GW, 1, "#4a3220");
+    for (var k = Math.floor((wg - cg) / 17) - 1; k <= Math.ceil((wg - cg + GW) / 17); k++) px(Math.round(k * 17 - wg + cg), BRANCH + 1, 2, 1, "#4a3220");
+    drawChameleon();
+    drawBird();
+    if (state === S.PLAY || state === S.OVER) drawNumber(score, Math.round(GW / 2), 3);
+  }
+  function drawNumber(n, cx, y) {
+    var s = String(n), w = s.length * 8 - 2, x0 = Math.round(cx - w / 2);
+    for (var pass = 0; pass < 2; pass++) {
+      for (var k = 0; k < s.length; k++) {
+        var d = DIGIT[+s[k]];
+        for (var i = 0; i < 15; i++) if (d[i] === "1") {
+          var x = x0 + k * 8 + (i % 3) * 2, yy = y + Math.floor(i / 3) * 2;
+          if (pass === 0) px(x - 1, yy - 1, 4, 4, "#ffffff");
+          else px(x, yy, 2, 2, "#1e2420");
+        }
+      }
+    }
+  }
 
-  /* 鳥。色が合っていないと少しずつ降りてくる。さらうときは急降下して持ち去る */
+  /* 鳥。色が合っていないと少しずつ降りてくる。さらうときは急降下して持ち去る（画面の座標） */
   function grabbed() {
     if (state !== S.OVER) return null;
     var t = overT;
@@ -387,80 +455,38 @@
   }
   function drawBird() {
     if (state === S.INTRO) return;
-    var g = grabbed(), b = g || birdPos(), flap = Math.sin(T * 9 + overT * 30);
-    ctx.save();
-    ctx.translate(b.x, b.y);
-    var dir = g ? -1 : (Math.cos(T * 0.9) > 0 ? 1 : -1);
-    ctx.scale(dir * 1.45, 1.45);
-    ctx.fillStyle = "#3a3330";
-    ctx.beginPath(); ctx.moveTo(-6, -4); ctx.lineTo(-46, -8 - flap * 26); ctx.lineTo(-22, 6); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(6, -4); ctx.lineTo(40, -10 - flap * 26); ctx.lineTo(18, 6); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(0, 0, 24, 12, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(-22, -2); ctx.lineTo(-38, -10); ctx.lineTo(-36, 6); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.arc(22, -6, 9, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#e8b030"; ctx.beginPath(); ctx.moveTo(29, -8); ctx.lineTo(40, -3); ctx.lineTo(29, -2); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(24, -8, 2.6, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#e8b030"; ctx.fillRect(-4, 10, 3, 8); ctx.fillRect(4, 10, 3, 8);
-    ctx.restore();
+    var g = grabbed(), b = g || birdPos();
+    var frame = Math.floor((T + overT) * 6) % 2;
+    var left = g ? true : Math.cos(T * 0.9) < 0;
+    var rows = BIRD[frame];
+    spr(rows, gx(b.x) - 10, gy(b.y) - 5, BIRD_PAL, left);
   }
 
-  function bodyCol(a) { return "rgba(" + Math.round(shown[0]) + "," + Math.round(shown[1]) + "," + Math.round(shown[2]) + "," + (a == null ? 1 : a) + ")"; }
-  function shade(f) { return "rgb(" + Math.round(shown[0] * f) + "," + Math.round(shown[1] * f) + "," + Math.round(shown[2] * f) + ")"; }
-
-  /* カメレオン。右を向いて枝にとまる */
+  /* カメレオン。体の色は今の色、濃い所・明るい所はそこから作る */
   function drawChameleon() {
-    var x = CX, y = CY, g = grabbed(), rot = 0;
-    if (g && g.carry) { x = g.x; y = g.y + 54; rot = -0.5; }
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(rot);
-    /* しっぽ（くるり） */
-    ctx.strokeStyle = shade(0.82); ctx.lineWidth = 12; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(-50, 6); ctx.quadraticCurveTo(-92, 10, -92, 36); ctx.stroke();
-    ctx.lineWidth = 9;
-    ctx.beginPath(); ctx.arc(-78, 38, 14, Math.PI, Math.PI * 2.6); ctx.stroke();
-    ctx.lineCap = "butt";
-    /* 脚 */
-    ctx.strokeStyle = shade(0.78); ctx.lineWidth = 9; ctx.lineCap = "round";
-    var st = state === S.PLAY ? Math.sin(walk * 0.09) * 9 : 0;
-    [[-30, 1, st], [24, -1, -st]].forEach(function (l) {
-      ctx.beginPath(); ctx.moveTo(l[0], 12); ctx.lineTo(l[0] + l[1] * 8 + l[2], 34); ctx.lineTo(l[0] + l[1] * 2 + l[2], 40); ctx.stroke();
-    });
-    ctx.lineCap = "butt";
-    /* 体 */
-    ctx.fillStyle = bodyCol();
-    ctx.beginPath();
-    ctx.moveTo(-58, 8);
-    ctx.bezierCurveTo(-50, -34, 22, -40, 44, -16);
-    ctx.lineTo(70, -12);
-    ctx.quadraticCurveTo(84, 0, 66, 14);
-    ctx.bezierCurveTo(30, 26, -30, 30, -58, 8);
-    ctx.fill();
-    ctx.strokeStyle = shade(0.6); ctx.lineWidth = 2.5; ctx.stroke();
-    /* 背中のとげと模様 */
-    ctx.fillStyle = shade(0.85);
-    for (var i = 0; i < 6; i++) { ctx.beginPath(); ctx.arc(-40 + i * 13, -18 + Math.abs(i - 2.5) * 2.4, 4, 0, Math.PI * 2); ctx.fill(); }
-    /* 頭のかぶと */
-    ctx.fillStyle = shade(0.9);
-    ctx.beginPath(); ctx.moveTo(30, -26); ctx.lineTo(50, -40); ctx.lineTo(56, -14); ctx.closePath(); ctx.fill();
-    /* 目（ぐるぐる動く） */
-    ctx.fillStyle = shade(0.75); ctx.beginPath(); ctx.arc(52, -8, 12, 0, Math.PI * 2); ctx.fill();
-    var bp = birdPos(), look = exp > 0.05 ? Math.atan2(bp.y - (y - 8), bp.x - (x + 52)) : Math.sin(eyeT * 1.3) * 1.5;
-    if (state === S.OVER) look = eyeT * 12;
-    if (blink > 0) { ctx.strokeStyle = "#1e2420"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(44, -8); ctx.lineTo(60, -8); ctx.stroke(); }
-    else {
-      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(52, -8, 7, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#1e2420"; ctx.beginPath(); ctx.arc(52 + Math.cos(look) * 3.5, -8 + Math.sin(look) * 3.5, 3.2, 0, Math.PI * 2); ctx.fill();
-    }
-    /* 口 */
-    ctx.strokeStyle = shade(0.55); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(64, 4); ctx.quadraticCurveTo(70, 6, 76, 2); ctx.stroke();
-    ctx.restore();
+    var g = grabbed(), x = gx(CX) - 22, y = BRANCH - 15;
+    if (g && g.carry) { x = gx(g.x) - 18; y = gy(g.y) + 3; }
+    var c = [shown[0], shown[1], shown[2]];
+    var pal = { o: shadeRGB(c, 0.45), b: shadeRGB(c, 1), d: shadeRGB(c, 0.78), l: shadeRGB(c, 1.12) };
+    var step = state === S.PLAY ? Math.floor(walk / 9) % 2 : 0;
+    /* 脚（奥の脚と手前の脚が交互に出る） */
+    spr(LEG, x + 9 + (step ? 1 : -1), y + 11, pal);
+    spr(LEG, x + 24 + (step ? -1 : 1), y + 11, pal);
+    spr(CHAM, x, y, pal);
+    /* 目（鳥を見る） */
+    spr(EYE, x + 27, y + 3, pal);
+    if (blink > 0) { px(x + 28, y + 5, 3, 1, pal.o); return; }
+    var bp = birdPos(), dx = 0, dy = 0;
+    if (exp > 0.05 || state === S.OVER) { dx = Math.sign(Math.round((bp.x - CX) / 40)); dy = bp.y < CY - 20 ? -1 : 0; }
+    else { dx = Math.round(Math.sin(eyeT * 1.3)); }
+    px(x + 28, y + 4, 3, 3, "#ffffff");
+    px(x + 29 + dx, y + 5 + dy, 1, 1, "#1e2420");
   }
 
   /* ホイールの絵は一度だけ点ごとに作っておく */
   var wheelImg = document.createElement("canvas"), wheelR = 0;
   function makeWheel() {
-    var n = Math.round(WR * 2 / 6); /* ホイールもドットで（1ドット＝6） */
+    var dpr = Math.min(2, window.devicePixelRatio || 1), n = Math.round(WR * 2 * dpr);
     wheelImg.width = wheelImg.height = n;
     var g = wheelImg.getContext("2d"), img = g && g.createImageData && g.createImageData(n, n);
     wheelR = WR;
@@ -471,22 +497,20 @@
       if (t > 1) continue;
       var h = Math.atan2(dx, -dy) * 180 / Math.PI;
       var c = rgbOf({ h: ((h + 60) % 360 + 360) % 360, t: Math.min(1, t) }), o = (y * n + x) * 4;
-      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = t > 0.99 ? Math.round((1 - t) * 100 * 255) : 255;
     }
     g.putImageData(img, 0, 0);
     wheelR = WR;
   }
   function drawPanel() {
     if (wheelR !== WR) makeWheel();
-    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(wheelImg, WX - WR, WY - WR, WR * 2, WR * 2);
-    ctx.imageSmoothingEnabled = true;
     /* 選んでいる所 */
     var p = pos(cur), x = WX + p.x * WR, y = WY + p.y * WR;
-    x = WX - WR + Math.round((x - (WX - WR)) / 6) * 6; y = WY - WR + Math.round((y - (WY - WR)) / 6) * 6;
-    ctx.fillStyle = "#1e2420"; ctx.fillRect(x - 15, y - 15, 30, 30);
-    ctx.fillStyle = "#fff"; ctx.fillRect(x - 12, y - 12, 24, 24);
-    ctx.fillStyle = colOf(cur); ctx.fillRect(x - 9, y - 9, 18, 18);
+    ctx.fillStyle = colOf(cur);
+    ctx.beginPath(); ctx.arc(x, y, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#1e2420"; ctx.lineWidth = 5; ctx.stroke();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5; ctx.stroke();
   }
 
   /* 結果画面。数と「もう一度」「Xでシェア」だけ */
