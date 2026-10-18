@@ -38,7 +38,9 @@ header .title img{border-radius:5px}
 #stage .split.col{flex:0 0 6px;margin:0 3px;border-radius:3px}
 #scriptText{flex:1;resize:none;background:#15161a;border:1px solid var(--line);border-radius:6px;padding:12px 14px;font-size:16px;line-height:1.8;outline:none}
 #scriptText:focus{border-color:#555a64}
-#ttsBtn{margin-top:8px}
+#ttsRow{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;flex:0 0 auto}
+#ttsRow select{flex:1 1 0;min-width:0}
+#ttsBtn{flex:1 1 100%}
 #scriptTabs{display:flex;margin-bottom:8px}
 #scriptTabs button{flex:1;border-radius:0;padding:5px 0}
 #scriptTabs button:first-child{border-radius:6px 0 0 6px}
@@ -201,7 +203,7 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
 
   <div id="mid">
     <div id="stage">
-      <div id="script"><div id="scriptTabs"><button type="button" data-st="script" aria-pressed="true">台本</button><button type="button" data-st="post" aria-pressed="false">投稿</button><button type="button" data-st="rec" aria-pressed="false">録画</button></div><textarea id="scriptText" placeholder="台本" spellcheck="false"></textarea><button type="button" id="ttsBtn" title="選んだ文か、台本全部を読み上げて置く" hidden>読み上げ</button>
+      <div id="script"><div id="scriptTabs"><button type="button" data-st="script" aria-pressed="true">台本</button><button type="button" data-st="post" aria-pressed="false">投稿</button><button type="button" data-st="rec" aria-pressed="false">録画</button></div><textarea id="scriptText" placeholder="台本" spellcheck="false"></textarea><div id="ttsRow" hidden><select id="ttsStyle" title="読み方"><option value="normal">ふつう</option><option value="clear">はきはき</option><option value="genki">元気</option><option value="calm">落ち着き</option></select><select id="ttsSpeed" title="速さ"><option value="1.2">ゆっくり</option><option value="1" selected>ふつうの速さ</option><option value="0.85">はやい</option></select><button type="button" id="ttsBtn" title="選んだ文か、台本全部を読み上げて置く">読み上げ</button></div>
         <div id="postPane" hidden>
           <label for="postX">X の投稿文</label><textarea id="postX" spellcheck="false"></textarea>
           <label for="postTitle">YouTube の題名</label><input id="postTitle" type="text">
@@ -2431,7 +2433,17 @@ showSidePanel('header');
 const VOICE_URL = 'http://127.0.0.1:5123';
 let voiceOn = /^(localhost|127\.0\.0\.1)$/.test(location.hostname), voiceReady = false, voiceBusy = false;
 try { if (/[?&]voice\b/.test(location.search)) localStorage.setItem('cakeCut.voice', '1'); voiceOn = voiceOn || localStorage.getItem('cakeCut.voice') === '1'; } catch (e) {}
-function syncTtsBtn() { $('ttsBtn').hidden = !voiceOn || $('scriptText').hidden; }
+function syncTtsBtn() { $('ttsRow').hidden = !voiceOn || $('scriptText').hidden; }
+// 読み方ごとの声の設定（ふつう＝週報と同じ）。速さは length に掛ける
+const TTS_STYLES = {
+  normal: {},
+  clear: { noise: 0.3, noise_w: 0.5, sdp_ratio: 0, intonation_scale: 1.3, pitch_scale: 1.03, length: 0.66, assist_text: 'はい！元気よく、はっきりとお伝えします！', assist_text_weight: 0.6 },
+  genki: { sdp_ratio: 0.6, intonation_scale: 1.4, pitch_scale: 1.05, length: 0.66, assist_text: 'やったー！めちゃくちゃ楽しい！最高です！', assist_text_weight: 0.7 },
+  calm: { intonation_scale: 0.9, length: 0.8, assist_text: '静かに、ゆっくりお話しします。', assist_text_weight: 0.7 },
+};
+function ttsParams() { const p = { ...TTS_STYLES[$('ttsStyle').value] }; p.length = +((p.length || 0.73) * +$('ttsSpeed').value).toFixed(3); return p; }
+// 選んだ読み方と速さはこのブラウザに残す
+['ttsStyle', 'ttsSpeed'].forEach(id => { const el = $(id); try { const v = localStorage.getItem('cakeCut.' + id); if (v && [...el.options].some(o => o.value === v)) el.value = v; } catch (e) {} el.onchange = () => { try { localStorage.setItem('cakeCut.' + id, el.value); } catch (e) {} }; });
 async function pingVoice() {
   try { const j = await (await fetch(VOICE_URL + '/ping')).json(); voiceReady = !!j.ok; } catch (e) { voiceReady = false; }
   return voiceReady;
@@ -2452,7 +2464,7 @@ async function speakScript() {
   voiceBusy = true; $('ttsBtn').disabled = true;
   try {
     if (!voiceReady && !await pingVoice() && !await startVoice()) throw 0;
-    const r = await fetch(VOICE_URL + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    const r = await fetch(VOICE_URL + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, ...ttsParams() }) });
     if (!r.ok) throw new Error(r.status);
     const blob = await r.blob(), raw = await actx.decodeAudioData(await blob.arrayBuffer());
     const bid = nid(); buffers.set(bid, { raw, peaks: computePeaks(raw) });
