@@ -245,4 +245,5 @@ window.DRAFT_GAMES = [
     "catch": "メガネウォーク"
   },
   {"type":"lab","tags":[],"id":"haeru-button","title":"ボタンが生える","year":2026,"date":"2026-10-18","plays":null,"url":"","img":"games/_haeru-button/img/thumb.webp","play":"games/_haeru-button/index.html","full":true,"catch":""},
+  {"type":"lab","tags":[],"id":"nanno-tama","title":"クイズ！何の球？","year":2026,"date":"2026-10-18","plays":null,"url":"","img":"games/_nanno-tama/img/thumb.webp","play":"games/_nanno-tama/index.html","full":true,"catch":""},
 ];

@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>クイズ！何の球？</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #answer { position:absolute; display:flex; gap:3%; box-sizing:border-box; }
+  #answer[hidden] { display:none; }
+  #answer input { flex:1; min-width:0; box-sizing:border-box; height:100%; padding:0 .6em; border:3px solid #16202e; border-radius:999px; background:#fff; color:#16202e; font:bold 1em sans-serif; outline:none; -webkit-user-select:text; user-select:text; }
+  #answer button { flex:none; aspect-ratio:1; height:100%; padding:0; border:3px solid #16202e; border-radius:50%; background:#fff; display:flex; align-items:center; justify-content:center; touch-action:manipulation; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+  <form id="answer" hidden><input id="answer-text" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-label="答え"><button type="submit" aria-label="答える"><svg viewBox="-12 -12 24 24" width="60%" height="60%"><path d="M-9 0H9M2-7l7 7-7 7" fill="none" stroke="#16202e" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></form>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* クイズ！何の球？
+
+   球のシルエットを見て、何の球かを文字で答える。全10問、1問1回答。後半はわりと理不尽。
+   ひらがな・カタカナ・漢字・英語の言い方の違いは正解にする。
+   正解すると「あなたは○人目の正解者です」が出る。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    if (document.activeElement === input) return;   /* 画面のキーボードが出たときは置き直さない */
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+    place();
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+  function sndRight() { tone(880, 0.12, 0.12, "square"); tone(1175, 0.3, 0.12, "square", null, 0.12); }
+  function sndWrong() { tone(220, 0.2, 0.12, "square"); tone(165, 0.4, 0.12, "square", null, 0.18); }
+  function sndQ() { tone(660, 0.08, 0.06, "triangle"); }
+
+  /* ============ 問題 ============
+     a … 正解の番号。後半ほど理不尽。 */
+  var QS = [
+    { id: "rugby", n: zT("ラグビーボール", "Rugby ball"), ok: ["らぐびーぼーる", "らぐびー", "rugby", "rugbyball"] },
+    { id: "bulb", n: zT("電球", "Light bulb"), ok: ["でんきゅう", "電球", "はくねつでんきゅう", "白熱電球", "白熱球", "lightbulb", "bulb"] },
+    { id: "balloon", n: zT("気球", "Hot-air balloon"), ok: ["ききゅう", "気球", "ねつききゅう", "熱気球", "hotairballoon", "balloon"] },
+    { id: "kendama", n: zT("けん玉", "Kendama"), ok: ["けんだま", "けん玉", "剣玉", "拳玉", "kendama"] },
+    { id: "earth", n: zT("地球", "Earth"), ok: ["ちきゅう", "地球", "earth", "theearth", "planetearth"] },
+    { id: "eye", n: zT("眼球", "Eyeball"), ok: ["がんきゅう", "眼球", "めだま", "目玉", "めんたま", "目ん玉", "eyeball", "eye"] },
+    { id: "base", n: zT("硬式野球の球", "Baseball"), ok: ["やきゅう", "野球", "こうしきやきゅう", "硬式野球", "こうきゅう", "硬球", "baseball", "hardball"] },
+    { id: "wbc", n: zT("白血球", "White blood cell"), ok: ["はっけっきゅう", "白血球", "whitebloodcell", "leukocyte", "wbc"] },
+    { id: "straight", n: zT("直球", "Fastball"), ok: ["ちょっきゅう", "直球", "すとれーと", "fastball", "straight", "straightball"] },
+    { id: "eclipse", n: zT("皆既日食の太陽", "Sun in a total eclipse"), ok: ["かいきにっしょく", "皆既日食", "皆既日蝕", "にっしょく", "日食", "日蝕", "solareclipse", "totaleclipse", "totalsolareclipse", "eclipse"] }
+  ];
+
+  /* 答え合わせ。全角半角・カタカナ・空白・「の球」「ボール」などの付け足しは気にしない */
+  function norm(t) {
+    t = String(t || "").normalize("NFKC").toLowerCase();
+    t = t.replace(/[\u30a1-\u30f6]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0x60); });
+    return t.replace(/[\s・.,、。!！?？「」'"-]/g, "");
+  }
+  function isRight(q, text) {
+    var t = norm(text);
+    if (!t) return false;
+    var cands = [t];
+    ["のぼーる", "ぼーる", "のたま", "の球", "のだま", "ball", "の太陽", "のたいよう"].forEach(function (x) {
+      if (t.length > x.length && t.slice(-x.length) === x) cands.push(t.slice(0, -x.length));
+    });
+    return q.ok.some(function (o) { return cands.indexOf(norm(o)) >= 0; });
+  }
+
+  /* 正解者の数（仮）。本物の数にするかは未定なので、いまは問題ごとの見た目だけの数 */
+  function solverNo(q) {
+    var base = [48213, 41877, 36590, 30124, 26662, 17310, 6022, 2814, 1408, 77][q];
+    var day = Math.floor(Date.now() / 86400000) % 97;
+    return base + day * (10 - q) * 3 + 1;
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", Q: "q", ANS: "ans", RESULT: "result" };
+  var state, qi, score, T, ansT, CY, IY, right, typed;
+  var form = document.getElementById("answer"), input = document.getElementById("answer-text");
+
+  function place() {
+    CY = Math.round(Math.min(H * 0.27, 250));
+    IY = CY + 190;
+    /* 答えの入力欄はゲーム座標で置く */
+    var k = wrap.clientWidth / W || 1;
+    form.style.left = (40 * k) + "px"; form.style.top = (IY * k) + "px";
+    form.style.width = ((W - 80) * k) + "px"; form.style.height = (72 * k) + "px";
+    form.style.fontSize = (28 * k) + "px";
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    score = 0; T = 0;
+    goQ(0);
+  }
+  function goQ(n) {
+    qi = n; state = S.Q; ansT = 0; right = false; typed = "";
+    input.value = ""; form.hidden = false;
+    if (!/Mobi|Android|iPhone|iPad/.test(navigator.userAgent)) { try { input.focus(); } catch (e) {} }
+    sndQ();
+  }
+
+  function update(dt) {
+    T += dt;
+    if (state === S.ANS) {
+      ansT += dt;
+      if (ansT > 2.6) next();
+    }
+  }
+  function next() {
+    if (qi >= QS.length - 1) { state = S.RESULT; form.hidden = true; return; }
+    goQ(qi + 1);
+  }
+  function answer(text) {
+    if (state !== S.Q) return;
+    typed = text; right = isRight(QS[qi], text);
+    state = S.ANS; ansT = 0; form.hidden = true;
+    try { input.blur(); } catch (e) {}
+    if (right) { score++; sndRight(); } else sndWrong();
+  }
+  form.addEventListener("submit", function (e) { e.preventDefault(); if (input.value.trim()) answer(input.value); });
+  ["pointerdown", "pointerup", "touchstart"].forEach(function (n) { form.addEventListener(n, function (e) { e.stopPropagation(); }, { passive: true }); });
+
+  /* ============ 入力 ============ */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) { if (hitButton(x, y) === "retry") newRound(); return; }
+    if (state === S.ANS) { if (ansT > 0.6) next(); return; }
+  }
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) { e.preventDefault(); var p = atCanvas(e); down(p.x, p.y); });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  /* 1〜9・0 … その問題へ。- … 結果画面 */
+  function debugKey(n) {
+    if (state === S.INTRO) startButton.click();
+    shareButton.hidden = true;
+    goQ(n === 0 ? 9 : n - 1);
+  }
+  window.addEventListener("keydown", function (e) {
+    if (e.target === input) return;                /* 打ち込み中の文字は答え */
+    if (DEBUG && (/^Digit[0-9]$/.test(e.code) || /^[0-9]$/.test(e.key))) { e.preventDefault(); debugKey(Number(e.key)); return; }
+    if (DEBUG && e.key === "-") { if (state === S.INTRO) startButton.click(); state = S.RESULT; return; }
+    var k = e.key.toLowerCase();
+    if (k === "escape") { e.preventDefault(); if (!e.repeat) newRound(); return; }
+    if (state === S.INTRO) { if (k === " " || k === "enter") e.preventDefault(); return; }
+    if (e.repeat) return;
+    if (k === " " || k === "enter") {
+      e.preventDefault();
+      if (state === S.ANS) next(); else if (state === S.RESULT) newRound(); else if (state === S.Q) input.focus();
+    }
+  });
+  window.addEventListener("keyup", function (e) {
+    if ((e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
+  });
+
+  function rank() {
+    return score >= 10 ? zT("球の神", "God of Balls") : score >= 8 ? zT("球博士", "Doctor of Balls") :
+      score >= 5 ? zT("球好き", "Ball Lover") : score >= 2 ? zT("球見習い", "Ball Apprentice") : zT("球音痴", "Ball-Blind");
+  }
+  function doShare() {
+    window.zResultActions.x({ text:
+      zT("球のシルエットを" + score + "問見抜いて「" + rank() + "」になりました（10問中）",
+         "Spotted " + score + "/10 ball silhouettes and became a \"" + rank() + "\"") +
+      zT(" #クイズ何の球", " #QuizWhatBall") });
+  }
+
+  /* ============ 絵 ============
+     どの球も、シルエットのときは全部同じ黒で塗る（col が色を決める）。 */
+  var SIL = false;
+  function col(c) { return SIL ? "#1d2230" : c; }
+  function circle(x, y, r, c) { ctx.fillStyle = col(c); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+  function line(pts, c, w) {
+    ctx.strokeStyle = col(c); ctx.lineWidth = w; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath(); ctx.moveTo(pts[0], pts[1]); for (var i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]); ctx.stroke();
+  }
+  function detail(f) { if (!SIL) f(); }
+
+  var ART = {
+    rugby: function () {
+      ctx.save(); ctx.rotate(-0.35);
+      ctx.fillStyle = col("#9a5530");
+      ctx.beginPath(); ctx.moveTo(-150, 0);
+      ctx.bezierCurveTo(-90, -95, 90, -95, 150, 0); ctx.bezierCurveTo(90, 95, -90, 95, -150, 0); ctx.fill();
+      detail(function () {
+        line([-40, -20, 40, -20], "#fff", 5);
+        for (var i = -30; i <= 30; i += 15) line([i, -30, i, -10], "#fff", 4);
+        line([-120, -18, -100, 18], "#f4efe6", 4); line([120, -18, 100, 18], "#f4efe6", 4);
+      });
+      ctx.restore();
+    },
+    bulb: function () {
+      circle(0, -40, 100, "#fff3b0");
+      ctx.fillStyle = col("#fff3b0");
+      ctx.beginPath(); ctx.moveTo(-60, 30); ctx.lineTo(-38, 90); ctx.lineTo(38, 90); ctx.lineTo(60, 30); ctx.fill();
+      ctx.fillStyle = col("#9aa0aa"); ctx.fillRect(-40, 88, 80, 56);
+      ctx.beginPath(); ctx.moveTo(-22, 144); ctx.lineTo(22, 144); ctx.lineTo(10, 164); ctx.lineTo(-10, 164); ctx.fill();
+      detail(function () {
+        for (var y = 98; y < 144; y += 12) line([-40, y, 40, y + 6], "#6c727c", 4);
+        line([-14, 60, -14, -30, -4, -50, 6, -30, 14, -50, 14, 60], "#b07a1e", 4);
+      });
+    },
+    balloon: function () {
+      ctx.fillStyle = col("#e2574c");
+      ctx.beginPath(); ctx.arc(0, -50, 115, Math.PI * 0.85, Math.PI * 2.15);
+      ctx.quadraticCurveTo(70, 80, 30, 95); ctx.lineTo(-30, 95); ctx.quadraticCurveTo(-70, 80, -106, -6); ctx.fill();
+      detail(function () {
+        ctx.save(); ctx.beginPath(); ctx.arc(0, -50, 115, Math.PI * 0.85, Math.PI * 2.15);
+        ctx.quadraticCurveTo(70, 80, 30, 95); ctx.lineTo(-30, 95); ctx.quadraticCurveTo(-70, 80, -106, -6); ctx.clip();
+        ctx.fillStyle = "#f5d77e"; ctx.fillRect(-45, -170, 30, 270); ctx.fillRect(15, -170, 30, 270); ctx.restore();
+      });
+      line([-30, 95, -24, 130], "#5a4a3a", 3); line([30, 95, 24, 130], "#5a4a3a", 3);
+      ctx.fillStyle = col("#a0703c"); ctx.fillRect(-28, 128, 56, 40);
+    },
+    kendama: function () {
+      ctx.fillStyle = col("#d9b07a");
+      ctx.fillRect(-12, -40, 24, 190);                         /* 剣 */
+      ctx.beginPath(); ctx.moveTo(-12, -40); ctx.lineTo(0, -80); ctx.lineTo(12, -40); ctx.fill();
+      ctx.fillRect(-70, 10, 140, 34);                          /* 皿の横棒 */
+      ctx.beginPath(); ctx.arc(-70, 27, 26, Math.PI / 2, Math.PI * 1.5); ctx.fill();
+      ctx.beginPath(); ctx.arc(70, 27, 26, -Math.PI / 2, Math.PI / 2); ctx.fill();
+      line([0, 150, 60, 170, 110, 100, 105, -40], "#7a6a5a", 3);
+      circle(105, -80, 52, "#d23b3b");
+      detail(function () { circle(105, -80, 10, "#7a1e1e"); circle(88, -100, 9, "rgba(255,255,255,.35)"); });
+    },
+    earth: function () {
+      circle(-20, 20, 120, "#3a7bd5");
+      detail(function () {
+        ctx.save(); ctx.beginPath(); ctx.arc(-20, 20, 120, 0, Math.PI * 2); ctx.clip();
+        ctx.fillStyle = "#4caf50";
+        ctx.beginPath(); ctx.ellipse(-60, -20, 50, 70, 0.4, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(40, 50, 40, 55, -0.3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.fillRect(-140, -110, 240, 24);
+        ctx.restore();
+      });
+      circle(140, -110, 28, "#b8b8b8");
+    },
+    eye: function () {
+      ctx.strokeStyle = col("#e89a9a"); ctx.lineWidth = 34; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(60, 40); ctx.quadraticCurveTo(140, 90, 170, 170); ctx.stroke();
+      circle(-10, -10, 110, "#f7f3ee");
+      detail(function () {
+        circle(-60, -30, 48, "#4a8ac9"); circle(-66, -32, 24, "#111");
+        circle(-74, -44, 8, "#fff");
+        line([60, -60, 30, -30, 40, 0], "#d65a5a", 2); line([50, 60, 20, 40, 30, 20], "#d65a5a", 2);
+      });
+    },
+    base: function () {
+      circle(0, 0, 105, "#f7f3ee");
+      detail(function () {
+        ctx.strokeStyle = "#d23b3b"; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(-160, 0, 120, -0.75, 0.75); ctx.stroke();
+        ctx.beginPath(); ctx.arc(160, 0, 120, Math.PI - 0.75, Math.PI + 0.75); ctx.stroke();
+        for (var a = -0.6; a <= 0.6; a += 0.15) {
+          var x = -160 + Math.cos(a) * 120, y = Math.sin(a) * 120;
+          line([x - 6, y - 4, x + 6, y + 4], "#d23b3b", 3);
+          line([-x + 6, y - 4, -x - 6, y + 4], "#d23b3b", 3);
+        }
+      });
+    },
+    wbc: function () {
+      ctx.fillStyle = col("#e8ddf2");
+      ctx.beginPath();
+      for (var i = 0; i <= 64; i++) {
+        var a = i / 64 * Math.PI * 2;
+        var r = 105 + Math.sin(a * 5) * 10 + Math.sin(a * 3 + 1) * 14 + (Math.cos(a) > 0.9 ? 30 * (Math.cos(a) - 0.9) * 10 : 0);
+        var x = Math.cos(a) * r, y = Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.fill();
+      detail(function () {
+        circle(-30, -10, 30, "#8a5fc0"); circle(10, 20, 26, "#8a5fc0"); circle(25, -25, 22, "#8a5fc0");
+        for (var k = 0; k < 14; k++) circle(Math.cos(k * 1.7) * 70, Math.sin(k * 2.3) * 60, 4, "#c9b3e0");
+      });
+    },
+    straight: function () {
+      for (var i = 0; i < 4; i++) line([-170, -36 + i * 24, -40, -36 + i * 24], "#8e97a8", 8);
+      circle(40, 0, 48, "#f7f3ee");
+      detail(function () {
+        ctx.strokeStyle = "#d23b3b"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(-30, 0, 55, -0.7, 0.7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(110, 0, 55, Math.PI - 0.7, Math.PI + 0.7); ctx.stroke();
+      });
+    },
+    eclipse: function () {
+      detail(function () {
+        var g = ctx.createRadialGradient(0, 0, 100, 0, 0, 170);
+        g.addColorStop(0, "rgba(255,240,200,.95)"); g.addColorStop(1, "rgba(255,240,200,0)");
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 170, 0, Math.PI * 2); ctx.fill();
+      });
+      circle(0, 0, 105, "#11131a");
+    }
+  };
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    var night = state !== S.INTRO && qi === 9 && state === S.ANS;
+    ctx.fillStyle = night ? "#1c2440" : "#f2eee4";
+    ctx.fillRect(0, 0, W, H);
+
+    var q = QS[qi];
+    /* 何問目か */
+    ctx.fillStyle = night ? "#cfd6e6" : "#6b6f7a"; ctx.font = "bold 26px sans-serif"; ctx.textAlign = "center";
+    if (state === S.Q || state === S.ANS) ctx.fillText((qi + 1) + " / " + QS.length, W / 2, 56);
+
+    /* 絵：答えを出すまではシルエット、出したら色つき（ゆっくり色が戻る） */
+    var reveal = state === S.ANS ? Math.min(1, ansT / 0.5) : state === S.INTRO ? 0 : 0;
+    ctx.save(); ctx.translate(W / 2, CY);
+    SIL = true; ctx.globalAlpha = 1 - reveal; ART[q.id]();
+    if (reveal > 0) { SIL = false; ctx.globalAlpha = reveal; ART[q.id](); }
+    ctx.globalAlpha = 1; SIL = false;
+    ctx.restore();
+
+    if (state === S.ANS) {
+      var ok = right;
+      /* ○ か × */
+      var u = Math.min(1, ansT / 0.25);
+      ctx.save(); ctx.translate(W / 2, CY); ctx.scale(0.6 + 0.4 * u, 0.6 + 0.4 * u);
+      ctx.globalAlpha = 0.85; ctx.lineWidth = 26; ctx.lineCap = "round";
+      ctx.strokeStyle = ok ? "#e2574c" : "#3a6fd8";
+      if (ok) { ctx.beginPath(); ctx.arc(0, 0, 130, 0, Math.PI * 2); ctx.stroke(); }
+      else { ctx.beginPath(); ctx.moveTo(-110, -110); ctx.lineTo(110, 110); ctx.moveTo(110, -110); ctx.lineTo(-110, 110); ctx.stroke(); }
+      ctx.restore();
+      var ink = night ? "#fff" : "#16202e";
+      ctx.fillStyle = ink; ctx.textAlign = "center";
+      var s = 52; ctx.font = "800 " + s + "px sans-serif";
+      while (s > 24 && ctx.measureText(q.n).width > W - 60) { s--; ctx.font = "800 " + s + "px sans-serif"; }
+      ctx.fillText(q.n, W / 2, IY + 50);
+      if (ok && ansT > 0.4) {
+        ctx.font = "bold 30px sans-serif";
+        var n = solverNo(qi).toLocaleString();
+        ctx.fillText(zT("あなたは" + n + "人目の正解者です", "You are correct answerer No. " + n), W / 2, IY + 120);
+      }
+    }
+
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 結果画面。正解数と「もう一度」「Xでシェア」だけ */
+  function resultButtons() {
+    var h = 54, gap = 16, wr = 170, ws = 224;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    return [
+      { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
+      { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
+    ];
+  }
+  function hitButton(x, y) {
+    var bs = resultButtons();
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    return null;
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(score + "/" + QS.length, W / 2, H * 0.45);
+    ctx.restore();
+    resultButtons().forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      ctx.font = "800 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (!window.zActionIcon || !window.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+    });
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, q: qi, score: score, right: right, W: W, H: H }; },
+    answer: function (t) { answer(t); },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(3000);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  qi = 0; score = 0; T = 0; ansT = 0; right = false; state = S.INTRO; startButton.hidden = false; form.hidden = true;
+  layout();
+  var last = performance.now();
+  var stepAcc = 0;
+  function loop(now) {
+    /* 端末の速さや画面のコマ数で挙動が変わらないように、update はいつもちょうど 1/60 秒ずつ呼ぶ */
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      stepAcc += dt;
+      while (stepAcc >= 1 / 60) { update(1 / 60); stepAcc -= 1 / 60; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
