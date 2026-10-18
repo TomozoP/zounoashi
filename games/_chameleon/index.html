@@ -323,14 +323,14 @@
     return zones[0].c;
   }
   /* 歩く速さ（px/秒）と、色が合っていなくても見つからない秒数 */
-  function bpm() { return Math.min(170, 110 + score * 2); }
+  function bpm() { return Math.min(210, 110 + score * 2.5); }
   function speed() { return bpm() / 60 * STEP_PX * 2; }
   function grace() { return Math.max(0.4, 0.95 - score * 0.015); }
 
   function update(dt) {
     blink -= dt; eyeT += dt;
     if (blink < -3 - Math.random() * 3) blink = 0.15;
-    hopT += dt; popT += dt;
+    hopT += dt; popT += dt; poseT += dt;
     rings.forEach(function (g) { g.t += dt; });
     rings = rings.filter(function (g) { return g.t < g.delay + 0.35; });
     for (var q = 0; q < 7; q++) pressT[q] += dt;
@@ -391,6 +391,7 @@
   var rings = [], popT = 9;
   function success(d) {
     SND.ok(d || 0); hopT = 0; popT = 0;
+    pose = (pose + 1 + Math.floor(Math.random() * 2)) % 3; poseT = 0; /* 続けて同じポーズにならない */
     /* 体から広がる輪を2重に */
     rings.push({ t: 0, delay: 0 }, { t: 0, delay: 0.07 });
     for (var i = 0; i < 20; i++) {
@@ -665,20 +666,63 @@
   }
 
   /* カメレオン。体の色は今の色、濃い所・明るい所はそこから作る */
+  /* 決めポーズ用：しっぽを外した体と、上に巻いたしっぽ・上げた前足 */
+  var CHAM_NT = [
+    "...............oo.....",
+    ".........oooooolbo....",
+    "......oobdbbdbbbbbooo.",
+    ".....obbbbbbbbbbbbbbbo",
+    ".....obbbbbbbbbbbbbbbo",
+    "....oblllbbbbbbbbbddo.",
+    "....oblllllllllbbbbbo..",
+    "....oooobbbbbbbooo....",
+    "......................"
+  ];
+  var TAIL_UP = [
+    "..ooo..",
+    ".obbbo.",
+    "obo.obo",
+    "obo..bo",
+    ".oo.obo",
+    "....obo",
+    "....obo",
+    "....obo"
+  ];
+  var ARM_UP = ["...oo", "..obo", "..ob.", ".ob..", ".ob..", "ob...", "oo..."];
+  /* 0 舌ぺろ  1 しっぽくるん  2 前足を上げてウインク */
+  var POSE_T = 0.55, poseT = 9, pose = 0;
   function drawChameleon() {
     var jk = jumpK();
     var g = grabbed(), x = gx(CX) - 12, y = BRANCH - 9 - (hopT < 0.3 ? Math.round(Math.sin(Math.PI * hopT / 0.3) * 3) : 0);
-    if (jk >= 0) y -= Math.round(Math.sin(Math.PI * jk) * 14);
+    if (jk >= 0) y -= Math.round(Math.sin(Math.PI * jk) * 20);
     if (g && g.carry) { x = gx(g.x) - 11; y = gy(g.y) + 3; }
     var c = [shown[0], shown[1], shown[2]];
     var pal = { o: shadeRGB(c, 0.45), b: shadeRGB(c, 1), d: shadeRGB(c, 0.78), l: shadeRGB(c, 1.12) };
     var step = state === S.PLAY && jk < 0 ? Math.floor(walk / 8) % 2 : 0;
     /* 脚（前後の脚が交互に出る） */
+    var posing = state === S.PLAY && poseT < POSE_T;
     spr(LEG, x + 6 + (step ? 1 : 0), y + 7, pal);
-    spr(LEG, x + 14 + (step ? 0 : 1), y + 7, pal);
-    spr(CHAM, x, y, pal);
-    /* 目（鳥を見る） */
+    if (!(posing && pose === 2)) spr(LEG, x + 14 + (step ? 0 : 1), y + 7, pal);
+    spr(posing && pose === 1 ? CHAM_NT : CHAM, x, y, pal);
     spr(EYE, x + 15, y + 2, pal);
+    if (posing) {
+      if (pose === 0) {
+        /* 舌をのばして、目はにっこり */
+        var tl = Math.min(9, Math.round(poseT / 0.08 * 9));
+        px(x + 21, y + 5, tl, 1, "#ff5c8a"); px(x + 20 + tl, y + 4, 2, 3, "#ff5c8a");
+        px(x + 16, y + 3, 2, 2, pal.b); px(x + 16, y + 3, 2, 1, pal.o);
+      } else if (pose === 1) {
+        /* しっぽを背中の上でくるん */
+        spr(TAIL_UP, x - 1, y - 4, pal);
+        px(x + 16, y + 3, 2, 2, "#ffffff"); px(x + 17, y + 3, 1, 1, "#1e2420");
+      } else {
+        /* 前足を上げて、ウインク */
+        spr(ARM_UP, x + 20, y - 1, pal);
+        px(x + 16, y + 3, 2, 2, pal.b); px(x + 16, y + 4, 2, 1, pal.o);
+      }
+      return;
+    }
+    /* 目（鳥を見る） */
     if (blink > 0) { px(x + 16, y + 3, 2, 2, pal.o); return; }
     var bp = birdPos(), dx = 0, dy = 0;
     if (exp > 0.05 || state === S.OVER) { dx = bp.x > CX ? 1 : 0; dy = bp.y < CY - 20 ? 0 : 1; }
@@ -753,7 +797,8 @@
     },
     pick: pick,
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
-    reset: function () { newRound(); }
+    reset: function () { newRound(); },
+    noFx: function () { fx = []; rings = []; }
   };
 
   window.__recording = {
