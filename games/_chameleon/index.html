@@ -112,42 +112,34 @@
   };
 
   /* ============ 色 ============
-     下のカラーホイールは 24色相 × 5段（内側ほど淡い）。真ん中の白は弾には出ない。
-     弾と同じマスか、となりのマス（色相・段とも1つ以内）ならすり抜ける。 */
-  var HUES = 24, RINGS = 5;
+     下のカラーホイールは境目なし。角度が色相、中心からの距離が濃さ（真ん中は白、外ほど鮮やか）。
+     色は { h: 色相(度), t: 中心からの距離 0〜1 }。ホイールの上で近ければ「だいたい合っている」ですり抜ける。 */
   function hsl(h, s, l) {
     s /= 100; l /= 100;
     var k = function (n) { return (n + h / 30) % 12; }, a = s * Math.min(l, 1 - l);
     var f = function (n) { return l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1))); };
     return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
   }
-  var LIGHT = [88, 78, 68, 58, 50];
-  var CELL = [];
-  for (var ri = 0; ri < RINGS; ri++) for (var hi = 0; hi < HUES; hi++) CELL.push(hsl(hi * 15, 88, LIGHT[ri]));
-  var WHITE = [246, 244, 238];
-  function rgbOf(i) { return i < 0 ? WHITE : CELL[i]; }
+  function rgbOf(c) { return hsl(c.h, 90, 97 - 47 * c.t); }
   function css(c) { return "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")"; }
-  function colOf(i) { return css(rgbOf(i)); }
-  function ringOf(i) { return Math.floor(i / HUES); }
-  function hueOf(i) { return i % HUES; }
-  function near(a, b) {
-    if (a < 0 || b < 0) return false;
-    var dh = Math.abs(hueOf(a) - hueOf(b)); dh = Math.min(dh, HUES - dh);
-    return dh <= 1 && Math.abs(ringOf(a) - ringOf(b)) <= 1;
-  }
-  /* すり抜けた数で出る色が増える */
+  function colOf(c) { return css(rgbOf(c)); }
+  /* ホイールの上の位置（半径1） */
+  function pos(c) { var a = (c.h - 60) * Math.PI / 180; return { x: Math.sin(a) * c.t, y: -Math.cos(a) * c.t }; }
+  function dist(a, b) { var p = pos(a), q = pos(b); return Math.hypot(p.x - q.x, p.y - q.y); }
+  var TOL = 0.24; /* これより近ければすり抜ける（ホイールの半径を1として） */
+  function near(a, b) { return dist(a, b) < TOL; }
+  /* すり抜けた数で出る色が増える。濃さ t の範囲と、色相の選び方 */
   var STEPS = [
-    { at: 0, rings: [4], every: 8 },
-    { at: 8, rings: [4], every: 4 },
-    { at: 18, rings: [3, 4], every: 2 },
-    { at: 32, rings: [1, 2, 3, 4], every: 1 },
-    { at: 50, rings: [0, 1, 2, 3, 4], every: 1 }
+    { at: 0, t0: 0.95, hues: [0, 120, 240] },
+    { at: 8, t0: 0.85, hues: [0, 60, 120, 180, 240, 300] },
+    { at: 18, t0: 0.6, hues: null },
+    { at: 32, t0: 0.35, hues: null }
   ];
-  function palette() {
-    var st = STEPS[0], p = [];
+  function randomColor() {
+    var st = STEPS[0];
     STEPS.forEach(function (x) { if (score >= x.at) st = x; });
-    st.rings.forEach(function (r) { for (var h = 0; h < HUES; h += st.every) p.push(r * HUES + h); });
-    return p;
+    var h = st.hues ? st.hues[Math.floor(Math.random() * st.hues.length)] : Math.random() * 360;
+    return { h: h, t: st.t0 + Math.random() * (1 - st.t0) };
   }
 
   /* ============ 配置 ============ */
@@ -164,13 +156,13 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: 0, PLAY: 1, OVER: 2, RESULT: 3 };
-  var state = S.INTRO, score = 0, T = 0, cur = -1, shown = [246, 244, 238], bullets = [], spawnT = 0, overT = 0;
+  var state = S.INTRO, score = 0, T = 0, cur = { h: 0, t: 0 }, shown = [246, 244, 238], bullets = [], spawnT = 0, overT = 0;
   var splat = null, press = -1, pressT = 0, fx = [], blink = 0, eyeT = 0, invincible = false;
 
   function hex(c) { return [parseInt(c.substr(1, 2), 16), parseInt(c.substr(3, 2), 16), parseInt(c.substr(5, 2), 16)]; }
 
   function newRound() {
-    state = S.PLAY; score = 0; T = 0; cur = -1; bullets = []; spawnT = 1.0; overT = 0; splat = null; fx = [];
+    state = S.PLAY; score = 0; T = 0; cur = { h: 0, t: 0 }; bullets = []; spawnT = 1.0; overT = 0; splat = null; fx = [];
     shareButton.hidden = true;
     if (startButton) startButton.hidden = true;
   }
@@ -180,17 +172,16 @@
   function interval() { return Math.max(0.42, 1.35 - score * 0.02); }
 
   function spawn() {
-    var p = palette(), c = p[Math.floor(Math.random() * p.length)];
-    var last = bullets[bullets.length - 1];
-    for (var k = 0; k < 4 && last && near(last.c, c); k++) c = p[Math.floor(Math.random() * p.length)];
-    var dist = SX + SW - CX + 30;
-    bullets.push({ c: c, d: 1, t: 0, dur: travel(), dist: dist, y: CY - 8 + (Math.random() - 0.5) * 30, done: false });
+    var c = randomColor(), last = bullets[bullets.length - 1];
+    for (var k = 0; k < 6 && last && dist(last.c, c) < 0.5; k++) c = randomColor();
+    var far = SX + SW - CX + 30;
+    bullets.push({ c: c, d: 1, t: 0, dur: travel(), dist: far, y: CY - 8 + (Math.random() - 0.5) * 30, done: false });
   }
 
   function update(dt) {
     blink -= dt; eyeT += dt;
     if (blink < -3 - Math.random() * 3) blink = 0.15;
-    if (pressT > 0) pressT -= dt;
+    if (pickT > 0) pickT -= dt;
     fx.forEach(function (e) { e.t += dt; e.x += e.vx * dt; e.y += e.vy * dt; e.vy += 500 * dt; });
     fx = fx.filter(function (e) { return e.t < e.life; });
     /* 体の色は少しだけかけて変わる（見た目だけ。判定はすぐ） */
@@ -221,20 +212,18 @@
   function bulletX(b) { return CX + b.d * b.dist * (1 - b.t / b.dur); }
 
   /* ============ 入力 ============ */
-  /* ホイールのどのマスか。真ん中は白（-1）。外れていれば null */
+  /* ホイールのどの色か。外れていれば null（縁の少し外は一番外の色） */
   function hitWheel(x, y) {
     var dx = x - WX, dy = y - WY, d = Math.hypot(dx, dy);
     if (d > WR + 24) return null;
-    if (d < W0) return -1;
-    var ring = Math.min(RINGS - 1, Math.floor((d - W0) / ((WR - W0) / RINGS)));
     var th = Math.atan2(dx, -dy) * 180 / Math.PI;
-    var h = ((Math.round(th / 15) + 4) % HUES + HUES) % HUES;
-    return ring * HUES + h;
+    return { h: ((th + 60) % 360 + 360) % 360, t: Math.min(1, d / WR) };
   }
-  function pick(i) {
-    if (i === null || state !== S.PLAY) return;
-    if (cur !== i) SND.pick(i < 0 ? 0 : ringOf(i) * 2 + (hueOf(i) % 3));
-    cur = i;
+  var pickT = 0;
+  function pick(c) {
+    if (c === null || state !== S.PLAY) return;
+    if (dist(c, cur) > 0.12 && pickT <= 0) { SND.pick(Math.round(c.t * 6)); pickT = 0.06; }
+    cur = c;
   }
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
@@ -260,7 +249,7 @@
   function debugKey(n) {
     if (state === S.INTRO) startButton.click();
     if (n === 1) { newRound(); score = 42; }
-    if (n === 2 && state === S.PLAY) { state = S.OVER; overT = 0; SND.hit(); splat = { c: colOf(cur === 4 * HUES ? 4 * HUES + 12 : 4 * HUES), x: CX + 20, y: CY - 8 }; }
+    if (n === 2 && state === S.PLAY) { state = S.OVER; overT = 0; SND.hit(); splat = { c: colOf({ h: (cur.h + 180) % 360, t: 1 }), x: CX + 20, y: CY - 8 }; }
     if (n === 3) invincible = !invincible;
   }
   /* キーでも選べる（左右で色相、上下で段） */
@@ -270,11 +259,10 @@
     if (k === "escape") { e.preventDefault(); if (!e.repeat) newRound(); return; }
     if (state === S.INTRO) { if (k === " " || k === "enter") e.preventDefault(); return; }
     if (state === S.RESULT) { if ((k === " " || k === "enter") && !e.repeat) { e.preventDefault(); newRound(); } return; }
-    var c0 = cur < 0 ? 4 * HUES + 4 : cur, r0 = ringOf(c0), h0 = hueOf(c0);
-    if (k === "arrowleft") { e.preventDefault(); pick(r0 * HUES + (h0 + HUES - 1) % HUES); }
-    if (k === "arrowright") { e.preventDefault(); pick(r0 * HUES + (h0 + 1) % HUES); }
-    if (k === "arrowup") { e.preventDefault(); pick(Math.min(RINGS - 1, r0 + 1) * HUES + h0); }
-    if (k === "arrowdown") { e.preventDefault(); pick(Math.max(0, r0 - 1) * HUES + h0); }
+    if (k === "arrowleft") { e.preventDefault(); pick({ h: (cur.h + 345) % 360, t: cur.t || 1 }); }
+    if (k === "arrowright") { e.preventDefault(); pick({ h: (cur.h + 15) % 360, t: cur.t || 1 }); }
+    if (k === "arrowup") { e.preventDefault(); pick({ h: cur.h, t: Math.min(1, cur.t + 0.1) }); }
+    if (k === "arrowdown") { e.preventDefault(); pick({ h: cur.h, t: Math.max(0, cur.t - 0.1) }); }
   });
   window.addEventListener("keyup", function (e) {
     var k = e.key.toLowerCase();
@@ -418,24 +406,35 @@
     ctx.restore();
   }
 
-  function drawPanel() {
-    var dr = (WR - W0) / RINGS, step = Math.PI * 2 / HUES;
-    ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.beginPath(); ctx.arc(WX, WY + 5, WR + 2, 0, Math.PI * 2); ctx.fill();
-    for (var i = 0; i < CELL.length; i++) {
-      var r = ringOf(i), h = hueOf(i);
-      var a0 = (h - 4) * step - step / 2 - Math.PI / 2, a1 = a0 + step;
-      var rin = W0 + r * dr, rout = rin + dr;
-      ctx.fillStyle = colOf(i);
-      ctx.beginPath(); ctx.arc(WX, WY, rout + 0.6, a0 - 0.004, a1 + 0.004); ctx.arc(WX, WY, rin, a1 + 0.004, a0 - 0.004, true); ctx.closePath(); ctx.fill();
+  /* ホイールの絵は一度だけ点ごとに作っておく */
+  var wheelImg = document.createElement("canvas"), wheelR = 0;
+  function makeWheel() {
+    var r = Math.round(WR), dpr = Math.min(2, window.devicePixelRatio || 1), n = Math.round(r * 2 * dpr);
+    wheelImg.width = wheelImg.height = n;
+    var g = wheelImg.getContext("2d"), img = g && g.createImageData && g.createImageData(n, n);
+    wheelR = WR;
+    if (!img) return;
+    var d = img.data;
+    for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) {
+      var dx = (x + 0.5) / (n / 2) - 1, dy = (y + 0.5) / (n / 2) - 1, t = Math.hypot(dx, dy);
+      if (t > 1.01) continue;
+      var h = Math.atan2(dx, -dy) * 180 / Math.PI;
+      var c = rgbOf({ h: ((h + 60) % 360 + 360) % 360, t: Math.min(1, t) }), o = (y * n + x) * 4;
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = t > 1 ? Math.round((1.01 - t) * 100 * 255) : 255;
     }
-    ctx.fillStyle = css(WHITE); ctx.beginPath(); ctx.arc(WX, WY, W0, 0, Math.PI * 2); ctx.fill();
-    /* 選んでいるマス */
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 4;
-    if (cur < 0) { ctx.strokeStyle = "#1e2420"; ctx.beginPath(); ctx.arc(WX, WY, W0 - 3, 0, Math.PI * 2); ctx.stroke(); return; }
-    var rr = ringOf(cur), hh = hueOf(cur), b0 = (hh - 4) * step - step / 2 - Math.PI / 2, b1 = b0 + step, ri = W0 + rr * dr, ro = ri + dr;
-    ctx.beginPath(); ctx.arc(WX, WY, ro, b0, b1); ctx.arc(WX, WY, ri, b1, b0, true); ctx.closePath();
-    ctx.strokeStyle = "#1e2420"; ctx.lineWidth = 6; ctx.stroke();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.stroke();
+    g.putImageData(img, 0, 0);
+    wheelR = WR;
+  }
+  function drawPanel() {
+    if (wheelR !== WR) makeWheel();
+    ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.beginPath(); ctx.arc(WX, WY + 5, WR + 1, 0, Math.PI * 2); ctx.fill();
+    ctx.drawImage(wheelImg, WX - WR, WY - WR, WR * 2, WR * 2);
+    /* 選んでいる所 */
+    var p = pos(cur), x = WX + p.x * WR, y = WY + p.y * WR;
+    ctx.fillStyle = colOf(cur);
+    ctx.beginPath(); ctx.arc(x, y, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#1e2420"; ctx.lineWidth = 5; ctx.stroke();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5; ctx.stroke();
   }
 
   /* 結果画面。数と「もう一度」「Xでシェア」だけ */
