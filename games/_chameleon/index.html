@@ -281,7 +281,7 @@
   var zones = [], walk = 0, exp = 0, fx = [], blink = 0, eyeT = 0, invincible = false, grabX = 0, grabY = 0;
 
   function newRound() {
-    rings = []; jumpLine = -1; hangLine = -1; wasAir = false; state = S.PLAY; score = 0; T = 0; cur = colorN(0); overT = 0; fx = []; exp = 0;
+    rings = []; jumpT = 9; wasAir = false; state = S.PLAY; score = 0; T = 0; cur = colorN(0); overT = 0; fx = []; exp = 0;
     makeZones(0); bgmStart();
     shareButton.hidden = true;
     if (startButton) startButton.hidden = true;
@@ -330,7 +330,7 @@
   function update(dt) {
     blink -= dt; eyeT += dt;
     if (blink < -3 - Math.random() * 3) blink = 0.15;
-    hopT += dt; popT += dt; poseT += dt; spinT += dt; landT += dt;
+    popT += dt; poseT += dt; spinT += dt; landT += dt; jumpT += dt;
     rings.forEach(function (g) { g.t += dt; });
     rings = rings.filter(function (g) { return g.t < g.delay + 0.35; });
     for (var q = 0; q < 7; q++) pressT[q] += dt;
@@ -348,12 +348,11 @@
     [zoneAt(walk), zoneAt(walk + 40)].forEach(function (z) {
       if (!z.got && near(cur, z.c)) { z.got = true; score++; success(z.c.i); }
     });
-    /* 色の境目の半拍前で跳ぶ（タッ）。境目でちょうど一番高い（ターン） */
-    var nb = nextLine();
-    if (nb !== jumpLine && walk >= nb - UP_PX) jumpLine = nb; /* 音は曲の拍に合わせて playStep で鳴らす */
-    var jk0 = jumpK(), air = jk0 >= 0 && jk0 < 0.5; /* 上がっている間だけ見つからない */
-    if ((jk0 >= 0) !== wasAir) { dust(); if (wasAir) landT = 0; }
-    wasAir = jk0 >= 0;
+    /* 色の境目の半拍前でかがむ（タッ）。境目で色を合わせられたら回転ジャンプ（ターン） */
+    /* かがんでいる間と、跳び上がっている間は見つからない */
+    var air = crouchK() >= 0 || jumpT < JUMP_T * 0.5;
+    if (wasAir && jumpT >= JUMP_T) { dust(); landT = 0; }
+    wasAir = jumpT < JUMP_T;
     var d = gap(), ok = d < TOL || air;
     if (ok || invincible) exp = Math.max(0, exp - dt * 1.5);
     else exp += dt * (0.5 + 1.3 * Math.min(1, (d - TOL) / 0.8)); /* 色が違うほど鳥が早く来る */
@@ -373,21 +372,17 @@
     return m;
   }
   function blends() { return gap() < TOL; }
-  /* 次の色の境目（歩いた距離）と、跳んでいる途中なら 0〜1（地面なら -1） */
-  var BEAT_PX = 88, UP_PX = 44, JUMP_H = 40, HANG_T = 0.18, hangLine = -1, hangU = 0, hangPx = 0, jumpLine = -1, wasAir = false, landT = 9;
+  /* 次の色の境目（歩いた距離）。かがむのは境目の UP_PX 手前から。跳ぶのは成功したときだけ（時間で動く） */
+  var UP_PX = 44, JUMP_H = 40, JUMP_T = 0.45, jumpT = 9, wasAir = false, landT = 9;
   function nextLine() {
     for (var i = 0; i < zones.length; i++) if (zones[i].x > walk) return zones[i].x;
     return Infinity;
   }
-  function jumpK() {
-    if (state !== S.PLAY || jumpLine < 0) return -1;
-    /* 半拍前に跳び、境目で一番高く、半拍後に着地（ふつうの放物線）。0〜0.5 上がり、0.5〜1 下がり */
-    var u = walk - (jumpLine - UP_PX);
-    if (u < 0) return -1;
-    /* 成功したら、その高さで少し止まる（止まった分だけ着地が遅れる） */
-    if (hangLine === jumpLine && u > hangU) u = u < hangU + hangPx ? hangU : u - hangPx;
-    var k = u / (UP_PX * 2);
-    return k < 1 ? k : -1;
+  /* かがんでいる途中なら 0〜1（それ以外は -1） */
+  function crouchK() {
+    if (state !== S.PLAY) return -1;
+    var d = nextLine() - walk;
+    return d > 0 && d <= UP_PX ? 1 - d / UP_PX : -1;
   }
   /* 足もとの土ぼこり（踏み切りと着地） */
   function dust() {
@@ -397,11 +392,10 @@
     }
   }
   /* 数が増えたとき：体から星が飛び、少し跳ねる */
-  var hopT = 9;
   var rings = [], popT = 9;
   function success(d) {
-    SND.ok(d || 0); hopT = 0; popT = 0;
-    if (jumpK() >= 0 && hangLine !== jumpLine) { hangLine = jumpLine; hangU = walk - (jumpLine - UP_PX); hangPx = speed() * HANG_T; }
+    SND.ok(d || 0); popT = 0;
+    if (state === S.PLAY) { jumpT = 0; dust(); }
     pose = (pose + 1 + Math.floor(Math.random() * 2)) % 3; poseT = 0; spinT = 0; /* 続けて同じポーズにならない */
     /* 体から広がる輪を2重に */
     rings.push({ t: 0, delay: 0 }, { t: 0, delay: 0.07 });
@@ -702,19 +696,16 @@
   ];
   var ARM_UP = ["...oo", "..obo", "..ob.", ".ob..", ".ob..", "ob...", "oo..."];
   /* 0 舌ぺろ  1 しっぽくるん  2 前足を上げてウインク */
-  var POSE_T = 0.32, poseT = 9, pose = 0, SPIN_T = 0.32, spinT = 9;
+  var POSE_T = 0.45, poseT = 9, pose = 0, SPIN_T = 0.45, spinT = 9;
   /* 回転させるときは、いったん小さな裏の画面に描いてから回して貼る */
   var chamX = 0, chamY = 0;
   var chamCv = document.createElement("canvas"); chamCv.width = 48; chamCv.height = 32;
   function drawChameleon() {
-    var jk = jumpK(), g = grabbed(), x = gx(CX) - 12, y = BRANCH - 9, sq = 0;
-    if (jk >= 0) y -= Math.round(JUMP_H * (1 - Math.pow(2 * jk - 1, 2)));
-    else {
-      /* 踏み切りの直前と着地の直後は、少し沈む */
-      var pre = nextLine() - UP_PX - walk;
-      if (state === S.PLAY && ((pre > 0 && pre < 10) || landT < 0.08)) sq = 1;
-      else if (hopT < 0.3) y -= Math.round(Math.sin(Math.PI * hopT / 0.3) * 3);
-    }
+    var air = state === S.PLAY && jumpT < JUMP_T, jk = air ? jumpT / JUMP_T : -1;
+    var g = grabbed(), x = gx(CX) - 12, y = BRANCH - 9, sq = 0;
+    if (air) y -= Math.round(JUMP_H * 4 * jk * (1 - jk));
+    else if (crouchK() >= 0) sq = crouchK() < 0.2 ? 1 : 2; /* タッ：かがむ */
+    else if (state === S.PLAY && landT < 0.08) sq = 1;     /* 着地で少し沈む */
     if (g && g.carry) { x = gx(g.x) - 11; y = gy(g.y) + 3; }
     chamX = SX + (x + 11) * DOT; chamY = SY + (y + 4) * DOT;
     var spin = state === S.PLAY && spinT < SPIN_T;
@@ -829,7 +820,7 @@
   window.__probe = {
     now: function () {
       return { state: state, score: score, cur: cur, time: T, W: W, H: H, bar: { x: BX, y: BY, w: BW, h: BH },
-        zone: colorAt(walk), exp: exp, walk: walk, jump: jumpK() };
+        zone: colorAt(walk), exp: exp, walk: walk, jump: crouchK(), air: jumpT < JUMP_T };
     },
     pick: pick,
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
