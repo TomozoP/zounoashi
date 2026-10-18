@@ -2468,28 +2468,52 @@ async function startVoice() {
   toast('声を起動できませんでした'); return false;
 }
 if (voiceOn) { syncTtsBtn(); pingVoice(); }
-// 選んだ文（なければ台本全部）を読み上げ、声のレーンの再生位置に置いて同じ文で字幕も作る（行ごとに字幕を分ける）
+// 選んだ文（なければ台本全部）を1文ずつ読み上げ、声のレーンの再生位置から並べて置く。
+// 字幕は1枚ぶんずつに分け、声のクリップも字幕と同じ所で切る（切れ目は近くのいちばん静かな所に寄せる）
+function quietAt(raw, t, span = 0.12) {
+  const d = raw.getChannelData(0), sr = raw.sampleRate, w = Math.round(sr * 0.02);
+  let best = t, bestE = Infinity;
+  for (let c = Math.max(0, t - span); c <= Math.min(raw.duration, t + span); c += 0.01) {
+    const i0 = Math.round(c * sr); let e = 0; for (let i = i0; i < Math.min(d.length, i0 + w); i++) e += d[i] * d[i];
+    if (e < bestE) { bestE = e; best = c; }
+  }
+  return best;
+}
 async function speakScript() {
   if (voiceBusy) return;
   const ta = $('scriptText'), v = ta.value; let a = ta.selectionStart, b = ta.selectionEnd;
   if (a === b) { a = 0; b = v.length; }
-  const text = v.slice(a, b).trim(); if (!text) return;
+  const units = v.slice(a, b).split('\n').flatMap(x => x.split(/(?<=[。！？!?])/)).map(x => x.trim()).filter(x => splitText(x, style.max).length);
+  if (!units.length) return;
   voiceBusy = true; $('ttsBtn').disabled = true;
   try {
     if (!voiceReady && !await pingVoice() && !await startVoice()) throw 0;
-    const r = await fetch(VOICE_URL + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, ...ttsParams() }) });
-    if (!r.ok) throw new Error(r.status);
-    const blob = await r.blob(), raw = await actx.decodeAudioData(await blob.arrayBuffer());
-    const bid = nid(); buffers.set(bid, { raw, peaks: computePeaks(raw) });
-    dbPut('media', 'a' + bid, { name: '読み上げ', blob });
+    const prm = ttsParams(), got = [];
+    for (let i = 0; i < units.length; i++) {
+      toast('読み上げ中 ' + (i + 1) + ' / ' + units.length, 60000);
+      const r = await fetch(VOICE_URL + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...prm, text: units[i] }) });
+      if (!r.ok) throw new Error(r.status);
+      const blob = await r.blob(); got.push({ text: units[i], blob, raw: await actx.decodeAudioData(await blob.arrayBuffer()) });
+    }
+    $('toast').style.display = 'none';
     commit();
-    const at = playhead;
-    aclips.push({ id: nid(), buf: bid, in: 0, out: raw.duration, at, gain: 1, lane: 'vo', name: '読み上げ' });
-    const lines = text.split('\n').map(x => x.trim()).filter(Boolean), total = lines.reduce((n, x) => n + [...x].length, 0);
-    // 行と行の間の無音は字幕に含めない
-    const gap = Math.min(ttsParams().pause, raw.duration / (lines.length * 2)), speech = raw.duration - gap * (lines.length - 1);
-    let t = at; addSubsFromSegs(lines.map(x => { const d = speech * [...x].length / total, sg = { text: x, start: t, end: t + d }; t += d + gap; return sg; }));
-    playhead = at + raw.duration;
+    let t = playhead;
+    for (const g of got) {
+      const bid = nid(); buffers.set(bid, { raw: g.raw, peaks: computePeaks(g.raw) });
+      dbPut('media', 'a' + bid, { name: '読み上げ', blob: g.blob });
+      const parts = splitText(g.text, style.max), total = parts.reduce((n, x) => n + [...x].length, 0), dur = g.raw.duration;
+      let from = 0, acc = 0;
+      parts.forEach((p, k) => {
+        acc += [...p].length;
+        const to = k === parts.length - 1 ? dur : quietAt(g.raw, dur * acc / total);
+        aclips.push({ id: nid(), buf: bid, in: from, out: to, at: t + from, gain: 1, lane: 'vo', name: '読み上げ' });
+        subs.push({ id: nid(), text: p, start: t + from, end: t + to });
+        from = to;
+      });
+      t += dur + prm.pause;
+    }
+    subs.sort((x, y) => x.start - y.start);
+    playhead = t - prm.pause;
     changed(true);
   } catch (e) { if (e !== 0) { voiceReady = false; toast('読み上げに失敗しました'); } }
   voiceBusy = false; $('ttsBtn').disabled = false;
