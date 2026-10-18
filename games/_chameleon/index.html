@@ -165,25 +165,39 @@
     shareButton.hidden = true;
     if (startButton) startButton.hidden = true;
   }
-  /* 背景の帯。最初は白で、そこから色が変わっていく */
+  /* 背景の色。決まった色の区間（w）と、次の色へなめらかに移る区間（tr）が交互に来る。最初は白 */
   function makeZones(n) {
     score = n; walk = 0;
-    zones = [{ x: -400, w: 640, c: { h: 0, t: 0 }, n: n }];
+    zones = [{ x: -400, w: 600, tr: 120, c: { h: 0, t: 0 }, n: n }];
     fill();
   }
   function fill() {
-    while (zones[zones.length - 1].x < walk + SW) {
+    while (zones[zones.length - 1].x < walk + SW * 2) {
       var last = zones[zones.length - 1], n = last.n + 1;
-      var base = Math.max(130, 330 - n * 5);
+      var base = Math.max(90, 260 - n * 5);
       var c = randomColor(n);
       for (var k = 0; k < 6 && dist(last.c, c) < 0.55; k++) c = randomColor(n);
-      zones.push({ x: last.x + last.w, w: base * (0.8 + Math.random() * 0.5), c: c, n: n, seed: Math.random() * 1000 });
+      zones.push({ x: last.x + last.w + last.tr, w: base * (0.7 + Math.random() * 0.6), tr: Math.max(70, 150 - n * 2), c: c, n: n });
     }
-    while (zones.length > 2 && zones[1].x + zones[1].w < walk - SW) zones.shift();
+    while (zones.length > 2 && zones[1].x + zones[1].w + zones[1].tr < walk - SW) zones.shift();
   }
   function zoneAt(x) {
-    for (var i = 0; i < zones.length; i++) if (x >= zones[i].x && x < zones[i].x + zones[i].w) return zones[i];
-    return zones[zones.length - 1];
+    for (var i = zones.length - 1; i >= 0; i--) if (x >= zones[i].x) return zones[i];
+    return zones[0];
+  }
+  /* その場所の背景の色。移る区間はホイールの上をまっすぐ進む */
+  function colorAt(x) {
+    if (!zones.length) return { h: 0, t: 0 };
+    for (var i = zones.length - 1; i >= 0; i--) {
+      var z = zones[i];
+      if (x < z.x) continue;
+      if (x < z.x + z.w || !zones[i + 1]) return z.c;
+      var u = (x - z.x - z.w) / z.tr; u = u * u * (3 - 2 * u);
+      var a = pos(z.c), b = pos(zones[i + 1].c), px = a.x + (b.x - a.x) * u, py = a.y + (b.y - a.y) * u;
+      var th = Math.atan2(px, -py) * 180 / Math.PI;
+      return { h: ((th + 60) % 360 + 360) % 360, t: Math.min(1, Math.hypot(px, py)) };
+    }
+    return zones[0].c;
   }
   /* 歩く速さ（px/秒）と、色が合っていなくても見つからない秒数 */
   function speed() { return Math.min(190, 75 + score * 3); }
@@ -205,9 +219,14 @@
     fill();
     var z = zoneAt(walk);
     if (z.n > score) { score = z.n; SND.pass(); }
-    if (near(cur, z.c) || invincible) exp = Math.max(0, exp - dt * 1.5);
+    if (blends() || invincible) exp = Math.max(0, exp - dt * 1.5);
     else exp += dt;
     if (exp > grace()) snatch();
+  }
+  /* 体の下（前後60）の背景のどこかと色が合っていればよい */
+  function blends() {
+    for (var dx = -60; dx <= 60; dx += 10) if (near(cur, colorAt(walk + dx))) return true;
+    return false;
   }
   function birdPos() {
     var ix = SX + SW * 0.55 + Math.sin(T * 0.9) * 150, iy = SY + 46 + Math.sin(T * 1.7) * 10;
@@ -304,25 +323,44 @@
     if (state === S.RESULT) drawResult();
   }
 
+  /* ドット絵：画面は 1/DOT の大きさの裏の画面に描いて、ぼかさずに引き伸ばす */
+  var DOT = 5, off = document.createElement("canvas"), main = ctx;
   function drawScreen() {
-    ctx.save();
-    roundRect(SX, SY, SW, SH, 14); ctx.clip();
-    /* 背景の帯（葉っぱの模様つき） */
-    zones.forEach(function (z) {
-      var x0 = CX + (z.x - walk);
-      if (x0 > SX + SW || x0 + z.w < SX) return;
-      var c = rgbOf(z.c);
-      ctx.fillStyle = css(c); ctx.fillRect(x0, SY, z.w + 1, SH);
+    var ow = Math.ceil(SW / DOT), oh = Math.ceil(SH / DOT);
+    if (off.width !== ow || off.height !== oh) { off.width = ow; off.height = oh; }
+    var o = off.getContext("2d");
+    if (o && o.setTransform) {
+      ctx = o;
+      ctx.setTransform(1 / DOT, 0, 0, 1 / DOT, -SX / DOT, -SY / DOT);
+      drawScene();
+      ctx = main;
       ctx.save();
-      ctx.beginPath(); ctx.rect(x0, SY, z.w + 1, SH); ctx.clip();
-      ctx.fillStyle = "rgba(" + Math.round(c[0] * 0.82) + "," + Math.round(c[1] * 0.82) + "," + Math.round(c[2] * 0.82) + ",.55)";
-      var sd = z.seed || 1;
-      for (var i = 0; i < 14; i++) {
-        var lx = x0 + ((sd * (i + 3) * 37) % (z.w + 40)) - 20, ly = SY + ((sd * (i + 7) * 53) % SH);
-        ctx.beginPath(); ctx.ellipse(lx, ly, 26, 11, ((sd + i) % 6) - 3, 0, Math.PI * 2); ctx.fill();
-      }
+      roundRect(SX, SY, SW, SH, 14); ctx.clip();
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(off, SX, SY, ow * DOT, oh * DOT);
+      ctx.imageSmoothingEnabled = true;
       ctx.restore();
-    });
+    } else drawScene();
+  }
+  function drawScene() {
+    ctx.save();
+    /* 背景（1ドットずつ、その場所の色で塗る） */
+    for (var cx = 0; cx < SW; cx += DOT) {
+      ctx.fillStyle = colOf(colorAt(walk + (SX + cx - CX)));
+      ctx.fillRect(SX + cx, SY, DOT + 0.5, SH);
+    }
+    /* 葉っぱの模様（世界に固定。色は下の背景より少し暗く） */
+    var t0 = Math.floor((walk - CX + SX - 60) / 60), t1 = Math.ceil((walk - CX + SX + SW + 60) / 60);
+    for (var tile = t0; tile <= t1; tile++) {
+      for (var li = 0; li < 3; li++) {
+        var hsh = Math.abs(Math.sin(tile * 12.9898 + li * 78.233) * 43758.5453) % 1;
+        var hs2 = Math.abs(Math.sin(tile * 39.3468 + li * 11.135) * 24634.6345) % 1;
+        var wx = tile * 60 + hsh * 60, sx = CX + (wx - walk), sy = SY + hs2 * SH;
+        var c = rgbOf(colorAt(wx));
+        ctx.fillStyle = "rgb(" + Math.round(c[0] * 0.84) + "," + Math.round(c[1] * 0.84) + "," + Math.round(c[2] * 0.84) + ")";
+        ctx.beginPath(); ctx.ellipse(sx, sy, 24, 10, (hsh * 6) - 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
     /* 枝 */
     ctx.strokeStyle = "#6b4a2e"; ctx.lineWidth = 14;
     ctx.beginPath(); ctx.moveTo(SX - 10, CY + 42); ctx.lineTo(SX + SW + 10, CY + 42); ctx.stroke();
@@ -333,8 +371,8 @@
     fx.forEach(function (e) { ctx.fillStyle = e.c; ctx.beginPath(); ctx.arc(e.x, e.y, 5, 0, Math.PI * 2); ctx.fill(); });
     if (state === S.PLAY || state === S.OVER) {
       ctx.fillStyle = "rgba(20,30,24,.8)"; ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 5;
-      ctx.font = "800 44px sans-serif"; ctx.textAlign = "center";
-      ctx.strokeText(String(score), SX + SW / 2, SY + 56); ctx.fillText(String(score), SX + SW / 2, SY + 56);
+      ctx.font = "800 60px sans-serif"; ctx.textAlign = "center";
+      ctx.strokeText(String(score), SX + SW / 2, SY + 66); ctx.fillText(String(score), SX + SW / 2, SY + 66);
     }
     ctx.restore();
   }
@@ -422,7 +460,7 @@
   /* ホイールの絵は一度だけ点ごとに作っておく */
   var wheelImg = document.createElement("canvas"), wheelR = 0;
   function makeWheel() {
-    var r = Math.round(WR), dpr = Math.min(2, window.devicePixelRatio || 1), n = Math.round(r * 2 * dpr);
+    var n = Math.round(WR * 2 / 6); /* ホイールもドットで（1ドット＝6） */
     wheelImg.width = wheelImg.height = n;
     var g = wheelImg.getContext("2d"), img = g && g.createImageData && g.createImageData(n, n);
     wheelR = WR;
@@ -430,24 +468,25 @@
     var d = img.data;
     for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) {
       var dx = (x + 0.5) / (n / 2) - 1, dy = (y + 0.5) / (n / 2) - 1, t = Math.hypot(dx, dy);
-      if (t > 1.01) continue;
+      if (t > 1) continue;
       var h = Math.atan2(dx, -dy) * 180 / Math.PI;
       var c = rgbOf({ h: ((h + 60) % 360 + 360) % 360, t: Math.min(1, t) }), o = (y * n + x) * 4;
-      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = t > 1 ? Math.round((1.01 - t) * 100 * 255) : 255;
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
     }
     g.putImageData(img, 0, 0);
     wheelR = WR;
   }
   function drawPanel() {
     if (wheelR !== WR) makeWheel();
-    ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.beginPath(); ctx.arc(WX, WY + 5, WR + 1, 0, Math.PI * 2); ctx.fill();
+    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(wheelImg, WX - WR, WY - WR, WR * 2, WR * 2);
+    ctx.imageSmoothingEnabled = true;
     /* 選んでいる所 */
     var p = pos(cur), x = WX + p.x * WR, y = WY + p.y * WR;
-    ctx.fillStyle = colOf(cur);
-    ctx.beginPath(); ctx.arc(x, y, 13, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#1e2420"; ctx.lineWidth = 5; ctx.stroke();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5; ctx.stroke();
+    x = WX - WR + Math.round((x - (WX - WR)) / 6) * 6; y = WY - WR + Math.round((y - (WY - WR)) / 6) * 6;
+    ctx.fillStyle = "#1e2420"; ctx.fillRect(x - 15, y - 15, 30, 30);
+    ctx.fillStyle = "#fff"; ctx.fillRect(x - 12, y - 12, 24, 24);
+    ctx.fillStyle = colOf(cur); ctx.fillRect(x - 9, y - 9, 18, 18);
   }
 
   /* 結果画面。数と「もう一度」「Xでシェア」だけ */
@@ -498,7 +537,7 @@
   window.__probe = {
     now: function () {
       return { state: state, score: score, cur: cur, time: T, W: W, H: H, wheel: { x: WX, y: WY, r: WR },
-        zone: zoneAt(walk).c, exp: exp, walk: walk };
+        zone: colorAt(walk), exp: exp, walk: walk };
     },
     pick: pick,
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
@@ -519,7 +558,7 @@
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
   startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
-  state = S.INTRO; startButton.hidden = false;
+  makeZones(0); state = S.INTRO; startButton.hidden = false;
   layout();
   var last = performance.now();
   var stepAcc = 0;
