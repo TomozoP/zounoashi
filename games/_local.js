@@ -285,5 +285,6 @@ window.DRAFT_GAMES = [
     "play": "games/_nazo-ui/index.html",
     "full": true,
     "catch": ""
-  }
+  },
+  {"type":"lab","tags":[],"id":"tapdance","title":"指タップダンス","year":2026,"date":"2026-10-18","plays":null,"url":"","img":"games/_tapdance/img/thumb.webp","play":"games/_tapdance/index.html","full":true,"catch":"スマホを床にして指でタップダンス"},
 ];
