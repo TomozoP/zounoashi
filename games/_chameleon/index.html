@@ -109,7 +109,7 @@
      背景の色からその場で曲を作る。色相で調（隣り合う色は近い調）、
      赤〜黄緑は明るい音階、水色〜紫は暗い音階。鮮やかなほど音が増えて硬い音色になり、
      白っぽいところは静かな和音だけ。進むほど速くなる。 */
-  var BUS = null, nextT = 0, stepI = 0;
+  var BUS = null, stepI = 0;
   function bgmBus() {
     if (BUS || !AC) return;
     var f = AC.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 3200;
@@ -121,7 +121,7 @@
     var n = AC.currentTime;
     BUS.gain.cancelScheduledValues(n); BUS.gain.setValueAtTime(BUS.gain.value, n);
     BUS.gain.linearRampToValueAtTime(1, n + 0.6);
-    nextT = n + 0.05; stepI = 0;
+    stepI = Math.ceil(walk / STEP_PX);
   }
   function bgmStop(sec) {
     if (!BUS) return;
@@ -157,15 +157,20 @@
   var MAJ = [0, 2, 4, 7, 9], MIN = [0, 3, 5, 7, 10];
   var PROG_MAJ = [0, -3, 5, 7], PROG_MIN = [0, -4, -7, -2];
   var ARP = [0, 2, 4, 1, 3, 2, 5, 1];
+  /* 曲は歩いた距離で刻む。8分音符1つ＝STEP_PX 進むごと。小節（8つ）の頭で背景の色が変わりきる */
   function bgmTick() {
     if (!AC || !BUS || state !== S.PLAY) return;
-    var now = AC.currentTime;
-    if (nextT < now) nextT = now + 0.02;
-    var step = 30 / Math.min(132, 92 + score * 1.2); /* 8分音符 */
-    while (nextT < now + 0.12) { playStep(stepI, nextT, step); nextT += step; stepI++; }
+    var now = AC.currentTime, sp = speed(), step = 30 / bpm();
+    if (stepI * STEP_PX < walk - STEP_PX) stepI = Math.ceil(walk / STEP_PX);
+    for (;;) {
+      var at = now + (stepI * STEP_PX - walk) / sp;
+      if (at > now + 0.12) break;
+      playStep(stepI, Math.max(now, at), step);
+      stepI++;
+    }
   }
   function playStep(i, at, step) {
-    var c = colorAt(walk + speed() * (at - AC.currentTime));
+    var c = colorAt(i * STEP_PX);
     var h = (c.h % 360 + 360) % 360, t = c.t;
     var key = (Math.round(h / 30) % 12) * 7 % 12;      /* 色相を五度ずつの調に */
     var minor = h > 165 && h < 315;
@@ -302,8 +307,10 @@
   function place() {
     /* 親指で触りやすいよう太めにし、画面の下の縁から少し離す */
     BH = 170;
-    SH = Math.max(320, H - 20 - 24 - BH - 56);
-    SY = 20;
+    SH = Math.max(320, Math.min(560, H - 20 - 24 - BH - 56));
+    /* 画面と帯をひとまとめにして縦の真ん中へ（帯の下は少なくとも56空ける） */
+    var total = SH + 24 + BH;
+    SY = Math.max(20, Math.min((H - total) / 2, H - 56 - total));
     CX = SX + 130; CY = SY + SH - 75;
     BX = SX; BW = SW; BY = SY + SH + 24;
   }
@@ -320,18 +327,22 @@
     if (startButton) startButton.hidden = true;
   }
   /* 背景の色。決まった色の区間（w）と、次の色へなめらかに移る区間（tr）が交互に来る。最初は白 */
+  /* 色の区切りは小節の頭。1小節＝BAR_PX。移り変わりは小節の終わりの方で、頭でちょうど次の色になる */
+  var STEP_PX = 44, BAR_PX = STEP_PX * 8;
   function makeZones(n) {
     score = n; walk = 0;
-    zones = [{ x: -400, w: 600, tr: 120, c: { h: 0, t: 1 }, n: n }];
+    zones = [{ x: -BAR_PX * 2, w: BAR_PX * 3.5, tr: BAR_PX / 2, c: { h: 0, t: 1 }, n: n }];
     fill();
   }
   function fill() {
     while (zones[zones.length - 1].x < walk + SW * 2) {
       var last = zones[zones.length - 1], n = last.n + 1;
-      var base = Math.max(80, 200 - n * 4);
       var c = randomColor(n);
       for (var k = 0; k < 6 && dist(last.c, c) < 0.55; k++) c = randomColor(n);
-      zones.push({ x: last.x + last.w + last.tr, w: base * (0.7 + Math.random() * 0.6), tr: Math.max(170, 320 - n * 3), c: c, n: n });
+      /* 長さは1小節。進むとときどき半小節も混ざる。移り変わりは序盤は半小節、進むと4分の1小節 */
+      var len = n >= 20 && Math.random() < 0.3 ? BAR_PX / 2 : BAR_PX;
+      var tr = Math.min(len / 2, n < 15 ? BAR_PX / 2 : BAR_PX / 4);
+      zones.push({ x: last.x + last.w + last.tr, w: len - tr, tr: tr, c: c, n: n });
     }
     while (zones.length > 2 && zones[1].x + zones[1].w + zones[1].tr < walk - SW) zones.shift();
   }
@@ -353,7 +364,8 @@
     return zones[0].c;
   }
   /* 歩く速さ（px/秒）と、色が合っていなくても見つからない秒数 */
-  function speed() { return Math.min(260, 160 + score * 3); }
+  function bpm() { return Math.min(170, 110 + score * 2); }
+  function speed() { return bpm() / 60 * STEP_PX * 2; }
   function grace() { return Math.max(0.4, 0.95 - score * 0.015); }
 
   function update(dt) {
