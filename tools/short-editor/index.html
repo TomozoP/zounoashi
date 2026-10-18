@@ -38,6 +38,7 @@ header .title img{border-radius:5px}
 #stage .split.col{flex:0 0 6px;margin:0 3px;border-radius:3px}
 #scriptText{flex:1;resize:none;background:#15161a;border:1px solid var(--line);border-radius:6px;padding:12px 14px;font-size:16px;line-height:1.8;outline:none}
 #scriptText:focus{border-color:#555a64}
+#ttsBtn{margin-top:8px}
 #scriptTabs{display:flex;margin-bottom:8px}
 #scriptTabs button{flex:1;border-radius:0;padding:5px 0}
 #scriptTabs button:first-child{border-radius:6px 0 0 6px}
@@ -200,7 +201,7 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
 
   <div id="mid">
     <div id="stage">
-      <div id="script"><div id="scriptTabs"><button type="button" data-st="script" aria-pressed="true">台本</button><button type="button" data-st="post" aria-pressed="false">投稿</button><button type="button" data-st="rec" aria-pressed="false">録画</button></div><textarea id="scriptText" placeholder="台本" spellcheck="false"></textarea>
+      <div id="script"><div id="scriptTabs"><button type="button" data-st="script" aria-pressed="true">台本</button><button type="button" data-st="post" aria-pressed="false">投稿</button><button type="button" data-st="rec" aria-pressed="false">録画</button></div><textarea id="scriptText" placeholder="台本" spellcheck="false"></textarea><button type="button" id="ttsBtn" title="選んだ文か、カーソルのある行を読み上げて置く" hidden>読み上げ</button>
         <div id="postPane" hidden>
           <label for="postX">X の投稿文</label><textarea id="postX" spellcheck="false"></textarea>
           <label for="postTitle">YouTube の題名</label><input id="postTitle" type="text">
@@ -1755,6 +1756,7 @@ document.querySelectorAll('#scriptTabs button').forEach(b => b.onclick = () => {
   const st = b.dataset.st;
   $('scriptText').hidden = st !== 'script'; $('postPane').hidden = st !== 'post'; $('recPane').hidden = st !== 'rec';
   document.querySelectorAll('#scriptTabs button').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+  syncTtsBtn();
   if (st === 'post') postInfo().then(fillPost);
 });
 // 録画設定は手元に覚えておき、「録画」を押したときにゲームの中の録画係へ渡す
@@ -2423,6 +2425,47 @@ showSidePanel('header');
   try { ta.value = localStorage.getItem('shortEditor.script') || ''; } catch (e) {}
   ta.addEventListener('input', () => { try { localStorage.setItem('shortEditor.script', ta.value); } catch (e) {} });
 })();
+/* ---------- tomozo の声で読み上げ ---------- */
+// このPCで読み上げ係（127.0.0.1:5123）が動いているときだけボタンを出す。
+// 公開のページでは、?voice を付けて一度開いたブラウザだけが読み上げ係を探す（ほかの人には何も起きない）
+const VOICE_URL = 'http://127.0.0.1:5123';
+let voiceReady = false, voiceBusy = false;
+function syncTtsBtn() { $('ttsBtn').hidden = !voiceReady || $('scriptText').hidden; }
+function pingVoice() {
+  if (voiceReady) return;
+  fetch(VOICE_URL + '/ping').then(r => r.json()).then(j => { if (j.ok) { voiceReady = true; syncTtsBtn(); } }).catch(() => {});
+}
+(() => {
+  let on = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  try { if (/[?&]voice\b/.test(location.search)) localStorage.setItem('cakeCut.voice', '1'); on = on || localStorage.getItem('cakeCut.voice') === '1'; } catch (e) {}
+  if (!on) return;
+  pingVoice(); addEventListener('focus', pingVoice);
+})();
+// 選んだ文（なければカーソルのある行）を読み上げ、声のレーンの再生位置に置いて同じ文で字幕も作る
+async function speakScript() {
+  if (voiceBusy) return;
+  const ta = $('scriptText'), v = ta.value; let a = ta.selectionStart, b = ta.selectionEnd;
+  if (a === b) { a = v.lastIndexOf('\n', a - 1) + 1; b = v.indexOf('\n', a); if (b < 0) b = v.length; }
+  const text = v.slice(a, b).trim(); if (!text) return;
+  voiceBusy = true; $('ttsBtn').disabled = true;
+  try {
+    const r = await fetch(VOICE_URL + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text.replace(/\s*\n\s*/g, '。') }) });
+    if (!r.ok) throw new Error(r.status);
+    const blob = await r.blob(), raw = await actx.decodeAudioData(await blob.arrayBuffer());
+    const bid = nid(); buffers.set(bid, { raw, peaks: computePeaks(raw) });
+    dbPut('media', 'a' + bid, { name: '読み上げ', blob });
+    commit();
+    const at = playhead;
+    aclips.push({ id: nid(), buf: bid, in: 0, out: raw.duration, at, gain: 1, lane: 'vo', name: '読み上げ' });
+    addSubsFromSegs([{ text, start: at, end: at + raw.duration }]);
+    playhead = at + raw.duration;
+    changed(true);
+    // 続けて押すと次の行を読む
+    const nx = Math.min(v.length, b + 1); ta.focus(); ta.setSelectionRange(nx, nx);
+  } catch (e) { voiceReady = false; syncTtsBtn(); toast('読み上げ係につながりません'); }
+  voiceBusy = false; $('ttsBtn').disabled = false;
+}
+$('ttsBtn').onclick = speakScript;
 /* ---------- 自動保存（このブラウザの IndexedDB に、素材ごと残す） ---------- */
 function projectState() {
   return JSON.stringify({ uid, vclips, aclips, subs, style, opt, playhead: +playhead.toFixed(2), names: [...sources.values()].map(x => [x.id, x.name]) });
