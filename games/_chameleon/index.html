@@ -193,7 +193,11 @@
 
   var SND = {
     pick: function (i) { tone(420 + i * 45, 0.05, 0.05, "triangle"); },
-    ok: function () { tone(1320, 0.12, 0.04, "sine"); tone(1980, 0.18, 0.035, "sine", 0, 0.06); },
+    ok: function () {
+      tone(1568, 0.07, 0.07, "square");
+      tone(2093, 0.3, 0.08, "triangle", 2637, 0.06);
+      tone(3136, 0.35, 0.03, "sine", 0, 0.12);
+    },
     pass: function () { tone(880, 0.07, 0.03, "sine", 1100); },
     hit: function () { tone(1800, 0.35, 0.06, "sawtooth", 900); tone(1500, 0.3, 0.05, "sawtooth", 700, 0.25); noiseHit(0.5, 1200, 0.3, 0.7, 0.4); }
   };
@@ -294,6 +298,7 @@
     blink -= dt; eyeT += dt;
     if (blink < -3 - Math.random() * 3) blink = 0.15;
     if (pickT > 0) pickT -= dt;
+    hopT += dt;
     fx.forEach(function (e) { e.t += dt; e.x += e.vx * dt; e.y += e.vy * dt; e.vy += 500 * dt; });
     fx = fx.filter(function (e) { return e.t < e.life; });
     /* 体の色は少しだけかけて変わる（見た目だけ。判定はすぐ） */
@@ -306,19 +311,31 @@
     fill();
     var z = zoneAt(walk);
     if (z.n > score) { score = z.n; SND.pass(); }
-    var ok = blends();
-    /* 色が合っていない状態から合わせられたら鳴らす */
-    if (ok && !wasOk && exp > 0.08) SND.ok();
+    var d = gap(), ok = d < TOL;
+    /* 色が合っていない状態から合わせられたら、きらきらと音 */
+    if (ok && !wasOk && exp > 0.08) success();
     wasOk = ok;
     if (ok || invincible) exp = Math.max(0, exp - dt * 1.5);
-    else exp += dt;
+    else exp += dt * (0.5 + 1.3 * Math.min(1, (d - TOL) / 0.8)); /* 色が違うほど鳥が早く来る */
     if (exp > grace()) snatch();
     bgmTick();
   }
   /* 体の下（前後40）の背景のどこかと色が合っていればよい */
-  function blends() {
-    for (var dx = -40; dx <= 40; dx += 10) if (near(cur, colorAt(walk + dx))) return true;
-    return false;
+  function gap() {
+    var m = 9;
+    for (var dx = -40; dx <= 40; dx += 10) m = Math.min(m, dist(cur, colorAt(walk + dx)));
+    return m;
+  }
+  function blends() { return gap() < TOL; }
+  /* 色を合わせ直せたとき：体から星が飛び、少し跳ねる */
+  var hopT = 9;
+  function success() {
+    SND.ok(); hopT = 0;
+    for (var i = 0; i < 14; i++) {
+      var a = -Math.PI * (0.1 + 0.8 * i / 13);
+      var v = 160 + Math.random() * 120;
+      fx.push({ t: 0, life: 0.55 + Math.random() * 0.25, x: CX + 5, y: CY + 20, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, big: i % 2 === 0 });
+    }
   }
   /* 鳥は色が合っていない間だけ、画面の右上の外から近づいてくる。合えば戻っていく */
   function birdPos() {
@@ -517,8 +534,19 @@
     px(0, BRANCH, GW, 1, "#8a6240"); px(0, BRANCH + 1, GW, 2, "#6b4a2e"); px(0, BRANCH + 3, GW, 1, "#4a3220");
     for (var k = Math.floor((wg - cg) / 17) - 1; k <= Math.ceil((wg - cg + GW) / 17); k++) px(Math.round(k * 17 - wg + cg), BRANCH + 1, 2, 1, "#4a3220");
     drawChameleon();
+    drawFx();
     drawBird();
     if (state === S.PLAY || state === S.OVER) drawNumber(score, Math.round(GW / 2), 3);
+  }
+  /* 星：十字の形。終わりぎわは小さくなる */
+  function drawFx() {
+    fx.forEach(function (e) {
+      var x = Math.round(gx(e.x)), y = Math.round(gy(e.y)), k = e.t / e.life;
+      var col = k < 0.5 ? "#ffffff" : "#fff3a8";
+      if (e.big && k < 0.7) { px(x - 2, y, 5, 1, col); px(x, y - 2, 1, 5, col); }
+      else if (k < 0.75) { px(x - 1, y, 3, 1, col); px(x, y - 1, 1, 3, col); }
+      else px(x, y, 1, 1, col);
+    });
   }
   function drawNumber(n, cx, y) {
     var s = String(n), w = s.length * 8 - 2, x0 = Math.round(cx - w / 2);
@@ -554,7 +582,7 @@
 
   /* カメレオン。体の色は今の色、濃い所・明るい所はそこから作る */
   function drawChameleon() {
-    var g = grabbed(), x = gx(CX) - 12, y = BRANCH - 9;
+    var g = grabbed(), x = gx(CX) - 12, y = BRANCH - 9 - (hopT < 0.3 ? Math.round(Math.sin(Math.PI * hopT / 0.3) * 3) : 0);
     if (g && g.carry) { x = gx(g.x) - 11; y = gy(g.y) + 3; }
     var c = [shown[0], shown[1], shown[2]];
     var pal = { o: shadeRGB(c, 0.45), b: shadeRGB(c, 1), d: shadeRGB(c, 0.78), l: shadeRGB(c, 1.12) };
