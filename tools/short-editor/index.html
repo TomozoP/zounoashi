@@ -201,7 +201,7 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
 
   <div id="mid">
     <div id="stage">
-      <div id="script"><div id="scriptTabs"><button type="button" data-st="script" aria-pressed="true">台本</button><button type="button" data-st="post" aria-pressed="false">投稿</button><button type="button" data-st="rec" aria-pressed="false">録画</button></div><textarea id="scriptText" placeholder="台本" spellcheck="false"></textarea><button type="button" id="ttsBtn" title="選んだ文か、カーソルのある行を読み上げて置く" hidden>読み上げ</button>
+      <div id="script"><div id="scriptTabs"><button type="button" data-st="script" aria-pressed="true">台本</button><button type="button" data-st="post" aria-pressed="false">投稿</button><button type="button" data-st="rec" aria-pressed="false">録画</button></div><textarea id="scriptText" placeholder="台本" spellcheck="false"></textarea><button type="button" id="ttsBtn" title="選んだ文か、台本全部を読み上げて置く" hidden>読み上げ</button>
         <div id="postPane" hidden>
           <label for="postX">X の投稿文</label><textarea id="postX" spellcheck="false"></textarea>
           <label for="postTitle">YouTube の題名</label><input id="postTitle" type="text">
@@ -2443,16 +2443,16 @@ async function startVoice() {
   toast('声を起動できませんでした'); return false;
 }
 if (voiceOn) { syncTtsBtn(); pingVoice(); }
-// 選んだ文（なければカーソルのある行）を読み上げ、声のレーンの再生位置に置いて同じ文で字幕も作る
+// 選んだ文（なければ台本全部）を読み上げ、声のレーンの再生位置に置いて同じ文で字幕も作る（行ごとに字幕を分ける）
 async function speakScript() {
   if (voiceBusy) return;
   const ta = $('scriptText'), v = ta.value; let a = ta.selectionStart, b = ta.selectionEnd;
-  if (a === b) { a = v.lastIndexOf('\n', a - 1) + 1; b = v.indexOf('\n', a); if (b < 0) b = v.length; }
+  if (a === b) { a = 0; b = v.length; }
   const text = v.slice(a, b).trim(); if (!text) return;
   voiceBusy = true; $('ttsBtn').disabled = true;
   try {
     if (!voiceReady && !await pingVoice() && !await startVoice()) throw 0;
-    const r = await fetch(VOICE_URL + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text.replace(/\s*\n\s*/g, '。') }) });
+    const r = await fetch(VOICE_URL + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
     if (!r.ok) throw new Error(r.status);
     const blob = await r.blob(), raw = await actx.decodeAudioData(await blob.arrayBuffer());
     const bid = nid(); buffers.set(bid, { raw, peaks: computePeaks(raw) });
@@ -2460,11 +2460,10 @@ async function speakScript() {
     commit();
     const at = playhead;
     aclips.push({ id: nid(), buf: bid, in: 0, out: raw.duration, at, gain: 1, lane: 'vo', name: '読み上げ' });
-    addSubsFromSegs([{ text, start: at, end: at + raw.duration }]);
+    const lines = text.split('\n').map(x => x.trim()).filter(Boolean), total = lines.reduce((n, x) => n + [...x].length, 0);
+    let t = at; addSubsFromSegs(lines.map(x => { const d = raw.duration * [...x].length / total, sg = { text: x, start: t, end: t + d }; t += d; return sg; }));
     playhead = at + raw.duration;
     changed(true);
-    // 続けて押すと次の行を読む
-    const nx = Math.min(v.length, b + 1); ta.focus(); ta.setSelectionRange(nx, nx);
   } catch (e) { if (e !== 0) { voiceReady = false; toast('読み上げに失敗しました'); } }
   voiceBusy = false; $('ttsBtn').disabled = false;
 }
