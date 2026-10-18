@@ -105,6 +105,92 @@
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
     else { try { AC.resume(); } catch (e) {} }
   });
+  /* ============ 音楽 ============
+     背景の色からその場で曲を作る。色相で調（隣り合う色は近い調）、
+     赤〜黄緑は明るい音階、水色〜紫は暗い音階。鮮やかなほど音が増えて硬い音色になり、
+     白っぽいところは静かな和音だけ。進むほど速くなる。 */
+  var BUS = null, nextT = 0, stepI = 0;
+  function bgmBus() {
+    if (BUS || !AC) return;
+    var f = AC.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 3200;
+    BUS = AC.createGain(); BUS.gain.value = 0;
+    BUS.connect(f); f.connect(AC.destination);
+  }
+  function bgmStart() {
+    if (!AC) return; bgmBus();
+    var n = AC.currentTime;
+    BUS.gain.cancelScheduledValues(n); BUS.gain.setValueAtTime(BUS.gain.value, n);
+    BUS.gain.linearRampToValueAtTime(1, n + 0.6);
+    nextT = n + 0.05; stepI = 0;
+  }
+  function bgmStop(sec) {
+    if (!BUS) return;
+    var n = AC.currentTime;
+    BUS.gain.cancelScheduledValues(n); BUS.gain.setValueAtTime(BUS.gain.value, n);
+    BUS.gain.linearRampToValueAtTime(0, n + (sec || 0.4));
+  }
+  function note(freq, at, dur, vol, type, att) {
+    var o = AC.createOscillator(), g = AC.createGain();
+    o.type = type; o.frequency.value = freq;
+    att = att || 0.01;
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(vol, at + att);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g); g.connect(BUS);
+    o.start(at); o.stop(at + dur + 0.05);
+  }
+  function hat(at, vol) {
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter(); f.type = "highpass"; f.frequency.value = 7000;
+    var g = AC.createGain();
+    g.gain.setValueAtTime(vol, at); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.04);
+    s.connect(f); f.connect(g); g.connect(BUS);
+    s.start(at, Math.random()); s.stop(at + 0.06);
+  }
+  function kick(at, vol) {
+    var o = AC.createOscillator(), g = AC.createGain();
+    o.frequency.setValueAtTime(130, at); o.frequency.exponentialRampToValueAtTime(45, at + 0.12);
+    g.gain.setValueAtTime(vol, at); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.18);
+    o.connect(g); g.connect(BUS); o.start(at); o.stop(at + 0.2);
+  }
+  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  var MAJ = [0, 2, 4, 7, 9], MIN = [0, 3, 5, 7, 10];
+  var PROG_MAJ = [0, -3, 5, 7], PROG_MIN = [0, -4, -7, -2];
+  var ARP = [0, 2, 4, 1, 3, 2, 5, 1];
+  function bgmTick() {
+    if (!AC || !BUS || state !== S.PLAY) return;
+    var now = AC.currentTime;
+    if (nextT < now) nextT = now + 0.02;
+    var step = 30 / Math.min(132, 92 + score * 1.2); /* 8分音符 */
+    while (nextT < now + 0.12) { playStep(stepI, nextT, step); nextT += step; stepI++; }
+  }
+  function playStep(i, at, step) {
+    var c = colorAt(walk + speed() * (at - AC.currentTime));
+    var h = (c.h % 360 + 360) % 360, t = c.t;
+    var key = (Math.round(h / 30) % 12) * 7 % 12;      /* 色相を五度ずつの調に */
+    var minor = h > 165 && h < 315;
+    var sc = minor ? MIN : MAJ, prog = minor ? PROG_MIN : PROG_MAJ;
+    var bar = Math.floor(i / 8) % 4, b = i % 8;
+    var root = 48 + key + prog[bar]; if (root > 55) root -= 12;
+    var vivid = t > 0.55;
+    /* 和音：小節の頭にふわっと */
+    if (b === 0) {
+      var third = minor ? 3 : 4;
+      [0, third, 7].forEach(function (d) { note(mtof(root + 12 + d), at, step * 8, 0.022 + 0.01 * (1 - t), "sine", 0.25); });
+    }
+    /* 低音 */
+    if (b === 0 || b === 4 || (vivid && b === 6)) note(mtof(root - 12 + (b === 4 ? 7 : 0)), at, step * 1.8, 0.07, "triangle");
+    /* 上の旋律：鮮やかなほど音が多い */
+    if (Math.random() < 0.2 + 0.75 * t) {
+      var k = ARP[(b + bar * 3) % 8] + (t > 0.8 && b % 2 ? 5 : 0);
+      var m = 60 + key + sc[k % 5] + 12 * Math.floor(k / 5);
+      note(mtof(m), at, step * (vivid ? 0.9 : 1.6), vivid ? 0.028 : 0.035, vivid ? "square" : "triangle", vivid ? 0.005 : 0.03);
+    }
+    /* 打楽器：色が濃いところだけ */
+    if (t > 0.45 && b % 2 === 1) hat(at, 0.03 * t);
+    if (t > 0.7 && (b === 0 || b === 4)) kick(at, 0.18);
+  }
+
   var SND = {
     pick: function (i) { tone(420 + i * 45, 0.05, 0.05, "triangle"); },
     pass: function () { tone(880, 0.07, 0.03, "sine", 1100); },
@@ -161,7 +247,7 @@
 
   function newRound() {
     state = S.PLAY; score = 0; T = 0; cur = { h: 0, t: 0 }; overT = 0; fx = []; exp = 0;
-    makeZones(0);
+    makeZones(0); bgmStart();
     shareButton.hidden = true;
     if (startButton) startButton.hidden = true;
   }
@@ -222,10 +308,11 @@
     if (blends() || invincible) exp = Math.max(0, exp - dt * 1.5);
     else exp += dt;
     if (exp > grace()) snatch();
+    bgmTick();
   }
-  /* 体の下（前後60）の背景のどこかと色が合っていればよい */
+  /* 体の下（前後40）の背景のどこかと色が合っていればよい */
   function blends() {
-    for (var dx = -60; dx <= 60; dx += 10) if (near(cur, colorAt(walk + dx))) return true;
+    for (var dx = -40; dx <= 40; dx += 10) if (near(cur, colorAt(walk + dx))) return true;
     return false;
   }
   function birdPos() {
@@ -234,7 +321,7 @@
     return { x: ix + (CX - ix) * k, y: iy + (CY - 30 - iy) * k };
   }
   function snatch() {
-    state = S.OVER; overT = 0; SND.hit();
+    state = S.OVER; overT = 0; SND.hit(); bgmStop(0.3);
     var b = birdPos(); grabX = b.x; grabY = b.y;
   }
 
@@ -342,24 +429,18 @@
   }
   /* カメレオン（右向き。脚と目は別に打つ） */
   var CHAM = [
-    "..........................oo........",
-    "........................oolbo.......",
-    "...............ooooooooolbbbo.......",
-    "...........oooobdbbdbbdbbbbbboooo...",
-    ".........oobbbbbbbbbbbbbbbbbbbbbboo.",
-    "........obbbbbbbbbbbbbbbbbbbbbbbbbbo",
-    ".......obbbbbbbbbbbbbbbbbbbbbbbbbbbo",
-    "..oooo.obbbbbbbbbbbbbbbbbbbbbbbbbbo.",
-    ".obbbbobllllbbbbbbbbbbbbbbbbbbdddo..",
-    "obooobbollllllllllllllbbbbbbbbbbo...",
-    "obo..obboollllllllllllllllbbbboo....",
-    "obo...oooobbbbbbbbbbbbbbbbbooo......",
-    "obboo...............................",
-    ".obbbo..............................",
-    "..ooo..............................."
+    "...............oo.....",
+    ".........oooooolbo....",
+    "......oobdbbdbbbbbooo.",
+    ".....obbbbbbbbbbbbbbbo",
+    "..oo.obbbbbbbbbbbbbbbo",
+    ".obbobllbbbbbbbbbbddo.",
+    "obooblllllllllbbbbbo..",
+    "obo.oooobbbbbbbooo....",
+    ".ooo.................."
   ];
-  var LEG = ["obbo", "obbo", "obdo", "oooo"];
-  var EYE = [".ooo.", "odddo", "odddo", "odddo", ".ooo."];
+  var LEG = ["obo", "ooo"];
+  var EYE = ["oooo", "o..o", "o..o", "oooo"];
   /* 鳥（右向き。羽が上と下の2コマ） */
   var BIRD = [[
     "..oo..........oo.....",
@@ -464,24 +545,25 @@
 
   /* カメレオン。体の色は今の色、濃い所・明るい所はそこから作る */
   function drawChameleon() {
-    var g = grabbed(), x = gx(CX) - 22, y = BRANCH - 15;
-    if (g && g.carry) { x = gx(g.x) - 18; y = gy(g.y) + 3; }
+    var g = grabbed(), x = gx(CX) - 12, y = BRANCH - 9;
+    if (g && g.carry) { x = gx(g.x) - 11; y = gy(g.y) + 3; }
     var c = [shown[0], shown[1], shown[2]];
     var pal = { o: shadeRGB(c, 0.45), b: shadeRGB(c, 1), d: shadeRGB(c, 0.78), l: shadeRGB(c, 1.12) };
-    var step = state === S.PLAY ? Math.floor(walk / 9) % 2 : 0;
-    /* 脚（奥の脚と手前の脚が交互に出る） */
-    spr(LEG, x + 9 + (step ? 1 : -1), y + 11, pal);
-    spr(LEG, x + 24 + (step ? -1 : 1), y + 11, pal);
+    var step = state === S.PLAY ? Math.floor(walk / 8) % 2 : 0;
+    /* 脚（前後の脚が交互に出る） */
+    spr(LEG, x + 6 + (step ? 1 : 0), y + 7, pal);
+    spr(LEG, x + 14 + (step ? 0 : 1), y + 7, pal);
     spr(CHAM, x, y, pal);
     /* 目（鳥を見る） */
-    spr(EYE, x + 27, y + 3, pal);
-    if (blink > 0) { px(x + 28, y + 5, 3, 1, pal.o); return; }
+    spr(EYE, x + 15, y + 2, pal);
+    if (blink > 0) { px(x + 16, y + 3, 2, 2, pal.o); return; }
     var bp = birdPos(), dx = 0, dy = 0;
-    if (exp > 0.05 || state === S.OVER) { dx = Math.sign(Math.round((bp.x - CX) / 40)); dy = bp.y < CY - 20 ? -1 : 0; }
-    else { dx = Math.round(Math.sin(eyeT * 1.3)); }
-    px(x + 28, y + 4, 3, 3, "#ffffff");
-    px(x + 29 + dx, y + 5 + dy, 1, 1, "#1e2420");
+    if (exp > 0.05 || state === S.OVER) { dx = bp.x > CX ? 1 : 0; dy = bp.y < CY - 20 ? 0 : 1; }
+    else { dx = Math.sin(eyeT * 1.3) > 0 ? 1 : 0; dy = 1; }
+    px(x + 16, y + 3, 2, 2, "#ffffff");
+    px(x + 16 + dx, y + 3 + dy, 1, 1, "#1e2420");
   }
+
 
   /* ホイールの絵は一度だけ点ごとに作っておく */
   var wheelImg = document.createElement("canvas"), wheelR = 0;
