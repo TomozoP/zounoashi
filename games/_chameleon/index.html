@@ -191,8 +191,71 @@
     if (t > 0.7 && (b === 0 || b === 4)) kick(at, 0.18);
   }
 
+  /* ============ 帯を触る音 ============
+     触っている間はふわっとした持続音が鳴り、指の位置の色相に合わせて高さがすべる。
+     音階の段をまたぐたびに小さな鈴。調は今いる背景の曲に合わせる。響きは山びこ（遅れて繰り返す）で足す。 */
+  var AMB = null, ambStep = -1;
+  function ambNodes() {
+    if (AMB || !AC) return AMB;
+    var out = AC.createGain(); out.gain.value = 0.9; out.connect(AC.destination);
+    var dl = AC.createDelay(1); dl.delayTime.value = 0.32;
+    var fb = AC.createGain(); fb.gain.value = 0.42;
+    var wet = AC.createGain(); wet.gain.value = 0.45;
+    var lp = AC.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 2200;
+    dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(wet); wet.connect(out);
+    var send = AC.createGain(); send.connect(out); send.connect(dl);
+    var pad = AC.createGain(); pad.gain.value = 0;
+    var pf = AC.createBiquadFilter(); pf.type = "lowpass"; pf.frequency.value = 900; pf.Q.value = 2;
+    pad.connect(pf); pf.connect(send);
+    var o1 = AC.createOscillator(), o2 = AC.createOscillator(), o3 = AC.createOscillator();
+    o1.type = "sine"; o2.type = "triangle"; o3.type = "sine"; o2.detune.value = 7; o3.detune.value = -5;
+    [o1, o2, o3].forEach(function (o) { o.connect(pad); o.start(); });
+    AMB = { send: send, pad: pad, pf: pf, o: [o1, o2, o3] };
+    return AMB;
+  }
+  function keyOf(c) {
+    var h = (c.h % 360 + 360) % 360;
+    return { key: (Math.round(h / 30) % 12) * 7 % 12, minor: h > 165 && h < 315 };
+  }
+  /* 帯の色相 → 今の調の音（2オクターブを10段） */
+  function ambNote(h) {
+    var k = keyOf(colorAt(walk)), sc = k.minor ? MIN : MAJ;
+    var i = Math.min(9, Math.floor(h / 36));
+    var base = 60 + k.key; if (base > 65) base -= 12;
+    return { i: i, m: base + sc[i % 5] + 12 * Math.floor(i / 5) };
+  }
+  function ambSet(h) {
+    if (!ambNodes()) return;
+    var n = ambNote(h), now = AC.currentTime, f = mtof(n.m - 12);
+    AMB.o[0].frequency.setTargetAtTime(f, now, 0.06);
+    AMB.o[1].frequency.setTargetAtTime(f * 1.5, now, 0.06);
+    AMB.o[2].frequency.setTargetAtTime(f * 2, now, 0.06);
+    AMB.pf.frequency.setTargetAtTime(500 + h * 3, now, 0.1);
+    if (n.i !== ambStep) { ambStep = n.i; bell(mtof(n.m + 12), now); }
+  }
+  function bell(f, at) {
+    var o = AC.createOscillator(), o2 = AC.createOscillator(), g = AC.createGain();
+    o.type = "sine"; o2.type = "sine"; o.frequency.value = f; o2.frequency.value = f * 2.01;
+    var g2 = AC.createGain(); g2.gain.value = 0.25;
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(0.05, at + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 1.4);
+    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(AMB.send);
+    o.start(at); o2.start(at); o.stop(at + 1.5); o2.stop(at + 1.5);
+  }
+  function ambOn(h) {
+    if (!ambNodes()) return;
+    var now = AC.currentTime;
+    ambStep = -1; ambSet(h);
+    AMB.pad.gain.cancelScheduledValues(now); AMB.pad.gain.setTargetAtTime(0.05, now, 0.12);
+  }
+  function ambOff() {
+    if (!AMB) return;
+    var now = AC.currentTime;
+    AMB.pad.gain.cancelScheduledValues(now); AMB.pad.gain.setTargetAtTime(0, now, 0.25);
+  }
+
   var SND = {
-    pick: function (i) { tone(420 + i * 45, 0.05, 0.05, "triangle"); },
     ok: function () {
       tone(1568, 0.07, 0.07, "square");
       tone(2093, 0.3, 0.08, "triangle", 2637, 0.06);
@@ -296,7 +359,6 @@
   function update(dt) {
     blink -= dt; eyeT += dt;
     if (blink < -3 - Math.random() * 3) blink = 0.15;
-    if (pickT > 0) pickT -= dt;
     hopT += dt;
     fx.forEach(function (e) { e.t += dt; e.x += e.vx * dt; e.y += e.vy * dt; e.vy += 500 * dt; });
     fx = fx.filter(function (e) { return e.t < e.life; });
@@ -348,7 +410,7 @@
     return { x: ix + (tx - ix) * k, y: iy + (ty - iy) * k + Math.sin(T * 6) * 4 * k };
   }
   function snatch() {
-    state = S.OVER; overT = 0; SND.hit(); bgmStop(0.3);
+    state = S.OVER; overT = 0; SND.hit(); bgmStop(0.3); ambOff();
     var b = birdPos(); grabX = b.x; grabY = b.y;
   }
 
@@ -359,10 +421,10 @@
     var u = Math.max(0, Math.min(0.9999, (x - BX) / BW));
     return { h: u * 360, t: 1 };
   }
-  var pickT = 0;
+
   function pick(c) {
     if (c === null || state !== S.PLAY) return;
-    if (dist(c, cur) > 0.12 && pickT <= 0) { SND.pick(Math.round(c.h / 40)); pickT = 0.06; }
+    if (AC) ambSet(c.h);
     cur = c;
   }
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -373,7 +435,7 @@
     var p = atCanvas(e);
     if (state === S.RESULT) { if (hitButton(p.x, p.y) === "retry") newRound(); return; }
     var i = hitWheel(p.x, p.y);
-    if (i !== null) { dragging[e.pointerId] = true; pick(i); }
+    if (i !== null) { dragging[e.pointerId] = true; if (state === S.PLAY) ambOn(i.h); pick(i); }
   });
   var dragging = {};
   wrap.addEventListener("pointermove", function (e) {
@@ -381,8 +443,9 @@
     var p = atCanvas(e), i = hitWheel(p.x, p.y);
     if (i !== null) pick(i);
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); delete dragging[e.pointerId]; });
-  wrap.addEventListener("pointercancel", function (e) { delete dragging[e.pointerId]; });
+  function release(e) { delete dragging[e.pointerId]; if (!Object.keys(dragging).length) ambOff(); }
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); release(e); });
+  wrap.addEventListener("pointercancel", release);
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   /* 1 … 色が全部出る所まで飛ぶ  2 … さらわれて終わり  3 … 無敵の入り切り */
