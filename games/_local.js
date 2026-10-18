@@ -287,4 +287,5 @@ window.DRAFT_GAMES = [
     "catch": ""
   },
   {"type":"lab","tags":[],"id":"tapdance","title":"指タップダンス","year":2026,"date":"2026-10-18","plays":null,"url":"","img":"games/_tapdance/img/thumb.webp","play":"games/_tapdance/index.html","full":true,"catch":"スマホを床にして指でタップダンス"},
+  {"type":"lab","tags":[],"id":"naname","title":"ナナメ","year":2026,"date":"2026-10-18","plays":null,"url":"","img":"games/_naname/img/thumb.webp","play":"games/_naname/index.html","full":true,"catch":"斜め下から見るゲーム機"},
 ];
