@@ -203,8 +203,8 @@
   };
 
   /* ============ 色 ============
-     下のカラーホイールは境目なし。角度が色相、中心からの距離が濃さ（真ん中は白、外ほど鮮やか）。
-     色は { h: 色相(度), t: 中心からの距離 0〜1 }。ホイールの上で近ければ「だいたい合っている」ですり抜ける。 */
+     下の色の帯は境目なし。左から右へ色相が一周する。出てくる色はどれも鮮やか。
+     色は { h: 色相(度), t: 濃さ（いまは常に1） }。色相が近ければ「だいたい合っている」ですり抜ける。 */
   function hsl(h, s, l) {
     s /= 100; l /= 100;
     var k = function (n) { return (n + h / 30) % 12; }, a = s * Math.min(l, 1 - l);
@@ -217,41 +217,41 @@
   /* ホイールの上の位置（半径1） */
   function pos(c) { var a = (c.h - 60) * Math.PI / 180; return { x: Math.sin(a) * c.t, y: -Math.cos(a) * c.t }; }
   function dist(a, b) { var p = pos(a), q = pos(b); return Math.hypot(p.x - q.x, p.y - q.y); }
-  var TOL = 0.24; /* これより近ければすり抜ける（ホイールの半径を1として） */
+  var TOL = 0.42; /* これより近ければすり抜ける（ホイールの半径を1として） */
   function near(a, b) { return dist(a, b) < TOL; }
   /* 進むほど出る色が増える。濃さ t の範囲と、色相の選び方 */
   var STEPS = [
     { at: 0, t0: 0.95, hues: [0, 120, 240] },
     { at: 8, t0: 0.85, hues: [0, 60, 120, 180, 240, 300] },
-    { at: 18, t0: 0.6, hues: null },
-    { at: 32, t0: 0.35, hues: null }
+    { at: 18, t0: 1, hues: [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] },
+    { at: 32, t0: 1, hues: null }
   ];
   function randomColor(n) {
     var st = STEPS[0];
     STEPS.forEach(function (x) { if (n >= x.at) st = x; });
     var h = st.hues ? st.hues[Math.floor(Math.random() * st.hues.length)] : Math.random() * 360;
-    return { h: h, t: st.t0 + Math.random() * (1 - st.t0) };
+    return { h: h, t: 1 };
   }
 
   /* ============ 配置 ============ */
   var SX = 20, SY = 20, SW = 500, SH = 300, CX = 270, CY = 200;
-  var WX = 270, WY = 700, WR = 180, W0 = 26;
+  /* 下の色の帯（横一列。左から右へ色相が一周する） */
+  var BX = 20, BY = 700, BW = 500, BH = 120;
   function place() {
-    var ph = Math.max(330, Math.min(420, H * 0.4));
-    SH = Math.max(300, Math.min(500, H - ph - 60));
-    SY = 20 + Math.max(0, Math.round((H - 40 - SH - 20 - ph) / 2));
+    BH = 120;
+    SH = Math.max(320, H - 40 - 20 - BH);
+    SY = 20;
     CX = SX + 130; CY = SY + SH - 75;
-    WR = Math.min(240, ph / 2 - 6); W0 = WR * 0.14;
-    WX = W / 2; WY = SY + SH + 20 + ph / 2;
+    BX = SX; BW = SW; BY = SY + SH + 20;
   }
 
   /* ============ 状態 ============ */
   var S = { INTRO: 0, PLAY: 1, OVER: 2, RESULT: 3 };
-  var state = S.INTRO, score = 0, T = 0, cur = { h: 0, t: 0 }, shown = [246, 244, 238], overT = 0;
+  var state = S.INTRO, score = 0, T = 0, cur = { h: 0, t: 1 }, shown = [246, 244, 238], overT = 0;
   var zones = [], walk = 0, exp = 0, fx = [], blink = 0, eyeT = 0, invincible = false, grabX = 0, grabY = 0;
 
   function newRound() {
-    state = S.PLAY; score = 0; T = 0; cur = { h: 0, t: 0 }; overT = 0; fx = []; exp = 0;
+    state = S.PLAY; score = 0; T = 0; cur = { h: 0, t: 1 }; overT = 0; fx = []; exp = 0;
     makeZones(0); bgmStart();
     shareButton.hidden = true;
     if (startButton) startButton.hidden = true;
@@ -259,7 +259,7 @@
   /* 背景の色。決まった色の区間（w）と、次の色へなめらかに移る区間（tr）が交互に来る。最初は白 */
   function makeZones(n) {
     score = n; walk = 0;
-    zones = [{ x: -400, w: 600, tr: 120, c: { h: 0, t: 0 }, n: n }];
+    zones = [{ x: -400, w: 600, tr: 120, c: { h: 0, t: 1 }, n: n }];
     fill();
   }
   function fill() {
@@ -276,7 +276,7 @@
     for (var i = zones.length - 1; i >= 0; i--) if (x >= zones[i].x) return zones[i];
     return zones[0];
   }
-  /* その場所の背景の色。移る区間はホイールの上をまっすぐ進む */
+  /* その場所の背景の色。移る区間は色相の近い回り方で移る */
   function colorAt(x) {
     if (!zones.length) return { h: 0, t: 0 };
     for (var i = zones.length - 1; i >= 0; i--) {
@@ -284,9 +284,8 @@
       if (x < z.x) continue;
       if (x < z.x + z.w || !zones[i + 1]) return z.c;
       var u = (x - z.x - z.w) / z.tr; u = u * u * (3 - 2 * u);
-      var a = pos(z.c), b = pos(zones[i + 1].c), px = a.x + (b.x - a.x) * u, py = a.y + (b.y - a.y) * u;
-      var th = Math.atan2(px, -py) * 180 / Math.PI;
-      return { h: ((th + 60) % 360 + 360) % 360, t: Math.min(1, Math.hypot(px, py)) };
+      var a = z.c, b = zones[i + 1].c, d = ((b.h - a.h) % 360 + 540) % 360 - 180;
+      return { h: ((a.h + d * u) % 360 + 360) % 360, t: a.t + (b.t - a.t) * u };
     }
     return zones[0].c;
   }
@@ -357,17 +356,16 @@
   }
 
   /* ============ 入力 ============ */
-  /* ホイールのどの色か。外れていれば null（縁の少し外は一番外の色） */
+  /* 帯のどの色か。外れていれば null（帯の少し外までは拾う） */
   function hitWheel(x, y) {
-    var dx = x - WX, dy = y - WY, d = Math.hypot(dx, dy);
-    if (d > WR + 24) return null;
-    var th = Math.atan2(dx, -dy) * 180 / Math.PI;
-    return { h: ((th + 60) % 360 + 360) % 360, t: Math.min(1, d / WR) };
+    if (y < BY - 30 || y > BY + BH + 30 || x < BX - 20 || x > BX + BW + 20) return null;
+    var u = Math.max(0, Math.min(0.9999, (x - BX) / BW));
+    return { h: u * 360, t: 1 };
   }
   var pickT = 0, wasOk = true;
   function pick(c) {
     if (c === null || state !== S.PLAY) return;
-    if (dist(c, cur) > 0.12 && pickT <= 0) { SND.pick(Math.round(c.t * 6)); pickT = 0.06; }
+    if (dist(c, cur) > 0.12 && pickT <= 0) { SND.pick(Math.round(c.h / 40)); pickT = 0.06; }
     cur = c;
   }
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -406,8 +404,6 @@
     if (state === S.RESULT) { if ((k === " " || k === "enter") && !e.repeat) { e.preventDefault(); newRound(); } return; }
     if (k === "arrowleft") { e.preventDefault(); pick({ h: (cur.h + 345) % 360, t: cur.t || 1 }); }
     if (k === "arrowright") { e.preventDefault(); pick({ h: (cur.h + 15) % 360, t: cur.t || 1 }); }
-    if (k === "arrowup") { e.preventDefault(); pick({ h: cur.h, t: Math.min(1, cur.t + 0.1) }); }
-    if (k === "arrowdown") { e.preventDefault(); pick({ h: cur.h, t: Math.max(0, cur.t - 0.1) }); }
   });
   window.addEventListener("keyup", function (e) {
     var k = e.key.toLowerCase();
@@ -608,34 +604,17 @@
   }
 
 
-  /* ホイールの絵は一度だけ点ごとに作っておく */
-  var wheelImg = document.createElement("canvas"), wheelR = 0;
-  function makeWheel() {
-    var dpr = Math.min(2, window.devicePixelRatio || 1), n = Math.round(WR * 2 * dpr);
-    wheelImg.width = wheelImg.height = n;
-    var g = wheelImg.getContext("2d"), img = g && g.createImageData && g.createImageData(n, n);
-    wheelR = WR;
-    if (!img) return;
-    var d = img.data;
-    for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) {
-      var dx = (x + 0.5) / (n / 2) - 1, dy = (y + 0.5) / (n / 2) - 1, t = Math.hypot(dx, dy);
-      if (t > 1) continue;
-      var h = Math.atan2(dx, -dy) * 180 / Math.PI;
-      var c = rgbOf({ h: ((h + 60) % 360 + 360) % 360, t: Math.min(1, t) }), o = (y * n + x) * 4;
-      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = t > 0.99 ? Math.round((1 - t) * 100 * 255) : 255;
-    }
-    g.putImageData(img, 0, 0);
-    wheelR = WR;
-  }
   function drawPanel() {
-    if (wheelR !== WR) makeWheel();
-    ctx.drawImage(wheelImg, WX - WR, WY - WR, WR * 2, WR * 2);
-    /* 選んでいる所 */
-    var p = pos(cur), x = WX + p.x * WR, y = WY + p.y * WR;
-    ctx.fillStyle = colOf(cur);
-    ctx.beginPath(); ctx.arc(x, y, 13, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#1e2420"; ctx.lineWidth = 5; ctx.stroke();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5; ctx.stroke();
+    var g = ctx.createLinearGradient(BX, 0, BX + BW, 0);
+    for (var k = 0; k <= 12; k++) g.addColorStop(k / 12, colOf({ h: k * 30, t: 1 }));
+    ctx.fillStyle = g;
+    roundRect(BX, BY, BW, BH, 18); ctx.fill();
+    /* 選んでいる所：帯より少し高いつまみ */
+    var x = BX + cur.h / 360 * BW;
+    roundRect(x - 13, BY - 10, 26, BH + 20, 13);
+    ctx.fillStyle = colOf(cur); ctx.fill();
+    ctx.strokeStyle = "#1e2420"; ctx.lineWidth = 6; ctx.stroke();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.stroke();
   }
 
   /* 結果画面。数と「もう一度」「Xでシェア」だけ */
@@ -685,7 +664,7 @@
   /* ============ 覗き穴 ============ */
   window.__probe = {
     now: function () {
-      return { state: state, score: score, cur: cur, time: T, W: W, H: H, wheel: { x: WX, y: WY, r: WR },
+      return { state: state, score: score, cur: cur, time: T, W: W, H: H, bar: { x: BX, y: BY, w: BW, h: BH },
         zone: colorAt(walk), exp: exp, walk: walk };
     },
     pick: pick,
