@@ -243,5 +243,6 @@ window.DRAFT_GAMES = [
     "play": "games/_megane/index.html",
     "full": true,
     "catch": "メガネウォーク"
-  }
+  },
+  {"type":"lab","tags":[],"id":"haeru-button","title":"ボタンが生える","year":2026,"date":"2026-10-18","plays":null,"url":"","img":"games/_haeru-button/img/thumb.webp","play":"games/_haeru-button/index.html","full":true,"catch":""},
 ];
