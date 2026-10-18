@@ -36,9 +36,9 @@
 <script>
 /* カメレオン（題名は仮）
 
-   上はゲームの画面、下はカラーパネル。
-   枝の上のカメレオンに、色の弾が飛んでくる。当たる瞬間に同じ色になっていれば、弾はすり抜ける。
-   違う色なら当たって終わり。すり抜けた弾の数が記録。 */
+   上はゲームの画面、下はカラーホイール。
+   カメレオンは枝の上を歩いて進む。背景の色が次々に変わるので、ホイールで体の色を合わせる。
+   色が合っていない時間が続くと、上の鳥に見つかってさらわれる。抜けた背景の数が記録。 */
 (function () {
   "use strict";
 
@@ -107,8 +107,8 @@
   });
   var SND = {
     pick: function (i) { tone(420 + i * 45, 0.05, 0.05, "triangle"); },
-    pass: function () { noiseHit(0.18, 2400, 0.25, 1.5); tone(900, 0.12, 0.04, "sine", 1400); },
-    hit: function () { noiseHit(0.35, 300, 0.7, 0.8); tone(300, 0.5, 0.08, "square", 80); }
+    pass: function () { tone(880, 0.07, 0.03, "sine", 1100); },
+    hit: function () { tone(1800, 0.35, 0.06, "sawtooth", 900); tone(1500, 0.3, 0.05, "sawtooth", 700, 0.25); noiseHit(0.5, 1200, 0.3, 0.7, 0.4); }
   };
 
   /* ============ 色 ============
@@ -128,16 +128,16 @@
   function dist(a, b) { var p = pos(a), q = pos(b); return Math.hypot(p.x - q.x, p.y - q.y); }
   var TOL = 0.24; /* これより近ければすり抜ける（ホイールの半径を1として） */
   function near(a, b) { return dist(a, b) < TOL; }
-  /* すり抜けた数で出る色が増える。濃さ t の範囲と、色相の選び方 */
+  /* 進むほど出る色が増える。濃さ t の範囲と、色相の選び方 */
   var STEPS = [
     { at: 0, t0: 0.95, hues: [0, 120, 240] },
     { at: 8, t0: 0.85, hues: [0, 60, 120, 180, 240, 300] },
     { at: 18, t0: 0.6, hues: null },
     { at: 32, t0: 0.35, hues: null }
   ];
-  function randomColor() {
+  function randomColor(n) {
     var st = STEPS[0];
-    STEPS.forEach(function (x) { if (score >= x.at) st = x; });
+    STEPS.forEach(function (x) { if (n >= x.at) st = x; });
     var h = st.hues ? st.hues[Math.floor(Math.random() * st.hues.length)] : Math.random() * 360;
     return { h: h, t: st.t0 + Math.random() * (1 - st.t0) };
   }
@@ -156,27 +156,38 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: 0, PLAY: 1, OVER: 2, RESULT: 3 };
-  var state = S.INTRO, score = 0, T = 0, cur = { h: 0, t: 0 }, shown = [246, 244, 238], bullets = [], spawnT = 0, overT = 0;
-  var splat = null, press = -1, pressT = 0, fx = [], blink = 0, eyeT = 0, invincible = false;
-
-  function hex(c) { return [parseInt(c.substr(1, 2), 16), parseInt(c.substr(3, 2), 16), parseInt(c.substr(5, 2), 16)]; }
+  var state = S.INTRO, score = 0, T = 0, cur = { h: 0, t: 0 }, shown = [246, 244, 238], overT = 0;
+  var zones = [], walk = 0, exp = 0, fx = [], blink = 0, eyeT = 0, invincible = false, grabX = 0, grabY = 0;
 
   function newRound() {
-    state = S.PLAY; score = 0; T = 0; cur = { h: 0, t: 0 }; bullets = []; spawnT = 1.0; overT = 0; splat = null; fx = [];
+    state = S.PLAY; score = 0; T = 0; cur = { h: 0, t: 0 }; overT = 0; fx = []; exp = 0;
+    makeZones(0);
     shareButton.hidden = true;
     if (startButton) startButton.hidden = true;
   }
-
-  /* 弾が届くまでの秒数と、次の弾までの間（すり抜けた数で短くなる） */
-  function travel() { return Math.max(0.85, 1.9 - score * 0.025); }
-  function interval() { return Math.max(0.42, 1.35 - score * 0.02); }
-
-  function spawn() {
-    var c = randomColor(), last = bullets[bullets.length - 1];
-    for (var k = 0; k < 6 && last && dist(last.c, c) < 0.5; k++) c = randomColor();
-    var far = SX + SW - CX + 30;
-    bullets.push({ c: c, d: 1, t: 0, dur: travel(), dist: far, y: CY - 8 + (Math.random() - 0.5) * 30, done: false });
+  /* 背景の帯。最初は白で、そこから色が変わっていく */
+  function makeZones(n) {
+    score = n; walk = 0;
+    zones = [{ x: -400, w: 640, c: { h: 0, t: 0 }, n: n }];
+    fill();
   }
+  function fill() {
+    while (zones[zones.length - 1].x < walk + SW) {
+      var last = zones[zones.length - 1], n = last.n + 1;
+      var base = Math.max(130, 330 - n * 5);
+      var c = randomColor(n);
+      for (var k = 0; k < 6 && dist(last.c, c) < 0.55; k++) c = randomColor(n);
+      zones.push({ x: last.x + last.w, w: base * (0.8 + Math.random() * 0.5), c: c, n: n, seed: Math.random() * 1000 });
+    }
+    while (zones.length > 2 && zones[1].x + zones[1].w < walk - SW) zones.shift();
+  }
+  function zoneAt(x) {
+    for (var i = 0; i < zones.length; i++) if (x >= zones[i].x && x < zones[i].x + zones[i].w) return zones[i];
+    return zones[zones.length - 1];
+  }
+  /* 歩く速さ（px/秒）と、色が合っていなくても見つからない秒数 */
+  function speed() { return Math.min(190, 75 + score * 3); }
+  function grace() { return Math.max(0.4, 0.95 - score * 0.015); }
 
   function update(dt) {
     blink -= dt; eyeT += dt;
@@ -187,29 +198,26 @@
     /* 体の色は少しだけかけて変わる（見た目だけ。判定はすぐ） */
     var tc = rgbOf(cur);
     for (var k = 0; k < 3; k++) shown[k] += (tc[k] - shown[k]) * Math.min(1, dt * 22);
-    if (state === S.OVER) { overT += dt; if (overT > 1.1) { state = S.RESULT; } return; }
+    if (state === S.OVER) { overT += dt; if (overT > 2.0) state = S.RESULT; return; }
     if (state !== S.PLAY) return;
     T += dt;
-    spawnT -= dt;
-    if (spawnT <= 0) { spawn(); spawnT = interval(); }
-    bullets.forEach(function (b) {
-      b.t += dt;
-      if (!b.done && b.t >= b.dur) {
-        b.done = true;
-        if (near(b.c, cur) || invincible) {
-          score++; SND.pass();
-          fx.push({ k: "ring", x: CX, y: b.y, vx: 0, vy: 0, t: 0, life: 0.35, c: colOf(b.c) });
-        } else {
-          state = S.OVER; overT = 0; SND.hit();
-          splat = { c: colOf(b.c), x: CX + b.d * 20, y: b.y };
-          for (var i = 0; i < 16; i++) fx.push({ k: "drop", x: CX + b.d * 20, y: b.y, vx: b.d * (40 + Math.random() * 160), vy: -Math.random() * 220, t: 0, life: 1, c: colOf(b.c) });
-        }
-      }
-    });
-    bullets = bullets.filter(function (b) { return b.t < b.dur * 1.8 && !(state === S.OVER && b.done && !near(b.c, cur)); });
+    walk += speed() * dt;
+    fill();
+    var z = zoneAt(walk);
+    if (z.n > score) { score = z.n; SND.pass(); }
+    if (near(cur, z.c) || invincible) exp = Math.max(0, exp - dt * 1.5);
+    else exp += dt;
+    if (exp > grace()) snatch();
   }
-
-  function bulletX(b) { return CX + b.d * b.dist * (1 - b.t / b.dur); }
+  function birdPos() {
+    var ix = SX + SW * 0.55 + Math.sin(T * 0.9) * 150, iy = SY + 46 + Math.sin(T * 1.7) * 10;
+    var k = Math.min(1, exp / grace()) * 0.55;
+    return { x: ix + (CX - ix) * k, y: iy + (CY - 30 - iy) * k };
+  }
+  function snatch() {
+    state = S.OVER; overT = 0; SND.hit();
+    var b = birdPos(); grabX = b.x; grabY = b.y;
+  }
 
   /* ============ 入力 ============ */
   /* ホイールのどの色か。外れていれば null（縁の少し外は一番外の色） */
@@ -245,11 +253,11 @@
   wrap.addEventListener("pointercancel", function (e) { delete dragging[e.pointerId]; });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
-  /* 1 … 色が全部出る所まで飛ぶ  2 … 当たって終わり  3 … 無敵の入り切り */
+  /* 1 … 色が全部出る所まで飛ぶ  2 … さらわれて終わり  3 … 無敵の入り切り */
   function debugKey(n) {
     if (state === S.INTRO) startButton.click();
-    if (n === 1) { newRound(); score = 42; }
-    if (n === 2 && state === S.PLAY) { state = S.OVER; overT = 0; SND.hit(); splat = { c: colOf({ h: (cur.h + 180) % 360, t: 1 }), x: CX + 20, y: CY - 8 }; }
+    if (n === 1) { newRound(); makeZones(32); }
+    if (n === 2 && state === S.PLAY) snatch();
     if (n === 3) invincible = !invincible;
   }
   /* キーでも選べる（左右で色相、上下で段） */
@@ -271,13 +279,9 @@
 
   function doShare() {
     var n = score;
-    var line = n >= 60 ? zT("もはや景色", "basically scenery now")
-      : n >= 30 ? zT("森に溶けた", "melted into the forest")
-      : n >= 10 ? zT("それなりに擬態した", "blended in, sort of")
-      : zT("ぜんぜん隠れていなかった", "wasn't hiding at all");
     window.zResultActions.x({ text:
-      zT("カメレオンになって色の弾を" + n + "発すり抜けた。" + line,
-         "As a chameleon, I let " + n + " paint shots pass right through me. I " + line) +
+      zT("カメレオンになって" + n + "色の景色に溶け込んだ。そして鳥にさらわれた",
+         "As a chameleon, I blended into " + n + " backgrounds. Then a bird carried me off") +
       zT(" #カメレオン", " #Chameleon") });
   }
 
@@ -303,47 +307,62 @@
   function drawScreen() {
     ctx.save();
     roundRect(SX, SY, SW, SH, 14); ctx.clip();
-    var g = ctx.createLinearGradient(0, SY, 0, SY + SH);
-    g.addColorStop(0, "#cfe8d8"); g.addColorStop(1, "#9cc7a8");
-    ctx.fillStyle = g; ctx.fillRect(SX, SY, SW, SH);
-    /* 奥の葉っぱ */
-    ctx.fillStyle = "rgba(60,120,80,.18)";
-    for (var i = 0; i < 9; i++) {
-      ctx.beginPath(); ctx.ellipse(SX + 30 + i * 60, SY + 30 + (i % 3) * 22, 46, 22, (i % 2 ? 0.4 : -0.4), 0, Math.PI * 2); ctx.fill();
-    }
+    /* 背景の帯（葉っぱの模様つき） */
+    zones.forEach(function (z) {
+      var x0 = CX + (z.x - walk);
+      if (x0 > SX + SW || x0 + z.w < SX) return;
+      var c = rgbOf(z.c);
+      ctx.fillStyle = css(c); ctx.fillRect(x0, SY, z.w + 1, SH);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(x0, SY, z.w + 1, SH); ctx.clip();
+      ctx.fillStyle = "rgba(" + Math.round(c[0] * 0.82) + "," + Math.round(c[1] * 0.82) + "," + Math.round(c[2] * 0.82) + ",.55)";
+      var sd = z.seed || 1;
+      for (var i = 0; i < 14; i++) {
+        var lx = x0 + ((sd * (i + 3) * 37) % (z.w + 40)) - 20, ly = SY + ((sd * (i + 7) * 53) % SH);
+        ctx.beginPath(); ctx.ellipse(lx, ly, 26, 11, ((sd + i) % 6) - 3, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    });
     /* 枝 */
-    ctx.strokeStyle = "#6b4a2e"; ctx.lineWidth = 14; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(SX - 10, CY + 40); ctx.quadraticCurveTo(CX, CY + 28, SX + SW + 10, CY + 46); ctx.stroke();
-    ctx.lineCap = "butt";
+    ctx.strokeStyle = "#6b4a2e"; ctx.lineWidth = 14;
+    ctx.beginPath(); ctx.moveTo(SX - 10, CY + 42); ctx.lineTo(SX + SW + 10, CY + 42); ctx.stroke();
+    ctx.fillStyle = "#5a3c24";
+    for (var j = 0; j < 8; j++) { var kx = SX + ((j * 97 - walk) % (SW + 60) + SW + 60) % (SW + 60) - 30; ctx.fillRect(kx, CY + 37, 10, 3); }
     drawChameleon();
-    bullets.forEach(function (b) {
-      if (state === S.OVER && b.done && !near(b.c, cur)) return;
-      var x = bulletX(b), c = colOf(b.c);
-      var thru = b.done;
-      ctx.globalAlpha = thru ? Math.max(0, 1 - (b.t - b.dur) / (b.dur * 0.5)) : 1;
-      for (var k = 1; k <= 4; k++) {
-        ctx.fillStyle = c; ctx.globalAlpha *= 0.55;
-        ctx.beginPath(); ctx.arc(x + b.d * k * 9, b.y, 13 - k * 2, 0, Math.PI * 2); ctx.fill();
-      }
-      ctx.globalAlpha = thru ? Math.max(0, 1 - (b.t - b.dur) / (b.dur * 0.5)) : 1;
-      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, b.y, 14, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.lineWidth = 2; ctx.stroke();
-      ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.beginPath(); ctx.arc(x - 4, b.y - 5, 4, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 1;
-    });
-    fx.forEach(function (e) {
-      if (e.k === "ring") {
-        ctx.strokeStyle = e.c; ctx.globalAlpha = 1 - e.t / e.life; ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.arc(e.x, e.y, 20 + e.t * 160, 0, Math.PI * 2); ctx.stroke();
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.fillStyle = e.c; ctx.beginPath(); ctx.arc(e.x, e.y, 5, 0, Math.PI * 2); ctx.fill();
-      }
-    });
+    drawBird();
+    fx.forEach(function (e) { ctx.fillStyle = e.c; ctx.beginPath(); ctx.arc(e.x, e.y, 5, 0, Math.PI * 2); ctx.fill(); });
     if (state === S.PLAY || state === S.OVER) {
-      ctx.fillStyle = "rgba(20,30,24,.75)"; ctx.font = "800 44px sans-serif"; ctx.textAlign = "center";
-      ctx.fillText(String(score), SX + SW / 2, SY + 56);
+      ctx.fillStyle = "rgba(20,30,24,.8)"; ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 5;
+      ctx.font = "800 44px sans-serif"; ctx.textAlign = "center";
+      ctx.strokeText(String(score), SX + SW / 2, SY + 56); ctx.fillText(String(score), SX + SW / 2, SY + 56);
     }
+    ctx.restore();
+  }
+
+  /* 鳥。色が合っていないと少しずつ降りてくる。さらうときは急降下して持ち去る */
+  function grabbed() {
+    if (state !== S.OVER) return null;
+    var t = overT;
+    if (t < 0.45) { var k = t / 0.45; return { x: grabX + (CX - grabX) * k, y: grabY + (CY - 30 - grabY) * k * k, carry: false }; }
+    var u = t - 0.45;
+    return { x: CX - u * 90, y: CY - 30 - u * u * 200 - u * 60, carry: true };
+  }
+  function drawBird() {
+    if (state === S.INTRO) return;
+    var g = grabbed(), b = g || birdPos(), flap = Math.sin(T * 9 + overT * 30);
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    var dir = g ? -1 : (Math.cos(T * 0.9) > 0 ? 1 : -1);
+    ctx.scale(dir * 1.45, 1.45);
+    ctx.fillStyle = "#3a3330";
+    ctx.beginPath(); ctx.moveTo(-6, -4); ctx.lineTo(-46, -8 - flap * 26); ctx.lineTo(-22, 6); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(6, -4); ctx.lineTo(40, -10 - flap * 26); ctx.lineTo(18, 6); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 0, 24, 12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-22, -2); ctx.lineTo(-38, -10); ctx.lineTo(-36, 6); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(22, -6, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#e8b030"; ctx.beginPath(); ctx.moveTo(29, -8); ctx.lineTo(40, -3); ctx.lineTo(29, -2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(24, -8, 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#e8b030"; ctx.fillRect(-4, 10, 3, 8); ctx.fillRect(4, 10, 3, 8);
     ctx.restore();
   }
 
@@ -352,9 +371,11 @@
 
   /* カメレオン。右を向いて枝にとまる */
   function drawChameleon() {
-    var x = CX, y = CY, hit = state === S.OVER ? Math.sin(overT * 50) * 3 * Math.max(0, 1 - overT) : 0;
+    var x = CX, y = CY, g = grabbed(), rot = 0;
+    if (g && g.carry) { x = g.x; y = g.y + 54; rot = -0.5; }
     ctx.save();
-    ctx.translate(x + hit, y);
+    ctx.translate(x, y);
+    ctx.rotate(rot);
     /* しっぽ（くるり） */
     ctx.strokeStyle = shade(0.82); ctx.lineWidth = 12; ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(-50, 6); ctx.quadraticCurveTo(-92, 10, -92, 36); ctx.stroke();
@@ -363,8 +384,9 @@
     ctx.lineCap = "butt";
     /* 脚 */
     ctx.strokeStyle = shade(0.78); ctx.lineWidth = 9; ctx.lineCap = "round";
-    [[-30, 1], [24, -1]].forEach(function (l) {
-      ctx.beginPath(); ctx.moveTo(l[0], 12); ctx.lineTo(l[0] + l[1] * 8, 34); ctx.lineTo(l[0] + l[1] * 2, 40); ctx.stroke();
+    var st = state === S.PLAY ? Math.sin(walk * 0.09) * 9 : 0;
+    [[-30, 1, st], [24, -1, -st]].forEach(function (l) {
+      ctx.beginPath(); ctx.moveTo(l[0], 12); ctx.lineTo(l[0] + l[1] * 8 + l[2], 34); ctx.lineTo(l[0] + l[1] * 2 + l[2], 40); ctx.stroke();
     });
     ctx.lineCap = "butt";
     /* 体 */
@@ -385,10 +407,7 @@
     ctx.beginPath(); ctx.moveTo(30, -26); ctx.lineTo(50, -40); ctx.lineTo(56, -14); ctx.closePath(); ctx.fill();
     /* 目（ぐるぐる動く） */
     ctx.fillStyle = shade(0.75); ctx.beginPath(); ctx.arc(52, -8, 12, 0, Math.PI * 2); ctx.fill();
-    var look = 0, tgt = null;
-    bullets.forEach(function (b) { if (!b.done && (!tgt || b.t / b.dur > tgt.t / tgt.dur)) tgt = b; });
-    if (tgt) look = Math.atan2(tgt.y - (y - 8), bulletX(tgt) - (x + 52));
-    else look = Math.sin(eyeT * 1.3) * 1.5;
+    var bp = birdPos(), look = exp > 0.05 ? Math.atan2(bp.y - (y - 8), bp.x - (x + 52)) : Math.sin(eyeT * 1.3) * 1.5;
     if (state === S.OVER) look = eyeT * 12;
     if (blink > 0) { ctx.strokeStyle = "#1e2420"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(44, -8); ctx.lineTo(60, -8); ctx.stroke(); }
     else {
@@ -397,12 +416,6 @@
     }
     /* 口 */
     ctx.strokeStyle = shade(0.55); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(64, 4); ctx.quadraticCurveTo(70, 6, 76, 2); ctx.stroke();
-    /* 当たった色のしみ */
-    if (splat) {
-      ctx.fillStyle = splat.c;
-      ctx.beginPath(); ctx.arc(splat.x - x, splat.y - y, 16, 0, Math.PI * 2); ctx.fill();
-      for (var j = 0; j < 6; j++) { var a = j * 1.05; ctx.beginPath(); ctx.arc(splat.x - x + Math.cos(a) * 18, splat.y - y + Math.sin(a) * 14, 5, 0, Math.PI * 2); ctx.fill(); }
-    }
     ctx.restore();
   }
 
@@ -485,7 +498,7 @@
   window.__probe = {
     now: function () {
       return { state: state, score: score, cur: cur, time: T, W: W, H: H, wheel: { x: WX, y: WY, r: WR },
-        bullets: bullets.map(function (b) { return { c: b.c, left: b.dur - b.t, done: b.done }; }) };
+        zone: zoneAt(walk).c, exp: exp, walk: walk };
     },
     pick: pick,
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
