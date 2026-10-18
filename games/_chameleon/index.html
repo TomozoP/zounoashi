@@ -154,10 +154,11 @@
     o.connect(g); g.connect(BUS); o.start(at); o.stop(at + 0.2);
   }
   function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
-  var MAJ = [0, 2, 4, 7, 9], MIN = [0, 3, 5, 7, 10];
-  var PROG_MAJ = [0, -3, 5, 7], PROG_MIN = [0, -4, -7, -2];
-  var ARP = [0, 2, 4, 1, 3, 2, 5, 1];
-  /* 曲は歩いた距離で刻む。8分音符1つ＝STEP_PX 進むごと。小節（8つ）の頭で背景の色が変わりきる */
+  /* 7色＝ドレミファソラシ。曲はハ長調で、背景の色の音を根にした和音を1小節鳴らす */
+  var SCALE = [0, 2, 4, 5, 7, 9, 11];
+  function deg(d) { return SCALE[d % 7] + 12 * Math.floor(d / 7); }
+  var ARP = [0, 2, 4, 2, 7, 4, 2, 4];
+  /* 曲は歩いた距離で刻む。8分音符1つ＝STEP_PX 進むごと。小節（8つ）の頭で背景の色が変わる */
   function bgmTick() {
     if (!AC || !BUS || state !== S.PLAY) return;
     var now = AC.currentTime, sp = speed(), step = 30 / bpm();
@@ -170,94 +171,42 @@
     }
   }
   function playStep(i, at, step) {
-    var c = colorAt(i * STEP_PX);
-    var h = (c.h % 360 + 360) % 360, t = c.t;
-    var key = (Math.round(h / 30) % 12) * 7 % 12;      /* 色相を五度ずつの調に */
-    var minor = h > 165 && h < 315;
-    var sc = minor ? MIN : MAJ, prog = minor ? PROG_MIN : PROG_MAJ;
-    var bar = Math.floor(i / 8) % 4, b = i % 8;
-    var root = 48 + key + prog[bar]; if (root > 55) root -= 12;
-    var vivid = t > 0.55;
+    var d = colorAt(i * STEP_PX).i || 0, b = i % 8;
     /* 和音：小節の頭にふわっと */
-    if (b === 0) {
-      var third = minor ? 3 : 4;
-      [0, third, 7].forEach(function (d) { note(mtof(root + 12 + d), at, step * 8, 0.022 + 0.01 * (1 - t), "sine", 0.25); });
-    }
+    if (b === 0) [0, 2, 4].forEach(function (k) { note(mtof(60 + deg(d + k)), at, step * 8, 0.022, "sine", 0.2); });
     /* 低音 */
-    if (b === 0 || b === 4 || (vivid && b === 6)) note(mtof(root - 12 + (b === 4 ? 7 : 0)), at, step * 1.8, 0.07, "triangle");
-    /* 上の旋律：鮮やかなほど音が多い */
-    if (Math.random() < 0.2 + 0.75 * t) {
-      var k = ARP[(b + bar * 3) % 8] + (t > 0.8 && b % 2 ? 5 : 0);
-      var m = 60 + key + sc[k % 5] + 12 * Math.floor(k / 5);
-      note(mtof(m), at, step * (vivid ? 0.9 : 1.6), vivid ? 0.028 : 0.035, vivid ? "square" : "triangle", vivid ? 0.005 : 0.03);
-    }
-    /* 打楽器：色が濃いところだけ */
-    if (t > 0.45 && b % 2 === 1) hat(at, 0.03 * t);
-    if (t > 0.7 && (b === 0 || b === 4)) kick(at, 0.18);
+    if (b === 0 || b === 4 || b === 6) note(mtof(36 + deg(d) + (b === 4 ? 7 : 0)), at, step * 1.8, 0.07, "triangle");
+    /* 上の分散和音（控えめ。押した音が聞こえるように） */
+    if (b % 2 === 1 || Math.random() < 0.3) note(mtof(72 + deg(d + ARP[b])), at, step * 0.9, 0.018, "square", 0.005);
+    if (b % 2 === 1) hat(at, 0.03);
+    if (b === 0 || b === 4) kick(at, 0.18);
   }
 
-  /* ============ 帯を触る音 ============
-     触っている間はふわっとした持続音が鳴り、指の位置の色相に合わせて高さがすべる。
-     音階の段をまたぐたびに小さな鈴。調は今いる背景の曲に合わせる。響きは山びこ（遅れて繰り返す）で足す。 */
-  var AMB = null, ambStep = -1;
-  function ambNodes() {
-    if (AMB || !AC) return AMB;
+  /* ============ 鍵盤の音 ============
+     押した色の音（ド〜シ）を鳴らす。山びこ（遅れて繰り返す）をかけてやわらかく */
+  var KEYS = null;
+  function keyBus() {
+    if (KEYS || !AC) return KEYS;
     var out = AC.createGain(); out.gain.value = 0.9; out.connect(AC.destination);
     var dl = AC.createDelay(1); dl.delayTime.value = 0.32;
-    var fb = AC.createGain(); fb.gain.value = 0.42;
-    var wet = AC.createGain(); wet.gain.value = 0.45;
+    var fb = AC.createGain(); fb.gain.value = 0.35;
+    var wet = AC.createGain(); wet.gain.value = 0.4;
     var lp = AC.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 2200;
     dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(wet); wet.connect(out);
-    var send = AC.createGain(); send.connect(out); send.connect(dl);
-    var pad = AC.createGain(); pad.gain.value = 0;
-    var pf = AC.createBiquadFilter(); pf.type = "lowpass"; pf.frequency.value = 900; pf.Q.value = 2;
-    pad.connect(pf); pf.connect(send);
-    var o1 = AC.createOscillator(), o2 = AC.createOscillator(), o3 = AC.createOscillator();
-    o1.type = "sine"; o2.type = "triangle"; o3.type = "sine"; o2.detune.value = 7; o3.detune.value = -5;
-    [o1, o2, o3].forEach(function (o) { o.connect(pad); o.start(); });
-    AMB = { send: send, pad: pad, pf: pf, o: [o1, o2, o3] };
-    return AMB;
+    KEYS = AC.createGain(); KEYS.connect(out); KEYS.connect(dl);
+    return KEYS;
   }
-  function keyOf(c) {
-    var h = (c.h % 360 + 360) % 360;
-    return { key: (Math.round(h / 30) % 12) * 7 % 12, minor: h > 165 && h < 315 };
-  }
-  /* 帯の色相 → 今の調の音（2オクターブを10段） */
-  function ambNote(h) {
-    var k = keyOf(colorAt(walk)), sc = k.minor ? MIN : MAJ;
-    var i = Math.min(9, Math.floor(h / 36));
-    var base = 60 + k.key; if (base > 65) base -= 12;
-    return { i: i, m: base + sc[i % 5] + 12 * Math.floor(i / 5) };
-  }
-  function ambSet(h) {
-    if (!ambNodes()) return;
-    var n = ambNote(h), now = AC.currentTime, f = mtof(n.m - 12);
-    AMB.o[0].frequency.setTargetAtTime(f, now, 0.06);
-    AMB.o[1].frequency.setTargetAtTime(f * 1.5, now, 0.06);
-    AMB.o[2].frequency.setTargetAtTime(f * 2, now, 0.06);
-    AMB.pf.frequency.setTargetAtTime(500 + h * 3, now, 0.1);
-    if (n.i !== ambStep) { ambStep = n.i; bell(mtof(n.m + 12), now); }
-  }
-  function bell(f, at) {
-    var o = AC.createOscillator(), o2 = AC.createOscillator(), g = AC.createGain();
-    o.type = "sine"; o2.type = "sine"; o.frequency.value = f; o2.frequency.value = f * 2.01;
-    var g2 = AC.createGain(); g2.gain.value = 0.25;
+  function playKey(d) {
+    if (!keyBus()) return;
+    var at = AC.currentTime, f = mtof(72 + deg(d));
+    var o = AC.createOscillator(), o2 = AC.createOscillator(), g = AC.createGain(), g2 = AC.createGain();
+    o.type = "triangle"; o2.type = "sine"; o.frequency.value = f; o2.frequency.value = f * 2;
+    g2.gain.value = 0.3;
     g.gain.setValueAtTime(0.0001, at);
-    g.gain.linearRampToValueAtTime(0.05, at + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, at + 1.4);
-    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(AMB.send);
-    o.start(at); o2.start(at); o.stop(at + 1.5); o2.stop(at + 1.5);
-  }
-  function ambOn(h) {
-    if (!ambNodes()) return;
-    var now = AC.currentTime;
-    ambStep = -1; ambSet(h);
-    AMB.pad.gain.cancelScheduledValues(now); AMB.pad.gain.setTargetAtTime(0.05, now, 0.12);
-  }
-  function ambOff() {
-    if (!AMB) return;
-    var now = AC.currentTime;
-    AMB.pad.gain.cancelScheduledValues(now); AMB.pad.gain.setTargetAtTime(0, now, 0.25);
+    g.gain.linearRampToValueAtTime(0.09, at + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 1.1);
+    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(KEYS);
+    o.start(at); o2.start(at); o.stop(at + 1.2); o2.stop(at + 1.2);
   }
 
   var SND = {
@@ -287,17 +236,19 @@
   var TOL = 0.42; /* これより近ければすり抜ける（ホイールの半径を1として） */
   function near(a, b) { return dist(a, b) < TOL; }
   /* 進むほど出る色が増える。濃さ t の範囲と、色相の選び方 */
+  /* 7色（ド レ ミ ファ ソ ラ シ） */
+  var HUES = [0, 30, 58, 120, 190, 235, 285];
+  function colorN(i) { return { h: HUES[i], t: 1, i: i }; }
+  /* 進むほど出る色が増える：ドミソ → ドレミソラ → 7色全部 */
   var STEPS = [
-    { at: 0, t0: 0.95, hues: [0, 120, 240] },
-    { at: 8, t0: 0.85, hues: [0, 60, 120, 180, 240, 300] },
-    { at: 18, t0: 1, hues: [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] },
-    { at: 32, t0: 1, hues: null }
+    { at: 0, set: [0, 2, 4] },
+    { at: 8, set: [0, 1, 2, 4, 5] },
+    { at: 18, set: [0, 1, 2, 3, 4, 5, 6] }
   ];
   function randomColor(n) {
     var st = STEPS[0];
     STEPS.forEach(function (x) { if (n >= x.at) st = x; });
-    var h = st.hues ? st.hues[Math.floor(Math.random() * st.hues.length)] : Math.random() * 360;
-    return { h: h, t: 1 };
+    return colorN(st.set[Math.floor(Math.random() * st.set.length)]);
   }
 
   /* ============ 配置 ============ */
@@ -317,11 +268,11 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: 0, PLAY: 1, OVER: 2, RESULT: 3 };
-  var state = S.INTRO, score = 0, T = 0, cur = { h: 0, t: 1 }, shown = [246, 244, 238], overT = 0;
+  var state = S.INTRO, score = 0, T = 0, cur = colorN(0), shown = [246, 244, 238], overT = 0;
   var zones = [], walk = 0, exp = 0, fx = [], blink = 0, eyeT = 0, invincible = false, grabX = 0, grabY = 0;
 
   function newRound() {
-    state = S.PLAY; score = 0; T = 0; cur = { h: 0, t: 1 }; overT = 0; fx = []; exp = 0;
+    state = S.PLAY; score = 0; T = 0; cur = colorN(0); overT = 0; fx = []; exp = 0;
     makeZones(0); bgmStart();
     shareButton.hidden = true;
     if (startButton) startButton.hidden = true;
@@ -331,18 +282,17 @@
   var STEP_PX = 44, BAR_PX = STEP_PX * 8;
   function makeZones(n) {
     score = n; walk = 0;
-    zones = [{ x: -BAR_PX * 2, w: BAR_PX * 3.5, tr: BAR_PX / 2, c: { h: 0, t: 1 }, n: n }];
+    zones = [{ x: -BAR_PX * 2, w: BAR_PX * 4, tr: 0, c: colorN(0), n: n }];
     fill();
   }
   function fill() {
     while (zones[zones.length - 1].x < walk + SW * 2) {
       var last = zones[zones.length - 1], n = last.n + 1;
       var c = randomColor(n);
-      for (var k = 0; k < 6 && dist(last.c, c) < 0.55; k++) c = randomColor(n);
-      /* 長さは1小節。進むとときどき半小節も混ざる。移り変わりは序盤は半小節、進むと4分の1小節 */
+      for (var k = 0; k < 6 && c.i === last.c.i; k++) c = randomColor(n);
+      /* 長さは1小節。進むとときどき半小節も混ざる。色は小節の頭でぱっと変わる */
       var len = n >= 20 && Math.random() < 0.3 ? BAR_PX / 2 : BAR_PX;
-      var tr = Math.min(len / 2, n < 15 ? BAR_PX / 2 : BAR_PX / 4);
-      zones.push({ x: last.x + last.w + last.tr, w: len - tr, tr: tr, c: c, n: n });
+      zones.push({ x: last.x + last.w + last.tr, w: len, tr: 0, c: c, n: n });
     }
     while (zones.length > 2 && zones[1].x + zones[1].w + zones[1].tr < walk - SW) zones.shift();
   }
@@ -356,7 +306,7 @@
     for (var i = zones.length - 1; i >= 0; i--) {
       var z = zones[i];
       if (x < z.x) continue;
-      if (x < z.x + z.w || !zones[i + 1]) return z.c;
+      if (x < z.x + z.w || !zones[i + 1] || !z.tr) return z.c;
       var u = (x - z.x - z.w) / z.tr; u = u * u * (3 - 2 * u);
       var a = z.c, b = zones[i + 1].c, d = ((b.h - a.h) % 360 + 540) % 360 - 180;
       return { h: ((a.h + d * u) % 360 + 360) % 360, t: a.t + (b.t - a.t) * u };
@@ -372,6 +322,7 @@
     blink -= dt; eyeT += dt;
     if (blink < -3 - Math.random() * 3) blink = 0.15;
     hopT += dt;
+    for (var q = 0; q < 7; q++) pressT[q] += dt;
     fx.forEach(function (e) { e.t += dt; e.x += e.vx * dt; e.y += e.vy * dt; e.vy += 500 * dt; });
     fx = fx.filter(function (e) { return e.t < e.life; });
     /* 体の色は少しだけかけて変わる（見た目だけ。判定はすぐ） */
@@ -422,21 +373,27 @@
     return { x: ix + (tx - ix) * k, y: iy + (ty - iy) * k + Math.sin(T * 6) * 4 * k };
   }
   function snatch() {
-    state = S.OVER; overT = 0; SND.hit(); bgmStop(0.3); ambOff();
+    state = S.OVER; overT = 0; SND.hit(); bgmStop(0.3);
     var b = birdPos(); grabX = b.x; grabY = b.y;
   }
 
   /* ============ 入力 ============ */
-  /* 帯のどの色か。外れていれば null（帯の少し外までは拾う） */
+  /* 7つの鍵盤のどれか。外れていれば null（鍵盤の少し外までは拾う） */
+  var KEY_GAP = 8;
+  function keyRect(i) {
+    var w = (BW - KEY_GAP * 6) / 7;
+    return { x: BX + i * (w + KEY_GAP), y: BY, w: w, h: BH };
+  }
   function hitWheel(x, y) {
     if (y < BY - 24 || y > BY + BH + 56 || x < BX - 20 || x > BX + BW + 20) return null;
-    var u = Math.max(0, Math.min(0.9999, (x - BX) / BW));
-    return { h: u * 360, t: 1 };
+    var i = Math.max(0, Math.min(6, Math.floor((x - BX + KEY_GAP / 2) / (BW + KEY_GAP) * 7)));
+    return colorN(i);
   }
-
-  function pick(c) {
+  var pressT = [9, 9, 9, 9, 9, 9, 9];
+  /* 押した（またはなぞって移った）ときに音。同じ鍵盤をなぞっている間は鳴らさない */
+  function pick(c, tap) {
     if (c === null || state !== S.PLAY) return;
-    if (AC) ambSet(c.h);
+    if (tap || c.i !== cur.i) { if (AC) playKey(c.i); pressT[c.i] = 0; }
     cur = c;
   }
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -447,7 +404,7 @@
     var p = atCanvas(e);
     if (state === S.RESULT) { if (hitButton(p.x, p.y) === "retry") newRound(); return; }
     var i = hitWheel(p.x, p.y);
-    if (i !== null) { dragging[e.pointerId] = true; if (state === S.PLAY) ambOn(i.h); pick(i); }
+    if (i !== null) { dragging[e.pointerId] = true; pick(i, true); }
   });
   var dragging = {};
   wrap.addEventListener("pointermove", function (e) {
@@ -455,7 +412,7 @@
     var p = atCanvas(e), i = hitWheel(p.x, p.y);
     if (i !== null) pick(i);
   });
-  function release(e) { delete dragging[e.pointerId]; if (!Object.keys(dragging).length) ambOff(); }
+  function release(e) { delete dragging[e.pointerId]; }
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); release(e); });
   wrap.addEventListener("pointercancel", release);
 
@@ -474,8 +431,8 @@
     if (k === "escape") { e.preventDefault(); if (!e.repeat) newRound(); return; }
     if (state === S.INTRO) { if (k === " " || k === "enter") e.preventDefault(); return; }
     if (state === S.RESULT) { if ((k === " " || k === "enter") && !e.repeat) { e.preventDefault(); newRound(); } return; }
-    if (k === "arrowleft") { e.preventDefault(); pick({ h: (cur.h + 345) % 360, t: cur.t || 1 }); }
-    if (k === "arrowright") { e.preventDefault(); pick({ h: (cur.h + 15) % 360, t: cur.t || 1 }); }
+    if (k === "arrowleft") { e.preventDefault(); pick(colorN(((cur.i || 0) + 6) % 7), true); }
+    if (k === "arrowright") { e.preventDefault(); pick(colorN(((cur.i || 0) + 1) % 7), true); }
   });
   window.addEventListener("keyup", function (e) {
     var k = e.key.toLowerCase();
@@ -677,16 +634,16 @@
 
 
   function drawPanel() {
-    var g = ctx.createLinearGradient(BX, 0, BX + BW, 0);
-    for (var k = 0; k <= 12; k++) g.addColorStop(k / 12, colOf({ h: k * 30, t: 1 }));
-    ctx.fillStyle = g;
-    roundRect(BX, BY, BW, BH, 24); ctx.fill();
-    /* 選んでいる所：帯より少し高いつまみ */
-    var x = BX + cur.h / 360 * BW;
-    roundRect(x - 16, BY - 10, 32, BH + 20, 16);
-    ctx.fillStyle = colOf(cur); ctx.fill();
-    ctx.strokeStyle = "#1e2420"; ctx.lineWidth = 6; ctx.stroke();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.stroke();
+    /* 7つの鍵盤。押すと少し沈み、選んでいる鍵盤は白い縁 */
+    for (var i = 0; i < 7; i++) {
+      var k = keyRect(i), sink = pressT[i] < 0.12 ? 6 * (1 - pressT[i] / 0.12) : 0;
+      roundRect(k.x, k.y + sink, k.w, k.h - sink, 14);
+      ctx.fillStyle = colOf(colorN(i)); ctx.fill();
+      if (cur.i === i) {
+        ctx.strokeStyle = "#1e2420"; ctx.lineWidth = 7; ctx.stroke();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 3.5; ctx.stroke();
+      }
+    }
   }
 
   /* 結果画面。数と「もう一度」「Xでシェア」だけ */
