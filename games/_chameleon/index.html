@@ -281,7 +281,7 @@
   var zones = [], walk = 0, exp = 0, fx = [], blink = 0, eyeT = 0, invincible = false, grabX = 0, grabY = 0;
 
   function newRound() {
-    rings = []; jumpLine = -1; state = S.PLAY; score = 0; T = 0; cur = colorN(0); overT = 0; fx = []; exp = 0;
+    rings = []; jumpLine = -1; wasAir = false; state = S.PLAY; score = 0; T = 0; cur = colorN(0); overT = 0; fx = []; exp = 0;
     makeZones(0); bgmStart();
     shareButton.hidden = true;
     if (startButton) startButton.hidden = true;
@@ -330,7 +330,7 @@
   function update(dt) {
     blink -= dt; eyeT += dt;
     if (blink < -3 - Math.random() * 3) blink = 0.15;
-    hopT += dt; popT += dt; poseT += dt;
+    hopT += dt; popT += dt; poseT += dt; spinT += dt; landT += dt;
     rings.forEach(function (g) { g.t += dt; });
     rings = rings.filter(function (g) { return g.t < g.delay + 0.35; });
     for (var q = 0; q < 7; q++) pressT[q] += dt;
@@ -352,6 +352,8 @@
     var nb = nextLine();
     if (nb !== jumpLine && walk >= nb - UP_PX) jumpLine = nb; /* 音は曲の拍に合わせて playStep で鳴らす */
     var jk0 = jumpK(), air = jk0 >= 0 && jk0 < 0.5; /* 上がっている間だけ見つからない */
+    if ((jk0 >= 0) !== wasAir) { dust(); if (wasAir) landT = 0; }
+    wasAir = jk0 >= 0;
     var d = gap(), ok = d < TOL || air;
     if (ok || invincible) exp = Math.max(0, exp - dt * 1.5);
     else exp += dt * (0.5 + 1.3 * Math.min(1, (d - TOL) / 0.8)); /* 色が違うほど鳥が早く来る */
@@ -372,32 +374,38 @@
   }
   function blends() { return gap() < TOL; }
   /* 次の色の境目（歩いた距離）と、跳んでいる途中なら 0〜1（地面なら -1） */
-  var BEAT_PX = 88, UP_PX = 44, DOWN_PX = 88, jumpLine = -1;
+  var BEAT_PX = 88, UP_PX = 44, JUMP_H = 40, jumpLine = -1, wasAir = false, landT = 9;
   function nextLine() {
     for (var i = 0; i < zones.length; i++) if (zones[i].x > walk) return zones[i].x;
     return Infinity;
   }
   function jumpK() {
     if (state !== S.PLAY || jumpLine < 0) return -1;
-    /* 半拍前に跳び（上がりは速く）、境目で一番高く、1拍かけてゆっくり着地。0〜0.5 上がり、0.5〜1 下がり */
-    var u = walk - (jumpLine - UP_PX), k;
+    /* 半拍前に跳び、境目で一番高く、半拍後に着地（ふつうの放物線）。0〜0.5 上がり、0.5〜1 下がり */
+    var u = walk - (jumpLine - UP_PX);
     if (u < 0) return -1;
-    if (u < UP_PX) k = 0.5 * u / UP_PX;
-    else k = 0.5 + 0.5 * (u - UP_PX) / DOWN_PX;
+    var k = u / (UP_PX * 2);
     return k < 1 ? k : -1;
+  }
+  /* 足もとの土ぼこり（踏み切りと着地） */
+  function dust() {
+    for (var i = 0; i < 6; i++) {
+      var sx = i < 3 ? -1 : 1;
+      fx.push({ t: 0, life: 0.28, x: CX + 5 + sx * (8 + Math.random() * 18), y: CY + 38, vx: sx * (40 + Math.random() * 60), vy: -60 - Math.random() * 60, dust: true });
+    }
   }
   /* 数が増えたとき：体から星が飛び、少し跳ねる */
   var hopT = 9;
   var rings = [], popT = 9;
   function success(d) {
     SND.ok(d || 0); hopT = 0; popT = 0;
-    pose = (pose + 1 + Math.floor(Math.random() * 2)) % 3; poseT = 0; /* 続けて同じポーズにならない */
+    pose = (pose + 1 + Math.floor(Math.random() * 2)) % 3; poseT = 0; spinT = 0; /* 続けて同じポーズにならない */
     /* 体から広がる輪を2重に */
     rings.push({ t: 0, delay: 0 }, { t: 0, delay: 0.07 });
     for (var i = 0; i < 20; i++) {
       var a = -Math.PI * (0.05 + 0.9 * i / 19);
       var v = 200 + Math.random() * 160;
-      fx.push({ t: 0, life: 0.55 + Math.random() * 0.25, x: CX + 5, y: CY + 20, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, big: i % 2 === 0 });
+      fx.push({ t: 0, life: 0.55 + Math.random() * 0.25, x: chamX || CX + 5, y: chamY || CY + 20, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, big: i % 2 === 0 });
     }
   }
   /* 鳥は色が合っていない間だけ、画面の右上の外から近づいてくる。合えば戻っていく */
@@ -618,7 +626,7 @@
     rings.forEach(function (g) {
       var k = (g.t - g.delay) / 0.35;
       if (k < 0) return;
-      var cx = gx(CX + 5), cy = gy(CY + 20), rr = 3 + k * 16, n = Math.ceil(rr * 7);
+      var cx = gx(chamX || CX + 5), cy = gy(chamY || CY + 20), rr = 3 + k * 16, n = Math.ceil(rr * 7);
       var col = k < 0.6 ? "#ffffff" : "#fff3a8";
       for (var i = 0; i < n; i++) {
         var a = i / n * Math.PI * 2;
@@ -627,6 +635,7 @@
     });
     fx.forEach(function (e) {
       var x = Math.round(gx(e.x)), y = Math.round(gy(e.y)), k = e.t / e.life;
+      if (e.dust) { px(x, y, k < 0.5 ? 2 : 1, k < 0.5 ? 2 : 1, "#efe6d2"); return; }
       var col = k < 0.5 ? "#ffffff" : "#fff3a8";
       if (e.big && k < 0.7) { px(x - 2, y, 5, 1, col); px(x, y - 2, 1, 5, col); }
       else if (k < 0.75) { px(x - 1, y, 3, 1, col); px(x, y - 1, 1, 3, col); }
@@ -690,29 +699,51 @@
   ];
   var ARM_UP = ["...oo", "..obo", "..ob.", ".ob..", ".ob..", "ob...", "oo..."];
   /* 0 舌ぺろ  1 しっぽくるん  2 前足を上げてウインク */
-  var POSE_T = 0.2, poseT = 9, pose = 0;
+  var POSE_T = 0.32, poseT = 9, pose = 0, SPIN_T = 0.32, spinT = 9;
+  /* 回転させるときは、いったん小さな裏の画面に描いてから回して貼る */
+  var chamX = 0, chamY = 0;
+  var chamCv = document.createElement("canvas"); chamCv.width = 48; chamCv.height = 32;
   function drawChameleon() {
-    var jk = jumpK();
-    var g = grabbed(), x = gx(CX) - 12, y = BRANCH - 9;
-    /* 跳んでいる間は成功の小さな跳ねを足さない（頂点がずれて見えるため） */
-    /* 頂点でとどまらないよう、とがった山の形（境目で一瞬だけ一番高い） */
-    if (jk >= 0) y -= Math.round((1 - Math.pow(Math.abs(1 - 2 * jk), 1.3)) * 40);
-    else if (hopT < 0.3) y -= Math.round(Math.sin(Math.PI * hopT / 0.3) * 3);
+    var jk = jumpK(), g = grabbed(), x = gx(CX) - 12, y = BRANCH - 9, sq = 0;
+    if (jk >= 0) y -= Math.round(JUMP_H * (1 - Math.pow(2 * jk - 1, 2)));
+    else {
+      /* 踏み切りの直前と着地の直後は、少し沈む */
+      var pre = nextLine() - UP_PX - walk;
+      if (state === S.PLAY && ((pre > 0 && pre < 10) || landT < 0.08)) sq = 1;
+      else if (hopT < 0.3) y -= Math.round(Math.sin(Math.PI * hopT / 0.3) * 3);
+    }
     if (g && g.carry) { x = gx(g.x) - 11; y = gy(g.y) + 3; }
+    chamX = SX + (x + 11) * DOT; chamY = SY + (y + 4) * DOT;
+    var spin = state === S.PLAY && spinT < SPIN_T;
+    if (!spin || !o.rotate) { chamBody(x, y + sq, jk, sq); return; }
+    /* くるっと1回転（後ろ向きに。最初は速く、最後はゆっくり） */
+    var main = o, cg = chamCv.getContext("2d");
+    if (!cg) { chamBody(x, y, jk, 0); return; }
+    cg.clearRect(0, 0, 48, 32); o = cg;
+    chamBody(8, 12, jk, 0);
+    o = main;
+    var t = spinT / SPIN_T, a = -Math.PI * 2 * (1 - Math.pow(1 - t, 3));
+    o.save();
+    o.translate(x + 11, y + 4);
+    o.rotate(a);
+    o.drawImage(chamCv, -19, -16);
+    o.restore();
+  }
+  function chamBody(x, y, jk, sq) {
     var c = [shown[0], shown[1], shown[2]];
     var pal = { o: shadeRGB(c, 0.45), b: shadeRGB(c, 1), d: shadeRGB(c, 0.78), l: shadeRGB(c, 1.12) };
-    var step = state === S.PLAY && jk < 0 ? Math.floor(walk / 8) % 2 : 0;
-    /* 脚（前後の脚が交互に出る） */
+    var air = jk >= 0, step = state === S.PLAY && !air ? Math.floor(walk / 8) % 2 : 0;
     var posing = state === S.PLAY && poseT < POSE_T;
-    spr(LEG, x + 6 + (step ? 1 : 0), y + 7, pal);
-    if (!(posing && pose === 2)) spr(LEG, x + 14 + (step ? 0 : 1), y + 7, pal);
+    /* 脚：歩くときは前後が交互、空中では下にのびる、沈むときは横に開く */
+    var ly = y + 7 + (air ? 1 : 0) - sq;
+    spr(LEG, x + 6 + (step ? 1 : 0) - sq, ly, pal);
+    if (!(posing && pose === 2)) spr(LEG, x + 14 + (step ? 0 : 1) + sq, ly, pal);
     spr(posing && pose === 1 ? CHAM_NT : CHAM, x, y, pal);
     spr(EYE, x + 15, y + 2, pal);
     if (posing) {
       if (pose === 0) {
         /* 舌をのばして、目はにっこり */
-        var tl = 9;
-        px(x + 21, y + 5, tl, 1, "#ff5c8a"); px(x + 20 + tl, y + 4, 2, 3, "#ff5c8a");
+        px(x + 21, y + 5, 9, 1, "#ff5c8a"); px(x + 29, y + 4, 2, 3, "#ff5c8a");
         px(x + 16, y + 3, 2, 2, pal.b); px(x + 16, y + 3, 2, 1, pal.o);
       } else if (pose === 1) {
         /* しっぽを背中の上でくるん */
@@ -733,7 +764,6 @@
     px(x + 16, y + 3, 2, 2, "#ffffff");
     px(x + 16 + dx, y + 3 + dy, 1, 1, "#1e2420");
   }
-
 
   function drawPanel() {
     /* 7つの鍵盤。押すと少し沈み、選んでいる鍵盤は白い縁 */
