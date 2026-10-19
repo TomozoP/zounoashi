@@ -69,6 +69,8 @@
     this.btn = btns.map(function (b) {
       var m = new T.Mesh(geo, Z3.std(b.col, { roughness: 0.6 }));
       m.userData.mat = m.material;
+      /* 押している間は暗くする（押した感を見た目でも出す） */
+      m.userData.down = m.material.clone(); m.userData.down.color.multiplyScalar(0.55);
       m.scale.set(b.r, 1, b.r);
       m.position.set(b.x, top + 0.11, b.z);
       m.castShadow = true;
@@ -86,14 +88,16 @@
     var top = this.top, self = this, w = s.wave;
     this.tex.needsUpdate = true;
     this.btn.forEach(function (m, i) {
-      var b = self.btns[i], y = s.pressed[i] ? 0.0 : 0.11;
+      var b = self.btns[i], y = s.pressed[i] ? -0.1 : 0.11;
       if (w) { var d = Math.hypot(b.x - w.x, b.z - w.z) - w.t * 14; if (d > -2 && d < 0) y += Math.sin(-d / 2 * Math.PI) * 0.6; }
       if (s.pop && s.pop[i]) y += s.pop[i];
       var a = s.anim && s.anim[i];
       /* 大外れで飛び散っている間は、渡された位置と傾きのまま */
       if (a) { m.position.set(a.x, top + 0.11 + a.y, a.z); m.rotation.set(a.rx, 0, a.rz); }
       else { m.position.set(b.x, top + y, b.z); m.rotation.set(0, 0, 0); }
-      m.material = s.mark && s.mark[i] ? self.markMat : m.userData.mat;
+      m.material = s.mark && s.mark[i] ? self.markMat : s.pressed[i] && !a ? m.userData.down : m.userData.mat;
+      var sc = s.pressed[i] && !a ? 0.9 : 1;
+      m.scale.set(b.r * sc, 1, b.r * sc);
     });
     var k = s.bounce || 0;
     this.dev.position.y = Math.abs(Math.sin(k * Math.PI * 3)) * k * 2.5;
