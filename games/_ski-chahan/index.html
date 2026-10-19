@@ -171,7 +171,7 @@
     score = 0;
     T = 0;
     steer = 0; keySteer = 0; flipT = 9; flipCool = 0; crashA = 0; crashed = false; shake = 0;
-    P = { x: 0, z: 0, h: 0, v: VMAX, y: 1.6, vy: -VMAX * SLOPE, vx: 0, vz: -VMAX, dist: 0 };
+    P = { x: 0, z: 0, h: 0, md: 0, st: 0, yaw: 0, v: VMAX, y: 1.6, vy: -VMAX * SLOPE, vx: 0, vz: -VMAX, dist: 0 };
     P.y = P.gy = ground(0, 0) + 1.6;
     grains = [];
     for (var i = 0; i < N; i++) {
@@ -224,7 +224,7 @@
       T += dt; crashA += dt;
       if (shake > 0) shake = Math.max(0, shake - dt * 0.6);
       P.v = Math.max(0, P.v - dt * 22);
-      P.x += -Math.sin(P.h) * P.v * dt; P.z += -Math.cos(P.h) * P.v * dt;
+      P.x += -Math.sin(P.md) * P.v * dt; P.z += -Math.cos(P.md) * P.v * dt;
       stepGrains(dt);
       if (crashA > 2.2) { score = 0; state = S.RESULT; }
       return;
@@ -238,9 +238,13 @@
     /* 滑る */
     var st = keySteer || steer;
     P.v += (VMAX - P.v) * Math.min(1, dt * 1.2);
-    P.h += -st * 1.15 * dt;
-    P.h = Math.max(-1.1, Math.min(1.1, P.h));
-    var fx = -Math.sin(P.h), fz = -Math.cos(P.h);
+    /* 指の動きはなめらかに効かせ、曲がる速さにも勢いを残す。進む向きは体の向きを少し遅れて追う（横滑り） */
+    P.st += (st - P.st) * Math.min(1, dt * 6);
+    P.yaw += (P.st * 1.15 - P.yaw) * Math.min(1, dt * 4);
+    P.h += -P.yaw * dt;
+    if (Math.abs(P.h) > 1.2) { P.h = Math.sign(P.h) * 1.2; P.yaw *= 0.5; }
+    P.md += (P.h - P.md) * Math.min(1, dt * 3.5);
+    var fx = -Math.sin(P.md), fz = -Math.cos(P.md);
     var nvx = fx * P.v, nvz = fz * P.v;
     P.x += nvx * dt; P.z += nvz * dt;
     if (Math.abs(P.x) > EDGE) { P.x = Math.sign(P.x) * EDGE; crash(); return; }
@@ -254,7 +258,7 @@
     /* 鍋の揺れ＝体の加速（向きは今の進行方向に合わせる） */
     var axw = (nvx - P.vx) / dt, azw = (nvz - P.vz) / dt;
     P.vx = nvx; P.vz = nvz;
-    var rx = Math.cos(P.h), rz = -Math.sin(P.h);
+    var rx = Math.cos(P.md), rz = -Math.sin(P.md);
     /* ぶつかった瞬間などの極端な値は丸める（こぼれ方はぶつかったときの処理で決める） */
     A.r = clampA(axw * rx + azw * rz, 14);
     A.f = clampA(axw * fx + azw * fz, 2.5);
@@ -456,7 +460,7 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ crashA: crashed ? crashA : -1, vmax: VMAX, t: T || 0, state: state, p: P, grains: grains, flipT: flipT, shake: shake, steer: keySteer || steer });
+        s3.sync({ crashA: crashed ? crashA : -1, vmax: VMAX, t: T || 0, state: state, p: P, grains: grains, flipT: flipT, shake: shake, steer: P ? P.st : 0 });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); }
     }
