@@ -177,8 +177,10 @@
     /* あおる動き：さっと持ち上げて手前へ引く */
     var ft = s.flipT, k = ft < 0.22 ? Math.sin(ft / 0.22 * Math.PI) : 0;
     this.wok.position.set(0, -0.44 + k * 0.06, -0.5 + k * 0.04);
-    this.wok.rotation.x = k * 0.28;
-    this.skis.rotation.y = -(s.steer || 0) * 0.15;
+    this.wok.rotation.set(k * 0.28, 0, 0);
+    this.skis.position.set(0, 0, 0);
+    this.skis.rotation.set(0, -(s.steer || 0) * 0.15, 0);
+    if (s.crashA >= 0) this.crashPose(Math.min(s.crashA, 1.6), t);
     for (var j = 0; j < this.flames.children.length; j++) this.flames.children[j].scale.y = 0.7 + Math.random() * 0.6;
 
     var gs = s.grains, M = this.m, Q = this.q, V = this.v, Sc = this.s;
@@ -203,6 +205,21 @@
     }
     this.rice.instanceMatrix.needsUpdate = true;
     if (this.rice.instanceColor) this.rice.instanceColor.needsUpdate = true;
+  };
+
+  /* 激突：前のめりに転がって雪に突っ込む。鍋は回りながら前へ飛び、板も外れる */
+  GameScene.prototype.crashPose = function (c, t) {
+    /* 激突：後ろへ吹っ飛んで空を見上げる。その空へ鍋が回りながら飛び、炒飯が舞う。板も外れる */
+    var e = 1 - Math.pow(1 - Math.min(1, c / 0.9), 3);
+    var back = e * 1.6;
+    this.rig.position.x -= -Math.sin(this.rig.rotation.y) * back;
+    this.rig.position.z -= -Math.cos(this.rig.rotation.y) * back;
+    this.rig.position.y -= e * 1.05;
+    this.head.rotation.set(-0.5 + e * 1.15 + Math.sin(c * 26) * 0.05 * (1 - e), e * 0.25, e * 0.55, "YXZ");
+    this.wok.position.set(c * 0.5, -0.44 + c * 4.2 - c * c * 1.9, -0.5 - c * 2.4);
+    this.wok.rotation.set(c * 7, c * 3, c * 5);
+    this.skis.position.set(c * -0.4, c * 2.2 - c * c * 1.4, -c * 1.2);
+    this.skis.rotation.set(c * 4, c * 2, c * 3);
   };
 
   GameScene.prototype.syncFlakes = function (p) {

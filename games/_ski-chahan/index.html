@@ -139,8 +139,9 @@
   var TREES = (function () {
     var s = 7, r = function () { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
     var t = [];
-    for (var d = 40; d < LEN - 20; d += 8) {     /* 滑る所にぽつぽつ */
-      if (r() < 0.6) t.push({ x: (r() * 2 - 1) * (EDGE - 4), z: -d - r() * 6, s: 0.8 + r() * 0.5 });
+    for (var d = 35; d < LEN - 15; d += 5.5) {     /* 滑る所にぽつぽつ */
+      if (r() < 0.9) t.push({ x: (r() * 2 - 1) * (EDGE - 3), z: -d - r() * 4, s: 0.8 + r() * 0.5 });
+      if (d > 120 && r() < 0.5) t.push({ x: (r() * 2 - 1) * (EDGE - 3), z: -d - r() * 4, s: 0.8 + r() * 0.5 });
     }
     for (var e = -10; e < LEN + 80; e += 4) {    /* 両端の林 */
       t.push({ x: -(EDGE + 1 + r() * 10), z: -e - r() * 3, s: 0.9 + r() * 0.6 });
@@ -158,10 +159,10 @@
   function surf(r) { return BR - Math.sqrt(Math.max(0, BR * BR - r * r)); }
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var S = { INTRO: "intro", PLAY: "play", CRASH: "crash", RESULT: "result" };
   var state, score, T, keyMode = false;
   var P;                                       /* 滑っている人 */
-  var steer, keySteer, flipT, flipCool, crashT, shake;
+  var steer, keySteer, flipT, flipCool, crashA, crashed, shake, noHit = false;
 
   function newRound() {
     shareButton.hidden = true;
@@ -169,7 +170,7 @@
     state = S.PLAY;
     score = 0;
     T = 0;
-    steer = 0; keySteer = 0; flipT = 9; flipCool = 0; crashT = 0; shake = 0;
+    steer = 0; keySteer = 0; flipT = 9; flipCool = 0; crashA = 0; crashed = false; shake = 0;
     P = { x: 0, z: 0, h: 0, v: VMAX, y: 1.6, vy: -VMAX * SLOPE, vx: 0, vz: -VMAX, dist: 0 };
     P.y = P.gy = ground(0, 0) + 1.6;
     grains = [];
@@ -197,22 +198,37 @@
     tone(180, 0.08, 0.08, "triangle", 120);
   }
 
-  function crash(power) {
-    crashT = 1.2; shake = 0.5;
+  /* ぶつかったら一発アウト：派手に転んで、鍋も炒飯も飛んでいく */
+  function crash() {
+    if (state !== S.PLAY) return;
+    state = S.CRASH; crashA = 0; crashed = true; shake = 1;
     grains.forEach(function (g) {
       if (g.lost) return;
-      g.vy += (0.5 + Math.random() * 0.7) * power;
-      g.vx += (Math.random() - 0.5) * 0.6 * power;
-      g.vz += (Math.random() - 0.5) * 0.5 * power;
-      g.on = false;
+      g.vy += 1.5 + Math.random() * 2.5;
+      g.vx += (Math.random() - 0.5) * 5;
+      g.vz += -1.5 - Math.random() * 3.5;
+      g.on = false; g.lost = true;
     });
-    noiseHit(0.4, 220, 0.6, 0.6);
-    tone(90, 0.25, 0.25, "sine", 50);
+    noiseHit(0.9, 160, 0.9, 0.5);
+    noiseHit(0.5, 900, 0.5, 0.7);
+    tone(80, 0.5, 0.35, "sine", 40);
+    tone(620, 0.9, 0.12, "triangle", 590, 0.05);   /* 鍋がカーンと鳴る */
+    tone(1240, 0.6, 0.05, "sine", 1180, 0.05);
+    setLoop(wind, 0); setLoop(sizzle, 0);
   }
 
   /* ============ 進行 ============ */
   var A = { r: 0, u: 0, f: 0 };                /* 鍋が受ける揺れ（右・上・前） */
   function update(dt) {
+    if (state === S.CRASH) {
+      T += dt; crashA += dt;
+      if (shake > 0) shake = Math.max(0, shake - dt * 0.6);
+      P.v = Math.max(0, P.v - dt * 22);
+      P.x += -Math.sin(P.h) * P.v * dt; P.z += -Math.cos(P.h) * P.v * dt;
+      stepGrains(dt);
+      if (crashA > 2.2) { score = 0; state = S.RESULT; }
+      return;
+    }
     if (state !== S.PLAY) { setLoop(wind, 0); setLoop(sizzle, 0); return; }
     T += dt;
     if (flipCool > 0) flipCool -= dt;
@@ -221,14 +237,13 @@
 
     /* 滑る */
     var st = keySteer || steer;
-    if (crashT > 0) crashT -= dt;
-    P.v += ((crashT > 0 ? 6 : VMAX) - P.v) * Math.min(1, dt * (crashT > 0 ? 2.5 : 1.2));
+    P.v += (VMAX - P.v) * Math.min(1, dt * 1.2);
     P.h += -st * 1.15 * dt;
     P.h = Math.max(-1.1, Math.min(1.1, P.h));
     var fx = -Math.sin(P.h), fz = -Math.cos(P.h);
     var nvx = fx * P.v, nvz = fz * P.v;
     P.x += nvx * dt; P.z += nvz * dt;
-    if (Math.abs(P.x) > EDGE) { P.x = Math.sign(P.x) * EDGE; P.h *= -0.4; nvx = 0; crash(0.8); }
+    if (Math.abs(P.x) > EDGE) { P.x = Math.sign(P.x) * EDGE; crash(); return; }
     P.dist = -P.z;
     /* 脚で受けた高さ（ばね） */
     var gy = ground(P.x, P.z) + 1.6, tv = (gy - P.gy) / dt;
@@ -250,7 +265,7 @@
       var t = TREES[i];
       if (Math.abs(t.z - P.z) > 1.2) continue;
       var dx = t.x - P.x, dz = t.z - P.z;
-      if (dx * dx + dz * dz < 0.8 * t.s * 0.8 * t.s && crashT <= 0.6) { crash(1); P.x -= dx * 0.6; P.z -= dz * 0.6; }
+      if (!noHit && dx * dx + dz * dz < 0.8 * t.s * 0.8 * t.s) { crash(); return; }
     }
 
     stepGrains(dt);
@@ -381,8 +396,9 @@
     if (state !== S.PLAY) return;
     if (n === 1) { P.z = -(LEN - 40); }                                  /* ゴール前 */
     if (n === 2) { P.z = -(BUMPS[0][0] - 10); }                          /* こぶの手前 */
-    if (n === 3) crash(1);                                               /* 木にぶつかる */
+    if (n === 3) crash();                                                /* 木にぶつかる */
     if (n === 4) grains.forEach(function (g) { g.cook = 1; g.burn = 0; });  /* 全部パラパラ */
+    if (n === 5) noHit = !noHit;                                         /* 木に当たらない（切り替え） */
     if (n === 9) finish();                                               /* 結果 */
     P.y = P.gy = ground(P.x, P.z) + 1.6; P.vy = 0;
   }
@@ -412,6 +428,7 @@
 
   function doShare() {
     var s = score, text;
+    if (crashed) { window.zResultActions.x({ text: zT("スキーで滑りながら炒飯を炒めていたら、木に激突して全部ぶちまけた", "Crashed into a tree while stir-frying rice on skis and sent it all flying") + zT(" #スキー炒飯", " #SkiFriedRice") }); return; }
     if (s >= 85) text = zT("ゲレンデを滑りながら黄金のパラパラ炒飯を完成させた（パラパラ度" + s + "%）", "Skied down the slope and made golden fluffy fried rice (" + s + "% fluffy)");
     else if (s >= 60) text = zT("スキーで滑降しながら炒飯を" + s + "%パラパラに炒めた", "Stir-fried rice to " + s + "% fluffiness while skiing downhill");
     else if (s >= 30) text = zT("雪山で滑りながら炒めた炒飯、パラパラ度" + s + "%", "Fried rice made while skiing: " + s + "% fluffy");
@@ -439,7 +456,7 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ vmax: VMAX, t: T || 0, state: state, p: P, grains: grains, flipT: flipT, shake: shake, steer: keySteer || steer });
+        s3.sync({ crashA: crashed ? crashA : -1, vmax: VMAX, t: T || 0, state: state, p: P, grains: grains, flipT: flipT, shake: shake, steer: keySteer || steer });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); }
     }
