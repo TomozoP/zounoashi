@@ -173,10 +173,11 @@
     if (this.fitW === W && this.fitH === H) return;
     this.fitW = W; this.fitH = H;
     var cam = this.camera, v = cam.fov * Math.PI / 360, hz = Math.atan(Math.tan(v) * W / H);
-    var d = Math.max((BW / 2 + 0.7) / Math.tan(hz), (BL / 2 + 1.6) / Math.tan(v));
-    var dir = new T.Vector3(0, 0.93, 0.37).normalize();
+    var d = Math.max((BW / 2 + 0.7) / Math.tan(hz), (BL / 2 + 1.6) / Math.tan(v)) + this.top;
+    /* 真上から。画面の上が奥（-z） */
     cam.aspect = W / H; cam.updateProjectionMatrix();
-    cam.position.set(0, 0, 0.3).addScaledVector(dir, d);
+    cam.up.set(0, 0, -1);
+    cam.position.set(0, d, 0.3);
     cam.lookAt(0, 0, 0.3);
     cam.updateMatrixWorld();
   };
