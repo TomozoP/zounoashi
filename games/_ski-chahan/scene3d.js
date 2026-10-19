@@ -122,13 +122,20 @@
     var N = o.n;
     /* 米粒は細長い粒 */
     var grainG = new T.SphereGeometry(0.5, 8, 5); grainG.scale(0.019, 0.0095, 0.0095);
-    this.rice = new T.InstancedMesh(grainG, new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 }), N);
+    /* 動く粒1つにつき、見た目の粒を K 個まとめて描く（動きの数はそのままで量を多く見せる） */
+    var K = this.K = 4;
+    this.rice = new T.InstancedMesh(grainG, new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 }), N * K);
     this.rice.instanceMatrix.setUsage(T.DynamicDrawUsage);
     this.rice.frustumCulled = false;
     wok.add(this.rice);
     this.rot = [];
     var rr = Z3.rng(11);
-    for (i = 0; i < N; i++) this.rot.push(new T.Euler(rr() * 6, rr() * 6, rr() * 6));
+    this.off = [];
+    for (i = 0; i < N * K; i++) {
+      this.rot.push(new T.Euler(rr() * 6, rr() * 6, rr() * 6));
+      var oa = rr() * 6.283, orr = i % K ? 0.006 + rr() * 0.011 : 0;
+      this.off.push([Math.cos(oa) * orr, i % K ? rr() * 0.014 : 0, Math.sin(oa) * orr]);
+    }
     this.col = new T.Color();
     this.cRaw = new T.Color(0xf7f3e6); this.cGold = new T.Color(0xf0c35a); this.cBurn = new T.Color(0x3a2212);
     this.cEgg = new T.Color(0xffd23a); this.cNegi = new T.Color(0x4f9f36);
@@ -175,23 +182,24 @@
     for (var j = 0; j < this.flames.children.length; j++) this.flames.children[j].scale.y = 0.7 + Math.random() * 0.6;
 
     var gs = s.grains, M = this.m, Q = this.q, V = this.v, Sc = this.s;
-    for (var i = 0; i < gs.length; i++) {
-      var g = gs[i];
+    var K = this.K;
+    for (var n = 0; n < gs.length * K; n++) {
+      var i = Math.floor(n / K), g = gs[i], kind = n % K ? 0 : g.kind;
       if (g.lost && g.y < -1.4) { Sc.set(0, 0, 0); }
       else Sc.set(1, 1, 1);
-      var e = this.rot[i];
+      var e = this.rot[n], o = this.off[n], spread = g.on ? 1 : 1.6;
       if (!g.on) { e.x += 0.25; e.z += 0.17; }
       Q.setFromEuler(e);
-      V.set(g.x, g.y + 0.006, g.z);
+      V.set(g.x + o[0] * spread, g.y + 0.006 + o[1], g.z + o[2] * spread);
       M.compose(V, Q, Sc);
-      this.rice.setMatrixAt(i, M);
+      this.rice.setMatrixAt(n, M);
       var c = this.col;
-      if (g.kind === 2) c.copy(this.cNegi);
+      if (kind === 2) c.copy(this.cNegi);
       else {
-        c.copy(g.kind === 1 ? this.cEgg : this.cRaw).lerp(this.cGold, g.cook * (g.kind === 1 ? 0.3 : 0.8));
+        c.copy(kind === 1 ? this.cEgg : this.cRaw).lerp(this.cGold, g.cook * (kind === 1 ? 0.3 : 0.8));
         c.lerp(this.cBurn, Math.min(1, g.burn * 1.2));
       }
-      this.rice.setColorAt(i, c);
+      this.rice.setColorAt(n, c);
     }
     this.rice.instanceMatrix.needsUpdate = true;
     if (this.rice.instanceColor) this.rice.instanceColor.needsUpdate = true;
