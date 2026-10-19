@@ -134,11 +134,14 @@
      本物の左・右・A は、遊ぶたびに100個の中から選び直す */
   var BODY = { w: 10.6, l: 20 }, PITCH = 1.0;
   var BTNS = [];
-  for (var row = 0; row < 10; row++) for (var col = 0; col < 10; col++) {
-    /* 色は1つずつ違う。色相を少しずつずらし、明るさを段ごとに変える */
-    var hue = ((row * 10 + col) * 0.381966) % 1, lit = [0.55, 0.48, 0.62, 0.52][row % 4];
-    BTNS.push({ x: (col - 4.5) * PITCH, z: 3.1 + (row - 4.5) * PITCH, r: 0.4, col: hsl(hue, 0.95, lit) });
-  }
+  /* 色は100個とも違う。色相25段×色合い4種の組み合わせを、決まった順に混ぜて配る
+     （隣り合う色相は近いが、完全に同じ色にはならない） */
+  var TONE = [[0.95, 0.55], [0.95, 0.44], [0.8, 0.64], [0.7, 0.5]], COLS = [];
+  for (var hi = 0; hi < 25; hi++) for (var ti = 0; ti < 4; ti++) COLS.push(hsl(hi / 25 + ti * 0.01, TONE[ti][0], TONE[ti][1]));
+  var seed = 7;
+  for (var ci = COLS.length - 1; ci > 0; ci--) { seed = (seed * 16807) % 2147483647; var cj = seed % (ci + 1), tc = COLS[ci]; COLS[ci] = COLS[cj]; COLS[cj] = tc; }
+  for (var row = 0; row < 10; row++) for (var col = 0; col < 10; col++)
+    BTNS.push({ x: (col - 4.5) * PITCH, z: 3.1 + (row - 4.5) * PITCH, r: 0.4, col: COLS[row * 10 + col] });
   function hsl(h, s, l) {
     var q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
     function c(t) { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; }
@@ -199,6 +202,9 @@
     kinds.sort(function () { return Math.random() - 0.5; });
     BTNS.forEach(function (b, j) { b.react = kinds[j]; b.note = j; });
     fx = newFx();
+    chaos = null;
+    /* 大外れ：押すとボタンが全部飛び散って、入れ替わる */
+    do { big = Math.floor(Math.random() * BTNS.length); } while (isReal(big));
     respawn();
   }
   function respawn() {
@@ -252,7 +258,52 @@
     if (P.x + P.w >= STAGE.flag - 1 && P.ground) { clearT = 0; SND.clear(); }
   }
   function jump() { if (state === S.PLAY) jumpQ = 0.12; }
+  /* ============ 大外れ ============
+     ボタンが全部穴から飛び出して机の上の本体でぐちゃっと転がり、別の穴にランダムに収まり直す。
+     色ごと（本物も大外れも）一緒に動くので、どこにあったかの記憶が崩れる */
+  var chaos = null, big = -1, FLY = 1.3, BACK = 0.8;
+  function startChaos() {
+    var slots = BTNS.map(function (b) { return { x: b.x, z: b.z }; });
+    slots.sort(function () { return Math.random() - 0.5; });
+    chaos = { t: 0, to: slots, p: BTNS.map(function (b) {
+      return { x: b.x, y: 0, z: b.z, vx: (Math.random() - 0.5) * 9, vy: 5 + Math.random() * 7, vz: (Math.random() - 0.5) * 9, rx: 0, rz: 0,
+        sx: (Math.random() - 0.5) * 14, sz: (Math.random() - 0.5) * 14 };
+    }) };
+    pointers = {};
+    fx.bounce = 1;
+    noiseHit(1.2, 400, 0.5, 0.4); tone(300, 0.9, 0.08, "sawtooth", 60);
+  }
+  function updateChaos(dt) {
+    if (!chaos) return;
+    var c = chaos, hw = BODY.w / 2 - 0.4, hl = BODY.l / 2 - 0.4;
+    c.t += dt;
+    if (c.t < FLY) {
+      c.p.forEach(function (q) {
+        q.vy -= 30 * dt;
+        q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt;
+        q.rx += q.sx * dt; q.rz += q.sz * dt;
+        if (q.y < 0) { q.y = 0; q.vy = -q.vy * 0.45; q.vx *= 0.7; q.vz *= 0.7; q.sx *= 0.7; q.sz *= 0.7; if (Math.abs(q.vy) > 2) tone(500 + Math.random() * 600, 0.03, 0.015, "square"); }
+        if (Math.abs(q.x) > hw) { q.x = Math.sign(q.x) * hw; q.vx = -q.vx * 0.5; }
+        if (Math.abs(q.z) > hl) { q.z = Math.sign(q.z) * hl; q.vz = -q.vz * 0.5; }
+      });
+    } else {
+      if (!c.from) { c.from = c.p.map(function (q) { return { x: q.x, y: q.y, z: q.z, rx: q.rx % (Math.PI * 2), rz: q.rz % (Math.PI * 2) }; }); tone(200, 0.5, 0.05, "sine", 900); }
+      var k = Math.min(1, (c.t - FLY) / BACK), e = k * k * (3 - 2 * k);
+      c.p.forEach(function (q, i) {
+        var f = c.from[i], to = c.to[i];
+        q.x = f.x + (to.x - f.x) * e; q.z = f.z + (to.z - f.z) * e;
+        q.y = f.y * (1 - e) + Math.sin(e * Math.PI) * 1.2;
+        q.rx = f.rx * (1 - e); q.rz = f.rz * (1 - e);
+      });
+      if (k >= 1) {
+        BTNS.forEach(function (b, i) { b.x = c.to[i].x; b.z = c.to[i].z; });
+        chaos = null;
+        SND.click();
+      }
+    }
+  }
   function updateFx(dt) {
+    updateChaos(dt);
     ["invert", "flipV", "flipH", "shake", "night", "off", "rain", "snow", "glitch", "big", "ghost"].forEach(function (k) { fx[k] = Math.max(0, fx[k] - dt); });
     fx.bounce = Math.max(0, fx.bounce - dt * 1.2);
     if (fx.wave) { fx.wave.t += dt; if (fx.wave.t > 1.2) fx.wave = null; }
@@ -288,6 +339,8 @@
   }
   function pressBtn(i) {
     SND.click();
+    if (chaos) return;
+    if (i === big) { startChaos(); return; }
     if (i === real.A) jump();
     else if (!isReal(i) && state === S.PLAY) BTNS[i].react(BTNS[i]);
   }
@@ -298,7 +351,7 @@
     audioOn();
     var p = atCanvas(e);
     if (state === S.RESULT) { if (hitButton(p.x, p.y) === "retry") newRound(); return; }
-    var i = hitBtn(p.x, p.y);
+    var i = chaos ? -1 : hitBtn(p.x, p.y);
     if (i < 0) return;
     pointers[e.pointerId] = i;
     pressBtn(i);
@@ -318,7 +371,8 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (n === 1) mark = !mark;                                  /* 本物のボタンに色をつける */
-    if (n === 2 && state === S.PLAY) { P.x = 60; }              /* 穴の手前へ */
+    if (n === 2 && state === S.PLAY) { P.x = 60; }              /* 段差の手前へ */
+    if (n === 3 && state === S.PLAY && !chaos) startChaos();   /* 大外れ */
     if (n === 9 && state === S.PLAY) finish();                  /* 結果へ */
   }
 
@@ -471,7 +525,8 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ pressed: BTNS.map(function (b, i) { return down(i); }), mark: mark ? BTNS.map(function (b, i) { return isReal(i); }) : null,
+        s3.sync({ pressed: BTNS.map(function (b, i) { return down(i); }), mark: mark ? BTNS.map(function (b, i) { return isReal(i) || i === big; }) : null,
+          anim: chaos ? chaos.p : null,
           bounce: fx.bounce, wave: fx.wave, pop: BTNS.map(function (b, i) { return fx.pop[i] ? Math.sin(fx.pop[i] * Math.PI) * 2.5 : 0; }), lamp: fx.lamp });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); }
@@ -524,6 +579,7 @@
   window.__probe = {
     now: function () { return { state: state, T: T, falls: falls, x: P && P.x, y: P && P.y, ground: P && P.ground, dead: dead, clear: clearT, W: W, H: H }; },
     real: function () { return real; },
+    big: function () { return big; },
     btnAt: function (i) { return btnAt(i); },
     hitBtn: function (x, y) { return hitBtn(x, y); },
     press: function (i) { pressBtn(i); },

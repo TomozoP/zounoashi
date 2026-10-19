@@ -89,7 +89,10 @@
       var b = self.btns[i], y = s.pressed[i] ? 0.0 : 0.11;
       if (w) { var d = Math.hypot(b.x - w.x, b.z - w.z) - w.t * 14; if (d > -2 && d < 0) y += Math.sin(-d / 2 * Math.PI) * 0.6; }
       if (s.pop && s.pop[i]) y += s.pop[i];
-      m.position.y = top + y;
+      var a = s.anim && s.anim[i];
+      /* 大外れで飛び散っている間は、渡された位置と傾きのまま */
+      if (a) { m.position.set(a.x, top + 0.11 + a.y, a.z); m.rotation.set(a.rx, 0, a.rz); }
+      else { m.position.set(b.x, top + y, b.z); m.rotation.set(0, 0, 0); }
       m.material = s.mark && s.mark[i] ? self.markMat : m.userData.mat;
     });
     var k = s.bounce || 0;
