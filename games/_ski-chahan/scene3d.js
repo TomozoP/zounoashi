@@ -9,7 +9,7 @@
   function GameScene(o) {
     T = global.THREE;
     this.o = o;
-    var st = this.stage = new Z3.Stage({ renderer: { tone: "aces", exposure: 1.05 }, camera: { fov: 70, near: 0.05, far: 160 } });
+    var st = this.stage = new Z3.Stage({ renderer: { tone: "aces", exposure: 1.05 }, camera: { fov: 80, near: 0.05, far: 160 } });
     var sc = this.scene = st.scene;
     this.camera = st.camera;
     sc.background = new T.Color(0x9cc6ec);
@@ -21,8 +21,8 @@
     var snowTex = Z3.canvasTex(128, 128, function (g, w, h) {
       g.fillStyle = "#f3f7fb"; g.fillRect(0, 0, w, h);
       var r = Z3.rng(3);
-      for (var i = 0; i < 260; i++) {
-        g.fillStyle = r() < 0.5 ? "rgba(170,190,215,.35)" : "rgba(255,255,255,.9)";
+      for (var i = 0; i < 420; i++) {
+        g.fillStyle = r() < 0.6 ? "rgba(140,165,200,.55)" : "rgba(255,255,255,.95)";
         g.fillRect(r() * w, r() * h, 1 + r() * 2, 1 + r() * 2);
       }
     }, 1);
@@ -69,6 +69,16 @@
       p.position.set(k * o.edge, gy0 + 3, gz); sc.add(p);
     });
 
+    /* 舞う雪：人のまわりに置き、後ろへ抜けたら前へ戻す（速さが見える） */
+    this.flakeN = 260;
+    var fp = new Float32Array(this.flakeN * 3);
+    this.flakes = new T.Points(new T.BufferGeometry(), new T.PointsMaterial({ color: 0xffffff, size: 0.05, transparent: true, opacity: 0.9, fog: false }));
+    this.flakes.geometry.setAttribute("position", new T.BufferAttribute(fp, 3));
+    this.flakes.frustumCulled = false;
+    this.flakeR = Z3.rng(5);
+    this.flakeInit = false;
+    sc.add(this.flakes);
+
     /* 人：体の向きだけ回る台。カメラ・鍋・板はここに付ける */
     var rig = this.rig = new T.Group(); sc.add(rig);
     this.head = new T.Group(); rig.add(this.head);
@@ -106,11 +116,13 @@
       var f = new T.Mesh(new T.ConeGeometry(0.018, 0.07, 6), i % 2 ? fo : fm);
       f.position.set(Math.cos(a) * 0.06, -0.035, Math.sin(a) * 0.06); this.flames.add(f);
     }
-    wok.position.set(0, -0.5, -0.66);
+    wok.position.set(0, -0.44, -0.5);
 
     /* 米粒 */
     var N = o.n;
-    this.rice = new T.InstancedMesh(new T.BoxGeometry(0.017, 0.009, 0.009), new T.MeshLambertMaterial({ color: 0xffffff }), N);
+    /* 米粒は細長い粒 */
+    var grainG = new T.SphereGeometry(0.5, 8, 5); grainG.scale(0.019, 0.0095, 0.0095);
+    this.rice = new T.InstancedMesh(grainG, new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 }), N);
     this.rice.instanceMatrix.setUsage(T.DynamicDrawUsage);
     this.rice.frustumCulled = false;
     wok.add(this.rice);
@@ -145,11 +157,16 @@
     this.groundAt(p.x, p.z);
     this.rig.position.set(p.x, p.y, p.z);
     this.rig.rotation.y = p.h;
-    var sh = s.shake || 0, t = s.t;
-    this.head.rotation.set(-0.5 + Math.sin(t * 40) * sh * 0.05, Math.sin(t * 33) * sh * 0.05, (s.steer || 0) * 0.12, "YXZ");
+    var sh = s.shake || 0, t = s.t, sp = s.state === "play" ? p.v / s.vmax : 0;
+    /* 速いほど細かく揺れて、視野が少し広がる */
+    var buzz = sp * 0.006;
+    this.head.rotation.set(-0.5 + Math.sin(t * 40) * sh * 0.05 + Math.sin(t * 71) * buzz, Math.sin(t * 33) * sh * 0.05 + Math.sin(t * 57) * buzz, (s.steer || 0) * 0.14, "YXZ");
+    var fov = 80 + sp * 8;
+    if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+    this.syncFlakes(p);
     /* あおる動き：さっと持ち上げて手前へ引く */
     var ft = s.flipT, k = ft < 0.22 ? Math.sin(ft / 0.22 * Math.PI) : 0;
-    this.wok.position.set(0, -0.5 + k * 0.06, -0.66 + k * 0.04);
+    this.wok.position.set(0, -0.44 + k * 0.06, -0.5 + k * 0.04);
     this.wok.rotation.x = k * 0.28;
     this.skis.rotation.y = -(s.steer || 0) * 0.15;
     for (var j = 0; j < this.flames.children.length; j++) this.flames.children[j].scale.y = 0.7 + Math.random() * 0.6;
@@ -175,6 +192,23 @@
     }
     this.rice.instanceMatrix.needsUpdate = true;
     if (this.rice.instanceColor) this.rice.instanceColor.needsUpdate = true;
+  };
+
+  GameScene.prototype.syncFlakes = function (p) {
+    var a = this.flakes.geometry.attributes.position.array, r = this.flakeR;
+    var fx = -Math.sin(p.h), fz = -Math.cos(p.h);
+    for (var i = 0; i < this.flakeN; i++) {
+      var k = i * 3, dx = a[k] - p.x, dz = a[k + 2] - p.z;
+      var ahead = dx * fx + dz * fz;
+      if (!this.flakeInit || ahead < -1 || ahead > 26 || Math.abs(dx * fz - dz * fx) > 9) {
+        var d = this.flakeInit ? 14 + r() * 10 : 1 + r() * 23, side = (r() * 2 - 1) * (1 + r() * 6);
+        a[k] = p.x + fx * d - fz * side * -1; a[k + 2] = p.z + fz * d + fx * side * -1;
+        a[k + 1] = p.y - 1.6 + r() * 2.4;
+      }
+      a[k + 1] -= 0.012;
+    }
+    this.flakeInit = true;
+    this.flakes.geometry.attributes.position.needsUpdate = true;
   };
 
   GameScene.prototype.draw = function (ctx, W, H) { return this.stage.draw(ctx, W, H); };
