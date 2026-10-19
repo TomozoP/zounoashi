@@ -1667,46 +1667,80 @@ function fillPost(g) {
   if (!$('postX').value) $('postX').value = g.title + ' ' + (g.no ? '【' + g.no + '本目】' : '') + '#' + g.tag + ' ' + g.url;
   if (!$('postTitle').value) $('postTitle').value = g.title;
   if (!$('postYt').value) $('postYt').value = '【ここで遊べます】' + g.url + '\n【X】 https://x.com/TomozoP';
-  if (!$('postTitleEn').value && g.titleEn) $('postTitleEn').value = g.titleEn;
-  if (!$('postYtEn').value) $('postYtEn').value = 'Play it here: ' + g.url + '\nX: https://x.com/TomozoP';
   fillSubEn();
 }
-// 英語の字幕は、焼き込む字幕（ヘッダー以外）の順に1行ずつ対応させ、YouTube へ字幕ファイルとして上げる
+// 英語の字幕は、タイムラインの字幕（ヘッダー以外）1枚ごとに1行。同じ時間で YouTube へ字幕ファイルとして上げる
+// s.enJa は訳したときの日本語。日本語を直すと訳し直す
 const subtitleList = () => subs.filter(s => !isHeader(s)).sort((a, b) => a.start - b.start);
 function fillSubEn() { const el = $('postSubEn'); if (document.activeElement !== el) el.value = subtitleList().map(s => s.en || '').join('\n').replace(/\n+$/, ''); }
-$('postSubEn').addEventListener('input', () => { const ls = $('postSubEn').value.split('\n'); subtitleList().forEach((s, i) => { const v = (ls[i] || '').trim(); if (v) { s.en = v; delete s.enCont; } else { delete s.en; s.enCont = true; } }); saveState(); });
+$('postSubEn').addEventListener('input', () => { const ls = $('postSubEn').value.split('\n'); subtitleList().forEach((s, i) => { s.en = (ls[i] || '').trim(); s.enJa = s.text; }); saveState(); });
 function srtTime(t) { const ms = Math.max(0, Math.round(t * 1000)), p = (n, w = 2) => String(n).padStart(w, '0'); return p(Math.floor(ms / 3600000)) + ':' + p(Math.floor(ms / 60000) % 60) + ':' + p(Math.floor(ms / 1000) % 60) + ',' + p(ms % 1000, 3); }
-// 英語が空の行は、すぐ前の英語の字幕をそのまま続けて出す（1文が字幕数枚に分かれている所）
 function enSrt() {
-  const ls = subtitleList(), out = [];
-  ls.forEach((s, i) => {
-    if (!s.en) return;
-    let end = s.end;
-    for (let j = i + 1; j < ls.length && !ls[j].en && ls[j].start - end < 0.05; j++) end = ls[j].end;
-    out.push((out.length + 1) + '\n' + srtTime(s.start) + ' --> ' + srtTime(end) + '\n' + s.en + '\n');
+  return subtitleList().filter(s => s.en).map((s, i) => (i + 1) + '\n' + srtTime(s.start) + ' --> ' + srtTime(s.end) + '\n' + s.en + '\n').join('\n');
+}
+// 1文の英訳を、字幕数枚へ日本語の文字数の割合で単語ごとに分ける
+function splitEn(en, cards) {
+  const w = en.split(/\s+/).filter(Boolean), lens = cards.map(c => Math.max(1, c.text.replace(/\s/g, '').length)), all = lens.reduce((a, b) => a + b, 0);
+  let acc = 0, at = 0;
+  return cards.map((c, k) => {
+    acc += lens[k];
+    let to = k === cards.length - 1 ? w.length : Math.round(w.length * acc / all);
+    to = Math.min(w.length - (cards.length - 1 - k), Math.max(to, at + 1));
+    const part = w.slice(at, Math.max(at, to)).join(' '); at = Math.max(at, to); return part;
   });
+}
+// 続きの1文か。読み上げで作った字幕は同じ文の声どうし、ほかは間が空かず文末の記号がないとき
+const voiceOf = c => { const m = (c.start + c.end) / 2, a = aclips.find(a => a.name === '読み上げ' && a.at <= m && m < a.at + a.out - a.in); return a && a.buf; };
+function sameSentence(a, b) {
+  const va = voiceOf(a), vb = voiceOf(b);
+  if (va || vb) return va === vb;
+  return b.start - a.end < 0.05 && !/[。！？!?]$/.test(a.text.trim());
+}
+// 日本語の文を英語に。URL はそのまま残し、日本語のある所だけ訳す
+async function trText(tr, text) {
+  const out = [];
+  for (const line of text.split('\n')) {
+    const parts = line.split(/(https?:\/\/\S+)/);
+    for (let i = 0; i < parts.length; i += 2) if (/[ぁ-んァ-ヶ一-龠]/.test(parts[i])) {
+      const lead = parts[i].match(/^\s*/)[0], tail = parts[i].match(/\s*$/)[0];
+      parts[i] = lead + (await tr.translate(parts[i].trim())).trim() + (tail || (i + 1 < parts.length ? ' ' : ''));
+    }
+    out.push(parts.join(''));
+  }
   return out.join('\n');
 }
-// 英語が空の字幕を、ブラウザの翻訳機能（Chrome・Edge のPC版）で埋める。字幕数枚に分かれた1文はまとめて訳し、先頭の行に入れる
-let translating = false;
+// 題名・説明文・字幕の英語を、ブラウザの翻訳機能（Chrome・Edge のPC版）で作る
+// 題名・説明文は、空か、前に訳したまま手で直していないときだけ訳し直す
+let translating = false, trAgain = false;
 async function autoTranslate() {
-  if (translating || !('Translator' in self)) return;
-  const ls = subtitleList(); if (!ls.some(s => !s.en && !s.enCont)) return;
+  if (!('Translator' in self)) return;
+  if (translating) { trAgain = true; return; }
   translating = true;
   try {
-    const tr = await Translator.create({ sourceLanguage: 'ja', targetLanguage: 'en' });
+    let tr = null; const get = async () => tr ||= await Translator.create({ sourceLanguage: 'ja', targetLanguage: 'en' });
+    for (const [jaId, enId] of [['postTitle', 'postTitleEn'], ['postYt', 'postYtEn']]) {
+      const ja = $(jaId).value.trim(), el = $(enId);
+      if (!ja || (el.value && (el.dataset.ja === ja || el.value !== el.dataset.auto))) continue;
+      el.value = el.dataset.auto = await trText(await get(), $(jaId).value); el.dataset.ja = ja;
+    }
+    const ls = subtitleList();
     for (let i = 0; i < ls.length; i++) {
-      if (ls[i].en || ls[i].enCont) continue;
-      let j = i, ja = ls[i].text;
-      while (j + 1 < ls.length && !ls[j + 1].en && !ls[j + 1].enCont && ls[j + 1].start - ls[j].end < 0.05 && !/[。！？!?]$/.test(ls[j].text)) ja += ls[++j].text;
-      const en = (await tr.translate(ja.replace(/\s+/g, ' '))).trim();
-      if (en) { ls[i].en = en; for (let k = i + 1; k <= j; k++) ls[k].enCont = true; }
+      let j = i;
+      while (j + 1 < ls.length && sameSentence(ls[j], ls[j + 1]) && j - i < 5) j++;
+      const cards = ls.slice(i, j + 1);
+      if (cards.some(c => c.enJa !== c.text)) {
+        const ja = cards.map(c => c.text.trim()).join('').replace(/\s+/g, ' ');
+        const en = ja ? (await (await get()).translate(ja)).trim() : '';
+        splitEn(en, cards).forEach((e, k) => { cards[k].en = e; cards[k].enJa = cards[k].text; });
+      }
       i = j;
     }
     fillSubEn(); saveState();
   } catch (e) { toast('英語に訳せませんでした', 4000); }
   translating = false;
+  if (trAgain) { trAgain = false; autoTranslate(); }
 }
+for (const id of ['postTitle', 'postYt']) $(id).addEventListener('change', autoTranslate);
 function postX() {
   open('https://x.com/intent/post?text=' + encodeURIComponent($('postX').value), '_blank');
   if (lastExport) { lastExport.save(); toast('動画を保存しました。開いた投稿画面へドラッグしてください', 5000); }
@@ -1730,7 +1764,7 @@ async function postInfo() {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const title = doc.title.replace(/【プレビュー】/g, '').trim();
     const v = doc.querySelector('meta[name="preview-version"]'), id = v && /^([a-z0-9-]+?)-\d+$/.exec(v.content || '');
-    return { title, tag: title.replace(/[\s・･·•、，,.。]/g, ''), url: id ? 'https://www.zounoashi.com/share/' + id[1] + '/?card=square2' : '', no: await gameNo(id && id[1]), titleEn: await enTitle(id && id[1]) };
+    return { title, tag: title.replace(/[\s・･·•、，,.。]/g, ''), url: id ? 'https://www.zounoashi.com/share/' + id[1] + '/?card=square2' : '', no: await gameNo(id && id[1]) };
   } catch (e) { return {}; }
 }
 // 1000本企画の何本目か。サイトの一覧のショート（公開済み）を日付順に数え、まだ載っていなければ次の1本とする
@@ -1741,11 +1775,6 @@ async function gameNo(id) {
     const me = labs.find(g => g.id === id);
     return me ? labs.filter(g => g.date <= me.date).length : labs.length + 1;
   } catch (e) { return 0; }
-}
-// サイトに登録したゲームの英語名（index.html の EN.titles）
-async function enTitle(id) {
-  if (!id) return '';
-  try { const m = new RegExp('"' + id + '":\\s*"([^"]+)"').exec(await (await fetch('../../index.html?_post=' + Date.now(), { cache: 'no-store' })).text()); return m ? m[1] : ''; } catch (e) { return ''; }
 }
 // ---------- YouTube へ直接アップロード ----------
 let googleReady = null, ytToken = null;
@@ -1815,7 +1844,7 @@ document.querySelectorAll('#scriptTabs button').forEach(b => b.onclick = () => {
   $('scriptText').hidden = st !== 'script'; $('postPane').hidden = st !== 'post'; $('recPane').hidden = st !== 'rec';
   document.querySelectorAll('#scriptTabs button').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
   syncTtsBtn();
-  if (st === 'post') { fillSubEn(); autoTranslate(); postInfo().then(fillPost); }
+  if (st === 'post') { fillSubEn(); autoTranslate(); postInfo().then(g => { fillPost(g); autoTranslate(); }); }
 });
 // 録画設定は手元に覚えておき、「録画」を押したときにゲームの中の録画係へ渡す
 document.querySelectorAll('#recPane select').forEach(sel => {
