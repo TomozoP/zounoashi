@@ -92,41 +92,131 @@
     this.v = new T.Vector3();
   }
 
-  var FUR = 0xe89a4a, FUR2 = 0xc8743a, WHITE = 0xfff4e6;
+  /* ============ ネコ ============
+     大きさは本物どおり（1 = 1cm。ゲーム機は横9cm・縦15cm、ネコは胴が40cmほど）。
+     毛は「殻」を重ねて描く：同じ形を少しずつ大きくして何枚も重ね、外側ほど毛の点がまばらになる。
+     スマホで重くならないよう、殻は6枚まで */
+  var SHELLS = 6;
+  function rnd(seed) { return function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }; }
+  /* 毛の色の絵。tabby は茶トラのしま（球の縦方向＝胴の前後にしまが並ぶ） */
+  function coatTex(kind) {
+    var r = rnd(kind === "tabby" ? 11 : 23), side = kind === "tabbyV";
+    if (side) kind = "tabby";
+    return Z3.canvasTex(256, 256, function (g, w, h) {
+      if (side) { g.translate(w / 2, h / 2); g.rotate(Math.PI / 2); g.translate(-w / 2, -h / 2); }
+      g.fillStyle = kind === "tabby" ? "#d8873e" : kind === "pink" ? "#e9a3a0" : "#f2e9de"; g.fillRect(0, 0, w, h);
+      if (kind === "tabby") {
+        for (var y = 0; y < h; y += 14 + r() * 10) {
+          g.fillStyle = "rgba(140,62,18," + (0.45 + r() * 0.3) + ")";
+          g.beginPath(); g.moveTo(0, y);
+          for (var x = 0; x <= w; x += 16) g.lineTo(x, y + Math.sin(x * 0.05 + y) * 3 + r() * 2);
+          for (x = w; x >= 0; x -= 16) g.lineTo(x, y + 5 + r() * 4 + Math.sin(x * 0.04) * 2);
+          g.fill();
+        }
+      }
+      for (var i = 0; i < 2500; i++) {
+        var l = r();
+        g.fillStyle = kind === "tabby" ? (l < 0.5 ? "rgba(120,55,15,.15)" : "rgba(255,210,150,.15)") : (l < 0.5 ? "rgba(200,180,160,.15)" : "rgba(255,255,255,.2)");
+        g.fillRect(r() * w, r() * h, 1 + r() * 2, 3 + r() * 5);
+      }
+    });
+  }
+  var hairTex = null;
+  function hair() {
+    if (hairTex) return hairTex;
+    var r = rnd(7);
+    hairTex = Z3.canvasTex(128, 128, function (g, w, h) {
+      var d = g.createImageData(w, h);
+      for (var i = 0; i < w * h; i++) { var v = Math.floor(r() * 255); d.data[i * 4] = d.data[i * 4 + 1] = d.data[i * 4 + 2] = v; d.data[i * 4 + 3] = 255; }
+      g.putImageData(d, 0, 0);
+    });
+    hairTex.colorSpace = T.NoColorSpace;
+    hairTex.wrapS = hairTex.wrapT = T.RepeatWrapping; hairTex.repeat.set(18, 18);
+    hairTex.magFilter = T.NearestFilter;
+    return hairTex;
+  }
+  function coat(kind) {
+    var map = coatTex(kind);
+    if (kind === "tabbyV") map.repeat.set(3, 1);
+    var base = new T.MeshStandardMaterial({ map: map, color: 0x9a8a80, roughness: 1 });
+    var shells = [];
+    for (var i = 0; i < SHELLS; i++) {
+      var k = (i + 1) / SHELLS, c = 0.62 + 0.38 * k;
+      shells.push(new T.MeshStandardMaterial({ map: map, alphaMap: hair(), alphaTest: 0.12 + 0.8 * k, color: new T.Color(c, c, c), roughness: 1 }));
+    }
+    return { base: base, shells: shells };
+  }
+  /* 毛を生やす。len は毛の長さ(cm) */
+  function furry(mesh, co, len) {
+    for (var i = 0; i < SHELLS; i++) {
+      var h = len * (i + 1) / SHELLS, s = mesh.scale;
+      var sh = new T.Mesh(mesh.geometry, co.shells[i]);
+      sh.scale.set(1 + h / s.x, 1 + h / s.y, 1 + h / s.z);
+      mesh.add(sh);
+    }
+    return mesh;
+  }
+
   GameScene.prototype.makeCat = function () {
-    var g = new T.Group(), fur = Z3.std(FUR, { roughness: 0.9 }), white = Z3.std(WHITE, { roughness: 0.9 });
-    var ball = new T.SphereGeometry(1, 24, 16);
-    function m(geo, mat, x, y, z, sx, sy, sz, parent) {
-      var o = new T.Mesh(geo, mat); o.position.set(x, y, z); o.scale.set(sx, sy, sz); o.castShadow = true; (parent || g).add(o); return o;
+    var g = new T.Group(), tabby = coat("tabby"), white = coat("white"), pinkC = coat("pink");
+    var ball = new T.SphereGeometry(1, 28, 18);
+    var ballZ = new T.SphereGeometry(1, 28, 18); ballZ.rotateX(Math.PI / 2);   /* 前後に長い胴用：しまが胴を巻く */
+    function m(geo, co, x, y, z, sx, sy, sz, parent, len) {
+      var o = new T.Mesh(geo, co.base || co); o.position.set(x, y, z); o.scale.set(sx, sy, sz); o.castShadow = true;
+      (parent || g).add(o);
+      if (co.shells && len) furry(o, co, len);
+      return o;
     }
     var c = { g: g };
-    c.body = m(ball, fur, 0, 1.3, 0, 2.3, 1.5, 3.6);
-    /* 背中のしま */
-    var stripe = Z3.std(FUR2, { roughness: 0.9 });
-    for (var i = 0; i < 4; i++) m(ball, stripe, 0, 2.55 - Math.abs(i - 1.5) * 0.05, -2 + i * 1.3, 1.6, 0.25, 0.32);
-    c.head = new T.Group(); c.head.position.set(0, 2.0, 3.6); g.add(c.head);
-    m(ball, fur, 0, 0, 0, 1.75, 1.5, 1.55, c.head);
-    m(ball, white, 0, -0.45, 1.05, 0.9, 0.6, 0.6, c.head);
-    var ear = new T.ConeGeometry(0.6, 1.1, 12);
-    [-1, 1].forEach(function (s) { var e = m(ear, fur, s * 0.95, 1.25, -0.1, 1, 1, 0.6, c.head); e.rotation.z = -s * 0.35; });
-    var black = new T.MeshBasicMaterial({ color: 0x1a1a1a });
-    c.eyes = [-1, 1].map(function (s) { return m(ball, black, s * 0.62, 0.25, 1.3, 0.22, 0.3, 0.15, c.head); });
-    m(ball, Z3.std(0xf08a9a), 0, -0.15, 1.6, 0.18, 0.13, 0.12, c.head);
-    c.legs = [[-1.3, 2.4], [1.3, 2.4], [-1.3, -2.2], [1.3, -2.2]].map(function (p) { return m(ball, white, p[0], 0.45, p[1], 0.6, 0.45, 0.75); });
-    c.tail = [];
-    for (i = 0; i < 16; i++) c.tail.push(m(ball, i > 12 ? stripe : fur, 0, 0.6, -3.4 - i * 0.42, 0.46 - i * 0.008, 0.46 - i * 0.008, 0.46 - i * 0.008));
+    c.body = m(ballZ, tabby, 0, 13, -1, 9.5, 8, 20, null, 1.2);
+    c.hips = [-1, 1].map(function (s) { return m(ball, tabby, s * 4.8, 11, -12, 5.5, 7, 8, null, 1.2); });
+    c.chest = m(ballZ, white, 0, 14, 14, 6.5, 7.5, 7, null, 1.4);
+    c.head = new T.Group(); c.head.position.set(0, 21, 21); g.add(c.head);
+    m(ballZ, tabby, 0, 0, 0, 5.8, 5, 5.4, c.head, 0.9);
+    m(ball, white, 0, -1.9, 3.6, 3.2, 2.1, 2.4, c.head, 0.6);
+    m(ball, pinkC.base, 0, -0.5, 5.6, 0.7, 0.45, 0.4, c.head);
+    var ear = new T.ConeGeometry(2.3, 4.6, 16);
+    c.ears = [-1, 1].map(function (s) {
+      var e = m(ear, tabby, s * 3.4, 4.4, -0.6, 1, 1, 0.55, c.head, 0.4); e.rotation.z = -s * 0.32;
+      m(ear, pinkC.base, 0, -0.2, 0.5, 0.65, 0.75, 0.4, e);
+      return e;
+    });
+    var amber = new T.MeshStandardMaterial({ color: 0xc9a23a, roughness: 0.15, metalness: 0 });
+    var black = new T.MeshBasicMaterial({ color: 0x111111 });
+    c.eyes = [-1, 1].map(function (s) {
+      var e = m(ball, amber, s * 2.2, 1.0, 4.4, 1.15, 1.15, 0.8, c.head);
+      m(ball, black, 0, 0, 0.55, 0.28, 0.85, 0.5, e);
+      return e;
+    });
+    var legGeo = new T.CapsuleGeometry(1.9, 10, 6, 12);
+    c.legs = [[-4.6, 15], [4.6, 15], [-4.8, -13], [4.8, -13]].map(function (p) {
+      var pivot = new T.Group(); pivot.position.set(p[0], 12, p[1]); g.add(pivot);
+      m(legGeo, p[1] > 0 ? white : tabby, 0, -6, 0, 1, 1, 1, pivot, 0.8);
+      m(ball, white, 0, -11.2, 0.8, 2.3, 1.4, 2.9, pivot, 0.6);
+      return pivot;
+    });
+    /* しっぽ：曲線に沿った管。形は毎コマ作り直す（毛の殻も同じ曲線で太さだけ変える） */
+    var tailCo = coat("tabbyV");
+    c.tail = [new T.Mesh(new T.BufferGeometry(), tailCo.base)].concat(tailCo.shells.map(function (mt) { return new T.Mesh(new T.BufferGeometry(), mt); }));
+    c.tail[0].castShadow = true;
+    c.tail.forEach(function (t) { g.add(t); });
+    c.tailPts = [];
+    for (var i = 0; i < 12; i++) c.tailPts.push(new T.Vector3());
     g.visible = false;
     this.scene.add(g);
     return c;
   };
   GameScene.prototype.makePaw = function () {
-    var g = new T.Group(), fur = Z3.std(FUR, { roughness: 0.9 }), white = Z3.std(WHITE, { roughness: 0.9 });
-    var arm = new T.Mesh(new T.CapsuleGeometry(0.75, 9, 6, 14), fur);
-    arm.rotation.z = Math.PI / 2; arm.position.set(5.2, 0, 0); arm.castShadow = true; g.add(arm);
-    var hand = new T.Mesh(new T.SphereGeometry(1, 20, 14), white); hand.scale.set(1.1, 0.7, 1.0); hand.castShadow = true; g.add(hand);
-    var pink = Z3.std(0xf08a9a);
-    [[-0.55, -0.45], [-0.75, 0], [-0.55, 0.45]].forEach(function (p) {
-      var b = new T.Mesh(new T.SphereGeometry(0.2, 10, 8), pink); b.scale.y = 0.4; b.position.set(p[0], 0.55, p[1]); g.add(b);
+    var g = new T.Group(), tabby = coat("tabby"), white = coat("white"), pinkC = coat("pink");
+    /* 腕：前後に長い球を横に寝かせる（しまが腕を巻く） */
+    var armGeo = new T.SphereGeometry(1, 24, 16); armGeo.rotateZ(Math.PI / 2);
+    var arm = new T.Mesh(armGeo, tabby.base);
+    arm.scale.set(16, 2.1, 2.3); arm.position.set(15, 0.6, 0); arm.castShadow = true; g.add(arm);
+    furry(arm, tabby, 1.0);
+    var hand = new T.Mesh(new T.SphereGeometry(1, 24, 16), white.base); hand.scale.set(2.2, 1.4, 2.0); hand.castShadow = true; g.add(hand);
+    furry(hand, white, 0.7);
+    [[-1.4, -1.0], [-1.9, 0], [-1.4, 1.0], [-0.3, -1.5]].forEach(function (p) {
+      var b = new T.Mesh(new T.SphereGeometry(0.38, 10, 8), pinkC.base); b.scale.y = 0.4; b.position.set(p[0], -1.1, p[1]); g.add(b);
     });
     g.visible = false;
     this.scene.add(g);
@@ -135,7 +225,7 @@
 
   GameScene.prototype.reset = function () { this.cat.g.visible = false; this.paw.g.visible = false; };
 
-  /* s: { t, pressed: {L,R,A}, cat: {kind, x, z, rot, lie, flinch, tailT} または null, paw: {x, z, out} または null } */
+  /* s: { t, pressed: {L,R,A}, cat: {x, y, z, rot, lie, walking, swish, flinch} または null, paw: {x, z, rot} または null } */
   GameScene.prototype.sync = function (s) {
     var self = this;
     this.tex.needsUpdate = true;
@@ -145,27 +235,37 @@
     if (k) {
       c.g.position.set(k.x, k.y, k.z);
       c.g.rotation.y = k.rot;
-      var lie = k.lie || 0, fl = k.flinch || 0;
-      c.body.scale.set(2.3 + lie * 0.4, 1.5 - lie * 0.45, 3.6);
-      c.body.position.y = 1.3 - lie * 0.5;
-      c.head.position.y = 2.0 - lie * 0.9 + fl * 0.4;
-      c.head.rotation.z = Math.sin(s.t * 1.3) * 0.12 * (1 - lie) + fl * 0.3;
+      var lie = k.lie || 0, fl = k.flinch || 0, sit = k.swish ? 1 : 0;
+      /* 寝そべると低く平たく。座ると後ろが下がる */
+      c.body.position.y = 13 - lie * 6 - sit * 3;
+      c.body.scale.set(9.5 + lie * 2, 8 - lie * 1.5, 20);
+      c.body.rotation.x = -sit * 0.35;
+      c.hips.forEach(function (h) { h.position.y = 11 - lie * 5 - sit * 5; });
+      c.chest.position.y = 14 - lie * 6 + sit * 3;
+      c.head.position.y = 21 - lie * 11 + sit * 5 + fl * 2;
+      c.head.position.z = 21 + lie * 2;
+      c.head.rotation.y = Math.sin(s.t * 0.9) * 0.25 * (1 - lie) + fl * 0.4;
+      c.head.rotation.z = lie * 0.4;
       c.legs.forEach(function (l, i) {
-        var walk = k.walking ? Math.sin(s.t * 10 + (i % 2 ? Math.PI : 0) + (i > 1 ? Math.PI : 0)) * 0.5 : 0;
-        l.position.z = [2.4, 2.4, -2.2, -2.2][i] + walk + lie * (i < 2 ? 0.6 : -0.3);
-        l.position.x = [-1.3, 1.3, -1.3, 1.3][i] * (1 + lie * 0.35);
+        var walk = k.walking ? Math.sin(s.t * 9 + (i === 0 || i === 3 ? 0 : Math.PI)) * 0.45 : 0;
+        l.rotation.x = walk;
+        l.position.y = 12 - lie * 8;
+        l.scale.y = 1 - lie * 0.6;
       });
-      c.eyes.forEach(function (e) { e.scale.y = lie > 0.8 ? 0.06 : 0.3; });
-      c.tail.forEach(function (b, i) {
-        var ang = Math.sin(s.t * (k.swish ? 1.8 : 1.2) - i * 0.18) * (k.swish ? 1.0 : 0.35) * (i / 15);
-        b.position.x = Math.sin(ang * 1.4) * i * 0.42;
-        b.position.z = -3.4 - Math.cos(ang) * i * 0.42;
-        b.position.y = k.swish ? self.top + 0.45 - k.y + i * 0.02 : 0.6 - lie * 0.2;
+      c.eyes.forEach(function (e) { e.scale.y = lie > 0.8 ? 0.15 : 1.15; });
+      c.tailPts.forEach(function (b, i) {
+        var ang = Math.sin(s.t * (k.swish ? 1.6 : 1.1) - i * 0.25) * (k.swish ? 1.1 : 0.3) * (i / 11);
+        b.set(Math.sin(ang * 1.5) * i * 2.3, k.swish ? self.top + 2 - k.y : 12 - lie * 8 - i * 0.6 * (1 - lie), -18 - Math.cos(ang) * i * 2.3);
+      });
+      var curve = new T.CatmullRomCurve3(c.tailPts);
+      c.tail.forEach(function (t, i) {
+        t.geometry.dispose();
+        t.geometry = new T.TubeGeometry(curve, 28, 1.6 + i * 1.0 / SHELLS, 10, false);
       });
     }
     var p = s.paw;
     this.paw.g.visible = !!p;
-    if (p) { this.paw.g.position.set(p.x, this.top + 0.75, p.z); this.paw.g.rotation.y = p.rot || 0; }
+    if (p) { this.paw.g.position.set(p.x, this.top + 2.2, p.z); this.paw.g.rotation.y = p.rot || 0; }
   };
 
   /* 画面の形に合わせて、本体がちょうど収まる距離にカメラを置く */
