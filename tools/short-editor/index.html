@@ -208,6 +208,9 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
           <label for="postX">X の投稿文</label><textarea id="postX" spellcheck="false"></textarea>
           <label for="postTitle">YouTube の題名</label><input id="postTitle" type="text">
           <label for="postYt">YouTube の説明文</label><textarea id="postYt" spellcheck="false"></textarea>
+          <label for="postTitleEn">YouTube の題名（英語）</label><input id="postTitleEn" type="text">
+          <label for="postYtEn">YouTube の説明文（英語）</label><textarea id="postYtEn" spellcheck="false"></textarea>
+          <label for="postSubEn">英語の字幕（字幕1枚に1行）</label><textarea id="postSubEn" spellcheck="false"></textarea>
           <div class="acts"><button type="button" id="postXBtn">Xに投稿</button><button type="button" id="postYtBtn">YouTubeに投稿</button></div>
           <div id="postFile">書き出した動画：まだありません</div>
         </div>
@@ -1664,7 +1667,16 @@ function fillPost(g) {
   if (!$('postX').value) $('postX').value = g.title + ' ' + (g.no ? '【' + g.no + '本目】' : '') + '#' + g.tag + ' ' + g.url;
   if (!$('postTitle').value) $('postTitle').value = g.title;
   if (!$('postYt').value) $('postYt').value = '【ここで遊べます】' + g.url + '\n【X】 https://x.com/TomozoP';
+  if (!$('postTitleEn').value && g.titleEn) $('postTitleEn').value = g.titleEn;
+  if (!$('postYtEn').value) $('postYtEn').value = 'Play it here: ' + g.url + '\nX: https://x.com/TomozoP';
+  fillSubEn();
 }
+// 英語の字幕は、焼き込む字幕（ヘッダー以外）の順に1行ずつ対応させ、YouTube へ字幕ファイルとして上げる
+const subtitleList = () => subs.filter(s => !isHeader(s)).sort((a, b) => a.start - b.start);
+function fillSubEn() { const el = $('postSubEn'); if (document.activeElement !== el) el.value = subtitleList().map(s => s.en || '').join('\n').replace(/\n+$/, ''); }
+$('postSubEn').addEventListener('input', () => { const ls = $('postSubEn').value.split('\n'); subtitleList().forEach((s, i) => { const v = (ls[i] || '').trim(); if (v) s.en = v; else delete s.en; }); saveState(); });
+function srtTime(t) { const ms = Math.max(0, Math.round(t * 1000)), p = (n, w = 2) => String(n).padStart(w, '0'); return p(Math.floor(ms / 3600000)) + ':' + p(Math.floor(ms / 60000) % 60) + ':' + p(Math.floor(ms / 1000) % 60) + ',' + p(ms % 1000, 3); }
+function enSrt() { return subtitleList().filter(s => s.en).map((s, i) => (i + 1) + '\n' + srtTime(s.start) + ' --> ' + srtTime(s.end) + '\n' + s.en + '\n').join('\n'); }
 function postX() {
   open('https://x.com/intent/post?text=' + encodeURIComponent($('postX').value), '_blank');
   if (lastExport) { lastExport.save(); toast('動画を保存しました。開いた投稿画面へドラッグしてください', 5000); }
@@ -1674,7 +1686,7 @@ function postYT(button) {
   if (YT_CLIENT_ID) {
     // 公開で上げる。審査前のアプリだと YouTube 側で非公開に固定されるので、そのときは YouTube Studio を開く
     if (!lastExport) { toast('先に書き出してください'); return; }
-    ytUpload(lastExport.file(), $('postTitle').value || 'ゲーム', $('postYt').value, button);
+    ytUpload(lastExport.file(), $('postTitle').value || 'ゲーム', $('postYt').value, button, { title: $('postTitleEn').value.trim(), description: $('postYtEn').value, srt: enSrt() });
   } else {
     copyText($('postYt').value); open('https://www.youtube.com/upload', '_blank');
     if (lastExport) lastExport.save();
@@ -1688,7 +1700,7 @@ async function postInfo() {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const title = doc.title.replace(/【プレビュー】/g, '').trim();
     const v = doc.querySelector('meta[name="preview-version"]'), id = v && /^([a-z0-9-]+?)-\d+$/.exec(v.content || '');
-    return { title, tag: title.replace(/[\s・･·•、，,.。]/g, ''), url: id ? 'https://www.zounoashi.com/share/' + id[1] + '/?card=square2' : '', no: await gameNo(id && id[1]) };
+    return { title, tag: title.replace(/[\s・･·•、，,.。]/g, ''), url: id ? 'https://www.zounoashi.com/share/' + id[1] + '/?card=square2' : '', no: await gameNo(id && id[1]), titleEn: await enTitle(id && id[1]) };
   } catch (e) { return {}; }
 }
 // 1000本企画の何本目か。サイトの一覧のショート（公開済み）を日付順に数え、まだ載っていなければ次の1本とする
@@ -1699,6 +1711,11 @@ async function gameNo(id) {
     const me = labs.find(g => g.id === id);
     return me ? labs.filter(g => g.date <= me.date).length : labs.length + 1;
   } catch (e) { return 0; }
+}
+// サイトに登録したゲームの英語名（index.html の EN.titles）
+async function enTitle(id) {
+  if (!id) return '';
+  try { const m = new RegExp('"' + id + '":\\s*"([^"]+)"').exec(await (await fetch('../../index.html?_post=' + Date.now(), { cache: 'no-store' })).text()); return m ? m[1] : ''; } catch (e) { return ''; }
 }
 // ---------- YouTube へ直接アップロード ----------
 let googleReady = null, ytToken = null;
@@ -1715,13 +1732,15 @@ function ytLogin() {
       error_callback: () => ng(new Error('ログインを中止しました')) }).requestAccessToken({ prompt: 'select_account' });
   });
 }
-async function ytUpload(file, title, description, button) {
+async function ytUpload(file, title, description, button, en = {}) {
   const label = button.textContent;
   try {
     const token = await ytLogin();
     button.disabled = true;
-    const meta = { snippet: { title: title.slice(0, 100), description, categoryId: '20' }, status: { privacyStatus: 'public', selfDeclaredMadeForKids: false } };
-    const start = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+    // 英語の題名と説明は、英語圏の人に出る別の版として付ける
+    const meta = { snippet: { title: title.slice(0, 100), description, categoryId: '20', defaultLanguage: 'ja' }, status: { privacyStatus: 'public', selfDeclaredMadeForKids: false } };
+    if (en.title) meta.localizations = { en: { title: en.title.slice(0, 100), description: en.description || '' } };
+    const start = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status' + (en.title ? ',localizations' : ''), {
       method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': file.type, 'X-Upload-Content-Length': String(file.size) }, body: JSON.stringify(meta) });
     if (!start.ok) throw new Error('アップロードを始められませんでした（' + start.status + '）');
     const url = start.headers.get('Location');
@@ -1737,6 +1756,13 @@ async function ytUpload(file, title, description, button) {
       method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=UTF-8' },
       body: JSON.stringify({ snippet: { videoId: video.id, topLevelComment: { snippet: { textOriginal: description } } } }) }).then(r => r.ok, () => false);
     if (!commented) toast('コメントはつけられませんでした', 5000);
+    // 英語の字幕を字幕ファイルとして付ける（失敗しても投稿はそのまま）
+    if (en.srt) {
+      const b = 'cakecut' + Date.now(), body = '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify({ snippet: { videoId: video.id, language: 'en', name: 'English' } }) + '\r\n--' + b + '\r\nContent-Type: application/octet-stream\r\n\r\n' + en.srt + '\r\n--' + b + '--';
+      const capOk = await fetch('https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&part=snippet', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'multipart/related; boundary=' + b }, body }).then(r => r.ok, () => false);
+      if (!capOk) toast('英語の字幕はつけられませんでした', 5000);
+    }
     if ((video.status || {}).privacyStatus === 'public') {
       button.textContent = '公開しました';
       toast('YouTube に公開しました', 5000);
@@ -1759,7 +1785,7 @@ document.querySelectorAll('#scriptTabs button').forEach(b => b.onclick = () => {
   $('scriptText').hidden = st !== 'script'; $('postPane').hidden = st !== 'post'; $('recPane').hidden = st !== 'rec';
   document.querySelectorAll('#scriptTabs button').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
   syncTtsBtn();
-  if (st === 'post') postInfo().then(fillPost);
+  if (st === 'post') { fillSubEn(); postInfo().then(fillPost); }
 });
 // 録画設定は手元に覚えておき、「録画」を押したときにゲームの中の録画係へ渡す
 document.querySelectorAll('#recPane select').forEach(sel => {
