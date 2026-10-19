@@ -1674,9 +1674,39 @@ function fillPost(g) {
 // 英語の字幕は、焼き込む字幕（ヘッダー以外）の順に1行ずつ対応させ、YouTube へ字幕ファイルとして上げる
 const subtitleList = () => subs.filter(s => !isHeader(s)).sort((a, b) => a.start - b.start);
 function fillSubEn() { const el = $('postSubEn'); if (document.activeElement !== el) el.value = subtitleList().map(s => s.en || '').join('\n').replace(/\n+$/, ''); }
-$('postSubEn').addEventListener('input', () => { const ls = $('postSubEn').value.split('\n'); subtitleList().forEach((s, i) => { const v = (ls[i] || '').trim(); if (v) s.en = v; else delete s.en; }); saveState(); });
+$('postSubEn').addEventListener('input', () => { const ls = $('postSubEn').value.split('\n'); subtitleList().forEach((s, i) => { const v = (ls[i] || '').trim(); if (v) { s.en = v; delete s.enCont; } else { delete s.en; s.enCont = true; } }); saveState(); });
 function srtTime(t) { const ms = Math.max(0, Math.round(t * 1000)), p = (n, w = 2) => String(n).padStart(w, '0'); return p(Math.floor(ms / 3600000)) + ':' + p(Math.floor(ms / 60000) % 60) + ':' + p(Math.floor(ms / 1000) % 60) + ',' + p(ms % 1000, 3); }
-function enSrt() { return subtitleList().filter(s => s.en).map((s, i) => (i + 1) + '\n' + srtTime(s.start) + ' --> ' + srtTime(s.end) + '\n' + s.en + '\n').join('\n'); }
+// 英語が空の行は、すぐ前の英語の字幕をそのまま続けて出す（1文が字幕数枚に分かれている所）
+function enSrt() {
+  const ls = subtitleList(), out = [];
+  ls.forEach((s, i) => {
+    if (!s.en) return;
+    let end = s.end;
+    for (let j = i + 1; j < ls.length && !ls[j].en && ls[j].start - end < 0.05; j++) end = ls[j].end;
+    out.push((out.length + 1) + '\n' + srtTime(s.start) + ' --> ' + srtTime(end) + '\n' + s.en + '\n');
+  });
+  return out.join('\n');
+}
+// 英語が空の字幕を、ブラウザの翻訳機能（Chrome・Edge のPC版）で埋める。字幕数枚に分かれた1文はまとめて訳し、先頭の行に入れる
+let translating = false;
+async function autoTranslate() {
+  if (translating || !('Translator' in self)) return;
+  const ls = subtitleList(); if (!ls.some(s => !s.en && !s.enCont)) return;
+  translating = true;
+  try {
+    const tr = await Translator.create({ sourceLanguage: 'ja', targetLanguage: 'en' });
+    for (let i = 0; i < ls.length; i++) {
+      if (ls[i].en || ls[i].enCont) continue;
+      let j = i, ja = ls[i].text;
+      while (j + 1 < ls.length && !ls[j + 1].en && !ls[j + 1].enCont && ls[j + 1].start - ls[j].end < 0.05 && !/[。！？!?]$/.test(ls[j].text)) ja += ls[++j].text;
+      const en = (await tr.translate(ja.replace(/\s+/g, ' '))).trim();
+      if (en) { ls[i].en = en; for (let k = i + 1; k <= j; k++) ls[k].enCont = true; }
+      i = j;
+    }
+    fillSubEn(); saveState();
+  } catch (e) { toast('英語に訳せませんでした', 4000); }
+  translating = false;
+}
 function postX() {
   open('https://x.com/intent/post?text=' + encodeURIComponent($('postX').value), '_blank');
   if (lastExport) { lastExport.save(); toast('動画を保存しました。開いた投稿画面へドラッグしてください', 5000); }
@@ -1785,7 +1815,7 @@ document.querySelectorAll('#scriptTabs button').forEach(b => b.onclick = () => {
   $('scriptText').hidden = st !== 'script'; $('postPane').hidden = st !== 'post'; $('recPane').hidden = st !== 'rec';
   document.querySelectorAll('#scriptTabs button').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
   syncTtsBtn();
-  if (st === 'post') { fillSubEn(); postInfo().then(fillPost); }
+  if (st === 'post') { fillSubEn(); autoTranslate(); postInfo().then(fillPost); }
 });
 // 録画設定は手元に覚えておき、「録画」を押したときにゲームの中の録画係へ渡す
 document.querySelectorAll('#recPane select').forEach(sel => {
