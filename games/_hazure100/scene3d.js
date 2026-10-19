@@ -17,6 +17,9 @@
     this.camera = st.camera;
     this.scene.background = new T.Color(0x3a2a20);
     Z3.lights(this.scene, { shadows: true, shadowSize: 14 });
+    /* 影を控えめに：光をほぼ真上からにして短くし、全体を少し明るく持ち上げる */
+    this.scene.children.forEach(function (l) { if (l.isDirectionalLight && l.castShadow) l.position.set(-1.5, 10, 2.5); });
+    this.scene.add(new T.AmbientLight(0xffffff, 0.45));
     this.v = new T.Vector3();
 
     /* 机 */
@@ -59,15 +62,15 @@
     lamp.rotation.x = -Math.PI / 2; lamp.position.set(-SW / 2 - 0.3, top + 0.1, SZ - 0.8); dev.add(lamp);
 
     /* ボタン。全部同じ形で、色は1つずつ違う */
-    var geo = new T.CylinderGeometry(1, 1, 0.4, 24);
+    var geo = new T.CylinderGeometry(1, 1, 0.26, 24);
     this.markMat = Z3.std(0xffffff, { roughness: 0.35, emissive: 0xffffff, emissiveIntensity: 0.6 });
     this.lampM = lamp.material;
     var holeM = Z3.std(0x8a6a20, { roughness: 0.7 });
     this.btn = btns.map(function (b) {
-      var m = new T.Mesh(geo, Z3.std(b.col, { roughness: 0.35 }));
+      var m = new T.Mesh(geo, Z3.std(b.col, { roughness: 0.6 }));
       m.userData.mat = m.material;
       m.scale.set(b.r, 1, b.r);
-      m.position.set(b.x, top + 0.18, b.z);
+      m.position.set(b.x, top + 0.11, b.z);
       m.castShadow = true;
       dev.add(m);
       var hole = new T.Mesh(new T.CircleGeometry(b.r + 0.07, 20), holeM);
@@ -83,7 +86,7 @@
     var top = this.top, self = this, w = s.wave;
     this.tex.needsUpdate = true;
     this.btn.forEach(function (m, i) {
-      var b = self.btns[i], y = s.pressed[i] ? 0.02 : 0.18;
+      var b = self.btns[i], y = s.pressed[i] ? 0.0 : 0.11;
       if (w) { var d = Math.hypot(b.x - w.x, b.z - w.z) - w.t * 14; if (d > -2 && d < 0) y += Math.sin(-d / 2 * Math.PI) * 0.6; }
       if (s.pop && s.pop[i]) y += s.pop[i];
       m.position.y = top + y;
