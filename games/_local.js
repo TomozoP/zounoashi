@@ -327,5 +327,6 @@ window.DRAFT_GAMES = [
     "play": "games/_neko-gameki/index.html",
     "full": true,
     "catch": "ネコに邪魔されながらゲーム機で遊ぶ"
-  }
+  },
+  {"type":"lab","tags":[],"id":"ski-chahan","title":"スキー炒飯","year":2026,"date":"2026-10-19","plays":null,"url":"","img":"games/_ski-chahan/img/thumb.webp","play":"games/_ski-chahan/index.html","full":true,"catch":"滑りながら炒飯を炒める"},
 ];
