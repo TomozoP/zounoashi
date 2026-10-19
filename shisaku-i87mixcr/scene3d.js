@@ -70,7 +70,7 @@
       var m = new T.Mesh(geo, Z3.std(b.col, { roughness: 0.6 }));
       m.userData.mat = m.material;
       /* 押している間は暗くする（押した感を見た目でも出す） */
-      m.userData.down = m.material.clone(); m.userData.down.color.multiplyScalar(0.55);
+      m.userData.down = m.material.clone(); m.userData.down.color.multiplyScalar(0.28);
       m.scale.set(b.r, 1, b.r);
       m.position.set(b.x, top + 0.11, b.z);
       m.castShadow = true;
@@ -96,7 +96,7 @@
       if (a) { m.position.set(a.x, top + 0.11 + a.y, a.z); m.rotation.set(a.rx, 0, a.rz); }
       else { m.position.set(b.x, top + y, b.z); m.rotation.set(0, 0, 0); }
       m.material = s.mark && s.mark[i] ? self.markMat : s.pressed[i] && !a ? m.userData.down : m.userData.mat;
-      var sc = s.pressed[i] && !a ? 0.9 : 1;
+      var sc = s.pressed[i] && !a ? 0.8 : 1;
       m.scale.set(b.r * sc, 1, b.r * sc);
     });
     var k = s.bounce || 0;
