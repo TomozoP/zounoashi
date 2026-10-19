@@ -6,8 +6,8 @@
   var T, Z3 = global.Z3;
 
   /* ゲーム機の寸法（机の上に寝かせて置く。x 横、z 手前、y 上。単位cm） */
-  var BW = 10, BL = 18, BH = 1.4;
-  var SW = 6.6, SL = 5.28, SZ = -5.3;           /* 画面（160:128）。中心の z */
+  var BW = 10.6, BL = 20, BH = 1.4;
+  var SW = 7.5, SL = 6.0, SZ = -6.2;            /* 画面（160:128）。中心の z */
 
   /* btns: [{x, z, r}] ボタンの置き場所（index.html が決める） */
   function GameScene(lcd, btns) {
@@ -31,56 +31,68 @@
     var desk = new T.Mesh(new T.PlaneGeometry(50, 50), Z3.std(0xffffff, { map: wood, roughness: 0.8 }));
     desk.rotation.x = -Math.PI / 2; desk.receiveShadow = true;
     this.scene.add(desk);
+    var dev = this.dev = new T.Group();
+    this.scene.add(dev);
 
-    /* 本体：角の丸い板。右下だけ大きく丸める */
+    /* 本体：四隅とも同じ丸みの板 */
     var shape = new T.Shape(), r = 1.0, x0 = -BW / 2, z0 = -BL / 2;
     shape.moveTo(x0 + r, z0); shape.lineTo(x0 + BW - r, z0); shape.quadraticCurveTo(x0 + BW, z0, x0 + BW, z0 + r);
-    shape.lineTo(x0 + BW, z0 + BL - 2.2); shape.quadraticCurveTo(x0 + BW, z0 + BL, x0 + BW - 2.2, z0 + BL);
+    shape.lineTo(x0 + BW, z0 + BL - r); shape.quadraticCurveTo(x0 + BW, z0 + BL, x0 + BW - r, z0 + BL);
     shape.lineTo(x0 + r, z0 + BL); shape.quadraticCurveTo(x0, z0 + BL, x0, z0 + BL - r);
     shape.lineTo(x0, z0 + r); shape.quadraticCurveTo(x0, z0, x0 + r, z0);
     var body = new T.Mesh(new T.ExtrudeGeometry(shape, { depth: BH, bevelEnabled: true, bevelThickness: 0.25, bevelSize: 0.25, bevelSegments: 3, curveSegments: 10 }), Z3.std(0xf0c85a, { roughness: 0.55 }));
     body.rotation.x = Math.PI / 2; body.position.y = BH + 0.25;
     body.castShadow = true; body.receiveShadow = true;
-    this.scene.add(body);
+    dev.add(body);
     var top = this.top = BH + 0.5;
 
     /* 画面の縁と画面 */
     var bez = new T.Mesh(new T.BoxGeometry(SW + 1.1, 0.12, SL + 1.3), Z3.std(0x2f3550, { roughness: 0.4 }));
-    bez.position.set(0, top + 0.02, SZ + 0.1); this.scene.add(bez);
+    bez.position.set(0, top + 0.02, SZ + 0.1); dev.add(bez);
     this.tex = new T.CanvasTexture(lcd);
     this.tex.magFilter = T.NearestFilter; this.tex.minFilter = T.LinearFilter;
     this.tex.colorSpace = T.SRGBColorSpace;
     var scr = new T.Mesh(new T.PlaneGeometry(SW, SL), new T.MeshBasicMaterial({ map: this.tex }));
     scr.rotation.x = -Math.PI / 2; scr.position.set(0, top + 0.09, SZ);
-    this.scene.add(scr);
+    dev.add(scr);
     var lamp = new T.Mesh(new T.CircleGeometry(0.12, 12), new T.MeshBasicMaterial({ color: 0x6ee07a }));
-    lamp.rotation.x = -Math.PI / 2; lamp.position.set(-SW / 2 - 0.3, top + 0.1, SZ - 0.8); this.scene.add(lamp);
+    lamp.rotation.x = -Math.PI / 2; lamp.position.set(-SW / 2 - 0.3, top + 0.1, SZ - 0.8); dev.add(lamp);
 
-    /* ボタン。全部同じ形・同じ色 */
-    var geo = new T.CylinderGeometry(1, 1, 0.4, 24), mat = Z3.std(0x3a3f52, { roughness: 0.35 });
-    this.mat = mat; this.markMat = Z3.std(0xe2574c, { roughness: 0.35 });
+    /* ボタン。全部同じ形で、色は1つずつ違う */
+    var geo = new T.CylinderGeometry(1, 1, 0.4, 24);
+    this.markMat = Z3.std(0xffffff, { roughness: 0.35, emissive: 0xffffff, emissiveIntensity: 0.6 });
+    this.lampM = lamp.material;
     var holeM = Z3.std(0x8a6a20, { roughness: 0.7 });
     this.btn = btns.map(function (b) {
-      var m = new T.Mesh(geo, mat);
+      var m = new T.Mesh(geo, Z3.std(b.col, { roughness: 0.35 }));
+      m.userData.mat = m.material;
       m.scale.set(b.r, 1, b.r);
       m.position.set(b.x, top + 0.18, b.z);
       m.castShadow = true;
-      this.scene.add(m);
+      dev.add(m);
       var hole = new T.Mesh(new T.CircleGeometry(b.r + 0.07, 20), holeM);
-      hole.rotation.x = -Math.PI / 2; hole.position.set(b.x, top + 0.005, b.z); this.scene.add(hole);
+      hole.rotation.x = -Math.PI / 2; hole.position.set(b.x, top + 0.005, b.z); dev.add(hole);
       return m;
     }, this);
     this.btns = btns;
   }
 
-  /* s: { pressed: [ボタンごとに押されているか], mark: [確かめ用に色を変えるか] } */
+  /* s: { pressed: [ボタンごとに押されているか], mark: [確かめ用に光らせるか], bounce: 本体の跳ね(0〜1),
+          wave: { x, z, t } 押した所から広がる波, pop: [飛び出す高さ], lamp: ランプの色 } */
   GameScene.prototype.sync = function (s) {
-    var top = this.top, self = this;
+    var top = this.top, self = this, w = s.wave;
     this.tex.needsUpdate = true;
     this.btn.forEach(function (m, i) {
-      m.position.y = top + (s.pressed[i] ? 0.02 : 0.18);
-      m.material = s.mark && s.mark[i] ? self.markMat : self.mat;
+      var b = self.btns[i], y = s.pressed[i] ? 0.02 : 0.18;
+      if (w) { var d = Math.hypot(b.x - w.x, b.z - w.z) - w.t * 14; if (d > -2 && d < 0) y += Math.sin(-d / 2 * Math.PI) * 0.6; }
+      if (s.pop && s.pop[i]) y += s.pop[i];
+      m.position.y = top + y;
+      m.material = s.mark && s.mark[i] ? self.markMat : m.userData.mat;
     });
+    var k = s.bounce || 0;
+    this.dev.position.y = Math.abs(Math.sin(k * Math.PI * 3)) * k * 2.5;
+    this.dev.rotation.z = Math.sin(k * Math.PI * 4) * k * 0.08;
+    if (s.lamp != null) this.lampM.color.setHSL(s.lamp, 0.8, 0.6);
   };
 
   /* 画面の形に合わせて、本体がちょうど収まる距離にカメラを置く */
@@ -88,7 +100,7 @@
     if (this.fitW === W && this.fitH === H) return;
     this.fitW = W; this.fitH = H;
     var cam = this.camera, v = cam.fov * Math.PI / 360, hz = Math.atan(Math.tan(v) * W / H);
-    var d = Math.max((BW / 2 + 0.4) / Math.tan(hz), (BL / 2 + 0.8) / Math.tan(v)) + this.top;
+    var d = Math.max((BW / 2 + 0.35) / Math.tan(hz), (BL / 2 + 0.4) / Math.tan(v)) + this.top;
     /* 真上から。画面の上が奥（-z） */
     cam.aspect = W / H; cam.updateProjectionMatrix();
     cam.up.set(0, 0, -1);

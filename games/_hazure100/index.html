@@ -132,16 +132,58 @@
   /* ============ ボタン ============
      同じ形のボタンを縦10×横10に並べる（ゲーム機の上の位置、単位cm）。
      本物の左・右・A は、遊ぶたびに100個の中から選び直す */
-  var BODY = { w: 10, l: 18 }, PITCH = 0.88;
+  var BODY = { w: 10.6, l: 20 }, PITCH = 1.0;
   var BTNS = [];
-  for (var row = 0; row < 10; row++) for (var col = 0; col < 10; col++)
-    BTNS.push({ x: (col - 4.5) * PITCH, z: 3.4 + (row - 4.5) * PITCH, r: 0.33 });
+  for (var row = 0; row < 10; row++) for (var col = 0; col < 10; col++) {
+    /* 色は1つずつ違う。色相を少しずつずらし、明るさを段ごとに変える */
+    var hue = ((row * 10 + col) * 0.381966) % 1, lit = [0.55, 0.42, 0.68, 0.5][row % 4];
+    BTNS.push({ x: (col - 4.5) * PITCH, z: 3.1 + (row - 4.5) * PITCH, r: 0.4, col: hsl(hue, 0.65, lit) });
+  }
+  function hsl(h, s, l) {
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+    function c(t) { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; }
+    return (Math.round(c(h + 1 / 3) * 255) << 16) | (Math.round(c(h) * 255) << 8) | Math.round(c(h - 1 / 3) * 255);
+  }
+  function cssCol(n) { return "#" + ("00000" + n.toString(16)).slice(-6); }
   var real = { L: -1, R: -1, A: -1 };
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, T, P = null, falls, clearT, jumpQ, dead, mark = false;
   var keys = { L: false, R: false }, pointers = {}, flash = {};
+
+  /* ============ ハズレの反応 ============ 押すと何か起きる。ゲームの進み（当たり）は変えない */
+  var fx;
+  function newFx() { return { invert: 0, flipV: 0, flipH: 0, shake: 0, night: 0, off: 0, rain: 0, snow: 0, glitch: 0, big: 0, bounce: 0, wave: null, bird: -1, ghost: 0, parts: [], pop: {}, lamp: null }; }
+  var SCALE = [262, 294, 330, 392, 440, 523, 587, 659, 784, 880];
+  function burst(kind, x, y, n, sp) {
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * Math.PI * 2, v = sp * (0.4 + Math.random() * 0.6);
+      fx.parts.push({ k: kind, x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - sp * 0.4, life: 0.9 + Math.random() * 0.5 });
+    }
+  }
+  var REACT = [
+    function (b) { tone(SCALE[b.note % 10], 0.5, 0.09, "triangle"); tone(SCALE[b.note % 10] * 2, 0.3, 0.03, "sine"); burst("note", P.x + 3, P.y - 4, 1, 20); },
+    function () { fx.invert = 0.8; tone(1200, 0.15, 0.05, "square", 300); },
+    function () { fx.flipV = 1.2; tone(200, 0.4, 0.08, "sine", 600); },
+    function () { fx.flipH = 1.2; tone(600, 0.3, 0.06, "sine", 200); },
+    function () { fx.shake = 0.6; noiseHit(0.4, 120, 0.5, 0.8); },
+    function () { fx.night = 1.8; tone(392, 0.25, 0.05, "sine"); tone(330, 0.4, 0.05, "sine", null, 0.25); },
+    function () { fx.off = 0.6; tone(90, 0.2, 0.08, "square", 40); },
+    function () { fx.rain = 2.5; noiseHit(1.5, 5000, 0.08, 0.3); },
+    function () { fx.snow = 3; [1568, 2093, 1760].forEach(function (f, i) { tone(f, 0.25, 0.025, "sine", null, i * 0.1); }); },
+    function () { burst("heart", P.x + 3, P.y, 8, 50); tone(660, 0.12, 0.05, "sine", 990); tone(880, 0.2, 0.04, "sine", 1320, 0.1); },
+    function () { burst("star", 80, 50, 14, 90); tone(1047, 0.1, 0.05, "square"); tone(1568, 0.25, 0.04, "square", null, 0.08); },
+    function () { fx.bird = 0; [2400, 2800, 2400].forEach(function (f, i) { tone(f, 0.06, 0.04, "sine", f * 1.3, i * 0.09); }); },
+    function () { fx.bounce = 1; tone(150, 0.5, 0.1, "sine", 500); },
+    function (b) { fx.wave = { x: b.x, z: b.z, t: 0 }; [0, 1, 2, 3, 4].forEach(function (i) { tone(300 + i * 80, 0.08, 0.04, "square", null, i * 0.06); }); },
+    function () { fx.glitch = 0.7; noiseHit(0.5, 2000, 0.2, 0.5); },
+    function () { fx.ghost = 1.6; tone(440, 1.0, 0.05, "sine", 220); tone(466, 1.0, 0.04, "sine", 233); },
+    function () { burst("puff", P.x - 1, P.y + 6, 5, 12); tone(90, 0.45, 0.12, "sawtooth", 60); noiseHit(0.4, 300, 0.2, 1); },
+    function () { burst("coin", P.x + 2, P.y - 6, 1, 0); tone(988, 0.08, 0.06, "square"); tone(1319, 0.3, 0.06, "square", null, 0.08); },
+    function (b) { fx.pop[BTNS.indexOf(b)] = 1; tone(500, 0.15, 0.08, "sine", 1500); },
+    function () { fx.big = 1.4; tone(200, 0.4, 0.07, "square", 800); }
+  ];
 
   function newRound() {
     shareButton.hidden = true;
@@ -151,6 +193,12 @@
     var pick = [];
     while (pick.length < 3) { var n = Math.floor(Math.random() * BTNS.length); if (pick.indexOf(n) < 0) pick.push(n); }
     real = { L: pick[0], R: pick[1], A: pick[2] };
+    /* ハズレの反応を配り直す（20種類を5個ずつ） */
+    var kinds = [];
+    for (var j = 0; j < BTNS.length; j++) kinds.push(REACT[j % REACT.length]);
+    kinds.sort(function () { return Math.random() - 0.5; });
+    BTNS.forEach(function (b, j) { b.react = kinds[j]; b.note = j; });
+    fx = newFx();
     respawn();
   }
   function respawn() {
@@ -172,6 +220,7 @@
     if (state !== S.PLAY) return;
     T += dt;
     for (var f in flash) flash[f] -= dt;
+    updateFx(dt);
     if (dead >= 0) { dead += dt; if (dead > 0.7) { falls++; respawn(); } return; }
     if (clearT >= 0) { clearT += dt; if (clearT > 0.9) finish(); return; }
     var dir = (held("L") ? -1 : 0) + (held("R") ? 1 : 0);
@@ -203,12 +252,25 @@
     if (P.x + P.w >= STAGE.flag - 1 && P.ground) { clearT = 0; SND.clear(); }
   }
   function jump() { if (state === S.PLAY) jumpQ = 0.12; }
+  function updateFx(dt) {
+    ["invert", "flipV", "flipH", "shake", "night", "off", "rain", "snow", "glitch", "big", "ghost"].forEach(function (k) { fx[k] = Math.max(0, fx[k] - dt); });
+    fx.bounce = Math.max(0, fx.bounce - dt * 1.2);
+    if (fx.wave) { fx.wave.t += dt; if (fx.wave.t > 1.2) fx.wave = null; }
+    if (fx.bird >= 0) { fx.bird += dt; if (fx.bird > 2) fx.bird = -1; }
+    for (var i in fx.pop) { fx.pop[i] -= dt * 1.5; if (fx.pop[i] <= 0) delete fx.pop[i]; }
+    fx.parts = fx.parts.filter(function (q) {
+      q.life -= dt; q.x += q.vx * dt; q.y += q.vy * dt;
+      q.vy += (q.k === "puff" ? -20 : q.k === "coin" ? 0 : 80) * dt;
+      if (q.k === "coin") q.y -= 30 * dt;
+      return q.life > 0;
+    });
+  }
 
   function finish() { state = S.RESULT; clearT = -1; shareButton.hidden = false; }
 
   /* ============ 入力 ============ */
   /* 立体が使えないとき（自動確認の台など）は、ゲーム機を画面の中央に平らに描く */
-  function flatK() { return W / (BODY.w + 0.8); }
+  function flatK() { return Math.min(W / (BODY.w + 0.3), H / (BODY.l + 0.8)); }
   function btnAt(i) {
     var s3 = scene3d();
     if (s3) { try { return s3.buttonAt(i, W, H); } catch (e) {} }
@@ -224,7 +286,11 @@
     }
     return bd < lim ? best : -1;
   }
-  function pressBtn(i) { SND.click(); if (i === real.A) jump(); }
+  function pressBtn(i) {
+    SND.click();
+    if (i === real.A) jump();
+    else if (!isReal(i) && state === S.PLAY) BTNS[i].react(BTNS[i]);
+  }
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault();
@@ -298,10 +364,16 @@
   var PAL = ["#d8e6ea", "#a6bfc8", "#577684", "#22323c"];
   function px(x, y, w, h, c) { lctx.fillStyle = PAL[c]; lctx.fillRect(Math.round(x), Math.round(y), w, h); }
 
+  var PAL_DAY = PAL, PAL_NIGHT = ["#1d2b3a", "#2e4257", "#5c7690", "#d8e6ea"];
+  var tmp = document.createElement("canvas"); tmp.width = LW; tmp.height = LH;
+  var tctx = tmp.getContext("2d");
   function drawLCD() {
+    PAL = fx.night > 0 ? PAL_NIGHT : PAL_DAY;
     lctx.setTransform(1, 0, 0, 1, 0, 0);
+    lctx.globalCompositeOperation = "source-over";
     px(0, 0, LW, LH, 0);
-    px(20, 28, 18, 4, 1); px(24, 25, 10, 3, 1); px(118, 18, 18, 4, 1); px(122, 15, 10, 3, 1);
+    if (fx.night > 0) { px(128, 14, 8, 8, 3); px(130, 12, 4, 12, 3); }
+    else { px(20, 28, 18, 4, 1); px(24, 25, 10, 3, 1); px(118, 18, 18, 4, 1); px(122, 15, 10, 3, 1); }
     STAGE.solids.forEach(function (r) {
       px(r.x, r.y, r.w, r.h, 2);
       px(r.x, r.y, r.w, 2, 3);
@@ -309,8 +381,59 @@
     });
     px(STAGE.flag, GROUND - 26, 2, 26, 3);
     px(STAGE.flag - 10, GROUND - 26, 10, 7, 2);
-    drawPlayer();
+    if (fx.big > 0) {
+      var cx = P.x + 3, cy = P.y + 8;
+      lctx.setTransform(2.5, 0, 0, 2.5, -cx * 1.5, -cy * 1.5);
+      drawPlayer();
+      lctx.setTransform(1, 0, 0, 1, 0, 0);
+    } else drawPlayer();
+    drawFx();
     if (clearT >= 0) { lctx.fillStyle = "rgba(216,230,234," + Math.min(0.6, clearT) + ")"; lctx.fillRect(0, 0, LW, LH); }
+    postFx();
+  }
+  /* 画面の中に出る小物 */
+  function drawFx() {
+    var t = T || 0, i;
+    if (fx.rain > 0) for (i = 0; i < 40; i++) { var rx = (i * 37 + t * 40) % LW, ry = (i * 53 + t * 220) % LH; px(rx, ry, 1, 4, 2); }
+    if (fx.snow > 0) for (i = 0; i < 30; i++) { var sx = (i * 41 + Math.sin(t * 2 + i) * 6 + LW) % LW, sy = (i * 29 + t * 30) % LH; px(sx, sy, 2, 2, fx.night > 0 ? 3 : 1); }
+    if (fx.bird >= 0) {
+      var bx = -12 + fx.bird * 92, by = 40 + Math.sin(fx.bird * 6) * 4, up = Math.floor(fx.bird * 10) % 2;
+      px(bx, by, 6, 3, 3); px(bx + 6, by - 1, 3, 3, 3); px(bx + 1, by + (up ? -3 : 2), 3, 2, 3);
+    }
+    if (fx.ghost > 0) {  /* 穴からおばけが出てくる */
+      var gy = GROUND + 4 - Math.min(1, Math.min(fx.ghost, 1.6 - fx.ghost) * 3) * 34, gx = 80 + Math.sin(fx.ghost * 5) * 3;
+      px(gx, gy, 14, 14, 1); px(gx + 2, gy - 2, 10, 2, 1);
+      for (var k = 0; k < 3; k++) px(gx + k * 5, gy + 14, 4, 2, 1);
+      px(gx + 3, gy + 4, 2, 3, 3); px(gx + 9, gy + 4, 2, 3, 3);
+    }
+    fx.parts.forEach(function (q) {
+      var x = q.x, y = q.y;
+      if (q.k === "heart") { px(x, y, 2, 2, 3); px(x + 3, y, 2, 2, 3); px(x, y + 1, 5, 2, 3); px(x + 1, y + 3, 3, 1, 3); px(x + 2, y + 4, 1, 1, 3); }
+      else if (q.k === "star") { px(x, y - 1, 1, 3, 3); px(x - 1, y, 3, 1, 3); }
+      else if (q.k === "note") { px(x + 3, y - 6, 1, 6, 3); px(x, y, 4, 2, 3); px(x + 3, y - 6, 3, 2, 3); }
+      else if (q.k === "puff") { px(x - 2, y - 2, 5, 4, 1); px(x - 1, y - 3, 3, 6, 1); }
+      else if (q.k === "coin") { var wv = Math.abs(Math.sin(q.life * 9)) * 3 + 1; px(x + 3 - wv / 2, y, wv, 6, 3); }
+    });
+  }
+  /* 画面全体にかける効果（反転・上下左右の裏返し・揺れ・乱れ・消灯） */
+  function postFx() {
+    lctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (fx.glitch > 0) {
+      for (var i = 0; i < 6; i++) {
+        var y = Math.floor(Math.random() * LH), h = 2 + Math.floor(Math.random() * 10), d = Math.floor(Math.random() * 30 - 15);
+        lctx.drawImage(lcd, 0, y, LW, h, d, y, LW, h);
+      }
+    }
+    if (fx.flipV > 0 || fx.flipH > 0 || fx.shake > 0) {
+      tctx.clearRect(0, 0, LW, LH); tctx.drawImage(lcd, 0, 0);
+      var sx = fx.shake > 0 ? Math.round((Math.random() - 0.5) * 10 * fx.shake) : 0, sy = fx.shake > 0 ? Math.round((Math.random() - 0.5) * 10 * fx.shake) : 0;
+      lctx.fillStyle = PAL[3]; lctx.fillRect(0, 0, LW, LH);
+      lctx.setTransform(fx.flipH > 0 ? -1 : 1, 0, 0, fx.flipV > 0 ? -1 : 1, (fx.flipH > 0 ? LW : 0) + sx, (fx.flipV > 0 ? LH : 0) + sy);
+      lctx.drawImage(tmp, 0, 0);
+      lctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    if (fx.invert > 0) { lctx.globalCompositeOperation = "difference"; lctx.fillStyle = "#fff"; lctx.fillRect(0, 0, LW, LH); lctx.globalCompositeOperation = "source-over"; }
+    if (fx.off > 0) { lctx.fillStyle = "#141c20"; lctx.fillRect(0, 0, LW, LH); }
   }
   function drawPlayer() {
     var x = Math.round(P.x), y = Math.round(P.y), f = P.face;
@@ -331,10 +454,10 @@
     roundRect(W / 2 - BODY.w / 2 * k, H / 2 - BODY.l / 2 * k, BODY.w * k, BODY.l * k, k);
     ctx.fillStyle = "#f0c85a"; ctx.fill();
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(lcd, W / 2 - 3.3 * k, H / 2 + (-5.3 - 2.64) * k, 6.6 * k, 5.28 * k);
+    ctx.drawImage(lcd, W / 2 - 3.75 * k, H / 2 + (-6.2 - 3) * k, 7.5 * k, 6 * k);
     BTNS.forEach(function (b, i) {
       var c = btnAt(i);
-      ctx.fillStyle = mark && isReal(i) ? "#e2574c" : "#3a3f52";
+      ctx.fillStyle = mark && isReal(i) ? "#fff" : cssCol(b.col);
       ctx.beginPath(); ctx.arc(c.x, c.y + (down(i) ? 2 : 0), c.r, 0, Math.PI * 2); ctx.fill();
     });
   }
@@ -348,7 +471,8 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ pressed: BTNS.map(function (b, i) { return down(i); }), mark: mark ? BTNS.map(function (b, i) { return isReal(i); }) : null });
+        s3.sync({ pressed: BTNS.map(function (b, i) { return down(i); }), mark: mark ? BTNS.map(function (b, i) { return isReal(i); }) : null,
+          bounce: fx.bounce, wave: fx.wave, pop: BTNS.map(function (b, i) { return fx.pop[i] ? Math.sin(fx.pop[i] * Math.PI) * 2.5 : 0; }), lamp: fx.lamp });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); }
     }
@@ -402,6 +526,7 @@
     real: function () { return real; },
     btnAt: function (i) { return btnAt(i); },
     hitBtn: function (x, y) { return hitBtn(x, y); },
+    press: function (i) { pressBtn(i); },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     keys: keys,
