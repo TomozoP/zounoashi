@@ -155,12 +155,15 @@
   GameScene.prototype.sync = function (s) {
     var p = s.p; if (!p) return;
     this.groundAt(p.x, p.z);
-    this.rig.position.set(p.x, p.y, p.z);
+    /* 目の高さはこぶの上下をなめらかにして見せる（鍋の揺れはゲーム側でそのまま） */
+    var base = p.gy != null ? p.gy : p.y;
+    this.camDy = this.camDy == null ? 0 : this.camDy + ((p.y - base) - this.camDy) * 0.12;
+    this.rig.position.set(p.x, base + this.camDy, p.z);
     this.rig.rotation.y = p.h;
     var sh = s.shake || 0, t = s.t, sp = s.state === "play" ? p.v / s.vmax : 0;
     /* 速いほど細かく揺れて、視野が少し広がる */
-    var buzz = sp * 0.006;
-    this.head.rotation.set(-0.5 + Math.sin(t * 40) * sh * 0.05 + Math.sin(t * 71) * buzz, Math.sin(t * 33) * sh * 0.05 + Math.sin(t * 57) * buzz, (s.steer || 0) * 0.14, "YXZ");
+    var buzz = sp * 0.0012;
+    this.head.rotation.set(-0.5 + Math.sin(t * 40) * sh * 0.025 + Math.sin(t * 71) * buzz, Math.sin(t * 33) * sh * 0.025 + Math.sin(t * 57) * buzz, (s.steer || 0) * 0.14, "YXZ");
     var fov = 80 + sp * 8;
     if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
     this.syncFlakes(p);
