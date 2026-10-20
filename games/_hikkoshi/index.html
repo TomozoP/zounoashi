@@ -168,21 +168,21 @@
      u,v は旧居の中の置き場所（0〜1）。 */
   var BREAK = false;                           /* いったん割れない形で試す（true で割れる） */
   var DEFS = [
-    { k: "bed", w: 96, h: 156, heavy: 2.2, u: 0.13, v: 0.76, a: 0 },
-    { k: "sofa", w: 158, h: 58, heavy: 1.9, u: 0.52, v: 0.70, a: 0 },
-    { k: "shelf", w: 124, h: 34, heavy: 1.7, u: 0.6, v: 0.94, a: 0 },
+    { k: "bed", split: 1, w: 96, h: 156, heavy: 2.2, u: 0.13, v: 0.76, a: 0 },
+    { k: "sofa", split: 1, w: 158, h: 58, heavy: 1.9, u: 0.52, v: 0.70, a: 0 },
+    { k: "shelf", split: 1, w: 124, h: 34, heavy: 1.7, u: 0.6, v: 0.94, a: 0 },
     { k: "plant", r: 21, heavy: 0.8, brk: 5.5, u: 0.93, v: 0.92 },
     { k: "lamp", r: 15, heavy: 0.5, brk: 5, u: 0.92, v: 0.62 },
     { k: "fridge", w: 66, h: 64, heavy: 2.6, u: 0.09, v: 0.22, a: 0 },
     { k: "tv", w: 98, h: 22, heavy: 0.9, brk: 6, u: 0.5, v: 0.11, a: 0 },
-    { k: "table", w: 94, h: 62, heavy: 1.3, u: 0.6, v: 0.31, a: 0 },
+    { k: "table", split: 1, w: 94, h: 62, heavy: 1.3, u: 0.6, v: 0.31, a: 0 },
     { k: "chair", w: 30, h: 30, heavy: 0.6, u: 0.47, v: 0.31, a: 0.2 },
     { k: "chair", w: 30, h: 30, heavy: 0.6, u: 0.74, v: 0.33, a: -0.3 },
     { k: "box", w: 46, h: 46, heavy: 1, brk: 10, u: 0.9, v: 0.14, a: 0.05 },
     { k: "box", w: 46, h: 46, heavy: 1, brk: 10, u: 0.9, v: 0.34, a: -0.08 },
     { k: "dish", w: 44, h: 40, heavy: 0.8, brk: 5, u: 0.79, v: 0.16, a: 0.1 },
     { k: "washer", w: 60, h: 60, heavy: 2.2, u: 0.33, v: 0.88, a: 0 },
-    { k: "dresser", w: 84, h: 40, heavy: 1.8, u: 0.82, v: 0.78, a: 0 },
+    { k: "dresser", split: 1, w: 84, h: 40, heavy: 1.8, u: 0.82, v: 0.78, a: 0 },
     { k: "guitar", w: 26, h: 84, heavy: 0.7, u: 0.27, v: 0.67, a: 0.15 },
     { k: "box", w: 46, h: 46, heavy: 1, brk: 10, u: 0.8, v: 0.58, a: 0.1 },
     { k: "chabudai", r: 30, heavy: 1, u: 0.3, v: 0.25 },
@@ -202,6 +202,7 @@
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
+    pendingSplit = [];
     T = 0; finalT = 0; broken = 0; doneHold = 0; dents = 0; shake = 0;
     build();
   }
@@ -224,15 +225,48 @@
     items = DEFS.map(function (d) {
       var x = G.ox0 + WT / 2 + (G.ox1 - G.ox0 - WT) * d.u;
       var y = G.oy0 + WT / 2 + (G.oy1 - G.oy0 - WT) * d.v;
-      var opt = { frictionAir: 0.13, friction: 0.25, restitution: 0.12, density: 0.001 * d.heavy, chamfer: d.r ? undefined : { radius: 5 } };
-      var b = d.r ? M.Bodies.circle(x, y, d.r, opt) : M.Bodies.rectangle(x, y, d.w, d.h, opt);
-      if (d.a) M.Body.setAngle(b, d.a);
-      b.def = d; b.item = true; b.inside = false; b.seed = Math.random(); b.marks = []; b.shape = outline(d);
-      return b;
+      return makeItem(d, x, y, d.a || 0);
     });
     M.Composite.add(engine.world, items);
     frags = []; decals = []; parts = []; rings = []; grabs = {};
     M.Events.on(engine, "collisionStart", onHit);
+  }
+
+  function makeItem(d, x, y, angle) {
+    var opt = { frictionAir: 0.13, friction: 0.25, restitution: 0.12, density: 0.001 * d.heavy, chamfer: d.r ? undefined : { radius: 5 } };
+    var b = d.r ? M.Bodies.circle(x, y, d.r, opt) : M.Bodies.rectangle(x, y, d.w, d.h, opt);
+    if (angle) M.Body.setAngle(b, angle);
+    b.def = d; b.item = true; b.inside = false; b.seed = Math.random(); b.marks = []; b.shape = outline(d);
+    return b;
+  }
+
+  /* 大きい家具は強くぶつけると長い向きに半分に割れる（割れた半分はもう割れない） */
+  var SPLIT = 6.5, pendingSplit = [];
+  function split(b) {
+    if (b.dead) return;
+    b.dead = true; broken++;
+    Object.keys(grabs).forEach(function (id) { if (grabs[id].body === b) release(id); });
+    M.Composite.remove(engine.world, b);
+    var d = b.def, alongX = d.w >= d.h;
+    var pw = alongX ? d.w / 2 : d.w, ph = alongX ? d.h : d.h / 2;
+    var v = M.Body.getVelocity(b), c = Math.cos(b.angle), si = Math.sin(b.angle);
+    [-1, 1].forEach(function (sg) {
+      var lx = alongX ? sg * d.w / 4 : 0, ly = alongX ? 0 : sg * d.h / 4;
+      var nd = Object.assign({}, d, { w: pw, h: ph, aw: d.aw || d.w, ah: d.ah || d.h, ox: (d.ox || 0) + lx, oy: (d.oy || 0) + ly, heavy: d.heavy * 0.55, split: 0, piece: 1 });
+      var wx = b.position.x + lx * c - ly * si, wy = b.position.y + lx * si + ly * c;
+      var nb = makeItem(nd, wx, wy, b.angle);
+      /* 傷はそれぞれの半分へ引き継ぐ */
+      b.marks.forEach(function (m) { if (alongX ? m.x * sg > 0 : m.y * sg > 0) nb.marks.push({ x: m.x - lx, y: m.y - ly, s: m.s, a: m.a, r: m.r }); });
+      var px = (lx * c - ly * si) / (d.w / 4 + d.h / 4), py = (lx * si + ly * c) / (d.w / 4 + d.h / 4);
+      M.Body.setVelocity(nb, { x: v.x + px * 3, y: v.y + py * 3 });
+      M.Body.setAngularVelocity(nb, sg * 0.05);
+      M.Composite.add(engine.world, nb);
+      items.push(nb);
+    });
+    shake = 18;
+    rings.push({ x: b.position.x, y: b.position.y, t: 0 });
+    splash(b.position.x, b.position.y, 22, "#e8d2a8", 7);
+    noiseHit(0.35, 900, 0.6, 0.7); noiseHit(0.5, 160, 0.7, 0.8);
   }
 
   /* 絵の輪郭。ぶつけた所が内側へへこむ（当たり判定は元の形のまま） */
@@ -250,8 +284,14 @@
         for (var j = 0; j < n; j++) pts.push({ x0: x0 + (x1 - x0) * j / n, y0: y0 + (y1 - y0) * j / n, nx: nx, ny: ny, off: 0 });
       }
       side(-w, -h, w, -h, 0, 1); side(w, -h, w, h, -1, 0); side(w, h, -w, h, 0, -1); side(-w, h, -w, -h, 1, 0);
+      /* へこむ向きは中心へ向ける（角で線が交差してトゲにならないように） */
+      pts.forEach(function (p) {
+        var l = Math.hypot(p.x0 / w, p.y0 / h) || 1;
+        var nx = -p.x0 / w / l / w, ny = -p.y0 / h / l / h, n = Math.hypot(nx, ny) || 1;
+        p.nx = nx / n; p.ny = ny / n;
+      });
     }
-    pts.maxD = d.r ? d.r * 0.45 : Math.min(d.w, d.h) * 0.32;
+    pts.maxD = d.r ? d.r * 0.35 : Math.min(d.w, d.h) * 0.22;
     return pts;
   }
   function dentAt(b, lx, ly, s) {
@@ -261,6 +301,11 @@
       if (dd > R * 2.5) return;
       p.off = Math.min(pts.maxD, p.off + depth * Math.exp(-(dd / R) * (dd / R)));
     });
+    /* となり同士でならして、なめらかなへこみにする */
+    for (var it = 0; it < 2; it++) {
+      var o = pts.map(function (p) { return p.off; }), n = pts.length;
+      pts.forEach(function (p, i) { p.off = (o[(i + n - 1) % n] + o[i] * 2 + o[(i + 1) % n]) / 4; });
+    }
     b.dented = true;
   }
   function shapePath(b) {
@@ -291,6 +336,7 @@
         shake = Math.max(shake, Math.min(16, (s - 2) * 1.6));
       }
       [a, b].forEach(function (x) {
+        if (x.item && !x.dead && x.def.split && s > SPLIT && pendingSplit.indexOf(x) < 0) pendingSplit.push(x);
         if (BREAK && x.item && !x.dead && x.def.brk && s > x.def.brk) toBreak.push(x);
       });
     });
@@ -309,9 +355,8 @@
   }
   function drawMarks(b) {
     if (!b.marks.length) return;
-    var d = b.def;
     ctx.save();
-    if (d.r) { ctx.beginPath(); ctx.arc(0, 0, d.r, 0, 7); } else rr(-d.w / 2, -d.h / 2, d.w, d.h, 5);
+    shapePath(b);
     ctx.clip();
     b.marks.forEach(function (m) {
       var k = 7 + m.s * 9;
@@ -442,14 +487,15 @@
         var g = grabs[id], b = g.body, e = grabEnd(g);
         var dx = g.x - e.x, dy = g.y - e.y, d = Math.hypot(dx, dy);
         if (d > REACH) { dx *= REACH / d; dy *= REACH / d; }
-        var gain = 0.16 / Math.sqrt(b.def.heavy), vx = dx * gain, vy = dy * gain;
-        var vs = Math.hypot(vx, vy), vm = VMAX / Math.pow(b.def.heavy, 0.3);
+        var gain = 0.24 / Math.pow(b.def.heavy, 0.35), vx = dx * gain, vy = dy * gain;
+        var vs = Math.hypot(vx, vy), vm = VMAX / Math.pow(b.def.heavy, 0.15);
         if (vs > vm) { vx *= vm / vs; vy *= vm / vs; }
         var v = M.Body.getVelocity(b);
-        var f = 0.3 * b.mass / (dts * BASE);
+        var f = 0.4 * b.mass / (dts * BASE);
         M.Body.applyForce(b, e, { x: (vx - v.x) * f, y: (vy - v.y) * f });
       });
       M.Engine.update(engine, dts);
+      if (pendingSplit.length) { pendingSplit.forEach(split); pendingSplit = []; }
       items.concat(frags).forEach(guard);
     }
   }
@@ -563,7 +609,9 @@
   function secText(t) { return (Math.floor(t * 10) / 10).toFixed(1); }
   function doShare() {
     var t = secText(finalT);
-    var text = dents === 0
+    var text = broken > 0
+      ? zT("家具を" + broken + "回まっぷたつにしながら" + t + "秒で引っ越しました", "Moved house in " + t + "s, snapping furniture in half " + broken + " times")
+      : dents === 0
       ? zT("家具を無傷のまま" + t + "秒で引っ越しました", "Moved house in " + t + "s without a single scratch")
       : zT("家具に" + dents + "か所キズをつけながら" + t + "秒で引っ越しました", "Moved house in " + t + "s, leaving " + dents + " dents and scratches");
     window.zResultActions.x({ text: text + zT(" #ハイスピード引っ越し", " #HighSpeedMoving") });
@@ -610,11 +658,13 @@
   }
 
   function drawItem(b) {
-    var d = b.def, w = d.w, h = d.h;
+    var d = b.def, w = d.aw || d.w, h = d.ah || d.h;  /* 割れた半分は、元の家具の絵の半分を写す */
     ctx.save();
     ctx.translate(b.position.x, b.position.y);
     ctx.rotate(b.angle);
-    if (b.dented) { ctx.save(); shapePath(b); ctx.clip(); }
+    var cut = b.dented || d.piece;
+    if (cut) { ctx.save(); shapePath(b); ctx.clip(); }
+    if (d.piece) { ctx.save(); ctx.translate(-d.ox, -d.oy); }
     ctx.lineWidth = 2; ctx.strokeStyle = LINE;
     switch (d.k) {
       case "bed":
@@ -714,8 +764,9 @@
         ctx.fillStyle = "#fff9e0"; ctx.beginPath(); ctx.arc(0, 0, d.r * 0.45, 0, 7); ctx.fill();
         break;
     }
+    if (d.piece) ctx.restore();
     drawMarks(b);
-    if (b.dented) {
+    if (cut) {
       ctx.restore();
       if (d.k !== "guitar") { shapePath(b); ctx.strokeStyle = LINE; ctx.lineWidth = 2.5; ctx.stroke(); }
     }
