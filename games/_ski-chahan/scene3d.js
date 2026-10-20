@@ -211,7 +211,12 @@
     this.plate = new T.Mesh(plateG, new T.MeshStandardMaterial({ map: plateTex, roughness: 0.25, side: T.DoubleSide }));
     this.plate.visible = false;
     rig.add(this.plate);
-    this.PLATE = new T.Vector3(-0.02, -0.6, -0.7);
+    this.PLATE = new T.Vector3(0, -0.6, -0.7);
+    /* 皿の上の山の芯（粒のすき間から皿が透けて浮いて見えないように）と、山の下の影 */
+    this.mound = new T.Mesh(new T.SphereGeometry(1, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), new T.MeshStandardMaterial({ color: 0xe9dcc0, roughness: 0.8 }));
+    this.mound.visible = false; rig.add(this.mound);
+    this.moundShadow = new T.Mesh(new T.CircleGeometry(1, 24), new T.MeshBasicMaterial({ map: Z3.canvasTex(64, 64, function (g) { var r = g.createRadialGradient(32, 32, 8, 32, 32, 32); r.addColorStop(0, "rgba(60,45,30,.45)"); r.addColorStop(1, "rgba(60,45,30,0)"); g.fillStyle = r; g.fillRect(0, 0, 64, 64); }), transparent: true, depthWrite: false }));
+    this.moundShadow.rotation.x = -Math.PI / 2; this.moundShadow.visible = false; rig.add(this.moundShadow);
     this.invW = new T.Matrix4();
 
     /* 米粒 */
@@ -299,7 +304,7 @@
       /* 盛り終わったら皿へ寄って大きく映す。板・コンロ・腕は消す */
       var cu = Math.max(0, Math.min(1, (sv - 2.15) / 0.8)), ce = cu * cu * (3 - 2 * cu);
       if (ce > 0) {
-        this.head.rotation.set(-0.72 - 0.1 * ce, 0, 0, "YXZ");
+        this.head.rotation.set(-0.72 + 0.06 * ce, 0, 0, "YXZ");
         this.head.position.set(0, -0.12 * ce, -0.12 * ce);
         var f2 = 80 + (56 - 80) * ce;
         if (Math.abs(this.camera.fov - f2) > 0.05) { this.camera.fov = f2; this.camera.updateProjectionMatrix(); }
@@ -324,7 +329,16 @@
       total *= K;
       Rd = 0.035 + 0.07 * Math.cbrt(total / (gs.length * K));
       this.wok.updateMatrix(); this.stove.updateMatrix(); this.invW.copy(this.wok.matrix).invert();
-    }
+      /* 芯は粒が落ちるにつれて育つ。色は粒の火の通りの平均 */
+      var grow = Math.max(0, Math.min(1, (sv - 1.0) / 0.9)), ck = 0, bn = 0, cnt = 0;
+      for (var u2 = 0; u2 < gs.length; u2++) if (!gs[u2].lost) { ck += gs[u2].cook; bn += gs[u2].burn; cnt++; }
+      this.mound.visible = this.moundShadow.visible = total > 0 && grow > 0;
+      this.mound.position.set(this.PLATE.x, this.plate.position.y + 0.008, this.PLATE.z);
+      this.mound.scale.set(Rd * 1.02 * Math.max(0.3, grow), Rd * 1.15 * grow, Rd * 1.02 * Math.max(0.3, grow));
+      this.mound.material.color.copy(this.cRaw).lerp(this.cGold, cnt ? ck / cnt * 0.8 : 0).lerp(this.cBurn, cnt ? Math.min(1, bn / cnt * 1.2) : 0).multiplyScalar(0.92);
+      this.moundShadow.position.set(this.PLATE.x, this.plate.position.y + 0.005, this.PLATE.z);
+      this.moundShadow.scale.setScalar(Rd * 1.45 * Math.max(0.3, grow));
+    } else { this.mound.visible = this.moundShadow.visible = false; }
     for (var n = 0; n < gs.length * K; n++) {
       var i = Math.floor(n / K), g = gs[i], kind = n % K ? 0 : g.kind;
       if (g.lost && g.y < -1.4) { Sc.set(0, 0, 0); }
@@ -336,7 +350,7 @@
       if (serving && !g.lost) {
         /* 落ちる先は皿の上の山の中のばらばらな場所。鍋の傾いた側（左）にある粒から順に、少しずつずれて落ちる */
         var pr = this.pr[n], rr2 = Rd * 1.15 * Math.sqrt(pr[0]), an = pr[1] * 6.2832;
-        var hgt = Rd * 1.3 * Math.sqrt(Math.max(0, 1 - pr[0])) * (0.5 + 0.5 * pr[2]);
+        var hgt = Rd * 1.3 * Math.sqrt(Math.max(0, 1 - pr[0])) * (0.8 + 0.2 * pr[2]);
         var tx = this.PLATE.x + Math.cos(an) * rr2, ty = this.plate.position.y + 0.012 + hgt, tz = this.PLATE.z + Math.sin(an) * rr2;
         var go = Math.max(0, Math.min(1, (sv - 0.85 - (g.x + 0.2) * 1.2 - pr[3] * 0.35) / 0.32));
         if (go > 0) {
