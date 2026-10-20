@@ -327,5 +327,6 @@ window.DRAFT_GAMES = [
     "play": "games/_neko-gameki/index.html",
     "full": true,
     "catch": "ネコに邪魔されながらゲーム機で遊ぶ"
-  }
+  },
+  {"type":"lab","tags":[],"id":"hikkoshi","title":"ハイスピード引っ越し","year":2026,"date":"2026-10-20","plays":null,"url":"","img":"games/_hikkoshi/img/thumb.webp","play":"games/_hikkoshi/index.html","full":true,"catch":"とにかく早く運ぶ"},
 ];
