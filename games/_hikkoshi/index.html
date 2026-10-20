@@ -227,7 +227,7 @@
       var opt = { frictionAir: 0.13, friction: 0.25, restitution: 0.12, density: 0.001 * d.heavy, chamfer: d.r ? undefined : { radius: 5 } };
       var b = d.r ? M.Bodies.circle(x, y, d.r, opt) : M.Bodies.rectangle(x, y, d.w, d.h, opt);
       if (d.a) M.Body.setAngle(b, d.a);
-      b.def = d; b.item = true; b.inside = false; b.seed = Math.random(); b.marks = [];
+      b.def = d; b.item = true; b.inside = false; b.seed = Math.random(); b.marks = []; b.shape = outline(d);
       return b;
     });
     M.Composite.add(engine.world, items);
@@ -235,9 +235,46 @@
     M.Events.on(engine, "collisionStart", onHit);
   }
 
+  /* 絵の輪郭。ぶつけた所が内側へへこむ（当たり判定は元の形のまま） */
+  function outline(d) {
+    var pts = [], i;
+    if (d.r) {
+      for (i = 0; i < 40; i++) {
+        var a = i / 40 * Math.PI * 2;
+        pts.push({ x0: Math.cos(a) * d.r, y0: Math.sin(a) * d.r, nx: -Math.cos(a), ny: -Math.sin(a), off: 0 });
+      }
+    } else {
+      var w = d.w / 2, h = d.h / 2;
+      function side(x0, y0, x1, y1, nx, ny) {
+        var n = Math.max(2, Math.round(Math.hypot(x1 - x0, y1 - y0) / 5));
+        for (var j = 0; j < n; j++) pts.push({ x0: x0 + (x1 - x0) * j / n, y0: y0 + (y1 - y0) * j / n, nx: nx, ny: ny, off: 0 });
+      }
+      side(-w, -h, w, -h, 0, 1); side(w, -h, w, h, -1, 0); side(w, h, -w, h, 0, -1); side(-w, h, -w, -h, 1, 0);
+    }
+    pts.maxD = d.r ? d.r * 0.45 : Math.min(d.w, d.h) * 0.32;
+    return pts;
+  }
+  function dentAt(b, lx, ly, s) {
+    var pts = b.shape, depth = Math.min(pts.maxD, (s - 2.8) * 1.6), R = 7 + s * 1.6;
+    pts.forEach(function (p) {
+      var dd = Math.hypot(p.x0 - lx, p.y0 - ly);
+      if (dd > R * 2.5) return;
+      p.off = Math.min(pts.maxD, p.off + depth * Math.exp(-(dd / R) * (dd / R)));
+    });
+    b.dented = true;
+  }
+  function shapePath(b) {
+    ctx.beginPath();
+    b.shape.forEach(function (p, i) {
+      var x = p.x0 + p.nx * p.off, y = p.y0 + p.ny * p.off;
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    });
+    ctx.closePath();
+  }
   function relSpeed(pair) {
     var a = pair.bodyA.parent, b = pair.bodyB.parent, n = pair.collision.normal;
-    var vx = a.velocity.x - b.velocity.x, vy = a.velocity.y - b.velocity.y;
+    var va = M.Body.getVelocity(a), vb = M.Body.getVelocity(b);
+    var vx = va.x - vb.x, vy = va.y - vb.y;
     return Math.abs(vx * n.x + vy * n.y);
   }
   function onHit(e) {
@@ -264,7 +301,9 @@
     var dx = sp.x - b.position.x, dy = sp.y - b.position.y;
     var c = Math.cos(-b.angle), si = Math.sin(-b.angle);
     if (b.marks.length >= 14) b.marks.shift();
-    b.marks.push({ x: dx * c - dy * si, y: dx * si + dy * c, s: Math.min(1.6, s / 6), a: Math.random() * 3.14, dent: s > 5.5, r: Math.random() });
+    var lx = dx * c - dy * si, ly = dx * si + dy * c;
+    b.marks.push({ x: lx, y: ly, s: Math.min(1.6, s / 6), a: Math.random() * 3.14, r: Math.random() });
+    dentAt(b, lx, ly, s);
     dents++;
     if (s > 5.5) noiseHit(0.18, 140, 0.5, 0.9);
   }
@@ -276,13 +315,6 @@
     ctx.clip();
     b.marks.forEach(function (m) {
       var k = 7 + m.s * 9;
-      if (m.dent) {
-        /* へこみ：暗いくぼみと、ふちの明るい線 */
-        ctx.fillStyle = "rgba(0,0,0,.32)";
-        ctx.beginPath(); ctx.ellipse(m.x, m.y, k, k * 0.62, m.a, 0, 7); ctx.fill();
-        ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.ellipse(m.x, m.y, k, k * 0.62, m.a, 3.4, 5.6); ctx.stroke();
-      }
       /* 傷：白っぽい引っかき線を数本 */
       ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 1.3;
       ctx.beginPath();
@@ -377,18 +409,15 @@
     if (!b) return;
     var lx = x - b.position.x, ly = y - b.position.y;
     if (!M.Vertices.contains(b.vertices, { x: x, y: y })) { lx *= 0.3; ly *= 0.3; }
-    var c = M.Constraint.create({ pointA: { x: x, y: y }, bodyB: b, pointB: { x: lx, y: ly }, length: 0, stiffness: 0.09 / b.def.heavy, damping: 0.05 });
-    M.Composite.add(engine.world, c);
-    grabs[id] = { body: b, c: c, x: x, y: y };
+    var c = Math.cos(-b.angle), si = Math.sin(-b.angle);
+    grabs[id] = { body: b, lx: lx * c - ly * si, ly: lx * si + ly * c, x: x, y: y };
     tone(330 + 120 / b.def.heavy, 0.06, 0.08, "triangle");
   }
-  function release(id) {
-    var g = grabs[id];
-    if (!g) return;
-    M.Composite.remove(engine.world, g.c);
-    delete grabs[id];
+  function release(id) { delete grabs[id]; }
+  function grabEnd(g) {
+    var b = g.body, c = Math.cos(b.angle), si = Math.sin(b.angle);
+    return { x: b.position.x + g.lx * c - g.ly * si, y: b.position.y + g.lx * si + g.ly * c };
   }
-  function grabEnd(g) { return M.Vector.add(g.body.position, g.c.pointB); }
 
   /* ============ 進行 ============ */
   function insideNew(b) {
@@ -403,31 +432,44 @@
     }
     return true;
   }
+  /* 引っぱりは位置を直接動かさず、つかんだ所に力をかける（壁にめり込ませない）。
+     1コマを4回に分けて進め、速い物でも壁を抜けにくくする */
+  var SUB = 4, BASE = 1000 / 60;
   function stepWorld() {
-    Object.keys(grabs).forEach(function (id) {
-      var g = grabs[id], e = grabEnd(g);
-      var dx = g.x - e.x, dy = g.y - e.y, d = Math.hypot(dx, dy);
-      var k = d > REACH ? REACH / d : 1;
-      g.c.pointA = { x: e.x + dx * k, y: e.y + dy * k };
-    });
-    M.Engine.update(engine, 1000 / 60);
-    items.concat(frags).forEach(function (b) {
-      if (b.dead) return;
-      var vm = b.frag ? 9 : VMAX;              /* 小さい破片は速いと壁を抜けるので遅めに */
-      var s = Math.hypot(b.velocity.x, b.velocity.y);
-      if (s > vm) M.Body.setVelocity(b, { x: b.velocity.x * vm / s, y: b.velocity.y * vm / s });
-      if (Math.abs(b.angularVelocity) > 0.35) M.Body.setAngularVelocity(b, Math.sign(b.angularVelocity) * 0.35);
-      /* 押しつぶされて中心が壁に入ったら、さっきの場所へ戻す（壁抜けを防ぐ） */
-      var c = b.position, inWall = false;
-      for (var i = 0; i < G.walls.length; i++) {
-        var r = G.walls[i];
-        if (c.x > r[0] && c.x < r[2] && c.y > r[1] && c.y < r[3]) { inWall = true; break; }
-      }
-      if (inWall && b.okPos) {
-        M.Body.setPosition(b, b.okPos);
-        M.Body.setVelocity(b, { x: 0, y: 0 });
-      } else if (!inWall) b.okPos = { x: c.x, y: c.y };
-    });
+    var dts = BASE / SUB;
+    for (var k = 0; k < SUB; k++) {
+      Object.keys(grabs).forEach(function (id) {
+        var g = grabs[id], b = g.body, e = grabEnd(g);
+        var dx = g.x - e.x, dy = g.y - e.y, d = Math.hypot(dx, dy);
+        if (d > REACH) { dx *= REACH / d; dy *= REACH / d; }
+        var gain = 0.16 / Math.sqrt(b.def.heavy), vx = dx * gain, vy = dy * gain;
+        var vs = Math.hypot(vx, vy), vm = VMAX / Math.pow(b.def.heavy, 0.3);
+        if (vs > vm) { vx *= vm / vs; vy *= vm / vs; }
+        var v = M.Body.getVelocity(b);
+        var f = 0.3 * b.mass / (dts * BASE);
+        M.Body.applyForce(b, e, { x: (vx - v.x) * f, y: (vy - v.y) * f });
+      });
+      M.Engine.update(engine, dts);
+      items.concat(frags).forEach(guard);
+    }
+  }
+  function guard(b) {
+    if (b.dead) return;
+    var v = M.Body.getVelocity(b), vm = b.frag ? 9 : VMAX;
+    var s = Math.hypot(v.x, v.y);
+    if (s > vm) M.Body.setVelocity(b, { x: v.x * vm / s, y: v.y * vm / s });
+    var av = M.Body.getAngularVelocity(b);
+    if (Math.abs(av) > 0.3) M.Body.setAngularVelocity(b, Math.sign(av) * 0.3);
+    /* それでも中心が壁に入ったら、さっきの場所へ戻す */
+    var c = b.position, inWall = false;
+    for (var i = 0; i < G.walls.length; i++) {
+      var r = G.walls[i];
+      if (c.x > r[0] && c.x < r[2] && c.y > r[1] && c.y < r[3]) { inWall = true; break; }
+    }
+    if (inWall && b.okPos) {
+      M.Body.setPosition(b, b.okPos);
+      M.Body.setVelocity(b, { x: 0, y: 0 });
+    } else if (!inWall) b.okPos = { x: c.x, y: c.y };
   }
   function update(dt) {
     shake *= 0.82; if (shake < 0.3) shake = 0;
@@ -572,6 +614,7 @@
     ctx.save();
     ctx.translate(b.position.x, b.position.y);
     ctx.rotate(b.angle);
+    if (b.dented) { ctx.save(); shapePath(b); ctx.clip(); }
     ctx.lineWidth = 2; ctx.strokeStyle = LINE;
     switch (d.k) {
       case "bed":
@@ -672,6 +715,10 @@
         break;
     }
     drawMarks(b);
+    if (b.dented) {
+      ctx.restore();
+      if (d.k !== "guitar") { shapePath(b); ctx.strokeStyle = LINE; ctx.lineWidth = 2.5; ctx.stroke(); }
+    }
     ctx.restore();
   }
   function drawFrag(f) {
