@@ -65,8 +65,11 @@ if (g.probe.now) {
   var reached = g.until(function () { return g.probe.now().state === "result"; }, 3000);
   ok("放っておくと結果画面まで行く", reached, reached ? "" : "（時間切れの無いゲームなら気にしなくてよい）");
   if (reached) {
-    var y = g.probe.now().H ? g.probe.now().H * 0.62 + 27 : g.H * 0.62 + 27;
-    guard("「もう一度」を押せる", function () { g.tap(175, y); g.step(10); });
+    /* ボタンの場所はゲームの覗き穴（now().buttons）から読む。無い古いゲームは雛形の位置を押す */
+    var bs = g.probe.now().buttons, retry = bs && bs.filter(function (b) { return b.id === "retry"; })[0];
+    var x = retry ? retry.x + retry.w / 2 : 175;
+    var y = retry ? retry.y + retry.h / 2 : (g.probe.now().H || g.H) * 0.62 + 27;
+    guard("「もう一度」を押せる", function () { g.tap(x, y); g.step(10); });
     ok("押すと遊びに戻る", g.probe.now().state !== "result", g.probe.now().state);
   }
 }

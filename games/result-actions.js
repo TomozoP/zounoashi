@@ -87,6 +87,62 @@
         button.removeEventListener('click', click);
       };
     },
+    /* 結果ボタンの横並び。ids は左から（"retry" "share" "next" など）。y はボタンの上端。 */
+    row: function (W, y, ids) {
+      ids = ids || ['retry', 'share'];
+      var h = 54, gap = 16, label = { retry: 'もう一度', share: 'Xでシェア', next: '次' };
+      var ws = ids.map(function (id) { return id === 'share' ? 224 : 170; });
+      if (ids.length > 2) ws = ws.map(function () { return 120; });
+      var total = ws.reduce(function (a, b) { return a + b; }, 0) + gap * (ws.length - 1), x = W / 2 - total / 2;
+      return ids.map(function (id, i) {
+        var b = { id: id, x: x, y: y, w: ws[i], h: h, label: label[id] || id };
+        x += ws[i] + gap;
+        return b;
+      });
+    },
+    /* 作品を見せる結果画面の並び（アフロ盆栽・スキー炒飯の形）。暗くせず、
+       文字は上端から順に積み、ボタンは下、その間を作品の枠にする。
+       sizes は上から各行の文字の大きさ。返す lines[i].y は textBaseline "top" で使う。 */
+    showcase: function (W, H, opt) {
+      opt = opt || {};
+      var sizes = opt.sizes || [96, 30], y = Math.max(18, H * 0.03), lines = [];
+      sizes.forEach(function (s) { lines.push({ y: y, size: s }); y += Math.round(s * 1.12); });
+      var by = H - 54 - Math.max(24, H * 0.05), pad = 12;
+      var top = y + pad, bottom = by - pad;
+      return {
+        lines: lines,
+        subject: { x: 0, y: top, w: W, h: Math.max(0, bottom - top), cx: W / 2, cy: (top + bottom) / 2 },
+        buttons: actions.row(W, by, opt.buttons)
+      };
+    },
+    hit: function (buttons, x, y) {
+      for (var i = 0; i < buttons.length; i++) {
+        var b = buttons[i];
+        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+      }
+      return null;
+    },
+    /* 白地・濃い縁・丸い両端のボタンにアイコンだけを描く（決めごとの形）。 */
+    drawButtons: function (ctx, buttons) {
+      buttons.forEach(function (b) {
+        var r = b.h / 2;
+        ctx.save();
+        ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+        ctx.beginPath();
+        ctx.moveTo(-b.w / 2 + r, -r); ctx.lineTo(b.w / 2 - r, -r);
+        ctx.arc(b.w / 2 - r, 0, r, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(-b.w / 2 + r, r);
+        ctx.arc(-b.w / 2 + r, 0, r, Math.PI / 2, Math.PI * 1.5);
+        ctx.closePath();
+        ctx.fillStyle = '#fff'; ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = '#16202e'; ctx.stroke();
+        ctx.fillStyle = '#16202e';
+        ctx.font = '800 24px sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        if (!global.zActionIcon || !global.zActionIcon(ctx, b.label, 0, 1, 30)) ctx.fillText(b.label, 0, 1);
+        ctx.restore();
+      });
+    },
     place: function (button, box, width, height, visible) {
       if (button.hidden !== !visible) button.hidden = !visible;
       if (!visible) return;
