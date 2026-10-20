@@ -155,10 +155,8 @@
     shank.quaternion.copy(hq); shank.position.copy(h0).addScaledVector(hd, 0.05); wok.add(shank);
     var grip = new T.Mesh(new T.CylinderGeometry(0.02, 0.017, 0.26, 10), wood);
     grip.quaternion.copy(hq); grip.position.copy(h0).addScaledVector(hd, 0.23); wok.add(grip);
-    var helper = new T.Mesh(new T.TorusGeometry(0.03, 0.007, 6, 12, Math.PI), metal);
-    helper.rotation.set(Math.PI / 2, 0, Math.PI / 2); helper.position.set(-RIM - 0.008, RY - 0.006, 0); wok.add(helper);
     this.gripR = h0.clone().addScaledVector(hd, 0.2);          /* 右手で握る所（鍋の中の座標） */
-    this.gripL = new T.Vector3(-RIM - 0.03, RY - 0.004, 0.01);  /* 左手で持つ所 */
+    this.gripL = new T.Vector3(-0.19, 0.0, 0.06);               /* 左手で持つ所（コンロの左端） */
 
     /* 腕：肩から手首まで、上着の袖と手袋。毎回の鍋の位置に合わせて伸ばす */
     var sleeveG = new T.CylinderGeometry(0.042, 0.062, 1, 12); sleeveG.translate(0, 0.5, 0);
@@ -177,10 +175,22 @@
     }, this);
     this.tmpV = new T.Vector3(); this.tmpW = new T.Vector3(); this.up = new T.Vector3(0, 1, 0); this.tmpQ = new T.Quaternion();
 
-    /* 鍋の下の小さなコンロと火 */
-    var stove = new T.Mesh(new T.CylinderGeometry(0.055, 0.07, 0.045, 14), metal);
-    stove.position.y = -0.08; wok.add(stove);
-    this.flames = new T.Group(); wok.add(this.flames);
+    /* 左手で持つカセットコンロ。鍋はこの上に載せていて、あおると浮く */
+    var stove = this.stove = new T.Group(); rig.add(stove);
+    var body = new T.Mesh(new T.BoxGeometry(0.36, 0.07, 0.28), new T.MeshStandardMaterial({ color: 0xc9ccd1, metalness: 0.5, roughness: 0.35 }));
+    stove.add(body);
+    var topPlate = new T.Mesh(new T.BoxGeometry(0.34, 0.006, 0.26), new T.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.5 }));
+    topPlate.position.y = 0.037; stove.add(topPlate);
+    var burner = new T.Mesh(new T.CylinderGeometry(0.05, 0.055, 0.012, 16), metal);
+    burner.position.y = 0.045; stove.add(burner);
+    var trivet = new T.Mesh(new T.TorusGeometry(0.085, 0.005, 6, 20), metal);
+    trivet.rotation.x = Math.PI / 2; trivet.position.y = 0.055; stove.add(trivet);
+    var knob = new T.Mesh(new T.CylinderGeometry(0.018, 0.018, 0.02, 12), new T.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.5 }));
+    knob.rotation.x = Math.PI / 2; knob.position.set(0.11, 0, 0.145); stove.add(knob);
+    var lid = new T.Mesh(new T.BoxGeometry(0.1, 0.05, 0.004), new T.MeshStandardMaterial({ color: 0xd8342c, roughness: 0.5 }));
+    lid.position.set(-0.09, 0, 0.142); stove.add(lid);
+    this.STOVE = new T.Vector3(0, -0.44 - 0.085, -0.5);
+    this.flames = new T.Group(); this.flames.position.y = 0.085; stove.add(this.flames);
     var fm = new T.MeshBasicMaterial({ color: 0x4aa8ff, transparent: true, opacity: 0.85 });
     var fo = new T.MeshBasicMaterial({ color: 0xffa23a, transparent: true, opacity: 0.8 });
     for (i = 0; i < 10; i++) {
@@ -189,6 +199,20 @@
       f.position.set(Math.cos(a) * 0.05, -0.035, Math.sin(a) * 0.05); this.flames.add(f);
     }
     wok.position.set(0, -0.44, -0.5);
+
+    /* ゴールで出てくる皿（白い丸皿に青い縁） */
+    var plateTex = Z3.canvasTex(128, 8, function (g, w, h) {
+      g.fillStyle = "#fbfbf8"; g.fillRect(0, 0, w, h);
+      g.fillStyle = "#2f5fa8"; g.fillRect(w * 0.82, 0, w * 0.06, h);
+    });
+    var pp = [new T.Vector2(0, 0), new T.Vector2(0.12, 0.004), new T.Vector2(0.16, 0.018), new T.Vector2(0.175, 0.03), new T.Vector2(0.17, 0.034), new T.Vector2(0.15, 0.022), new T.Vector2(0.09, 0.01), new T.Vector2(0.06, -0.01), new T.Vector2(0, -0.01)];
+    var plateG = new T.LatheGeometry(pp, 40), puv = plateG.attributes.uv;
+    for (i = 0; i < puv.count; i++) puv.setXY(i, 1 - puv.getY(i), 0.5);
+    this.plate = new T.Mesh(plateG, new T.MeshStandardMaterial({ map: plateTex, roughness: 0.25, side: T.DoubleSide }));
+    this.plate.visible = false;
+    rig.add(this.plate);
+    this.PLATE = new T.Vector3(-0.02, -0.6, -0.7);
+    this.invW = new T.Matrix4();
 
     /* 米粒 */
     var N = o.n;
@@ -253,12 +277,37 @@
     this.wok.rotation.set(k * 0.28, 0, 0);
     this.skis.position.set(0, 0, 0);
     this.skis.rotation.set(0, -(s.steer || 0) * 0.15, 0);
+    var sv = s.serveA >= 0 ? s.serveA : -1;
+    this.plate.visible = sv >= 0;
+    if (sv >= 0) {
+      /* 皿が奥の下から出てきて、鍋は皿の手前上へ動き、向こうへ傾けて盛る。コンロは左下へ下ろす */
+      var pu = Math.min(1, sv / 0.6), pe = 1 - Math.pow(1 - pu, 3);
+      this.plate.position.set(this.PLATE.x, this.PLATE.y - 0.35 * (1 - pe), this.PLATE.z);
+      var wu = Math.min(1, sv / 0.7), we = wu * wu * (3 - 2 * wu);
+      var tilt = sv < 0.7 ? 0 : Math.min(1, (sv - 0.7) / 0.35) * (sv < 1.8 ? 1 : Math.max(0, 1 - (sv - 1.8) / 0.4));
+      var away = sv < 1.8 ? 0 : Math.min(1, (sv - 1.8) / 0.5);
+      this.wok.position.set(0.26 * we + 0.4 * away, -0.44 + 0.04 * we + 0.2 * away, -0.5 - 0.18 * we);
+      this.wok.rotation.set(0, 0, 1.15 * tilt);
+      this.stoveOff = we;
+      this.head.rotation.x = -0.5 - 0.22 * we;
+    }
+    var so = sv >= 0 ? this.stoveOff : 0;
+    this.stove.position.set(this.STOVE.x - 0.3 * so, this.STOVE.y - 0.5 * so, this.STOVE.z + 0.15 * so);
+    this.stove.rotation.set(0, 0, 0);
     this.syncArms(s.crashA >= 0 ? Math.min(s.crashA, 1.6) : 0);
     if (s.crashA >= 0) this.crashPose(Math.min(s.crashA, 1.6), t);
     for (var j = 0; j < this.flames.children.length; j++) this.flames.children[j].scale.y = 0.7 + Math.random() * 0.6;
 
     var gs = s.grains, M = this.m, Q = this.q, V = this.v, Sc = this.s;
     var K = this.K;
+    /* 盛りつけ：残った粒を皿の上のドームの形へ。皿の位置は鍋の中の座標に直して置く */
+    var serving = sv >= 0, slot = 0, total = 0, Rd = 0;
+    if (serving) {
+      for (var u = 0; u < gs.length; u++) if (!gs[u].lost) total++;
+      total *= K;
+      Rd = 0.035 + 0.07 * Math.cbrt(total / (gs.length * K));
+      this.wok.updateMatrix(); this.stove.updateMatrix(); this.invW.copy(this.wok.matrix).invert();
+    }
     for (var n = 0; n < gs.length * K; n++) {
       var i = Math.floor(n / K), g = gs[i], kind = n % K ? 0 : g.kind;
       if (g.lost && g.y < -1.4) { Sc.set(0, 0, 0); }
@@ -267,6 +316,18 @@
       if (!g.on) { e.x += 0.25; e.z += 0.17; }
       Q.setFromEuler(e);
       V.set(g.x + o[0] * spread, g.y + 0.006 + o[1], g.z + o[2] * spread);
+      if (serving && !g.lost) {
+        /* ドームの殻に、下から順に敷き詰める（黄金角で回す） */
+        var j = slot++, hh = (j + 0.5) / total, ring = Rd * Math.sqrt(1 - hh * hh) * 1.15, an = j * 2.39996;
+        var tx = this.PLATE.x + Math.cos(an) * ring, ty = this.plate.position.y + 0.012 + Rd * hh * 1.35, tz = this.PLATE.z + Math.sin(an) * ring;
+        var go = Math.max(0, Math.min(1, (sv - 0.8 - hh * 0.6) / 0.35));
+        if (go > 0) {
+          this.tmpV.set(tx, ty, tz).applyMatrix4(this.invW);
+          var ge = go * go * (3 - 2 * go);
+          V.lerp(this.tmpV, ge);
+          if (go < 1) V.y += Math.sin(go * Math.PI) * 0.03;
+        }
+      }
       M.compose(V, Q, Sc);
       this.rice.setMatrixAt(n, M);
       var c = this.col;
@@ -292,17 +353,19 @@
     this.head.rotation.set(-0.5 + e * 1.15 + Math.sin(c * 26) * 0.05 * (1 - e), e * 0.25, e * 0.55, "YXZ");
     this.wok.position.set(c * 0.5, -0.44 + c * 4.2 - c * c * 1.9, -0.5 - c * 2.4);
     this.wok.rotation.set(c * 7, c * 3, c * 5);
+    this.stove.position.set(this.STOVE.x - c * 0.6, this.STOVE.y + c * 3.0 - c * c * 1.8, this.STOVE.z - c * 1.6);
+    this.stove.rotation.set(c * 5, c * 3, c * 4);
     this.skis.position.set(c * -0.4, c * 2.2 - c * c * 1.4, -c * 1.2);
     this.skis.rotation.set(c * 4, c * 2, c * 3);
   };
 
   /* 肩から鍋の握り所まで袖を伸ばす。転んだときは腕を振り上げる */
   GameScene.prototype.syncArms = function (c) {
-    this.wok.updateMatrix();
+    this.wok.updateMatrix(); this.stove.updateMatrix();
     for (var i = 0; i < this.arms.length; i++) {
       var A = this.arms[i], k = A.k;
       var sh = this.tmpV.set(k * 0.22, -0.6, 0.02);
-      var wr = this.tmpW.copy(k > 0 ? this.gripR : this.gripL).applyMatrix4(this.wok.matrix);
+      var wr = k > 0 ? this.tmpW.copy(this.gripR).applyMatrix4(this.wok.matrix) : this.tmpW.copy(this.gripL).applyMatrix4(this.stove.matrix);
       if (c > 0) wr.set(k * (0.35 + c * 0.2), -0.2 + c * 0.9, -0.35);
       var dir = wr.clone().sub(sh), len = Math.max(0.05, dir.length() - 0.045);
       dir.normalize();

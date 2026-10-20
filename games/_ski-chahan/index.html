@@ -159,10 +159,10 @@
   function surf(r) { return BR - Math.sqrt(Math.max(0, BR * BR - r * r)); }
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", CRASH: "crash", RESULT: "result" };
+  var S = { INTRO: "intro", PLAY: "play", CRASH: "crash", SERVE: "serve", RESULT: "result" };
   var state, score, T, keyMode = false;
   var P;                                       /* 滑っている人 */
-  var steer, keySteer, flipT, flipCool, crashA, crashed, shake, noHit = false;
+  var steer, keySteer, flipT, flipCool, crashA, crashed, serveA, shake, noHit = false;
 
   function newRound() {
     shareButton.hidden = true;
@@ -170,7 +170,7 @@
     state = S.PLAY;
     score = 0;
     T = 0;
-    steer = 0; keySteer = 0; flipT = 9; flipCool = 0; crashA = 0; crashed = false; shake = 0;
+    steer = 0; keySteer = 0; flipT = 9; flipCool = 0; crashA = 0; crashed = false; serveA = -1; shake = 0;
     P = { x: 0, z: 0, h: 0, md: 0, st: 0, yaw: 0, v: VMAX, y: 1.6, vy: -VMAX * SLOPE, vx: 0, vz: -VMAX, dist: 0 };
     P.y = P.gy = ground(0, 0) + 1.6;
     grains = [];
@@ -227,6 +227,20 @@
       P.x += -Math.sin(P.md) * P.v * dt; P.z += -Math.cos(P.md) * P.v * dt;
       stepGrains(dt);
       if (crashA > 2.2) { score = 0; state = S.RESULT; }
+      return;
+    }
+    if (state === S.SERVE) {
+      /* ゴール：止まって皿に盛る（見た目は scene3d.js の servePose） */
+      T += dt; serveA += dt;
+      P.v = Math.max(0, P.v - dt * 24);
+      P.x += -Math.sin(P.md) * P.v * dt; P.z += -Math.cos(P.md) * P.v * dt;
+      if (serveA > 0.75 && serveA - dt <= 0.75) noiseHit(0.5, 1400, 0.3, 0.6);   /* 鍋から皿へジャッ */
+      if (serveA > 2.6) {
+        state = S.RESULT;
+        tone(523, 0.15, 0.15, "triangle");
+        tone(659, 0.15, 0.15, "triangle", null, 0.12);
+        tone(784, 0.35, 0.15, "triangle", null, 0.24);
+      }
       return;
     }
     if (state !== S.PLAY) { setLoop(wind, 0); setLoop(sizzle, 0); return; }
@@ -343,15 +357,16 @@
   function calcScore() {
     var s = 0;
     for (var i = 0; i < N; i++) s += quality(grains[i]);
-    return Math.round(s / N * 100);
+    return Math.round(s / N * 1000);
   }
+  /* 点数（0〜1000）からランク */
+  function rank(sc) { return sc >= 850 ? "S" : sc >= 700 ? "A" : sc >= 500 ? "B" : sc >= 300 ? "C" : "D"; }
+
   function finish() {
     if (state !== S.PLAY) return;
     score = calcScore();
-    state = S.RESULT;
-    tone(523, 0.15, 0.15, "triangle");
-    tone(659, 0.15, 0.15, "triangle", null, 0.12);
-    tone(784, 0.35, 0.15, "triangle", null, 0.24);
+    state = S.SERVE; serveA = 0;
+    setLoop(wind, 0); setLoop(sizzle, 0);
   }
 
   /* ============ 入力 ============
@@ -433,10 +448,13 @@
   function doShare() {
     var s = score, text;
     if (crashed) { window.zResultActions.x({ text: zT("スキーで滑りながら炒飯を炒めていたら、木に激突して全部ぶちまけた", "Crashed into a tree while stir-frying rice on skis and sent it all flying") + zT(" #スキー炒飯", " #SkiFriedRice") }); return; }
-    if (s >= 85) text = zT("ゲレンデを滑りながら黄金のパラパラ炒飯を完成させた（パラパラ度" + s + "%）", "Skied down the slope and made golden fluffy fried rice (" + s + "% fluffy)");
-    else if (s >= 60) text = zT("スキーで滑降しながら炒飯を" + s + "%パラパラに炒めた", "Stir-fried rice to " + s + "% fluffiness while skiing downhill");
-    else if (s >= 30) text = zT("雪山で滑りながら炒めた炒飯、パラパラ度" + s + "%", "Fried rice made while skiing: " + s + "% fluffy");
-    else text = zT("炒飯はほとんど雪山に消えた（パラパラ度" + s + "%）", "Most of my fried rice vanished into the snow (" + s + "% fluffy)");
+    var rk = rank(s), tag = zT("（" + s + "点・" + rk + "ランク）", " (" + s + " pts, rank " + rk + ")");
+    if (rk === "S") text = zT("ゲレンデを滑りながら黄金のパラパラ炒飯を完成させた", "Skied down the slope and made golden fluffy fried rice");
+    else if (rk === "A") text = zT("スキーで滑降しながら炒飯をパラパラに炒めきった", "Stir-fried rice to perfection while skiing downhill");
+    else if (rk === "B") text = zT("雪山で滑りながら炒飯を作り、なんとか皿に盛った", "Made fried rice while skiing and somehow got it on a plate");
+    else if (rk === "C") text = zT("滑りながら炒めた炒飯、皿の上はさびしい量だった", "Fried rice made on skis: a sad little portion on the plate");
+    else text = zT("炒飯はほとんど雪山に消えた", "Most of my fried rice vanished into the snow");
+    text += tag;
     window.zResultActions.x({ text: text + zT(" #スキー炒飯", " #SkiFriedRice") });
   }
 
@@ -460,7 +478,7 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ crashA: crashed ? crashA : -1, vmax: VMAX, t: T || 0, state: state, p: P, grains: grains, flipT: flipT, shake: shake, steer: P ? P.st : 0 });
+        s3.sync({ serveA: serveA, crashA: crashed ? crashA : -1, vmax: VMAX, t: T || 0, state: state, p: P, grains: grains, flipT: flipT, shake: shake, steer: P ? P.st : 0 });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); }
     }
@@ -471,7 +489,7 @@
   /* 結果画面。数字と「もう一度」「Xでシェア」だけ */
   function resultButtons() {
     var h = 54, gap = 16, wr = 170, ws = 224;
-    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.62;
+    var x0 = W / 2 - (wr + gap + ws) / 2, y = H * 0.8;
     return [
       { id: "retry", x: x0, y: y, w: wr, h: h, label: "もう一度" },
       { id: "share", x: x0 + wr + gap, y: y, w: ws, h: h, label: "Xでシェア" }
@@ -485,16 +503,24 @@
     }
     return null;
   }
+  /* 結果：ランクと点数。ゴールしたときは盛った皿が見えるよう、暗くするのは控えめに */
+  var RANK_COL = { S: "#ffd23a", A: "#ff8a3a", B: "#7fd0ff", C: "#c9d3dc", D: "#9aa3ad" };
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.62)";
+    ctx.fillStyle = crashed ? "rgba(10,8,6,.62)" : "rgba(10,8,6,.38)";
     ctx.fillRect(0, 0, W, H);
+    var rk = crashed ? "D" : rank(score);
     ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
-    ctx.font = "800 108px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(score + "%", W / 2, H * 0.45);
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 12;
+    ctx.font = "900 150px sans-serif";
+    ctx.lineWidth = 10; ctx.strokeStyle = "#16202e"; ctx.lineJoin = "round";
+    ctx.strokeText(rk, W / 2, H * 0.24);
+    ctx.fillStyle = RANK_COL[rk];
+    ctx.fillText(rk, W / 2, H * 0.24);
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 96px sans-serif";
+    ctx.fillText(String(score), W / 2, H * 0.36);
     ctx.restore();
     resultButtons().forEach(function (b) {
       ctx.save();
