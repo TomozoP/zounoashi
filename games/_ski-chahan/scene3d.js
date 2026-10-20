@@ -110,7 +110,7 @@
     /* 舞う雪：人のまわりに置き、後ろへ抜けたら前へ戻す（速さが見える） */
     this.flakeN = 260;
     var fp = new Float32Array(this.flakeN * 3);
-    this.flakes = new T.Points(new T.BufferGeometry(), new T.PointsMaterial({ color: 0xffffff, size: 0.05, transparent: true, opacity: 0.9, fog: false }));
+    this.flakes = new T.Points(new T.BufferGeometry(), new T.PointsMaterial({ color: 0xffffff, size: 0.05, map: Z3.canvasTex(32, 32, function (g) { var r = g.createRadialGradient(16, 16, 0, 16, 16, 16); r.addColorStop(0, "rgba(255,255,255,1)"); r.addColorStop(0.5, "rgba(255,255,255,.8)"); r.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = r; g.fillRect(0, 0, 32, 32); }), transparent: true, depthWrite: false, opacity: 0.9, fog: false }));
     this.flakes.geometry.setAttribute("position", new T.BufferAttribute(fp, 3));
     this.flakes.frustumCulled = false;
     this.flakeR = Z3.rng(5);
@@ -226,9 +226,10 @@
     wok.add(this.rice);
     this.rot = [];
     var rr = Z3.rng(11);
-    this.off = [];
+    this.off = []; this.pr = [];
     for (i = 0; i < N * K; i++) {
       this.rot.push(new T.Euler(rr() * 6, rr() * 6, rr() * 6));
+      this.pr.push([rr(), rr(), rr(), rr()]);
       var oa = rr() * 6.283, orr = i % K ? 0.006 + rr() * 0.011 : 0;
       this.off.push([Math.cos(oa) * orr, i % K ? rr() * 0.014 : 0, Math.sin(oa) * orr]);
     }
@@ -279,17 +280,33 @@
     this.skis.rotation.set(0, -(s.steer || 0) * 0.15, 0);
     var sv = s.serveA >= 0 ? s.serveA : -1;
     this.plate.visible = sv >= 0;
+    if (sv < 0) {
+      this.head.position.set(0, 0, 0);
+      this.skis.visible = this.stove.visible = true;
+      for (var aj = 0; aj < this.arms.length; aj++) this.arms[aj].sleeve.visible = this.arms[aj].cuff.visible = this.arms[aj].hand.visible = true;
+    }
     if (sv >= 0) {
       /* 皿が奥の下から出てきて、鍋は皿の手前上へ動き、向こうへ傾けて盛る。コンロは左下へ下ろす */
       var pu = Math.min(1, sv / 0.6), pe = 1 - Math.pow(1 - pu, 3);
       this.plate.position.set(this.PLATE.x, this.PLATE.y - 0.35 * (1 - pe), this.PLATE.z);
       var wu = Math.min(1, sv / 0.7), we = wu * wu * (3 - 2 * wu);
-      var tilt = sv < 0.7 ? 0 : Math.min(1, (sv - 0.7) / 0.35) * (sv < 1.8 ? 1 : Math.max(0, 1 - (sv - 1.8) / 0.4));
-      var away = sv < 1.8 ? 0 : Math.min(1, (sv - 1.8) / 0.5);
+      var tilt = sv < 0.7 ? 0 : Math.min(1, (sv - 0.7) / 0.35) * (sv < 2.0 ? 1 : Math.max(0, 1 - (sv - 2.0) / 0.4));
+      var away = sv < 2.0 ? 0 : Math.min(1, (sv - 2.0) / 0.5);
       this.wok.position.set(0.26 * we + 0.4 * away, -0.44 + 0.04 * we + 0.2 * away, -0.5 - 0.18 * we);
       this.wok.rotation.set(0, 0, 1.15 * tilt);
       this.stoveOff = we;
       this.head.rotation.x = -0.5 - 0.22 * we;
+      /* 盛り終わったら皿へ寄って大きく映す。板・コンロ・腕は消す */
+      var cu = Math.max(0, Math.min(1, (sv - 2.15) / 0.8)), ce = cu * cu * (3 - 2 * cu);
+      if (ce > 0) {
+        this.head.rotation.set(-0.72 - 0.1 * ce, 0, 0, "YXZ");
+        this.head.position.set(0, -0.12 * ce, -0.12 * ce);
+        var f2 = 80 + (56 - 80) * ce;
+        if (Math.abs(this.camera.fov - f2) > 0.05) { this.camera.fov = f2; this.camera.updateProjectionMatrix(); }
+      }
+      var hideGear = ce > 0.35;
+      this.skis.visible = this.stove.visible = !hideGear;
+      for (var ai = 0; ai < this.arms.length; ai++) this.arms[ai].sleeve.visible = this.arms[ai].cuff.visible = this.arms[ai].hand.visible = !hideGear;
     }
     var so = sv >= 0 ? this.stoveOff : 0;
     this.stove.position.set(this.STOVE.x - 0.3 * so, this.STOVE.y - 0.5 * so, this.STOVE.z + 0.15 * so);
@@ -313,19 +330,21 @@
       if (g.lost && g.y < -1.4) { Sc.set(0, 0, 0); }
       else Sc.set(1, 1, 1);
       var e = this.rot[n], o = this.off[n], spread = g.on ? 1 : 1.6;
-      if (!g.on) { e.x += 0.25; e.z += 0.17; }
+      if (!g.on && !serving) { e.x += 0.25; e.z += 0.17; }   /* 盛った後は回さない（うごめかない） */
       Q.setFromEuler(e);
       V.set(g.x + o[0] * spread, g.y + 0.006 + o[1], g.z + o[2] * spread);
       if (serving && !g.lost) {
-        /* ドームの殻に、下から順に敷き詰める（黄金角で回す） */
-        var j = slot++, hh = (j + 0.5) / total, ring = Rd * Math.sqrt(1 - hh * hh) * 1.15, an = j * 2.39996;
-        var tx = this.PLATE.x + Math.cos(an) * ring, ty = this.plate.position.y + 0.012 + Rd * hh * 1.35, tz = this.PLATE.z + Math.sin(an) * ring;
-        var go = Math.max(0, Math.min(1, (sv - 0.8 - hh * 0.6) / 0.35));
+        /* 落ちる先は皿の上の山の中のばらばらな場所。鍋の傾いた側（左）にある粒から順に、少しずつずれて落ちる */
+        var pr = this.pr[n], rr2 = Rd * 1.15 * Math.sqrt(pr[0]), an = pr[1] * 6.2832;
+        var hgt = Rd * 1.3 * Math.sqrt(Math.max(0, 1 - pr[0])) * (0.5 + 0.5 * pr[2]);
+        var tx = this.PLATE.x + Math.cos(an) * rr2, ty = this.plate.position.y + 0.012 + hgt, tz = this.PLATE.z + Math.sin(an) * rr2;
+        var go = Math.max(0, Math.min(1, (sv - 0.85 - (g.x + 0.2) * 1.2 - pr[3] * 0.35) / 0.32));
         if (go > 0) {
-          this.tmpV.set(tx, ty, tz).applyMatrix4(this.invW);
-          var ge = go * go * (3 - 2 * go);
-          V.lerp(this.tmpV, ge);
-          if (go < 1) V.y += Math.sin(go * Math.PI) * 0.03;
+          var sx = this.tmpW.copy(V).applyMatrix4(this.wok.matrix);
+          var fx2 = sx.x + (tx - sx.x) * go, fz2 = sx.z + (tz - sx.z) * go;
+          var fy2 = sx.y + (ty - sx.y) * go * go + Math.sin(go * Math.PI) * 0.02;
+          V.set(fx2, fy2, fz2).applyMatrix4(this.invW);
+          if (go < 1) { e.x += 0.3; e.y += 0.2; }
         }
       }
       M.compose(V, Q, Sc);
