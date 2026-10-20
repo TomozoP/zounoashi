@@ -329,16 +329,18 @@
       total *= K;
       Rd = 0.035 + 0.07 * Math.cbrt(total / (gs.length * K));
       this.wok.updateMatrix(); this.stove.updateMatrix(); this.invW.copy(this.wok.matrix).invert();
+      if (!this.fillReady) this.makeFillOrder(gs);
       /* 芯は粒が落ちるにつれて育つ。色は粒の火の通りの平均 */
       var grow = Math.max(0, Math.min(1, (sv - 1.0) / 0.9)), ck = 0, bn = 0, cnt = 0;
       for (var u2 = 0; u2 < gs.length; u2++) if (!gs[u2].lost) { ck += gs[u2].cook; bn += gs[u2].burn; cnt++; }
-      this.mound.visible = this.moundShadow.visible = total > 0 && grow > 0;
+      this.mound.visible = false;   /* 芯は使わない（中から玉が膨らんで見えたため） */
+      this.moundShadow.visible = total > 0 && grow > 0;
       this.mound.position.set(this.PLATE.x, this.plate.position.y + 0.008, this.PLATE.z);
       this.mound.scale.set(Rd * 1.02 * Math.max(0.3, grow), Rd * 1.15 * grow, Rd * 1.02 * Math.max(0.3, grow));
       this.mound.material.color.copy(this.cRaw).lerp(this.cGold, cnt ? ck / cnt * 0.8 : 0).lerp(this.cBurn, cnt ? Math.min(1, bn / cnt * 1.2) : 0).multiplyScalar(0.92);
       this.moundShadow.position.set(this.PLATE.x, this.plate.position.y + 0.005, this.PLATE.z);
       this.moundShadow.scale.setScalar(Rd * 1.45 * Math.max(0.3, grow));
-    } else { this.mound.visible = this.moundShadow.visible = false; }
+    } else { this.mound.visible = this.moundShadow.visible = false; this.fillReady = false; }
     for (var n = 0; n < gs.length * K; n++) {
       var i = Math.floor(n / K), g = gs[i], kind = n % K ? 0 : g.kind;
       if (g.lost && g.y < -1.4) { Sc.set(0, 0, 0); }
@@ -348,11 +350,13 @@
       Q.setFromEuler(e);
       V.set(g.x + o[0] * spread, g.y + 0.006 + o[1], g.z + o[2] * spread);
       if (serving && !g.lost) {
-        /* 落ちる先は皿の上の山の中のばらばらな場所。鍋の傾いた側（左）にある粒から順に、少しずつずれて落ちる */
-        var pr = this.pr[n], rr2 = Rd * 1.15 * Math.sqrt(pr[0]), an = pr[1] * 6.2832;
-        var hgt = Rd * 1.3 * Math.sqrt(Math.max(0, 1 - pr[0])) * (0.8 + 0.2 * pr[2]);
+        /* 鍋の傾いた側（左）の粒から少しずつずれて落ち、皿の上に下から積もっていく。
+           f は落ちる順番（0〜1）。f までに落ちた分の山の表面に乗せるので、最初の粒は皿の上、最後の粒が山のてっぺんの側になる */
+        var pr = this.pr[n], f = this.fillOrder[n], Rf = Rd * Math.cbrt(Math.max(0.02, f));
+        var rr2 = Rf * 1.15 * Math.sqrt(pr[0]), an = pr[1] * 6.2832;
+        var hgt = Rf * 1.3 * Math.sqrt(Math.max(0, 1 - pr[0]));
         var tx = this.PLATE.x + Math.cos(an) * rr2, ty = this.plate.position.y + 0.012 + hgt, tz = this.PLATE.z + Math.sin(an) * rr2;
-        var go = Math.max(0, Math.min(1, (sv - 0.85 - (g.x + 0.2) * 1.2 - pr[3] * 0.35) / 0.32));
+        var go = Math.max(0, Math.min(1, (sv - 0.85 - this.fillDelay[n]) / 0.32));
         if (go > 0) {
           var sx = this.tmpW.copy(V).applyMatrix4(this.wok.matrix);
           var fx2 = sx.x + (tx - sx.x) * go, fz2 = sx.z + (tz - sx.z) * go;
@@ -390,6 +394,22 @@
     this.stove.rotation.set(c * 5, c * 3, c * 4);
     this.skis.position.set(c * -0.4, c * 2.2 - c * c * 1.4, -c * 1.2);
     this.skis.rotation.set(c * 4, c * 2, c * 3);
+  };
+
+  /* 盛りつけの順番：落ちる遅れ（鍋の左にある粒ほど早い＋ばらつき）を決め、その順に 0〜1 の番号を振る */
+  GameScene.prototype.makeFillOrder = function (gs) {
+    var K = this.K, n = gs.length * K, idx = [];
+    this.fillDelay = this.fillDelay || new Float32Array(n);
+    this.fillOrder = this.fillOrder || new Float32Array(n);
+    for (var i = 0; i < n; i++) {
+      var g = gs[Math.floor(i / K)];
+      this.fillDelay[i] = (g.x + 0.2) * 1.2 + this.pr[i][3] * 0.35;
+      if (!g.lost) idx.push(i);
+    }
+    var d = this.fillDelay;
+    idx.sort(function (a, b) { return d[a] - d[b]; });
+    for (var j = 0; j < idx.length; j++) this.fillOrder[idx[j]] = (j + 1) / idx.length;
+    this.fillReady = true;
   };
 
   /* 肩から鍋の握り所まで袖を伸ばす。転んだときは腕を振り上げる */
