@@ -139,9 +139,9 @@
   var TREES = (function () {
     var s = 7, r = function () { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
     var t = [];
-    for (var d = 35; d < LEN - 15; d += 5.5) {     /* 滑る所にぽつぽつ */
+    for (var d = 30; d < LEN - 15; d += 4) {     /* 滑る所にぽつぽつ */
       if (r() < 0.9) t.push({ x: (r() * 2 - 1) * (EDGE - 3), z: -d - r() * 4, s: 0.8 + r() * 0.5 });
-      if (d > 120 && r() < 0.5) t.push({ x: (r() * 2 - 1) * (EDGE - 3), z: -d - r() * 4, s: 0.8 + r() * 0.5 });
+      if (d > 80 && r() < 0.6) t.push({ x: (r() * 2 - 1) * (EDGE - 3), z: -d - r() * 4, s: 0.8 + r() * 0.5 });
     }
     for (var e = -10; e < LEN + 80; e += 4) {    /* 両端の林 */
       t.push({ x: -(EDGE + 1 + r() * 10), z: -e - r() * 3, s: 0.9 + r() * 0.6 });
@@ -178,7 +178,7 @@
       var a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 0.12;
       var x = Math.cos(a) * r, z = Math.sin(a) * r;
       grains.push({ x: x, y: surf(r) + Math.random() * 0.03, z: z, vx: 0, vy: 0, vz: 0,
-        cook: 0, burn: 0, touch: 0, on: false, lost: false, kind: i % 11 === 0 ? 1 : i % 17 === 0 ? 2 : 0 });
+        cook: 0, burn: 0, touch: 0, on: false, lost: false, kind: i % 11 === 0 ? 1 : i % 17 === 0 ? 2 : i % 13 === 0 ? 3 : 0 });   /* 1卵 2ネギ 3チャーシュー */
     }
   }
 
@@ -226,7 +226,7 @@
       P.v = Math.max(0, P.v - dt * 22);
       P.x += -Math.sin(P.md) * P.v * dt; P.z += -Math.cos(P.md) * P.v * dt;
       stepGrains(dt);
-      if (crashA > 2.2) { score = 0; state = S.RESULT; }
+      if (crashA > 2.2) { score = 0; state = S.RESULT; fanfare("D"); }
       return;
     }
     if (state === S.SERVE) {
@@ -237,9 +237,7 @@
       if (serveA > 0.75 && serveA - dt <= 0.75) noiseHit(0.5, 1400, 0.3, 0.6);   /* 鍋から皿へジャッ */
       if (serveA > 3.1) {
         state = S.RESULT;
-        tone(523, 0.15, 0.15, "triangle");
-        tone(659, 0.15, 0.15, "triangle", null, 0.12);
-        tone(784, 0.35, 0.15, "triangle", null, 0.24);
+        fanfare(rank(score));
       }
       return;
     }
@@ -361,6 +359,33 @@
   }
   /* 点数（0〜N）からランク。満点に対する割合で分ける */
   function rank(sc) { var r = sc / N; return r >= 0.85 ? "S" : r >= 0.7 ? "A" : r >= 0.5 ? "B" : r >= 0.3 ? "C" : "D"; }
+
+  /* ランクが出たときのファンファーレ。金管っぽい音（のこぎり波を少しこもらせる）で、ランクが高いほど長く華やか。D はしょんぼり */
+  function brass(freq, at, dur, vol) {
+    if (!AC) return;
+    var n = AC.currentTime + at;
+    [1, 1.005].forEach(function (dt2) {
+      var o = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
+      o.type = "sawtooth"; o.frequency.setValueAtTime(freq * dt2, n);
+      f.type = "lowpass"; f.frequency.setValueAtTime(900, n); f.frequency.linearRampToValueAtTime(2600, n + 0.05); f.frequency.linearRampToValueAtTime(1500, n + dur);
+      g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(vol, n + 0.03);
+      g.gain.setValueAtTime(vol, n + dur * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+      o.connect(f); f.connect(g); g.connect(AC.destination);
+      o.start(n); o.stop(n + dur + 0.05);
+    });
+  }
+  function fanfare(rk) {
+    var C = 523.25, E = 659.25, G = 783.99, C2 = 1046.5, A = 880, F = 698.46, B = 987.77;
+    var tunes = {
+      S: [[G, 0, 0.1], [G, 0.12, 0.1], [G, 0.24, 0.1], [C2, 0.36, 0.5], [A, 0.9, 0.16], [B, 1.08, 0.16], [C2, 1.26, 0.9]],
+      A: [[C, 0, 0.1], [E, 0.12, 0.1], [G, 0.24, 0.1], [C2, 0.36, 0.7]],
+      B: [[C, 0, 0.12], [E, 0.14, 0.12], [G, 0.28, 0.5]],
+      C: [[E, 0, 0.14], [G, 0.16, 0.45]],
+      D: [[G, 0, 0.18], [F * 0.75, 0.22, 0.7]]
+    };
+    (tunes[rk] || tunes.C).forEach(function (t) { brass(t[0], t[1], t[2], 0.07); });
+    if (rk === "S" || rk === "A") { brass(C / 2, 0.36, 0.7, 0.05); brass(G / 2, 0.36, 0.7, 0.04); }
+  }
 
   function finish() {
     if (state !== S.PLAY) return;

@@ -229,6 +229,12 @@
     this.rice.instanceMatrix.setUsage(T.DynamicDrawUsage);
     this.rice.frustumCulled = false;
     wok.add(this.rice);
+    /* 具（卵・ネギ・チャーシュー）は立方体。米粒と同じ番号の場所に描き、使わない番号は大きさ0 */
+    this.bits = new T.InstancedMesh(new T.BoxGeometry(0.013, 0.013, 0.013), new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }), N * K);
+    this.bits.instanceMatrix.setUsage(T.DynamicDrawUsage);
+    this.bits.frustumCulled = false;
+    wok.add(this.bits);
+    this.zero = new T.Matrix4().makeScale(0, 0, 0);
     this.rot = [];
     var rr = Z3.rng(11);
     this.off = []; this.pr = [];
@@ -240,7 +246,7 @@
     }
     this.col = new T.Color();
     this.cRaw = new T.Color(0xf7f3e6); this.cGold = new T.Color(0xf0c35a); this.cBurn = new T.Color(0x3a2212);
-    this.cEgg = new T.Color(0xffd23a); this.cNegi = new T.Color(0x4f9f36);
+    this.cEgg = new T.Color(0xffd23a); this.cNegi = new T.Color(0x4f9f36); this.cHam = new T.Color(0xd4564c);
     this.m = m; this.q = q; this.v = v; this.s = s;
   }
 
@@ -366,17 +372,21 @@
         }
       }
       M.compose(V, Q, Sc);
-      this.rice.setMatrixAt(n, M);
       var c = this.col;
-      if (kind === 2) c.copy(this.cNegi);
-      else {
-        c.copy(kind === 1 ? this.cEgg : this.cRaw).lerp(this.cGold, g.cook * (kind === 1 ? 0.3 : 0.8));
-        c.lerp(this.cBurn, Math.min(1, g.burn * 1.2));
+      if (kind === 0) {
+        c.copy(this.cRaw).lerp(this.cGold, g.cook * 0.8).lerp(this.cBurn, Math.min(1, g.burn * 1.2));
+        this.rice.setMatrixAt(n, M); this.rice.setColorAt(n, c);
+        this.bits.setMatrixAt(n, this.zero);
+      } else {
+        c.copy(kind === 1 ? this.cEgg : kind === 2 ? this.cNegi : this.cHam).lerp(this.cBurn, Math.min(1, g.burn * 0.9));
+        this.bits.setMatrixAt(n, M); this.bits.setColorAt(n, c);
+        this.rice.setMatrixAt(n, this.zero);
       }
-      this.rice.setColorAt(n, c);
     }
     this.rice.instanceMatrix.needsUpdate = true;
     if (this.rice.instanceColor) this.rice.instanceColor.needsUpdate = true;
+    this.bits.instanceMatrix.needsUpdate = true;
+    if (this.bits.instanceColor) this.bits.instanceColor.needsUpdate = true;
   };
 
   /* 激突：前のめりに転がって雪に突っ込む。鍋は回りながら前へ飛び、板も外れる */
