@@ -12,10 +12,37 @@
     var st = this.stage = new Z3.Stage({ renderer: { tone: "aces", exposure: 1.05 }, camera: { fov: 80, near: 0.05, far: 160 } });
     var sc = this.scene = st.scene;
     this.camera = st.camera;
-    sc.background = new T.Color(0x9cc6ec);
+    sc.background = new T.Color(0xbcd8f2);
     sc.fog = new T.Fog(0xe2edf7, 28, 125);
     sc.add(new T.HemisphereLight(0xffffff, 0x9fb4cc, 1.5));
     var sun = new T.DirectionalLight(0xfff4e2, 2.2); sun.position.set(-4, 9, 3); sc.add(sun);
+
+    /* 空：上ほど濃い青のドーム。遠くの山並み（人について動く） */
+    var skyG = new T.SphereGeometry(140, 24, 12), sc2 = [], top = new T.Color(0x2f74c8), hor = new T.Color(0xcfe3f6);
+    for (i = 0; i < skyG.attributes.position.count; i++) {
+      var yy = Math.max(0, skyG.attributes.position.getY(i) / 140), c = hor.clone().lerp(top, Math.pow(yy, 0.45));
+      sc2.push(c.r, c.g, c.b);
+    }
+    skyG.setAttribute("color", new T.Float32BufferAttribute(sc2, 3));
+    this.sky = new T.Group(); sc.add(this.sky);
+    this.sky.add(new T.Mesh(skyG, new T.MeshBasicMaterial({ vertexColors: true, side: T.BackSide, fog: false, depthWrite: false, toneMapped: false })));
+    var mtTex = Z3.canvasTex(1024, 128, function (g, w, h) {
+      var r2 = Z3.rng(9);
+      /* とがった峰を2列。奥は青く、手前は白っぽく */
+      [["#9fbcdc", 0.3, 18], ["#e4edf6", 0.55, 11]].forEach(function (L) {
+        g.fillStyle = L[0]; g.beginPath(); g.moveTo(0, h);
+        var x = 0, y0 = h * 0.9;
+        g.lineTo(0, y0);
+        while (x < w) {
+          var wd = 30 + r2() * 60, pk = h * L[1] + r2() * h * 0.25;
+          g.lineTo(x + wd * (0.4 + r2() * 0.2), pk); x += wd; g.lineTo(x, h * 0.75 + r2() * h * 0.15);
+        }
+        g.lineTo(w, h); g.closePath(); g.fill();
+      });
+    });
+    var mt = new T.Mesh(new T.CylinderGeometry(120, 120, 22, 40, 1, true), new T.MeshBasicMaterial({ map: mtTex, transparent: true, side: T.BackSide, fog: false, depthWrite: false, toneMapped: false }));
+    mt.position.y = -14; this.sky.add(mt);
+    this.sky.children.forEach(function (c) { c.renderOrder = -1; });
 
     /* 雪の斜面。人の近くだけを毎回高さを付け直して使い回す（1マス2m、絵も2mで繰り返す） */
     var snowTex = Z3.canvasTex(128, 128, function (g, w, h) {
@@ -53,7 +80,18 @@
       m.compose(v, q, s);
       leaves.setMatrixAt(i, m); leaves2.setMatrixAt(i, m); trunks.setMatrixAt(i, m);
     }
-    sc.add(leaves); sc.add(leaves2); sc.add(trunks);
+    /* 枝の上の雪 */
+    var capG = new T.ConeGeometry(0.62, 1.1, 7); capG.translate(0, 5.65, 0);
+    var caps = new T.InstancedMesh(capG, new T.MeshLambertMaterial({ color: 0xf6f9fc }), n);
+    var capG2 = new T.ConeGeometry(1.0, 0.9, 7); capG2.translate(0, 4.0, 0);
+    var caps2 = new T.InstancedMesh(capG2, new T.MeshLambertMaterial({ color: 0xf0f5fa }), n);
+    var tint = new T.Color();
+    for (i = 0; i < n; i++) {
+      leaves.getMatrixAt(i, m); caps.setMatrixAt(i, m); caps2.setMatrixAt(i, m);
+      var tv2 = 0.85 + ((i * 37) % 30) / 100;
+      leaves.setColorAt(i, tint.setRGB(tv2, tv2, tv2)); leaves2.setColorAt(i, tint.setRGB(tv2, tv2, tv2));
+    }
+    sc.add(leaves); sc.add(leaves2); sc.add(trunks); sc.add(caps); sc.add(caps2);
 
     /* ゴールの門 */
     var gz = -o.len, gy0 = o.ground(0, gz);
@@ -84,37 +122,71 @@
     this.head = new T.Group(); rig.add(this.head);
     this.head.add(this.camera);
 
-    /* 板 */
-    var skiM = new T.MeshLambertMaterial({ color: 0xe0312b });
+    /* 板（先が反った細い板と、前から見える留め具） */
+    var skiM = new T.MeshStandardMaterial({ color: 0xd8342c, roughness: 0.35 });
+    var skiLine = new T.MeshBasicMaterial({ color: 0xffffff });
     this.skis = new T.Group(); rig.add(this.skis);
-    [-0.14, 0.14].forEach(function (x) {
-      var b = new T.Mesh(new T.BoxGeometry(0.1, 0.025, 1.6), skiM); b.position.set(x, -1.57, -0.45); this.skis.add(b);
-      var tip = new T.Mesh(new T.BoxGeometry(0.1, 0.025, 0.25), skiM); tip.position.set(x, -1.53, -1.33); tip.rotation.x = 0.45; this.skis.add(tip);
+    [-0.13, 0.13].forEach(function (x) {
+      var b = new T.Mesh(new T.BoxGeometry(0.085, 0.02, 1.4), skiM); b.position.set(x, -1.57, -0.5); this.skis.add(b);
+      var ln = new T.Mesh(new T.PlaneGeometry(0.012, 1.3), skiLine); ln.rotation.x = -Math.PI / 2; ln.position.set(x, -1.558, -0.55); this.skis.add(ln);
+      var tip = new T.Mesh(new T.CylinderGeometry(0.11, 0.11, 0.085, 12, 1, true, 0, Math.PI / 2), skiM);
+      tip.rotation.set(0, 0, Math.PI / 2); tip.position.set(x, -1.47, -1.2); this.skis.add(tip);
     }, this);
 
-    /* 中華鍋 */
+    /* 中華鍋：内側は焼けた色、縁は少し厚く。右に長い木の柄、左に小さな持ち手 */
     var wok = this.wok = new T.Group(); rig.add(wok);
     var pts = [];
-    for (i = 0; i <= 14; i++) { var r = RIM * i / 14; pts.push(new T.Vector2(r, surf(r))); }
-    pts.push(new T.Vector2(RIM + 0.008, surf(RIM) + 0.004));
-    var steel = new T.MeshStandardMaterial({ color: 0x4a4e55, metalness: 0.25, roughness: 0.45, side: T.DoubleSide });
-    wok.add(new T.Mesh(new T.LatheGeometry(pts, 32), steel));
-    var handle = new T.Mesh(new T.CylinderGeometry(0.018, 0.022, 0.36, 8), new T.MeshLambertMaterial({ color: 0x8a5a33 }));
-    handle.rotation.set(Math.PI / 2, 0, 0); handle.rotation.order = "YXZ"; handle.rotation.y = 0.55;
-    handle.position.set(0.24, surf(RIM) - 0.01, 0.2); wok.add(handle);
-    var glove = new T.MeshLambertMaterial({ color: 0x2b6fd6 });
-    var gR = new T.Mesh(new T.SphereGeometry(0.06, 10, 8), glove); gR.scale.set(1, 0.8, 1.3); gR.position.set(0.33, surf(RIM) - 0.02, 0.34); wok.add(gR);
-    var gL = new T.Mesh(new T.SphereGeometry(0.055, 10, 8), glove); gL.scale.set(1.3, 0.8, 1); gL.position.set(-0.22, surf(RIM) - 0.01, 0.06); wok.add(gL);
-    /* 鍋の下のコンロと火 */
-    var stove = new T.Mesh(new T.CylinderGeometry(0.06, 0.075, 0.05, 14), new T.MeshStandardMaterial({ color: 0x9aa0a8, metalness: 0.7, roughness: 0.4 }));
-    stove.position.y = -0.085; wok.add(stove);
+    for (i = 0; i <= 16; i++) { var r = RIM * i / 16; pts.push(new T.Vector2(r, surf(r))); }
+    var RY = surf(RIM);
+    pts.push(new T.Vector2(RIM + 0.006, RY + 0.003), new T.Vector2(RIM + 0.01, RY - 0.004));
+    var wokTex = Z3.canvasTex(8, 128, function (g, w, h) {
+      var gr = g.createLinearGradient(0, h, 0, 0);
+      gr.addColorStop(0, "#2a2018"); gr.addColorStop(0.35, "#4a3a2c"); gr.addColorStop(0.6, "#5b5f68"); gr.addColorStop(0.9, "#7d828b"); gr.addColorStop(1, "#c9ccd2");
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    });
+    var steel = new T.MeshStandardMaterial({ map: wokTex, metalness: 0.45, roughness: 0.38, side: T.DoubleSide });
+    wok.add(new T.Mesh(new T.LatheGeometry(pts, 40), steel));
+    var metal = new T.MeshStandardMaterial({ color: 0x8b9099, metalness: 0.6, roughness: 0.35 });
+    var wood = new T.MeshStandardMaterial({ color: 0x9a6232, roughness: 0.6 });
+    /* 柄は鍋の右手前へ伸ばす（hd が向き） */
+    var hd = new T.Vector3(0.42, 0.16, 0.89).normalize(), hq = new T.Quaternion().setFromUnitVectors(new T.Vector3(0, 1, 0), hd);
+    var h0 = new T.Vector3(RIM * 0.42, RY - 0.012, RIM * 0.9);
+    var shank = new T.Mesh(new T.CylinderGeometry(0.011, 0.014, 0.1, 8), metal);
+    shank.quaternion.copy(hq); shank.position.copy(h0).addScaledVector(hd, 0.05); wok.add(shank);
+    var grip = new T.Mesh(new T.CylinderGeometry(0.02, 0.017, 0.26, 10), wood);
+    grip.quaternion.copy(hq); grip.position.copy(h0).addScaledVector(hd, 0.23); wok.add(grip);
+    var helper = new T.Mesh(new T.TorusGeometry(0.03, 0.007, 6, 12, Math.PI), metal);
+    helper.rotation.set(Math.PI / 2, 0, Math.PI / 2); helper.position.set(-RIM - 0.008, RY - 0.006, 0); wok.add(helper);
+    this.gripR = h0.clone().addScaledVector(hd, 0.2);          /* 右手で握る所（鍋の中の座標） */
+    this.gripL = new T.Vector3(-RIM - 0.03, RY - 0.004, 0.01);  /* 左手で持つ所 */
+
+    /* 腕：肩から手首まで、上着の袖と手袋。毎回の鍋の位置に合わせて伸ばす */
+    var sleeveG = new T.CylinderGeometry(0.042, 0.062, 1, 12); sleeveG.translate(0, 0.5, 0);
+    var cuffG = new T.CylinderGeometry(0.047, 0.047, 0.05, 12);
+    var jacket = new T.MeshStandardMaterial({ color: 0xf07a22, roughness: 0.7 });
+    var cuffM = new T.MeshStandardMaterial({ color: 0x23324a, roughness: 0.8 });
+    var gloveM = new T.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.75 });
+    var mitt = new T.SphereGeometry(1, 14, 10), thumbG = new T.CapsuleGeometry ? new T.CapsuleGeometry(0.013, 0.03, 4, 8) : new T.SphereGeometry(0.016, 8, 6);
+    this.arms = [];
+    [1, -1].forEach(function (k) {
+      var arm = { k: k, sleeve: new T.Mesh(sleeveG, jacket), cuff: new T.Mesh(cuffG, cuffM), hand: new T.Group() };
+      var palm = new T.Mesh(mitt, gloveM); palm.scale.set(0.042, 0.03, 0.06); palm.position.y = 0.045; arm.hand.add(palm);
+      var thumb = new T.Mesh(thumbG, gloveM); thumb.position.set(-k * 0.035, 0.035, 0.015); thumb.rotation.z = k * 0.6; arm.hand.add(thumb);
+      rig.add(arm.sleeve); rig.add(arm.cuff); rig.add(arm.hand);
+      this.arms.push(arm);
+    }, this);
+    this.tmpV = new T.Vector3(); this.tmpW = new T.Vector3(); this.up = new T.Vector3(0, 1, 0); this.tmpQ = new T.Quaternion();
+
+    /* 鍋の下の小さなコンロと火 */
+    var stove = new T.Mesh(new T.CylinderGeometry(0.055, 0.07, 0.045, 14), metal);
+    stove.position.y = -0.08; wok.add(stove);
     this.flames = new T.Group(); wok.add(this.flames);
     var fm = new T.MeshBasicMaterial({ color: 0x4aa8ff, transparent: true, opacity: 0.85 });
     var fo = new T.MeshBasicMaterial({ color: 0xffa23a, transparent: true, opacity: 0.8 });
-    for (i = 0; i < 8; i++) {
-      var a = i / 8 * Math.PI * 2;
-      var f = new T.Mesh(new T.ConeGeometry(0.018, 0.07, 6), i % 2 ? fo : fm);
-      f.position.set(Math.cos(a) * 0.06, -0.035, Math.sin(a) * 0.06); this.flames.add(f);
+    for (i = 0; i < 10; i++) {
+      var a = i / 10 * Math.PI * 2;
+      var f = new T.Mesh(new T.ConeGeometry(0.014, 0.06, 6), i % 2 ? fo : fm);
+      f.position.set(Math.cos(a) * 0.05, -0.035, Math.sin(a) * 0.05); this.flames.add(f);
     }
     wok.position.set(0, -0.44, -0.5);
 
@@ -167,6 +239,7 @@
     this.camDy = this.camDy == null ? 0 : this.camDy + ((p.y - base) - this.camDy) * 0.12;
     this.rig.position.set(p.x, base + this.camDy, p.z);
     this.rig.rotation.y = p.h;
+    this.sky.position.set(p.x, base, p.z);
     var sh = s.shake || 0, t = s.t, sp = s.state === "play" ? p.v / s.vmax : 0;
     /* 速いほど細かく揺れて、視野が少し広がる */
     var buzz = sp * 0.0012;
@@ -180,6 +253,7 @@
     this.wok.rotation.set(k * 0.28, 0, 0);
     this.skis.position.set(0, 0, 0);
     this.skis.rotation.set(0, -(s.steer || 0) * 0.15, 0);
+    this.syncArms(s.crashA >= 0 ? Math.min(s.crashA, 1.6) : 0);
     if (s.crashA >= 0) this.crashPose(Math.min(s.crashA, 1.6), t);
     for (var j = 0; j < this.flames.children.length; j++) this.flames.children[j].scale.y = 0.7 + Math.random() * 0.6;
 
@@ -220,6 +294,23 @@
     this.wok.rotation.set(c * 7, c * 3, c * 5);
     this.skis.position.set(c * -0.4, c * 2.2 - c * c * 1.4, -c * 1.2);
     this.skis.rotation.set(c * 4, c * 2, c * 3);
+  };
+
+  /* 肩から鍋の握り所まで袖を伸ばす。転んだときは腕を振り上げる */
+  GameScene.prototype.syncArms = function (c) {
+    this.wok.updateMatrix();
+    for (var i = 0; i < this.arms.length; i++) {
+      var A = this.arms[i], k = A.k;
+      var sh = this.tmpV.set(k * 0.22, -0.6, 0.02);
+      var wr = this.tmpW.copy(k > 0 ? this.gripR : this.gripL).applyMatrix4(this.wok.matrix);
+      if (c > 0) wr.set(k * (0.35 + c * 0.2), -0.2 + c * 0.9, -0.35);
+      var dir = wr.clone().sub(sh), len = Math.max(0.05, dir.length() - 0.045);
+      dir.normalize();
+      this.tmpQ.setFromUnitVectors(this.up, dir);
+      A.sleeve.position.copy(sh); A.sleeve.quaternion.copy(this.tmpQ); A.sleeve.scale.set(1, len, 1);
+      A.cuff.position.copy(sh).addScaledVector(dir, len); A.cuff.quaternion.copy(this.tmpQ);
+      A.hand.position.copy(sh).addScaledVector(dir, len + 0.01); A.hand.quaternion.copy(this.tmpQ);
+    }
   };
 
   GameScene.prototype.syncFlakes = function (p) {
