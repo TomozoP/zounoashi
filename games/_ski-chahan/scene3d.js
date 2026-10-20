@@ -93,14 +93,14 @@
     }
     sc.add(leaves); sc.add(leaves2); sc.add(trunks); sc.add(caps); sc.add(caps2);
 
-    /* 横倒しの木：皮の丸太に、上に雪、切り口は明るい色、短い枝の名残 */
-    var bark = new T.MeshLambertMaterial({ color: 0x5e4029 }), cut = new T.MeshLambertMaterial({ color: 0xc9a46c }), logSnow = new T.MeshLambertMaterial({ color: 0xf4f8fc });
+    /* 横倒しの木：濃い色の丸太、切り口は明るい色、短い枝の名残 */
+    var bark = new T.MeshLambertMaterial({ color: 0x4a2e1a }), cut = new T.MeshLambertMaterial({ color: 0xc9a46c }), logShadow = new T.MeshBasicMaterial({ color: 0x6f7f95, transparent: true, opacity: 0.35, depthWrite: false });
     o.logs.forEach(function (lg, li) {
       var len = lg.b - lg.a, cx = (lg.a + lg.b) / 2, gy = Math.max(o.ground(lg.a, lg.z), o.ground(lg.b, lg.z), o.ground(cx, lg.z));
       var grp = new T.Group(); grp.position.set(cx, o.ground(cx, lg.z) + 0.32, lg.z); sc.add(grp);
       var trunk = new T.Mesh(new T.CylinderGeometry(0.36, 0.38, len, 10), bark); trunk.rotation.z = Math.PI / 2; grp.add(trunk);
-      var snow = new T.Mesh(new T.CylinderGeometry(0.385, 0.385, len * 0.96, 10, 1, false, -Math.PI / 2, Math.PI), logSnow);
-      snow.rotation.set(0, 0, Math.PI / 2); snow.position.y = 0.04; grp.add(snow);
+      /* 雪は載せない（雪面に溶けて見えにくいため）。下に影の帯を敷いて目立たせる */
+      var sh = new T.Mesh(new T.PlaneGeometry(len, 1.3), logShadow); sh.rotation.x = -Math.PI / 2; sh.position.y = -0.3; grp.add(sh);
       /* すき間側の端は切り口を見せる */
       var endX = lg.a < -o.edge ? len / 2 : -len / 2;
       var cap = new T.Mesh(new T.CircleGeometry(0.36, 12), cut); cap.rotation.y = endX > 0 ? Math.PI / 2 : -Math.PI / 2; cap.position.x = endX + (endX > 0 ? 0.01 : -0.01); grp.add(cap);
