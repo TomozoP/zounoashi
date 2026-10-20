@@ -101,9 +101,10 @@
       var trunk = new T.Mesh(new T.CylinderGeometry(0.36, 0.38, len, 10), bark); trunk.rotation.z = Math.PI / 2; grp.add(trunk);
       /* 雪は載せない（雪面に溶けて見えにくいため）。下に影の帯を敷いて目立たせる */
       var sh = new T.Mesh(new T.PlaneGeometry(len, 1.3), logShadow); sh.rotation.x = -Math.PI / 2; sh.position.y = -0.3; grp.add(sh);
-      /* すき間側の端は切り口を見せる */
-      var endX = lg.a < -o.edge ? len / 2 : -len / 2;
-      var cap = new T.Mesh(new T.CircleGeometry(0.36, 12), cut); cap.rotation.y = endX > 0 ? Math.PI / 2 : -Math.PI / 2; cap.position.x = endX + (endX > 0 ? 0.01 : -0.01); grp.add(cap);
+      /* 両端は切り口 */
+      [-1, 1].forEach(function (k) {
+        var cap = new T.Mesh(new T.CircleGeometry(0.36, 12), cut); cap.rotation.y = k * Math.PI / 2; cap.position.x = k * (len / 2 + 0.01); grp.add(cap);
+      });
       for (var b2 = 0; b2 < len / 3; b2++) {
         var br = new T.Mesh(new T.CylinderGeometry(0.04, 0.07, 0.7, 5), bark);
         br.position.set(-len / 2 + 1.5 + b2 * 3 + (li % 3), 0.35, (b2 % 2 ? 0.15 : -0.15)); br.rotation.set(b2 % 2 ? 0.6 : -0.6, 0, 0.3);
