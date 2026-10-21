@@ -146,6 +146,7 @@
     var capM = Z3.std(0xffffff, { roughness: 0.3 });
     var cyl = new T.CylinderGeometry(1, 1, 1, 16, 1, true), sph = new T.SphereGeometry(1, 16, 12);
 
+    var clearZ = function (r) { r.clearDepth(); };
     var glowM = new T.MeshBasicMaterial({ color: 0xffd23a, side: T.BackSide, depthTest: false, transparent: true });
     var root = this.person = new T.Group(); sc.add(root);
     /* 手足：筒と両端の玉。setLimb で両端を合わせる */
@@ -159,7 +160,8 @@
       var R = r + 0.07;
       oc.scale.set(R, 1, R); oa.scale.setScalar(R); ob.scale.setScalar(R);
       var glow = new T.Group(); glow.add(oc, oa, ob); glow.visible = false; m.add(glow);
-      [oc, oa, ob].forEach(function (x) { x.renderOrder = 10; });
+      /* 縁取りを描く直前に奥行きを消し、その手足だけ奥行きつきで重ねる（ほかの物より手前に、節は出さない） */
+      [oc, oa, ob].forEach(function (x) { x.renderOrder = 10; x.onBeforeRender = clearZ; });
       m.userData = { c: c, a: a, b: b, oc: oc, ob: ob, glow: glow, mat: mat };
       root.add(m); return m;
     }
@@ -220,10 +222,10 @@
     m.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), new T.Vector3(dx / len, dy / len, dz / len));
   }
 
-  /* 手前に描くための、奥行きを無視する同じ色の材質 */
+  /* 手前に描くための同じ色の材質（透明物の後に描かれるよう transparent にする） */
   NumaScene.prototype.topMat = function (mat) {
     this.tops = this.tops || new Map();
-    if (!this.tops.has(mat)) { var m = mat.clone(); m.depthTest = false; m.transparent = true; this.tops.set(mat, m); }
+    if (!this.tops.has(mat)) { var m = mat.clone(); m.transparent = true; this.tops.set(mat, m); }
     return this.tops.get(mat);
   };
 
