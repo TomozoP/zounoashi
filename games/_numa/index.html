@@ -149,6 +149,7 @@
   /* 最初は手足なし。手前の腕→奥の腕→手前の脚→奥の脚の順に1本ずつ描いて、回す力を決めていく */
   var design = [{ pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }];
   var sel = 0;                                 /* いま描いている手足（順番） */
+  var phase = "draw";                          /* draw：操作盤なしで描く（指を離したら次へ）、power：操作盤で回す力を決める */
   var pts, mass, sticks, wet, limbIdx, camX, camY, zoom, splats, bubbles, guideT, drawing, sliding, runT;
 
   /* 設計から体を組み立てる（水面に浮かべた姿勢） */
@@ -183,12 +184,19 @@
   /* 描く画面へ。もう一度のときも形は残し、1本目から順に見直せる */
   function toEdit() {
     shareButton.hidden = true;
-    sel = 0;
+    sel = 0; phase = "draw";
     state = S.EDIT;
     score = 0; T = 0; held = false; won = false;
     build(WALL0 + 360);
     splats = []; bubbles = []; guideT = 0; drawing = null; sliding = false;
-    zoom = 1; camX = pts[HIP].x + 20; camY = SY + H * 0.2;          /* 体の全体が操作盤の上に収まるように */
+    editCam(1);
+  }
+  /* 描く画面のカメラ。描くときは関節を画面の中央に寄せ、力を決めるときは体の全体を操作盤の上に収める */
+  function editCam(k) {
+    var j = pts[JOINT[sel]];
+    var tz = phase === "draw" ? 1.3 : 1, tx = phase === "draw" ? j.x : pts[HIP].x + 20, ty = phase === "draw" ? j.y : SY + H * 0.2;
+    if (k >= 1 || !(zoom > 0)) { zoom = tz; camX = tx; camY = ty; return; }
+    zoom += (tz - zoom) * k; camX += (tx - camX) * k; camY += (ty - camY) * k;
   }
   function play() {
     state = S.RUN; runT = 0; T = 0; drawing = null; sliding = false;
@@ -277,6 +285,7 @@
     T += dt;
     guideT += dt;
     updateFx(dt);
+    if (state === S.EDIT) editCam(Math.min(1, dt * 6));
     if (state === S.GOAL) {
       for (var j = 0; j < SUB; j++) physStep(dt / SUB);
       if (T - score > 1.6) toResult();
@@ -356,7 +365,7 @@
   /* 次へ（最後の1本なら再生）。描いていないうちは進めない */
   function next() {
     if (!drawn(sel)) return;
-    if (sel < 3) { sel++; tone(660, 0.06, 0.08, "triangle"); }
+    if (sel < 3) { sel++; phase = "draw"; tone(660, 0.06, 0.08, "triangle"); }
     else play();
   }
   function setTorque(x) {
@@ -378,14 +387,15 @@
     if (state !== S.EDIT) return;
     if (x == null) { next(); return; }
     held = true;
-    if (y >= PANEL) {
+    if (phase === "power" && y >= PANEL) {
       var ui = panelUI();
-      /* 描き終えた手足（と今の1本）は丸を押して戻れる */
-      for (var i = 0; i < 4; i++) if (Math.hypot(x - ui.chips[i].x, y - ui.chips[i].y) < ui.chips[i].r + 10 && (i <= sel || drawn(i))) { sel = i; tone(660, 0.05, 0.08, "square"); return; }
+      /* 描き終えた手足（と今の1本）は丸を押すと、その手足を描き直せる */
+      for (var i = 0; i < 4; i++) if (Math.hypot(x - ui.chips[i].x, y - ui.chips[i].y) < ui.chips[i].r + 10 && (i <= sel || drawn(i))) { sel = i; phase = "draw"; tone(660, 0.05, 0.08, "square"); return; }
       if (Math.hypot(x - ui.play.x, y - ui.play.y) < ui.play.r + 10) { next(); return; }
       if (Math.abs(y - ui.slider.y) < 40) { sliding = true; setTorque(x); }
       return;
     }
+    if (phase === "power") { phase = "draw"; return; }   /* 上の画面を触ると、この手足を描き直す */
     drawing = [toGame(x, y)];
   }
   function move(x, y) {
@@ -419,6 +429,7 @@
     design[sel].pts = out;
     build(pts[HIP].x);
     tone(520, 0.06, 0.08, "triangle");
+    phase = "power";                            /* 指を離したら回す力を決める */
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -442,7 +453,7 @@
     if (n === 2) {                               /* 速く泳げる見本の形（腕は平たいかい、脚は曲がった足ひれ） */
       design[0].pts = line(1, 0.15, 150); design[1].pts = line(1, 0.15, 150); design[0].torque = 1; design[1].torque = 1;
       design[2].pts = line(-1, 0.3, 160); design[3].pts = line(-1, -0.2, 160); design[2].torque = -0.4; design[3].torque = 0.4;
-      toEdit(); sel = 3;
+      toEdit(); sel = 3; phase = "power";
     }
     if (n === 9) { toEdit(); play(); score = 18.42; won = true; toResult(); }
   }
@@ -518,7 +529,12 @@
     ctx.stroke();
     var a = 0.5 + 0.3 * Math.sin(guideT * 5);
     ctx.fillStyle = "rgba(255,210,58," + a + ")";
-    ctx.beginPath(); ctx.arc(j.x, j.y, 12, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(j.x, j.y, phase === "draw" ? 16 : 12, 0, 7); ctx.fill();
+    if (phase === "draw" && !drawing) {                 /* 描く前は、関節から広がる輪で描き始めの場所を示す */
+      var rr = 16 + (guideT * 40) % 40;
+      ctx.strokeStyle = "rgba(255,210,58," + (1 - (rr - 16) / 40) + ")"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(j.x, j.y, rr, 0, 7); ctx.stroke();
+    }
     if (drawing && drawing.length > 1) {
       ctx.strokeStyle = "#16202e"; ctx.lineWidth = 7;
       ctx.beginPath();
@@ -534,7 +550,7 @@
 
   /* 操作盤：手足を選ぶ丸（小さな人の絵で、その手足だけ太く）・回す力の目盛り・再生 */
   function drawPanel() {
-    if (state !== S.EDIT) return;
+    if (state !== S.EDIT || phase !== "power") return;
     var ui = panelUI();
     ctx.save();
     ctx.fillStyle = "rgba(22,32,46,.88)";
