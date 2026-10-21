@@ -7,10 +7,10 @@
   var T, Z3 = global.Z3;
   var S = 40;
   var HEIGHT = { bed: 36, sofa: 44, shelf: 80, fridge: 100, tv: 46, table: 40, chair: 24, box: 44, dish: 40,
-    plant: 34, lamp: 70, washer: 60, dresser: 64, guitar: 10, chabudai: 20, cushion: 8, trash: 34 };
+    plant: 34, lamp: 70, washer: 60, dresser: 64, guitar: 10, chabudai: 20, cushion: 8, kotatsu: 30, trash: 34 };
   var SIDE = { bed: 0x6d4f37, sofa: 0x3f6187, shelf: 0x7c552f, fridge: 0xc9d0d6, tv: 0x1a1d22, table: 0x94683f, chair: 0x6d4f33,
     box: 0xa47a45, dish: 0xa47a45, plant: 0x9e522c, lamp: 0xd8c78f, washer: 0xcfd5da, dresser: 0x86592f, guitar: 0x8a5a26,
-    chabudai: 0x7a4826, cushion: 0xb5403c, trash: 0x6f8396 };
+    chabudai: 0x7a4826, cushion: 0xb5403c, kotatsu: 0xb8483a, trash: 0x6f8396 };
   var WALL_H = 46;
 
   function RoomScene(game) {
