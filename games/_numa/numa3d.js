@@ -1,5 +1,5 @@
-/* 背泳ぎのプールの立体の見た目（three.js）。games/three-base.js の Z3 を土台にする。
-   動き（腕・速さ・沈み）はゲーム側の2Dのまま。ここは見た目と、画面の点 ⇔ ゲームの点の変換だけ。
+/* バタフライのプールの立体の見た目（three.js）。games/three-base.js の Z3 を土台にする。
+   動き（手足の物理）はゲーム側の2Dのまま。ここは見た目と、画面の点 ⇔ ゲームの点の変換だけ。
    単位：ゲームの 100px が立体の 1。ゲームの x → 立体の x、ゲームの y（下向き）→ 立体の -y。
    水面（ゲームの SY）が立体の y=0。人は z=0 の面で泳ぐ。
    真横から遠近なしで見る2.5D（立体の絵を平らに並べた画面）。画面は泳ぐ人を追って横に動く。 */
@@ -120,7 +120,7 @@
     }
     sc.add(rope);
 
-    /* 背泳ぎの旗：両端から5mに張った紐と三角の旗 */
+    /* 両端から5mに張った紐と三角の旗 */
     var flagCols = [0xe03a3a, 0xffffff, 0x2f6fe0, 0xffd23a].map(function (c) { return Z3.std(c, { roughness: 0.6 }); });
     var cordM = Z3.std(0x555555), poleM = Z3.std(0xb0b8c0, { roughness: 0.4 });
     [x0 + m5, x1 - m5].forEach(function (x) {
@@ -164,6 +164,7 @@
     this.handB = ball(skinB, 0.13);
     this.thigh = limb(skin, 0.19); this.shin = limb(skin, 0.16);
     this.footF = ball(skin, 0.16);
+    this.toeF = limb(skin, 0.1); this.toeB = limb(skinB, 0.09);
     this.torso = limb(skin, 0.31);
     this.trunks = new T.Mesh(new T.CylinderGeometry(0.33, 0.35, 0.36, 20), trunks);
     root.add(this.trunks);
@@ -240,27 +241,30 @@
     if (!this.built) this.buildPool(g);
     var self = this, V = function (p, z) { return self.v(p.x, p.y, z); };
 
-    var sh = g.shake * 0.04;
-    this.person.position.set((Math.random() - .5) * sh, (Math.random() - .5) * sh, 0);
-    var h = V(g.hip), s = V(g.shoulder), knee = V(g.knee), foot = V(g.foot), fb = V(g.footB), el = V(g.elbow), hd = V(g.hand), ot = V(g.other);
+    var h = V(g.hip), s = V(g.shoulder), knee = V(g.knee), foot = V(g.foot), toe = V(g.toe), el = V(g.elbow), hd = V(g.hand);
     var zf = 0.18, zb = -0.18;
-    setLimb(this.legB, { x: h.x, y: h.y, z: zb }, { x: fb.x, y: fb.y, z: zb });
-    this.footB.position.set(fb.x, fb.y, zb);
+    /* 両腕・両脚はそろって動く（バタフライ）。奥の手足は少し暗い色で同じ形 */
+    setLimb(this.legB, { x: h.x, y: h.y, z: zb }, { x: foot.x, y: foot.y, z: zb });
+    this.footB.position.set(foot.x, foot.y, zb);
+    setLimb(this.toeB, { x: foot.x, y: foot.y, z: zb }, { x: toe.x, y: toe.y, z: zb });
     setLimb(this.thigh, { x: h.x, y: h.y, z: zf }, { x: knee.x, y: knee.y, z: zf });
     setLimb(this.shin, { x: knee.x, y: knee.y, z: zf }, { x: foot.x, y: foot.y, z: zf });
     this.footF.position.set(foot.x, foot.y, zf);
+    setLimb(this.toeF, { x: foot.x, y: foot.y, z: zf }, { x: toe.x, y: toe.y, z: zf });
     setLimb(this.torso, h, s);
+    var thT = Math.atan2(s.x - h.x, s.y - h.y);          /* 胴の傾き（上向きから時計回り） */
     this.trunks.position.set(h.x + (s.x - h.x) * 0.06, h.y + (s.y - h.y) * 0.06, 0);
-    this.trunks.rotation.set(0, 0, -g.th);
-    setLimb(this.armB, { x: s.x, y: s.y, z: -0.3 }, { x: ot.x, y: ot.y, z: -0.3 });
-    this.handB.position.set(ot.x, ot.y, -0.3);
+    this.trunks.rotation.set(0, 0, -thT);
+    setLimb(this.armB, { x: s.x, y: s.y, z: -0.3 }, { x: hd.x, y: hd.y, z: -0.3 });
+    this.handB.position.set(hd.x, hd.y, -0.3);
     setLimb(this.upper, { x: s.x, y: s.y, z: 0.32 }, { x: el.x, y: el.y, z: 0.34 });
     setLimb(this.fore, { x: el.x, y: el.y, z: 0.34 }, { x: hd.x, y: hd.y, z: 0.36 });
     this.handF.position.set(hd.x, hd.y, 0.36);
 
-    var hp = V(g.head);
+    /* 頭：首から頭への向きに合わせて回す。うつ伏せなので顔は下（と少し手前）を向く */
+    var hp = V(g.head), thH = Math.atan2(hp.x - s.x, hp.y - s.y);
     this.head.position.set(hp.x, hp.y, 0.02);
-    this.head.rotation.set(0, 0.35, -g.th);
+    this.head.rotation.set(0, Math.PI - 0.35, -thH);
     this.head.scale.setScalar(g.K * 0.95);
 
     /* 表情 */

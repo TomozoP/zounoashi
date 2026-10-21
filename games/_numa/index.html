@@ -122,19 +122,29 @@
   var S = { INTRO: "intro", PLAY: "play", GOAL: "goal", RESULT: "result" };
   var state, score, T, held, keyMode = false, won = false;
 
-  /* 体の寸法（ゲームの座標） */
-  var K = 1.45, TORSO = 100 * K, HEAD_AT = 128 * K, HEAD_R = 28, LEG = 112 * K, ARM = 84 * K;
   /* プール：ゲームの 200px が 1m。スタートの壁から25m先がゴールの壁 */
   var M = 200, WALL0 = 60, POOL = 25 * M, WALL1 = WALL0 + POOL;
+  var K = 1.45, HEAD_R = 28;                   /* 頭の見た目の大きさ（HEAD_R * K） */
   var SY;                                      /* 水面の高さ */
   function place() {
     SY = Math.round(H * 0.5);
   }
 
-  /* 人：腰の位置 x・沈み d（腰が水面より下に何px）・速さ vx。仰向けで頭がゴール側。
-     腕は肩のまわりの角度 arm（画面の時計回り。0=頭の先、π/2=水の中、π=腰の横、3π/2=空中）。
-     奥の腕はいつも反対側（arm+π）。 */
-  var P, finger, fv, panic, bubbles, splats, guideT, camX, strokes;
+  /* ============ 体（物理） ============
+     点と棒でできた人形（点の位置を直接動かす方式）。うつ伏せで頭がゴール側。
+     関節を目標の角度へ回すと、手足が水を押し、その抵抗で体が進む。進み方は水の抵抗まかせ。
+     腕ボタン：押している間は腕が前から水の中を通って後ろへ（かく）。離すと空中を回って前へ戻る。
+     脚ボタン：押している間はひざを曲げて足を上げる。離すと一気に蹴り下ろす。 */
+  var HEAD = 0, NECK = 1, HIP = 2, KNEE = 3, ANKLE = 4, TOE = 5, ELBOW = 6, HAND = 7;
+  var MASS = [3, 4, 5, 1.6, 1, 0.5, 1, 0.7];
+  var STICKS = [[HEAD, NECK, 52], [NECK, HIP, 135], [HIP, KNEE, 88], [KNEE, ANKLE, 82], [ANKLE, TOE, 36], [NECK, ELBOW, 74], [ELBOW, HAND, 70]];
+  var LIFT = [1.25, 1.2, 1.1, 0.9, 0.9, 0.9, 0.9, 0.9];   /* 浮く強さ（重さに対して）。胸と頭はよく浮く */
+  var G = 1400;                                 /* 重さ（下向きの加速） */
+  var CN = 0.055, CT = 0.004;                   /* 水の抵抗：棒の向きに垂直な動きは強く、沿う動きは弱い */
+  var FIN = [1, 1, 1, 1.5, 4, 1.2, 1.6];        /* 棒ごとの抵抗の倍率（足先はひれのように強く、手のひらも少し） */
+  var SUB = 8;                                  /* 1コマを細かく分けて計算する回数 */
+  var pts, arm, armRel, btnArm, btnLeg, camX, splats, bubbles, strokes, kicks, guideT;
+
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden=true;
@@ -143,85 +153,139 @@
     T = 0;
     held = false;
     won = false;
-    P = { x: WALL0 + LEG + 14, d: 14, vx: 0, th: 1.48, ph: 1.42, arm: Math.PI, shake: 0, kick: 0 };
-    finger = null; fv = 0; panic = 0;
-    bubbles = []; splats = []; guideT = 0; strokes = 0;
-    camX = W / 2;
+    /* まっすぐ伸びて水面に浮いた姿勢から。つま先がスタートの壁 */
+    var x = WALL0 + 6, y = SY + 6;
+    pts = [];
+    function at(px, py) { pts.push({ x: px, y: py, px: px, py: py }); }
+    var toeX = x, ank = toeX + 36, knee = ank + 82, hip = knee + 88, neck = hip + 135, head = neck + 52;
+    at(head, y - 6); at(neck, y); at(hip, y); at(knee, y); at(ank, y); at(toeX, y);
+    at(neck + 74, y + 4); at(neck + 144, y + 6);           /* 腕は頭の先へ伸ばしておく */
+    arm = 0; armRel = null;
+    btnArm = btnLeg = false;
+    camX = W / 2; splats = []; bubbles = []; strokes = 0; kicks = 0; guideT = 0;
   }
 
-  function hip() { return { x: P.x, y: SY + P.d }; }
-  function dirT() { return { x: Math.sin(P.th), y: -Math.cos(P.th) }; }
-  function shoulder() { var h = hip(), t = dirT(); return { x: h.x + t.x * TORSO * 0.92, y: h.y + t.y * TORSO * 0.92 }; }
-  function headPos() { var h = hip(), t = dirT(); return { x: h.x + t.x * HEAD_AT, y: h.y + t.y * HEAD_AT }; }
-  function lying() { return true; }
-  function armAt(a) { var s = shoulder(); return { x: s.x + Math.cos(a) * ARM, y: s.y + Math.sin(a) * ARM }; }
-  function handPos() { return armAt(P.arm); }
+  function ang(a, b) { return Math.atan2(b.y - a.y, b.x - a.x); }
+  function wrapA(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
+  function rotAround(p, c, d) {
+    var dx = p.x - c.x, dy = p.y - c.y, cs = Math.cos(d), sn = Math.sin(d);
+    p.x = c.x + dx * cs - dy * sn; p.y = c.y + dx * sn + dy * cs;
+  }
+  function relAngle(a, j, c) { return wrapA(ang(pts[j], pts[c]) - ang(pts[a], pts[j])); }
+  /* 関節の筋肉：子の角度を目標へ近づける回す力（ばねと減衰）。親側には同じ大きさの逆向きの力。
+     力の合計は0なので、体が進むのは水を押したときだけ。I は先の重さの回りにくさ、wn は速さ */
+  function muscle(ax, ay, a, j, c, err, I, wn, h) {
+    var A = pts[a], J = pts[j], C = pts[c];
+    var cx = C.x - J.x, cy = C.y - J.y, Lc = Math.hypot(cx, cy) || 1; cx /= Lc; cy /= Lc;
+    var wx = A.x - J.x, wy = A.y - J.y, Lp = Math.hypot(wx, wy) || 1; wx /= Lp; wy /= Lp;
+    var vjx = (J.x - J.px) / h, vjy = (J.y - J.py) / h;
+    var wc = (cx * ((C.y - C.py) / h - vjy) - cy * ((C.x - C.px) / h - vjx)) / Lc;
+    var wp = (wx * ((A.y - A.py) / h - vjy) - wy * ((A.x - A.px) / h - vjx)) / Lp;
+    err = Math.max(-1.5, Math.min(1.5, err));
+    var tau = I * wn * wn * err - 2 * I * wn * (wc - wp);
+    var tmax = I * wn * wn * 1.3;
+    tau = Math.max(-tmax, Math.min(tmax, tau));
+    var fcx = -cy * tau / Lc, fcy = cx * tau / Lc;            /* 子：角度が増える向き */
+    var fax = wy * tau / Lp, fay = -wx * tau / Lp;            /* 親：逆向き */
+    ax[c] += fcx / MASS[c]; ay[c] += fcy / MASS[c];
+    ax[a] += fax / MASS[a]; ay[a] += fay / MASS[a];
+    ax[j] -= (fcx + fax) / MASS[j]; ay[j] -= (fcy + fay) / MASS[j];
+  }
+
+  function physStep(h) {
+    var i, p, s;
+    /* 力：重さ・浮く力・空気と水の抵抗 */
+    var ax = [], ay = [];
+    for (i = 0; i < pts.length; i++) {
+      p = pts[i];
+      var dep = p.y - SY;
+      var sub = Math.max(0, Math.min(1, (dep + 12) / 30));          /* 水に浸かっている割合 */
+      ax[i] = 0; ay[i] = G - G * LIFT[i] * sub;
+      var vx = (p.x - p.px) / h, vy = (p.y - p.py) / h;
+      ax[i] -= vx * 0.15; ay[i] -= vy * 0.15;
+    }
+    for (i = 0; i < STICKS.length; i++) {
+      s = STICKS[i];
+      var A = pts[s[0]], B = pts[s[1]];
+      var mid = (A.y + B.y) / 2 - SY;
+      var wet = Math.max(0, Math.min(1, (mid + 10) / 25));
+      if (!wet) continue;
+      var dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+      var vmx = ((A.x - A.px) + (B.x - B.px)) / 2 / h, vmy = ((A.y - A.py) + (B.y - B.py)) / 2 / h;
+      var vt = vmx * ux + vmy * uy, nx = -uy, ny = ux, vn = vmx * nx + vmy * ny;
+      var cn = CN * FIN[i];
+      var fx = -(cn * vn * nx + CT * vt * ux) * L * wet, fy = -(cn * vn * ny + CT * vt * uy) * L * wet;
+      ax[s[0]] += fx / 2 / MASS[s[0]] * 10; ay[s[0]] += fy / 2 / MASS[s[0]] * 10;
+      ax[s[1]] += fx / 2 / MASS[s[1]] * 10; ay[s[1]] += fy / 2 / MASS[s[1]] * 10;
+    }
+    /* 関節の筋肉 */
+    var ra = relAngle(HIP, NECK, ELBOW);
+    if (armRel != null) arm += wrapA(ra - armRel);
+    armRel = ra;
+    var tw = btnArm ? Math.PI : 0;                  /* 押す：後ろ（π）へ、離す：前（0）へ。いつも同じ向きに回る */
+    var tgt = arm + ((tw - arm) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    if (tgt - arm > Math.PI * 2 - 0.4) tgt -= Math.PI * 2;
+    muscle(ax, ay, HIP, NECK, ELBOW, tgt - arm, 20000, 14, h);
+    muscle(ax, ay, NECK, ELBOW, HAND, wrapA(0.12 - relAngle(NECK, ELBOW, HAND)), 3400, 20, h);
+    muscle(ax, ay, HIP, NECK, HEAD, wrapA(0.1 - relAngle(HIP, NECK, HEAD)), 8100, 20, h);
+    muscle(ax, ay, NECK, HIP, KNEE, wrapA((btnLeg ? -0.75 : 0.2) - relAngle(NECK, HIP, KNEE)), 62000, 12, h);
+    muscle(ax, ay, HIP, KNEE, ANKLE, wrapA((btnLeg ? 1.5 : 0) - relAngle(HIP, KNEE, ANKLE)), 13700, 16, h);
+    muscle(ax, ay, KNEE, ANKLE, TOE, wrapA(0.15 - relAngle(KNEE, ANKLE, TOE)), 650, 15, h);
+    for (i = 0; i < pts.length; i++) {
+      p = pts[i];
+      var nx2 = p.x + (p.x - p.px) + ax[i] * h * h, ny2 = p.y + (p.y - p.py) + ay[i] * h * h;
+      p.px = p.x; p.py = p.y; p.x = nx2; p.y = ny2;
+    }
+    /* 棒の長さを保つ */
+    for (var it = 0; it < 3; it++) {
+      for (i = 0; i < STICKS.length; i++) {
+        s = STICKS[i];
+        var P1 = pts[s[0]], P2 = pts[s[1]];
+        var ddx = P2.x - P1.x, ddy = P2.y - P1.y, d = Math.hypot(ddx, ddy) || 1, e = (d - s[2]) / d;
+        var w1 = MASS[s[1]] / (MASS[s[0]] + MASS[s[1]]), w2 = 1 - w1;
+        P1.x += ddx * e * w1; P1.y += ddy * e * w1;
+        P2.x -= ddx * e * w2; P2.y -= ddy * e * w2;
+      }
+    }
+    /* 壁と底 */
+    for (i = 0; i < pts.length; i++) {
+      p = pts[i];
+      if (p.x < WALL0 + 4) { p.x = WALL0 + 4; p.px = p.x; }
+      if (p.y > SY + 290) { p.y = SY + 290; }
+    }
+  }
 
   /* ============ 進行 ============ */
-  var PANIC_W = 8.5;                           /* 指が肩のまわりをこれより速く回ると（1秒あたり）、腕が空回りしてバシャバシャになる */
-  var ARM_W = 7;                               /* 腕が回る速さの上限（1秒あたり） */
   function update(dt) {
     T += dt;
     guideT += dt;
     updateFx(dt);
     if (state === S.GOAL) {
-      P.vx *= Math.pow(0.05, dt); P.x += P.vx * dt;
+      for (var j = 0; j < SUB; j++) physStep(dt / SUB);
       if (T - score > 1.6) toResult();
       followCam(dt);
       return;
     }
     if (state !== S.PLAY) return;
-
-    /* 指の速さ（なめらかにならす） */
-    if (!held || (lastWant && performance.now() - lastWant.t > 120)) fv *= Math.pow(0.05, dt);   /* 指が止まったら落ち着く */
-    var over = Math.max(0, fv - PANIC_W) / (PANIC_W * 0.4);
-    var pt = Math.min(1, over);
-    panic += (pt - panic) * Math.min(1, dt * (pt > panic ? 3 : 5));
-    if (panic < 0.02) panic = 0;
-    P.shake = panic;
-
-    /* 腕：指のある向きへ回す（速すぎても上限まで）。前へ回した分だけ水をかいて進む */
-    var s = shoulder();
-    if (held && finger) {
-      var want = Math.atan2(finger.y - s.y, finger.x - s.x);
-      var da = want - P.arm;
-      da = Math.atan2(Math.sin(da), Math.cos(da));
-      da = Math.max(-ARM_W * dt, Math.min(ARM_W * dt, da));
-      var before = Math.floor(P.arm / Math.PI);
-      P.arm += da;
-      /* 水をかく力。どちらかの手はいつも水の中。暴れているとほとんど進まない */
-      P.vx += da * 34 * (1 - panic * 0.85);
-      var after = Math.floor(P.arm / Math.PI);
-      if (after > before) { strokes++; plash(); splash(armAt(P.arm - Math.PI * 0.05).x, 0.6); }
-    }
-    /* バタ足は小さく一定。水の抵抗で速さが落ちる。暴れると沈んで抵抗も増える */
-    P.kick += dt;
-    P.vx += 18 * dt;
-    P.vx *= Math.pow(0.42 - panic * 0.3, dt);
-    if (P.vx < 0) P.vx *= Math.pow(0.01, dt);
-    P.x += P.vx * dt;
-    if (P.x < WALL0 + LEG + 14) { P.x = WALL0 + LEG + 14; P.vx = 0; }
-    var wantD = 14 + panic * 70;
-    P.d += (wantD - P.d) * Math.min(1, dt * 3);
-    if (panic > 0.15) {
-      if (Math.random() < dt * 30 * panic) splash(s.x + (Math.random() - .3) * 160, 1);
-      if (Math.random() < dt * 6 * panic) gurgle();
-    }
-    if (Math.random() < dt * 3) addBubble(P.x + (Math.random() - .5) * 200, 2 + Math.random() * 3);
-    if (Math.random() < dt * 6) splash(P.x - LEG + Math.random() * 30, 0.15);     /* バタ足のしぶき */
+    var y0 = pts[HAND].y, k0 = pts[TOE].y;
+    for (var i = 0; i < SUB; i++) physStep(dt / SUB);
+    /* 手足が水面を出入りしたらしぶき */
+    if ((y0 - SY) * (pts[HAND].y - SY) < 0) { splash(pts[HAND].x, 0.8); plash(); }
+    if ((k0 - SY) * (pts[TOE].y - SY) < 0) { splash(pts[TOE].x, 0.5); }
+    if (Math.random() < dt * 4) addBubble(pts[HEAD].x - 20 + Math.random() * 40, 2 + Math.random() * 3);
 
     /* 頭が壁に着いたらゴール */
-    var hp = headPos();
+    var hp = pts[HEAD];
     if (hp.x + HEAD_R * K >= WALL1) {
-      P.x -= hp.x + HEAD_R * K - WALL1;
-      state = S.GOAL; score = T; won = true; P.vx = 0; fanfare();
+      state = S.GOAL; score = T; won = true; btnArm = btnLeg = false; fanfare();
     }
+    for (var n = 0; n < pts.length; n++) if (pts[n].x > WALL1 - 4) { pts[n].x = WALL1 - 4; pts[n].px = pts[n].x; }
     followCam(dt);
   }
   /* 画面は泳ぐ人を追う（頭の少し先を見せる） */
   function followCam(dt) {
-    var want = Math.max(W / 2, Math.min(WALL1 + 80 - W / 2, P.x + 90));
-    camX += (want - camX) * Math.min(1, dt * 5);
+    var want = Math.max(W / 2, Math.min(WALL1 + 80 - W / 2, pts[HIP].x + 150));
+    camX += (want - camX) * Math.min(1, dt * 4);
   }
   function toResult() {
     state = S.RESULT;
@@ -230,7 +294,7 @@
 
   /* しぶきと泡 */
   function splash(x, n) {
-    for (var i = 0; i < 2 + n * 5; i++) splats.push({ x: x, y: SY, vx: (Math.random() - .5) * 220, vy: -100 - Math.random() * 260 * n, r: 3 + Math.random() * 5, t: 0 });
+    for (var i = 0; i < 2 + n * 6; i++) splats.push({ x: x, y: SY, vx: (Math.random() - .5) * 240, vy: -100 - Math.random() * 280 * n, r: 3 + Math.random() * 5, t: 0 });
   }
   function addBubble(x, r) { bubbles.push({ x: x, r: r, t: 0, life: 0.6 + Math.random() * 1 }); }
   function updateFx(dt) {
@@ -245,19 +309,25 @@
   }
 
   /* 音 */
-  function gurgle() { noiseHit(0.25, 500 + Math.random() * 400, 0.2, 2); }
   function plash() { noiseHit(0.18, 900 + Math.random() * 300, 0.18, 1.5); }
   function fanfare() { [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.22, 0.14, "triangle", null, i * 0.12); }); }
 
   /* ============ 入力 ============
-     どこを触ってもよい。肩のまわりで指をぐるぐる回すと腕が回って進む。速く回しすぎると暴れて沈む。 */
-  /* 立体で描いているときは、画面の点を人の動く面の点に直す */
-  var view3d = null;
-  function toGame(x, y) { return view3d ? view3d.toGame(x, y) : { x: x + camX - W / 2, y: y }; }
+     画面の左半分が腕ボタン、右半分が脚ボタン（下に丸いボタンを描く）。2本の指で同時に押せる。
+     キーは 左/A/F が腕、右/D/J が脚。 */
+  var touches = {};
   var scene3d = window.Z3 ? Z3.lazy(function () { return new NumaScene(); }) : function () { return null; };
   scene3d.drop = scene3d.drop || function () {};
-  var lastWant = null;
-  function down(x, y) {
+  function setButtons() {
+    var a = false, l = false;
+    for (var id in touches) { if (touches[id] === "arm") a = true; else l = true; }
+    var na = a || keyArm, nl = l || keyLeg;
+    if (na && !btnArm) strokes++;
+    if (!nl && btnLeg) kicks++;
+    btnArm = na; btnLeg = nl;
+  }
+  var keyArm = false, keyLeg = false;
+  function down(x, y, id) {
     if(state===S.INTRO)return;
     audioOn();
     if (state === S.RESULT) {
@@ -266,41 +336,27 @@
       return;
     }
     if (state !== S.PLAY || x == null) return;
-    var g = toGame(x, y);
     held = true;
-    finger = g; lastWant = null;
+    touches[id == null ? "m" : id] = x < W / 2 ? "arm" : "leg";
+    setButtons();
   }
-  function move(x, y) {
-    if (state !== S.PLAY || !held) return;
-    finger = toGame(x, y);
-    /* 指が肩のまわりを回る速さ（指の動いた時刻で測る。ならす） */
-    var s = shoulder(), now = performance.now();
-    var want = Math.atan2(finger.y - s.y, finger.x - s.x);
-    if (lastWant) {
-      var ms = now - lastWant.t;
-      if (ms < 30) return;
-      var dw = want - lastWant.a; dw = Math.atan2(Math.sin(dw), Math.cos(dw));
-      var w = Math.abs(dw) / (ms / 1000);
-      fv += (w - fv) * Math.min(1, ms / 1000 * 6);
-    }
-    lastWant = { a: want, t: now };
-  }
-  function up() {
-    if (!held) return;
-    held = false;
-    finger = null;
+  function move() {}
+  function up(id) {
+    if (id == null) touches = {}; else delete touches[id];
+    held = Object.keys(touches).length > 0;
+    if (state === S.PLAY) setButtons();
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y);
+    var p = atCanvas(e); down(p.x, p.y, e.pointerId);
   });
   wrap.addEventListener("pointermove", function (e) {
     var p = atCanvas(e); move(p.x, p.y);
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { up(); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(e.pointerId); });
+  wrap.addEventListener("pointercancel", function (e) { up(e.pointerId); });
   window.addEventListener("blur", function () { up(); });
 
   /* 本番以外（手元・確認用ページ・制作中の固定リンク）だけ、数字キーで場面を飛ばせる。
@@ -308,38 +364,41 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (state === S.INTRO) { startButton.click(); }
-    if (n === 1) { newRound(); P.x = WALL1 - HEAD_AT - 260; T = 15; }
-    if (n === 3) { if (state === S.PLAY) { panic = 1; fv = 3000; } }
-    if (n === 9) { newRound(); P.x = WALL1 - HEAD_AT - HEAD_R * K; T = 18.4; score = T; won = true; state = S.GOAL; camX = WALL1 + 80 - W / 2; }
+    if (n === 1) { newRound(); var dx = WALL1 - 600 - pts[HEAD].x; pts.forEach(function (p) { p.x += dx; p.px += dx; }); camX = pts[HIP].x; T = 15; }
+    if (n === 9) { newRound(); var dx2 = WALL1 - HEAD_R * K - 2 - pts[HEAD].x; pts.forEach(function (p) { p.x += dx2; p.px += dx2; }); T = 18.4; score = T; won = true; state = S.GOAL; camX = WALL1 + 80 - W / 2; }
   }
+
 
 
   window.addEventListener("keydown", function (e) {
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
-    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    var left = /^(ArrowLeft|a|A|f|F)$/.test(e.key);
+    var right = /^(ArrowRight|d|D|j|J)$/.test(e.key);
     if (!esc && !go && !left && !right) return;
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
     if (left || right) {
+      if (left) keyArm = true; else keyLeg = true;
       if (state !== S.PLAY) return;
-      /* ▼UPDATE: 左右キー（選ぶものがあるとき。目印は keyMode のときだけ出す） */
+      setButtons();
       return;
     }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
     down();
   });
   window.addEventListener("keyup", function (e) {
+    if (/^(ArrowLeft|a|A|f|F)$/.test(e.key)) { keyArm = false; if (state === S.PLAY) setButtons(); }
+    if (/^(ArrowRight|d|D|j|J)$/.test(e.key)) { keyLeg = false; if (state === S.PLAY) setButtons(); }
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
   });
 
   function scoreText() { return zT(score.toFixed(2) + "秒", score.toFixed(2) + "s"); }
   function doShare() {
     /* ▼SHARE */
-    var text = zT("背泳ぎ25mを" + score.toFixed(2) + "秒で泳ぎきりました", "Swam 25m backstroke in " + score.toFixed(2) + " seconds");
+    var text = zT("バタフライ25mを" + score.toFixed(2) + "秒で泳ぎきりました", "Swam 25m butterfly in " + score.toFixed(2) + " seconds");
     window.zResultActions.x({ text: text + zT(" #底なし沼からの正しい抜け出し方シミュレーター", " #QuicksandEscapeSimulator") });
   }
 
@@ -349,64 +408,61 @@
     ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
   }
-  /* 体の各点（平面でも立体でも同じものを使う） */
-  function pose() {
-    var h = hip(), t = dirT(), s = shoulder(), hp = headPos();
-    var kick = Math.sin(P.kick * 14) * 0.12;
-    var lgx = -Math.sin(P.ph + kick), lgy = Math.cos(P.ph + kick);
-    var knee = { x: h.x + lgx * LEG * 0.5, y: h.y + lgy * LEG * 0.5 };
-    var lgx2 = -Math.sin(P.ph - kick * 1.6), lgy2 = Math.cos(P.ph - kick * 1.6);
-    var foot = { x: knee.x + lgx2 * LEG * 0.5, y: knee.y + lgy2 * LEG * 0.5 };
-    var footB = { x: h.x - Math.sin(P.ph - kick) * LEG, y: h.y + Math.cos(P.ph - kick) * LEG };
-    var hd = handPos(), ot = armAt(P.arm + Math.PI);
-    var el = { x: (s.x + hd.x) / 2, y: (s.y + hd.y) / 2 };
-    return { hip: h, t: t, shoulder: s, head: hp, knee: knee, foot: foot, footB: footB, other: ot, hand: hd, elbow: el, lgx: lgx, lgy: lgy };
-  }
   function face() {
-    if (panic > 0.2) return "scared";
-    return state === S.GOAL || state === S.RESULT ? "calm" : "normal";
+    return state === S.GOAL || state === S.RESULT ? "calm" : (btnArm && btnLeg ? "scared" : "normal");
   }
   function drawPerson() {
-    var q = pose(), h = q.hip, s = q.shoulder;
-    limb(h, q.footB, 24 * K, "#e0a87a");
-    limb(s, q.other, 16 * K, "#d9a074");
-    limb(h, q.knee, 26 * K, "#f0b88a"); limb(q.knee, q.foot, 24 * K, "#f0b88a");
-    limb(h, s, 46 * K, "#f0b88a");
-    limb(h, { x: h.x + q.t.x * 16 * K, y: h.y + q.t.y * 16 * K }, 44 * K, "#d23b3b");   /* 水着 */
-    ctx.fillStyle = "#f0b88a"; ctx.beginPath(); ctx.arc(q.head.x, q.head.y, HEAD_R * K, 0, 7); ctx.fill();
-    ctx.fillStyle = "#e8e8f0"; ctx.beginPath(); ctx.arc(q.head.x + 8, q.head.y, HEAD_R * K * 0.95, -Math.PI / 2, Math.PI / 2); ctx.fill();
-    limb(s, q.hand, 16 * K, "#f0b88a");
+    var p = pts;
+    limb(p[HIP], p[KNEE], 26 * K, "#f0b88a"); limb(p[KNEE], p[ANKLE], 22 * K, "#f0b88a"); limb(p[ANKLE], p[TOE], 14 * K, "#f0b88a");
+    limb(p[NECK], p[HIP], 46 * K, "#f0b88a");
+    limb(p[HIP], { x: p[HIP].x + (p[NECK].x - p[HIP].x) * 0.12, y: p[HIP].y + (p[NECK].y - p[HIP].y) * 0.12 }, 44 * K, "#d23b3b");
+    ctx.fillStyle = "#f0b88a"; ctx.beginPath(); ctx.arc(p[HEAD].x, p[HEAD].y, HEAD_R * K, 0, 7); ctx.fill();
+    limb(p[NECK], p[ELBOW], 18 * K, "#f0b88a"); limb(p[ELBOW], p[HAND], 15 * K, "#f0b88a");
   }
   function draw2d() {
     var g = ctx.createLinearGradient(0, 0, 0, SY);
     g.addColorStop(0, "#dfe9ef"); g.addColorStop(1, "#b9cfdb");
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, SY);
     ctx.save(); ctx.translate(W / 2 - camX, 0);
-    ctx.fillStyle = "#e6eef2"; ctx.fillRect(WALL1, SY - 40, 200, H);
     drawPerson();
     ctx.fillStyle = "rgba(40,150,210,.55)"; ctx.fillRect(WALL0, SY, POOL, H - SY);
     ctx.fillStyle = "#fff";
     for (var m = 0; m <= 25; m += 5) ctx.fillRect(WALL0 + m * M - 2, SY + 6, 4, 18);
     ctx.fillStyle = "#cfd8de"; ctx.fillRect(WALL0 - 200, SY - 40, 200, H); ctx.fillRect(WALL1, SY - 40, 200, H);
     ctx.fillStyle = "#fff";
-    for (var i = 0; i < splats.length; i++) { var p = splats[i]; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill(); }
+    for (var i = 0; i < splats.length; i++) { var q = splats[i]; ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, 7); ctx.fill(); }
     ctx.restore();
   }
 
-  /* 最初の一かきまで、腕を回す向きをそっと示す（文字は出さない） */
-  function drawGuide() {
-    if (state !== S.PLAY || held || strokes > 0) return;
-    var s = shoulder();
-    if (view3d) s = view3d.toScreen(s.x, s.y); else s = { x: s.x - camX + W / 2, y: s.y };
-    var a = 0.35 + 0.25 * Math.sin(guideT * 4), r = ARM * 0.9, t0 = guideT * 3;
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255," + a + ")"; ctx.lineWidth = 5; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.arc(s.x, s.y, r, t0, t0 + Math.PI * 1.4); ctx.stroke();
-    var e = t0 + Math.PI * 1.4, ex = s.x + Math.cos(e) * r, ey = s.y + Math.sin(e) * r;
-    var tx = -Math.sin(e), ty = Math.cos(e);
-    ctx.fillStyle = "rgba(255,255,255," + a + ")";
-    ctx.beginPath(); ctx.moveTo(ex + tx * 16, ey + ty * 16); ctx.lineTo(ex - ty * 11, ey + tx * 11); ctx.lineTo(ex + ty * 11, ey - tx * 11); ctx.fill();
-    ctx.restore();
+  /* 腕ボタン（左下）と脚ボタン（右下）。文字は出さず、絵だけ */
+  function buttonPos() {
+    var r = 62, y = H - r - Math.max(28, H * 0.05);
+    return [{ x: W * 0.25, y: y, r: r, on: btnArm }, { x: W * 0.75, y: y, r: r, on: btnLeg }];
+  }
+  function drawButtons() {
+    if (state !== S.PLAY) return;
+    var b = buttonPos();
+    for (var i = 0; i < 2; i++) {
+      var o = b[i];
+      ctx.save(); ctx.translate(o.x, o.y + (o.on ? 4 : 0));
+      ctx.fillStyle = o.on ? "#d9e6ee" : "#fff";
+      ctx.strokeStyle = "#16202e"; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(0, 0, o.r, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = "#16202e"; ctx.fillStyle = "#16202e"; ctx.lineWidth = 9; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      if (i === 0) {
+        /* 腕：肩から伸びた腕と、回す向きの矢印 */
+        ctx.beginPath(); ctx.arc(-14, 10, 9, 0, 7); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(-6, 4); ctx.lineTo(10, -14); ctx.lineTo(24, -6); ctx.stroke();
+        ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.arc(0, 4, 34, Math.PI * 1.1, Math.PI * 1.75); ctx.stroke();
+      } else {
+        /* 脚：曲げた脚 */
+        ctx.beginPath(); ctx.moveTo(-26, -14); ctx.lineTo(4, 4); ctx.lineTo(-6, 26); ctx.lineTo(10, 28); ctx.stroke();
+        ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(20, -20); ctx.lineTo(28, -6); ctx.moveTo(30, 6); ctx.lineTo(34, 18); ctx.stroke();
+      }
+      ctx.restore();
+    }
   }
 
   function draw() {
@@ -415,16 +471,15 @@
     var s3 = scene3d(), drawn3d = false;
     if (s3) {
       try {
-        var q = pose();
-        s3.sync({ W: W, H: H, SY: SY, M: M, WALL0: WALL0, WALL1: WALL1, camX: camX, K: K, T: T, th: P.th, shake: P.shake,
-          hip: q.hip, shoulder: q.shoulder, head: q.head, knee: q.knee, foot: q.foot, footB: q.footB, other: q.other, hand: q.hand, elbow: q.elbow,
+        var p = pts;
+        s3.sync({ W: W, H: H, SY: SY, M: M, WALL0: WALL0, WALL1: WALL1, camX: camX, K: K, T: T,
+          hip: p[HIP], shoulder: p[NECK], head: p[HEAD], knee: p[KNEE], foot: p[ANKLE], toe: p[TOE], elbow: p[ELBOW], hand: p[HAND],
           face: face(), bubbles: bubbles, splats: splats });
         drawn3d = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); drawn3d = false; }
     }
-    view3d = drawn3d ? s3 : null;
     if (!drawn3d) draw2d();
-    drawGuide();
+    drawButtons();
     if (state === S.RESULT) drawResult();
   }
 
@@ -451,7 +506,8 @@
   /* ============ 覗き穴 ============
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
   window.__probe = {
-    now: function () { return { state: state, score: score, W: W, H: H, P: P, panic: panic, camX: camX, SY: SY, buttons: state === S.RESULT ? resultButtons() : null }; },
+    pts: function () { return pts; },
+    now: function () { return { state: state, score: score, W: W, H: H, head: pts && pts[HEAD], hip: pts && pts[HIP], camX: camX, SY: SY, T: T, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
