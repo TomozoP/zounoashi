@@ -176,8 +176,6 @@
     /* 水泳帽：頭の後ろ上を包む */
     var cap = new T.Mesh(new T.SphereGeometry(0.44, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.45), capM);
     cap.rotation.z = -0.45; head.add(cap);
-    var nose = new T.Mesh(new T.SphereGeometry(0.12, 16, 10), Z3.std(0xffb488, { roughness: 0.5 }));
-    nose.position.set(-0.4, -0.06, 0.12); head.add(nose);
     /* 目：白目と黒目。顔は -x（ゴールと反対＝仰向けで上）と手前を向く */
     var whiteE = Z3.std(0xffffff, { roughness: 0.3 }), black = Z3.std(0x1a1a28, { roughness: 0.2 });
     this.eyes = [];
@@ -189,8 +187,18 @@
       e.userData.w = w; e.userData.p = p;
       head.add(e); this.eyes.push(e);
     }
-    this.mouth = new T.Mesh(new T.SphereGeometry(0.07, 12, 8), Z3.std(0x6a1e1e, { roughness: 0.4 }));
-    this.mouth.position.set(-0.36, -0.22, 0.14); head.add(this.mouth);
+    /* ゴーグル：目を包む色つきのレンズと縁、頭をまわるゴム */
+    var rimM = Z3.std(0x1a1a28, { roughness: 0.4 });
+    var lensM = new T.MeshStandardMaterial({ color: 0x3fa9e8, roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.55 });
+    for (var g2 = 0; g2 < 2; g2++) {
+      var gz = g2 ? 0.25 : 0.03;
+      var lens = new T.Mesh(new T.SphereGeometry(0.13, 16, 12), lensM);
+      lens.scale.set(0.55, 1, 1); lens.position.set(-0.36, 0.04, gz); head.add(lens);
+      var rim = new T.Mesh(new T.TorusGeometry(0.13, 0.025, 8, 20), rimM);
+      rim.rotation.y = Math.PI / 2; rim.position.set(-0.36, 0.04, gz); head.add(rim);
+    }
+    var strap = new T.Mesh(new T.TorusGeometry(0.43, 0.03, 8, 32), rimM);
+    strap.rotation.x = Math.PI / 2; strap.position.y = 0.04; head.add(strap);
   };
 
   function setLimb(m, a, b) {
@@ -270,9 +278,6 @@
       else if (g.face === "calm" || blink) { w.scale.set(0.6, 0.2, 0.6); p.scale.set(0.01, 0.01, 0.01); }
       else { w.scale.set(0.6, 1.25, 0.6); p.scale.set(0.6, 1.2, 0.8); }
     });
-    if (g.face === "scared") this.mouth.scale.set(1.2, 1.8, 1);
-    else if (g.face === "calm") this.mouth.scale.set(1.1, 0.5, 1);
-    else this.mouth.scale.set(0.9, 0.6, 1);
 
     /* 泡と水しぶき（毎コマ作り直さず使い回す） */
     var n = 0, pool = this.pool, scn = this.scene;
