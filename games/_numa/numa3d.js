@@ -183,6 +183,7 @@
 
     /* 頭（帽子と顔をまとめて回す） */
     var head = this.head = new T.Group(); root.add(head);
+    head.rotation.order = "ZYX";            /* 顔を少し手前へ向けてから、体の傾きで回す */
     var skull = new T.Mesh(new T.SphereGeometry(0.42, 28, 18), skin); skull.castShadow = true; head.add(skull);
     var brim = new T.Mesh(new T.CylinderGeometry(0.62, 0.62, 0.05, 28), hat); brim.position.y = 0.2; head.add(brim);
     var crown = new T.Mesh(new T.SphereGeometry(0.4, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), hat);
