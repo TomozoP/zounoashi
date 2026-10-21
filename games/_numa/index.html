@@ -148,7 +148,8 @@
   function line(dx, dy, len) { var a = []; for (var d = SEG; d <= len + 0.1; d += SEG) a.push({ x: dx * d, y: dy * d }); return a; }
   /* 最初は手足なし。手前の腕→奥の腕→手前の脚→奥の脚の順に1本ずつ描いて、回す力を決めていく */
   var design = [{ pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }];
-  var sel = 0;                                 /* いま描いている手足（順番） */
+  var ORDER = [1, 0, 3, 2];                    /* 描く順番：左腕（奥）→右腕→左脚→右脚 */
+  var sel = 1;                                 /* いま描いている手足（順番） */
   var phase = "draw";                          /* draw：操作盤なしで1本ずつ描く（指を離したら次の手足へ）、power：4本まとめて回す力を決める */
   var redraw = false;                          /* 回す力の画面から1本だけ描き直している */
   var pts, mass, sticks, wet, limbIdx, camX, camY, zoom, splats, bubbles, guideT, drawing, sliding, runT;
@@ -185,7 +186,7 @@
   /* 描く画面へ。もう一度のときも形は残し、1本目から順に見直せる */
   function toEdit() {
     shareButton.hidden = true;
-    sel = 0; phase = "draw"; redraw = false;
+    sel = ORDER[0]; phase = "draw"; redraw = false;
     state = S.EDIT;
     score = 0; T = 0; held = false; won = false;
     build(WALL0 + 360);
@@ -360,7 +361,7 @@
   function panelUI() {
     var top = PANEL, h = H - top, rows = [];
     for (var i = 0; i < 4; i++) {
-      var y = top + h * (0.12 + i * 0.18);
+      var y = top + h * (0.12 + ORDER.indexOf(i) * 0.18);   /* 行は描いた順に並べる */
       rows.push({ chip: { x: 56, y: y, r: 32 }, slider: { x0: 150, x1: W - 70, y: y } });
     }
     return { rows: rows, play: { x: W / 2, y: top + h * 0.86, r: Math.min(50, h * 0.11) } };
@@ -392,7 +393,7 @@
         var r = ui.rows[i];
         /* 丸を押すと、その手足だけ描き直す（描いたらこの画面に戻る） */
         if (Math.hypot(x - r.chip.x, y - r.chip.y) < r.chip.r + 10) { sel = i; phase = "draw"; redraw = true; tone(660, 0.05, 0.08, "square"); return; }
-        if (Math.abs(y - r.slider.y) < 30 && x > r.slider.x0 - 40) { sliding = i + 1; setTorque(x, i); return; }
+        if (Math.abs(y - r.slider.y) < 30 && x > r.slider.x0 - 40) { sliding = i + 1; sel = i; setTorque(x, i); return; }
       }
       return;
     }
@@ -430,8 +431,8 @@
     build(pts[HIP].x);
     tone(520, 0.06, 0.08, "triangle");
     /* 指を離したら次の手足へ。4本描いたら（描き直しのときはすぐ）まとめて回す力を決める */
-    if (redraw || sel === 3) { phase = "power"; redraw = false; }
-    else sel++;
+    if (redraw || sel === ORDER[3]) { phase = "power"; redraw = false; }
+    else sel = ORDER[ORDER.indexOf(sel) + 1];
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -455,7 +456,7 @@
     if (n === 2) {                               /* 速く泳げる見本の形（腕は平たいかい、脚は曲がった足ひれ） */
       design[0].pts = line(1, 0.15, 150); design[1].pts = line(1, 0.15, 150); design[0].torque = 1; design[1].torque = 1;
       design[2].pts = line(-1, 0.3, 160); design[3].pts = line(-1, -0.2, 160); design[2].torque = -0.4; design[3].torque = 0.4;
-      toEdit(); sel = 3; phase = "power";
+      toEdit(); sel = ORDER[3]; phase = "power";
     }
     if (n === 9) { toEdit(); play(); score = 18.42; won = true; toResult(); }
   }
@@ -506,6 +507,12 @@
     ctx.fillStyle = "#f0b88a"; ctx.beginPath(); ctx.arc(pts[HEAD].x, pts[HEAD].y, HEAD_R * K, 0, 7); ctx.fill();
     for (var i = 0; i < 4; i++) {
       var l = limbIdx[i];
+      if (state === S.EDIT && phase === "power" && sel === i) {
+        ctx.strokeStyle = "#ffd23a"; ctx.lineWidth = (i < 2 ? 22 : 30) + 14;
+        ctx.beginPath(); ctx.moveTo(pts[l[0]].x, pts[l[0]].y);
+        for (var k2 = 1; k2 < l.length; k2++) ctx.lineTo(pts[l[k2]].x, pts[l[k2]].y);
+        ctx.stroke();
+      }
       ctx.strokeStyle = i % 2 ? "#d9a074" : "#f0b88a"; ctx.lineWidth = i < 2 ? 22 : 30;
       ctx.beginPath(); ctx.moveTo(pts[l[0]].x, pts[l[0]].y);
       for (var k = 1; k < l.length; k++) ctx.lineTo(pts[l[k]].x, pts[l[k]].y);
@@ -626,6 +633,7 @@
         s3.sync({ W: W, H: H, SY: SY, M: M, WALL0: WALL0, WALL1: WALL1, camX: camX, camY: camY, zoom: zoom, K: K, T: T,
           hip: pts[HIP], shoulder: pts[NECK], head: pts[HEAD],
           limbs: limbIdx.map(function (l) { return l.map(function (k) { return pts[k]; }); }),
+          glow: state === S.EDIT && phase === "power" ? sel : -1,
           face: state === S.RUN ? "normal" : "calm", bubbles: bubbles, splats: splats });
         drawn3d = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); drawn3d = false; }
@@ -642,7 +650,7 @@
   /* やり直し：書き直すは全部消して1本目から、力を直すは形を残して力の画面へ */
   function redo(hit) {
     if (hit === "redraw") { design.forEach(function (d) { d.pts = []; }); toEdit(); }
-    else if (hit === "repower") { toEdit(); sel = 3; phase = "power"; editCam(1); }
+    else if (hit === "repower") { toEdit(); sel = ORDER[3]; phase = "power"; editCam(1); }
   }
   /* 泳いでいる途中のやり直しボタン（画面の下） */
   function runButtons() {

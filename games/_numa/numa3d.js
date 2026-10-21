@@ -146,6 +146,7 @@
     var capM = Z3.std(0xffffff, { roughness: 0.3 });
     var cyl = new T.CylinderGeometry(1, 1, 1, 16, 1, true), sph = new T.SphereGeometry(1, 16, 12);
 
+    var glowM = new T.MeshBasicMaterial({ color: 0xffd23a, side: T.BackSide, depthTest: false, transparent: true });
     var root = this.person = new T.Group(); sc.add(root);
     /* 手足：筒と両端の玉。setLimb で両端を合わせる */
     function limb(mat, r) {
@@ -153,7 +154,13 @@
       var c = new T.Mesh(cyl, mat), a = new T.Mesh(sph, mat), b = new T.Mesh(sph, mat);
       c.scale.set(r, 1, r); a.scale.setScalar(r); b.scale.setScalar(r);
       [c, a, b].forEach(function (x) { x.castShadow = true; m.add(x); });
-      m.userData = { c: c, b: b };
+      /* 光る縁取り：ひと回り大きい裏面だけの形（ふだんは隠す） */
+      var oc = new T.Mesh(cyl, glowM), oa = new T.Mesh(sph, glowM), ob = new T.Mesh(sph, glowM);
+      var R = r + 0.07;
+      oc.scale.set(R, 1, R); oa.scale.setScalar(R); ob.scale.setScalar(R);
+      var glow = new T.Group(); glow.add(oc, oa, ob); glow.visible = false; m.add(glow);
+      [oc, oa, ob].forEach(function (x) { x.renderOrder = 10; });
+      m.userData = { c: c, a: a, b: b, oc: oc, ob: ob, glow: glow, mat: mat };
       root.add(m); return m;
     }
     function ball(mat, r) {
@@ -166,8 +173,10 @@
     this.limbZ = [0.8, -0.8, 0.3, -0.3];    /* 腕は頭（ゴーグルのゴムを含む）より外側を通す */
     this.chains = [[], [], [], []];
     this.torso = limb(skin, 0.31);
-    this.trunks = new T.Mesh(new T.CylinderGeometry(0.33, 0.35, 0.36, 20), trunks);
-    root.add(this.trunks);
+    /* 水着：腰を包む筒（上の端は平らなゴム）と、脚の付け根を包む短い筒 */
+    this.trunks = limb(trunks, 0.345); this.trunks.userData.b.visible = false;
+    this.legTrunks = [limb(trunks, this.limbR[2] + 0.05), limb(trunks, this.limbR[3] + 0.05)];
+    this.legTrunks.forEach(function (m) { m.userData.b.visible = false; });
 
     /* 頭（帽子と顔をまとめて回す） */
     var head = this.head = new T.Group(); root.add(head);
@@ -207,8 +216,16 @@
     m.position.set(a.x, a.y, a.z || 0);
     m.userData.c.scale.y = len; m.userData.c.position.y = len / 2;
     m.userData.b.position.y = len;
+    m.userData.oc.scale.y = len; m.userData.oc.position.y = len / 2; m.userData.ob.position.y = len;
     m.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), new T.Vector3(dx / len, dy / len, dz / len));
   }
+
+  /* 手前に描くための、奥行きを無視する同じ色の材質 */
+  NumaScene.prototype.topMat = function (mat) {
+    this.tops = this.tops || new Map();
+    if (!this.tops.has(mat)) { var m = mat.clone(); m.depthTest = false; m.transparent = true; this.tops.set(mat, m); }
+    return this.tops.get(mat);
+  };
 
   /* ゲームの点 → 立体の点 */
   NumaScene.prototype.v = function (x, y, z) { return { x: (x - this.cx) / U, y: (this.SY - y) / U, z: z || 0 }; };
@@ -250,8 +267,7 @@
     var h = V(g.hip), s = V(g.shoulder);
     setLimb(this.torso, h, s);
     var thT = Math.atan2(s.x - h.x, s.y - h.y);          /* 胴の傾き（上向きから時計回り） */
-    this.trunks.position.set(h.x + (s.x - h.x) * 0.06, h.y + (s.y - h.y) * 0.06, 0);
-    this.trunks.rotation.set(0, 0, -thT);
+    setLimb(this.trunks, h, { x: h.x + (s.x - h.x) * 0.3, y: h.y + (s.y - h.y) * 0.3, z: 0 });
     /* 描いた手足 */
     for (var li = 0; li < 4; li++) {
       var pl = g.limbs[li], ch = this.chains[li], z = this.limbZ[li];
@@ -261,6 +277,21 @@
         if (!ch[ci].visible) continue;
         var a1 = V(pl[ci]), b1 = V(pl[ci + 1]);
         setLimb(ch[ci], { x: a1.x, y: a1.y, z: z }, { x: b1.x, y: b1.y, z: z });
+        /* 選んだ手足は縁取りを光らせ、ほかの物より手前に描く（奥の手足も見えるように） */
+        var on = g.glow === li, ud = ch[ci].userData;
+        if (ud.glow.visible !== on) {
+          ud.glow.visible = on;
+          [ud.c, ud.a, ud.b].forEach(function (x) { x.material = on ? self.topMat(ud.mat) : ud.mat; x.renderOrder = on ? 11 : 0; });
+        }
+      }
+      /* 脚の付け根の水着：最初の区切りに沿って少しだけ */
+      if (li >= 2) {
+        var lt = this.legTrunks[li - 2];
+        lt.visible = pl.length > 1;
+        if (lt.visible) {
+          var p0 = V(pl[0]), p1 = V(pl[1]), dx = p1.x - p0.x, dy = p1.y - p0.y, dl = Math.max(0.001, Math.hypot(dx, dy)), k = Math.min(dl, 0.32) / dl;
+          setLimb(lt, { x: p0.x, y: p0.y, z: z }, { x: p0.x + dx * k, y: p0.y + dy * k, z: z });
+        }
       }
     }
 
