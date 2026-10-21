@@ -37,7 +37,7 @@ function references(base, initial) {
     if (!/\.(html|css|js)$/i.test(file)) return;
     for (const raw of resourceRefs(fs.readFileSync(file, 'utf8'))) {
       if (/^(?:https?:)?\/\//.test(raw)) { external.add(raw); continue; }
-      if (/^(?:data:|blob:|#)/.test(raw) || /[${}<>]/.test(raw)) continue;
+      if (/^(?:data:|blob:|#)/.test(raw) || /[${}<>]/.test(raw) || /^\+|\+$/.test(raw)) continue;   /* "url("+t+")" のような組み立て途中の文字列は見ない */
       const clean = decodeURIComponent(raw.split(/[?#]/)[0]);
       if (!clean) continue;
       const target = clean.startsWith('/') ? inside(base, '.' + clean) : inside(base, path.relative(base, path.resolve(path.dirname(file), clean)));
