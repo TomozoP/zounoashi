@@ -177,11 +177,11 @@
     }
     /* 新居 */
     hw(g.nx0 - h, g.nx1 + h, g.ny0);
-    hw(g.nx0 - h, g.ndoor[0], g.ny1); hw(g.ndoor[1], g.nx1 + h, g.ny1);
+    /* 新居の下の壁と旧居の上の壁（向かい合う2枚）はなし */
     vw(g.nx0, g.ny0, g.ny1); vw(g.nx1, g.ny0, g.ny1);
     vw(g.npart, g.ny0, g.npartEnd);
     /* 旧居 */
-    hw(g.ox0 - h, g.odoor[0], g.oy0); hw(g.odoor[1], g.ox1 + h, g.oy0);
+
     hw(g.ox0 - h, g.ox1 + h, g.oy1);
     vw(g.ox0, g.oy0, g.oy1); vw(g.ox1, g.oy0, g.oy1);
     hw(g.ox0, g.omidDoor[0], g.omid); hw(g.omidDoor[1], g.ox1, g.omid);
@@ -234,7 +234,7 @@
     engine.gravity.x = 0; engine.gravity.y = 0;
     engine.positionIterations = 10; engine.velocityIterations = 8;
     walls = G.walls.map(function (r) {
-      var wb = M.Bodies.rectangle((r[0] + r[2]) / 2, (r[1] + r[3]) / 2, r[2] - r[0], r[3] - r[1], { isStatic: true, friction: 0.2, restitution: 0.1 });
+      var wb = M.Bodies.rectangle((r[0] + r[2]) / 2, (r[1] + r[3]) / 2, r[2] - r[0], r[3] - r[1], { isStatic: true, friction: 0.1, restitution: 0.7 });
       wb.wall = r; r.body = wb; r.hp = WALL_HP; r.dead = false; r.cracks = [];
       return wb;
     });
@@ -256,7 +256,7 @@
   }
 
   function makeItem(d, x, y, angle) {
-    var opt = { frictionAir: 0.1, friction: 0.25, restitution: 0.12, density: 0.001 * d.heavy, chamfer: d.r ? undefined : { radius: 5 } };
+    var opt = { frictionAir: 0.035, friction: 0.15, restitution: 0.45, density: 0.001 * d.heavy, chamfer: d.r ? undefined : { radius: 5 } };
     var b = d.r ? M.Bodies.circle(x, y, d.r, opt) : M.Bodies.rectangle(x, y, d.w, d.h, opt);
     if (angle) M.Body.setAngle(b, angle);
     b.def = d; b.item = true; b.inside = false; b.seed = Math.random(); b.marks = []; b.shape = outline(d);
@@ -512,7 +512,7 @@
 
   /* ============ 引っぱる ============ */
   var REACH = 80;                              /* ひもの伸びの上限（これ以上は引っぱっても速くならない） */
-  var VMAX = 20;                               /* 壁をすり抜けない速さの上限 */
+  var VMAX = 26;                               /* 壁をすり抜けない速さの上限 */
   function pick(x, y) {
     var live = items.filter(function (b) { return !b.dead; }).concat(frags);
     var hits = M.Query.point(live, { x: x, y: y });
@@ -535,7 +535,24 @@
     return grabs[id];
     tone(330 + 120 / b.def.heavy, 0.06, 0.08, "triangle");
   }
-  function release(id) { delete grabs[id]; }
+  /* モンスト式：家具をつかんで引き、離すと反対向きへ飛ぶ。引いた長さほど速い */
+  var FLING = true, FLING_K = 0.13, FLING_MAX = 24;
+  function flingVel(g) {
+    var e = grabEnd(g), vx = (e.x - g.x) * FLING_K, vy = (e.y - g.y) * FLING_K, v = Math.hypot(vx, vy);
+    if (v > FLING_MAX) { vx *= FLING_MAX / v; vy *= FLING_MAX / v; v = FLING_MAX; }
+    return { x: vx, y: vy, v: v };
+  }
+  function release(id, fire) {
+    var g = grabs[id];
+    delete grabs[id];
+    if (!FLING || !fire || !g || g.body.dead || state !== S.PLAY) return;
+    var f = flingVel(g);
+    if (f.v < 1.5) return;
+    M.Body.setVelocity(g.body, { x: f.x, y: f.y });
+    M.Body.setAngularVelocity(g.body, (Math.random() - 0.5) * 0.06 * f.v / FLING_MAX);
+    noiseHit(0.18, 900 + f.v * 60, 0.25 + f.v / FLING_MAX * 0.3, 1.5);
+    tone(260 + f.v * 25, 0.12, 0.08, "triangle", 700 + f.v * 30);
+  }
   function grabEnd(g) {
     var b = g.body, c = Math.cos(b.angle), si = Math.sin(b.angle);
     return { x: b.position.x + g.lx * c - g.ly * si, y: b.position.y + g.lx * si + g.ly * c };
@@ -560,7 +577,7 @@
   function stepWorld() {
     var dts = BASE / SUB;
     for (var k = 0; k < SUB; k++) {
-      Object.keys(grabs).forEach(function (id) {
+      if (FLING) { /* 引っぱって離す形では、つかんでいる間は力をかけない */ } else Object.keys(grabs).forEach(function (id) {
         var g = grabs[id], b = g.body, e = grabEnd(g);
         var dx = g.x - e.x, dy = g.y - e.y, d = Math.hypot(dx, dy);
         if (d > REACH) { dx *= REACH / d; dy *= REACH / d; }
@@ -658,7 +675,7 @@
     if (s3 && s3.built) { var q = s3.toGame(p.x, p.y, g.h); if (q) { g.x = q.x; g.y = q.y; } }
     else { g.x = p.x; g.y = p.y; }
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); release(e.pointerId); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); release(e.pointerId, true); });
   wrap.addEventListener("pointercancel", function (e) { release(e.pointerId); });
   window.addEventListener("blur", function () { if (grabs) Object.keys(grabs).forEach(release); });
 
@@ -904,6 +921,27 @@
       var g = grabs[id], e0 = grabEnd(g);
       var d = Math.hypot(g.x - e0.x, g.y - e0.y);
       var e = MP(e0.x, e0.y, g.h), f = is3d && g.sx != null ? { x: g.sx, y: g.sy } : { x: g.x, y: g.y };
+      if (FLING) {
+        /* 飛ぶ向きの矢印（長いほど強い）と、指までのゴム */
+        var fv = flingVel(g), a0 = MP(g.body.position.x, g.body.position.y, g.h);
+        var a1 = MP(g.body.position.x + fv.x * 9, g.body.position.y + fv.y * 9, g.h);
+        ctx.strokeStyle = "rgba(255,255,255,.6)"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(f.x, f.y); ctx.stroke();
+        if (fv.v >= 1.5) {
+          var ang = Math.atan2(a1.y - a0.y, a1.x - a0.x), k = fv.v / FLING_MAX;
+          ctx.strokeStyle = k > 0.95 ? "#ff5a3c" : "#ffe14a"; ctx.lineWidth = 6 + k * 4; ctx.lineCap = "round";
+          ctx.beginPath(); ctx.moveTo(a0.x, a0.y); ctx.lineTo(a1.x, a1.y); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(a1.x + Math.cos(ang) * 14, a1.y + Math.sin(ang) * 14);
+          ctx.lineTo(a1.x + Math.cos(ang + 2.4) * 16, a1.y + Math.sin(ang + 2.4) * 16);
+          ctx.lineTo(a1.x + Math.cos(ang - 2.4) * 16, a1.y + Math.sin(ang - 2.4) * 16);
+          ctx.closePath(); ctx.fillStyle = ctx.strokeStyle; ctx.fill();
+          ctx.lineCap = "butt";
+        }
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(f.x, f.y, 9, 0, 7); ctx.fill();
+        ctx.strokeStyle = LINE; ctx.lineWidth = 2; ctx.stroke();
+        return;
+      }
       ctx.strokeStyle = d > REACH ? "#ff5a3c" : "#fff";
       ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(f.x, f.y); ctx.stroke();
