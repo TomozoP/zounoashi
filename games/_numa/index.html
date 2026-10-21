@@ -129,7 +129,7 @@
   var SY, PANEL;                               /* 水面の高さ、下の操作盤の上端 */
   function place() {
     SY = Math.round(H * 0.42);
-    PANEL = Math.round(H * 0.6);
+    PANEL = Math.round(H * 0.5);
   }
 
   /* ============ 体（物理） ============
@@ -149,7 +149,8 @@
   /* 最初は手足なし。手前の腕→奥の腕→手前の脚→奥の脚の順に1本ずつ描いて、回す力を決めていく */
   var design = [{ pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }];
   var sel = 0;                                 /* いま描いている手足（順番） */
-  var phase = "draw";                          /* draw：操作盤なしで描く（指を離したら次へ）、power：操作盤で回す力を決める */
+  var phase = "draw";                          /* draw：操作盤なしで1本ずつ描く（指を離したら次の手足へ）、power：4本まとめて回す力を決める */
+  var redraw = false;                          /* 回す力の画面から1本だけ描き直している */
   var pts, mass, sticks, wet, limbIdx, camX, camY, zoom, splats, bubbles, guideT, drawing, sliding, runT;
 
   /* 設計から体を組み立てる（水面に浮かべた姿勢） */
@@ -184,7 +185,7 @@
   /* 描く画面へ。もう一度のときも形は残し、1本目から順に見直せる */
   function toEdit() {
     shareButton.hidden = true;
-    sel = 0; phase = "draw";
+    sel = 0; phase = "draw"; redraw = false;
     state = S.EDIT;
     score = 0; T = 0; held = false; won = false;
     build(WALL0 + 360);
@@ -194,7 +195,7 @@
   /* 描く画面のカメラ。描くときは関節を画面の中央に寄せ、力を決めるときは体の全体を操作盤の上に収める */
   function editCam(k) {
     var j = pts[JOINT[sel]];
-    var tz = phase === "draw" ? 1.3 : 1, tx = phase === "draw" ? j.x : pts[HIP].x + 20, ty = phase === "draw" ? j.y : SY + H * 0.2;
+    var tz = phase === "draw" ? 1.3 : 0.9, tx = phase === "draw" ? j.x : pts[HIP].x + 20, ty = phase === "draw" ? j.y : SY + (H - PANEL) / 2 / tz;
     if (k >= 1 || !(zoom > 0)) { zoom = tz; camX = tx; camY = ty; return; }
     zoom += (tz - zoom) * k; camX += (tx - camX) * k; camY += (ty - camY) * k;
   }
@@ -355,25 +356,22 @@
     if (view3d) return view3d.toScreen(x, y);
     return { x: W / 2 + (x - camX) * zoom, y: H / 2 + (y - camY) * zoom };
   }
+  /* 回す力の操作盤：手足ごとに1行（丸の絵＋目盛り）、いちばん下に再生 */
   function panelUI() {
-    var top = PANEL, h = H - top;
-    var chips = [], r = 40;
-    for (var i = 0; i < 4; i++) chips.push({ x: W * (0.14 + i * 0.24), y: top + h * 0.17, r: r });
-    return { chips: chips, slider: { x0: 70, x1: W - 70, y: top + h * 0.45 }, play: { x: W / 2, y: top + h * 0.76, r: Math.min(56, h * 0.15) } };
+    var top = PANEL, h = H - top, rows = [];
+    for (var i = 0; i < 4; i++) {
+      var y = top + h * (0.12 + i * 0.18);
+      rows.push({ chip: { x: 56, y: y, r: 32 }, slider: { x0: 150, x1: W - 70, y: y } });
+    }
+    return { rows: rows, play: { x: W / 2, y: top + h * 0.86, r: Math.min(50, h * 0.11) } };
   }
   function drawn(i) { return design[i].pts.length > 0; }
-  /* 次へ（最後の1本なら再生）。描いていないうちは進めない */
-  function next() {
-    if (!drawn(sel)) return;
-    if (sel < 3) { sel++; phase = "draw"; tone(660, 0.06, 0.08, "triangle"); }
-    else play();
-  }
-  function setTorque(x) {
-    var s = panelUI().slider;
+  function setTorque(x, i) {
+    var s = panelUI().rows[i].slider;
     var v = (x - (s.x0 + s.x1) / 2) / ((s.x1 - s.x0) / 2);
     v = Math.max(-1, Math.min(1, v));
     if (Math.abs(v) < 0.06) v = 0;
-    design[sel].torque = Math.round(v * 20) / 20;
+    design[i].torque = Math.round(v * 20) / 20;
   }
   function down(x, y) {
     if(state===S.INTRO)return;
@@ -385,22 +383,25 @@
     }
     if (state === S.RUN) { toEdit(); return; }
     if (state !== S.EDIT) return;
-    if (x == null) { next(); return; }
+    if (x == null) { if (phase === "power") play(); return; }
     held = true;
-    if (phase === "power" && y >= PANEL) {
+    if (phase === "power") {
+      if (y < PANEL) return;
       var ui = panelUI();
-      /* 描き終えた手足（と今の1本）は丸を押すと、その手足を描き直せる */
-      for (var i = 0; i < 4; i++) if (Math.hypot(x - ui.chips[i].x, y - ui.chips[i].y) < ui.chips[i].r + 10 && (i <= sel || drawn(i))) { sel = i; phase = "draw"; tone(660, 0.05, 0.08, "square"); return; }
-      if (Math.hypot(x - ui.play.x, y - ui.play.y) < ui.play.r + 10) { next(); return; }
-      if (Math.abs(y - ui.slider.y) < 40) { sliding = true; setTorque(x); }
+      if (Math.hypot(x - ui.play.x, y - ui.play.y) < ui.play.r + 10) { play(); return; }
+      for (var i = 0; i < 4; i++) {
+        var r = ui.rows[i];
+        /* 丸を押すと、その手足だけ描き直す（描いたらこの画面に戻る） */
+        if (Math.hypot(x - r.chip.x, y - r.chip.y) < r.chip.r + 10) { sel = i; phase = "draw"; redraw = true; tone(660, 0.05, 0.08, "square"); return; }
+        if (Math.abs(y - r.slider.y) < 30 && x > r.slider.x0 - 40) { sliding = i + 1; setTorque(x, i); return; }
+      }
       return;
     }
-    if (phase === "power") { phase = "draw"; return; }   /* 上の画面を触ると、この手足を描き直す */
     drawing = [toGame(x, y)];
   }
   function move(x, y) {
     if (state !== S.EDIT || !held) return;
-    if (sliding) { setTorque(x); return; }
+    if (sliding) { setTorque(x, sliding - 1); return; }
     if (!drawing) return;
     var g = toGame(x, y), last = drawing[drawing.length - 1];
     if (Math.hypot(g.x - last.x, g.y - last.y) > 4) drawing.push(g);
@@ -429,7 +430,9 @@
     design[sel].pts = out;
     build(pts[HIP].x);
     tone(520, 0.06, 0.08, "triangle");
-    phase = "power";                            /* 指を離したら回す力を決める */
+    /* 指を離したら次の手足へ。4本描いたら（描き直しのときはすぐ）まとめて回す力を決める */
+    if (redraw || sel === 3) { phase = "power"; redraw = false; }
+    else sel++;
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -472,7 +475,7 @@
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
     if (left || right) {
-      if (state === S.EDIT) { if (left && sel > 0) sel--; else if (right) next(); }  /* 前の手足へ・次へ */
+      if (state === S.EDIT && phase === "power") { sel = (sel + (left ? 3 : 1)) % 4; }
       return;
     }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
@@ -519,7 +522,7 @@
 
   /* 描き直し中：選んだ手足をなぞった線と、関節の印 */
   function drawEditOverlay() {
-    if (state !== S.EDIT) return;
+    if (state !== S.EDIT || phase !== "draw") return;
     var l = limbIdx[sel], j = toScreen(pts[l[0]].x, pts[l[0]].y);
     ctx.save();
     ctx.lineCap = "round"; ctx.lineJoin = "round";
@@ -556,41 +559,27 @@
     ctx.fillStyle = "rgba(22,32,46,.88)";
     ctx.fillRect(0, PANEL, W, H - PANEL);
     for (var i = 0; i < 4; i++) {
-      var c = ui.chips[i], on = i === sel;
-      ctx.globalAlpha = on || drawn(i) ? 1 : 0.35;           /* まだの手足は薄く */
-      ctx.fillStyle = on ? "#ffd23a" : "#fff";
+      var r = ui.rows[i], c = r.chip, s = r.slider;
+      ctx.fillStyle = "#fff";
       ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, 7); ctx.fill();
-      chipIcon(c.x, c.y, i);
-      /* 回す力の向きと強さを、丸の外の小さな弧で */
-      var tq = design[i].torque;
-      if (tq) {
-        ctx.strokeStyle = "#fff"; ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.arc(c.x, c.y, c.r + 8, -Math.PI / 2, -Math.PI / 2 + tq * Math.PI, tq < 0); ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
+      ctx.save(); ctx.translate(c.x, c.y); ctx.scale(0.8, 0.8); chipIcon(0, 0, i); ctx.restore();
+      /* 目盛り：真ん中が0。左は反時計回り、右は時計回り */
+      var v = design[i].torque, mid = (s.x0 + s.x1) / 2, kx = mid + v * (s.x1 - s.x0) / 2;
+      ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 10; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(s.x0, s.y); ctx.lineTo(s.x1, s.y); ctx.stroke();
+      ctx.strokeStyle = "#ffd23a";
+      ctx.beginPath(); ctx.moveTo(mid, s.y); ctx.lineTo(kx, s.y); ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.fillRect(mid - 2, s.y - 12, 4, 24);
+      ctx.beginPath(); ctx.arc(kx, s.y, 17, 0, 7); ctx.fill();
+      ctx.save(); ctx.globalAlpha = 0.7; ctx.scale(1, 1);
+      turnIcon(s.x0 - 30, s.y, -1); turnIcon(s.x1 + 34, s.y, 1);
+      ctx.restore();
     }
-    /* 目盛り：真ん中が0。左は反時計回り、右は時計回り */
-    var s = ui.slider, v = design[sel].torque, mid = (s.x0 + s.x1) / 2, kx = mid + v * (s.x1 - s.x0) / 2;
-    ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 10; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(s.x0, s.y); ctx.lineTo(s.x1, s.y); ctx.stroke();
-    ctx.strokeStyle = "#ffd23a";
-    ctx.beginPath(); ctx.moveTo(mid, s.y); ctx.lineTo(kx, s.y); ctx.stroke();
-    ctx.fillStyle = "#fff"; ctx.fillRect(mid - 2, s.y - 14, 4, 28);
-    ctx.beginPath(); ctx.arc(kx, s.y, 20, 0, 7); ctx.fill();
-    turnIcon(s.x0 - 38, s.y, -1); turnIcon(s.x1 + 38, s.y, 1);
-    /* 次へ（最後の1本は再生）。描くまでは薄く */
+    /* 再生 */
     var p = ui.play;
-    ctx.globalAlpha = drawn(sel) ? 1 : 0.3;
     ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
-    ctx.fillStyle = "#16202e"; ctx.strokeStyle = "#16202e";
-    if (sel < 3) {
-      ctx.lineWidth = p.r * 0.16; ctx.lineCap = "round"; ctx.lineJoin = "round";
-      ctx.beginPath(); ctx.moveTo(p.x - p.r * 0.38, p.y); ctx.lineTo(p.x + p.r * 0.36, p.y);
-      ctx.moveTo(p.x + p.r * 0.02, p.y - p.r * 0.34); ctx.lineTo(p.x + p.r * 0.38, p.y); ctx.lineTo(p.x + p.r * 0.02, p.y + p.r * 0.34); ctx.stroke();
-    } else {
-      ctx.beginPath(); ctx.moveTo(p.x - p.r * 0.28, p.y - p.r * 0.4); ctx.lineTo(p.x + p.r * 0.45, p.y); ctx.lineTo(p.x - p.r * 0.28, p.y + p.r * 0.4); ctx.closePath(); ctx.fill();
-    }
-    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#16202e";
+    ctx.beginPath(); ctx.moveTo(p.x - p.r * 0.28, p.y - p.r * 0.4); ctx.lineTo(p.x + p.r * 0.45, p.y); ctx.lineTo(p.x - p.r * 0.28, p.y + p.r * 0.4); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
   function chipIcon(x, y, k) {
