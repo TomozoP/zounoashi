@@ -33,6 +33,9 @@
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="../three-base.js"></script>
+<script src="numa3d.js"></script>   <!-- 立体の見た目（動きは2Dのまま） -->
 <script>
 /* 底なし沼からの正しい抜け出し方シミュレーター
 
@@ -273,6 +276,11 @@
   /* ============ 入力 ============
      頭をつかんで傾ける、手をつかんで泥をかく。速く動かすともがいて沈む。 */
   var lastF = null;
+  /* 立体で描いているときは、画面の点を人の動く面の点に直す */
+  var view3d = null;
+  function toGame(x, y) { return view3d ? view3d.toGame(x, y) : { x: x, y: y }; }
+  var scene3d = window.Z3 ? Z3.lazy(function () { return new NumaScene(); }) : function () { return null; };
+  scene3d.drop = scene3d.drop || function () {};
   function down(x, y) {
     if(state===S.INTRO)return;
     audioOn();
@@ -282,6 +290,7 @@
       return;
     }
     if (state !== S.PLAY || x == null) return;
+    var g = toGame(x, y); x = g.x; y = g.y;
     held = true;
     finger = { x: x, y: y }; lastF = { x: x, y: y, t: performance.now() };
     var hp = headPos(), hd = handPos();
@@ -292,6 +301,7 @@
   }
   function move(x, y) {
     if (state !== S.PLAY || !held) return;
+    var g = toGame(x, y); x = g.x; y = g.y;
     finger = { x: x, y: y };
     var now = performance.now();
     if (lastF) {
@@ -417,19 +427,30 @@
     ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
   }
-  function drawPerson() {
-    var sh = P.shake * 4;
-    var ox = (Math.random() - .5) * sh, oy = (Math.random() - .5) * sh;
-    ctx.save(); ctx.translate(ox, oy);
+  /* 体の各点（2Dでも立体でも同じものを使う） */
+  function pose() {
     var h = hip(), t = dirT(), s = shoulder(), hp = headPos();
     var lgx = -Math.sin(P.ph), lgy = Math.cos(P.ph);
     var wig = state === S.PLAY && lying() && !legsFree() ? Math.sin(T * 5) * 0.06 : 0;
     var knee = { x: h.x + (lgx * Math.cos(wig) - lgy * Math.sin(wig)) * LEG * 0.5, y: h.y + (lgy * Math.cos(wig) + lgx * Math.sin(wig)) * LEG * 0.5 };
     var foot = { x: h.x + lgx * LEG, y: h.y + lgy * LEG };
+    var other = { x: s.x - P.hx * 0.6 + t.x * 10, y: s.y + Math.abs(P.hy) * 0.7 + 20 };
+    var hd = handPos();
+    var el = { x: (s.x + hd.x) / 2 + t.x * -10, y: (s.y + hd.y) / 2 + 6 };
+    return { hip: h, t: t, shoulder: s, head: hp, knee: knee, foot: foot, other: other, hand: hd, elbow: el, lgx: lgx, lgy: lgy };
+  }
+  function face() {
+    var scared = panic > 0.2 || (state === S.PLAY && P.d > 95 && !lying()) || state === S.SINK;
+    return scared ? "scared" : lying() ? "calm" : "normal";
+  }
+  function drawPerson() {
+    var sh = P.shake * 4;
+    var ox = (Math.random() - .5) * sh, oy = (Math.random() - .5) * sh;
+    ctx.save(); ctx.translate(ox, oy);
+    var q = pose(), h = q.hip, t = q.t, s = q.shoulder, knee = q.knee, foot = q.foot, lgx = q.lgx, lgy = q.lgy;
     /* 奥の脚・腕 */
     limb(h, { x: foot.x + 8, y: foot.y - 4 }, 24 * K, "#3b4a5e");
-    var other = { x: s.x - P.hx * 0.6 + t.x * 10, y: s.y + Math.abs(P.hy) * 0.7 + 20 };
-    limb(s, other, 16 * K, "#b8935f");
+    limb(s, q.other, 16 * K, "#b8935f");
     /* 手前の脚 */
     limb(h, knee, 26 * K, "#465a72"); limb(knee, foot, 24 * K, "#465a72");
     limb({ x: foot.x, y: foot.y }, { x: foot.x + lgy * 16 - lgx * 4, y: foot.y - lgx * 16 }, 14 * K, "#2a2420");
@@ -438,10 +459,9 @@
     ctx.save(); ctx.lineCap = "butt"; ctx.strokeStyle = "#6b4a2a"; ctx.lineWidth = 46 * K; ctx.beginPath(); ctx.moveTo(h.x + t.x * 8 * K, h.y + t.y * 8 * K); ctx.lineTo(h.x + t.x * 16 * K, h.y + t.y * 16 * K); ctx.stroke(); ctx.restore();  /* ベルト */
     /* 首と頭 */
     limb(s, { x: s.x + t.x * 18, y: s.y + t.y * 18 }, 16 * K, "#e7b98a");
-    drawHead(hp, P.th);
+    drawHead(q.head, P.th);
     /* 手前の腕 */
-    var hd = handPos();
-    var el = { x: (s.x + hd.x) / 2 + t.x * -10, y: (s.y + hd.y) / 2 + 6 };
+    var hd = q.hand, el = q.elbow;
     limb(s, el, 18 * K, "#c9a96a"); limb(el, hd, 15 * K, "#e7b98a");
     ctx.fillStyle = "#e7b98a"; ctx.beginPath(); ctx.arc(hd.x, hd.y, 10 * K, 0, 7); ctx.fill();
     ctx.restore();
@@ -456,8 +476,7 @@
     ctx.beginPath(); ctx.arc(0, -16, 24, Math.PI, 0); ctx.fill();
     ctx.fillStyle = "#6b4a2a"; ctx.fillRect(-24, -20, 48, 6);
     /* 顔（岸の方を向く） */
-    var scared = panic > 0.2 || (state === S.PLAY && P.d > 95 && !lying()) || state === S.SINK;
-    var calm = lying() && !scared;
+    var f = face(), scared = f === "scared", calm = f === "calm";
     ctx.fillStyle = "#1d1714"; ctx.strokeStyle = "#1d1714"; ctx.lineWidth = 3; ctx.lineCap = "round";
     if (scared) {
       ctx.fillStyle = "#fff";
@@ -512,6 +531,7 @@
     if (state !== S.PLAY || held) return;
     var p = canSwim() ? handPos() : (lying() ? null : headPos());
     if (!p) return;
+    if (view3d) p = view3d.toScreen(p.x, p.y);
     var a = 0.25 + 0.25 * Math.sin(guideT * 4);
     ctx.strokeStyle = "rgba(255,255,255," + a + ")"; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(p.x, p.y, canSwim() ? 34 : 64, 0, 7); ctx.stroke();
@@ -520,10 +540,23 @@
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
-    drawSky();
-    drawShore();
-    drawPerson();
-    drawMud();
+    var s3 = scene3d(), drawn3d = false;
+    if (s3) {
+      try {
+        var q = pose();
+        s3.sync({ W: W, H: H, SY: SY, SHORE: SHORE, K: K, T: T, th: P.th, shake: P.shake, state: state, won: won,
+          hip: q.hip, shoulder: q.shoulder, head: q.head, knee: q.knee, foot: q.foot, other: q.other, hand: q.hand, elbow: q.elbow,
+          face: face(), bubbles: bubbles, splats: splats });
+        drawn3d = s3.draw(ctx, W, H);
+      } catch (e) { scene3d.drop(); drawn3d = false; }
+    }
+    view3d = drawn3d ? s3 : null;
+    if (!drawn3d) {
+      drawSky();
+      drawShore();
+      drawPerson();
+      drawMud();
+    }
     drawGuide();
     if (state === S.RESULT) drawResult();
   }
