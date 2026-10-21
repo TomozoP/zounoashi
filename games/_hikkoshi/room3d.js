@@ -11,7 +11,7 @@
   var SIDE = { bed: 0x6d4f37, sofa: 0x3f6187, shelf: 0x7c552f, fridge: 0xc9d0d6, tv: 0x1a1d22, table: 0x94683f, chair: 0x6d4f33,
     box: 0xa47a45, dish: 0xa47a45, plant: 0x9e522c, lamp: 0xd8c78f, washer: 0xcfd5da, dresser: 0x86592f, guitar: 0x8a5a26,
     chabudai: 0x7a4826, cushion: 0xb5403c, trash: 0x6f8396 };
-  var WALL_H = 46;
+  var WALL_H = 56;
 
   function RoomScene(game) {
     T = global.THREE;
@@ -58,10 +58,24 @@
     this.root.add(floor(G.nx0, G.ny0, G.nx1, G.ny1, "#f3dfb8", "rgba(170,130,80,.18)"));
     this.root.add(floor(G.ox0, G.oy0, G.ox1, G.oy1, "#d9c29a", "rgba(120,90,50,.2)"));
     /* 壁 */
+    /* 壁：側面は白っぽい漆喰に幅木、上の面は間取り図の濃い色。傷むと側面にひびが増える */
+    if (!this.wallMats) {
+      this.wallMats = [0, 1, 2, 3].map(function (lv) {
+        var tex = Z3.canvasTex(128, 128, function (g, w, h) { paintWall(g, w, h, lv); });
+        return new T.MeshLambertMaterial({ map: tex });
+      });
+      this.wallTops = [0, 1, 2, 3].map(function (lv) {
+        return new T.MeshLambertMaterial({ map: Z3.canvasTex(64, 64, function (g, w, h) { paintTop(g, w, h, lv); }) });
+      });
+      this.wallTop = this.wallTops[0];
+    }
+    this.rubble = [];
     this.walls = G.walls.map(function (r) {
-      var m = new T.Mesh(new T.BoxGeometry((r[2] - r[0]) / S, WALL_H / S, (r[3] - r[1]) / S), new T.MeshLambertMaterial({ color: 0x2b2724 }));
+      var side = self.wallMats[0];
+      var m = new T.Mesh(new T.BoxGeometry((r[2] - r[0]) / S, WALL_H / S, (r[3] - r[1]) / S), [side, side, self.wallTop, self.wallTop, side, side]);
       m.position.set((r[0] + r[2]) / 2 / S, WALL_H / 2 / S, (r[1] + r[3]) / 2 / S);
       m.castShadow = true; m.receiveShadow = true;
+      m.userData.home = m.position.clone(); m.userData.lv = 0;
       self.root.add(m);
       return m;
     });
@@ -76,7 +90,7 @@
 
   /* 間取り全体が画面に収まる距離を探す（手前から少し傾けて見下ろす） */
   RoomScene.prototype.fit = function (W, H) {
-    var cam = this.camera, tilt = 22 * Math.PI / 180;
+    var cam = this.camera, tilt = 32 * Math.PI / 180;
     cam.aspect = W / H; cam.updateProjectionMatrix();
     var tx = W / 2 / S, tz = H / 2 / S + 0.3;
     var pts = [[0, 0, 0], [W, 0, 0], [0, 0, H], [W, 0, H], [0, WALL_H, 0], [W, WALL_H, 0]];
@@ -92,6 +106,55 @@
       if (ok) break;
     }
   };
+
+  /* 壁の側面の絵。lv 0〜3 でひびが増える */
+  function paintWall(g, w, h, lv) {
+    g.fillStyle = "#ece6dc"; g.fillRect(0, 0, w, h);
+    var r = Z3.rng(11);
+    for (var i = 0; i < 260; i++) {                 /* 漆喰のざらつき */
+      g.fillStyle = r() < 0.5 ? "rgba(0,0,0,.035)" : "rgba(255,255,255,.08)";
+      g.fillRect(r() * w, r() * h, 2 + r() * 3, 2 + r() * 3);
+    }
+    g.fillStyle = "#7a5a3c"; g.fillRect(0, h - 20, w, 20);   /* 幅木 */
+    g.fillStyle = "rgba(0,0,0,.25)"; g.fillRect(0, h - 21, w, 2);
+    g.fillStyle = "rgba(0,0,0,.18)"; g.fillRect(0, 0, w, 6);  /* 上の縁の影 */
+    if (!lv) return;
+    var cr = Z3.rng(30 + lv);
+    g.strokeStyle = "rgba(60,50,40,.75)"; g.lineCap = "round";
+    for (var c = 0; c < lv * 3; c++) {
+      var x = 10 + cr() * (w - 20), y = 10 + cr() * (h - 40), a = cr() * 6.28;
+      g.lineWidth = 2 + lv * 0.6;
+      g.beginPath(); g.moveTo(x, y);
+      for (var j = 0; j < 5; j++) {
+        a += (cr() - 0.5) * 1.4; x += Math.cos(a) * (8 + lv * 3); y += Math.sin(a) * (8 + lv * 3);
+        g.lineTo(x, y);
+        if (cr() < 0.35) { g.moveTo(x, y); g.lineTo(x + Math.cos(a + 1.2) * 8, y + Math.sin(a + 1.2) * 8); g.moveTo(x, y); }
+      }
+      g.stroke();
+    }
+    if (lv >= 3) {                                   /* 欠けて中が見える */
+      for (var k = 0; k < 4; k++) {
+        g.fillStyle = "#9b8f80";
+        g.beginPath(); var cx = cr() * w, cy = cr() * (h - 30), rr = 6 + cr() * 9;
+        for (var t = 0; t < 7; t++) { var aa = t / 7 * 6.28; g.lineTo(cx + Math.cos(aa) * rr * (0.6 + cr() * 0.5), cy + Math.sin(aa) * rr * (0.6 + cr() * 0.5)); }
+        g.closePath(); g.fill();
+      }
+    }
+  }
+
+  /* 壁の上の面。傷むと白いひびが走る */
+  function paintTop(g, w, h, lv) {
+    g.fillStyle = "#2b2724"; g.fillRect(0, 0, w, h);
+    if (!lv) return;
+    var cr = Z3.rng(50 + lv);
+    g.strokeStyle = "rgba(235,225,205,.8)"; g.lineWidth = 1 + lv * 0.5;
+    for (var c = 0; c < lv * 2; c++) {
+      var x = cr() * w, y = cr() * h, a = cr() * 6.28;
+      g.beginPath(); g.moveTo(x, y);
+      for (var j = 0; j < 4; j++) { a += (cr() - 0.5) * 1.5; x += Math.cos(a) * 9; y += Math.sin(a) * 9; g.lineTo(x, y); }
+      g.stroke();
+    }
+  }
 
   function floor(x0, y0, x1, y1, base, line) {
     var w = x1 - x0, h = y1 - y0;
@@ -176,13 +239,51 @@
       it.g.rotation.y = -b.angle;
     });
     Object.keys(this.items).forEach(function (id) { if (!seen[id]) self.dropItem(id); });
+    var now = performance.now();
     o.G.walls.forEach(function (r, i) {
       var m = self.walls[i];
       if (!m) return;
-      m.visible = !r.dead;
-      var k = Math.max(0, Math.min(1, 1 - r.hp / o.wallHp));   /* 傷むほど少し明るく */
-      m.material.color.setRGB((43 + k * 60) / 255, (39 + k * 52) / 255, (36 + k * 46) / 255, T.SRGBColorSpace);
+      if (r.dead) {
+        if (m.visible) { m.visible = false; self.crumble(m, r); }
+        return;
+      }
+      var k = Math.max(0, Math.min(1, 1 - r.hp / o.wallHp));
+      var lv = k <= 0 ? 0 : k < 0.34 ? 1 : k < 0.67 ? 2 : 3;
+      if (lv !== m.userData.lv) {
+        m.userData.lv = lv;
+        var sd = self.wallMats[lv];
+        m.material = [sd, sd, self.wallTops[lv], self.wallTop, sd, sd];
+      }
+      /* 当たった直後は少し震える */
+      var dt = r.hitT ? (now - r.hitT) / 1000 : 9, home = m.userData.home;
+      if (dt < 0.25) {
+        var amp = (1 - dt / 0.25) * 0.06;
+        m.position.set(home.x + Math.sin(now * 0.09) * amp, home.y, home.z + Math.cos(now * 0.11) * amp);
+      } else m.position.copy(home);
     });
+    /* 崩れた壁のかけら：飛び散って床に落ち、そのまま残る */
+    this.rubble.forEach(function (c) {
+      if (c.rest) return;
+      var d = Math.min(0.05, (now - c.t) / 1000); c.t = now;
+      c.v.y -= 30 * d;
+      c.m.position.addScaledVector(c.v, d);
+      c.m.rotation.x += c.w.x * d; c.m.rotation.z += c.w.z * d;
+      if (c.m.position.y < c.h) { c.m.position.y = c.h; c.v.y *= -0.3; c.v.x *= 0.6; c.v.z *= 0.6; if (Math.abs(c.v.y) < 0.5) c.rest = true; }
+    });
+  };
+
+  RoomScene.prototype.crumble = function (m, r) {
+    var mat = this.wallMats[3], n = 9, now = performance.now();
+    var w = (r[2] - r[0]) / S, d = (r[3] - r[1]) / S;
+    for (var i = 0; i < n; i++) {
+      var sz = (5 + Math.random() * 9) / S;
+      var c = new T.Mesh(new T.BoxGeometry(sz * (0.8 + Math.random()), sz, sz * (0.8 + Math.random())), [mat, mat, this.wallTop, mat, mat, mat]);
+      c.position.set(m.position.x + (Math.random() - 0.5) * w, (8 + Math.random() * 30) / S, m.position.z + (Math.random() - 0.5) * d);
+      c.castShadow = true;
+      this.root.add(c);
+      var a = Math.random() * 6.28, sp = 1 + Math.random() * 3;
+      this.rubble.push({ m: c, t: now, h: sz / 2, v: new T.Vector3(Math.cos(a) * sp, 2 + Math.random() * 4, Math.sin(a) * sp), w: { x: (Math.random() - 0.5) * 12, z: (Math.random() - 0.5) * 12 } });
+    }
   };
 
   /* 画面の点 → 床から高さ hpx の面の上の、ゲームの点 */
