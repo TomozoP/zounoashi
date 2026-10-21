@@ -149,6 +149,28 @@
     tex.offset.set(0.5, 0.5);
     return tex;
   };
+  /* ブルドーザー（黄色い車体・キャタピラ・運転席・前に排土板）。寸法はゲーム側の当たりに合わせる */
+  RoomScene.prototype.makeDozer = function (b) {
+    var g = new T.Group(), inner = new T.Group(), off = b.baseOff;
+    inner.position.set(off.x / S, 0, off.y / S);
+    g.add(inner);
+    function box(w, h, d, color, x, y, z) {
+      var m = new T.Mesh(new T.BoxGeometry(w / S, h / S, d / S), new T.MeshLambertMaterial({ color: color }));
+      m.position.set(x / S, y / S, z / S); m.castShadow = true; m.receiveShadow = true;
+      inner.add(m); return m;
+    }
+    var L = 58, Wd = 42;
+    box(L, 16, 11, 0x222222, 0, 8, -Wd / 2 + 5);           /* キャタピラ */
+    box(L, 16, 11, 0x222222, 0, 8, Wd / 2 - 5);
+    box(L - 8, 16, Wd - 18, 0xf2b81c, 0, 20, 0);            /* 車体 */
+    box(22, 22, 26, 0xf2b81c, -10, 39, 0);                  /* 運転席 */
+    box(23, 12, 27, 0x2a3440, -10, 40, 0);                  /* 窓 */
+    box(10, 26, 66, 0x8a8f96, L / 2 + 5, 14, 0);            /* 排土板 */
+    box(16, 6, 6, 0x555a60, L / 2 - 6, 18, -14);            /* 腕 */
+    box(16, 6, 6, 0x555a60, L / 2 - 6, 18, 14);
+    this.root.add(g);
+    return g;
+  };
   RoomScene.prototype.dropItem = function (id) {
     var it = this.items[id];
     if (!it) return;
@@ -175,6 +197,11 @@
       it.g.rotation.y = -b.angle;
     });
     Object.keys(this.items).forEach(function (id) { if (!seen[id]) self.dropItem(id); });
+    if (o.dozer) {
+      if (!this.dozerG || this.dozerG.parent !== this.root) this.dozerG = this.makeDozer(o.dozer);
+      this.dozerG.position.set(o.dozer.position.x / S, 0, o.dozer.position.y / S);
+      this.dozerG.rotation.y = -o.dozer.angle;
+    }
     o.G.walls.forEach(function (r, i) {
       var m = self.walls[i];
       if (!m) return;

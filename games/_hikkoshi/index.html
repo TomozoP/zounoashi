@@ -251,12 +251,66 @@
       return makeItem(d, x, y, d.a || 0);
     });
     M.Composite.add(engine.world, items);
+    makeDozer();
     frags = []; decals = []; parts = []; rings = []; grabs = {};
     M.Events.on(engine, "collisionStart", onHit);
   }
 
+  /* ============ ブルドーザー ============
+     指で触った所へ向かって走る（向きを変えてから進む。真後ろなら下がる）。
+     本体の前（ローカルの +x）に排土板。矢印キーでも運転できる */
+  var dozer, drive = { on: false, x: 0, y: 0, sx: 0, sy: 0 }, keys = {};
+  var DZ = { len: 58, wid: 42, blade: 66, bladeT: 10, speed: 5.2, turn: 0.055 };
+  function makeDozer() {
+    var x = W / 2, y = (G.ny1 + G.oy0) / 2;
+    var base = M.Bodies.rectangle(x, y, DZ.len, DZ.wid, { chamfer: { radius: 6 } });
+    var blade = M.Bodies.rectangle(x + DZ.len / 2 + DZ.bladeT / 2, y, DZ.bladeT, DZ.blade, { chamfer: { radius: 3 } });
+    dozer = M.Body.create({ parts: [base, blade], frictionAir: 0.2, friction: 0.3, restitution: 0.05 });
+    M.Body.setDensity(dozer, 0.006);
+    dozer.dozer = true; base.dozer = true; blade.dozer = true;
+    /* 重心は本体の中心から少し前にずれるので、絵を置くためのずれを覚えておく */
+    dozer.baseOff = { x: base.position.x - dozer.position.x, y: base.position.y - dozer.position.y };
+    M.Body.setAngle(dozer, Math.PI / 2);      /* 旧居（下）を向いて道に置く */
+    M.Composite.add(engine.world, dozer);
+    drive.on = false; keys = {};
+  }
+  function wrapA(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
+  function driveDozer(dts) {
+    var a = dozer.angle, fx = Math.cos(a), fy = Math.sin(a), speed = 0, turn = 0;
+    if (drive.on) {
+      var dx = drive.x - dozer.position.x, dy = drive.y - dozer.position.y, dist = Math.hypot(dx, dy);
+      if (dist > 26) {
+        var diff = wrapA(Math.atan2(dy, dx) - a);
+        if (Math.abs(diff) > 2.1) {               /* 真後ろなら下がりながら向きを合わせる */
+          var back = wrapA(diff + Math.PI);
+          turn = Math.max(-1, Math.min(1, back * 2));
+          speed = -0.65 * Math.max(0, Math.cos(back));
+        } else {
+          turn = Math.max(-1, Math.min(1, diff * 2));
+          speed = Math.max(0, Math.cos(diff)) * Math.min(1, dist / 90);
+        }
+      }
+    }
+    if (keys.up) speed = 1; if (keys.down) speed = -0.65;
+    if (keys.left) turn = -1; if (keys.right) turn = 1;
+    M.Body.setAngularVelocity(dozer, turn * DZ.turn);
+    var v = M.Body.getVelocity(dozer), vx = fx * speed * DZ.speed, vy = fy * speed * DZ.speed;
+    var f = 0.35 * dozer.mass / (dts * BASE);
+    M.Body.applyForce(dozer, dozer.position, { x: (vx - v.x) * f, y: (vy - v.y) * f });
+  }
+  function drawDozer2D() {
+    ctx.save();
+    ctx.translate(dozer.position.x, dozer.position.y); ctx.rotate(dozer.angle);
+    ctx.translate(dozer.baseOff.x, dozer.baseOff.y);
+    ctx.fillStyle = "#222"; ctx.fillRect(-DZ.len / 2, -DZ.wid / 2 - 2, DZ.len, 10); ctx.fillRect(-DZ.len / 2, DZ.wid / 2 - 8, DZ.len, 10);
+    fillRR(-DZ.len / 2 + 4, -DZ.wid / 2 + 6, DZ.len - 8, DZ.wid - 12, 4, "#f2b81c");
+    fillRR(-DZ.len / 2 + 8, -10, 20, 20, 3, "#333");
+    ctx.fillStyle = "#8a8f96"; ctx.fillRect(DZ.len / 2, -DZ.blade / 2, DZ.bladeT, DZ.blade);
+    ctx.restore();
+  }
+
   function makeItem(d, x, y, angle) {
-    var opt = { frictionAir: 0.1, friction: 0.25, restitution: 0.12, density: 0.001 * d.heavy, chamfer: d.r ? undefined : { radius: 5 } };
+    var opt = { frictionAir: 0.16, friction: 0.25, restitution: 0.12, density: 0.001 * d.heavy, chamfer: d.r ? undefined : { radius: 5 } };
     var b = d.r ? M.Bodies.circle(x, y, d.r, opt) : M.Bodies.rectangle(x, y, d.w, d.h, opt);
     if (angle) M.Body.setAngle(b, angle);
     b.def = d; b.item = true; b.inside = false; b.seed = Math.random(); b.marks = []; b.shape = outline(d);
@@ -342,10 +396,10 @@
   }
   /* 壁：強くぶつけるたびにひびが入り、HPがなくなると崩れる */
   var WALL_HP = 30;
-  var WALL_BREAK = false;                      /* いったん壁は壊れない（true でひび→崩れる） */
-  function hitWall(r, sp, s) {
+  var WALL_BREAK = true;                       /* 壁はぶつけまくると崩れる（false で壊れない） */
+  function hitWall(r, sp, s, by) {
     if (!WALL_BREAK || r.dead) return;
-    r.hp -= s - 2.5;
+    r.hp -= by && by.dozer ? (s - 1.5) * 3 : s - 2.5;   /* ブルドーザーで当てると大きく削れる */
     var cx = Math.max(r[0], Math.min(r[2], sp.x)), cy = Math.max(r[1], Math.min(r[3], sp.y));
     r.cracks.push({ x: cx, y: cy, a: Math.random() * 6.28, l: 6 + s * 1.5 });
     if (r.hp > 0) return;
@@ -369,15 +423,15 @@
     var toBreak = [];
     e.pairs.forEach(function (p) {
       var a = p.bodyA.parent, b = p.bodyB.parent;
-      if (!a.item && !b.item) return;
+      if (!a.item && !b.item && !a.dozer && !b.dozer) return;
       var s = relSpeed(p);
-      if (s > 2.2 && (a.item || b.item) && !(a.frag || b.frag)) thud(s);
-      if (s > 3.2) {
+      if (s > 2.2 && !(a.frag || b.frag)) thud(s);
+      if (s > 3.2 || (s > 2.2 && (a.dozer || b.dozer) && (a.wall || b.wall))) {
         /* 強くぶつけると、ぶつけた所にへこみや傷が残り、画面が揺れる */
         var sp = p.collision.supports && p.collision.supports[0];
         [a, b].forEach(function (x) { if (x.item && !x.dead && sp) mark(x, sp, s); });
-        if (sp && a.wall && b.item) hitWall(a.wall, sp, s);
-        if (sp && b.wall && a.item) hitWall(b.wall, sp, s);
+        if (sp && a.wall && (b.item || b.dozer)) hitWall(a.wall, sp, s, b);
+        if (sp && b.wall && (a.item || a.dozer)) hitWall(b.wall, sp, s, a);
         shake = Math.max(shake, Math.min(24, (s - 2) * 2.6));
         if (sp) impact(sp, s);
       }
@@ -571,18 +625,20 @@
         var f = 0.9 * b.mass / (dts * BASE);
         M.Body.applyForce(b, e, { x: (vx - v.x) * f, y: (vy - v.y) * f });
       });
+      if (dozer) driveDozer(dts);
       M.Engine.update(engine, dts);
+      if (dozer) guard(dozer);
       if (pendingSplit.length) { pendingSplit.forEach(split); pendingSplit = []; }
       items.concat(frags).forEach(guard);
     }
   }
   function guard(b) {
     if (b.dead) return;
-    var v = M.Body.getVelocity(b), vm = b.frag ? 9 : VMAX;
+    var v = M.Body.getVelocity(b), vm = b.frag ? 9 : b.dozer ? DZ.speed * 1.4 : VMAX;
     var s = Math.hypot(v.x, v.y);
     if (s > vm) M.Body.setVelocity(b, { x: v.x * vm / s, y: v.y * vm / s });
     var av = M.Body.getAngularVelocity(b);
-    if (Math.abs(av) > 0.3) M.Body.setAngularVelocity(b, Math.sign(av) * 0.3);
+    if (!b.dozer && Math.abs(av) > 0.3) M.Body.setAngularVelocity(b, Math.sign(av) * 0.3);
     /* それでも中心が壁に入ったら、さっきの場所へ戻す */
     var c = b.position, inWall = false;
     for (var i = 0; i < G.walls.length; i++) {
@@ -619,6 +675,7 @@
     if (state !== S.PLAY) return;
     finalT = T;
     state = S.RESULT;
+    drive.on = false; keys = {};
     Object.keys(grabs).forEach(release);
     [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.22, 0.14, "square", null, i * 0.11); });
     tone(1047, 0.6, 0.12, "triangle", null, 0.44);
@@ -626,6 +683,15 @@
 
   /* ============ 入力 ============ */
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  /* 指を置いている間、その場所へブルドーザーが走る */
+  function setDrive(p) {
+    var s3 = scene3d(), q = null;
+    drive.sx = p.x; drive.sy = p.y;
+    if (s3 && s3.built) q = s3.toGame(p.x, p.y, 0);
+    else q = { x: p.x, y: p.y };
+    if (q) { drive.x = q.x; drive.y = q.y; }
+  }
+  var drivePid = null;
   wrap.addEventListener("pointerdown", function (e) {
     if (e.target === shareButton) return;
     e.preventDefault(); keyMode = false;
@@ -637,30 +703,16 @@
       return;
     }
     try { wrap.setPointerCapture(e.pointerId); } catch (er) {}
-    var s3 = scene3d(), g;
-    if (s3 && s3.built) {
-      /* 立体：画面の点にある家具の、当たった高さの面で引っぱる */
-      var hit = s3.pick(p.x, p.y);
-      if (hit) g = grab(e.pointerId, hit.x, hit.y, hit.body, hit.h);
-      else {
-        var q = s3.toGame(p.x, p.y, 20);
-        if (q) g = grab(e.pointerId, q.x, q.y);
-        if (g) { g.h = s3.heightOf(g.body) * 0.6; var q2 = s3.toGame(p.x, p.y, g.h); if (q2) { g.x = q2.x; g.y = q2.y; } }
-      }
-    } else g = grab(e.pointerId, p.x, p.y);
-    if (g) { g.sx = p.x; g.sy = p.y; }
+    drivePid = e.pointerId; drive.on = true; setDrive(p);
   });
   wrap.addEventListener("pointermove", function (e) {
-    var g = grabs[e.pointerId];
-    if (!g) return;
-    var p = atCanvas(e), s3 = scene3d();
-    g.sx = p.x; g.sy = p.y;
-    if (s3 && s3.built) { var q = s3.toGame(p.x, p.y, g.h); if (q) { g.x = q.x; g.y = q.y; } }
-    else { g.x = p.x; g.y = p.y; }
+    if (e.pointerId !== drivePid || !drive.on) return;
+    setDrive(atCanvas(e));
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); release(e.pointerId); });
-  wrap.addEventListener("pointercancel", function (e) { release(e.pointerId); });
-  window.addEventListener("blur", function () { if (grabs) Object.keys(grabs).forEach(release); });
+  function stopDrive(e) { if (!e || e.pointerId === drivePid) { drive.on = false; drivePid = null; } }
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); stopDrive(e); });
+  wrap.addEventListener("pointercancel", stopDrive);
+  window.addEventListener("blur", function () { stopDrive(); keys = {}; });
 
   /* 本番以外（手元・確認用ページ・制作中の固定リンク）だけ、数字キーで場面を飛ばせる。 */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
@@ -690,6 +742,8 @@
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var arrow = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key];
+    if (arrow) { e.preventDefault(); keys[arrow] = true; return; }
     if (!esc && !go) return;
     e.preventDefault();
     if (esc) { if (!e.repeat) newRound(); return; }
@@ -697,6 +751,8 @@
     if (state === S.RESULT) newRound();
   });
   window.addEventListener("keyup", function (e) {
+    var arrow = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key];
+    if (arrow) keys[arrow] = false;
     if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
   });
 
@@ -921,7 +977,7 @@
     var s3 = scene3d(), drawn3d = false;
     if (s3) {
       try {
-        s3.sync({ G: G, W: W, H: H, items: items, wallHp: WALL_HP });
+        s3.sync({ G: G, W: W, H: H, items: items, wallHp: WALL_HP, dozer: dozer });
         drawn3d = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); drawn3d = false; }
     }
@@ -930,6 +986,7 @@
       drawHouses();
       frags.forEach(drawFrag);
       items.forEach(function (b) { if (!b.dead) drawItem(b); });
+      if (dozer) drawDozer2D();
     }
     /* 立体のときは、床の上の点を画面の点に写して重ねる */
     MP = drawn3d ? function (x, y, h) { return s3.toScreen(x, y, h); } : function (x, y) { return { x: x, y: y }; };
@@ -945,7 +1002,11 @@
       ctx.strokeStyle = "rgba(255,255,255," + (1 - r.t / 0.4) + ")"; ctx.lineWidth = 4;
       ctx.beginPath(); ctx.arc(q.x, q.y, 10 + r.t * 160, 0, 7); ctx.stroke();
     });
-    drawGrabs(drawn3d);
+    if (drive.on && state === S.PLAY) {
+      var tq = MP(drive.x, drive.y, 0);
+      ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(tq.x, tq.y, 14, 0, 7); ctx.stroke();
+    }
     ctx.restore();
     if (state === S.PLAY) {
       ctx.save();
