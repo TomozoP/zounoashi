@@ -14,9 +14,9 @@
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
   #start[hidden] { display:none; }
-  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
-  #share-button[hidden] { display:none; }
-  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+  #share-button, #save-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden], #save-button[hidden] { display:none; }
+  #share-button:focus-visible, #save-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
 </style>
 </head>
 <body>
@@ -24,6 +24,7 @@
   <canvas id="c"></canvas>
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+  <button id="save-button" type="button" aria-label="動画を保存" hidden></button>
 </div></div>
 <script src="../start.js"></script>
 <script src="../view.js"></script>
@@ -52,6 +53,58 @@
   var wrap = document.getElementById("wrap");
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
+
+  /* ============ 泳ぎの録画 ============
+     泳ぎ始めから結果が出て2秒後まで、ボタンを除いた画面の真ん中を正方形で録る。X に載せられる mp4 を優先（無い環境は webm） */
+  var saveButton = document.getElementById("save-button");
+  var rec = null, recBlob = null, recEnd = 0, recCv = document.createElement("canvas"), recCtx = recCv.getContext("2d");
+  /* Claude の確認用ページの中ではファイルを直接落とせないので、ページの保存の仕組みを使う */
+  var pageSaver = null;
+  if (window.claude && window.claude.use) window.claude.use("downloads").then(function (d) { pageSaver = d; }, function () {});
+  function recType() {
+    if (!window.MediaRecorder || !recCv.captureStream) return null;
+    var c = ["video/mp4;codecs=avc1.42E01E", "video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
+    for (var i = 0; i < c.length; i++) if (MediaRecorder.isTypeSupported(c[i])) return c[i];
+    return null;
+  }
+  function recStart() {
+    recStop(true); recBlob = null;
+    var type = recType(); if (!type) return;
+    /* 正方形（水面とタイムが入る真ん中あたりを切り出す）、一辺は1080まで */
+    var side = Math.round(Math.min(1080, canvas.width) / 2) * 2;
+    recCv.width = side; recCv.height = side;
+    try {
+      var stream = recCv.captureStream(30), r = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8000000 }), chunks = [];
+      r.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+      r.onstop = function () {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        if (!r.discard && chunks.length) recBlob = new Blob(chunks, { type: type.split(";")[0] });
+      };
+      r.start(500); rec = r;
+    } catch (e) { rec = null; }
+  }
+  function recStop(discard) {
+    if (!rec) return;
+    var r = rec; rec = null; r.discard = !!discard;
+    try { r.stop(); } catch (e) {}
+  }
+  function recFrame() {
+    if (!rec) return;
+    var sw = canvas.width, sy = Math.max(0, Math.min(canvas.height - sw, canvas.height * 0.45 - sw / 2));
+    recCtx.drawImage(canvas, 0, sy, sw, sw, 0, 0, recCv.width, recCv.height);
+    if (state === S.RESULT && performance.now() > recEnd) recStop(false);
+  }
+  function fileStamp() {
+    var d = new Date();
+    function p2(n) { return (n < 10 ? "0" : "") + n; }
+    return d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + "-" + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
+  }
+  window.zResultActions.bind(saveButton, function () {
+    if (!recBlob) return;
+    var name = zT("最速泳法ファインダー", "FastestSwimStyleFinder") + "_" + fileStamp() + (recBlob.type.indexOf("mp4") >= 0 ? ".mp4" : ".webm");
+    if (pageSaver) { pageSaver.save({ filename: name, data: recBlob }).catch(function () {}); return; }
+    window.zResultActions.saveImage({ blob: recBlob, name: name });
+  });
 
   /* ============ 画面 ============
      タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
@@ -185,7 +238,7 @@
   }
   /* 描く画面へ。もう一度のときも形は残し、1本目から順に見直せる */
   function toEdit() {
-    shareButton.hidden = true;
+    shareButton.hidden = true; saveButton.hidden = true; recStop(true);
     sel = ORDER[0]; phase = "draw"; redraw = false;
     state = S.EDIT;
     score = 0; T = 0; held = false; won = false;
@@ -204,6 +257,7 @@
   function play() {
     state = S.RUN; runT = 0; T = 0; drawing = null; sliding = false;
     build(WALL0 + 200);
+    recStart();
     tone(523, 0.12, 0.12, "triangle"); tone(784, 0.18, 0.12, "triangle", null, 0.1);
   }
 
@@ -321,6 +375,7 @@
   function toResult() {
     state = S.RESULT;
     shareButton.hidden = false;
+    recEnd = performance.now() + 2000;
   }
 
   /* しぶきと泡 */
@@ -627,7 +682,9 @@
   }
 
   function draw() {
-    window.zResultActions.place(shareButton, resultButtons()[2], W, H, state === S.RESULT);
+    var rb = resultButtons();
+    window.zResultActions.place(shareButton, btnOf(rb, "share"), W, H, state === S.RESULT);
+    if (btnOf(rb, "save")) window.zResultActions.place(saveButton, btnOf(rb, "save"), W, H, state === S.RESULT && !!recBlob);
     ctx.clearRect(0, 0, W, H);
     var s3 = scene3d(), drawn3d = false;
     if (s3) {
@@ -645,6 +702,7 @@
     drawEditOverlay();
     drawPanel();
     drawPhaseTitle();
+    if (state === S.RUN || state === S.GOAL) recFrame();
     if (state === S.RUN) window.zResultActions.drawButtons(ctx, runButtons());
     if (state === S.RESULT) drawResult();
   }
@@ -661,9 +719,15 @@
     return b;
   }
   function resultButtons() {
-    var b = window.zResultActions.row(W, H * 0.62, ["redraw", "repower", "share"]);
+    var ids = recType() ? ["redraw", "repower", "save", "share"] : ["redraw", "repower", "share"];
+    var b = window.zResultActions.row(W, H * 0.62, ids);
     b[0].label = "書き直す"; b[1].label = "力を直す";
+    if (btnOf(b, "save")) btnOf(b, "save").label = "動画を保存";
     return b;
+  }
+  function btnOf(list, id) {
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
   }
   function hitButton(x, y) {
     return window.zResultActions.hit(resultButtons(), x, y);
@@ -679,12 +743,17 @@
     ctx.textAlign = "center";
     ctx.fillText(scoreText(), W / 2, H * 0.45);
     ctx.restore();
-    window.zResultActions.drawButtons(ctx, resultButtons());
+    recFrame();                                  /* 録画にはボタンを入れない */
+    /* 動画の保存は、録り終わるまで薄く出す */
+    var rb = resultButtons();
+    window.zResultActions.drawButtons(ctx, rb.filter(function (b) { return b.id !== "save" || recBlob; }));
+    if (btnOf(rb, "save") && !recBlob) { ctx.save(); ctx.globalAlpha = 0.4; window.zResultActions.drawButtons(ctx, [btnOf(rb, "save")]); ctx.restore(); }
   }
 
   /* ============ 覗き穴 ============
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。 */
   window.__probe = {
+    video: function () { return recBlob ? { type: recBlob.type, size: recBlob.size } : null; },
     pts: function () { return pts; },
     now: function () { return { state: state, score: score, W: W, H: H, head: pts && pts[HEAD], hip: pts && pts[HIP], camX: camX, SY: SY, T: T, runT: runT, dist: pts && distance(), buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
