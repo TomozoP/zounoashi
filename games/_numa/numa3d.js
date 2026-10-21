@@ -1,8 +1,9 @@
-/* バタフライのプールの立体の見た目（three.js）。games/three-base.js の Z3 を土台にする。
+/* 最速泳法ファインダーのプールの立体の見た目（three.js）。games/three-base.js の Z3 を土台にする。
    動き（手足の物理）はゲーム側の2Dのまま。ここは見た目と、画面の点 ⇔ ゲームの点の変換だけ。
    単位：ゲームの 100px が立体の 1。ゲームの x → 立体の x、ゲームの y（下向き）→ 立体の -y。
    水面（ゲームの SY）が立体の y=0。人は z=0 の面で泳ぐ。
-   真横から遠近なしで見る2.5D（立体の絵を平らに並べた画面）。画面は泳ぐ人を追って横に動く。 */
+   真横から遠近なしで見る2.5D（立体の絵を平らに並べた画面）。画面は泳ぐ人を追って横に動く。
+   手足はプレイヤーが描いた線なので、区切りごとの筒をつないで作る。 */
 (function (global) {
   "use strict";
   var T, Z3 = global.Z3;
@@ -158,18 +159,15 @@
     function ball(mat, r) {
       var m = new T.Mesh(new T.SphereGeometry(r, 18, 12), mat); m.castShadow = true; root.add(m); return m;
     }
-    this.legB = limb(skinB, 0.16);
-    this.footB = ball(skinB, 0.15);
-    this.armB = limb(skinB, 0.11);
-    this.handB = ball(skinB, 0.13);
-    this.thigh = limb(skin, 0.19); this.shin = limb(skin, 0.16);
-    this.footF = ball(skin, 0.16);
-    this.toeF = limb(skin, 0.1); this.toeB = limb(skinB, 0.09);
+    /* 描いた手足：区切りごとの筒をつないで作る（本数は描いた長さで変わる）。手前は明るく、奥は少し暗く */
+    this.limbMake = limb;
+    this.limbMats = [skin, skinB, skin, skinB];
+    this.limbR = [0.12, 0.11, 0.16, 0.15];
+    this.limbZ = [0.36, -0.3, 0.2, -0.2];
+    this.chains = [[], [], [], []];
     this.torso = limb(skin, 0.31);
     this.trunks = new T.Mesh(new T.CylinderGeometry(0.33, 0.35, 0.36, 20), trunks);
     root.add(this.trunks);
-    this.upper = limb(skin, 0.13); this.fore = limb(skin, 0.11);
-    this.handF = ball(skin, 0.14);
 
     /* 頭（帽子と顔をまとめて回す） */
     var head = this.head = new T.Group(); root.add(head);
@@ -208,10 +206,10 @@
   NumaScene.prototype.v = function (x, y, z) { return { x: (x - this.cx) / U, y: (this.SY - y) / U, z: z || 0 }; };
 
   /* カメラ：遠近なしで真横から。camX（ゲームの x）が画面の中央に来る */
-  NumaScene.prototype.aim = function (W, H, SY, camX) {
+  NumaScene.prototype.aim = function (W, H, SY, camX, camY, zoom) {
     this.W = W; this.H = H; this.SY = SY; this.cx = W / 2;
-    var cam = this.camera, ZOOM = 1.25, hw = W / U / 2 / ZOOM, hh = H / U / 2 / ZOOM;   /* 少し寄って人を大きく見せる */
-    var pitch = 0.1, D = 20, ty = (SY - H / 2) / U, tx = (camX - this.cx) / U;
+    var cam = this.camera, hw = W / U / 2 / zoom, hh = H / U / 2 / zoom;   /* zoom：描くときは寄り、泳ぐときは引く */
+    var pitch = 0.1, D = 20, ty = (SY - camY) / U, tx = (camX - this.cx) / U;
     cam.left = -hw; cam.right = hw; cam.top = hh; cam.bottom = -hh;
     cam.position.set(tx, ty + Math.sin(pitch) * D, Math.cos(pitch) * D);
     cam.lookAt(tx, ty, 0);
@@ -237,29 +235,26 @@
 
   /* g: ゲームの状態（点はすべてゲームの座標） */
   NumaScene.prototype.sync = function (g) {
-    this.aim(g.W, g.H, g.SY, g.camX);
+    this.aim(g.W, g.H, g.SY, g.camX, g.camY, g.zoom);
     if (!this.built) this.buildPool(g);
     var self = this, V = function (p, z) { return self.v(p.x, p.y, z); };
 
-    var h = V(g.hip), s = V(g.shoulder), knee = V(g.knee), foot = V(g.foot), toe = V(g.toe), el = V(g.elbow), hd = V(g.hand);
-    var zf = 0.18, zb = -0.18;
-    /* 両腕・両脚はそろって動く（バタフライ）。奥の手足は少し暗い色で同じ形 */
-    setLimb(this.legB, { x: h.x, y: h.y, z: zb }, { x: foot.x, y: foot.y, z: zb });
-    this.footB.position.set(foot.x, foot.y, zb);
-    setLimb(this.toeB, { x: foot.x, y: foot.y, z: zb }, { x: toe.x, y: toe.y, z: zb });
-    setLimb(this.thigh, { x: h.x, y: h.y, z: zf }, { x: knee.x, y: knee.y, z: zf });
-    setLimb(this.shin, { x: knee.x, y: knee.y, z: zf }, { x: foot.x, y: foot.y, z: zf });
-    this.footF.position.set(foot.x, foot.y, zf);
-    setLimb(this.toeF, { x: foot.x, y: foot.y, z: zf }, { x: toe.x, y: toe.y, z: zf });
+    var h = V(g.hip), s = V(g.shoulder);
     setLimb(this.torso, h, s);
     var thT = Math.atan2(s.x - h.x, s.y - h.y);          /* 胴の傾き（上向きから時計回り） */
     this.trunks.position.set(h.x + (s.x - h.x) * 0.06, h.y + (s.y - h.y) * 0.06, 0);
     this.trunks.rotation.set(0, 0, -thT);
-    setLimb(this.armB, { x: s.x, y: s.y, z: -0.3 }, { x: hd.x, y: hd.y, z: -0.3 });
-    this.handB.position.set(hd.x, hd.y, -0.3);
-    setLimb(this.upper, { x: s.x, y: s.y, z: 0.32 }, { x: el.x, y: el.y, z: 0.34 });
-    setLimb(this.fore, { x: el.x, y: el.y, z: 0.34 }, { x: hd.x, y: hd.y, z: 0.36 });
-    this.handF.position.set(hd.x, hd.y, 0.36);
+    /* 描いた手足 */
+    for (var li = 0; li < 4; li++) {
+      var pl = g.limbs[li], ch = this.chains[li], z = this.limbZ[li];
+      while (ch.length < pl.length - 1) ch.push(this.limbMake(this.limbMats[li], this.limbR[li]));
+      for (var ci = 0; ci < ch.length; ci++) {
+        ch[ci].visible = ci < pl.length - 1;
+        if (!ch[ci].visible) continue;
+        var a1 = V(pl[ci]), b1 = V(pl[ci + 1]);
+        setLimb(ch[ci], { x: a1.x, y: a1.y, z: z }, { x: b1.x, y: b1.y, z: z });
+      }
+    }
 
     /* 頭：首から頭への向きに合わせて回す。うつ伏せなので顔は下（と少し手前）を向く */
     var hp = V(g.head), thH = Math.atan2(hp.x - s.x, hp.y - s.y);
