@@ -1,8 +1,8 @@
-/* 底なし沼の立体の見た目（three.js）。games/three-base.js の Z3 を土台にする。
-   動き（沈み・傾き・泥かき）はゲーム側の2Dのまま。ここは見た目と、画面の点 ⇔ ゲームの点の変換だけ。
+/* 背泳ぎのプールの立体の見た目（three.js）。games/three-base.js の Z3 を土台にする。
+   動き（腕・速さ・沈み）はゲーム側の2Dのまま。ここは見た目と、画面の点 ⇔ ゲームの点の変換だけ。
    単位：ゲームの 100px が立体の 1。ゲームの x → 立体の x、ゲームの y（下向き）→ 立体の -y。
-   沼の表面（ゲームの SY）が立体の y=0。人は z=0 の面の上で動く。
-   真横から遠近なしで見る2.5Dの見た目（ワンダーのような、立体の絵を平らに並べた画面）。丸っこい形と明るい色で、つやを少し出す。 */
+   水面（ゲームの SY）が立体の y=0。人は z=0 の面で泳ぐ。
+   真横から遠近なしで見る2.5D（立体の絵を平らに並べた画面）。画面は泳ぐ人を追って横に動く。 */
 (function (global) {
   "use strict";
   var T, Z3 = global.Z3;
@@ -11,152 +11,141 @@
   function NumaScene() {
     T = global.THREE;
     var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.1 }, camera: { fov: 30, near: 1, far: 80 } });
-    /* 真横から遠近なしで見る（2.5D）。少しだけ見下ろして泥の表面のつやを見せる */
+    /* 真横から遠近なしで見る。少しだけ見下ろして水面のつやを見せる */
     st.camera = new T.OrthographicCamera(-2.7, 2.7, 4.8, -4.8, 0.1, 80);
     this.scene = st.scene;
     this.camera = st.camera;
+    this.scene.background = new T.Color(0xdfeef5);
+    this.built = false;
+
     var sc = this.scene;
-
-    /* 空：明るい青のグラデーション */
-    sc.background = Z3.canvasTex(4, 256, function (g, w, h) {
-      var gr = g.createLinearGradient(0, 0, 0, h);
-      gr.addColorStop(0, "#2f8fe0"); gr.addColorStop(0.6, "#7cc4f2"); gr.addColorStop(1, "#d6f0fb");
-      g.fillStyle = gr; g.fillRect(0, 0, w, h);
-    });
-
-    sc.add(new T.HemisphereLight(0xf2f8ff, 0x8a7050, 1.9));
-    var key = this.key = new T.DirectionalLight(0xfff4e2, 2.0);
-    key.position.set(-3, 6, 8);
+    sc.add(new T.HemisphereLight(0xf6fbff, 0x7aa8c0, 1.9));
+    var key = this.key = new T.DirectionalLight(0xfff8ee, 1.9);
     key.castShadow = true;
     key.shadow.mapSize.set(Z3.mobile ? 1024 : 2048, Z3.mobile ? 1024 : 2048);
-    var sc2 = key.shadow.camera; sc2.left = -5; sc2.right = 5; sc2.top = 5; sc2.bottom = -5; sc2.near = 0.5; sc2.far = 30;
+    var sc2 = key.shadow.camera; sc2.left = -4; sc2.right = 4; sc2.top = 4; sc2.bottom = -4; sc2.near = 0.5; sc2.far = 30;
     key.shadow.bias = -0.0008;
     sc.add(key); sc.add(key.target);
-    var rim = new T.DirectionalLight(0xd8f0ff, 1.2); rim.position.set(4, 3, -5); sc.add(rim);
-
-    var r = Z3.rng(5);
-    var self = this;
-    /* もこもこ（玉の集まり）。雲・丘・茂みに使う */
-    function puff(mat, x, y, z, w, h, n, seed) {
-      var g = new T.Group(), rr = Z3.rng(seed);
-      for (var i = 0; i < n; i++) {
-        var k = i / Math.max(1, n - 1), rad = h * (0.55 + 0.45 * Math.sin(k * Math.PI)) * (0.8 + rr() * 0.3);
-        var m = new T.Mesh(new T.SphereGeometry(1, 20, 14), mat);
-        m.scale.setScalar(rad);
-        m.position.set(x + (k - 0.5) * w, y + rad * 0.2, z + rr() * 0.2);
-        g.add(m);
-      }
-      sc.add(g); return g;
-    }
-    /* 雲（奥）：白くふくらんだ玉 */
-    var cloud = Z3.std(0xffffff, { roughness: 0.95, emissive: 0x9ab8d0, emissiveIntensity: 0.35 });
-    puff(cloud, -2.3, 1.2, -20, 2.4, 0.9, 6, 1);
-    puff(cloud, 2.6, 2.4, -20, 1.8, 0.55, 5, 2);
-    puff(cloud, 0.4, 3.6, -20, 1.0, 0.3, 4, 3);
-    puff(cloud, -1.4, 3.1, -20, 0.8, 0.22, 3, 4);
-    /* 丘（奥ほど淡い） */
-    var hillFar = Z3.std(0x9fd6b4, { roughness: 1, emissive: 0x3a6a5a, emissiveIntensity: 0.25 });
-    var hillMid = Z3.std(0x5cbf6a, { roughness: 0.9 });
-    puff(hillFar, 0, -0.6, -16, 6.5, 1.3, 5, 7);
-    puff(hillMid, -1.5, -0.7, -12, 3.5, 1.1, 4, 8);
-    puff(hillMid, 2.8, -0.9, -12, 2.4, 1.0, 3, 9);
-
-    /* 奥の岸：草の帯と、茂み・ガマ */
-    var grassMat = Z3.std(0x58c040, { roughness: 0.6 });
-    var back = new T.Mesh(new T.BoxGeometry(14, 0.6, 3), grassMat);
-    back.position.set(0, -0.15, -5.2); back.receiveShadow = true; sc.add(back);
-    var bush = Z3.std(0x2fa84a, { roughness: 0.55 });
-    puff(bush, -2.2, 0.25, -4.4, 0.9, 0.32, 4, 11).children.forEach(function (m) { m.castShadow = true; });
-    puff(bush, 0.6, 0.22, -4.4, 0.7, 0.28, 3, 12);
-    puff(bush, 2.3, 0.25, -4.4, 0.8, 0.3, 4, 13);
-    var stem = Z3.std(0x4f9a3a, { roughness: 0.6 }), head = Z3.std(0x8a5a2e, { roughness: 0.5 });
-    for (var j = 0; j < 9; j++) {
-      var cx = -2.6 + j * 0.62 + r() * 0.2, hgt = 0.9 + r() * 0.6;
-      var st1 = new T.Mesh(new T.CylinderGeometry(0.025, 0.035, hgt, 6), stem);
-      st1.position.set(cx, hgt / 2, -3.3 - r() * 0.4); st1.rotation.z = (r() - 0.5) * 0.25; sc.add(st1);
-      var hd = new T.Mesh(new T.CapsuleGeometry(0.06, 0.22, 4, 8), head);
-      hd.position.set(cx + st1.rotation.z * -hgt * 0.5, hgt * 0.92, st1.position.z); sc.add(hd);
-    }
-
-    /* 沼：上の面が y=0 の箱（z は -3〜+1）。人は z=0 で動くので、沈んだ所は手前の泥に隠れる */
-    this.mudMat = Z3.std(0x7a4c26, { roughness: 0.18, metalness: 0.0 });
-    /* 手前の切り口：波打つ泥の層（ワンダーの地面の断面のように） */
-    var cut = Z3.std(0xffffff, { roughness: 0.85, map: Z3.canvasTex(512, 512, function (g, w, h) {
-      var cols = ["#8a5630", "#6e4224", "#5a341b", "#7a4a28", "#4a2a14", "#3a200e"];
-      g.fillStyle = cols[0]; g.fillRect(0, 0, w, h);
-      for (var i = 1; i < cols.length; i++) {
-        var y0 = h * (i / cols.length) - 10;
-        g.fillStyle = cols[i];
-        g.beginPath(); g.moveTo(0, h);
-        for (var x = 0; x <= w; x += 8) g.lineTo(x, y0 + Math.sin(x / w * Math.PI * 6 + i * 1.7) * 14);
-        g.lineTo(w, h); g.fill();
-      }
-      var rr = Z3.rng(3);
-      for (var k = 0; k < 26; k++) {
-        g.fillStyle = "rgba(255,230,190," + (0.08 + rr() * 0.1) + ")";
-        g.beginPath(); g.ellipse(rr() * w, 40 + rr() * (h - 40), 8 + rr() * 14, 5 + rr() * 8, 0, 0, 7); g.fill();
-      }
-    }, null) });
-    cut.map.wrapS = T.RepeatWrapping; cut.map.repeat.set(3, 1);
-    this.mud = new T.Mesh(new T.BoxGeometry(14, 8, 4), [this.mudMat, this.mudMat, this.mudMat, this.mudMat, cut, this.mudMat]);
-    this.mud.receiveShadow = true;
-    sc.add(this.mud);
-    /* 手前のふちの丸み（つやのある泥） */
-    this.lip = new T.Mesh(new T.CylinderGeometry(0.12, 0.12, 14, 16), this.mudMat);
-    this.lip.rotation.z = Math.PI / 2; sc.add(this.lip);
-
-    /* 岸：断面の見える土の台に、丸いふちの芝 */
-    this.shore = new T.Group(); sc.add(this.shore);
-    var soil = Z3.std(0xffffff, { roughness: 0.9, map: Z3.canvasTex(256, 512, function (g, w, h) {
-      var cols = ["#c98a4a", "#b0703a", "#d29a58", "#a4652f", "#8a5226"];
-      for (var i = 0; i < cols.length; i++) {
-        g.fillStyle = cols[i];
-        g.beginPath(); g.moveTo(0, h);
-        var y0 = h * (i / cols.length);
-        for (var x = 0; x <= w; x += 8) g.lineTo(x, y0 + Math.sin(x / w * Math.PI * 3 + i) * 12);
-        g.lineTo(w, h); g.fill();
-      }
-    }) });
-    var dirtSide = Z3.std(0xb0703a, { roughness: 0.9 });
-    var dirt = new T.Mesh(new T.BoxGeometry(4, 8, 8), [dirtSide, dirtSide, dirtSide, dirtSide, soil, dirtSide]);
-    dirt.position.set(2, -4 + 0.26, -2); dirt.receiveShadow = true; this.shore.add(dirt);
-    var grass = new T.Mesh(new T.BoxGeometry(4.1, 0.2, 8.1), grassMat);
-    grass.position.set(2.02, 0.34, -2); grass.receiveShadow = true; this.shore.add(grass);
-    for (var q = 0; q < 14; q++) {
-      var bump = new T.Mesh(new T.SphereGeometry(0.14, 14, 10), grassMat);
-      bump.position.set(0.05 + q * 0.15, 0.3, 2.0); bump.scale.set(1, 0.8, 0.8); this.shore.add(bump);
-    }
-    var edge = new T.Mesh(new T.CylinderGeometry(0.14, 0.14, 8.1, 14), grassMat);
-    edge.rotation.x = Math.PI / 2; edge.position.set(0, 0.3, -2); this.shore.add(edge);
-    var sb = puff(bush, 0, 0, 0, 0.6, 0.26, 3, 14);
-    sc.remove(sb); this.shore.add(sb); sb.position.set(0.75, 0.5, -1.2);
+    var rim = new T.DirectionalLight(0xd8f0ff, 1.0); rim.position.set(4, 3, -5); sc.add(rim);
 
     this.buildPerson();
 
-    /* 体のまわりの泥の盛り上がり・泡・飛び散る泥 */
-    this.mound = new T.Mesh(new T.SphereGeometry(1, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), this.mudMat);
-    sc.add(this.mound);
-    this.bubbleMat = Z3.std(0x9a7048, { roughness: 0.2, transparent: true, opacity: 0.9 });
-    this.bubbleGeo = new T.SphereGeometry(1, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2);
-    this.splatGeo = new T.SphereGeometry(1, 8, 6);
+    /* 泡・しぶき（使い回す） */
+    this.bubbleMat = Z3.std(0xffffff, { roughness: 0.1, transparent: true, opacity: 0.7 });
+    this.splatMat = Z3.std(0xffffff, { roughness: 0.1, transparent: true, opacity: 0.85, emissive: 0x9fd8f0, emissiveIntensity: 0.4 });
+    this.ballGeo = new T.SphereGeometry(1, 10, 8);
     this.pool = [];
   }
 
-  /* 人の部品：丸い頭に帽子、大きな目、太い胴と手足（カプセル） */
+  /* プール一式。最初の1回だけ作る（x はゲームの座標から直す。画面の高さが変わっても x の並びは同じ） */
+  NumaScene.prototype.buildPool = function (g) {
+    var sc = this.scene;
+    var x0 = (g.WALL0 - this.cx) / U, x1 = (g.WALL1 - this.cx) / U, len = x1 - x0, mid = (x0 + x1) / 2;
+    var m5 = g.M * 5 / U;
+
+    /* 奥の壁：明るい壁に大きな窓 */
+    var wallTex = Z3.canvasTex(512, 256, function (c, w, h) {
+      c.fillStyle = "#eef3f6"; c.fillRect(0, 0, w, h);
+      var gr = c.createLinearGradient(0, 30, 0, 170);
+      gr.addColorStop(0, "#8fd0f4"); gr.addColorStop(1, "#d4f0fb");
+      c.fillStyle = gr;
+      for (var i = 0; i < 4; i++) c.fillRect(20 + i * 124, 30, 104, 140);
+      c.fillStyle = "#c9d6de"; c.fillRect(0, 200, w, 56);
+    });
+    wallTex.wrapS = T.RepeatWrapping; wallTex.repeat.set((len + 20) / 6, 1);
+    var wall = new T.Mesh(new T.PlaneGeometry(len + 20, 6), new T.MeshBasicMaterial({ map: wallTex }));
+    wall.position.set(mid, 2.6, -8); sc.add(wall);
+
+    /* タイルの貼り物 */
+    function tileTex(a, b, n) {
+      var t = Z3.canvasTex(128, 128, function (c, w, h) {
+        c.fillStyle = a; c.fillRect(0, 0, w, h);
+        c.strokeStyle = b; c.lineWidth = 3;
+        for (var i = 0; i <= n; i++) { c.beginPath(); c.moveTo(i * w / n, 0); c.lineTo(i * w / n, h); c.stroke(); c.beginPath(); c.moveTo(0, i * h / n); c.lineTo(w, i * h / n); c.stroke(); }
+      });
+      t.wrapS = t.wrapT = T.RepeatWrapping; return t;
+    }
+    /* 奥のプールサイド */
+    var deckTex = tileTex("#f2f4f2", "#d8dcd8", 4); deckTex.repeat.set((len + 20) / 2, 2.5);
+    var deck = new T.Mesh(new T.BoxGeometry(len + 20, 0.4, 5), Z3.std(0xffffff, { roughness: 0.5, map: deckTex }));
+    deck.position.set(mid, 0.1, -5.7); deck.receiveShadow = true; sc.add(deck);
+
+    /* 水槽の中：底と奥の面は水色のタイル、紺の線 */
+    var inTex = tileTex("#7fd3f0", "#5fb8de", 4); inTex.repeat.set(len, 3);
+    var inMat = Z3.std(0xffffff, { roughness: 0.4, map: inTex });
+    var back = new T.Mesh(new T.PlaneGeometry(len, 3), inMat);
+    back.position.set(mid, -1.5, -3.2); sc.add(back);
+    var floorTex = inTex.clone(); floorTex.repeat.set(len, 4.2); floorTex.needsUpdate = true;
+    var floor = new T.Mesh(new T.PlaneGeometry(len, 4.2), Z3.std(0xffffff, { roughness: 0.4, map: floorTex }));
+    floor.rotation.x = -Math.PI / 2; floor.position.set(mid, -3, -1.1); sc.add(floor);
+    var navy = Z3.std(0x1d3a6a, { roughness: 0.5 });
+    var line = new T.Mesh(new T.PlaneGeometry(len - 4, 0.25), navy);
+    line.position.set(mid, -2.2, -3.19); sc.add(line);
+    [x0 + 2, x1 - 2].forEach(function (x) {
+      var tb = new T.Mesh(new T.PlaneGeometry(0.25, 0.9), navy);
+      tb.position.set(x, -2.2, -3.18); sc.add(tb);
+    });
+    /* 5mごとの目印（奥の面） */
+    var white = Z3.std(0xffffff, { roughness: 0.5 });
+    for (var k = 1; k < 5; k++) {
+      var mk = new T.Mesh(new T.PlaneGeometry(0.08, 0.5), white);
+      mk.position.set(x0 + k * m5, -0.45, -3.18); sc.add(mk);
+    }
+
+    /* 両端の壁（プールサイドの台）。ゴール側はタッチ板つき */
+    var side = Z3.std(0xf2f4f2, { roughness: 0.5 });
+    [[x0 - 3, x0], [x1, x1 + 3]].forEach(function (r) {
+      var b = new T.Mesh(new T.BoxGeometry(r[1] - r[0], 3.4, 9), side);
+      b.position.set((r[0] + r[1]) / 2, -1.5, -1.5); b.receiveShadow = true; sc.add(b);
+    });
+    var pad = new T.Mesh(new T.BoxGeometry(0.06, 0.9, 2.4), Z3.std(0xffd23a, { roughness: 0.4 }));
+    pad.position.set(x1 - 0.03, -0.2, -1); sc.add(pad);
+    /* 水槽の下の土台（画面の下まで） */
+    var base = new T.Mesh(new T.BoxGeometry(len + 20, 10, 9), Z3.std(0xc8d4dc, { roughness: 0.7 }));
+    base.position.set(mid, -3 - 5, -1.5); sc.add(base);
+
+    /* 水：透ける水色の箱。水の中の体は青く透けて見える */
+    var water = new T.Mesh(new T.BoxGeometry(len, 3, 4.2), new T.MeshStandardMaterial({ color: 0x2aa6e0, roughness: 0.08, transparent: true, opacity: 0.42, depthWrite: false }));
+    water.position.set(mid, -1.5, -1.1); water.renderOrder = 2; sc.add(water);
+
+    /* コースロープ（奥）：壁から5mは赤白、あとは青白の浮き */
+    var n = Math.floor(len / 0.22);
+    var rope = new T.InstancedMesh(new T.CylinderGeometry(0.09, 0.09, 0.18, 12), Z3.std(0xffffff, { roughness: 0.4 }), n);
+    var mtx = new T.Matrix4(), q = new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 0, 1), Math.PI / 2), col = new T.Color(), one = new T.Vector3(1, 1, 1);
+    for (var i = 0; i < n; i++) {
+      var x = x0 + 0.11 + i * 0.22, near = Math.min(x - x0, x1 - x) < m5;
+      mtx.compose(new T.Vector3(x, 0.02, -2.3), q, one);
+      rope.setMatrixAt(i, mtx);
+      rope.setColorAt(i, col.set(near ? (i % 2 ? 0xe03a3a : 0xffffff) : (i % 3 === 0 ? 0xffffff : 0x2f6fe0)));
+    }
+    sc.add(rope);
+
+    /* 背泳ぎの旗：両端から5mに張った紐と三角の旗 */
+    var flagCols = [0xe03a3a, 0xffffff, 0x2f6fe0, 0xffd23a].map(function (c) { return Z3.std(c, { roughness: 0.6 }); });
+    var cordM = Z3.std(0x555555), poleM = Z3.std(0xb0b8c0, { roughness: 0.4 });
+    [x0 + m5, x1 - m5].forEach(function (x) {
+      var cord = new T.Mesh(new T.CylinderGeometry(0.01, 0.01, 5, 6), cordM);
+      cord.rotation.x = Math.PI / 2; cord.position.set(x, 1.9, -1.5); sc.add(cord);
+      for (var j = 0; j < 9; j++) {
+        var f = new T.Mesh(new T.ConeGeometry(0.12, 0.3, 3), flagCols[j % 4]);
+        f.rotation.x = Math.PI; f.position.set(x, 1.75, -3.6 + j * 0.5); sc.add(f);
+      }
+      var pole = new T.Mesh(new T.CylinderGeometry(0.03, 0.03, 2.2, 8), poleM);
+      pole.position.set(x, 0.9, -4.0); sc.add(pole);
+    });
+    this.built = true;
+  };
+
+  /* 人の部品：丸い頭に水泳帽とゴーグル、大きな目、太い胴と手足 */
   NumaScene.prototype.buildPerson = function () {
     var sc = this.scene;
-    var skin = Z3.std(0xffc69a, { roughness: 0.55 });
-    var shirt = Z3.std(0xe8b04a, { roughness: 0.6 });
-    var pants = Z3.std(0x3a6fd0, { roughness: 0.6 });
-    var boot = Z3.std(0x7a4a2a, { roughness: 0.5 });
-    var hat = Z3.std(0xd9b878, { roughness: 0.7 });
-    var band = Z3.std(0xc8402e, { roughness: 0.6 });
-    this.mats = { skin: skin, shirt: shirt, pants: pants, boot: boot };
+    var skin = Z3.std(0xffc69a, { roughness: 0.45 });
+    var skinB = Z3.std(0xe8ad82, { roughness: 0.5 });
+    var trunks = Z3.std(0xd8322e, { roughness: 0.45 });
+    var capM = Z3.std(0xffffff, { roughness: 0.3 });
     var cyl = new T.CylinderGeometry(1, 1, 1, 16, 1, true), sph = new T.SphereGeometry(1, 16, 12);
 
     var root = this.person = new T.Group(); sc.add(root);
-    this.limbs = [];
-    var self = this;
     /* 手足：筒と両端の玉。setLimb で両端を合わせる */
     function limb(mat, r) {
       var m = new T.Group();
@@ -164,48 +153,45 @@
       c.scale.set(r, 1, r); a.scale.setScalar(r); b.scale.setScalar(r);
       [c, a, b].forEach(function (x) { x.castShadow = true; m.add(x); });
       m.userData = { c: c, b: b };
-      root.add(m); self.limbs.push(m); return m;
+      root.add(m); return m;
     }
     function ball(mat, r) {
       var m = new T.Mesh(new T.SphereGeometry(r, 18, 12), mat); m.castShadow = true; root.add(m); return m;
     }
-    this.legB = limb(Z3.std(0x2f5cb0, { roughness: 0.6 }), 0.17);
-    this.bootB = ball(boot, 0.17);
-    this.armB = limb(Z3.std(0xd09a38, { roughness: 0.6 }), 0.11);
-    this.handB = ball(skin, 0.12);
-    this.thigh = limb(pants, 0.19); this.shin = limb(pants, 0.18);
-    this.bootF = ball(boot, 0.19);
-    this.torso = limb(shirt, 0.31);
-    this.belt = new T.Mesh(new T.CylinderGeometry(0.33, 0.33, 0.1, 18), Z3.std(0x5a3a22, { roughness: 0.5 }));
-    root.add(this.belt);
-    this.upper = limb(shirt, 0.13); this.fore = limb(skin, 0.11);
+    this.legB = limb(skinB, 0.16);
+    this.footB = ball(skinB, 0.15);
+    this.armB = limb(skinB, 0.11);
+    this.handB = ball(skinB, 0.13);
+    this.thigh = limb(skin, 0.19); this.shin = limb(skin, 0.16);
+    this.footF = ball(skin, 0.16);
+    this.torso = limb(skin, 0.31);
+    this.trunks = new T.Mesh(new T.CylinderGeometry(0.33, 0.35, 0.36, 20), trunks);
+    root.add(this.trunks);
+    this.upper = limb(skin, 0.13); this.fore = limb(skin, 0.11);
     this.handF = ball(skin, 0.14);
 
     /* 頭（帽子と顔をまとめて回す） */
     var head = this.head = new T.Group(); root.add(head);
     head.rotation.order = "ZYX";            /* 顔を少し手前へ向けてから、体の傾きで回す */
     var skull = new T.Mesh(new T.SphereGeometry(0.42, 28, 18), skin); skull.castShadow = true; head.add(skull);
-    var brim = new T.Mesh(new T.CylinderGeometry(0.62, 0.62, 0.05, 28), hat); brim.position.y = 0.2; head.add(brim);
-    var crown = new T.Mesh(new T.SphereGeometry(0.4, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), hat);
-    crown.position.y = 0.2; crown.scale.y = 0.8; head.add(crown);
-    var hb = new T.Mesh(new T.CylinderGeometry(0.405, 0.405, 0.09, 24), band); hb.position.y = 0.26; head.add(hb);
+    /* 水泳帽：頭の後ろ上を包む */
+    var cap = new T.Mesh(new T.SphereGeometry(0.44, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.45), capM);
+    cap.rotation.z = -0.45; head.add(cap);
     var nose = new T.Mesh(new T.SphereGeometry(0.12, 16, 10), Z3.std(0xffb488, { roughness: 0.5 }));
     nose.position.set(-0.4, -0.06, 0.12); head.add(nose);
-    /* 目：白目と黒目。顔は -x（岸と反対）と手前を向く */
-    var white = Z3.std(0xffffff, { roughness: 0.3 }), black = Z3.std(0x1a1a28, { roughness: 0.2 });
+    /* 目：白目と黒目。顔は -x（ゴールと反対＝仰向けで上）と手前を向く */
+    var whiteE = Z3.std(0xffffff, { roughness: 0.3 }), black = Z3.std(0x1a1a28, { roughness: 0.2 });
     this.eyes = [];
     for (var i = 0; i < 2; i++) {
       var e = new T.Group();
-      var w = new T.Mesh(new T.SphereGeometry(0.11, 16, 12), white); w.scale.set(0.6, 1.25, 0.6); e.add(w);
+      var w = new T.Mesh(new T.SphereGeometry(0.11, 16, 12), whiteE); w.scale.set(0.6, 1.25, 0.6); e.add(w);
       var p = new T.Mesh(new T.SphereGeometry(0.06, 12, 8), black); p.position.set(-0.05, 0, 0.02); p.scale.set(0.6, 1.2, 0.8); e.add(p);
-      e.position.set(-0.34, 0.06, i ? 0.25 : 0.03);
+      e.position.set(-0.34, 0.04, i ? 0.25 : 0.03);
       e.userData.w = w; e.userData.p = p;
       head.add(e); this.eyes.push(e);
     }
     this.mouth = new T.Mesh(new T.SphereGeometry(0.07, 12, 8), Z3.std(0x6a1e1e, { roughness: 0.4 }));
     this.mouth.position.set(-0.36, -0.22, 0.14); head.add(this.mouth);
-    var mus = new T.Mesh(new T.CapsuleGeometry(0.05, 0.16, 4, 8), Z3.std(0x4a2e1e, { roughness: 0.6 }));
-    mus.rotation.x = Math.PI / 2; mus.position.set(-0.4, -0.14, 0.12); head.add(mus);
   };
 
   function setLimb(m, a, b) {
@@ -220,17 +206,18 @@
   /* ゲームの点 → 立体の点 */
   NumaScene.prototype.v = function (x, y, z) { return { x: (x - this.cx) / U, y: (this.SY - y) / U, z: z || 0 }; };
 
-  /* カメラ：z=0 の面の画面の中央がゲームの中央に来るよう、少し見下ろす */
-  NumaScene.prototype.aim = function (W, H, SY) {
-    if (this.W === W && this.H === H && this.SY === SY) return;
+  /* カメラ：遠近なしで真横から。camX（ゲームの x）が画面の中央に来る */
+  NumaScene.prototype.aim = function (W, H, SY, camX) {
     this.W = W; this.H = H; this.SY = SY; this.cx = W / 2;
-    var cam = this.camera, hw = W / U / 2, hh = H / U / 2;
-    var pitch = 0.1, D = 20, ty = (SY - H / 2) / U;
+    var cam = this.camera, ZOOM = 1.25, hw = W / U / 2 / ZOOM, hh = H / U / 2 / ZOOM;   /* 少し寄って人を大きく見せる */
+    var pitch = 0.1, D = 20, ty = (SY - H / 2) / U, tx = (camX - this.cx) / U;
     cam.left = -hw; cam.right = hw; cam.top = hh; cam.bottom = -hh;
-    cam.position.set(0, ty + Math.sin(pitch) * D, Math.cos(pitch) * D);
-    cam.lookAt(0, ty, 0);
+    cam.position.set(tx, ty + Math.sin(pitch) * D, Math.cos(pitch) * D);
+    cam.lookAt(tx, ty, 0);
     cam.updateProjectionMatrix();
-    this.key.target.position.set(0, 0, 0);
+    cam.updateMatrixWorld();
+    this.key.position.set(tx - 3, 6, 8);
+    this.key.target.position.set(tx, 0, 0);
   };
 
   /* 画面の点 → z=0 の面のゲームの点（指の位置に使う） */
@@ -241,7 +228,7 @@
     var d = f.sub(o), t = -o.z / d.z;
     return { x: (o.x + d.x * t) * U + this.cx, y: this.SY - (o.y + d.y * t) * U };
   };
-  /* ゲームの点 → 画面の点（光る輪に使う） */
+  /* ゲームの点 → 画面の点 */
   NumaScene.prototype.toScreen = function (x, y) {
     var p = this.v(x, y); var v = new T.Vector3(p.x, p.y, 0).project(this.camera);
     return { x: (v.x + 1) / 2 * this.W, y: (1 - v.y) / 2 * this.H };
@@ -249,25 +236,22 @@
 
   /* g: ゲームの状態（点はすべてゲームの座標） */
   NumaScene.prototype.sync = function (g) {
-    this.aim(g.W, g.H, g.SY);
+    this.aim(g.W, g.H, g.SY, g.camX);
+    if (!this.built) this.buildPool(g);
     var self = this, V = function (p, z) { return self.v(p.x, p.y, z); };
-    var shore = this.v(g.SHORE, g.SY);
-    this.mud.position.set(shore.x - 7, -4, -1);
-    this.lip.position.set(shore.x - 7, -0.06, 0.95);
-    this.shore.position.set(shore.x, 0, 0);
 
     var sh = g.shake * 0.04;
     this.person.position.set((Math.random() - .5) * sh, (Math.random() - .5) * sh, 0);
-    var h = V(g.hip), s = V(g.shoulder), knee = V(g.knee), foot = V(g.foot), el = V(g.elbow), hd = V(g.hand), ot = V(g.other);
+    var h = V(g.hip), s = V(g.shoulder), knee = V(g.knee), foot = V(g.foot), fb = V(g.footB), el = V(g.elbow), hd = V(g.hand), ot = V(g.other);
     var zf = 0.18, zb = -0.18;
-    setLimb(this.legB, { x: h.x, y: h.y, z: zb }, { x: foot.x + 0.06, y: foot.y + 0.03, z: zb });
-    this.bootB.position.set(foot.x + 0.06, foot.y + 0.03, zb);
+    setLimb(this.legB, { x: h.x, y: h.y, z: zb }, { x: fb.x, y: fb.y, z: zb });
+    this.footB.position.set(fb.x, fb.y, zb);
     setLimb(this.thigh, { x: h.x, y: h.y, z: zf }, { x: knee.x, y: knee.y, z: zf });
     setLimb(this.shin, { x: knee.x, y: knee.y, z: zf }, { x: foot.x, y: foot.y, z: zf });
-    this.bootF.position.set(foot.x, foot.y, zf);
+    this.footF.position.set(foot.x, foot.y, zf);
     setLimb(this.torso, h, s);
-    this.belt.position.set(h.x + (s.x - h.x) * 0.1, h.y + (s.y - h.y) * 0.1, 0);
-    this.belt.rotation.set(0, 0, -g.th);
+    this.trunks.position.set(h.x + (s.x - h.x) * 0.06, h.y + (s.y - h.y) * 0.06, 0);
+    this.trunks.rotation.set(0, 0, -g.th);
     setLimb(this.armB, { x: s.x, y: s.y, z: -0.3 }, { x: ot.x, y: ot.y, z: -0.3 });
     this.handB.position.set(ot.x, ot.y, -0.3);
     setLimb(this.upper, { x: s.x, y: s.y, z: 0.32 }, { x: el.x, y: el.y, z: 0.34 });
@@ -288,29 +272,23 @@
       else { w.scale.set(0.6, 1.25, 0.6); p.scale.set(0.6, 1.2, 0.8); }
     });
     if (g.face === "scared") this.mouth.scale.set(1.2, 1.8, 1);
-    else if (g.face === "calm") this.mouth.scale.set(0.8, 0.3, 1);
+    else if (g.face === "calm") this.mouth.scale.set(1.1, 0.5, 1);
     else this.mouth.scale.set(0.9, 0.6, 1);
 
-    /* 体のまわりの泥の盛り上がり */
-    var lying = g.th > 1.15;
-    this.mound.position.set(lying ? h.x + 0.6 : h.x, -0.01, 0);
-    this.mound.scale.set(lying ? 1.5 : 0.48, 0.07, 0.5);
-    this.mound.visible = g.state !== "clear" && g.state !== "result" || !g.won;
-
-    /* 泡と泥の粒（毎コマ作り直さず使い回す） */
+    /* 泡と水しぶき（毎コマ作り直さず使い回す） */
     var n = 0, pool = this.pool, scn = this.scene;
-    function get(geo) {
+    function get(mat) {
       var m = pool[n];
-      if (!m) { m = new T.Mesh(geo, self.bubbleMat); pool.push(m); scn.add(m); }
-      m.geometry = geo; m.visible = true; n++; return m;
+      if (!m) { m = new T.Mesh(self.ballGeo, mat); m.renderOrder = 4; pool.push(m); scn.add(m); }
+      m.material = mat; m.visible = true; n++; return m;
     }
     g.bubbles.forEach(function (b) {
-      var k = b.t / b.life, m = get(self.bubbleGeo), p = self.v(b.x, g.SY, 0);
-      m.position.set(p.x, 0, ((b.x * 7) % 3) * 0.3 - 0.4); m.scale.setScalar(b.r / U * (0.6 + k) * 1.4);
+      var k = b.t / b.life, m = get(self.bubbleMat), p = self.v(b.x, g.SY + 20 - k * 20, 0);
+      m.position.set(p.x, p.y, 0.4); m.scale.setScalar(b.r / U * 1.5);
     });
     g.splats.forEach(function (sp) {
-      var m = get(self.splatGeo), p = self.v(sp.x, sp.y, 0);
-      m.position.set(p.x, p.y, 0.3); m.scale.setScalar(sp.r / U * 1.3);
+      var m = get(self.splatMat), p = self.v(sp.x, sp.y, 0);
+      m.position.set(p.x, p.y, 0.5); m.scale.setScalar(sp.r / U * 1.3);
     });
     for (var i = n; i < pool.length; i++) pool[i].visible = false;
   };
