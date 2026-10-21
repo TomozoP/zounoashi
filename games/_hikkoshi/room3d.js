@@ -142,6 +142,7 @@
     var d = b.def, w = d.r ? d.r * 2 : d.w, h = d.r ? d.r * 2 : d.h;
     var k = Z3.mobile ? 3 : 4, pad = 6, cwp = w + pad * 2, chp = h + pad * 2, game = this.game;
     var tex = Z3.canvasTex(Math.ceil(cwp * k), Math.ceil(chp * k), function (g, cw, ch) {
+      g.fillStyle = "#" + (SIDE[d.k] || 0x888888).toString(16).padStart(6, "0"); g.fillRect(0, 0, cw, ch);   /* 絵の外は側面の色 */
       g.setTransform(k, 0, 0, k, cw / 2, ch / 2);
       game.paintArt(g, b);
     });
