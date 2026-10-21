@@ -163,7 +163,7 @@
     this.limbMake = limb;
     this.limbMats = [skin, skinB, skin, skinB];
     this.limbR = [0.12, 0.11, 0.16, 0.15];
-    this.limbZ = [0.36, -0.3, 0.2, -0.2];
+    this.limbZ = [0.8, -0.8, 0.3, -0.3];    /* 腕は頭（ゴーグルのゴムを含む）より外側を通す */
     this.chains = [[], [], [], []];
     this.torso = limb(skin, 0.31);
     this.trunks = new T.Mesh(new T.CylinderGeometry(0.33, 0.35, 0.36, 20), trunks);
