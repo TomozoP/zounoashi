@@ -146,13 +146,9 @@
 
   /* 設計：手足ごとに、関節から見た点の並び（胴が右向きに寝ているときの向き）と回す力（-1〜1） */
   function line(dx, dy, len) { var a = []; for (var d = SEG; d <= len + 0.1; d += SEG) a.push({ x: dx * d, y: dy * d }); return a; }
-  var design = [
-    { pts: line(1, 0, 130), torque: 0.6 },
-    { pts: line(1, 0, 130), torque: 0.6 },
-    { pts: line(-1, 0, 156), torque: 0 },
-    { pts: line(-1, 0, 156), torque: 0 }
-  ];
-  var sel = 0;                                 /* 選んでいる手足 */
+  /* 最初は手足なし。手前の腕→奥の腕→手前の脚→奥の脚の順に1本ずつ描いて、回す力を決めていく */
+  var design = [{ pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }, { pts: [], torque: 0.5 }];
+  var sel = 0;                                 /* いま描いている手足（順番） */
   var pts, mass, sticks, wet, limbIdx, camX, camY, zoom, splats, bubbles, guideT, drawing, sliding, runT;
 
   /* 設計から体を組み立てる（水面に浮かべた姿勢） */
@@ -160,7 +156,7 @@
     var y = SY + 8;
     pts = []; mass = []; sticks = []; wet = [];
     function at(px, py, m) { pts.push({ x: px, y: py, px: px, py: py }); mass.push(m); return pts.length - 1; }
-    at(x, y, TORSO_M[0]); at(x + 135, y, TORSO_M[1]); at(x + 187, y - 6, TORSO_M[2]); at(x + 68, y + 26, TORSO_M[3]);
+    at(x, y, TORSO_M[0]); at(x + 135, y, TORSO_M[1]); at(x + 200, y - 6, TORSO_M[2]); at(x + 68, y + 26, TORSO_M[3]);
     function rigid(list) {
       for (var a = 0; a < list.length; a++) for (var b = a + 1; b < list.length; b++) {
         var p = pts[list[a]], q = pts[list[b]];
@@ -184,8 +180,10 @@
     document.getElementById("start").hidden=true;
     toEdit();
   }
+  /* 描く画面へ。もう一度のときも形は残し、1本目から順に見直せる */
   function toEdit() {
     shareButton.hidden = true;
+    sel = 0;
     state = S.EDIT;
     score = 0; T = 0; held = false; won = false;
     build(WALL0 + 360);
@@ -221,7 +219,9 @@
     }
     /* 手足のモーター。手足の点に回す力、胴の点に逆向きの力、関節で合計を0にする */
     for (var L4 = 0; L4 < 4; L4++) {
-      var list = limbIdx[L4], J = pts[list[0]], jvx = (J.x - J.px) / h, jvy = (J.y - J.py) / h;
+      var list = limbIdx[L4];
+      if (list.length < 2) continue;                /* まだ描いていない手足 */
+      var J = pts[list[0]], jvx = (J.x - J.px) / h, jvy = (J.y - J.py) / h;
       function omega(ids) {
         var s = 0, c = 0;
         for (var a = 0; a < ids.length; a++) {
@@ -352,6 +352,13 @@
     for (var i = 0; i < 4; i++) chips.push({ x: W * (0.14 + i * 0.24), y: top + h * 0.17, r: r });
     return { chips: chips, slider: { x0: 70, x1: W - 70, y: top + h * 0.45 }, play: { x: W / 2, y: top + h * 0.76, r: Math.min(56, h * 0.15) } };
   }
+  function drawn(i) { return design[i].pts.length > 0; }
+  /* 次へ（最後の1本なら再生）。描いていないうちは進めない */
+  function next() {
+    if (!drawn(sel)) return;
+    if (sel < 3) { sel++; tone(660, 0.06, 0.08, "triangle"); }
+    else play();
+  }
   function setTorque(x) {
     var s = panelUI().slider;
     var v = (x - (s.x0 + s.x1) / 2) / ((s.x1 - s.x0) / 2);
@@ -369,12 +376,13 @@
     }
     if (state === S.RUN) { toEdit(); return; }
     if (state !== S.EDIT) return;
-    if (x == null) { play(); return; }
+    if (x == null) { next(); return; }
     held = true;
     if (y >= PANEL) {
       var ui = panelUI();
-      for (var i = 0; i < 4; i++) if (Math.hypot(x - ui.chips[i].x, y - ui.chips[i].y) < ui.chips[i].r + 10) { sel = i; tone(660, 0.05, 0.08, "square"); return; }
-      if (Math.hypot(x - ui.play.x, y - ui.play.y) < ui.play.r + 10) { play(); return; }
+      /* 描き終えた手足（と今の1本）は丸を押して戻れる */
+      for (var i = 0; i < 4; i++) if (Math.hypot(x - ui.chips[i].x, y - ui.chips[i].y) < ui.chips[i].r + 10 && (i <= sel || drawn(i))) { sel = i; tone(660, 0.05, 0.08, "square"); return; }
+      if (Math.hypot(x - ui.play.x, y - ui.play.y) < ui.play.r + 10) { next(); return; }
       if (Math.abs(y - ui.slider.y) < 40) { sliding = true; setTorque(x); }
       return;
     }
@@ -434,7 +442,7 @@
     if (n === 2) {                               /* 速く泳げる見本の形（腕は平たいかい、脚は曲がった足ひれ） */
       design[0].pts = line(1, 0.15, 150); design[1].pts = line(1, 0.15, 150); design[0].torque = 1; design[1].torque = 1;
       design[2].pts = line(-1, 0.3, 160); design[3].pts = line(-1, -0.2, 160); design[2].torque = -0.4; design[3].torque = 0.4;
-      toEdit();
+      toEdit(); sel = 3;
     }
     if (n === 9) { toEdit(); play(); score = 18.42; won = true; toResult(); }
   }
@@ -453,7 +461,7 @@
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
     if (left || right) {
-      if (state === S.EDIT) { sel = (sel + (left ? 3 : 1)) % 4; }  /* 選ぶ手足を変える */
+      if (state === S.EDIT) { if (left && sel > 0) sel--; else if (right) next(); }  /* 前の手足へ・次へ */
       return;
     }
     if (e.repeat) return;                      /* 押しっぱなしで連発しない */
@@ -533,6 +541,7 @@
     ctx.fillRect(0, PANEL, W, H - PANEL);
     for (var i = 0; i < 4; i++) {
       var c = ui.chips[i], on = i === sel;
+      ctx.globalAlpha = on || drawn(i) ? 1 : 0.35;           /* まだの手足は薄く */
       ctx.fillStyle = on ? "#ffd23a" : "#fff";
       ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, 7); ctx.fill();
       chipIcon(c.x, c.y, i);
@@ -542,6 +551,7 @@
         ctx.strokeStyle = "#fff"; ctx.lineWidth = 4;
         ctx.beginPath(); ctx.arc(c.x, c.y, c.r + 8, -Math.PI / 2, -Math.PI / 2 + tq * Math.PI, tq < 0); ctx.stroke();
       }
+      ctx.globalAlpha = 1;
     }
     /* 目盛り：真ん中が0。左は反時計回り、右は時計回り */
     var s = ui.slider, v = design[sel].torque, mid = (s.x0 + s.x1) / 2, kx = mid + v * (s.x1 - s.x0) / 2;
@@ -552,11 +562,19 @@
     ctx.fillStyle = "#fff"; ctx.fillRect(mid - 2, s.y - 14, 4, 28);
     ctx.beginPath(); ctx.arc(kx, s.y, 20, 0, 7); ctx.fill();
     turnIcon(s.x0 - 38, s.y, -1); turnIcon(s.x1 + 38, s.y, 1);
-    /* 再生 */
+    /* 次へ（最後の1本は再生）。描くまでは薄く */
     var p = ui.play;
+    ctx.globalAlpha = drawn(sel) ? 1 : 0.3;
     ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
-    ctx.fillStyle = "#16202e";
-    ctx.beginPath(); ctx.moveTo(p.x - p.r * 0.28, p.y - p.r * 0.4); ctx.lineTo(p.x + p.r * 0.45, p.y); ctx.lineTo(p.x - p.r * 0.28, p.y + p.r * 0.4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#16202e"; ctx.strokeStyle = "#16202e";
+    if (sel < 3) {
+      ctx.lineWidth = p.r * 0.16; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath(); ctx.moveTo(p.x - p.r * 0.38, p.y); ctx.lineTo(p.x + p.r * 0.36, p.y);
+      ctx.moveTo(p.x + p.r * 0.02, p.y - p.r * 0.34); ctx.lineTo(p.x + p.r * 0.38, p.y); ctx.lineTo(p.x + p.r * 0.02, p.y + p.r * 0.34); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.moveTo(p.x - p.r * 0.28, p.y - p.r * 0.4); ctx.lineTo(p.x + p.r * 0.45, p.y); ctx.lineTo(p.x - p.r * 0.28, p.y + p.r * 0.4); ctx.closePath(); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
   function chipIcon(x, y, k) {
