@@ -347,6 +347,36 @@
     var m = PENTA[(Math.random() * PENTA.length) | 0] + (level >= 5 ? 12 : 0);
     osc(level >= 4 ? "triangle" : "sine", midi(m), n, 0.12, 0.004, 0.18);
   }
+  /* 終わったときの歓声：ざわめき（色をつけた雑音）がふくらんで引き、「わー」「ひゅー」が重なる */
+  function cheer() {
+    if (!AC || !NOISE) return;
+    var n = AC.currentTime + 0.02, out = AC.createGain();
+    out.gain.value = 0.9; out.connect(AC.destination);          /* 音楽のフェードとは別に鳴らす */
+    for (var k = 0; k < 3; k++) {
+      var src = AC.createBufferSource(); src.buffer = NOISE; src.loop = true;
+      var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = [700, 1300, 2400][k]; f.Q.value = 1.2;
+      var g = AC.createGain();
+      g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.35, n + 0.35);
+      g.gain.setValueAtTime(0.35, n + 1.4); g.gain.exponentialRampToValueAtTime(0.0001, n + 3.6);
+      src.connect(f); f.connect(g); g.connect(out);
+      src.start(n, Math.random()); src.stop(n + 3.7);
+    }
+    for (var v = 0; v < 9; v++) {
+      var t0 = n + Math.random() * 0.8, base = 220 + Math.random() * 260, d = 0.6 + Math.random() * 0.9;
+      var o = AC.createOscillator(), fo = AC.createBiquadFilter(), go = AC.createGain();
+      o.type = "sawtooth"; o.frequency.setValueAtTime(base, t0); o.frequency.linearRampToValueAtTime(base * 1.35, t0 + d * 0.4);
+      o.frequency.linearRampToValueAtTime(base * 0.9, t0 + d);
+      fo.type = "bandpass"; fo.frequency.value = 900 + Math.random() * 500; fo.Q.value = 3;
+      go.gain.setValueAtTime(0.0001, t0); go.gain.exponentialRampToValueAtTime(0.07, t0 + 0.08); go.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+      o.connect(fo); fo.connect(go); go.connect(out); o.start(t0); o.stop(t0 + d + 0.05);
+    }
+    for (var w = 0; w < 2; w++) {                                 /* 指笛 */
+      var tw = n + 0.3 + w * 0.7, ow = AC.createOscillator(), gw = AC.createGain();
+      ow.type = "sine"; ow.frequency.setValueAtTime(1800, tw); ow.frequency.exponentialRampToValueAtTime(2900, tw + 0.25); ow.frequency.exponentialRampToValueAtTime(2200, tw + 0.5);
+      gw.gain.setValueAtTime(0.0001, tw); gw.gain.exponentialRampToValueAtTime(0.06, tw + 0.05); gw.gain.exponentialRampToValueAtTime(0.0001, tw + 0.55);
+      ow.connect(gw); gw.connect(out); ow.start(tw); ow.stop(tw + 0.6);
+    }
+  }
   /* 大きいものが生えたときの低い音 */
   function bigSound(sc) {
     if (!AC) return;
@@ -423,6 +453,7 @@
       var o = notes[i]; o.t += dt; o.x += o.vx * dt; o.y += o.vy * dt;
       if (o.t > 1.4) notes.splice(i, 1);
     }
+    if (endT >= 0 && T - endT < 3.5 && Math.random() < dt * 14) burst(3);
     for (i = fx.length - 1; i >= 0; i--) {
       var e = fx[i]; e.t += dt; e.x += e.vx * dt; e.y += e.vy * dt; e.vx *= 1 - dt * 3; e.vy *= 1 - dt * 3;
       if (e.t > e.life) fx.splice(i, 1);
@@ -478,7 +509,7 @@
     var L = 0;
     for (var i = 0; i < STEPS.length; i++) if (taps >= STEPS[i]) L = i;
     setLevel(L);
-    if (taps >= GOAL && endT < 0) { endT = T; burst(90); }
+    if (taps >= GOAL && endT < 0) { endT = T; burst(120); cheer(); }
     lastTap = T;
     for (i = 0; i < members.length; i++) if (members[i].at && members[i].t0 == null && taps >= members[i].at) { arrive(members[i]); if (members[i].sc > 2 || (members[i].h || 0) > 300) bigSound(Math.max(members[i].sc, (members[i].h || 0) / 150)); }
     /* 音符を飛ばす（男の頭のあたりから） */
@@ -523,8 +554,7 @@
   });
 
   function doShare() {
-    var sec = score.toFixed(1);
-    window.zResultActions.x({ text: zT(sec + "秒タップして地球まで楽しくなりました", "Tapped for " + sec + "s and got the whole Earth happy") +
+    window.zResultActions.x({ text: zT("タップするだけで地球まで楽しくなりました", "Just by tapping, I got the whole Earth happy") +
       zT(" #1分間タップするだけで楽しくなれるゲーム", " #TapForOneMinuteAndGetHappy") });
   }
 
@@ -1063,22 +1093,13 @@
   }
 
   function resultButtons() {
-    return window.zResultActions.row(W, H * 0.27);   /* 笑顔の男が見えるよう上に寄せる */
+    return window.zResultActions.row(W, H - 96);
   }
   function hitButton(x, y) {
     return window.zResultActions.hit(resultButtons(), x, y);
   }
+  /* 結果は暗くせず、笑顔の男の下にボタンだけ */
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.35)";
-    ctx.fillRect(0, 0, W, H);
-    ctx.save();
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
-    ctx.font = "800 108px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(score.toFixed(1) + zT("秒", "s"), W / 2, H * 0.2);
-    ctx.restore();
     window.zResultActions.drawButtons(ctx, resultButtons());
   }
 
