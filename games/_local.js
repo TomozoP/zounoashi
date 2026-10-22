@@ -327,6 +327,5 @@ window.DRAFT_GAMES = [
     "play": "games/_neko-gameki/index.html",
     "full": true,
     "catch": "ネコに邪魔されながらゲーム機で遊ぶ"
-  },
-  {"type":"lab","tags":[],"id":"numa","title":"最速泳法ファインダー","year":2026,"date":"2026-10-21","plays":null,"url":"","img":"games/_numa/img/thumb.webp","play":"games/_numa/index.html","full":true,"catch":"いちばん速い泳ぎ方をさがす"},
+  }
 ];
