@@ -328,5 +328,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "ネコに邪魔されながらゲーム機で遊ぶ"
   },
-  {"type":"lab","tags":[],"id":"norinori","title":"ノリノリタップ","year":2026,"date":"2026-10-22","plays":null,"url":"","img":"games/_norinori/img/thumb.webp","play":"games/_norinori/index.html","full":true,"catch":"タップでどんどん楽しくなる"},
+  {"type":"lab","tags":[],"id":"norinori","title":"1分間タップするだけで楽しくなれるゲーム","year":2026,"date":"2026-10-22","plays":null,"url":"","img":"games/_norinori/img/thumb.webp","play":"games/_norinori/index.html","full":true,"catch":""},
 ];
