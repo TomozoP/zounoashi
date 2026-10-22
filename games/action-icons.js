@@ -2,7 +2,7 @@
    ボタンを足すときは、ゲームごとに描かずここへ同じ線の太さで足す。 */
 (function(global){
   'use strict';
-  function kind(label){return label==='もう一度'||label==='もう一度走る'?'retry':label==='Xでシェア'||label==='Xでポスト'?'share':label==='次'||label==='次へ'?'next':label==='画像を選ぶ'||label==='背景'?'photo':label==='ガイドを消す'?'guide':label==='ガイドを出す'?'guideOff':label==='スプレー'?'spray':label==='ハサミ'?'scissors':label==='毛色'?'palette':label==='飾り'?'ribbon':label==='顔'?'face':label==='画像を保存'||label==='動画を保存'?'save':label==='カッター'?'cutter':label==='やすり'?'sand':label==='作り直す'?'refold':label==='もう一度投げる'?'rethrow':label==='書き直す'?'redraw':label==='力を直す'?'repower':null;}
+  function kind(label){return label==='もう一度'||label==='もう一度走る'?'retry':label==='Xでシェア'||label==='Xでポスト'?'share':label==='次'||label==='次へ'?'next':label==='戻る'?'back':label==='画像を選ぶ'||label==='背景'?'photo':label==='ガイドを消す'?'guide':label==='ガイドを出す'?'guideOff':label==='スプレー'?'spray':label==='ハサミ'?'scissors':label==='毛色'?'palette':label==='飾り'?'ribbon':label==='顔'?'face':label==='画像を保存'||label==='動画を保存'?'save':label==='カッター'?'cutter':label==='やすり'?'sand':label==='作り直す'?'refold':label==='もう一度投げる'?'rethrow':label==='書き直す'?'redraw':label==='力を直す'?'repower':null;}
   function draw(ctx,label,x,y,size){
     var id=kind(label);if(!id)return false;
     ctx.save();ctx.translate(x,y);ctx.scale((size||30)/24,(size||30)/24);ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';
@@ -11,6 +11,8 @@
       ctx.beginPath();ctx.moveTo(-8,-8);ctx.lineTo(-6.5,-3);ctx.lineTo(-1.5,-5);ctx.stroke();
     }else if(id==='next'){
       ctx.beginPath();ctx.moveTo(-9,0);ctx.lineTo(9,0);ctx.moveTo(2,-7);ctx.lineTo(9,0);ctx.lineTo(2,7);ctx.stroke();
+    }else if(id==='back'){
+      ctx.beginPath();ctx.moveTo(9,0);ctx.lineTo(-9,0);ctx.moveTo(-2,-7);ctx.lineTo(-9,0);ctx.lineTo(-2,7);ctx.stroke();
     }else if(id==='photo'){
       ctx.beginPath();ctx.moveTo(-8,-7);ctx.lineTo(8,-7);ctx.arcTo(10,-7,10,-5,2);ctx.lineTo(10,5);ctx.arcTo(10,7,8,7,2);ctx.lineTo(-8,7);ctx.arcTo(-10,7,-10,5,2);ctx.lineTo(-10,-5);ctx.arcTo(-10,-7,-8,-7,2);ctx.stroke();
       ctx.beginPath();ctx.moveTo(-10,5);ctx.lineTo(-4,-1);ctx.lineTo(1,4);ctx.lineTo(4,1);ctx.lineTo(10,6);ctx.stroke();
