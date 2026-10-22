@@ -106,7 +106,7 @@
     base.position.set(mid, -3 - 5, -1.5); sc.add(base);
 
     /* 水：透ける水色の箱。水の中の体は青く透けて見える */
-    var water = new T.Mesh(new T.BoxGeometry(len, 3, 4.2), new T.MeshStandardMaterial({ color: 0x2aa6e0, roughness: 0.08, transparent: true, opacity: 0.42, depthWrite: false }));
+    var water = new T.Mesh(new T.BoxGeometry(len, 3, 4.2), new T.MeshStandardMaterial({ color: 0x2aa6e0, roughness: 0.08, transparent: true, opacity: 0.28, depthWrite: false }));
     water.position.set(mid, -1.5, -1.1); water.renderOrder = 2; sc.add(water);
 
     /* コースロープ（奥）：壁から5mは赤白、あとは青白の浮き */
@@ -140,8 +140,10 @@
   /* 人の部品：丸い頭に水泳帽とゴーグル、大きな目、太い胴と手足 */
   NumaScene.prototype.buildPerson = function () {
     var sc = this.scene;
-    var skin = Z3.std(0xffc69a, { roughness: 0.45 });
-    var skinB = Z3.std(0xe8ad82, { roughness: 0.5 });
+    var skin = Z3.std(0xf7b07c, { roughness: 0.45 });
+    var skinB = Z3.std(0xdc9767, { roughness: 0.5 });
+    /* 輪郭線：ひと回り大きい裏面だけの濃い形で縁どり、背景から浮かせる */
+    var lineM = new T.MeshBasicMaterial({ color: 0x23324a, side: T.BackSide });
     var trunks = Z3.std(0xd8322e, { roughness: 0.45 });
     var capM = Z3.std(0xffffff, { roughness: 0.3 });
     var cyl = new T.CylinderGeometry(1, 1, 1, 16, 1, true), sph = new T.SphereGeometry(1, 16, 12);
@@ -162,7 +164,10 @@
       var glow = new T.Group(); glow.add(oc, oa, ob); glow.visible = false; m.add(glow);
       /* 縁取りを描く直前に奥行きを消し、その手足だけ奥行きつきで重ねる（ほかの物より手前に、節は出さない） */
       [oc, oa, ob].forEach(function (x) { x.renderOrder = 10; x.onBeforeRender = clearZ; });
-      m.userData = { c: c, a: a, b: b, oc: oc, ob: ob, glow: glow, mat: mat };
+      var L = r + 0.045, lc = new T.Mesh(cyl, lineM), la = new T.Mesh(sph, lineM), lb = new T.Mesh(sph, lineM);
+      lc.scale.set(L, 1, L); la.scale.setScalar(L); lb.scale.setScalar(L);
+      m.add(lc, la, lb);
+      m.userData = { c: c, a: a, b: b, oc: oc, ob: ob, glow: glow, mat: mat, lc: lc, lb: lb };
       root.add(m); return m;
     }
     function ball(mat, r) {
@@ -176,14 +181,15 @@
     this.chains = [[], [], [], []];
     this.torso = limb(skin, 0.31);
     /* 水着：腰を包む筒（上の端は平らなゴム）と、脚の付け根を包む短い筒 */
-    this.trunks = limb(trunks, 0.345); this.trunks.userData.b.visible = false;
+    this.trunks = limb(trunks, 0.345); this.trunks.userData.b.visible = false; this.trunks.userData.lb.visible = false;
     this.legTrunks = [limb(trunks, this.limbR[2] + 0.05), limb(trunks, this.limbR[3] + 0.05)];
-    this.legTrunks.forEach(function (m) { m.userData.b.visible = false; });
+    this.legTrunks.forEach(function (m) { m.userData.b.visible = false; m.userData.lb.visible = false; });
 
     /* 頭（帽子と顔をまとめて回す） */
     var head = this.head = new T.Group(); root.add(head);
     head.rotation.order = "ZYX";            /* 顔を少し手前へ向けてから、体の傾きで回す */
     var skull = new T.Mesh(new T.SphereGeometry(0.42, 28, 18), skin); skull.castShadow = true; head.add(skull);
+    head.add(new T.Mesh(new T.SphereGeometry(0.48, 24, 16), lineM));   /* 頭の輪郭線（帽子の外まで） */
     /* 水泳帽：頭の後ろ上を包む */
     var cap = new T.Mesh(new T.SphereGeometry(0.44, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.45), capM);
     cap.rotation.z = -0.45; head.add(cap);
@@ -219,6 +225,7 @@
     m.userData.c.scale.y = len; m.userData.c.position.y = len / 2;
     m.userData.b.position.y = len;
     m.userData.oc.scale.y = len; m.userData.oc.position.y = len / 2; m.userData.ob.position.y = len;
+    m.userData.lc.scale.y = len; m.userData.lc.position.y = len / 2; m.userData.lb.position.y = len;
     m.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), new T.Vector3(dx / len, dy / len, dz / len));
   }
 
