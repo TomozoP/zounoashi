@@ -72,13 +72,14 @@
     deck.position.set(mid, 0.1, -5.7); deck.receiveShadow = true; sc.add(deck);
 
     /* 水槽の中：底と奥の面は水色のタイル、紺の線 */
-    var inTex = tileTex("#7fd3f0", "#5fb8de", 4); inTex.repeat.set(len, 3);
+    var DEP = 10;                                  /* 水槽の深さ（画面の下までプールに見えるよう深くする） */
+    var inTex = tileTex("#7fd3f0", "#5fb8de", 4); inTex.repeat.set(len, DEP);
     var inMat = Z3.std(0xffffff, { roughness: 0.4, map: inTex });
-    var back = new T.Mesh(new T.PlaneGeometry(len, 3), inMat);
-    back.position.set(mid, -1.5, -3.2); sc.add(back);
+    var back = new T.Mesh(new T.PlaneGeometry(len, DEP), inMat);
+    back.position.set(mid, -DEP / 2, -3.2); sc.add(back);
     var floorTex = inTex.clone(); floorTex.repeat.set(len, 4.2); floorTex.needsUpdate = true;
     var floor = new T.Mesh(new T.PlaneGeometry(len, 4.2), Z3.std(0xffffff, { roughness: 0.4, map: floorTex }));
-    floor.rotation.x = -Math.PI / 2; floor.position.set(mid, -3, -1.1); sc.add(floor);
+    floor.rotation.x = -Math.PI / 2; floor.position.set(mid, -DEP, -1.1); sc.add(floor);
     var navy = Z3.std(0x1d3a6a, { roughness: 0.5 });
     var line = new T.Mesh(new T.PlaneGeometry(len - 4, 0.25), navy);
     line.position.set(mid, -2.2, -3.19); sc.add(line);
@@ -96,18 +97,18 @@
     /* 両端の壁（プールサイドの台）。ゴール側はタッチ板つき */
     var side = Z3.std(0xf2f4f2, { roughness: 0.5 });
     [[x0 - 3, x0], [x1, x1 + 3]].forEach(function (r) {
-      var b = new T.Mesh(new T.BoxGeometry(r[1] - r[0], 3.4, 9), side);
-      b.position.set((r[0] + r[1]) / 2, -1.5, -1.5); b.receiveShadow = true; sc.add(b);
+      var b = new T.Mesh(new T.BoxGeometry(r[1] - r[0], DEP + 0.4, 9), side);
+      b.position.set((r[0] + r[1]) / 2, -DEP / 2 + 0.2, -1.5); b.receiveShadow = true; sc.add(b);
     });
     var pad = new T.Mesh(new T.BoxGeometry(0.06, 0.9, 2.4), Z3.std(0xffd23a, { roughness: 0.4 }));
     pad.position.set(x1 - 0.03, -0.2, -1); sc.add(pad);
     /* 水槽の下の土台（画面の下まで） */
     var base = new T.Mesh(new T.BoxGeometry(len + 20, 10, 9), Z3.std(0xc8d4dc, { roughness: 0.7 }));
-    base.position.set(mid, -3 - 5, -1.5); sc.add(base);
+    base.position.set(mid, -DEP - 5, -1.5); sc.add(base);
 
     /* 水：透ける水色の箱。水の中の体は青く透けて見える */
-    var water = new T.Mesh(new T.BoxGeometry(len, 3, 4.2), new T.MeshStandardMaterial({ color: 0x2aa6e0, roughness: 0.08, transparent: true, opacity: 0.28, depthWrite: false }));
-    water.position.set(mid, -1.5, -1.1); water.renderOrder = 2; sc.add(water);
+    var water = new T.Mesh(new T.BoxGeometry(len, DEP, 4.2), new T.MeshStandardMaterial({ color: 0x2aa6e0, roughness: 0.08, transparent: true, opacity: 0.28, depthWrite: false }));
+    water.position.set(mid, -DEP / 2, -1.1); water.renderOrder = 2; sc.add(water);
 
     /* コースロープ（奥）：壁から5mは赤白、あとは青白の浮き */
     var n = Math.floor(len / 0.22);
@@ -243,7 +244,7 @@
   NumaScene.prototype.aim = function (W, H, SY, camX, camY, zoom) {
     this.W = W; this.H = H; this.SY = SY; this.cx = W / 2;
     var cam = this.camera, hw = W / U / 2 / zoom, hh = H / U / 2 / zoom;   /* zoom：描くときは寄り、泳ぐときは引く */
-    var pitch = 0.1, D = 20, ty = (SY - camY) / U, tx = (camX - this.cx) / U;
+    var pitch = 0.2, D = 20, ty = (SY - camY) / U, tx = (camX - this.cx) / U;
     cam.left = -hw; cam.right = hw; cam.top = hh; cam.bottom = -hh;
     cam.position.set(tx, ty + Math.sin(pitch) * D, Math.cos(pitch) * D);
     cam.lookAt(tx, ty, 0);
