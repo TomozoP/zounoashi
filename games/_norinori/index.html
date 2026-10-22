@@ -169,12 +169,33 @@
       { lv: 5, kind: "human", x: -470, z: 1, c: PEOPLE[5] },
       { lv: 5, kind: "human", x: 470, z: 1, c: PEOPLE[6] }
     ];
-    /* 町：家・ビル・木と、遠くの人だかり */
-    var bx = [-760, -620, -470, -330, -190, -40, 110, 250, 400, 540, 690];
-    for (var i = 0; i < bx.length; i++) {
-      m.push({ lv: 6, kind: i % 3 === 1 ? "tree" : "building", x: bx[i], z: 9, w: 96 + (i * 37) % 50, h: 150 + (i * 71) % 170, hue: (i * 47) % 360 });
-    }
-    for (i = 0; i < 34; i++) {
+    /* 背景：タップごとに家・巨大な動物・ビル・高層ビルが生えて、空を埋めていく */
+    var rnd = 5;
+    function r01() { rnd = (rnd * 16807) % 2147483647; return rnd / 2147483647; }
+    var GROUPS = [
+      { from: 20, to: 36, n: 6, z: 4, xr: 340, pick: function (j) { return j % 3 === 2 ? { kind: "tree" } : { kind: "building", w: 90 + r01() * 40, h: 140 + r01() * 90 }; } },
+      { from: 36, to: 56, n: 6, z: 5, xr: 430, pick: function (j) { return { kind: j % 2 ? "giraffe" : "elephant", sc: 2.4 + r01() * 0.9 }; } },
+      { from: 56, to: 80, n: 10, z: 6, xr: 640, pick: function (j) { return j % 5 === 4 ? { kind: "giraffe", sc: 5.5 + r01() } : { kind: "building", w: 120 + r01() * 60, h: 320 + r01() * 330 }; } },
+      { from: 80, to: 150, n: 15, z: 8, xr: 880, pick: function (j) {
+        if (j % 4 === 1) return { kind: "elephant", sc: 6.5 + r01() * 2 };
+        if (j % 4 === 3) return { kind: "giraffe", sc: 11 + r01() * 4 };
+        return { kind: "building", w: 170 + r01() * 90, h: 900 + r01() * 700 };
+      } }
+    ];
+    GROUPS.forEach(function (g, gi) {
+      var xs = [];
+      for (var j = 0; j < g.n; j++) xs.push(-g.xr + (j + 0.5) * g.xr * 2 / g.n + (r01() - 0.5) * 50);
+      for (j = xs.length - 1; j > 0; j--) { var q = (r01() * (j + 1)) | 0, t = xs[j]; xs[j] = xs[q]; xs[q] = t; }
+      xs.forEach(function (x, j) {
+        var o = g.pick(j);
+        o.lv = 0; o.x = x; o.z = g.z + r01() * 0.9; o.hue = (r01() * 360) | 0;
+        o.at = Math.round(g.from + (j + 1) * (g.to - g.from) / (g.n + 1));
+        if (o.kind === "tree") { o.h = 140; o.sc = 1.3; }
+        if (!o.sc) o.sc = 1;
+        m.push(o);
+      });
+    });
+    for (var i = 0; i < 34; i++) {
       var x = -900 + i * 55 + ((i * 31) % 23);
       if (Math.abs(x) < 60) continue;
       m.push({ lv: 6, kind: "human", x: x, z: 5 + (i % 3), c: PEOPLE[i % PEOPLE.length], sm: 0.8 });
@@ -278,6 +299,12 @@
     var m = PENTA[(Math.random() * PENTA.length) | 0] + (level >= 5 ? 12 : 0);
     osc(level >= 4 ? "triangle" : "sine", midi(m), n, 0.12, 0.004, 0.18);
   }
+  /* 大きいものが生えたときの低い音 */
+  function bigSound(sc) {
+    if (!AC) return;
+    var n = AC.currentTime + 0.01;
+    osc("sine", 90 / Math.sqrt(sc / 2), n, 0.5, 0.005, 0.5, 0, 40);
+  }
   function levelUpSound() {
     if (!AC) return;
     var n = AC.currentTime + 0.01;
@@ -356,6 +383,7 @@
     var L = 0;
     for (var i = 0; i < STEPS.length; i++) if (taps >= STEPS[i]) L = i;
     setLevel(L);
+    for (i = 0; i < members.length; i++) if (members[i].at && members[i].t0 == null && taps >= members[i].at) { members[i].t0 = T; if (members[i].sc > 2 || (members[i].h || 0) > 300) bigSound(Math.max(members[i].sc, (members[i].h || 0) / 150)); }
     if (taps >= GOAL && endT < 0) { endT = T; burst(90); }
     /* 音符を飛ばす（男の頭のあたりから） */
     var p = toScreen(0, -120);
@@ -554,13 +582,19 @@
     ctx.fillRect(-w / 2, -h, w, h);
     ctx.fillStyle = "hsl(" + m.hue + ",45%,45%)";
     ctx.fillRect(-w / 2 - 4, -h - 8, w + 8, 10);
-    /* 窓が目、ドアが口 */
+    /* 窓が目、ドアが口。高いビルは目を上のほうに、間に窓を並べる */
+    var ey = -Math.max(h * 0.68, h - w * 0.55), dh = Math.min(h * 0.22, w * 0.45);
+    if (h > w * 2.2) {
+      ctx.fillStyle = "hsla(" + m.hue + ",60%,85%,.8)";
+      for (var wy = -dh - 40; wy > ey + w * 0.3; wy -= 56)
+        for (var wx = -1; wx <= 1; wx++) ctx.fillRect(wx * w * 0.28 - w * 0.08, wy - 20, w * 0.16, 26);
+    }
     ctx.fillStyle = "#fff8d6";
-    ell(-w * 0.2, -h * 0.68, w * 0.11, w * 0.13); ctx.fill(); ell(w * 0.2, -h * 0.68, w * 0.11, w * 0.13); ctx.fill();
+    ell(-w * 0.2, ey, w * 0.11, w * 0.13); ctx.fill(); ell(w * 0.2, ey, w * 0.11, w * 0.13); ctx.fill();
     ctx.fillStyle = INK;
-    ell(-w * 0.2 + s * 3, -h * 0.67, w * 0.05, w * 0.06); ctx.fill(); ell(w * 0.2 + s * 3, -h * 0.67, w * 0.05, w * 0.06); ctx.fill();
+    ell(-w * 0.2 + s * w * 0.03, ey + w * 0.01, w * 0.05, w * 0.06); ctx.fill(); ell(w * 0.2 + s * w * 0.03, ey + w * 0.01, w * 0.05, w * 0.06); ctx.fill();
     ctx.fillStyle = "hsl(" + m.hue + ",40%,30%)";
-    ctx.beginPath(); ctx.moveTo(-w * 0.18, 0); ctx.lineTo(-w * 0.18, -h * 0.22); ctx.quadraticCurveTo(0, -h * 0.3, w * 0.18, -h * 0.22); ctx.lineTo(w * 0.18, 0); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-w * 0.18, 0); ctx.lineTo(-w * 0.18, -dh); ctx.quadraticCurveTo(0, -dh * 1.35, w * 0.18, -dh); ctx.lineTo(w * 0.18, 0); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
   function drawTree(m, s, b) {
@@ -698,10 +732,10 @@
       var m = members[i];
       if (!manDrawn && m.z <= 0) { drawMan(); manDrawn = true; }
       if (m.t0 == null || level < m.lv) continue;
-      var e = Math.max(0, Math.min(1, (T - m.t0) / 0.5));
+      var e = Math.max(0, Math.min(1, (T - m.t0) / (m.sc > 2 ? 0.8 : 0.5)));
       if (e <= 0) continue;
       var pop = e < 1 ? 1 + Math.sin(e * Math.PI) * 0.35 - (1 - e) : 1;
-      var d = (1 - m.z * 0.06) * (m.sm || 1);
+      var d = m.sc || (1 - m.z * 0.06) * (m.sm || 1);
       var a = m.x / R;
       ctx.save();
       ctx.translate(0, R); ctx.rotate(a); ctx.translate(0, -R - m.z * 16);
