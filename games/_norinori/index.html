@@ -197,17 +197,17 @@
           { kind: "whale", sc: 10 }, { kind: "panda", sc: 13 }][j];
       } }
     ];
-    /* 人と動物が1タップごとに集まってくる（12〜110タップ） */
+    /* 人と動物が2〜3タップごとに、画面の外から歩いて集まってくる（12〜110タップ） */
     var KINDS = ["human", "dog", "human", "rabbit", "human", "cat", "human", "panda", "human", "sheep", "human", "pig",
       "human", "lion", "human", "chicken", "human", "cow", "human", "penguin", "human", "horse"];
-    for (var j = 0; j < 60; j++) {
+    for (var j = 0; j < 40; j++) {
       var zz = 1 + (j % 6), side = j % 2 ? 1 : -1;
-      var xx = side * (50 + r01() * (60 + j * 2.6));
+      var xx = side * (50 + r01() * (60 + j * 3.9));
       var kd = KINDS[j % KINDS.length];
       if (kd !== "human" && r01() < 0.5) zz = -1;
       if (kd === "human" && j % 5 === 0) zz = -2;
       m.push({ lv: 0, kind: kd, x: xx, z: zz + r01() * 0.5, c: j % 9 === 4 ? ROBOT : PEOPLE[(r01() * PEOPLE.length) | 0],
-        at: Math.round(12 + j * (110 - 12) / 60) });
+        at: Math.round(12 + j * (110 - 12) / 40) });
     }
     GROUPS.forEach(function (g, gi) {
       var xs = [];
@@ -348,9 +348,17 @@
     if (L === level) return;
     level = L;
     if (L >= 1) startMusic();
-    for (var i = 0; i < members.length; i++) if (members[i].lv === L) members[i].t0 = T + Math.random() * 0.35;
+    for (var i = 0; i < members.length; i++) if (members[i].lv === L) { arrive(members[i]); members[i].t0 += Math.random() * 0.35; }
     levelUpSound();
     if (L >= 7) burst(60);
+  }
+  /* 出てくる。人と動物は画面の外から歩いてきて、大きいものはその場で生える */
+  function arrive(m) {
+    m.t0 = T;
+    if (m.sc || m.kind === "building" || m.kind === "tree") return;
+    var hw = W / 2 / zoom + 60;
+    m.fromX = (m.x < 0 ? -1 : 1) * Math.max(hw, Math.abs(m.x) + 150);
+    m.wd = Math.min(1.8, Math.abs(m.fromX - m.x) / 320);
   }
   function burst(n) {
     for (var i = 0; i < n; i++) confetti.push({
@@ -370,7 +378,7 @@
     /* カメラ */
     var c = CAM[level], ez = Math.min(1, dt * (level >= 7 ? 0.75 : 2.2));
     zoom = Math.exp(Math.log(zoom) + (Math.log(c.z) - Math.log(zoom)) * ez);
-    camYBase = -(H * 0.93 - CY) / zoom;          /* どの段階でも地面が画面のいちばん下に来る高さ */
+    camYBase = -(H * 0.985 - CY) / zoom;          /* どの段階でも地面が画面のいちばん下に来る高さ */
     var k = earthK();
     camY = camYBase + (EC - camYBase) * k;
     for (var j = 0; j < 2; j++) {
@@ -416,7 +424,7 @@
     setLevel(L);
     if (taps >= GOAL && endT < 0) { endT = T; burst(90); }
     lastTap = T;
-    for (i = 0; i < members.length; i++) if (members[i].at && members[i].t0 == null && taps >= members[i].at) { members[i].t0 = T; if (members[i].sc > 2 || (members[i].h || 0) > 300) bigSound(Math.max(members[i].sc, (members[i].h || 0) / 150)); }
+    for (i = 0; i < members.length; i++) if (members[i].at && members[i].t0 == null && taps >= members[i].at) { arrive(members[i]); if (members[i].sc > 2 || (members[i].h || 0) > 300) bigSound(Math.max(members[i].sc, (members[i].h || 0) / 150)); }
     /* 音符を飛ばす（男の頭のあたりから） */
     var p = toScreen(0, -120);
     notes.push({ x: p.x + (Math.random() - 0.5) * 30, y: p.y, vx: (Math.random() - 0.5) * 120, vy: -110 - Math.random() * 80, t: 0,
@@ -896,11 +904,18 @@
       if (e <= 0) continue;
       var pop = e < 1 ? 1 + Math.sin(e * Math.PI) * 0.35 - (1 - e) : 1;
       var d = m.sc || (1 - m.z * 0.06) * (m.sm || 1);
-      var a = m.x / R;
+      var wx = m.x, hop = 0, walking = false;
+      if (m.fromX != null && T - m.t0 < m.wd) {
+        var we = Math.max(0, (T - m.t0) / m.wd);
+        wx = m.fromX + (m.x - m.fromX) * (1 - (1 - we) * (1 - we));
+        hop = Math.abs(Math.sin(we * Math.PI * 6)) * 14; walking = true;
+      }
+      if (m.fromX != null) pop = 1;
+      var a = wx / R;
       ctx.save();
-      ctx.translate(0, EC); ctx.rotate(a); ctx.translate(0, -EC - m.z * 16);
+      ctx.translate(0, EC); ctx.rotate(a); ctx.translate(0, -EC - m.z * 16 - hop);
       ctx.scale(d * pop, d * pop);
-      var s = crowdS, flip = m.x < 0 ? 1 : -1;
+      var s = walking ? Math.sin(T * 18) * 0.7 : crowdS, flip = m.x < 0 ? 1 : -1;
       if (m.kind === "human") drawHuman(m.c, s, pulse, 0.6 + 0.4 * ((i % 3) / 2), 1, false);
       else if (m.kind === "building") drawBuilding(m, s, pulse);
       else if (m.kind === "tree") drawTree(m, s, pulse);
