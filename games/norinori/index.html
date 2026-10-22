@@ -134,10 +134,12 @@
      0 男ひとり → 1 音楽 → 2,3 人が増える → 4 動物 → 5 大きい動物 → 6 町 → 7 地球 */
   var STEPS = [0, 10, 25, 45, 70, 110, 150, 190];
   var OUTRO = 200;                             /* ここから地球から男へ寄っていき、音楽も落ち着く */
-  var GOAL = 220;                              /* ここまで叩いたら結果へ。ふつうに叩いて1分くらい */
+  var thumbZ = 1;                             /* サムネ撮影のときだけ最後の寄りを弱める */
+  var GOAL = 220;                              /* ここまで進んだら締め */
+  var TAPK = GOAL / 200;                       /* 1タップの進み。実際のタップは合計200回 */
   var R = 3000;                                /* 地面は大きな丸（地球） */
   var EC = R - 200;                            /* 丸の中心。てっぺんは y=-200 で、奥の列もみな地面の上に立つ */
-  var fx, level, taps, swing, swingV, swingDir, happy, endT, lastTap, members, notes, confetti;
+  var fx, level, taps, swing, swingV, swingDir, happy, endT, smileT, cheered, lastTap, members, notes, confetti;
   var zoom, camY, camYBase, sky;
 
   var CY;
@@ -268,7 +270,7 @@
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     score = 0; T = 0; held = false;
-    level = 0; taps = 0; swing = 0; swingV = 0; swingDir = 1; happy = 0; endT = -1; lastTap = -9;
+    level = 0; taps = 0; swing = 0; swingV = 0; swingDir = 1; happy = 0; endT = -1; smileT = -1; cheered = false; lastTap = -9;
     members = baseMembers(); notes = []; confetti = []; fx = [];
     zoom = CAM[0].z; camYBase = CAM[0].y; camY = camYBase;
     sky = [hex(SKY[0][0]), hex(SKY[0][1])];
@@ -327,7 +329,7 @@
   var MEL = [76, 0, 79, 0, 81, 0, 79, 76, 0, 74, 0, 72, 74, 0, 0, 0, 72, 0, 74, 0, 76, 0, 79, 0, 81, 0, 84, 0, 81, 79, 0, 0];
   var MEL2 = [84, 0, 81, 84, 0, 86, 0, 84, 81, 0, 79, 0, 81, 0, 84, 0, 88, 0, 86, 84, 0, 81, 0, 79, 81, 0, 0, 79, 76, 0, 79, 0];
   function playStep(i, n) {
-    var of = outroF(), L = of > 0 ? Math.round(7 - Math.min(1, of) * 6) : level, bar = Math.floor(i / 16) % 2, k = i % 16, ch = CH[bar];
+    var of = outroF(), L = of > 0 ? Math.round(7 - Math.min(1, of) * 5) : level, bar = Math.floor(i / 16) % 2, k = i % 16, ch = CH[bar];
     if (L >= 1 && k % 4 === 0) kick(n, 0.85);
     if (L >= 2 && (k === 4 || k === 12)) clap(n);
     if (L >= 2 && BASS[bar][k]) osc("sawtooth", midi(BASS[bar][k] + (L >= 5 && k === 3 ? 0 : 0)), n, L >= 5 ? 0.32 : 0.26, 0.005, 0.16, 520 + L * 60);
@@ -345,9 +347,23 @@
     if (!music || !AC) return;
     while (music.t0 + music.n * STEP < AC.currentTime + 0.12) {
       var n = music.t0 + music.n * STEP;
+      if (music.endN != null && music.n >= music.endN) { finalChord(n); music = null; return; }
       if (n > AC.currentTime - 0.02) playStep(music.n, n);
       music.n++;
     }
+  }
+  /* 曲の締め：次の半小節の頭でジャーンと鳴らして止める。鳴り終わるまでの秒数を返す */
+  function endMusic() {
+    if (!music || !AC) return 0.8;
+    var nx = Math.max(music.n, Math.ceil((AC.currentTime + 0.15 - music.t0) / STEP));
+    music.endN = Math.ceil(nx / 8) * 8;
+    return music.t0 + music.endN * STEP - AC.currentTime;
+  }
+  function finalChord(n) {
+    kick(n, 1); clap(n); noise(n, 0.3, 1.6, 5000);
+    osc("sawtooth", midi(33), n, 0.3, 0.005, 1.6, 500);
+    [57, 60, 64, 67, 71].forEach(function (m) { osc("sawtooth", midi(m), n, 0.04, 0.01, 1.8, 2200); });
+    osc("triangle", midi(81), n, 0.1, 0.01, 1.6);
   }
   var PENTA = [57, 60, 62, 64, 67, 69, 72, 74, 76];
   function tapSound() {
@@ -429,13 +445,10 @@
     if (state !== S.PLAY && state !== S.RESULT) return;
     T += dt;
     pumpMusic();
-    /* 終わったら音楽をそっと消す */
-    if (MASTER && AC) {
-      var mv = endT >= 0 ? Math.max(0, 0.8 * (1 - (T - endT) / 3)) : 0.8;
-      if (Math.abs(MASTER.gain.value - mv) > 0.005) MASTER.gain.setTargetAtTime(mv, AC.currentTime, 0.05);
-    }
+    /* 曲が鳴り終わったら笑顔・歓声・紙吹雪 */
+    if (smileT >= 0 && !cheered && T >= smileT) { cheered = true; burst(120); cheer(); }
     /* 男の腰：タップの向きへばねで寄る */
-    var acc = ((endT >= 0 ? 0 : swingDir) - swing) * 260 - swingV * 16;
+    var acc = ((cheered ? 0 : swingDir) - swing) * 260 - swingV * 16;
     swingV += acc * dt; swing += swingV * dt;
     happy += (Math.min(1, level / 5) - happy) * Math.min(1, dt * 2);
     /* カメラ */
@@ -450,7 +463,7 @@
     if (of > 0) {                               /* 地球から男のアップへ */
       var g = Math.min(1, of / 1.4);
       g = g * g * (3 - 2 * g);
-      tz = Math.exp(Math.log(CAM[7].z) + (Math.log(3) - Math.log(CAM[7].z)) * g);
+      tz = Math.exp(Math.log(CAM[7].z) + (Math.log(3 * thumbZ) - Math.log(CAM[7].z)) * g);
     }
     zoom = Math.exp(Math.log(zoom) + (Math.log(tz) - Math.log(zoom)) * ez);
     camYBase = -(H * 0.95 - CY) / zoom;          /* どの段階でも地面が画面のいちばん下に来る高さ */
@@ -464,7 +477,7 @@
       var o = notes[i]; o.t += dt; o.x += o.vx * dt; o.y += o.vy * dt;
       if (o.t > 1.4) notes.splice(i, 1);
     }
-    if (endT >= 0 && T - endT < 3.5 && Math.random() < dt * 14) burst(3);
+    if (cheered && T - smileT < 3.5 && Math.random() < dt * 14) burst(3);
     for (i = fx.length - 1; i >= 0; i--) {
       var e = fx[i]; e.t += dt; e.x += e.vx * dt; e.y += e.vy * dt; e.vx *= 1 - dt * 3; e.vy *= 1 - dt * 3;
       if (e.t > e.life) fx.splice(i, 1);
@@ -473,7 +486,7 @@
       var p = confetti[i]; p.x += p.vx * dt; p.y += p.vy * dt; p.r += p.vr * dt;
       if (p.y > H + 20) confetti.splice(i, 1);
     }
-    if (state === S.PLAY && endT >= 0 && T - endT > 4.2) {
+    if (state === S.PLAY && cheered && T - smileT > 3.5) {
       state = S.RESULT;
       score = endT;
     }
@@ -511,16 +524,17 @@
       if (hit === "retry") newRound();
       return;
     }
+    if (endT >= 0) return;                     /* 締めに入ったらタップは受けない */
     if (x == null) { var hp = toScreen(0, -60); tapFx(hp.x, hp.y); } else tapFx(x, y);
     held = true;
-    taps++;
+    taps = Math.round((taps + TAPK) * 1000) / 1000;   /* 小数の誤差で220に届かないのを防ぐ */
     swingDir = -swingDir;
     swingV += swingDir * 6;
     tapSound();
     var L = 0;
     for (var i = 0; i < STEPS.length; i++) if (taps >= STEPS[i]) L = i;
     setLevel(L);
-    if (taps >= GOAL && endT < 0) { endT = T; burst(120); cheer(); }
+    if (taps >= GOAL && endT < 0) { endT = T; smileT = T + endMusic() + 0.9; }
     lastTap = T;
     for (i = 0; i < members.length; i++) if (members[i].at && members[i].t0 == null && taps >= members[i].at) { arrive(members[i]); if (members[i].sc > 2 || (members[i].h || 0) > 300) bigSound(Math.max(members[i].sc, (members[i].h || 0) / 150)); }
     /* 音符を飛ばす（男の頭のあたりから） */
@@ -547,7 +561,7 @@
     if (state !== S.PLAY) return;
     if (n >= 1 && n <= 7) { taps = STEPS[n] - 1; down(); }
     if (n === 8) { taps = GOAL - 2; down(); }
-    if (n === 9) { taps = GOAL - 1; down(); endT = T - 2.5; }
+    if (n === 9) { taps = GOAL - 1; down(); endT = T - 2.5; smileT = T; }
   }
 
   window.addEventListener("keydown", function (e) {
@@ -565,8 +579,7 @@
   });
 
   function doShare() {
-    window.zResultActions.x({ text: zT("タップするだけで地球まで楽しくなりました", "Just by tapping, I got the whole Earth happy") +
-      zT(" #100秒で楽しくなれるゲーム", " #GetHappyIn100Seconds") });
+    window.zResultActions.x({ text: zT("#100秒で楽しくなれるゲーム　で楽しくなった", "#GetHappyIn100Seconds made me happy") });
   }
 
   /* ============ 描画 ============ */
@@ -1032,14 +1045,14 @@
     function drawMan() {
       var ps = 1 + Math.max(0, Math.abs(swingV) * 0.004);
       ctx.save(); ctx.scale(ps, 1 / ps);
-      var fin = endT >= 0;                     /* 最後はサングラスを外して笑顔 */
+      var fin = cheered;                     /* 最後はサングラスを外して笑顔 */
       drawHuman({ skin: "#f0c29a", shirt: level >= 2 ? "#ffffff" : "#d8d8d8", pants: "#3b4a8f", hair: "#2a1a10", eye: fin ? 2 : 0, acc: fin ? "cheek" : "" },
         Math.max(-1.3, Math.min(1.3, swing)), pulse, fin ? 1 : Math.min(1, level / 4), fin ? 1.3 : happy, level >= 3 && !fin);
       ctx.restore();
     }
     for (var i = 0; i < members.length; i++) {
       var m = members[i];
-      if (!manDrawn && m.z <= 0 && endT < 0) { drawMan(); manDrawn = true; }
+      if (!manDrawn && m.z <= 0 && !cheered) { drawMan(); manDrawn = true; }
       if (m.t0 == null || level < m.lv) continue;
       var e = Math.max(0, Math.min(1, (T - m.t0) / (m.sc > 2 ? 0.8 : 0.5)));
       if (e <= 0) continue;
@@ -1071,7 +1084,7 @@
       ctx.restore();
     }
     if (!manDrawn) {                           /* 最後はいちばん手前に、少し大きく */
-      ctx.save(); if (endT >= 0) ctx.scale(1.15, 1.15); drawMan(); ctx.restore();
+      ctx.save(); if (cheered) ctx.scale(1.15, 1.15); drawMan(); ctx.restore();
     }
     ctx.restore();
 
@@ -1124,9 +1137,9 @@
 
   /* サムネ撮影用：指定のタップ数まで進めて、音符や輪を消す（UIなし） */
   window.__thumbnail = function (o) {
-    startButton.hidden = true; newRound();
-    for (var i = 0; i < (o.taps || 170); i++) { down(); up(); window.__probe.step(6); }
-    window.__probe.step(120);
+    startButton.hidden = true; newRound(); thumbZ = o.zoom || 1;
+    for (var i = 0; i < (o.taps || 155); i++) { down(); up(); window.__probe.step(o.per || 6); }
+    window.__probe.step(o.wait || 120);
     notes = []; fx = []; confetti = [];
   };
 
