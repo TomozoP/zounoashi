@@ -1,0 +1,241 @@
+/* 倒してもいいですかゲームの3Dの絵（three.js）。土台は games/three-base.js の Z3。
+   人の作りはアツアツ一輪車と同じ（玉の頭に長い鼻、棒の手足、玉の胴）。
+   単位はメートル。進む向き（座席の前）が +x、手前（カメラ側）が +z。
+   当たり判定に使う形（背もたれの箱・後ろの人の頭と鼻）もここで決めて、ゲーム側から使う。 */
+(function (global) {
+  "use strict";
+  var T, Z3 = global.Z3;
+
+  var PITCH = 1.04;                             /* 座席の間隔 */
+  var SEAT_Y = 0.45;                            /* 座面の高さ */
+  var BACK = { u0: -0.12, u1: 0.02, v0: 0, v1: 0.8 };  /* 背もたれ（軸から見た箱。u は前が＋、v は上） */
+  var HEAD_R = 0.14, NOSE = 0.2;
+
+  /* 背もたれの軸（自分の座席は x=0 に置く） */
+  function pivot(seatX) { return { x: seatX - 0.04, y: SEAT_Y }; }
+
+  /* 後ろの人の頭と鼻の先。lean は前かがみの角度（ラジアン） */
+  function backHead(lean) {
+    var hip = { x: -PITCH + 0.1, y: SEAT_Y + 0.1 };
+    var sh = { x: hip.x + Math.sin(lean) * 0.5, y: hip.y + Math.cos(lean) * 0.5 };
+    var a2 = lean + 0.35;
+    var head = { x: sh.x + Math.sin(a2) * 0.24, y: sh.y + Math.cos(a2) * 0.24 };
+    var nd = -1.25;                              /* 鼻は下（手元のスマホ）を向く */
+    var nose = { x: head.x + Math.cos(nd) * (HEAD_R + NOSE), y: head.y + Math.sin(nd) * (HEAD_R + NOSE) };
+    return { hip: hip, sh: sh, head: head, nose: nose, nd: nd };
+  }
+
+  /* 点から背もたれの箱までの距離。a は倒した角度（ラジアン、後ろへ） */
+  function distToBack(a, p) {
+    var pv = pivot(0), dx = p.x - pv.x, dy = p.y - pv.y;
+    var c = Math.cos(a), s = Math.sin(a);
+    /* 箱は軸のまわりに a だけ後ろ（-x）へ倒れている。点を箱の向きに戻す */
+    var u = dx * c + dy * s, v = -dx * s + dy * c;
+    var cu = Math.max(BACK.u0, Math.min(BACK.u1, u)), cv = Math.max(BACK.v0, Math.min(BACK.v1, v));
+    var du = u - cu, dv = v - cv;
+    return { d: Math.sqrt(du * du + dv * dv), near: { x: pv.x + cu * c - cv * s, y: pv.y + cu * s + cv * c } };
+  }
+  /* すき間（メートル）。頭の玉と鼻の先のうち近いほう */
+  function gapAt(a, lean) {
+    var b = backHead(lean);
+    var h = distToBack(a, b.head), n = distToBack(a, b.nose);
+    var gh = h.d - HEAD_R, gn = n.d - 0.015;
+    return gh < gn ? { gap: gh, at: b.head, near: h.near, r: HEAD_R } : { gap: gn, at: b.nose, near: n.near, r: 0.015 };
+  }
+
+  function Scene3D() {
+    T = global.THREE;
+    var self = this;
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.1 }, camera: { fov: 40, near: 0.1, far: 40 }, finish: { vignette: 0.25, grain: 0.02 } });
+    var sc = this.scene = st.scene;
+    this.camera = st.camera;
+    sc.background = new T.Color("#ebe7dc");
+    var L = Z3.lights(sc, { shadows: true, shadowSize: 2.5 });
+    L.key.position.set(2, 5, 4);
+    this.geo = { ball: new T.SphereGeometry(1, 18, 12), tube: new T.CylinderGeometry(1, 1, 1, 12), box: new T.BoxGeometry(1, 1, 1) };
+    this.mats = {};
+
+    /* 床と壁 */
+    var floor = this.part(sc, "box", "#8d887b", -0.4, -0.01, 1.5, 7, 0.02, 4.6);
+    floor.castShadow = false; floor.receiveShadow = true;
+    var wallC = "#ebe7dc";
+    this.part(sc, "box", wallC, -0.4, 0.38, -0.75, 7, 0.76, 0.04).receiveShadow = true;
+    this.part(sc, "box", wallC, -0.4, 2.0, -0.75, 7, 1.2, 0.04).receiveShadow = true;
+    this.part(sc, "box", "#c9c4b6", -0.4, 0.77, -0.72, 7, 0.04, 0.08);
+    this.part(sc, "box", "#c9c4b6", -0.4, 1.4, -0.72, 7, 0.04, 0.06);
+    [-2.5, -1.45, -0.4, 0.65, 1.7].forEach(function (x) { self.part(sc, "box", wallC, x, 1.08, -0.75, 0.12, 0.66, 0.05); });
+    /* 窓の外の景色（流れる） */
+    this.sceneryTex = Z3.canvasTex(1024, 256, function (g, w, h) {
+      var sky = g.createLinearGradient(0, 0, 0, h);
+      sky.addColorStop(0, "#7fb9ea"); sky.addColorStop(1, "#d6ecfa");
+      g.fillStyle = sky; g.fillRect(0, 0, w, h);
+      g.fillStyle = "#6c86a8"; g.beginPath(); g.moveTo(260, h); g.lineTo(440, 70); g.lineTo(520, 70); g.lineTo(700, h); g.fill();
+      g.fillStyle = "#fff"; g.beginPath(); g.moveTo(410, 108); g.lineTo(440, 70); g.lineTo(520, 70); g.lineTo(550, 108); g.lineTo(505, 98); g.lineTo(480, 112); g.lineTo(455, 98); g.fill();
+      g.fillStyle = "#6b8f4e";
+      for (var i = 0; i < 14; i++) { g.beginPath(); g.ellipse(i * 80 + 20, h - 26, 60, 40, 0, 0, Math.PI * 2); g.fill(); }
+    });
+    this.sceneryTex.wrapS = T.RepeatWrapping;
+    var view = new T.Mesh(new T.PlaneGeometry(7, 0.62), new T.MeshBasicMaterial({ map: this.sceneryTex }));
+    view.position.set(-0.4, 1.09, -0.8); sc.add(view);
+    /* 荷物棚 */
+    this.part(sc, "box", "#b9b4a6", -0.4, 1.9, -0.5, 7, 0.03, 0.4);
+
+    /* 座席2つ（自分・後ろ） */
+    this.myBack = this.seat(0);
+    this.backBack = this.seat(-PITCH);
+    this.backBack.rotation.z = 0.12;
+
+    /* 人 */
+    this.me = this.person({ coat: "#3a6fb8", pants: "#2e3442", skin: "#f1c7a1", hat: "#d8412f", hand: "#f1c7a1" });
+    this.him = this.person({ coat: "#5d7a4a", pants: "#3a3530", skin: "#eab993", hair: "#2a2420", hand: "#eab993" });
+    /* スマホ */
+    this.phone = this.part(sc, "box", "#1d1f24", 0, 0, 0, 0.075, 0.008, 0.14);
+    this.phoneScreen = this.part(sc, "box", "#9fd8ff", 0, 0, 0, 0.06, 0.002, 0.12, { emissive: "#6fb8ef", emissiveIntensity: 0.6 });
+
+    this.t = 0;
+  }
+
+  Scene3D.prototype.mat = function (color, opt) {
+    var key = color + JSON.stringify(opt || {});
+    if (!this.mats[key]) {
+      var o = { color: color, roughness: 0.85 };
+      for (var k in opt) o[k] = opt[k];
+      this.mats[key] = new T.MeshStandardMaterial(o);
+    }
+    return this.mats[key];
+  };
+  Scene3D.prototype.part = function (parent, kind, color, x, y, z, sx, sy, sz, opt) {
+    var m = new T.Mesh(this.geo[kind], typeof color === "string" ? this.mat(color, opt) : color);
+    m.position.set(x, y, z); m.scale.set(sx, sy, sz);
+    m.castShadow = true; m.receiveShadow = true;
+    parent.add(m);
+    return m;
+  };
+  /* 太さのある棒を a から b へ渡す（a, b は {x, y, z}） */
+  Scene3D.prototype.segment = function (mesh, a, b) {
+    var from = new T.Vector3(a.x, a.y, a.z || 0), to = new T.Vector3(b.x, b.y, b.z || 0);
+    var d = to.clone().sub(from), len = d.length();
+    mesh.position.copy(from).addScaledVector(d, 0.5);
+    mesh.scale.y = Math.max(0.001, len);
+    mesh.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), d.normalize());
+  };
+
+  /* 座席。背もたれのまとまりを返す（軸で回す） */
+  Scene3D.prototype.seat = function (x) {
+    var sc = this.scene, blue = "#2f4f86", self = this;
+    this.part(sc, "box", blue, x + 0.22, SEAT_Y - 0.06, 0, 0.5, 0.12, 0.48);
+    this.part(sc, "box", "#6f747c", x + 0.22, 0.18, 0, 0.36, 0.3, 0.06);
+    [-0.25, 0.25].forEach(function (z) {
+      self.part(sc, "box", "#4a4f57", x + 0.2, SEAT_Y + 0.2, z, 0.42, 0.05, 0.06);
+      self.part(sc, "box", "#4a4f57", x + 0.0, SEAT_Y + 0.08, z, 0.05, 0.2, 0.05);
+    });
+    var pv = pivot(x), g = new T.Group();
+    g.position.set(pv.x, pv.y, 0);
+    sc.add(g);
+    var u = (BACK.u0 + BACK.u1) / 2;
+    this.part(g, "box", blue, u, (BACK.v0 + BACK.v1) / 2, 0, BACK.u1 - BACK.u0, BACK.v1 - BACK.v0, 0.48);
+    /* 頭の部分の白いカバー */
+    this.part(g, "box", "#f2f2ee", u, BACK.v1 - 0.12, 0, BACK.u1 - BACK.u0 + 0.01, 0.24, 0.3);
+    /* 背中側の板と、たたんだテーブル */
+    this.part(g, "box", "#26447a", BACK.u0 - 0.004, 0.45, 0, 0.01, 0.6, 0.4);
+    this.part(g, "box", "#cfcac0", BACK.u0 - 0.012, 0.42, 0, 0.012, 0.3, 0.36);
+    return g;
+  };
+
+  /* 人（アツアツ一輪車の作り）。座った姿勢は pose() で毎回置く */
+  Scene3D.prototype.person = function (o) {
+    var sc = this.scene, p = { o: o };
+    p.thigh = this.part(sc, "tube", o.pants, 0, 0, 0, 0.06, 1, 0.06);
+    p.shin = this.part(sc, "tube", o.pants, 0, 0, 0, 0.05, 1, 0.05);
+    p.knee = this.part(sc, "ball", o.pants, 0, 0, 0, 0.06, 0.06, 0.06);
+    p.foot = this.part(sc, "ball", "#3b2a22", 0, 0, 0, 0.09, 0.045, 0.055);
+    p.hips = this.part(sc, "ball", o.pants, 0, 0, 0, 0.14, 0.1, 0.15);
+    p.torso = this.part(sc, "ball", o.coat, 0, 0, 0, 0.16, 0.26, 0.17);
+    p.upper = this.part(sc, "tube", o.coat, 0, 0, 0, 0.045, 1, 0.045);
+    p.fore = this.part(sc, "tube", o.coat, 0, 0, 0, 0.04, 1, 0.04);
+    p.elbow = this.part(sc, "ball", o.coat, 0, 0, 0, 0.045, 0.045, 0.045);
+    p.hand = this.part(sc, "ball", o.hand, 0, 0, 0, 0.045, 0.045, 0.045);
+    var head = p.head = new T.Group();
+    sc.add(head);
+    p.faceMat = this.mat(o.skin).clone();
+    p.faceMat.emissive = new T.Color("#ff2010"); p.faceMat.emissiveIntensity = 0;
+    var face = new T.Mesh(this.geo.ball, p.faceMat); face.scale.setScalar(HEAD_R); face.castShadow = true; head.add(face);
+    var nose = new T.Mesh(new T.CylinderGeometry(0.013, 0.032, NOSE, 12), p.faceMat);
+    nose.rotation.z = -Math.PI / 2; nose.position.set(HEAD_R + NOSE / 2 - 0.01, 0, 0); nose.castShadow = true;
+    head.add(nose);
+    if (o.hat) {
+      this.part(head, "ball", o.hat, -0.005, 0.045, 0, 0.145, 0.12, 0.145);
+      this.part(head, "tube", "#f2ede4", 0, 0.05, 0, 0.148, 0.04, 0.148);
+      this.part(head, "ball", "#f2ede4", -0.02, 0.18, 0, 0.045, 0.045, 0.045);
+    }
+    if (o.hair) this.part(head, "ball", o.hair, -0.03, 0.04, 0, 0.145, 0.115, 0.148);
+    return p;
+  };
+  /* 座った姿勢。hip, sh（肩）, head（頭の中心）, nd（鼻の向き）, knee, foot, elbow, hand（いずれも x, y）、z は体の奥行き */
+  Scene3D.prototype.pose = function (p, q) {
+    var z = 0.12;
+    function P(a, dz) { return { x: a.x, y: a.y, z: dz == null ? z : dz }; }
+    this.segment(p.thigh, P(q.hip), P(q.knee));
+    this.segment(p.shin, P(q.knee), P(q.foot));
+    p.knee.position.set(q.knee.x, q.knee.y, z);
+    p.foot.position.set(q.foot.x + 0.06, q.foot.y, z);
+    p.hips.position.set(q.hip.x, q.hip.y, 0);
+    var mid = { x: (q.hip.x + q.sh.x) / 2, y: (q.hip.y + q.sh.y) / 2 };
+    p.torso.position.set(mid.x, mid.y + 0.04, 0);
+    p.torso.rotation.z = -Math.atan2(q.sh.x - q.hip.x, q.sh.y - q.hip.y);
+    this.segment(p.upper, P(q.sh, 0.17), P(q.elbow, 0.18));
+    this.segment(p.fore, P(q.elbow, 0.18), P(q.hand, 0.14));
+    p.elbow.position.set(q.elbow.x, q.elbow.y, 0.18);
+    p.hand.position.set(q.hand.x, q.hand.y, 0.14);
+    p.head.position.set(q.head.x, q.head.y, 0);
+    p.head.rotation.z = q.nd;
+  };
+
+  /* 状態を写す。s: { t, angle（ラジアン）, lean, near（0〜1 近さ）, angry（0〜1）, mag } */
+  Scene3D.prototype.sync = function (s) {
+    var dt = Math.max(0, Math.min(0.1, s.t - this.t)); this.t = s.t;
+    this.sceneryTex.offset.x = (this.sceneryTex.offset.x + dt * 0.35) % 1;
+    var a = s.angle;
+    this.myBack.rotation.z = a;
+
+    /* 自分：背もたれにもたれる */
+    var pv = pivot(0), c = Math.cos(a), sn = Math.sin(a);
+    function onBack(u, v) { return { x: pv.x + u * c - v * sn, y: pv.y + u * sn + v * c }; }
+    var hip = onBack(0.14, 0.1), sh = onBack(0.16, 0.55), head = onBack(0.19, 0.78);
+    var knee = { x: hip.x + 0.42, y: SEAT_Y + 0.08 }, foot = { x: knee.x + 0.05, y: 0.05 };
+    this.pose(this.me, { hip: hip, sh: sh, head: head, nd: a * 0.6, knee: knee, foot: foot,
+      elbow: { x: sh.x + 0.05, y: SEAT_Y + 0.24 }, hand: { x: knee.x - 0.1, y: SEAT_Y + 0.14 } });
+
+    /* 後ろの人：前かがみでスマホ。近いと頭がふるえ、怒ると顔が赤くなってのけぞる */
+    var b = backHead(s.lean), shake = s.near > 0.6 && !s.angry ? (Math.random() - 0.5) * 0.004 * s.near : 0;
+    var back = s.angry * 0.12;
+    var bh = { x: b.head.x - back + shake, y: b.head.y + back * 0.4 };
+    var bknee = { x: b.hip.x + 0.44, y: SEAT_Y + 0.1 }, bfoot = { x: bknee.x + 0.04, y: 0.05 };
+    var hand = { x: b.sh.x + 0.22, y: b.sh.y - 0.2 };
+    this.pose(this.him, { hip: b.hip, sh: { x: b.sh.x - back * 0.6, y: b.sh.y }, head: bh, nd: b.nd + s.angry * 0.9 + s.near * 0.15,
+      knee: bknee, foot: bfoot, elbow: { x: b.sh.x + 0.02, y: b.sh.y - 0.26 }, hand: hand });
+    this.him.faceMat.emissiveIntensity = Math.max(s.angry * 0.8, Math.max(0, s.near - 0.5) * 0.6);
+    this.phone.position.set(hand.x + 0.02, hand.y + 0.03, 0.08);
+    this.phone.rotation.set(0, 0, 0.5);
+    this.phoneScreen.position.set(hand.x + 0.016, hand.y + 0.042, 0.08);
+    this.phoneScreen.rotation.set(0, 0, 0.5);
+
+    /* カメラ：横から少し前寄り。縦長の画面でも2人が収まるように */
+    var asp = s.W / s.H, hf = 56 * Math.PI / 180;
+    this.camera.fov = 2 * Math.atan(Math.tan(hf / 2) / asp) * 180 / Math.PI;
+    this.camera.updateProjectionMatrix();
+    this.camera.position.set(-0.36, 1.1, 2.0);
+    this.camera.lookAt(-0.36, 0.98, 0);
+  };
+
+  /* 場面の点（x, y, z=0）を画面の座標へ */
+  Scene3D.prototype.project = function (p, W, H) {
+    var v = new T.Vector3(p.x, p.y, p.z || 0).project(this.camera);
+    return { x: (v.x + 1) / 2 * W, y: (1 - v.y) / 2 * H };
+  };
+
+  Scene3D.prototype.draw = function (ctx, W, H) { return this.stage.draw(ctx, W, H); };
+
+  global.Scene3D = Scene3D;
+  global.zRecline = { gapAt: gapAt, backHead: backHead };
+})(window);
