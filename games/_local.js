@@ -327,5 +327,6 @@ window.DRAFT_GAMES = [
     "play": "games/_neko-gameki/index.html",
     "full": true,
     "catch": "ネコに邪魔されながらゲーム機で遊ぶ"
-  }
+  },
+  {"type":"lab","tags":[],"id":"sekkyou","title":"リズム説教","year":2026,"date":"2026-10-23","plays":null,"url":"","img":"games/_sekkyou/img/thumb.webp","play":"games/_sekkyou/index.html","full":true,"catch":"上司の説教に拍で相づちを打つ"},
 ];

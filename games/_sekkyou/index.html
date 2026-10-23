@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>リズム説教</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* リズム説教
+
+   上司が拍に乗せて説教する。言い終わった次の拍で「はい」とタップ（スペースでも）。
+   返事が遅れる・抜ける → 「返事は！」、話の途中で返事 → 「まだ話してるだろ！」、
+   続けて2回 → 「はいは一回！」が差し込まれて説教が延びる。説教が延びるほどテンポも上がる。
+   結果は説教が終わるまでの秒数。声は VOICEVOX（青山龍星・ずんだもん）で前もって作った音声。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 説教の台本 ============ */
+  var SCRIPT = [
+    ["b01", "あのさぁ", "So, listen."],
+    ["b02", "なんで呼ばれたか", "Do you know why"],
+    ["b03", "わかってる？", "you're here?"],
+    ["b04", "昨日の資料", "Yesterday's report."],
+    ["b05", "数字が全部", "The numbers were"],
+    ["b06", "ずれてたよね", "all wrong, right?"],
+    ["b07", "確認したの？", "Did you check it?"],
+    ["b08", "してないよね", "You didn't, did you?"],
+    ["b09", "社会人として", "As a working adult,"],
+    ["b10", "どうなのそれ", "how is that okay?"],
+    ["b11", "聞いてる？", "Are you listening?"],
+    ["b12", "ほうれんそう", "Ho-Ren-So."],
+    ["b13", "報告、連絡、相談", "Report, inform, consult."],
+    ["b14", "大事だよね", "It matters, right?"],
+    ["b15", "次から気をつけて", "Be careful next time."],
+    ["b16", "以上！", "That's all!"]
+  ];
+  var PENALTY = {
+    p_miss: ["返事は！", "Answer me!"],
+    p_early: ["まだ話してるだろ！", "I'm still talking!"],
+    p_twice: ["はいは一回！", "Say yes ONCE!"]
+  };
+  /* 声の音声。参照が拾えるように1つずつ書く */
+  var FILES = {
+    b01: "voice/b01.mp3", b02: "voice/b02.mp3", b03: "voice/b03.mp3", b04: "voice/b04.mp3",
+    b05: "voice/b05.mp3", b06: "voice/b06.mp3", b07: "voice/b07.mp3", b08: "voice/b08.mp3",
+    b09: "voice/b09.mp3", b10: "voice/b10.mp3", b11: "voice/b11.mp3", b12: "voice/b12.mp3",
+    b13: "voice/b13.mp3", b14: "voice/b14.mp3", b15: "voice/b15.mp3", b16: "voice/b16.mp3",
+    p_miss: "voice/p_miss.mp3", p_early: "voice/p_early.mp3", p_twice: "voice/p_twice.mp3",
+    hai1: "voice/hai1.mp3", hai2: "voice/hai2.mp3", hai3: "voice/hai3.mp3"
+  };
+  var BUF = {}, loading = false;
+  function loadVoices() {
+    if (loading || !AC) return;
+    loading = true;
+    Object.keys(FILES).forEach(function (k) {
+      fetch(FILES[k]).then(function (r) { return r.arrayBuffer(); }).then(function (a) {
+        return new Promise(function (ok, ng) { AC.decodeAudioData(a, ok, ng); });
+      }).then(function (b) { BUF[k] = b; }, function () {});
+    });
+  }
+  function ready() { for (var k in FILES) if (!BUF[k]) return false; return true; }
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null, BOSS_OUT = null, ANA = null, ANA_BUF = null, MUSIC = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 1);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    BOSS_OUT = AC.createGain(); BOSS_OUT.gain.value = 1.0;
+    ANA = AC.createAnalyser(); ANA.fftSize = 512; ANA_BUF = new Float32Array(ANA.fftSize);
+    BOSS_OUT.connect(ANA); BOSS_OUT.connect(AC.destination);
+    MUSIC = AC.createGain(); MUSIC.gain.value = 0.55; MUSIC.connect(AC.destination);
+    loadVoices();
+  }
+  function playVoice(key, at, rate, out) {
+    var b = BUF[key];
+    if (!AC || !b) return null;
+    var s = AC.createBufferSource(); s.buffer = b;
+    s.playbackRate.value = rate || 1;
+    s.connect(out || AC.destination);
+    s.start(Math.max(AC.currentTime, at));
+    return s;
+  }
+  function voiceLen(key, rate) { return BUF[key] ? BUF[key].duration / (rate || 1) : 0.8; }
+
+  /* 太鼓・スネア・ハイハット・ベース（予約して鳴らす） */
+  function kick(t) {
+    var o = AC.createOscillator(), g = AC.createGain();
+    o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.14);
+    g.gain.setValueAtTime(0.9, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    o.connect(g); g.connect(MUSIC); o.start(t); o.stop(t + 0.25);
+  }
+  function hit(t, freq, dur, vol, type) {
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter(); f.type = type || "bandpass"; f.frequency.value = freq; f.Q.value = 0.8;
+    var g = AC.createGain();
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f); f.connect(g); g.connect(MUSIC);
+    s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.02);
+  }
+  function bass(t, freq, dur) {
+    var o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter();
+    o.type = "sawtooth"; o.frequency.value = freq;
+    f.type = "lowpass"; f.frequency.value = 420;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.32, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(f); f.connect(g); g.connect(MUSIC); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function tick(t, freq, vol) {
+    var o = AC.createOscillator(), g = AC.createGain();
+    o.type = "sine"; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    o.connect(g); g.connect(MUSIC); o.start(t); o.stop(t + 0.06);
+  }
+  var BASS = [55, 55, 65.4, 49];               /* 小節ごとのベースの音（A A C G） */
+  function beatSound(t, beatNo, spb) {
+    var inBar = beatNo % 4, bar = Math.floor(beatNo / 4);
+    if (inBar === 0 || inBar === 2) kick(t);
+    if (inBar === 1 || inBar === 3) hit(t, 1800, 0.14, 0.32);
+    hit(t, 8000, 0.03, 0.12, "highpass");
+    hit(t + spb / 2, 8000, 0.03, 0.07, "highpass");
+    var root = BASS[bar % 4];
+    bass(t, root, spb * 0.45);
+    if (inBar === 3) bass(t + spb / 2, root * 1.5, spb * 0.4);
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", WAIT: "wait", PLAY: "play", RESULT: "result" };
+  var state, score;
+  var bpm, line, queue, items, beatNo, nextBeat, startT, endT, anger, cur, nod, haiT, haiKey, misses, flash;
+  var BPM0 = 96;
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.WAIT;
+    score = 0; bpm = BPM0; line = 0; queue = []; items = []; beatNo = 0; nextBeat = 0;
+    startT = 0; endT = 0; anger = 0; cur = null; nod = 0; haiT = -9; haiKey = "hai1"; misses = 0; flash = 0;
+  }
+  function now() { return AC ? AC.currentTime : 0; }
+  function latency() { return AC ? (AC.outputLatency || 0) + (AC.baseLatency || 0) : 0; }
+
+  /* 次に話すこと。差し込み（叱り）が先、なければ台本の次 */
+  function nextItem(t) {
+    var key, text;
+    if (queue.length) { key = queue.shift(); text = PENALTY[key]; }
+    else if (line < SCRIPT.length) { key = SCRIPT[line][0]; text = [SCRIPT[line][1], SCRIPT[line][2]]; line++; }
+    else return null;
+    var spb = 60 / bpm;
+    var rate = 1 + Math.max(0, bpm - BPM0) / BPM0 * 0.5;
+    var len = voiceLen(key, rate);
+    /* 言い終わってから最初の拍で返事。最低でも2拍目 */
+    var ans = Math.max(1, Math.ceil((len + 0.12) / spb));
+    var beats = ans < 4 ? 4 : 8;
+    var it = { key: key, text: text, t: t, len: len, ans: t + ans * spb, beats: beats, spb: spb, hit: false, judged: false, wrong: false };
+    var src = playVoice(key, t, rate, BOSS_OUT);
+    it.src = src;
+    items.push(it);
+    if (items.length > 6) items.shift();
+    return it;
+  }
+
+  function scold(key) {
+    if (queue.length >= 1) return;              /* 叱りは一度に1つまで */
+    queue.push(key);
+    anger = Math.min(1, anger + 0.25);
+    misses++;
+    flash = 1;
+  }
+
+  /* ============ 進行 ============ */
+  var itemEnd = 0;                              /* 今の発言が占める最後の拍 */
+  function update(dt) {
+    nod = Math.max(0, nod - dt * 5);
+    flash = Math.max(0, flash - dt * 3);
+    anger = Math.max(0, anger - dt * 0.03);
+    if (state === S.WAIT) {
+      if (AC && ready()) {
+        state = S.PLAY;
+        startT = now() + 0.25; nextBeat = startT; beatNo = 0; itemEnd = 0;
+      }
+      return;
+    }
+    if (state !== S.PLAY) return;
+    var t = now();
+    /* 0.2秒先まで拍を予約する。発言の頭で次のことを言わせる */
+    while (nextBeat < t + 0.2 && state === S.PLAY) {
+      var spb = 60 / bpm;
+      if (beatNo >= itemEnd) {
+        var it = nextItem(nextBeat);
+        if (!it) {
+          endT = nextBeat;
+          toResult();
+          return;
+        }
+        itemEnd = beatNo + it.beats;
+      }
+      beatSound(nextBeat, beatNo, spb);
+      nextBeat += spb; beatNo++;
+      if (beatNo === itemEnd) bpm = Math.min(150, bpm + 2 + (queue.length ? 3 : 0));
+    }
+    /* 返事の時刻を過ぎても返事がなければ「返事は！」 */
+    var heard = t - latency();
+    for (var i = 0; i < items.length; i++) {
+      var c = items[i];
+      if (!c.judged && heard > c.ans + 0.2) {
+        c.judged = true;
+        if (!c.hit) scold("p_miss");
+      }
+    }
+    /* 今しゃべっている発言（字幕） */
+    cur = null;
+    for (i = items.length - 1; i >= 0; i--) if (items[i].t <= t) { cur = items[i]; break; }
+  }
+  function toResult() {
+    state = S.RESULT;
+    score = Math.round((endT - startT) * 10) / 10;
+  }
+
+  /* ============ 入力 ============ */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var h = x == null ? "retry" : hitButton(x, y);
+      if (h === "retry") newRound();
+      return;
+    }
+    if (state !== S.PLAY) return;
+    var t = now(), heard = t - latency();
+    nod = 1; haiT = t;
+    haiKey = ["hai1", "hai2", "hai3"][Math.floor(Math.random() * 3)];
+    playVoice(haiKey, t, 1, AC.destination);
+    /* いちばん近い返事の時刻で判定 */
+    var best = null, bd = 1e9;
+    for (var i = 0; i < items.length; i++) {
+      var d = Math.abs(heard - items[i].ans);
+      if (d < bd) { bd = d; best = items[i]; }
+    }
+    if (best && bd <= 0.16 && !best.hit && !best.judged) { best.hit = true; return; }
+    if (best && best.hit && bd <= best.spb * 1.2) { scold("p_twice"); return; }
+    if (best && !best.hit && heard < best.ans) { scold("p_early"); return; }
+    scold("p_early");
+  }
+  function move() {}
+  function up() {}
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    /* 1 終盤へ（台本の14番目から） 2 「返事は！」 3 結果 */
+    if (state !== S.PLAY) return;
+    if (n === 1) line = 13;
+    if (n === 2) scold("p_miss");
+    if (n === 3) { endT = now(); toResult(); }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (esc) { if (!e.repeat) { newRound(); } return; }
+    if (e.repeat) return;
+    if (state === S.INTRO) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
+  });
+
+  function doShare() {
+    var sec = score.toFixed(1);
+    var text = misses === 0
+      ? zT("上司の説教を" + sec + "秒で、一度もしくじらずに聞き終えた", "Took my boss's lecture for " + sec + " seconds without a single slip")
+      : zT("相づちを" + misses + "回しくじって、上司の説教が" + sec + "秒に延びた", "Messed up " + misses + " times and my boss's lecture dragged on for " + sec + " seconds");
+    window.zResultActions.x({ text: text + zT(" #リズム説教", " #RhythmLecture") });
+  }
+
+  /* ============ 描画 ============ */
+  function rr(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function mouthLevel() {
+    if (!ANA) return 0;
+    ANA.getFloatTimeDomainData(ANA_BUF);
+    var s = 0;
+    for (var i = 0; i < ANA_BUF.length; i++) s += ANA_BUF[i] * ANA_BUF[i];
+    return Math.min(1, Math.sqrt(s / ANA_BUF.length) * 6);
+  }
+  /* 拍の中の位置（0〜1）。ペンで机をたたく動き */
+  function beatPhase() {
+    if (state !== S.PLAY || !AC) return 0;
+    var spb = 60 / bpm, t = now() - startT;
+    return ((t % spb) + spb) % spb / spb;
+  }
+
+  var mouth = 0;
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    var t = performance.now() / 1000;
+    mouth += (mouthLevel() - mouth) * 0.5;
+    var a = anger;
+
+    /* 壁・窓のブラインド */
+    ctx.fillStyle = "#d9dccf"; ctx.fillRect(0, 0, W, H);
+    var wy = H * 0.08, wh = H * 0.3;
+    ctx.fillStyle = "#b9c6cf"; ctx.fillRect(40, wy, W - 80, wh);
+    ctx.fillStyle = "#eef1ee";
+    for (var y = wy; y < wy + wh; y += 14) ctx.fillRect(40, y, W - 80, 9);
+    ctx.strokeStyle = "#9aa39a"; ctx.lineWidth = 6; ctx.strokeRect(40, wy, W - 80, wh);
+    /* 時計 */
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(W - 70, wy + wh + 60, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#333"; ctx.lineWidth = 3; ctx.stroke();
+    var ca = (state === S.PLAY ? now() - startT : 0) / 60 * Math.PI * 2;
+    ctx.beginPath(); ctx.moveTo(W - 70, wy + wh + 60); ctx.lineTo(W - 70 + Math.sin(ca) * 24, wy + wh + 60 - Math.cos(ca) * 24); ctx.stroke();
+    /* 床 */
+    ctx.fillStyle = "#8c8f86"; ctx.fillRect(0, H * 0.62, W, H * 0.38);
+
+    /* 上司 */
+    var bx = W / 2, by = H * 0.43;
+    var shake = a > 0.4 ? (Math.random() - 0.5) * a * 4 : 0;
+    var lean = mouth * 6;
+    ctx.save(); ctx.translate(shake, lean);
+    /* 椅子の背 */
+    ctx.fillStyle = "#2b2b30"; rr(bx - 120, by - 150, 240, 260, 30); ctx.fill();
+    /* 体（スーツ） */
+    ctx.fillStyle = "#3a4152"; rr(bx - 110, by - 10, 220, 200, 50); ctx.fill();
+    ctx.fillStyle = "#f4f4f2"; ctx.beginPath(); ctx.moveTo(bx - 34, by - 6); ctx.lineTo(bx + 34, by - 6); ctx.lineTo(bx, by + 70); ctx.fill();
+    ctx.fillStyle = "#a8283a"; ctx.beginPath(); ctx.moveTo(bx - 9, by); ctx.lineTo(bx + 9, by); ctx.lineTo(bx + 13, by + 70); ctx.lineTo(bx, by + 84); ctx.lineTo(bx - 13, by + 70); ctx.fill();
+    /* 頭 */
+    var skin = "rgb(" + Math.round(236 + 10 * a) + "," + Math.round(200 - 90 * a) + "," + Math.round(170 - 90 * a) + ")";
+    ctx.fillStyle = skin; ctx.beginPath(); ctx.ellipse(bx, by - 70, 66, 78, 0, 0, Math.PI * 2); ctx.fill();
+    /* 耳 */
+    ctx.beginPath(); ctx.ellipse(bx - 66, by - 64, 12, 20, 0, 0, Math.PI * 2); ctx.ellipse(bx + 66, by - 64, 12, 20, 0, 0, Math.PI * 2); ctx.fill();
+    /* 髪（七三） */
+    ctx.fillStyle = "#2a2622";
+    ctx.beginPath(); ctx.moveTo(bx - 68, by - 80); ctx.quadraticCurveTo(bx - 70, by - 160, bx + 4, by - 152);
+    ctx.quadraticCurveTo(bx + 72, by - 148, bx + 68, by - 84); ctx.quadraticCurveTo(bx + 40, by - 130, bx - 20, by - 120);
+    ctx.quadraticCurveTo(bx - 50, by - 112, bx - 68, by - 80); ctx.fill();
+    /* 眉（怒るほど吊り上がる） */
+    ctx.strokeStyle = "#2a2622"; ctx.lineWidth = 8; ctx.lineCap = "round";
+    var tilt = 6 + 14 * a + mouth * 4;
+    ctx.beginPath(); ctx.moveTo(bx - 46, by - 96 - tilt * 0.2); ctx.lineTo(bx - 14, by - 88 + tilt * 0.5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx + 46, by - 96 - tilt * 0.2); ctx.lineTo(bx + 14, by - 88 + tilt * 0.5); ctx.stroke();
+    /* めがね */
+    ctx.strokeStyle = "#222"; ctx.lineWidth = 4;
+    rr(bx - 52, by - 82, 40, 28, 8); ctx.stroke(); rr(bx + 12, by - 82, 40, 28, 8); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx - 12, by - 70); ctx.lineTo(bx + 12, by - 70); ctx.stroke();
+    ctx.fillStyle = "#222";
+    ctx.beginPath(); ctx.arc(bx - 32, by - 67, 4, 0, Math.PI * 2); ctx.arc(bx + 32, by - 67, 4, 0, Math.PI * 2); ctx.fill();
+    /* 口（声の大きさで開く） */
+    ctx.fillStyle = "#5a1e1e";
+    var mh = 4 + mouth * 26;
+    ctx.beginPath(); ctx.ellipse(bx, by - 22, 18 + mouth * 6, mh / 2, 0, 0, Math.PI * 2); ctx.fill();
+    /* 怒りのすじ */
+    if (a > 0.3) {
+      ctx.strokeStyle = "#c0263a"; ctx.lineWidth = 4;
+      var mx = bx + 40, my = by - 128;
+      ctx.beginPath(); ctx.moveTo(mx - 10, my - 4); ctx.lineTo(mx - 2, my - 2); ctx.lineTo(mx - 4, my - 10);
+      ctx.moveTo(mx + 10, my - 4); ctx.lineTo(mx + 2, my - 2); ctx.lineTo(mx + 4, my - 10);
+      ctx.moveTo(mx - 10, my + 6); ctx.lineTo(mx - 2, my + 4); ctx.lineTo(mx - 4, my + 12);
+      ctx.moveTo(mx + 10, my + 6); ctx.lineTo(mx + 2, my + 4); ctx.lineTo(mx + 4, my + 12); ctx.stroke();
+    }
+    ctx.restore();
+
+    /* 机とペン（拍ごとに机をたたく） */
+    var dy = H * 0.6;
+    ctx.fillStyle = "#6b4a2f"; ctx.fillRect(0, dy, W, 26);
+    ctx.fillStyle = "#4e3622"; ctx.fillRect(0, dy + 26, W, H * 0.12);
+    ctx.fillStyle = "#f7f6f1"; ctx.save(); ctx.translate(W * 0.3, dy + 4); ctx.rotate(-0.08); ctx.fillRect(-60, -6, 120, 8); ctx.restore();
+    var ph = beatPhase(), lift = state === S.PLAY ? Math.pow(ph, 0.6) * 26 : 10;
+    ctx.save(); ctx.translate(W * 0.68, dy - 4 - lift);
+    ctx.fillStyle = skin; ctx.beginPath(); ctx.ellipse(10, -8, 26, 18, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(-6, -2); ctx.lineTo(-30, 2 + 0); ctx.stroke();
+    ctx.restore();
+
+    /* 自分（手前の背中）。返事で頭を下げる */
+    var px = W / 2, py = H * 0.9, n = Math.sin(Math.min(1, nod) * Math.PI) * 26;
+    ctx.fillStyle = "#26303f"; rr(px - 170, py - 40, 340, 260, 90); ctx.fill();
+    ctx.fillStyle = "#1c1916"; ctx.beginPath(); ctx.ellipse(px, py - 80 + n, 72, 80, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#e9c2a2";
+    ctx.beginPath(); ctx.ellipse(px - 72, py - 70 + n, 11, 18, 0, 0, Math.PI * 2); ctx.ellipse(px + 72, py - 70 + n, 11, 18, 0, 0, Math.PI * 2); ctx.fill();
+
+    /* 字幕（上司の言ったこと） */
+    if (state === S.PLAY && cur && now() < cur.t + cur.len + 0.35) {
+      var txt = zT(cur.text[0], cur.text[1]), pen = cur.key.charAt(0) === "p";
+      ctx.font = (pen ? "900 46px" : "800 36px") + " sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      var tw = ctx.measureText(txt).width + 44, ty = H * 0.12;
+      ctx.fillStyle = pen ? "#c0263a" : "#fff";
+      rr(W / 2 - tw / 2, ty - 36, tw, 72, 36); ctx.fill();
+      ctx.fillStyle = pen ? "#fff" : "#16202e";
+      ctx.fillText(txt, W / 2, ty + 2);
+    }
+    /* 自分の返事 */
+    if (state === S.PLAY && now() - haiT < 0.45) {
+      ctx.font = "800 40px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      var hx = W * 0.22, hy = H * 0.74;
+      ctx.fillStyle = "#fff"; rr(hx - 60, hy - 32, 120, 64, 32); ctx.fill();
+      ctx.fillStyle = "#16202e"; ctx.fillText(zT("はい", "Yes"), hx, hy + 2);
+    }
+    if (flash > 0) { ctx.fillStyle = "rgba(200,30,50," + (flash * 0.25) + ")"; ctx.fillRect(0, 0, W, H); }
+
+    if (state === S.INTRO) drawCredit();
+    if (state === S.RESULT) drawResult();
+  }
+  function drawCredit() {
+    ctx.font = "600 15px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+    ctx.fillStyle = "rgba(255,255,255,.75)";
+    ctx.fillText("VOICEVOX:青山龍星 / VOICEVOX:ずんだもん", 12, H - 10);
+  }
+
+  function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
+  function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(score.toFixed(1) + zT("秒", "s"), W / 2, H * 0.45);
+    ctx.restore();
+    window.zResultActions.drawButtons(ctx, resultButtons());
+  }
+
+  window.__probe = {
+    now: function () { return { state: state, score: score, misses: misses, line: line, bpm: bpm, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      if (!await r.until(function () { return state === S.RESULT; }, 90)) throw Error("終わらない");
+      await r.wait(1500);
+    }
+  };
+
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  layout();
+  var last = performance.now(), stepAcc = 0;
+  function loop(nowMs) {
+    var dt = Math.max(0, Math.min(0.25, (nowMs - last) / 1000));
+    last = nowMs;
+    if (!window.__recordManual) {
+      stepAcc += dt;
+      while (stepAcc >= 1 / 60) { update(1 / 60); stepAcc -= 1 / 60; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
