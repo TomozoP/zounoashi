@@ -35,6 +35,7 @@
 <script src="../pad.js"></script>
 <script src="../voice.js"></script>   <!-- 声（アツアツ一輪車と同じ） -->
 <script src="../random-bowling/vendor/three.min.js"></script>
+<script src="../random-bowling/vendor/cannon.js"></script>
 <script src="../three-base.js"></script>
 <script src="scene3d.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
@@ -42,8 +43,8 @@
 
    新幹線の座席。STARTで「倒してもいいですか？」と聞き、後ろの人が「どうぞ」。
    押している間だけ背もたれがなめらかに倒れる。離したところで決まる。
-   後ろの人は前かがみでスマホを見ていて、背もたれの頭の部分が後ろの人の頭に触れたら「ちょっと！」。
-   前かがみの深さは毎回少しちがう。すき間が近づくと拡大鏡が出る。結果は残りのすき間（mm）。
+   後ろの人はふつうに座ってスマホを見ていて、背もたれの頭の部分が後ろの人の頭（鼻）にぶつかったら、
+   アツアツ一輪車の倒れたときと同じ叫び声でラグドールになる。座り方は毎回少しちがう。すき間が近づくと拡大鏡が出る。結果は残りのすき間（mm）。
    絵は3D（scene3d.js）。人の作りと声はアツアツ一輪車と同じ（声は games/voice.js）。 */
 (function () {
   "use strict";
@@ -97,6 +98,45 @@
     s.start(n, Math.random()); s.stop(n + dur + 0.05);
   }
   /* 背もたれが少しずつ倒れる「ギッ」 */
+  /* ぶつかったときの声（アツアツ一輪車の倒れたときと同じ）。
+     「アアアアア～～～」。高いところから落ちていくように下がる長い叫び。
+     細かく音量を揺らして「アアアア」と途切れさせ、だんだん震えを強くして消える */
+  function scream(ac, at, pitch) {
+    var t = at, f0 = pitch || 520, dur = 1.7;
+    var out = ac.createGain(), trem = ac.createGain();
+    out.gain.value = 0.45;
+    trem.connect(out); out.connect(ac.destination);
+    var o = ac.createOscillator(), env = ac.createGain();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(f0 * 1.15, t);
+    o.frequency.exponentialRampToValueAtTime(f0, t + 0.12);
+    o.frequency.exponentialRampToValueAtTime(f0 * 0.5, t + dur);
+    /* 声の震え（あとほど深く） */
+    var vib = ac.createOscillator(), vg = ac.createGain();
+    vib.frequency.value = 6.5;
+    vg.gain.setValueAtTime(f0 * 0.01, t);
+    vg.gain.linearRampToValueAtTime(f0 * 0.05, t + dur);
+    vib.connect(vg); vg.connect(o.frequency);
+    /* 「アアアア」と途切れる揺れ */
+    var am = ac.createOscillator(), ag = ac.createGain();
+    am.frequency.setValueAtTime(8, t);
+    am.frequency.linearRampToValueAtTime(5, t + dur);
+    ag.gain.value = 0.35;
+    trem.gain.value = 0.65;
+    am.connect(ag); ag.connect(trem.gain);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(0.9, t + 0.03);
+    env.gain.setValueAtTime(0.9, t + dur * 0.55);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(env);
+    [[850, 5, 2.2], [1250, 6, 1.4], [2700, 8, 0.8]].forEach(function (fm) {
+      var b = ac.createBiquadFilter(), g = ac.createGain();
+      b.type = "bandpass"; b.frequency.value = fm[0]; b.Q.value = fm[1]; g.gain.value = fm[2];
+      env.connect(b); b.connect(g); g.connect(trem);
+    });
+    [o, vib, am].forEach(function (n) { n.start(t); n.stop(t + dur + 0.05); });
+  }
+  /* 背もたれが倒れる「ギッ」 */
   function creak() {
     if (!AC) return;
     var o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter(), n = AC.currentTime;
@@ -117,7 +157,7 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", ASK: "ask", PLAY: "play", ANGRY: "angry", RESULT: "result" };
   var state, score, T, held, keyMode = false;
-  var MAX = 40;                                 /* 座席が倒れきる角度 */
+  var MAX = 50;                                 /* 座席が倒れきる角度 */
   var SPEED = 8;                                /* 倒れる速さ（度/秒） */
   var D2R = Math.PI / 180;
   var angle, contact, lean, gap, hitInfo, coughed, failed, creakT = 0;
@@ -127,7 +167,7 @@
     document.getElementById("start").hidden = true;
     state = S.ASK;
     score = 0; T = 0; T2 = 0; held = false; angle = 0; failed = false; coughed = false; gap = null;
-    lean = 0.38 + Math.random() * 0.24;         /* 後ろの人の前かがみ（毎回ちがう） */
+    lean = -0.12 + Math.random() * 0.18;        /* 後ろの人の座り方（少しもたれる〜少し前へ。毎回ちがう） */
     contact = 0; while (gapNow(contact) > 0 && contact < MAX) contact += 0.1;
     gap = gapNow(0);
     bubbles = [];
@@ -149,8 +189,7 @@
     if (state === S.ASK) { if (T > 2.4) state = S.PLAY; return; }
     if (state === S.ANGRY) {
       T2 += dt;
-      if (T2 > 0.5) angle = Math.max(0, angle - dt * 25);
-      if (T2 > 2.4) toResult();
+      if (T2 > 2.6) toResult();
       return;
     }
     if (state !== S.PLAY) return;
@@ -168,7 +207,7 @@
     }
     if (gap <= 0) {
       state = S.ANGRY; T2 = 0; failed = true; held = false;
-      say("back", "ちょっと！", "ちょっと！", "Hey!", { pitch: 300, mora: 0.1, volume: 0.5 });
+      if (AC) scream(AC, AC.currentTime + 0.02, 480 + Math.random() * 80);
       noiseHit(0.12, 2500, 0.5, 2);
     }
   }
@@ -257,14 +296,14 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ t: T || 0, angle: angle * D2R, lean: lean, near: state === S.INTRO ? 0 : near, angry: angry, W: W, H: H });
+        s3.sync({ t: T || 0, angle: angle * D2R, lean: lean, near: state === S.INTRO ? 0 : near, angry: angry, rag: state === S.ANGRY || (state === S.RESULT && failed), W: W, H: H });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); }
     }
     if (!drew) { ctx.fillStyle = "#d9d4c6"; ctx.fillRect(0, 0, W, H); }
 
     /* すき間が近いときの拡大鏡（当たりそうな所を5倍に） */
-    if (drew && hitInfo && g < 0.06 && state !== S.ANGRY && state !== S.INTRO) {
+    if (drew && hitInfo && g < 0.06 && !failed && state !== S.ANGRY && state !== S.INTRO) {
       var hi = hitInfo, k = canvas.width / W, mag = 5, R = 100;
       var dx = hi.near.x - hi.at.x, dy = hi.near.y - hi.at.y, dl = Math.sqrt(dx * dx + dy * dy) || 1;
       var surf = { x: hi.at.x + dx / dl * hi.r, y: hi.at.y + dy / dl * hi.r };
