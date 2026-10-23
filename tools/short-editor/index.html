@@ -1645,7 +1645,7 @@ function showExported(blob, ext) {
   $('ovActs').append(b2, b1);
   // 投稿：文は左の「投稿」タブの欄を使う。ここにも同じボタンを置く
   lastExport = { file: () => new File([blob], a.download, { type: blob.type }), save, info };
-  info.then(g => { fillPost(g); $('postFile').textContent = '書き出した動画：' + a.download; });
+  info.then(g => { fillPost(g); autoTranslate(); $('postFile').textContent = '書き出した動画：' + a.download; });
   const box = document.createElement('div'); box.id = 'postBox';
   const row = document.createElement('div'); row.className = 'acts';
   if (navigator.canShare && navigator.canShare({ files: [lastExport.file()] }) && matchMedia('(pointer:coarse)').matches) {
@@ -1668,6 +1668,8 @@ function fillPost(g) {
   if (!$('postX').value) $('postX').value = '#gamedev';
   if (!$('postX2').value) $('postX2').value = (g.no ? '【' + g.no + '本目】' : '') + '#' + g.tag + ' ' + g.url;
   if (!$('postTitle').value) $('postTitle').value = g.title;
+  const te = $('postTitleEn');
+  if (g.en && $('postTitle').value === g.title && (!te.value || te.value === te.dataset.auto)) { te.value = te.dataset.auto = g.en; te.dataset.ja = g.title; }
   if (!$('postYt').value) $('postYt').value = '【ここで遊べます】' + g.url + '\n【X】 https://x.com/TomozoP';
   fillSubEn();
 }
@@ -1762,7 +1764,7 @@ function postYT(button) {
   if (YT_CLIENT_ID) {
     // 公開で上げる。審査前のアプリだと YouTube 側で非公開に固定されるので、そのときは YouTube Studio を開く
     if (!lastExport) { toast('先に書き出してください'); return; }
-    ytUpload(lastExport.file(), $('postTitle').value || 'ゲーム', $('postYt').value, button, { title: $('postTitleEn').value.trim(), description: $('postYtEn').value, srt: enSrt() });
+    ytUpload(lastExport.file(), $('postTitle').value || 'ゲーム', $('postYt').value, button, () => ({ title: $('postTitleEn').value.trim(), description: $('postYtEn').value, srt: enSrt() }));
   } else {
     copyText($('postYt').value); open('https://www.youtube.com/upload', '_blank');
     if (lastExport) lastExport.save();
@@ -1776,13 +1778,16 @@ async function postInfo() {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const title = doc.title.replace(/【プレビュー】/g, '').trim();
     const v = doc.querySelector('meta[name="preview-version"]'), id = v && /^([a-z0-9-]+?)-\d+$/.exec(v.content || '');
-    return { title, tag: title.replace(/[\s・･·•、，,.。]/g, ''), url: id ? 'https://www.zounoashi.com/share/' + id[1] + '/?card=square2' : '', no: await gameNo(id && id[1]) };
+    return { title, tag: title.replace(/[\s・･·•、，,.。]/g, ''), url: id ? 'https://www.zounoashi.com/share/' + id[1] + '/?card=square2' : '', no: await gameNo(id && id[1]), en: gameNo.en };
   } catch (e) { return {}; }
 }
 // 1000本企画の何本目か。サイトの一覧のショート（公開済み）を日付順に数え、まだ載っていなければ次の1本とする
 async function gameNo(id) {
   try {
     const html = await (await fetch('../../index.html?_post=' + Date.now(), { cache: 'no-store' })).text();
+    // サイトの英語のゲーム名（EN.titles）があれば、YouTube の英語の題名に使う
+    const en = id && new RegExp('\\n\\s*"' + id + '":\\s*"([^"]+)"').exec(html);
+    gameNo.en = en ? en[1] : '';
     const labs = [...html.matchAll(/\{\s*type:\s*"lab"[^\n]*?id:\s*"([^"]+)"[^\n]*?date:\s*"([^"]+)"/g)].map(m => ({ id: m[1], date: m[2] }));
     const me = labs.find(g => g.id === id);
     return me ? labs.filter(g => g.date <= me.date).length : labs.length + 1;
@@ -1803,11 +1808,15 @@ function ytLogin() {
       error_callback: () => ng(new Error('ログインを中止しました')) }).requestAccessToken({ prompt: 'select_account' });
   });
 }
-async function ytUpload(file, title, description, button, en = {}) {
+async function ytUpload(file, title, description, button, getEn = () => ({})) {
   const label = button.textContent;
   try {
     const token = await ytLogin();
     button.disabled = true;
+    // 英語の訳がまだなら、訳し終わるのを待ってから上げる（投稿タブを開かずに上げると訳されていなかった）
+    if (!$('postTitleEn').value.trim()) autoTranslate();
+    while (translating) await new Promise(ok => setTimeout(ok, 200));
+    const en = getEn();
     // 英語の題名と説明は、英語圏の人に出る別の版として付ける
     const meta = { snippet: { title: title.slice(0, 100), description, categoryId: '20', defaultLanguage: 'ja' }, status: { privacyStatus: 'public', selfDeclaredMadeForKids: false } };
     if (en.title) meta.localizations = { en: { title: en.title.slice(0, 100), description: en.description || '' } };
