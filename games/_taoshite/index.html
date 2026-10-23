@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>倒してもいいですかゲーム</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>
+<script src="../voice.js"></script>   <!-- かなの読みを音に分ける -->   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 倒してもいいですかゲーム
+
+   新幹線の座席。STARTで「倒してもいいですか？」と聞き、後ろの人が「どうぞ」。
+   押している間だけ背もたれが倒れる。離したところで決まり、倒した角度が結果。
+   後ろの人には我慢の限界（毎回ちがう）があり、越えると「ちょっと！」で戻される。
+   後ろの人は毎回ちがう（パソコン・コーヒー・ひざの長い人）。限界が近づくと
+   画面が閉じていく・コーヒーがすべる・ひざが押される、と顔色で分かる。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null, CREAK = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    /* 走行音（低いゴー） */
+    var s = AC.createBufferSource(); s.buffer = NOISE; s.loop = true;
+    var f = AC.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 220;
+    var g = AC.createGain(); g.gain.value = 0.18;
+    s.connect(f); f.connect(g); g.connect(AC.destination); s.start();
+  }
+  function noiseHit(dur, freq, vol, q, at) {
+    if (!AC) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = at || AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+  }
+  /* 背もたれが少しずつ倒れる「ギッ」 */
+  function creak() {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter(), n = AC.currentTime;
+    o.type = "sawtooth"; o.frequency.setValueAtTime(70 + Math.random() * 30, n);
+    f.type = "bandpass"; f.frequency.value = 900; f.Q.value = 3;
+    g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.12, n + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.07);
+    o.connect(f); f.connect(g); g.connect(AC.destination); o.start(n); o.stop(n + 0.1);
+  }
+
+  /* FM合成の声（リズム説教と同じ作り）。words は zVoice.kana の形 */
+  var VOW = { a: [800, 1200, 2600], i: [300, 2300, 3000], u: [350, 1300, 2400], e: [500, 1900, 2600], o: [500, 850, 2500], n: [250, 1000, 2200] };
+  function fmSpeak(at, words, opt) {
+    if (!AC) return 0;
+    var base = opt.pitch, out = AC.createGain();
+    out.gain.value = opt.volume || 0.5;
+    out.connect(AC.destination);
+    var mod = AC.createOscillator(); mod.type = "sine";
+    var env = AC.createGain(); env.gain.value = 0.0001; env.connect(out);
+    var ops = [0.55, 0.3, 0.1].map(function (amp) {
+      var c = AC.createOscillator(), depth = AC.createGain(), g = AC.createGain();
+      c.type = "sine"; g.gain.value = amp;
+      mod.connect(depth); depth.connect(c.frequency); c.connect(g); g.connect(env);
+      return { c: c, depth: depth };
+    });
+    function hiss(t0, dur, freq, q, vol) {
+      var n = AC.createBufferSource(), b = AC.createBiquadFilter(), g = AC.createGain();
+      n.buffer = NOISE; b.type = "bandpass"; b.frequency.value = freq; b.Q.value = q;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      n.connect(b); b.connect(g); g.connect(out);
+      n.start(t0, Math.random() * 0.5); n.stop(t0 + dur + 0.02);
+    }
+    var t = at, voiced = 0, total = 0;
+    words.forEach(function (w) { if (VOW[w[1]]) total++; });
+    words.forEach(function (w) {
+      var c = w[0], vw = VOW[w[1]], dur = w[2];
+      if (!vw) { env.gain.setTargetAtTime(0.0001, t, 0.01); t += dur; return; }
+      var k = total > 1 ? voiced / (total - 1) : 0;
+      var p = base * (1.15 - 0.25 * k);
+      if (opt.ask && voiced >= total - 2) p = base * (1.0 + 0.35 * (voiced - total + 3) / 2);
+      voiced++;
+      var cl = 0;
+      if (c === "s" || c === "sh" || c === "ch") { cl = Math.min(dur * 0.35, 0.05); env.gain.setTargetAtTime(0.0001, t, 0.004); hiss(t, cl + 0.01, c === "s" ? 6500 : 3400, 1.6, 0.5); }
+      else if (c === "g" || c === "d" || c === "t" || c === "p" || c === "b" || c === "k") { cl = 0.02; env.gain.setTargetAtTime(0.0001, t, 0.003); hiss(t + 0.008, 0.02, (c === "p" || c === "b") ? 700 : c === "g" ? 1500 : 3500, 0.8, 0.45); }
+      else if (c === "h") { cl = Math.min(dur * 0.3, 0.04); env.gain.setTargetAtTime(0.0001, t, 0.004); hiss(t, cl + 0.01, 1800, 0.6, 0.35); }
+      else if (c === "z" || c === "j") { cl = 0.03; env.gain.setTargetAtTime(0.15, t, 0.004); hiss(t, cl, c === "z" ? 5500 : 3200, 1.5, 0.3); }
+      else if (c === "m" || c === "n" || c === "r" || c === "y" || c === "w") { cl = 0.025; env.gain.setTargetAtTime(0.3, t, 0.005); }
+      var tv = t + cl;
+      mod.frequency.setValueAtTime(p, tv);
+      ops.forEach(function (o, j) {
+        var f = c === "m" || c === "n" ? [250, 1100, 2200][j] : vw[j];
+        o.c.frequency.setValueAtTime(Math.max(1, Math.round(f / p)) * p, tv);
+        o.depth.gain.setValueAtTime(p * opt.bright * [1.2, 0.8, 0.5][j], tv);
+      });
+      var loud = w[1] === "n" ? 0.45 : (c === "sh" && w[1] === "i") ? 0.35 : 1;
+      env.gain.setTargetAtTime(loud, tv, 0.006);
+      env.gain.setTargetAtTime(loud * 0.7, tv + 0.03, 0.05);
+      t += dur;
+    });
+    env.gain.setTargetAtTime(0.0001, t - 0.02, 0.02);
+    mod.start(at); ops.forEach(function (o) { o.c.start(at); });
+    mod.stop(t + 0.3); ops.forEach(function (o) { o.c.stop(t + 0.3); });
+    return t;
+  }
+  var bubbles = [];                             /* 吹き出し { who: "me"|"back", ja, en, until } */
+  function say(who, yomi, ja, en, opt) {
+    var at = AC ? AC.currentTime + (opt.delay || 0) : 0;
+    var end = fmSpeak(at, window.zVoice.kana(yomi.replace(/[！？!?。…]+$/, ""), opt.mora || 0.11), opt);
+    bubbles = bubbles.filter(function (b) { return b.who !== who; });
+    bubbles.push({ who: who, ja: ja, en: en, from: T + (opt.delay || 0), until: T + (opt.delay || 0) + Math.max(1.2, (end - at) + 0.8) });
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", ASK: "ask", PLAY: "play", ANGRY: "angry", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+  var MAX = 40;                                 /* 座席が倒れきる角度 */
+  var angle, limit, kind, mood, stepT, phaseT, failed, cough, glance, sceneryX, kinds = ["laptop", "coffee", "knees"];
+  var coffeeX, coffeeV, spilled, screen;
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.ASK;
+    score = 0; T = 0; held = false; angle = 0; stepT = 0; phaseT = 0; failed = false; cough = 0; glance = 0;
+    kind = kinds[Math.floor(Math.random() * kinds.length)];
+    /* 限界の角度。種類ごとに幅をずらす */
+    limit = kind === "laptop" ? 15 + Math.random() * 13 : kind === "coffee" ? 17 + Math.random() * 14 : 11 + Math.random() * 12;
+    mood = 0; coffeeX = 0; coffeeV = 0; spilled = false; screen = 105;
+    bubbles = [];
+    say("me", "たおしてもいいですか？", "倒してもいいですか？", "May I recline?", { pitch: 140, bright: 1.0, volume: 0.5, ask: true });
+    say("back", "どうぞ", "どうぞ", "Sure.", { pitch: kind === "coffee" ? 230 : 120, bright: 0.9, volume: 0.45, delay: 1.7, mora: 0.14 });
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    T += dt;
+    sceneryX += dt * 900;
+    bubbles = bubbles.filter(function (b) { return T < b.until; });
+    if (state === S.ASK) { if (T > 2.4) state = S.PLAY; return; }
+    if (state === S.ANGRY) {
+      phaseT += dt;
+      angle = Math.max(0, angle - dt * 30);
+      if (phaseT > 2.2) toResult();
+      return;
+    }
+    if (state !== S.PLAY) return;
+
+    /* 押している間だけ倒れる。少しずつガクッと進む */
+    if (held && angle < MAX) {
+      stepT -= dt;
+      if (stepT <= 0) { stepT = 0.09 + Math.random() * 0.06; angle = Math.min(MAX, angle + 0.6 + Math.random() * 0.5); creak(); }
+    }
+    var r = angle / limit;
+    mood += (Math.max(0, r) - mood) * Math.min(1, dt * 6);
+    /* 後ろの人の物：画面が閉じる・カップがすべる */
+    if (kind === "laptop") screen = Math.min(105, 105 - Math.max(0, angle - limit * 0.45) * (55 / (limit * 0.55)));
+    if (kind === "coffee") {
+      var tilt = angle * Math.PI / 180;
+      coffeeV += (Math.sin(tilt) * 260 - (coffeeX > 0 ? 120 : 0) - coffeeV * 2.5) * dt;
+      if (angle < limit * 0.5) coffeeV = Math.min(0, coffeeV);
+      coffeeX = Math.max(0, coffeeX + coffeeV * dt);
+    }
+    /* 気配：見上げる・せきばらい */
+    if (r > 0.6 && glance === 0) glance = T;
+    if (r > 0.8 && cough === 0) {
+      cough = T;
+      say("back", "ごほん", "ゴホン", "Ahem.", { pitch: 110, bright: 1.6, volume: 0.4, mora: 0.12 });
+    }
+    if (angle > limit) {
+      state = S.ANGRY; phaseT = 0; failed = true; held = false;
+      if (kind === "coffee") spilled = true;
+      say("back", "ちょっと！", "ちょっと！", "Hey!", { pitch: kind === "coffee" ? 280 : 170, bright: 2.6, volume: 0.65, mora: 0.1 });
+      noiseHit(0.25, 300, 0.4, 1);
+    }
+  }
+  function toResult() {
+    state = S.RESULT;
+    score = failed ? 0 : Math.round(angle * 10) / 10;
+  }
+
+  /* ============ 入力 ============ */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (state !== S.PLAY) return;
+    held = true;
+  }
+  function move() {}
+  function up() {
+    if (!held) return;
+    held = false;
+    if (state === S.PLAY && angle > 0) { phaseT = 0; toResult(); noiseHit(0.08, 600, 0.3, 2); }
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    /* 1 限界の直前まで 2 限界を越える 3 結果 4 パソコン 5 コーヒー 6 ひざ */
+    if (n >= 4 && n <= 6) { kinds = [["laptop", "coffee", "knees"][n - 4]]; newRound(); return; }
+    if (state !== S.PLAY) return;
+    if (n === 1) angle = limit - 1.5;
+    if (n === 2) angle = limit + 0.5;
+    if (n === 3) { angle = limit - 0.3; toResult(); }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function doShare() {
+    var text = failed
+      ? zT("新幹線の座席を倒しすぎて、後ろの人に「ちょっと！」と言われた", "Reclined my bullet-train seat too far and the person behind me went \"Hey!\"")
+      : zT("新幹線の座席を" + score.toFixed(1) + "°まで、ギリッギリ倒した", "Reclined my bullet-train seat to a borderline " + score.toFixed(1) + "°");
+    window.zResultActions.x({ text: text + zT(" #倒してもいいですかゲーム", " #MayIReclineGame") });
+  }
+
+  /* ============ 描画 ============ */
+  function rr(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  sceneryX = 0;
+
+  /* 座席1つ（横から）。x は座面の後ろの端、a は背もたれの傾き（度、後ろへ） */
+  function seat(x, fy, a, front) {
+    var D2R = Math.PI / 180;
+    /* 脚 */
+    ctx.fillStyle = "#6f747c"; ctx.fillRect(x - 120, fy - 70, 14, 70); ctx.fillRect(x - 20, fy - 70, 14, 70);
+    /* 座面 */
+    ctx.fillStyle = "#2f4f86"; rr(x - 150, fy - 120, 160, 54, 18); ctx.fill();
+    /* 背もたれ（座面の後ろを軸に回る） */
+    ctx.save(); ctx.translate(x - 4, fy - 100); ctx.rotate(a * D2R);
+    ctx.fillStyle = "#2f4f86"; rr(-26, -300, 56, 310, 24); ctx.fill();
+    ctx.fillStyle = "#26447a"; rr(4, -296, 22, 300, 14); ctx.fill();          /* 背中側の板 */
+    /* 枕カバー（白） */
+    ctx.fillStyle = "#f2f2ee"; rr(-30, -300, 64, 70, 16); ctx.fill();
+    ctx.restore();
+    /* ひじ掛け */
+    ctx.fillStyle = "#4a4f57"; rr(x - 140, fy - 160, 130, 16, 8); ctx.fill();
+  }
+  /* 背もたれ上の点（座席の軸から上へ h、後ろへ d）の画面の位置 */
+  function backPoint(x, fy, a, h, d) {
+    var r = a * Math.PI / 180;
+    return { x: x - 4 + Math.sin(r) * h + Math.cos(r) * d, y: fy - 100 - Math.cos(r) * h + Math.sin(r) * d };
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    /* 場面は少し拡大して、縦の真ん中に寄せる */
+    var Z = 1.12, fy = Math.round((H * 0.5 + 330) / Z);
+    ctx.fillStyle = "#e9e6dc"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#8a8578"; ctx.fillRect(0, fy * Z, W, H);
+    ctx.save(); ctx.translate(W / 2, 0); ctx.scale(Z, Z); ctx.translate(-W / 2, 0);
+    /* 車内の壁と窓（景色が流れる） */
+    ctx.fillStyle = "#e9e6dc"; ctx.fillRect(-60, 0, W + 120, fy);
+    var wy = fy - 520, wh = 190;
+    ctx.save();
+    rr(-20, wy, W + 40, wh, 26); ctx.clip();
+    var sky = ctx.createLinearGradient(0, wy, 0, wy + wh);
+    sky.addColorStop(0, "#8ec5ee"); sky.addColorStop(1, "#d9eefb");
+    ctx.fillStyle = sky; ctx.fillRect(0, wy, W, wh);
+    /* 富士山（ゆっくり） */
+    var fx = W * 0.7 - ((sceneryX * 0.02) % (W + 400));
+    if (fx < -200) fx += W + 400;
+    ctx.fillStyle = "#6c86a8"; ctx.beginPath(); ctx.moveTo(fx - 180, wy + wh); ctx.lineTo(fx - 40, wy + 50); ctx.lineTo(fx + 40, wy + 50); ctx.lineTo(fx + 180, wy + wh); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(fx - 64, wy + 82); ctx.lineTo(fx - 40, wy + 50); ctx.lineTo(fx + 40, wy + 50); ctx.lineTo(fx + 64, wy + 82); ctx.lineTo(fx + 30, wy + 74); ctx.lineTo(fx, wy + 86); ctx.lineTo(fx - 30, wy + 74); ctx.fill();
+    /* 手前の電柱と木（速く） */
+    ctx.fillStyle = "#6b8f4e";
+    for (var i = 0; i < 8; i++) { var tx = ((i * 180 - sceneryX * 0.6) % 1440 + 1440) % 1440 - 100; ctx.beginPath(); ctx.ellipse(tx, wy + wh - 20, 60, 34, 0, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = "#555";
+    for (i = 0; i < 3; i++) { var px = ((i * 520 - sceneryX * 1.4) % 1560 + 1560) % 1560 - 60; ctx.fillRect(px, wy, 8, wh); }
+    ctx.restore();
+    ctx.strokeStyle = "#c9c4b6"; ctx.lineWidth = 8; rr(-20, wy, W + 40, wh, 26); ctx.stroke();
+    /* 荷物棚 */
+    ctx.fillStyle = "#b9b4a6"; ctx.fillRect(-60, wy - 90, W + 120, 14);
+    /* 床 */
+    ctx.fillStyle = "#8a8578"; ctx.fillRect(-60, fy, W + 120, H);
+    ctx.fillStyle = "#7a7568"; ctx.fillRect(-60, fy, W + 120, 6);
+
+    var myX = 215, backX = 455;
+    var a = angle;
+    var rr0 = Math.min(1.3, angle / limit);
+
+    /* 後ろの人の座席 */
+    seat(backX, fy, 8);
+    /* 後ろの人 */
+    drawBackPerson(backX, fy, rr0);
+    /* 自分の座席（手前に描く。後ろの人の物より前） */
+    seat(myX, fy, a);
+    /* テーブル（自分の背もたれの裏に付いている。背もたれと一緒に傾く） */
+    var tp = backPoint(myX, fy, a, 150, 30);
+    ctx.save(); ctx.translate(tp.x, tp.y); ctx.rotate(a * Math.PI / 180);
+    ctx.fillStyle = "#cfcac0"; rr(0, -8, 120, 12, 5); ctx.fill();
+    /* テーブルの上の物 */
+    if (kind === "laptop") {
+      ctx.fillStyle = "#3b3f46"; rr(20, -16, 90, 8, 3); ctx.fill();
+      ctx.save(); ctx.translate(26, -14); ctx.rotate(-(180 - screen) * Math.PI / 180 + Math.PI);
+      ctx.fillStyle = "#3b3f46"; rr(0, -4, 86, 7, 3); ctx.fill();
+      ctx.fillStyle = "#7fd0ff"; ctx.fillRect(6, 2, 74, 2);
+      ctx.restore();
+    }
+    if (kind === "coffee" && !spilled) {
+      var cx = 40 + coffeeX;
+      ctx.fillStyle = "#fff"; rr(cx, -46, 28, 38, 4); ctx.fill();
+      ctx.fillStyle = "#8b5a2b"; ctx.fillRect(cx, -34, 28, 12);
+    }
+    ctx.restore();
+    if (kind === "coffee" && spilled) {
+      ctx.fillStyle = "rgba(110,64,30,.85)"; ctx.beginPath(); ctx.ellipse(backX - 110, fy - 120, 60, 10, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    /* 自分（後ろ頭と肩） */
+    var hp = backPoint(myX, fy, a, 250, -40);
+    ctx.fillStyle = "#3a4152"; ctx.save(); ctx.translate(myX - 60, fy - 150); ctx.rotate(a * 0.9 * Math.PI / 180);
+    rr(-40, -170, 80, 190, 36); ctx.fill(); ctx.restore();
+    ctx.fillStyle = "#1c1916"; ctx.beginPath(); ctx.ellipse(hp.x - 18, hp.y + 4, 40, 46, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#e9c2a2"; ctx.beginPath(); ctx.ellipse(hp.x - 44, hp.y + 14, 14, 20, 0, 0, Math.PI * 2); ctx.fill();
+
+    ctx.restore();
+    fy = fy * Z;
+    /* 吹き出し */
+    bubbles.forEach(function (b) {
+      if (T < b.from) return;
+      var txt = zT(b.ja, b.en), angry = b.ja === "ちょっと！";
+      ctx.font = (angry ? "900 44px" : "800 32px") + " sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      var w = ctx.measureText(txt).width + 40, bx = b.who === "me" ? W * 0.38 : W * 0.7, by = b.who === "me" ? fy - 640 : fy - 600;
+      bx = Math.max(w / 2 + 10, Math.min(W - w / 2 - 10, bx));
+      ctx.fillStyle = angry ? "#c0263a" : "#fff";
+      rr(bx - w / 2, by - 34, w, 68, 30); ctx.fill();
+      ctx.fillStyle = angry ? "#fff" : "#16202e";
+      ctx.fillText(txt, bx, by + 2);
+    });
+
+    if (state === S.RESULT) drawResult();
+  }
+
+  /* 後ろの人。r は限界までの近さ（0〜1以上） */
+  function drawBackPerson(x, fy, r) {
+    var tall = kind === "knees";
+    var hx = x - 30, hy = fy - 330 - (tall ? 40 : 0);
+    var look = r > 0.6 ? Math.min(1, (r - 0.6) / 0.3) : 0;
+    /* 体 */
+    ctx.fillStyle = kind === "coffee" ? "#b85a6a" : kind === "laptop" ? "#4a5d7a" : "#5d6b4a";
+    rr(hx - 34, hy + 40, 76, 200 + (tall ? 40 : 0), 34); ctx.fill();
+    /* 脚（ひざ） */
+    ctx.strokeStyle = "#2d2f36"; ctx.lineWidth = 34; ctx.lineCap = "round";
+    var kx = tall ? x - 230 + Math.min(0, -(angle - limit * 0.5)) * 0 : x - 170, ky = fy - 140 - (tall ? 40 : 0);
+    if (tall) { kx = Math.max(x - 250, backPoint(215, fy, angle, 150, 36).x + 10); ky = fy - 170; }
+    ctx.beginPath(); ctx.moveTo(hx, fy - 110); ctx.lineTo(kx, ky); ctx.lineTo(kx - 10, fy - 6); ctx.stroke();
+    /* 頭 */
+    var red = Math.min(1, Math.max(0, r - 0.75) * 3);
+    ctx.fillStyle = "rgb(" + Math.round(236 + 10 * red) + "," + Math.round(200 - 80 * red) + "," + Math.round(168 - 80 * red) + ")";
+    ctx.beginPath(); ctx.ellipse(hx, hy, 38, 44, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = kind === "coffee" ? "#5a3a22" : "#222";
+    ctx.beginPath(); ctx.ellipse(hx + 6, hy - 18, 40, 30, 0, Math.PI, Math.PI * 2); ctx.fill();
+    if (kind === "coffee") { ctx.beginPath(); ctx.ellipse(hx + 26, hy + 6, 20, 40, 0, 0, Math.PI * 2); ctx.fill(); }
+    /* 目（下を向いている → 前を見上げる） */
+    ctx.fillStyle = "#222";
+    var ex = hx - 26, ey = hy - 4 + (1 - look) * 8;
+    ctx.beginPath(); ctx.ellipse(ex, ey, 4, r > 0.88 ? 2 : 5, 0, 0, Math.PI * 2); ctx.fill();
+    /* まゆ */
+    ctx.strokeStyle = "#222"; ctx.lineWidth = 4; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(ex - 10, ey - 12 + look * 4); ctx.lineTo(ex + 8, ey - 12 - look * 2 + (r > 0.88 ? 6 : 0)); ctx.stroke();
+    /* 口 */
+    ctx.beginPath(); ctx.moveTo(hx - 32, hy + 22); ctx.lineTo(hx - 20, hy + 22 + (r > 0.75 ? 3 : -2)); ctx.stroke();
+    /* 汗 */
+    if (r > 0.9) { ctx.fillStyle = "#7cc4f0"; ctx.beginPath(); ctx.ellipse(hx + 10, hy - 30, 6, 10, 0, 0, Math.PI * 2); ctx.fill(); }
+  }
+
+  function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
+  function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(score.toFixed(1) + "°", W / 2, H * 0.45);
+    ctx.restore();
+    window.zResultActions.drawButtons(ctx, resultButtons());
+  }
+
+  window.__probe = {
+    now: function () { return { state: state, score: score, angle: angle, limit: limit, kind: kind, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(3000);
+      held = true;
+      if (!await r.until(function () { return angle > limit * 0.9 || state !== S.PLAY; }, 20)) throw Error("倒れない");
+      up();
+      await r.wait(1500);
+    }
+  };
+
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  kind = "laptop"; angle = 0; limit = 20; screen = 105; coffeeX = 0; T = 0; bubbles = []; state = S.INTRO; startButton.hidden = false;
+  layout();
+  var last = performance.now(), stepAcc = 0;
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      stepAcc += dt;
+      while (stepAcc >= 1 / 60) { update(1 / 60); stepAcc -= 1 / 60; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
