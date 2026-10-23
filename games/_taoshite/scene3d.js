@@ -94,7 +94,7 @@
     /* 座席2つ（自分・後ろ） */
     this.myBack = this.seat(0);
     this.backBack = this.seat(-PITCH);
-    this.backBack.rotation.z = 0.12;
+    this.backBack.rotation.z = 0.03;   /* 後ろの人の座席はほぼ直角 */
 
     /* 人 */
     this.me = this.person({ coat: "#3a6fb8", pants: "#2e3442", skin: "#f1c7a1", cap: "#d8412f", hand: "#f1c7a1" });
@@ -287,7 +287,7 @@
     backBody(bp, this.backBack.rotation.z);
     backBody(mp, this.myBack.rotation.z);
     var moved = [], parts = [];
-    function part(meshes, center, quat, shape, mass, vel) {
+    function part(meshes, center, quat, shape, mass, vel, damp) {
       var g = new T.Group();
       g.position.copy(center); g.quaternion.copy(quat);
       self.scene.add(g);
@@ -295,7 +295,7 @@
         moved.push({ m: m, parent: m.parent, p: m.position.clone(), q: m.quaternion.clone(), s: m.scale.clone() });
         g.attach(m);
       });
-      var b = new C.Body({ mass: mass, linearDamping: 0.05, angularDamping: 0.4, collisionFilterGroup: 2, collisionFilterMask: 1 });
+      var b = new C.Body({ mass: mass, linearDamping: 0.05, angularDamping: damp || 0.4, collisionFilterGroup: 2, collisionFilterMask: 1 });
       b.addShape(shape);
       b.position.set(center.x, center.y, center.z);
       b.quaternion.set(quat.x, quat.y, quat.z, quat.w);
@@ -321,8 +321,15 @@
     var torso = part([p.hips, p.torso], V(mid), tq, new C.Box(new C.Vec3(0.15, 0.27, 0.15)), 30, [push[0] * 0.5, push[1] * 0.6, push[2]]);
     var hq = new T.Quaternion().setFromEuler(new T.Euler(0, 0, q.nd));
     p.neck.visible = false;                       /* 首は伸び縮みしないので、ラグドールの間は隠す */
-    var head = part([p.head], V(q.head), hq, new C.Sphere(HEAD_R), 5, [push[0] * 1.6, push[1], push[2] * 0.8]);
-    joint(torso, head, { x: q.head.x * 0.4 + q.sh.x * 0.6, y: q.head.y * 0.4 + q.sh.y * 0.6 });
+    var head = part([p.head], V(q.head), hq, new C.Sphere(HEAD_R), 6, [push[0] * 0.6, push[1] * 0.6, push[2] * 0.6], 0.85);
+    /* 首は円すいの範囲(約25°)でしか曲がらない関節にして、頭が暴れすぎないようにする */
+    var nk = new C.Vec3(q.head.x * 0.4 + q.sh.x * 0.6, q.head.y * 0.4 + q.sh.y * 0.6, 0);
+    var ax = new C.Vec3(q.head.x - q.sh.x, q.head.y - q.sh.y, 0); ax.normalize();
+    world.addConstraint(new C.ConeTwistConstraint(torso, head, {
+      pivotA: torso.pointToLocalFrame(nk), pivotB: head.pointToLocalFrame(nk),
+      axisA: torso.vectorToLocalFrame(ax), axisB: head.vectorToLocalFrame(ax),
+      angle: 0.45, twistAngle: 0.2
+    }));
     var th = limb([p.thigh, p.knee], q.hip, q.knee, 0.055, 7, [0, 0.4, push[2] * 0.7], 0.12, 0.12);
     var sh = limb([p.shin, p.foot], q.knee, q.foot, 0.045, 4, [0.3, 0.2, push[2] * 0.5], 0.12, 0.12);
     joint(torso, th, q.hip, 0.12); joint(th, sh, q.knee, 0.12);
