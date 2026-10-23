@@ -17,10 +17,16 @@ async function write(n, text) {
 async function fill(p) {
   const [first, second] = p.texts;
   // 先に動画を付ける（文を先に入れると、付けたときに文が消えた）
-  const bin = atob(p.data.split(',')[1]), bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  // 切れ端に分けて預けた動画を受け取ってつなぐ（8MB の文字ごとに区切ってあるので、そのまま戻せる）
+  const chunks = [];
+  for (let i = 0; i < p.n; i++) {
+    const bin = atob(await chrome.runtime.sendMessage({ type: 'get', i })), bytes = new Uint8Array(bin.length);
+    for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+    chunks.push(bytes);
+  }
+  chrome.runtime.sendMessage({ type: 'done' });
   const input = await wait(() => document.querySelector('input[data-testid="fileInput"]'));
-  const dt = new DataTransfer(); dt.items.add(new File([bytes], p.name, { type: p.type }));
+  const dt = new DataTransfer(); dt.items.add(new File(chunks, p.name, { type: p.type }));
   input.files = dt.files;
   input.dispatchEvent(new Event('change', { bubbles: true }));
   await sleep(1500);
