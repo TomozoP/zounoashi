@@ -1,7 +1,7 @@
 /* 倒してもいいですかゲームの3Dの絵（three.js）。土台は games/three-base.js の Z3。
    人の作りはアツアツ一輪車と同じ（玉の頭、棒の手足、玉の胴）。鼻はなし。
    単位はメートル。進む向き（座席の前）が +x、手前（カメラ側）が +z。
-   当たり判定に使う形（背もたれの箱・後ろの人の頭とキャップ）もここで決めて、ゲーム側から使う。
+   当たり判定に使う形（背もたれの箱・後ろの人の頭）もここで決めて、ゲーム側から使う。
    カメラは真横から遠近なし（正射影）で写すので、画面で見える形と当たりの形がそのまま一致する。 */
 (function (global) {
   "use strict";
@@ -13,14 +13,10 @@
   var HEAD_R = 0.14;
   /* キャップ（頭の中心から見た形。頭と一緒に nd だけ回る）。てっぺんの丸みと前に出たつば */
   var CAP = { dome: { x: -0.005, y: 0.045, rx: 0.15, ry: 0.11 }, brim: { x0: 0.09, x1: 0.24, y: 0.04, t: 0.016 } };
-  /* 頭とキャップの外形の点（頭の中心から、回す前）。当たりはこの点と背もたれの箱の距離で見る */
+  /* 後ろの人の頭の外形の点（頭の中心から、回す前）。当たりはこの点と背もたれの箱の距離で見る（キャップは自分だけ） */
   var OUTLINE = (function () {
-    var pts = [], i, n = 180;
-    for (i = 0; i < n; i++) { var a = i / n * Math.PI * 2; pts.push([Math.cos(a) * HEAD_R, Math.sin(a) * HEAD_R]); }
-    for (i = 0; i <= n / 2; i++) { var b = i / (n / 2) * Math.PI; pts.push([CAP.dome.x + Math.cos(b) * CAP.dome.rx, CAP.dome.y + Math.sin(b) * CAP.dome.ry]); }
-    var B = CAP.brim;
-    for (i = 0; i <= 40; i++) { var x = B.x0 + (B.x1 - B.x0) * i / 40; pts.push([x, B.y + B.t / 2], [x, B.y - B.t / 2]); }
-    for (i = 0; i <= 4; i++) pts.push([B.x1, B.y - B.t / 2 + B.t * i / 4]);
+    var pts = [], n = 360;
+    for (var i = 0; i < n; i++) { var a = i / n * Math.PI * 2; pts.push([Math.cos(a) * HEAD_R, Math.sin(a) * HEAD_R]); }
     return pts;
   })();
 
@@ -47,7 +43,7 @@
     var du = u - cu, dv = v - cv;
     return { d: Math.sqrt(du * du + dv * dv), near: { x: pv.x + cu * c - cv * s, y: pv.y + cu * s + cv * c } };
   }
-  /* すき間（メートル）。頭とキャップの外形のいちばん近い点まで */
+  /* すき間（メートル）。頭の外形のいちばん近い点まで */
   function gapAt(a, lean) {
     var b = backHead(lean), c = Math.cos(b.nd), s = Math.sin(b.nd), best = null;
     for (var i = 0; i < OUTLINE.length; i++) {
@@ -102,7 +98,7 @@
 
     /* 人 */
     this.me = this.person({ coat: "#3a6fb8", pants: "#2e3442", skin: "#f1c7a1", cap: "#d8412f", hand: "#f1c7a1" });
-    this.him = this.person({ coat: "#5d7a4a", pants: "#3a3530", skin: "#eab993", cap: "#2f5a8a", hand: "#eab993" });
+    this.him = this.person({ coat: "#5d7a4a", pants: "#3a3530", skin: "#eab993", hair: "#2a2420", hand: "#eab993" });
     /* スマホ */
     this.phone = this.part(sc, "box", "#1d1f24", 0, 0, 0, 0.075, 0.008, 0.14);
     this.phoneScreen = this.part(sc, "box", "#9fd8ff", 0, 0, 0, 0.06, 0.002, 0.12, { emissive: "#6fb8ef", emissiveIntensity: 0.6 });
@@ -176,6 +172,10 @@
     p.faceMat = this.mat(o.skin).clone();
     p.faceMat.emissive = new T.Color("#ff2010"); p.faceMat.emissiveIntensity = 0;
     var face = new T.Mesh(this.geo.ball, p.faceMat); face.scale.setScalar(HEAD_R); face.castShadow = true; head.add(face);
+    if (o.hair) {                                /* 短い髪：頭の玉にぴったり（当たりの形を変えない） */
+      var hair = new T.Mesh(new T.SphereGeometry(HEAD_R * 1.002, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.42), this.mat(o.hair));
+      hair.rotation.z = 0.5; hair.castShadow = true; head.add(hair);
+    }
     if (o.cap) {
       var D = CAP.dome, B = CAP.brim;
       var dome = new T.Mesh(new T.SphereGeometry(1, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), this.mat(o.cap));
