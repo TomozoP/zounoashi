@@ -1,15 +1,15 @@
 /* 倒してもいいですかゲームの3Dの絵（three.js）。土台は games/three-base.js の Z3。
-   人の作りはアツアツ一輪車と同じ（玉の頭に長い鼻、棒の手足、玉の胴）。
+   人の作りはアツアツ一輪車と同じ（玉の頭、棒の手足、玉の胴）。鼻はなし。
    単位はメートル。進む向き（座席の前）が +x、手前（カメラ側）が +z。
    当たり判定に使う形（背もたれの箱・後ろの人の頭と鼻）もここで決めて、ゲーム側から使う。 */
 (function (global) {
   "use strict";
   var T, Z3 = global.Z3;
 
-  var PITCH = 1.04;                             /* 座席の間隔 */
+  var PITCH = 0.92;                             /* 座席の間隔 */
   var SEAT_Y = 0.45;                            /* 座面の高さ */
   var BACK = { u0: -0.12, u1: 0.02, v0: 0, v1: 0.95 };  /* 背もたれ（軸から見た箱。u は前が＋、v は上） */
-  var HEAD_R = 0.14, NOSE = 0.2;
+  var HEAD_R = 0.14;
 
   /* 背もたれの軸（自分の座席は x=0 に置く） */
   function pivot(seatX) { return { x: seatX - 0.04, y: SEAT_Y }; }
@@ -21,8 +21,7 @@
     var a2 = lean + 0.08;
     var head = { x: sh.x + Math.sin(a2) * 0.24, y: sh.y + Math.cos(a2) * 0.24 };
     var nd = -0.3;                               /* ふつうに座って、少しうつむく */
-    var nose = { x: head.x + Math.cos(nd) * (HEAD_R + NOSE), y: head.y + Math.sin(nd) * (HEAD_R + NOSE) };
-    return { hip: hip, sh: sh, head: head, nose: nose, nd: nd };
+    return { hip: hip, sh: sh, head: head, nd: nd };
   }
 
   /* 点から背もたれの箱までの距離。a は倒した角度（ラジアン、後ろへ） */
@@ -35,12 +34,11 @@
     var du = u - cu, dv = v - cv;
     return { d: Math.sqrt(du * du + dv * dv), near: { x: pv.x + cu * c - cv * s, y: pv.y + cu * s + cv * c } };
   }
-  /* すき間（メートル）。頭の玉と鼻の先のうち近いほう */
+  /* すき間（メートル）。頭の玉まで */
   function gapAt(a, lean) {
     var b = backHead(lean);
-    var h = distToBack(a, b.head), n = distToBack(a, b.nose);
-    var gh = h.d - HEAD_R, gn = n.d - 0.015;
-    return gh < gn ? { gap: gh, at: b.head, near: h.near, r: HEAD_R } : { gap: gn, at: b.nose, near: n.near, r: 0.015 };
+    var h = distToBack(a, b.head);
+    return { gap: h.d - HEAD_R, at: b.head, near: h.near, r: HEAD_R };
   }
 
   function Scene3D() {
@@ -161,9 +159,6 @@
     p.faceMat = this.mat(o.skin).clone();
     p.faceMat.emissive = new T.Color("#ff2010"); p.faceMat.emissiveIntensity = 0;
     var face = new T.Mesh(this.geo.ball, p.faceMat); face.scale.setScalar(HEAD_R); face.castShadow = true; head.add(face);
-    var nose = new T.Mesh(new T.CylinderGeometry(0.013, 0.032, NOSE, 12), p.faceMat);
-    nose.rotation.z = -Math.PI / 2; nose.position.set(HEAD_R + NOSE / 2 - 0.01, 0, 0); nose.castShadow = true;
-    head.add(nose);
     if (o.hair) this.part(head, "ball", o.hair, -0.03, 0.04, 0, 0.145, 0.115, 0.148);
     return p;
   };
