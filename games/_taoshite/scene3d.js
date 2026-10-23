@@ -1,7 +1,8 @@
 /* 倒してもいいですかゲームの3Dの絵（three.js）。土台は games/three-base.js の Z3。
    人の作りはアツアツ一輪車と同じ（玉の頭、棒の手足、玉の胴）。鼻はなし。
    単位はメートル。進む向き（座席の前）が +x、手前（カメラ側）が +z。
-   当たり判定に使う形（背もたれの箱・後ろの人の頭と鼻）もここで決めて、ゲーム側から使う。 */
+   当たり判定に使う形（背もたれの箱・後ろの人の頭とキャップ）もここで決めて、ゲーム側から使う。
+   カメラは真横から遠近なし（正射影）で写すので、画面で見える形と当たりの形がそのまま一致する。 */
 (function (global) {
   "use strict";
   var T, Z3 = global.Z3;
@@ -10,6 +11,18 @@
   var SEAT_Y = 0.45;                            /* 座面の高さ */
   var BACK = { u0: -0.12, u1: 0.02, v0: 0, v1: 0.95 };  /* 背もたれ（軸から見た箱。u は前が＋、v は上） */
   var HEAD_R = 0.14;
+  /* キャップ（頭の中心から見た形。頭と一緒に nd だけ回る）。てっぺんの丸みと前に出たつば */
+  var CAP = { dome: { x: -0.005, y: 0.045, rx: 0.15, ry: 0.11 }, brim: { x0: 0.09, x1: 0.24, y: 0.04, t: 0.016 } };
+  /* 頭とキャップの外形の点（頭の中心から、回す前）。当たりはこの点と背もたれの箱の距離で見る */
+  var OUTLINE = (function () {
+    var pts = [], i, n = 180;
+    for (i = 0; i < n; i++) { var a = i / n * Math.PI * 2; pts.push([Math.cos(a) * HEAD_R, Math.sin(a) * HEAD_R]); }
+    for (i = 0; i <= n / 2; i++) { var b = i / (n / 2) * Math.PI; pts.push([CAP.dome.x + Math.cos(b) * CAP.dome.rx, CAP.dome.y + Math.sin(b) * CAP.dome.ry]); }
+    var B = CAP.brim;
+    for (i = 0; i <= 40; i++) { var x = B.x0 + (B.x1 - B.x0) * i / 40; pts.push([x, B.y + B.t / 2], [x, B.y - B.t / 2]); }
+    for (i = 0; i <= 4; i++) pts.push([B.x1, B.y - B.t / 2 + B.t * i / 4]);
+    return pts;
+  })();
 
   /* 背もたれの軸（自分の座席は x=0 に置く） */
   function pivot(seatX) { return { x: seatX - 0.04, y: SEAT_Y }; }
@@ -34,19 +47,23 @@
     var du = u - cu, dv = v - cv;
     return { d: Math.sqrt(du * du + dv * dv), near: { x: pv.x + cu * c - cv * s, y: pv.y + cu * s + cv * c } };
   }
-  /* すき間（メートル）。頭の玉まで */
+  /* すき間（メートル）。頭とキャップの外形のいちばん近い点まで */
   function gapAt(a, lean) {
-    var b = backHead(lean);
-    var h = distToBack(a, b.head);
-    return { gap: h.d - HEAD_R, at: b.head, near: h.near, r: HEAD_R };
+    var b = backHead(lean), c = Math.cos(b.nd), s = Math.sin(b.nd), best = null;
+    for (var i = 0; i < OUTLINE.length; i++) {
+      var o = OUTLINE[i], p = { x: b.head.x + o[0] * c - o[1] * s, y: b.head.y + o[0] * s + o[1] * c };
+      var h = distToBack(a, p);
+      if (!best || h.d < best.gap) best = { gap: h.d, at: p, near: h.near, r: 0 };
+    }
+    return best;
   }
 
   function Scene3D() {
     T = global.THREE;
     var self = this;
-    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.1 }, camera: { fov: 40, near: 0.1, far: 40 }, finish: { vignette: 0.25, grain: 0.02 } });
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.1 }, finish: { vignette: 0.25, grain: 0.02 } });
     var sc = this.scene = st.scene;
-    this.camera = st.camera;
+    this.camera = st.camera = new T.OrthographicCamera(-1, 1, 1, -1, 0.1, 40);
     sc.background = new T.Color("#ebe7dc");
     var L = Z3.lights(sc, { shadows: true, shadowSize: 2.5 });
     L.key.position.set(2, 5, 4);
@@ -54,7 +71,7 @@
     this.mats = {};
 
     /* 床と壁 */
-    var floor = this.part(sc, "box", "#8d887b", -0.4, -0.01, 1.5, 7, 0.02, 4.6);
+    var floor = this.part(sc, "box", "#8d887b", -0.4, -1, 1.5, 7, 2, 4.6);
     floor.castShadow = false; floor.receiveShadow = true;
     var wallC = "#ebe7dc";
     this.part(sc, "box", wallC, -0.4, 0.38, -0.75, 7, 0.76, 0.04).receiveShadow = true;
@@ -84,8 +101,8 @@
     this.backBack.rotation.z = 0.12;
 
     /* 人 */
-    this.me = this.person({ coat: "#3a6fb8", pants: "#2e3442", skin: "#f1c7a1", hair: "#3a2a1e", hand: "#f1c7a1" });
-    this.him = this.person({ coat: "#5d7a4a", pants: "#3a3530", skin: "#eab993", hair: "#2a2420", hand: "#eab993" });
+    this.me = this.person({ coat: "#3a6fb8", pants: "#2e3442", skin: "#f1c7a1", cap: "#d8412f", hand: "#f1c7a1" });
+    this.him = this.person({ coat: "#5d7a4a", pants: "#3a3530", skin: "#eab993", cap: "#2f5a8a", hand: "#eab993" });
     /* スマホ */
     this.phone = this.part(sc, "box", "#1d1f24", 0, 0, 0, 0.075, 0.008, 0.14);
     this.phoneScreen = this.part(sc, "box", "#9fd8ff", 0, 0, 0, 0.06, 0.002, 0.12, { emissive: "#6fb8ef", emissiveIntensity: 0.6 });
@@ -133,7 +150,7 @@
     var u = (BACK.u0 + BACK.u1) / 2;
     this.part(g, "box", blue, u, (BACK.v0 + BACK.v1) / 2, 0, BACK.u1 - BACK.u0, BACK.v1 - BACK.v0, 0.48);
     /* 頭の部分の白いカバー */
-    this.part(g, "box", "#f2f2ee", u, BACK.v1 - 0.12, 0, BACK.u1 - BACK.u0 + 0.01, 0.24, 0.3);
+    this.part(g, "box", "#f2f2ee", BACK.u1 - 0.03, BACK.v1 - 0.12, 0, 0.07, 0.24, 0.3);   /* 前側だけに出る（裏の当たりの面は変えない） */
     /* 背中側の板と、たたんだテーブル */
     this.part(g, "box", "#26447a", BACK.u0 - 0.004, 0.45, 0, 0.01, 0.6, 0.4);
     this.part(g, "box", "#cfcac0", BACK.u0 - 0.012, 0.42, 0, 0.012, 0.3, 0.36);
@@ -159,7 +176,13 @@
     p.faceMat = this.mat(o.skin).clone();
     p.faceMat.emissive = new T.Color("#ff2010"); p.faceMat.emissiveIntensity = 0;
     var face = new T.Mesh(this.geo.ball, p.faceMat); face.scale.setScalar(HEAD_R); face.castShadow = true; head.add(face);
-    if (o.hair) this.part(head, "ball", o.hair, -0.03, 0.04, 0, 0.145, 0.115, 0.148);
+    if (o.cap) {
+      var D = CAP.dome, B = CAP.brim;
+      var dome = new T.Mesh(new T.SphereGeometry(1, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), this.mat(o.cap));
+      dome.scale.set(D.rx, D.ry, 0.15); dome.position.set(D.x, D.y, 0); dome.castShadow = true; head.add(dome);
+      this.part(head, "box", o.cap, (B.x0 + B.x1) / 2, B.y, 0, B.x1 - B.x0, B.t, 0.2);
+      this.part(head, "ball", o.cap, D.x, D.y + D.ry, 0, 0.02, 0.012, 0.02);
+    }
     return p;
   };
   /* 座った姿勢。hip, sh（肩）, head（頭の中心）, nd（鼻の向き）, knee, foot, elbow, hand（いずれも x, y）、z は体の奥行き */
@@ -212,12 +235,12 @@
       this.him.faceMat.emissiveIntensity = 0.8;
     } else {
     /* 後ろの人：ふつうに座ってスマホ。近いと頭がふるえて顔が赤くなる */
-    var b = backHead(s.lean), shake = s.near > 0.6 && !s.angry ? (Math.random() - 0.5) * 0.004 * s.near : 0;
-    var back = s.angry * 0.12;
-    var bh = { x: b.head.x - back + shake, y: b.head.y + back * 0.4 };
+    /* 頭は当たりの形と同じ場所・向きに置く（ずらさない） */
+    var b = backHead(s.lean), back = 0;
+    var bh = { x: b.head.x, y: b.head.y };
     var bknee = { x: b.hip.x + 0.44, y: SEAT_Y + 0.1 }, bfoot = { x: bknee.x + 0.04, y: 0.05 };
     var hand = { x: b.hip.x + 0.32, y: b.hip.y + 0.14 };
-    this.pose(this.him, { hip: b.hip, sh: { x: b.sh.x - back * 0.6, y: b.sh.y }, head: bh, nd: b.nd + s.angry * 0.9 + s.near * 0.15,
+    this.pose(this.him, { hip: b.hip, sh: { x: b.sh.x - back * 0.6, y: b.sh.y }, head: bh, nd: b.nd,
       knee: bknee, foot: bfoot, elbow: { x: b.sh.x + 0.04, y: b.sh.y - 0.27 }, hand: hand });
     this.him.faceMat.emissiveIntensity = Math.max(s.angry * 0.8, Math.max(0, s.near - 0.5) * 0.6);
     this.phone.position.set(hand.x + 0.02, hand.y + 0.03, 0.08);
@@ -226,12 +249,13 @@
     this.phoneScreen.rotation.set(0, 0, 0.5);
     }
 
-    /* カメラ：横から少し前寄り。縦長の画面でも2人が収まるように */
-    var asp = s.W / s.H, hf = 56 * Math.PI / 180;
-    this.camera.fov = 2 * Math.atan(Math.tan(hf / 2) / asp) * 180 / Math.PI;
-    this.camera.updateProjectionMatrix();
-    this.camera.position.set(-0.42, 1.12, 2.05);
-    this.camera.lookAt(-0.42, 1.0, 0);
+    /* カメラ：真横から遠近なし（見た目と当たりを一致させる）。横1.75mを写し、縦長の画面では上下が広がる */
+    var vw = 1.75, vh = vw * s.H / s.W, cx = -0.4, cy = 0.95;
+    var cam = this.camera;
+    cam.left = -vw / 2; cam.right = vw / 2; cam.top = vh / 2; cam.bottom = -vh / 2;
+    cam.updateProjectionMatrix();
+    cam.position.set(cx, cy, 6);
+    cam.lookAt(cx, cy, 0);
   };
 
   /* ============ ぶつかったらラグドール（アツアツ一輪車と同じ作り。cannon.js） ============
@@ -296,7 +320,8 @@
     var tq = new T.Quaternion().setFromEuler(new T.Euler(0, 0, p.torso.rotation.z));
     var torso = part([p.hips, p.torso], V(mid), tq, new C.Box(new C.Vec3(0.15, 0.27, 0.15)), 30, [push[0] * 0.5, push[1] * 0.6, push[2]]);
     var hq = new T.Quaternion().setFromEuler(new T.Euler(0, 0, q.nd));
-    var head = part([p.head, p.neck], V(q.head), hq, new C.Sphere(HEAD_R), 5, [push[0] * 1.6, push[1], push[2] * 0.8]);
+    p.neck.visible = false;                       /* 首は伸び縮みしないので、ラグドールの間は隠す */
+    var head = part([p.head], V(q.head), hq, new C.Sphere(HEAD_R), 5, [push[0] * 1.6, push[1], push[2] * 0.8]);
     joint(torso, head, { x: q.head.x * 0.4 + q.sh.x * 0.6, y: q.head.y * 0.4 + q.sh.y * 0.6 });
     var th = limb([p.thigh, p.knee], q.hip, q.knee, 0.055, 7, [0, 0.4, push[2] * 0.7], 0.12, 0.12);
     var sh = limb([p.shin, p.foot], q.knee, q.foot, 0.045, 4, [0.3, 0.2, push[2] * 0.5], 0.12, 0.12);
@@ -315,6 +340,7 @@
     });
     this.rag.parts.forEach(function (o) { self.scene.remove(o.g); });
     this.rag = null;
+    this.him.neck.visible = true;
   };
 
   /* 場面の点（x, y, z=0）を画面の座標へ */
