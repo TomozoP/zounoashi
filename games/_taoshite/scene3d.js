@@ -57,11 +57,11 @@
   function Scene3D() {
     T = global.THREE;
     var self = this;
-    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.1 }, finish: { vignette: 0.25, grain: 0.02 } });
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.45 }, finish: { vignette: 0.06, grain: 0 } });
     var sc = this.scene = st.scene;
     this.camera = st.camera = new T.OrthographicCamera(-1, 1, 1, -1, 0.1, 40);
     sc.background = new T.Color("#ebe7dc");
-    var L = Z3.lights(sc, { shadows: true, shadowSize: 2.5 });
+    var L = Z3.lights(sc, { shadows: true, shadowSize: 2.5, scale: 1.25 });   /* くすまないよう、はっきりめ */
     L.key.position.set(2, 5, 4);
     this.geo = { ball: new T.SphereGeometry(1, 18, 12), tube: new T.CylinderGeometry(1, 1, 1, 12), box: new T.BoxGeometry(1, 1, 1) };
     this.mats = {};
