@@ -2,7 +2,7 @@
    ボタンを足すときは、ゲームごとに描かずここへ同じ線の太さで足す。 */
 (function(global){
   'use strict';
-  function kind(label){return label==='もう一度'||label==='もう一度走る'?'retry':label==='Xでシェア'||label==='Xでポスト'?'share':label==='次'||label==='次へ'?'next':label==='戻る'?'back':label==='画像を選ぶ'||label==='背景'?'photo':label==='ガイドを消す'?'guide':label==='ガイドを出す'?'guideOff':label==='スプレー'?'spray':label==='ハサミ'?'scissors':label==='毛色'?'palette':label==='飾り'?'ribbon':label==='顔'?'face':label==='画像を保存'||label==='動画を保存'?'save':label==='カッター'?'cutter':label==='やすり'?'sand':label==='作り直す'?'refold':label==='もう一度投げる'?'rethrow':label==='書き直す'?'redraw':label==='力を直す'?'repower':null;}
+  function kind(label){return label==='もう一度'||label==='もう一度走る'?'retry':label==='Xでシェア'||label==='Xでポスト'?'share':label==='次'||label==='次へ'?'next':label==='戻る'?'back':label==='画像を選ぶ'||label==='背景'?'photo':label==='ガイドを消す'?'guide':label==='ガイドを出す'?'guideOff':label==='スプレー'?'spray':label==='ハサミ'?'scissors':label==='毛色'?'palette':label==='飾り'?'ribbon':label==='顔'?'face':label==='画像を保存'||label==='動画を保存'?'save':label==='カッター'?'cutter':label==='やすり'?'sand':label==='作り直す'?'refold':label==='もう一度投げる'?'rethrow':label==='書き直す'?'redraw':label==='力を直す'?'repower':label==='ひっくり返す'?'flip':null;}
   function draw(ctx,label,x,y,size){
     var id=kind(label);if(!id)return false;
     ctx.save();ctx.translate(x,y);ctx.scale((size||30)/24,(size||30)/24);ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';
@@ -54,6 +54,12 @@
       ctx.beginPath();ctx.moveTo(2,0);ctx.lineTo(10,-6);ctx.lineTo(10,6);ctx.closePath();ctx.stroke();
       ctx.beginPath();ctx.arc(0,0,2.4,0,Math.PI*2);ctx.stroke();
       ctx.beginPath();ctx.moveTo(-1.5,2.2);ctx.lineTo(-4,10);ctx.moveTo(1.5,2.2);ctx.lineTo(4,10);ctx.stroke();
+    }else if(id==='flip'){
+      /* 上下を入れ替える2本の曲がった矢印 */
+      ctx.beginPath();ctx.arc(0,0,8,Math.PI*1.1,Math.PI*1.9);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(4,-10);ctx.lineTo(7.6,-4.6);ctx.lineTo(1.6,-3.6);ctx.stroke();
+      ctx.beginPath();ctx.arc(0,0,8,Math.PI*0.1,Math.PI*0.9);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-4,10);ctx.lineTo(-7.6,4.6);ctx.lineTo(-1.6,3.6);ctx.stroke();
     }else if(id==='refold'){
       /* 角を折った紙（紙飛行機を作り直す） */
       ctx.beginPath();ctx.moveTo(-8,-10);ctx.lineTo(3,-10);ctx.lineTo(8,-5);ctx.lineTo(8,10);ctx.lineTo(-8,10);ctx.closePath();ctx.stroke();

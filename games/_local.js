@@ -341,5 +341,6 @@ window.DRAFT_GAMES = [
     "play": "games/_sekkyou/index.html",
     "full": true,
     "catch": "上司の説教に拍で相づちを打つ"
-  }
+  },
+  {"type":"lab","tags":[],"id":"taiyaki","title":"好きなたい焼き","year":2026,"date":"2026-10-24","plays":null,"url":"","img":"games/_taiyaki/img/thumb.webp","play":"games/_taiyaki/index.html","full":true,"catch":"好きな画像の形でたい焼きを焼く"},
 ];
