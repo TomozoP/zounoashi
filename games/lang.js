@@ -61,12 +61,18 @@
   var doc = global.document;
   if (doc && doc.documentElement) doc.documentElement.lang = full === "zh" ? "zh-CN" : full === "tw" ? "zh-TW" : full;
 
-  /* 結果画面などの共通ボタンの読み上げ名は、ここでまとめて英語にする */
-  var LABELS = { "Xでシェア": "Share on X", "もう一度": "Retry", "次": "Next", "次へ": "Next" };
+  /* 結果画面などの共通ボタンの読み上げ名は、ここでまとめて英語（韓国語・中国語）にする */
+  var LABELS = {
+    "Xでシェア": ["Share on X", "X에 공유", "分享到 X", "分享到 X"],
+    "もう一度": ["Retry", "다시 하기", "再来一次", "再來一次"],
+    "次": ["Next", "다음", "下一个", "下一個"],
+    "次へ": ["Next", "다음", "下一个", "下一個"],
+    "作者をフォロー": ["Follow the creator", "제작자 팔로우", "关注作者", "追蹤作者"]
+  };
   function labels() {
     doc.querySelectorAll("[aria-label]").forEach(function (el) {
-      var en = LABELS[el.getAttribute("aria-label")];
-      if (en) el.setAttribute("aria-label", en);
+      var t = LABELS[el.getAttribute("aria-label")];
+      if (t) el.setAttribute("aria-label", global.zT(null, t[0], t[1], t[2], t[3]));
     });
   }
   if (lang === "en" && doc) {

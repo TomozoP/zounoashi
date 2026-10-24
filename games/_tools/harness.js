@@ -42,7 +42,7 @@ function load(file, opts) {
   if (!found) throw new Error("ゲームの <script> が見つからない: " + file);
   var code = parts.join("\n;\n");
   /* 本物のブラウザでは window の持ち物はそのまま名前で呼べる。lang.js の zT も同じように呼べるようにする */
-  code = "function zT(ja, en) { return window.zT ? window.zT(ja, en) : ja; }\nvar zLang = \"ja\";\n" + code;
+  code = "function zT(ja) { return window.zT ? window.zT.apply(null, arguments) : ja; }\nvar zLang = \"ja\";\n" + code;
   if (opts.inject) {                       /* テストのときだけ覗き穴を足したいとき */
     code = code.replace("  /* ============ ループ ============ */",
                         opts.inject + "\n  /* ============ ループ ============ */");

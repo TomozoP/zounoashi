@@ -119,11 +119,11 @@
        link(parent) で透明のリンクを作って重ね、place(link, followBox(...), ...) で位置を合わせる。 */
     follow: {
       url: 'https://x.com/intent/follow?screen_name=TomozoP',
-      text: function () { return global.zT ? global.zT('作者をフォロー', 'Follow the creator') : '作者をフォロー'; },
+      text: function () { return global.zT ? global.zT('作者をフォロー', 'Follow the creator', '제작자 팔로우', '关注作者', '追蹤作者') : '作者をフォロー'; },
       link: function (parent) {
         var a = document.createElement('a');
         a.href = actions.follow.url; a.target = '_blank'; a.rel = 'noopener';
-        a.setAttribute('aria-label', '作者をフォロー'); a.hidden = true;
+        a.setAttribute('aria-label', actions.follow.text()); a.hidden = true;
         a.style.cssText = 'position:absolute;border-radius:999px;touch-action:manipulation;';
         parent.appendChild(a);
         return a;
