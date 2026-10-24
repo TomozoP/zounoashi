@@ -238,8 +238,9 @@
     /* 頭は当たりの形と同じ場所・向きに置く（ずらさない） */
     var b = backHead(s.lean), back = 0;
     var bh = { x: b.head.x, y: b.head.y };
-    var bknee = { x: b.hip.x + 0.44, y: SEAT_Y + 0.1 }, bfoot = { x: bknee.x + 0.04, y: 0.05 };
-    var hand = { x: b.hip.x + 0.32, y: b.hip.y + 0.14 };
+    /* 前の座席が近いので、ひざは低めに手前で止め、手も体に寄せる（倒れてきた背もたれに食い込まない） */
+    var bknee = { x: b.hip.x + 0.36, y: SEAT_Y + 0.07 }, bfoot = { x: bknee.x + 0.02, y: 0.05 };
+    var hand = { x: b.hip.x + 0.22, y: b.hip.y + 0.2 };
     this.pose(this.him, { hip: b.hip, sh: { x: b.sh.x - back * 0.6, y: b.sh.y }, head: bh, nd: b.nd,
       knee: bknee, foot: bfoot, elbow: { x: b.sh.x + 0.04, y: b.sh.y - 0.27 }, hand: hand });
     this.him.faceMat.emissiveIntensity = Math.max(s.angry * 0.8, Math.max(0, s.near - 0.5) * 0.6);
