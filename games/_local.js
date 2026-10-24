@@ -328,6 +328,18 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "ネコに邪魔されながらゲーム機で遊ぶ"
   },
-  {"type":"lab","tags":[],"id":"sekkyou","title":"リズム説教","year":2026,"date":"2026-10-23","plays":null,"url":"","img":"games/_sekkyou/img/thumb.webp","play":"games/_sekkyou/index.html","full":true,"catch":"上司の説教に拍で相づちを打つ"},
-  {"type":"lab","tags":[],"id":"taoshite","title":"倒してもいいですかゲーム","year":2026,"date":"2026-10-23","plays":null,"url":"","img":"games/_taoshite/img/thumb.webp","play":"games/_taoshite/index.html","full":true,"catch":"新幹線の座席をギリギリまで倒す"},
+  {
+    "type": "lab",
+    "tags": [],
+    "id": "sekkyou",
+    "title": "リズム説教",
+    "year": 2026,
+    "date": "2026-10-23",
+    "plays": null,
+    "url": "",
+    "img": "games/_sekkyou/img/thumb.webp",
+    "play": "games/_sekkyou/index.html",
+    "full": true,
+    "catch": "上司の説教に拍で相づちを打つ"
+  }
 ];
