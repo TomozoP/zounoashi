@@ -7,7 +7,7 @@
   "use strict";
   var T, Z3 = global.Z3;
 
-  var PITCH = 0.92;                             /* 座席の間隔 */
+  var PITCH = 0.78;                             /* 座席の間隔 */
   var SEAT_Y = 0.45;                            /* 座面の高さ */
   var BACK = { u0: -0.12, u1: 0.02, v0: 0, v1: 0.95 };  /* 背もたれ（軸から見た箱。u は前が＋、v は上） */
   var HEAD_R = 0.14;
@@ -29,7 +29,7 @@
     var sh = { x: hip.x + Math.sin(lean) * 0.46, y: hip.y + Math.cos(lean) * 0.46 };
     var a2 = lean + 0.08;
     var head = { x: sh.x + Math.sin(a2) * 0.24, y: sh.y + Math.cos(a2) * 0.24 };
-    var nd = -0.3;                               /* ふつうに座って、少しうつむく */
+    var nd = 0.14;                              /* 背もたれに頭をあずけて少し上向き */
     return { hip: hip, sh: sh, head: head, nd: nd };
   }
 
