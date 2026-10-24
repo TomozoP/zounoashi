@@ -115,6 +115,43 @@
         buttons: actions.row(W, by, opt.buttons)
       };
     },
+    /* ボタン列の下の控えめな「作者をフォロー」。ほかのボタンと同じ白地・濃い縁で小さめ。
+       link(parent) で透明のリンクを作って重ね、place(link, followBox(...), ...) で位置を合わせる。 */
+    follow: {
+      url: 'https://x.com/intent/follow?screen_name=TomozoP',
+      text: function () { return global.zT ? global.zT('作者をフォロー', 'Follow the creator') : '作者をフォロー'; },
+      link: function (parent) {
+        var a = document.createElement('a');
+        a.href = actions.follow.url; a.target = '_blank'; a.rel = 'noopener';
+        a.setAttribute('aria-label', '作者をフォロー'); a.hidden = true;
+        a.style.cssText = 'position:absolute;border-radius:999px;touch-action:manipulation;';
+        parent.appendChild(a);
+        return a;
+      },
+      box: function (ctx, buttons, W) {
+        var b = buttons[0];
+        ctx.save(); ctx.font = '700 18px sans-serif';
+        var w = ctx.measureText(actions.follow.text()).width + 56;
+        ctx.restore();
+        return { x: W / 2 - w / 2, y: b.y + b.h + 10, w: w, h: 34 };
+      },
+      draw: function (ctx, f) {
+        var r = f.h / 2;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(f.x + r, f.y); ctx.lineTo(f.x + f.w - r, f.y);
+        ctx.arc(f.x + f.w - r, f.y + r, r, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(f.x + r, f.y + f.h);
+        ctx.arc(f.x + r, f.y + r, r, Math.PI / 2, Math.PI * 1.5);
+        ctx.closePath();
+        ctx.fillStyle = '#fff'; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = '#16202e'; ctx.stroke();
+        ctx.fillStyle = '#16202e'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        if (!global.zActionIcon || !global.zActionIcon(ctx, 'Xでシェア', f.x + 22, f.y + r, 18)) { ctx.font = '900 17px sans-serif'; ctx.fillText('X', f.x + 14, f.y + r + 1); }
+        ctx.font = '700 18px sans-serif'; ctx.fillText(actions.follow.text(), f.x + 38, f.y + r + 1);
+        ctx.restore();
+      }
+    },
     hit: function (buttons, x, y) {
       for (var i = 0; i < buttons.length; i++) {
         var b = buttons[i];
