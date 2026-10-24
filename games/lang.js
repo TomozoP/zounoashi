@@ -1,20 +1,19 @@
-/* 表示の言語。ブラウザの言語が日本語以外なら英語にする（韓国語・中国語のブラウザは ko / zh）。
+/* 表示の言語。ブラウザの言語が日本語以外なら英語にする（韓国語は ko、中国語は簡体字 zh・台湾/香港は繁体字 tw）。
 
      zT("点でした", "points")              // 今の言語の文字を返す
-     zT("点でした", "points", "점", "分")   // 韓国語・中国語も書くとき（書かなければ英語）
-     zLang                                  // "ja" か "en"（ko / zh のときも "en"。ゲーム側は英語扱い）
-     zLangFull                              // "ja" "en" "ko" "zh" のどれか
+     zT("点でした", "points", "점", "分", "分")  // 韓国語・簡体字・繁体字も書くとき（繁体字が無ければ簡体字、どれも無ければ英語）
+     zLang                                  // "ja" か "en"（ko / zh / tw のときも "en"。ゲーム側は英語扱い）
+     zLangFull                              // "ja" "en" "ko" "zh" "tw" のどれか
      zSetLang("en")                         // 切り替えて覚える（読み込み直す）
 
-   確かめるときは URL に ?lang=en / ?lang=ko / ?lang=zh / ?lang=ja を付ける。
-   中国語は簡体字。
+   確かめるときは URL に ?lang=en / ?lang=ko / ?lang=zh / ?lang=tw / ?lang=ja を付ける。
    サイトの中で開いたゲームは、サイト側の指定を引き継ぐ。
    読み込むと <html lang> も合わせる（ブラウザ翻訳の勧めが的外れにならないように）。 */
 (function (global) {
   "use strict";
 
   function pick(search) {
-    var m = /[?&]lang=(ja|en|ko|zh)\b/.exec(search || "");
+    var m = /[?&]lang=(ja|en|ko|zh|tw)\b/.exec(search || "");
     return m ? m[1] : null;
   }
   function detect() {
@@ -29,11 +28,11 @@
     } catch (e) {}
     try {
       var saved = global.localStorage.getItem("zLang");
-      if (/^(ja|en|ko|zh)$/.test(saved)) return saved;
+      if (/^(ja|en|ko|zh|tw)$/.test(saved)) return saved;
     } catch (e) {}
     var n = global.navigator || {};
     var first = (n.languages && n.languages[0]) || n.language || "ja";
-    return /^ja\b/i.test(first) ? "ja" : /^ko\b/i.test(first) ? "ko" : /^zh\b/i.test(first) ? "zh" : "en";
+    return /^ja\b/i.test(first) ? "ja" : /^ko\b/i.test(first) ? "ko" : /^zh\b/i.test(first) ? (/^zh-(tw|hk|mo|hant)\b/i.test(first) ? "tw" : "zh") : "en";
   }
 
   var full = detect();
@@ -49,17 +48,18 @@
     /* URL の指定が残っていると切り替わらないので外す */
     var url = new URL(global.location.href);
     url.searchParams.delete("lang");
-    var hash = url.hash.replace(/([?&])lang=(ja|en|ko|zh)&?/, "$1").replace(/[?&]$/, "");
+    var hash = url.hash.replace(/([?&])lang=(ja|en|ko|zh|tw)&?/, "$1").replace(/[?&]$/, "");
     try { global.history.replaceState(null, "", url.pathname + url.search + hash); } catch (e) {}
     global.location.reload();
   };
-  global.zT = function (ja, en, ko, zh) {
+  global.zT = function (ja, en, ko, zh, tw) {
     if (full === "ko" && ko != null) return ko;
-    if (full === "zh" && zh != null) return zh;
+    if (full === "tw" && tw != null) return tw;
+    if ((full === "zh" || full === "tw") && zh != null) return zh;
     return lang === "ja" || en == null ? ja : en;
   };
   var doc = global.document;
-  if (doc && doc.documentElement) doc.documentElement.lang = full === "zh" ? "zh-CN" : full;
+  if (doc && doc.documentElement) doc.documentElement.lang = full === "zh" ? "zh-CN" : full === "tw" ? "zh-TW" : full;
 
   /* 結果画面などの共通ボタンの読み上げ名は、ここでまとめて英語にする */
   var LABELS = { "Xでシェア": "Share on X", "もう一度": "Retry", "次": "Next", "次へ": "Next" };
