@@ -232,6 +232,8 @@
         o.g.position.set(o.b.position.x, o.b.position.y, o.b.position.z);
         o.g.quaternion.set(o.b.quaternion.x, o.b.quaternion.y, o.b.quaternion.z, o.b.quaternion.w);
       });
+      var R = this.rag, na = R.torso.pointToWorldFrame(R.nkA), hp = R.head.position;
+      this.segment(this.him.neck, { x: na.x, y: na.y, z: na.z }, { x: hp.x, y: hp.y, z: hp.z });
       this.him.faceMat.emissiveIntensity = 0.8;
     } else {
     /* 後ろの人：ふつうに座ってスマホ。近いと頭がふるえて顔が赤くなる */
@@ -321,7 +323,6 @@
     var tq = new T.Quaternion().setFromEuler(new T.Euler(0, 0, p.torso.rotation.z));
     var torso = part([p.hips, p.torso], V(mid), tq, new C.Box(new C.Vec3(0.15, 0.27, 0.15)), 30, [push[0] * 0.5, push[1] * 0.6, push[2]]);
     var hq = new T.Quaternion().setFromEuler(new T.Euler(0, 0, q.nd));
-    p.neck.visible = false;                       /* 首は伸び縮みしないので、ラグドールの間は隠す */
     var head = part([p.head], V(q.head), hq, new C.Sphere(HEAD_R), 6, [push[0] * 0.6, push[1] * 0.6, push[2] * 0.6], 0.85);
     /* 首は円すいの範囲(約25°)でしか曲がらない関節にして、頭が暴れすぎないようにする */
     var nk = new C.Vec3(q.head.x * 0.4 + q.sh.x * 0.6, q.head.y * 0.4 + q.sh.y * 0.6, 0);
@@ -337,7 +338,9 @@
     var up = limb([p.upper, p.elbow], q.sh, q.elbow, 0.045, 2.5, [push[0] * 0.4, push[1], push[2]], 0.17, 0.18);
     var fo = limb([p.fore, p.hand, this.phone, this.phoneScreen], q.elbow, q.hand, 0.04, 2, [0.5, 2, push[2]], 0.18, 0.14);
     joint(torso, up, q.sh, 0.17); joint(up, fo, q.elbow, 0.18);
-    this.rag = { world: world, parts: parts, moved: moved };
+    /* 首：胴の肩の点と頭の中心を毎フレーム棒でつなぐ（頭が取れて見えないように） */
+    var nkA = torso.pointToLocalFrame(new C.Vec3(q.sh.x, q.sh.y, 0));
+    this.rag = { world: world, parts: parts, moved: moved, torso: torso, head: head, nkA: nkA };
   };
   Scene3D.prototype.ragReset = function () {
     var self = this;
@@ -348,7 +351,6 @@
     });
     this.rag.parts.forEach(function (o) { self.scene.remove(o.g); });
     this.rag = null;
-    this.him.neck.visible = true;
   };
 
   /* 場面の点（x, y, z=0）を画面の座標へ */
