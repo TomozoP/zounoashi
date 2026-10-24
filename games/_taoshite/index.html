@@ -160,9 +160,9 @@
   var MAX = 50;                                 /* 座席が倒れきる角度 */
   var SPEED = 8;                                /* 倒れる速さ（度/秒） */
   var D2R = Math.PI / 180;
-  var angle, contact, lean, gap, hitInfo, failed, creakT = 0;
+  var angle, contact, lean, gap, hitInfo, failed, denied, creakT = 0;
 
-  function newRound() {
+  function newRound(forceDeny) {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.ASK;
@@ -172,7 +172,10 @@
     gap = gapNow(0);
     bubbles = [];
     say("me", "たおしてもいいですか？", "倒してもいいですか？", "May I recline?", { pitch: 290 });
-    say("back", "どうぞ", "どうぞ", "Sure.", { pitch: 210, delay: 1.7, mora: 0.15 });
+    /* 30回に1回くらい、断られて終わり */
+    denied = forceDeny || Math.random() < 1 / 30;
+    if (denied) say("back", "だめです", "ダメです", "No.", { pitch: 200, delay: 1.7, mora: 0.15 });
+    else say("back", "どうぞ", "どうぞ", "Sure.", { pitch: 210, delay: 1.7, mora: 0.15 });
   }
 
   /* 背もたれの頭の部分と後ろの人の頭のすき間（メートル）。a は度 */
@@ -186,7 +189,7 @@
     T += dt;
     bubbles = bubbles.filter(function (b) { return T < b.until; });
     gap = gapNow(angle);
-    if (state === S.ASK) { if (T > 2.4) state = S.PLAY; return; }
+    if (state === S.ASK) { if (denied ? T > 3.2 : T > 2.4) { if (denied) toResult(); else state = S.PLAY; } return; }
     if (state === S.ANGRY) {
       T2 += dt;
       if (T2 > 2.6) toResult();
@@ -264,7 +267,8 @@
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    /* 1 すき間 2cm の手前まで 2 触れる 3 結果（残り約0.3mm） */
+    /* 1 すき間 2cm の手前まで 2 触れる 3 結果（残り約0.3mm） 4 断られる回 */
+    if (n === 4 && state !== S.INTRO) { newRound(true); return; }
     if (state !== S.PLAY) return;
     var to = n === 1 ? 0.02 : n === 2 ? 0 : 0.00037;
     while (gapNow(angle) > to && angle < MAX) angle += 0.01;
@@ -288,7 +292,7 @@
   });
 
   function doShare() {
-    var text = failed
+    var text = denied ? zT("だめでした", "Denied") : failed
       ? zT("後ろの人を倒した", "Knocked out the person behind me")
       : zT(score.toFixed(2) + "mmまで倒した", "Reclined my seat to " + score.toFixed(2) + "mm from the head behind me");
     window.zResultActions.x({ text: text + zT(" #倒してもいいですかゲーム", " #MayIReclineGame") });
@@ -356,12 +360,12 @@
     if (state === S.RESULT) drawResult();
   }
 
-  function resultLayout() { return window.zResultActions.showcase(W, H, { sizes: failed ? [58] : [104, 50] }); }
+  function resultLayout() { return window.zResultActions.showcase(W, H, { sizes: denied ? [80] : failed ? [58] : [104, 50] }); }
   function resultButtons() { return resultLayout().buttons; }
   function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
   function drawResult() {
     var L = resultLayout();
-    var rows = failed ? [zT("後ろの人を倒した", "Knocked out the person behind")] : [score.toFixed(2) + "mm", zT("まで倒した", "left")];
+    var rows = denied ? [zT("だめでした", "Denied")] : failed ? [zT("後ろの人を倒した", "Knocked out the person behind")] : [score.toFixed(2) + "mm", zT("まで倒した", "left")];
     ctx.save();
     ctx.textAlign = "center"; ctx.textBaseline = "top";
     ctx.lineJoin = "round"; ctx.strokeStyle = "#16202e";
@@ -370,7 +374,7 @@
       ctx.font = "900 " + sz + "px sans-serif";
       while (ctx.measureText(t).width > W - 30 && sz > 20) { sz -= 2; ctx.font = "900 " + sz + "px sans-serif"; }
       ctx.lineWidth = Math.max(6, sz * 0.12); ctx.strokeText(t, W / 2, L.lines[i].y);
-      ctx.fillStyle = failed ? "#ff5a6e" : "#fff"; ctx.fillText(t, W / 2, L.lines[i].y);
+      ctx.fillStyle = failed || denied ? "#ff5a6e" : "#fff"; ctx.fillText(t, W / 2, L.lines[i].y);
     });
     ctx.restore();
     window.zResultActions.drawButtons(ctx, resultButtons());
