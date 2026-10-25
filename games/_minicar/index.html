@@ -121,10 +121,12 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
-  /* 単位は 1 = 100mm。机の端が z=0。z は車の重心（車の長さ 0.8 なので前の端は z-0.4） */
-  var HALF = 0.4, DECEL = 4, GAIN = 4.6, PULL_MAX = 3, FLOOR = -7.5;
-  var phase, L, z, y, pitch, w, v, vy, pull, wheel, side, fell, startY, lastClick, wobble, settleT, keyHold;
+  /* 単位は 1 = 100mm。車は -z の向きへ走る。z は車の重心（車の長さ 0.8 なので前後の端は z∓0.4） */
+  var HALF = 0.4, DECEL = 4, GAIN = 4.6, PULL_MAX = 3, GRAV = 28;
+  var phase, z, x, y, pitch, roll, yaw, vx, vy, vz, spin, v, pull, wheel, base, startY, lastClick, endT, keyHold, crashZ;
+  var traps, edgeZ;
   var runOsc = null, runGain = null;
+  var KINDS = ["press", "hammer", "spinner", "pusher", "door"];
 
   function place() {}
 
@@ -136,17 +138,60 @@
     T = 0;
     held = false;
     phase = "aim";
-    L = 6 + Math.random() * 4;
-    z = L; y = 0; pitch = 0; w = 0; v = 0; vy = 0; pull = 0; wheel = 0; side = 0;
-    fell = false; lastClick = 0; wobble = 0; settleT = 0; keyHold = false;
+    z = 2.5; x = 0; y = 0; pitch = 0; roll = 0; yaw = 0; vx = vy = vz = spin = 0;
+    v = 0; pull = 0; wheel = 0; base = z; lastClick = 0; endT = 0; keyHold = false; crashZ = null;
+    traps = []; edgeZ = 0;
+    moreTraps();
     runSound(0);
+  }
+
+  /* 前のほうへトラップを足していく（どこまでも続く）。あとのものほど周期が短い */
+  function moreTraps() {
+    while (edgeZ > z - 45) {
+      var k = traps.length, a = 1.7 + Math.random() * 0.9, b = 1.7 + Math.random() * 0.9;
+      var kind = k === 0 ? "press" : k === 1 ? "hammer" : KINDS[Math.floor(Math.random() * KINDS.length)];
+      if (k > 1 && kind === traps[k - 1].kind) kind = KINDS[(KINDS.indexOf(kind) + 1 + Math.floor(Math.random() * 4)) % KINDS.length];
+      var speedUp = Math.max(0.55, 1 - k * 0.025);
+      traps.push({ k: k, kind: kind, z0: edgeZ, zc: edgeZ - a, z1: edgeZ - a - b,
+        period: (kind === "spinner" ? 2.2 : 2.3) * speedUp * (0.85 + Math.random() * 0.3), off: Math.random(), pose: 0 });
+      edgeZ -= a + b;
+    }
+  }
+
+  /* 0〜1 を区切りで繋いだ動き。[[u, 値], ...] の間を直線で結ぶ */
+  function ramp(u, pts) {
+    for (var i = 1; i < pts.length; i++) if (u <= pts[i][0]) {
+      var a = pts[i - 1], b = pts[i];
+      return a[1] + (b[1] - a[1]) * (u - a[0]) / (b[0] - a[0]);
+    }
+    return pts[pts.length - 1][1];
+  }
+  /* トラップの今の形（pose）と、車（重心 cz）に当たるか。"hit" / "fall" / null */
+  function trapPose(tr) {
+    var u = ((T / tr.period + tr.off) % 1 + 1) % 1;
+    if (tr.kind === "press") tr.pose = ramp(u, [[0, 1], [0.5, 1], [0.58, 0], [0.75, 0], [1, 1]]);       /* 1=上がっている */
+    else if (tr.kind === "hammer") tr.pose = 1.2 * Math.sin(u * Math.PI * 2);                            /* 振れの角度 */
+    else if (tr.kind === "spinner") tr.pose = u * Math.PI * 2;                                           /* 腕の向き */
+    else if (tr.kind === "pusher") tr.pose = ramp(u, [[0, 0], [0.45, 0], [0.55, 1], [0.75, 1], [1, 0]]); /* 1=閉じている */
+    else tr.pose = ramp(u, [[0, 0], [0.5, 0], [0.56, 1], [0.8, 1], [0.92, 0], [1, 0]]);                  /* 1=開いている */
+  }
+  function trapHit(tr, cz) {
+    var d = cz - tr.zc, p = tr.pose;
+    if (tr.kind === "press") return Math.abs(d) < 0.45 + HALF && 0.02 + p * 1.5 < 0.33 ? "hit" : null;
+    if (tr.kind === "hammer") return Math.abs(d) < 0.3 + HALF && Math.abs(2.4 * Math.sin(p)) < 0.45 ? "hit" : null;
+    if (tr.kind === "spinner") {
+      var c = Math.cos(p);
+      if (c < 1.4 / 2.8) return null;                                    /* 腕が道まで届いていない */
+      return Math.abs(cz - (tr.zc + 1.4 * Math.tan(p))) < 0.08 + HALF ? "hit" : null;
+    }
+    if (tr.kind === "pusher") return Math.abs(d) < 0.4 + HALF && 1.15 - p * 1.0 < 0.22 ? "hit" : null;
+    return Math.abs(d) < 0.6 && p > 0.4 ? "fall" : null;
   }
 
   /* 引いた量から走る距離を決めて、離す */
   function launch() {
-    if (pull < 0.05) { pull = 0; z = L; phase = "aim"; return; }
-    var dist = GAIN * pull;
-    v = Math.sqrt(2 * DECEL * dist);
+    if (pull < 0.05) { pull = 0; z = base; phase = "aim"; return; }
+    v = Math.sqrt(2 * DECEL * GAIN * pull);
     phase = "run";
     noiseHit(0.08, 2400, 0.12, 3);
   }
@@ -155,16 +200,17 @@
     if (Math.abs(p - lastClick) >= 0.06) { lastClick = p; tone(2200 + p * 300, 0.018, 0.05, "square"); }
     wheel -= (p - pull) / 0.09;
     pull = p;
-    z = L + pull;
+    z = base + pull;
   }
-  function stopCar() {
-    phase = "settle"; settleT = 0;
-    var over = HALF - z;
-    score = Math.round(over * 100);
-    if (over > 0.2) wobble = (over - 0.2) / 0.2 * 0.09;
-    runSound(0);
-    if (score >= 30) [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.18, 0.1, "triangle", null, i * 0.09); });
-    else if (score >= 0) tone(880, 0.2, 0.08, "triangle");
+  function crash(kind) {
+    phase = "crash"; crashZ = z; endT = 0; runSound(0);
+    if (kind === "hit") {
+      vx = (Math.random() < 0.5 ? -1 : 1) * (2.5 + Math.random() * 2); vy = 7; vz = -v * 0.4 - 1; spin = 9 + Math.random() * 6;
+      noiseHit(0.3, 900, 0.4, 0.8); tone(180, 0.25, 0.15, "square", 70);
+    } else {
+      vx = 0; vy = 0; vz = -v; spin = 0;
+      tone(700, 0.6, 0.1, "triangle", 120);
+    }
   }
   function runSound(speed) {
     if (!AC) return;
@@ -184,6 +230,7 @@
   function update(dt) {
     if (state !== S.PLAY) return;
     T += dt;
+    for (var i = 0; i < traps.length; i++) trapPose(traps[i]);
 
     if (phase === "aim" && keyHold) setPull(pull + dt * 0.9);
     if (phase === "run") {
@@ -191,49 +238,45 @@
       var nv = v - DECEL * dt, dz = nv > 0 ? (v + nv) / 2 * dt : v * v / (2 * DECEL);
       z -= dz; wheel += dz / 0.09; v = Math.max(0, nv);
       runSound(v);
-      if (z < 0) { phase = "fall"; fell = true; score = null; runSound(0); noiseHit(0.5, 600, 0.15, 0.7); }
-      else if (v <= 0) { v = 0; stopCar(); }
-    } else if (phase === "fall") {
-      /* 重心が端を越えたら、前に回りながら落ちる */
-      w += 26 * dt; pitch += w * dt;
-      vy -= 98 * dt; y += vy * dt;
-      z -= v * dt; wheel += v * dt / 0.09;
-      if (y <= FLOOR) {
-        y = FLOOR; pitch = Math.round(pitch / Math.PI) * Math.PI;
-        noiseHit(0.35, 300, 0.35, 0.8); tone(140, 0.25, 0.15, "square", 60);
-        phase = "settle"; settleT = 0;
+      if (v <= 0) { phase = "aim"; base = z; pull = 0; lastClick = 0; moreTraps(); }
+    }
+    if (phase === "aim" || phase === "run") {
+      /* くぐり抜けた数。トラップの区間を車の後ろの端が抜けたら1つ */
+      var n = 0;
+      for (i = 0; i < traps.length; i++) {
+        var tr = traps[i], hit = trapHit(tr, z);
+        if (hit) { crash(hit); break; }
+        if (z + HALF < tr.zc - 0.9) n++;
       }
-    } else if (phase === "settle") {
-      settleT += dt;
-      if (!fell) pitch = wobble * Math.exp(-settleT * 1.6) * Math.abs(Math.sin(settleT * 9));
+      if (n > score) { score = n; tone(1320, 0.07, 0.06, "triangle"); tone(1760, 0.09, 0.05, "triangle", null, 0.06); }
+    } else if (phase === "crash") {
+      endT += dt;
+      vy -= GRAV * dt;
+      x += vx * dt; y += vy * dt; z += vz * dt;
+      pitch += spin * dt; roll += spin * 0.6 * dt; yaw += vx * 0.5 * dt;
+      if (endT > 1.6) state = S.RESULT;
     }
-    if (phase === "run" || phase === "fall" || phase === "settle") {
-      var near = phase === "run" ? Math.max(0, 1 - Math.max(0, z - 1.5) / 2.5) * 0.35 : 1;
-      side += (Math.max(side, near) - side) * Math.min(1, dt * 3);
-      if (phase !== "run") side = Math.min(1, side + dt * 0.9);
-    }
-    if (phase === "settle" && settleT > 2) state = S.RESULT;
   }
 
   /* ============ 入力 ============
      タップとスペースキーで同じことができるようにする。
      x が null のときはキー操作（場所を指さない）。 */
-  function down(x, y) {
+  function down(px, py) {
     if(state===S.INTRO)return;
     audioOn();
     if (state === S.RESULT) {
-      var hit = x == null ? "retry" : hitButton(x, y);
+      var hit = px == null ? "retry" : hitButton(px, py);
       if (hit === "retry") newRound();
       return;
     }
     if (phase !== "aim") return;
     held = true;
-    if (x == null) { keyHold = true; return; }
-    startY = y;
+    if (px == null) { keyHold = true; return; }
+    startY = py;
   }
-  function move(x, y) {
+  function move(px, py) {
     if (state !== S.PLAY || !held) return;
-    if (phase === "aim") setPull((y - startY) / 120);
+    if (phase === "aim") setPull((py - startY) / 120);
   }
   function up() {
     if (!held) return;
@@ -258,11 +301,16 @@
      本番（www.zounoashi.com/games/ 以下）では効かない。 */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    /* 1=ちょうどよく(+30mm) 2=落ちる 3=手前で止まる */
-    if (state !== S.PLAY || phase !== "aim") newRound();
-    var want = n === 1 ? L - HALF + 0.3 : n === 2 ? L + 1 : n === 3 ? L - 1.5 : null;
-    if (want == null) return;
-    setPull(want / (GAIN - 1)); launch();   /* 引いた分だけ後ろから走る */
+    /* 1=次のトラップの手前へ 2=その場で壊れる 3=10個先へ */
+    if (state !== S.PLAY) newRound();
+    if (phase !== "aim") return;
+    if (n === 2) { v = 3; crash("hit"); return; }
+    var skip = n === 1 ? 0 : n === 3 ? 9 : null;
+    if (skip == null) return;
+    for (var i = 0; i < traps.length; i++) if (traps[i].zc < z - 0.5) break;
+    var tr = traps[i + skip];
+    z = base = tr.z0 - HALF - 0.05; pull = 0;
+    moreTraps();
   }
 
   window.addEventListener("keydown", function (e) {
@@ -291,10 +339,7 @@
     /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
     /* 英語のときのハッシュタグは英語のゲーム名にする（空白・記号は除く） */
-    var text;
-    if (score == null) text = zT("ミニカーを机から落としました", "My minicar flew off the table", "미니카를 책상에서 떨어뜨렸습니다", "迷你车从桌子上掉下去了", "迷你車從桌子上掉下去了");
-    else if (score > 0) text = zT("ミニカーを机の端から" + score + "mmはみ出させて止めました", "Stopped my minicar hanging " + score + "mm off the table edge", "미니카를 책상 끝에서 " + score + "mm 튀어나오게 세웠습니다", "让迷你车探出桌边" + score + "mm停住了", "讓迷你車探出桌邊" + score + "mm停住了");
-    else text = zT("ミニカーが机の端の" + (-score) + "mm手前で止まりました", "My minicar stopped " + (-score) + "mm before the table edge", "미니카가 책상 끝 " + (-score) + "mm 앞에서 멈췄습니다", "迷你车停在离桌边" + (-score) + "mm的地方", "迷你車停在離桌邊" + (-score) + "mm的地方");
+    var text = zT("ミニカーでトラップを" + score + "個くぐり抜けました", "My minicar made it through " + score + " traps", "미니카로 함정 " + score + "개를 빠져나갔습니다", "迷你车穿过了" + score + "个陷阱", "迷你車穿過了" + score + "個陷阱");
     window.zResultActions.x({ text: text + zT(" #ミニカーチキンレース", " #MinicarChickenRace", " #미니카치킨레이스", " #迷你车胆量赛", " #迷你車膽量賽") });
   }
 
@@ -318,9 +363,16 @@
 
     /* ▼DRAW: ここに絵。立体の上に、文字やボタンを2Dで描く */
     var s3 = scene3d(), drew = false;
-    if (s3) { try { s3.sync({ z: z, y: y, pitch: pitch, wheel: wheel, side: side, fall: fell }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (s3) { try { s3.sync({ x: x, y: y, z: z, pitch: pitch, roll: roll, yaw: yaw, wheel: wheel, camZ: crashZ == null ? z : crashZ, traps: traps }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
     if (!drew) { ctx.fillStyle = "#1d1714"; ctx.fillRect(0, 0, W, H); }
 
+    if (state === S.PLAY && phase !== "crash") {
+      ctx.save();
+      ctx.fillStyle = "#fff"; ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 8;
+      ctx.font = "800 64px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(String(score), W / 2, 96);
+      ctx.restore();
+    }
     if (state === S.RESULT) drawResult();
   }
 
@@ -337,8 +389,7 @@
     return window.zResultActions.hit(resultButtons(), x, y);
   }
   function scoreText() {
-    if (score == null) return zT("落下", "FELL", "낙하", "掉落", "掉落");
-    return (score > 0 ? "+" : "") + score + "mm";
+    return String(score);
   }
   function drawResult() {
     ctx.fillStyle = "rgba(10,8,6,.66)";
@@ -358,7 +409,7 @@
      テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
      消さなくてよい。遊びを飛ばせるものは足さないこと。 */
   window.__probe = {
-    now: function () { return { state: state, phase: phase, z: z, L: L, score: score, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { state: state, phase: phase, z: z, score: score, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
@@ -371,7 +422,7 @@
       await r.wait(1000);
       r.key();
       await r.wait(800);
-      debugKey(1);
+      debugKey(1); await r.wait(1500); debugKey(2);
       if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("勝敗が出ない");
       await r.wait(1500);
     }
