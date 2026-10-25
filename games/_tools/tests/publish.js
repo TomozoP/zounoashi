@@ -10,7 +10,7 @@ fs.mkdirSync(path.join(root, "games/_tools"), { recursive: true });
 ["publish.js", "ogp.js", "ogp-render.js", "transaction.js", "workflow.js"].forEach(function (name) {
   fs.copyFileSync(path.join(__dirname, "..", name), path.join(root, "games/_tools", name));
 });
-var original = 'var GAMES = [\n  { type: "lab", id: "existing" },\n];';
+var original = 'var GAMES = [\n  { type: "lab", id: "existing", date: "2026-10-20" },\n];';
 fs.writeFileSync(path.join(root, "index.html"), original);
 fs.mkdirSync(path.join(root, "games/_sample/img"), { recursive: true });
 fs.writeFileSync(path.join(root, "games/_sample/index.html"), '<html><head><title>確認</title></head><body></body></html>');
@@ -44,8 +44,13 @@ assert.equal(drafts()[1].play, "games/sample/index.html");
 assert(!fs.existsSync(path.join(root, "share/sample")));
 assert.equal(run(["sample", "--unlisted"]).status, 0);
 fs.writeFileSync(path.join(root, "games/sample/index.html"), read("games/sample/index.html").replace(/\r?\n/g, '\r\n'));
-r = run(["sample"]);
+/* 正式公開は担当日が要り、最新の公開作より前の日付では止まる */
+assert.notEqual(run(["sample"]).status, 0);
+assert.notEqual(run(["sample", "--date=2026-10-19"]).status, 0);
+assert.notEqual(run(["sample", "--date=2026-13-01"]).status, 0);
+r = run(["sample", "--date=2026-10-21"]);
 assert.equal(r.status, 0, r.stderr);
+assert(read("index.html").includes('date: "2026-10-21"'));
 assert(!read("games/sample/index.html").includes("noindex"));
 assert(!read("games/sample/index.html").includes("zounoashi-unlisted"));
 assert(read("index.html").includes('id: "sample"'));
@@ -60,7 +65,7 @@ fs.writeFileSync(path.join(root, "games/_direct/index.html"), '<html><head></hea
 fs.writeFileSync(path.join(root, "games/_direct/img/thumb.webp"), "画像の存在確認用");
 fs.writeFileSync(path.join(root, "games/_local.js"), 'window.DRAFT_GAMES = [{ type: "lab", id: "direct", title: "直接公開", play: "games/_direct/index.html", img: "games/_direct/img/thumb.webp" }];');
 fs.writeFileSync(path.join(root, "games/_direct/_制作.json"), JSON.stringify(record));
-r = run(["direct"]);
+r = run(["direct", "--date=10/22"]);
 assert.equal(r.status, 0, r.stderr);
 assert(read("share/direct/index.html").includes("/#/game/direct"));
 var directGame = read("games/direct/index.html"), directShare = read("share/direct/index.html");

@@ -1,17 +1,28 @@
 /* 下書きを公開できる形にする。commit・push は別に行う。
    node games/_tools/publish.js hoge --unlisted  一覧に出さない制作中の公開
-   node games/_tools/publish.js hoge             正式に一覧へ載せる */
+   node games/_tools/publish.js hoge --date=10/26  正式に一覧へ載せる（--date は担当日。「〇/〇のゲーム」の日） */
 var fs = require("fs");
 var path = require("path");
 var vm = require("vm");
 var id = process.argv[2];
 var options = process.argv.slice(3);
 var unlisted = options.includes("--unlisted"), check = options.includes("--check");
+var dateOption = options.find(o => o.startsWith("--date="));
 var workflow = require("./workflow");
 var render = require("./ogp-render");
 var apply = require("./transaction");
 function fail(message) { console.error(message); process.exit(1); }
-if (!id || !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(id) || options.some(o => !["--unlisted", "--check"].includes(o))) fail("使い方: node games/_tools/publish.js <id> [--unlisted] [--check]");
+if (!id || !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(id) || options.some(o => !["--unlisted", "--check"].includes(o) && o !== dateOption)) fail("使い方: node games/_tools/publish.js <id> [--date=10/26] [--unlisted] [--check]");
+/* 担当日。「10/26」「2026-10-26」のどちらでもよい（年を省くと今年） */
+function parseDate(text) {
+  var m = /^(?:(\d{4})[-/])?(\d{1,2})[-/](\d{1,2})$/.exec(text || "");
+  if (!m) return null;
+  var y = +(m[1] || new Date().getFullYear()), mo = +m[2], d = +m[3], t = new Date(y, mo - 1, d);
+  if (t.getMonth() !== mo - 1 || t.getDate() !== d) return null;
+  return y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+}
+var date = dateOption ? parseDate(dateOption.slice(7)) : null;
+if (dateOption && !date) fail("--date の形が読めません: " + dateOption + "（例: --date=10/26）");
 var root = path.resolve(__dirname, "../..");
 var from = path.join(root, "games", "_" + id);
 var to = path.join(root, "games", id);
@@ -27,6 +38,16 @@ if (matches.length !== 1) fail("games/_local.js に対象の行が1つ必要で�
 var entry = matches[0];
 var listed = vm.runInNewContext(idx.match(/var GAMES = (\[[\s\S]*?\n\]);/)[1], { UR: "", KY: "" });
 if (listed.some(function (g) { return g.id === id; })) fail("すでに正式公開されています: " + id);
+/* 一覧の日付は下書き作成日のまま入りやすいので、担当日で上書きし、最新の公開作より前なら止める */
+var latest = listed.filter(g => g.type === "lab" && g.date).map(g => g.date).sort().pop() || "";
+if (date) { entry.date = date; entry.year = +date.slice(0, 4); }
+if (!unlisted) {
+  if (!date && !check) fail("正式公開には担当日が必要です: --date=10/26 のように付けてください（いまの値 " + entry.date + "）");
+  if (entry.date < latest) {
+    if (check) console.log("日付の要確認: " + entry.date + " は最新の公開作 " + latest + " より前です（--date=担当日 を付ける）");
+    else fail("日付 " + entry.date + " が最新の公開作 " + latest + " より前です。担当日を確かめてください");
+  }
+}
 var anchor = idx.match(/^[ \t]*\{ type: "lab".*$/m);
 if (!unlisted && !anchor) fail("index.html の実験場の行が見つかりません");
 if (fs.existsSync(from) && fs.existsSync(to)) fail("移動先がすでにあります: " + to);
@@ -45,6 +66,7 @@ var materialIssues = workflow.materials(source, config);
 console.log("対象: " + id + " / " + entry.title);
 console.log("区分: " + (unlisted ? "一覧なし" : "正式公開"));
 console.log("サムネ: " + (entry.img || "未指定"));
+if (!unlisted) console.log("一覧の日付: " + entry.date + (date ? "（担当日）" : "（下書きの値。公開時は --date で担当日に）"));
 console.log("一覧の説明: " + (entry.catch || "なし"));
 console.log("共有カードの題名: " + entry.title);
 console.log("結果の共有文は得点で変わるため、ゲームの共有ボタンでも確認してください。");

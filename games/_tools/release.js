@@ -1,7 +1,8 @@
 /* 「公開して」を1回で済ませる。正式公開の指示を受けてから使う。
 
-     node games/_tools/release.js hoge --check   何が変わるかを見るだけ（何も書かない）
-     node games/_tools/release.js hoge           サムネ → 公開の形 → 固定リンクの差し替え
+     node games/_tools/release.js hoge 10/26 --check   何が変わるかを見るだけ（何も書かない）
+     node games/_tools/release.js hoge 10/26           サムネ → 公開の形 → 固定リンクの差し替え
+   10/26 は担当日（「〇/〇のゲーム」の日）。一覧の日付をこの日にする
 
    1. サムネ（img/thumb.webp）がなければ thumb.js で撮る（_制作.json に保存した撮影条件を使う）。
       あれば撮り直さない。撮り直すときは先に thumb.js を単独で使う
@@ -16,7 +17,9 @@ var workflow = require("./workflow");
 
 var id = process.argv[2], options = process.argv.slice(3);
 var check = options.includes("--check");
-if (!id || options.some(function (o) { return o !== "--check"; })) { console.error("使い方: node games/_tools/release.js <id> [--check]"); process.exit(1); }
+var day = options.filter(function (o) { return o !== "--check"; });
+if (!id || day.length > 1 || (!check && day.length !== 1)) { console.error("使い方: node games/_tools/release.js <id> <担当日 例 10/26> [--check]"); process.exit(1); }
+var dateArg = day.length ? ["--date=" + day[0]] : [];
 try { workflow.game(id); } catch (e) { console.error(e.message); process.exit(1); }
 
 function run(tool, args) {
@@ -35,7 +38,7 @@ var hasThumb = thumb && fs.existsSync(thumb);
 
 if (check) {
   console.log("サムネ: " + (hasThumb ? "あり（" + entry.img + "）" : "なし → 実行時に thumb.js で撮ります"));
-  if (hasThumb) run("publish.js", [id, "--check"]);
+  if (hasThumb) run("publish.js", [id, "--check"].concat(dateArg));
   else console.log("（publish.js の確認はサムネが要るので、サムネを撮ったあとの本番で行います）");
   console.log("\n固定リンク（Cake Cut）も " + id + " に差し替えます。");
   process.exit(0);
@@ -51,7 +54,7 @@ if (!hasThumb) {
     fs.writeFileSync(path.join(dir, "_制作.json"), JSON.stringify(config, null, 2) + "\n");
   }
 } else console.log("サムネ: 既存の " + entry.img + " を使います");
-run("publish.js", [id]);
+run("publish.js", [id].concat(dateArg));
 run("preview-link.js", [id]);
 console.log("\nOK  公開の形にしました。サムネを目で確かめ、差分を見て commit・push してください。");
 console.log("    push のあと: node games/_tools/verify-deploy.js " + id);
