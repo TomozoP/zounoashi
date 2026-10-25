@@ -175,7 +175,7 @@
   function guarding(f) { return !f.ko && !(f.stun > 0) && f.L < -0.35; }
   function height(f) { return f.C > 0.5 ? "low" : "high"; }
 
-  var G = 1800, DT = 1 / 60;
+  var G = 1800, DT = 1 / 60, hitStop = 0, parries = 0;
   function physics(f) {
     var p, n, i;
     for (i = 0; i < NAMES.length; i++) {
@@ -230,10 +230,11 @@
         /* 上段・下段とガードの高さが合えば防がれ、打った方がはじかれてすきができる */
         if (guarding(b) && height(b) === height(a)) {
           b.hp -= 0.5;
-          a.stun = 0.5; a.hurtT = 0.3; a.slide -= nx * 30;
-          fx.push({ x: gl.x + nx * 12, y: gl.y + ny * 12, t: 0, big: false, guard: true });
-          tone(1500, 0.12, 0.09, "triangle"); tone(2250, 0.1, 0.05, "square"); noiseHit(0.06, 3000, 0.1, 3);
-          shake = Math.max(shake, 0.06);
+          a.hurtT = 0.3;
+          a.stun = 0.6; a.slide -= nx * 40;
+          fx.push({ x: gl.x + nx * 12, y: gl.y + ny * 12, t: 0, big: false, guard: true, ang: Math.atan2(ny, nx) });
+          parrySound(); parries++;
+          hitStop = 0.09; shake = Math.max(shake, 0.12);
           return;
         }
         var head = tg[0] === "head";
@@ -250,6 +251,17 @@
         if (b.hp <= 0) { b.hp = 0; knockOut(b); }
       });
     });
+  }
+  /* パリィの音：澄んだ金属の「キィン」。高い倍音を少しずらして重ね、長めに響かせる */
+  function parrySound() {
+    if (!AC) return;
+    [[2093, 0.5, 0.11], [3136, 0.42, 0.07], [4699, 0.3, 0.05], [6272, 0.18, 0.03]].forEach(function (p) {
+      tone(p[0], p[1], p[2], "sine");
+      tone(p[0] * 1.006, p[1] * 0.9, p[2] * 0.6, "sine");
+    });
+    tone(1046, 0.25, 0.06, "triangle", 1568);
+    noiseHit(0.05, 6000, 0.25, 0.7);
+    tone(120, 0.12, 0.18, "sine", 60);
   }
   function knockOut(f) {
     f.ko = true; f.muscle = 0; f.C = 0;
@@ -339,7 +351,9 @@
   function update(dt) {
     T += dt;
     shake = Math.max(0, shake - dt);
-    for (var i = fx.length - 1; i >= 0; i--) { fx[i].t += dt; if (fx[i].t > 0.22) fx.splice(i, 1); }
+    for (var i = fx.length - 1; i >= 0; i--) { fx[i].t += dt; if (fx[i].t > (fx[i].guard ? 0.4 : 0.22)) fx.splice(i, 1); }
+    /* 防いだ瞬間だけ、ほんの少し止める */
+    if (hitStop > 0) { hitStop -= dt; return; }
     for (var si = sparks.length - 1; si >= 0; si--) { var sp = sparks[si]; sp.t += dt; sp.y += sp.vy * dt; if (sp.t > 1.2) sparks.splice(si, 1); }
     if (state === S.INTRO) { me.L = Math.sin(T * 2) * 0.1; stepFighter(me, dt); stepFighter(foe, dt); return; }
     if (state === S.FIGHT) {
@@ -564,8 +578,27 @@
     ctx.font = "900 34px sans-serif"; ctx.textAlign = "center";
     ctx.fillText(String(Math.max(0, Math.ceil(TIME - fightT))), W / 2, y - 6);
   }
+  /* パリィ：白く光る輪が広がり、はじいた向きに火花が散る */
+  function drawParry(e) {
+    var k = e.t / 0.4, r = 18 + k * 90;
+    ctx.save(); ctx.translate(e.x, e.y);
+    if (k < 0.25) { ctx.fillStyle = "rgba(255,255,255," + (1 - k * 4) + ")"; ctx.beginPath(); ctx.arc(0, 0, 46, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1 - k;
+    ctx.lineWidth = 7 * (1 - k) + 1; ctx.strokeStyle = INK;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 3 * (1 - k) + 1; ctx.strokeStyle = "#7fd3ff";
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.82, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = INK; ctx.lineCap = "round";
+    for (var i = 0; i < 9; i++) {
+      var a = e.ang + (i - 4) * 0.28, r0 = 20 + k * 70, r1 = r0 + 30 * (1 - k) + 10;
+      ctx.lineWidth = i % 2 ? 3 : 5;
+      ctx.beginPath(); ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.stroke();
+    }
+    ctx.restore();
+  }
   function drawFx() {
     fx.forEach(function (e) {
+      if (e.guard) { drawParry(e); return; }
       var k = e.t / 0.22, r = (e.big ? 70 : 42) * (0.6 + k * 0.6);
       ctx.save(); ctx.translate(e.x, e.y);
       ctx.beginPath();
@@ -645,7 +678,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, level: level, before: before, after: after, outcome: outcome, me: me && { hp: me.hp, L: me.L, C: me.C, head: [me.P.head.x, me.P.head.y], gf: [me.P.gf.x, me.P.gf.y] }, foe: foe && { hp: foe.hp, ko: foe.ko, head: [foe.P.head.x, foe.P.head.y] }, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { parries: parries, state: state, level: level, before: before, after: after, outcome: outcome, me: me && { hp: me.hp, L: me.L, C: me.C, head: [me.P.head.x, me.P.head.y], gf: [me.P.gf.x, me.P.gf.y] }, foe: foe && { hp: foe.hp, ko: foe.ko, head: [foe.P.head.x, foe.P.head.y] }, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
