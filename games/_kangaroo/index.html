@@ -42,10 +42,9 @@
    いつも自分と同じレベルのカンガルーと戦う。全10戦。レベル1から始まり、後半ほど大きく上がって最後はレベル100（1,3,6,10,16,24,35,50,72,100）。
    相手の毛色・グローブ・トランクス・耳や鼻先は毎試合少し変わる。
    体は点とばねの簡単な物理。指でなぞると、押した所からのずれのぶんだけ
-     前 → 体を乗り出して前の手が伸びる（パンチ） / 後ろ → ガード
+     後ろ → 体を引いて溜める（グローブが光る） / 前 → 乗り出して前の手が伸びる（パンチ）
    と、左右だけでおもちゃのように体を引っぱる。グローブが相手に当たったときの勢いがダメージ。
-   引いた直後（0.3秒）に受けるとパリィで、打った方がはじかれてすきができる。
-   ガードを出しっぱなしだと防ぎきれず少し削られる（タイミングの読み合い）。
+   溜めるほど次の一撃が強いが、溜め中に打たれるとカウンターで倍のダメージ（ドンケツ式の読み合い）。
    勝つと短いレベルアップの演出のあと、すぐ次の（1つ上のレベルの）相手。負けたら結果を出してレベル1に戻る。
    相手の賢さと速さだけがレベルで上がる。 */
 (function () {
@@ -161,11 +160,6 @@
     else if (n === "chest") o = [12 + 95 * L, -190 + 100 * C];
     else if (n === "head") o = [12 + 95 * L + 28 + 10 * L, -190 + 100 * C - 58 + 5 * C];
     else if (n === "tail") o = [-135, -6];
-    else if (guarding(f)) {
-      /* ガード：立てば顔の前（上段）、かがめばお腹の前（下段） */
-      var low = f.C > 0.5, cx0 = 12 + 95 * L, cy0 = -190 + 100 * C;
-      o = n === "gf" ? [cx0 + 42, cy0 + (low ? 34 : -62)] : [cx0 + 34, cy0 + (low ? 20 : -48)];
-    }
     /* 前の手は伸ばすほど少し下へ弧を描く（かがんだ相手の頭にも届く） */
     else if (n === "gf") o = [12 + 95 * L + 50 + 100 * Math.max(0, L), -190 + 100 * C - 6 - 10 * C + 45 * Math.max(0, L)];
     else o = [12 + 95 * L + 32, -190 + 100 * C - 26];
@@ -175,12 +169,11 @@
     return { x: f.home + f.slide + (o[0] + step) * f.dir * f.sc, y: GROUND + (o[1] - (n === "foot" ? 0 : 0)) * f.sc - hop };
   }
 
-  /* 後ろへ引いている間はガード。高さはかがみ具合で決まる */
-  function guarding(f) { return !f.ko && !(f.stun > 0) && f.L < -0.35; }
-  /* 引いた直後だけパリィ。出しっぱなしのガードは少し削られる */
-  var PARRY_T = 0.3;
+  /* 後ろへ引いている間は溜め。溜めるほど次の一撃が強いが、溜め中に打たれるとカウンターで大きく食らう */
+  var CHARGE_T = 0.8;
+  function charging(f) { return (f.charge || 0) > 0.1; }
 
-  var G = 1800, DT = 1 / 60, hitStop = 0, parries = 0;
+  var G = 1800, DT = 1 / 60, hitStop = 0, counters = 0;
   /* 全10戦。レベルは1から始まり、後半ほど大きく上がって最後がレベル100 */
   var LEVELS = [1, 3, 6, 10, 16, 24, 35, 50, 72, 100];
   var START_LV = 1, MAX_LV = 100;
@@ -345,31 +338,24 @@
         t.x += nx * over * 0.5; t.y += ny * over * 0.5;
         if (vn < 300 || a.cool[g] > 0 || b.ko || a.ko || a.stun > 0) return;
         a.cool[g] = 0.25;
-        /* 引いた直後のガードで受けるとパリィ：打った方がはじかれてすきができる */
-        if (guarding(b) && b.guardT > PARRY_T) {
-          b.hp -= Math.min(5, (vn - 300) / 50 * 0.35 + 1); b.hurtT = 0.12;
-          a.slide -= nx * 15; b.slide += nx * 10;
-          fx.push({ x: gl.x + nx * 12, y: gl.y + ny * 12, t: 0, big: false });
-          noiseHit(0.1, 500, 0.35, 0.8); tone(120, 0.12, 0.15, "sine", 70);
-          lastHit = fightT;
-          return;
-        }
-        if (guarding(b)) {
-          b.hp -= 0.5;
-          a.hurtT = 0.3;
-          a.stun = 0.6; a.slide -= nx * 40;
-          fx.push({ x: gl.x + nx * 12, y: gl.y + ny * 12, t: 0, big: false, guard: true, ang: Math.atan2(ny, nx) });
-          parrySound(); parries++;
-          lastHit = fightT; crowd.ooh(0.6); crowd.applause(0.7); crowd.excite(0.4);
-          hitStop = 0.09; shake = Math.max(shake, 0.12);
-          return;
-        }
         var head = tg[0] === "head";
-        var dmg = Math.min(16, (vn - 300) / 50 * (head ? 1.2 : 0.6) + (head ? 2 : 1));
+        /* 溜めた一撃ほど強い。溜め中の相手に当てるとカウンターで倍 */
+        var power = a.powT > 0 ? a.pow : 0, counter = charging(b);
+        var dmg = Math.min(16, (vn - 300) / 50 * (head ? 1.2 : 0.6) + (head ? 2 : 1)) * (0.6 + 1.6 * power);
+        if (counter) dmg *= 2;
+        dmg = Math.min(35, dmg);
         b.hp -= dmg; b.hurtT = 0.25;
         /* 当たった勢いで相手の体を押す */
-        t.px -= nx * vn * DT * 0.6; t.py -= ny * vn * DT * 0.6;
-        b.slide += nx * vn * 0.03;
+        t.px -= nx * vn * DT * (0.6 + power); t.py -= ny * vn * DT * (0.6 + power);
+        b.slide += nx * vn * (0.03 + 0.05 * power);
+        a.powT = 0;
+        if (counter) {
+          b.charge = 0; b.stun = 0.5; b.slide += nx * 80;
+          fx.push({ x: gl.x + nx * 12, y: gl.y + ny * 12, t: 0, big: true, guard: true, ang: Math.atan2(ny, nx) });
+          parrySound(); counters++;
+          crowd.ooh(1); crowd.applause(0.8); crowd.excite(0.6);
+          hitStop = Math.max(hitStop, 0.14);
+        }
         var big = dmg > 10;
         fx.push({ x: gl.x + nx * 18, y: gl.y + ny * 18, t: 0, big: big });
         shake = Math.max(shake, big ? 0.25 : 0.1);
@@ -418,8 +404,13 @@
   }
   function stepFighter(f, dt) {
     if (f.stun > 0) { f.stun -= dt; f.L = -0.5; }
-    f.C = 0;
-    f.guardT = guarding(f) ? (f.guardT || 0) + dt : 0;
+    /* 引いている間は溜まる。前へ出した瞬間に溜めた分の一撃になる */
+    var back = !f.ko && !(f.stun > 0) && f.L < -0.3;
+    if (back) f.charge = Math.min(1, (f.charge || 0) + dt / CHARGE_T);
+    else if (f.charge > 0 && f.L > 0) { f.pow = f.charge; f.powT = 0.4; f.charge = 0; }
+    else f.charge = Math.max(0, (f.charge || 0) - dt * 2);
+    if (f.powT > 0) f.powT -= dt;
+    f.C = (f.charge || 0) * 0.3;
     f.cool.gf = Math.max(0, f.cool.gf - dt); f.cool.gb = Math.max(0, f.cool.gb - dt);
     f.hurtT = Math.max(0, f.hurtT - dt);
     f.slide *= Math.pow(0.1, dt);
@@ -441,7 +432,7 @@
     state = S.READY; T = 0; fightT = 0; lastHit = 0; lowCheer = false;
     announce("Ready?", 0.95);
     me = fighter(P1X, 1); foe = fighter(P2X, -1);
-    ai = { L: 0, C: 0, goalL: 0, goalC: 0, think: 0.6, punchT: 0, react: null, guardFor: 0 };
+    ai = { L: 0, C: 0, goalL: 0, goalC: 0, think: 0.6, punchT: 0, react: null, chargeT: 0, saw: false };
     before = after = level; outcome = "";
     foeLook = makeLook();
   }
@@ -459,32 +450,30 @@
   function stepCpu(dt) {
     var k = cpuSkill();
     if (foe.ko || foe.stun > 0) { ai.L = foe.L; ai.C = foe.C; return; }
-    /* こちらの前の手が速く近づいてきたら、高さを読んでガード（レベルが高いほど速く確か） */
-    var g = me.P.gf, lunge = (g.x - g.px) / DT * me.dir;
-    /* こちらの踏み込みを見て、ちょうどよく引いてパリィを狙う（レベルが高いほど速く確か） */
-    if (!ai.react && lunge > 450 && ai.guardFor <= 0 && ai.punchT <= 0 && Math.random() < k.sure) ai.react = { t: k.delay };
+    /* こちらが溜め始めたら、小突いてカウンターを狙う（レベルが高いほど速く確か） */
+    if (!charging(me)) ai.saw = false;
+    else if (!ai.saw) { ai.saw = true; if (Math.random() < k.sure) ai.react = { t: k.delay }; }
     if (ai.react) {
       ai.react.t -= dt;
-      if (ai.react.t <= 0) { ai.guardFor = 0.45; ai.react = null; }
+      if (ai.react.t <= 0) { ai.react = null; ai.chargeT = 0; ai.punchT = 0.2; }
     }
-    if (ai.guardFor > 0) { ai.guardFor -= dt; ai.goalL = -0.7; ai.goalC = 0; }
-    else if (ai.punchT > 0) { ai.punchT -= dt; ai.goalL = 1; ai.goalC = 0; }
+    if (ai.punchT > 0) { ai.punchT -= dt; ai.goalL = 1; }
+    else if (ai.chargeT > 0) { ai.chargeT -= dt; ai.goalL = -0.85; if (ai.chargeT <= 0) ai.punchT = 0.25; }
     else {
-      ai.goalC = 0; ai.goalL = -0.15 + Math.sin(T * 3) * 0.12;
+      ai.goalL = -0.15 + Math.sin(T * 3) * 0.12;
       ai.think -= dt;
       /* こちらがすきだらけなら狙う */
       if (me.stun > 0 && Math.random() < k.sure) ai.think = Math.min(ai.think, k.delay);
       if (ai.think <= 0) {
         ai.think = k.pace * (0.5 + Math.random());
-        /* 弱いうちはガードを出しっぱなしで固まることがある（削れる） */
-        if (Math.random() < 0.3 * (1 - power())) ai.guardFor = 0.9 + Math.random() * 0.8;
+        /* 溜めて大きく打つか、すぐ小突くか。弱いうちは長く溜めがち（カウンターの的） */
+        if (Math.random() < 0.75 - 0.3 * power()) ai.chargeT = 0.4 + Math.random() * (1.4 - power());
         else ai.punchT = 0.2;
       }
     }
     var sp = k.speed * dt;
     ai.L += Math.max(-sp, Math.min(sp, ai.goalL - ai.L));
-    ai.C += Math.max(-sp, Math.min(sp, ai.goalC - ai.C));
-    foe.L = ai.L; foe.C = ai.C;
+    foe.L = ai.L;
   }
 
   function endFight() {
@@ -517,7 +506,7 @@
     if (state === S.FIGHT) {
       fightT += dt;
       /* 指のずれがそのまま体の引っぱり */
-      /* 左右だけ。前に払うとパンチ、後ろに引くとガード */
+      /* 左右だけ。後ろに引くと溜め、前に払うとパンチ */
       if (drag) me.L = Math.max(-1, Math.min(1, drag.dx / 90));
       else me.L += (keyL - me.L) * Math.min(1, dt * 14);
       stepCpu(dt);
@@ -805,6 +794,7 @@
     /* 立体が使えないときは線画で描く */
     if (!ok) { drawBackground(); drawRoo(foe, 0, 0, null); drawRoo(me, 0, 0, null); }
     if (state === S.LEVELUP) drawRays();
+    if (state === S.FIGHT) { drawCharge(me); drawCharge(foe); }
     drawFx();
     if (state !== S.RESULT && state !== S.INTRO) drawHud();
     ctx.restore();
@@ -812,6 +802,20 @@
     if (state === S.LEVELUP) drawLevelUp();
     if (state === S.READY) drawReady();
     if (res) drawResult();
+  }
+
+  /* 溜め：前のグローブが溜まるほど大きく光る（満タンで脈打つ） */
+  function drawCharge(f) {
+    var c = f.charge || 0;
+    if (c <= 0.05) return;
+    var g = f.P.gf, full = c >= 1, r = (22 + 30 * c + (full ? Math.sin(T * 30) * 6 : 0)) * f.sc;
+    var gr = ctx.createRadialGradient(g.x, g.y, 0, g.x, g.y, r);
+    gr.addColorStop(0, "rgba(255,240,170," + (0.2 + 0.6 * c) + ")");
+    gr.addColorStop(0.5, "rgba(255,150,40," + (0.15 + 0.4 * c) + ")");
+    gr.addColorStop(1, "rgba(255,90,0,0)");
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(g.x, g.y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   }
 
   /* READY… FIGHT!：大きな文字が勢いよく出る */
@@ -886,7 +890,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { parries: parries, state: state, level: level, before: before, after: after, outcome: outcome, me: me && { hp: me.hp, L: me.L, C: me.C, head: [me.P.head.x, me.P.head.y], gf: [me.P.gf.x, me.P.gf.y] }, foe: foe && { hp: foe.hp, ko: foe.ko, head: [foe.P.head.x, foe.P.head.y] }, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { counters: counters, state: state, level: level, before: before, after: after, outcome: outcome, me: me && { hp: me.hp, L: me.L, C: me.C, head: [me.P.head.x, me.P.head.y], gf: [me.P.gf.x, me.P.gf.y] }, foe: foe && { hp: foe.hp, ko: foe.ko, head: [foe.P.head.x, foe.P.head.y] }, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
