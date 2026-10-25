@@ -35,6 +35,9 @@
     this.tailTip = add(new T.SphereGeometry(0.05, 8, 6), M.fur);
     this.armB = add(new T.CapsuleGeometry(0.075, 1, 4, 8), M.fur);
     this.armF = add(new T.CapsuleGeometry(0.075, 1, 4, 8), M.fur);
+    /* 前腕（ひじから先） */
+    this.foreB = add(new T.CapsuleGeometry(0.07, 1, 4, 8), M.fur);
+    this.foreF = add(new T.CapsuleGeometry(0.07, 1, 4, 8), M.fur);
     var glove = new T.SphereGeometry(0.19, 18, 12);
     this.gloveB = add(glove, M.glove);
     this.gloveF = add(glove, M.glove);
@@ -134,12 +137,23 @@
     var shF = sh.clone(); shF.z = z + 0.2 * s;
     var gB = v.gb.clone(); gB.z = z - 0.2 * s;
     var gF = v.gf.clone(); gF.z = z + 0.2 * s;
-    between(this.armB, shB, gB, 1); this.armB.scale.x = this.armB.scale.z = s;
-    between(this.armF, shF, gF, 1); this.armF.scale.x = this.armF.scale.z = s;
+    /* ひじは下へ曲がる。肩とグローブが近いほど深く曲がり、伸ばすとまっすぐに近づく */
+    function elbow(a, b) {
+      var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.001;
+      var l = Math.max(0.5 * s, d / 2 * 1.02), h = Math.sqrt(Math.max(0, l * l - d * d / 4));
+      var px = dy / d, py = -dx / d;
+      if (py > 0) { px = -px; py = -py; }
+      return new T.Vector3((a.x + b.x) / 2 + px * h, (a.y + b.y) / 2 + py * h, (a.z + b.z) / 2 + 0.04 * (a.z > z ? 1 : -1));
+    }
+    var eB = elbow(shB, gB), eF = elbow(shF, gF);
+    between(this.armB, shB, eB, 1); this.armB.scale.x = this.armB.scale.z = s;
+    between(this.armF, shF, eF, 1); this.armF.scale.x = this.armF.scale.z = s;
+    between(this.foreB, eB, gB, 1); this.foreB.scale.x = this.foreB.scale.z = s;
+    between(this.foreF, eF, gF, 1); this.foreF.scale.x = this.foreF.scale.z = s;
     this.gloveB.position.copy(gB); this.gloveB.scale.set(1.1 * s, 0.95 * s, 0.95 * s);
     this.gloveF.position.copy(gF); this.gloveF.scale.set(1.1 * s, 0.95 * s, 0.95 * s);
-    this.cuffB.position.lerpVectors(shB, gB, 0.82); this.cuffB.quaternion.copy(this.armB.quaternion); this.cuffB.scale.setScalar(s);
-    this.cuffF.position.lerpVectors(shF, gF, 0.82); this.cuffF.quaternion.copy(this.armF.quaternion); this.cuffF.scale.setScalar(s);
+    this.cuffB.position.lerpVectors(eB, gB, 0.72); this.cuffB.quaternion.copy(this.foreB.quaternion); this.cuffB.scale.setScalar(s);
+    this.cuffF.position.lerpVectors(eF, gF, 0.72); this.cuffF.quaternion.copy(this.foreF.quaternion); this.cuffF.scale.setScalar(s);
     /* 頭：胸から頭への向きで傾ける */
     var hx = v.head.x - chest.x, hy = v.head.y - chest.y;
     var rot = Math.atan2(hy, hx) - Math.atan2(0.58, 0.28 * d);
