@@ -61,6 +61,14 @@
       var inner = new T.Mesh(ear, M.ear); inner.position.set(0.015, 0.13, 0.01 * s); inner.scale.set(0.6, 0.85, 0.5); eg.add(inner);
       self.ears.push(eg);
     });
+    /* 黒いふち：裏側だけ描く少し大きい写しを各部品に重ねる */
+    var lineM = new T.MeshBasicMaterial({ color: 0x111111, side: T.BackSide });
+    var parts = [];
+    g.traverse(function (o) { if (o.isMesh && o.material !== M.eye && o.material !== M.nose && o.material !== M.ear) parts.push(o); });
+    parts.forEach(function (o) {
+      var thin = o.geometry.type !== "SphereGeometry", k = thin ? 1.5 : 1.1;
+      var l = new T.Mesh(o.geometry, lineM); l.scale.set(k, thin ? 1.04 : k, k); o.add(l);
+    });
     scene.add(g);
     this.M = M;
     this.hurt = 0;
@@ -229,9 +237,9 @@
     this.t = 0;
 
     var M = {
-      fur: mat(0xa8693b, { roughness: 0.95 }),
+      fur: mat(0xcd8c58, { roughness: 0.95 }),
       belly: mat(0xdcb48a, { roughness: 0.95 }),
-      dark: mat(0x7c4a28, { roughness: 0.95 }),
+      dark: mat(0x9c6640, { roughness: 0.95 }),
       ear: mat(0xd9958a, { roughness: 0.9 }),
       eye: mat(0x0c0c0c, { roughness: 0.15 }),
       nose: mat(0x2a1a14, { roughness: 0.4 }),
@@ -241,7 +249,7 @@
     };
     var M2 = {}; for (var k in M) M2[k] = M[k];
     M2.glove = mat(0x1d48b8, { roughness: 0.32 });
-    M2.fur = mat(0x96704e, { roughness: 0.95 });
+    M2.fur = mat(0xc49a70, { roughness: 0.95 });
     M2.belly = mat(0xdcb48a, { roughness: 0.95 });
     M2.trunks = mat(0x1d48b8, { roughness: 0.55 });
     this.me = new Roo(sc, M);
