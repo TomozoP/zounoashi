@@ -60,13 +60,13 @@
       burst: function (W, H, n, at) {
         n = n || 160;
         for (var i = 0; i < n; i++) {
-          var b = { r: Math.random() * 6, vr: (Math.random() - 0.5) * 8, flip: Math.random() * 6, vf: 4 + Math.random() * 8,
+          var b = { r: Math.random() * 6, vr: (Math.random() - 0.5) * 14, flip: Math.random() * 6, vf: 9 + Math.random() * 10, fall: 240 + Math.random() * 160,
             size: 0.8 + Math.random() * 0.5, col: c.colors[i % c.colors.length] };
           if (at) {
-            var a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6, sp = 250 + Math.random() * 450;
+            var a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6, sp = 600 + Math.random() * 700;
             b.x = at.x; b.y = at.y; b.vx = Math.cos(a) * sp; b.vy = Math.sin(a) * sp;
           } else {
-            b.x = Math.random() * W; b.y = -Math.random() * H * 0.8 - 20; b.vx = (Math.random() - 0.5) * 60; b.vy = 120 + Math.random() * 140;
+            b.x = Math.random() * W; b.y = -Math.random() * H * 0.8 - 20; b.vx = (Math.random() - 0.5) * 80; b.vy = b.fall;
           }
           bits.push(b);
         }
@@ -75,9 +75,9 @@
         for (var i = bits.length - 1; i >= 0; i--) {
           var b = bits[i];
           /* 噴き出した分は空気で減速して、ふつうの落ち方に落ち着く */
-          b.vx += (0 - b.vx) * Math.min(1, dt * 2.5);
-          b.vy += (130 - b.vy) * Math.min(1, dt * 2.5);
-          b.x += (b.vx + Math.sin(b.flip) * 40) * dt; b.y += b.vy * dt;
+          b.vx += (0 - b.vx) * Math.min(1, dt * 3);
+          b.vy += (b.fall - b.vy) * Math.min(1, dt * 3);
+          b.x += (b.vx + Math.sin(b.flip * 0.5) * 50) * dt; b.y += b.vy * dt;
           b.r += b.vr * dt; b.flip += b.vf * dt;
           if (b.y > H + 20) {
             if (c.rain) { b.y = -20; b.x = Math.random() * W; } else bits.splice(i, 1);
