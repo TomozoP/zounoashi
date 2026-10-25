@@ -133,10 +133,10 @@
     this.tailTip.position.copy(v.tail);
     /* 腕とグローブ */
     var sh = tmpV.copy(v.head).sub(chest).multiplyScalar(0.25).add(chest).clone();
-    /* グローブはいつも胴より手前（カメラ側）に出す。奥の腕は肩を奥に残し、胴の横から前へ回す */
-    var shB = sh.clone(); shB.z = z - 0.12 * s;
+    /* 手前の腕とグローブはいつも胴より手前（カメラ側）に。奥の腕は奥のまま */
+    var shB = sh.clone(); shB.z = z - 0.2 * s;
     var shF = sh.clone(); shF.z = z + 0.5 * s;
-    var gB = v.gb.clone(); gB.z = z + 0.4 * s;
+    var gB = v.gb.clone(); gB.z = z - 0.2 * s;
     var gF = v.gf.clone(); gF.z = z + 0.62 * s;
     /* ひじは下へ曲がる。肩とグローブが近いほど深く曲がり、伸ばすとまっすぐに近づく */
     function elbow(a, b) {
@@ -258,6 +258,18 @@
       sc.add(b); this.beams.push(b);
     }, this);
     this.t = 0;
+    /* 勝ったときの後光：自分の背中側（体の奥）に置く放射の板 */
+    var rc = document.createElement("canvas"); rc.width = rc.height = 512;
+    var rx = rc.getContext("2d"), grd = rx.createRadialGradient(256, 256, 0, 256, 256, 256);
+    grd.addColorStop(0, "rgba(255,240,170,1)"); grd.addColorStop(1, "rgba(255,200,60,0)");
+    rx.fillStyle = grd; rx.translate(256, 256);
+    for (var ri = 0; ri < 16; ri++) {
+      rx.rotate(Math.PI / 8); rx.globalAlpha = ri % 2 ? 0.55 : 0.35;
+      rx.beginPath(); rx.moveTo(0, 0); rx.lineTo(256, -24); rx.lineTo(256, 24); rx.closePath(); rx.fill();
+    }
+    var rtex = new T.CanvasTexture(rc);
+    this.rays = new T.Mesh(new T.PlaneGeometry(9, 9), new T.MeshBasicMaterial({ map: rtex, transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false, fog: false }));
+    this.rays.visible = false; sc.add(this.rays);
 
     var M = {
       fur: mat(0xcd8c58, { roughness: 0.95 }),
@@ -288,6 +300,10 @@
     if (s.foe) this.foe.sync(s.foe, map, -0.15, s.me);
     if (s.foeLook && s.foeLook !== this.foeLook) { this.foeLook = s.foeLook; this.foe.setLook(s.foeLook); }
     this.foe.group.visible = !!s.showFoe;
+    if (s.rays > 0 && s.me) {
+      map(s.me.P.chest, this.rays.position); this.rays.position.z = 0.15 - 1.2;
+      this.rays.rotation.z = this.t * 0.6; this.rays.material.opacity = s.rays * 0.8; this.rays.visible = true;
+    } else this.rays.visible = false;
     this.furM[0].emissive.setRGB(0.14 * this.me.hurt, 0, 0);
     this.furM[1].emissive.setRGB(0.14 * this.foe.hurt, 0, 0);
     this.animate(s.dt || 1 / 60, s.excite || 0);

@@ -124,7 +124,7 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", READY: "ready", FIGHT: "fight", END: "end", LEVELUP: "levelup", RESULT: "result" };
-  var state, T, shake = 0, fx = [], sparks = [], before = level, after = level, outcome = "";
+  var state, T, shake = 0, fx = [], sparks = [], confetti = [], before = level, after = level, outcome = "";
   var TIME = 45;
   var GROUND, PANEL, P1X, P2X, FS = 1;
   function place() {
@@ -209,7 +209,7 @@
     tone(150, 0.1, 0.16 + p * 0.1, "sine", 80);
   }
 
-  var G = 1800, DT = 1 / 60, hitStop = 0;
+  var G = 1800, DT = 1 / 60, hitStop = 0, slowT = 0, slowAcc = 0;
   /* 全10戦。レベルは1から始まり、後半ほど大きく上がって最後がレベル100 */
   var LEVELS = [1, 3, 6, 10, 16, 24, 35, 50, 72, 100];
   var START_LV = 1, MAX_LV = 100;
@@ -420,6 +420,7 @@
   }
   function knockOut(f) {
     f.ko = true; f.muscle = 0; f.C = 0;
+    slowT = 1.1; slowAcc = 0;
     crowd.cheer(2.4, 1); crowd.applause(2.6); crowd.excite(1);
     endFight();
   }
@@ -453,7 +454,7 @@
     crowd.start();
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
-    fx = []; sparks = []; shake = 0; drag = null;
+    fx = []; sparks = []; confetti = []; shake = 0; drag = null;
     nextBout();
   }
   /* 次の試合。演出なしですぐ始まる */
@@ -524,6 +525,8 @@
     for (var i = fx.length - 1; i >= 0; i--) { fx[i].t += dt; if (fx[i].t > (fx[i].guard ? 0.4 : 0.22)) fx.splice(i, 1); }
     /* 防いだ瞬間だけ、ほんの少し止める */
     if (hitStop > 0) { hitStop -= dt; return; }
+    /* KOの瞬間はスロー：体の動きだけ間引いて進める */
+    if (slowT > 0) { slowT -= dt; slowAcc += 0.3; if (slowAcc < 1) return; slowAcc -= 1; }
     for (var si = sparks.length - 1; si >= 0; si--) { var sp = sparks[si]; sp.t += dt; sp.y += sp.vy * dt; if (sp.t > 1.2) sparks.splice(si, 1); }
     crowd.step(dt);
     if (state === S.INTRO) { me.L = Math.sin(T * 2) * 0.1; stepFighter(me, dt); stepFighter(foe, dt); return; }
@@ -562,20 +565,37 @@
     if (state === S.END) {
       me.L *= 0.9; me.C *= 0.9; if (!foe.ko) { foe.L *= 0.9; foe.C *= 0.9; }
       stepFighter(me, dt); stepFighter(foe, dt); bodies(me, foe);
-      if (outcome === "win" && T > 0.6) { level = after; state = S.LEVELUP; T = 0; levelUpSound(); }
+      if (outcome === "win" && T > 1.5) { level = after; state = S.LEVELUP; T = 0; levelUpSound(); }
       else if (outcome === "draw" && T > 0.6) nextBout();
-      else if (outcome === "champ" && T > 1.6) { state = S.RESULT; crowd.cheer(2.5, 1); crowd.applause(3); levelUpSound(); }
-      else if (outcome === "lose" && T > 1.4) { level = after; state = S.RESULT; crowd.stop(); tone(330, 0.3, 0.1, "triangle", 220); }
+      else if (outcome === "champ" && T > 2.2) { state = S.RESULT; crowd.cheer(2.5, 1); crowd.applause(3); fanfare(); throwConfetti(); }
+      else if (outcome === "lose" && T > 2) { level = after; state = S.RESULT; crowd.stop(); tone(330, 0.3, 0.1, "triangle", 220); }
       return;
     }
     if (state === S.LEVELUP) {
       me.hopY = Math.abs(Math.sin(T * 6)) * 30;
       stepFighter(me, dt); stepFighter(foe, dt);
       if (Math.random() < dt * 40) sparks.push({ x: me.P.chest.x + (Math.random() - 0.5) * 220, y: GROUND - Math.random() * 40, vy: -200 - Math.random() * 260, t: 0 });
-      if (T > 1.3) { me.hopY = 0; nextBout(); }
+      if (T > 2.1) { me.hopY = 0; nextBout(); }
       return;
     }
-    if (state === S.RESULT) { stepFighter(me, dt); stepFighter(foe, dt); }
+    if (state === S.RESULT) { stepFighter(me, dt); stepFighter(foe, dt); stepConfetti(dt); }
+  }
+  /* 全勝：ファンファーレと紙吹雪 */
+  function fanfare() {
+    var n = [[523, 0, 0.12], [523, 0.13, 0.12], [523, 0.26, 0.12], [523, 0.39, 0.36], [415, 0.78, 0.36], [466, 1.17, 0.36], [523, 1.56, 0.2], [466, 1.8, 0.12], [523, 1.95, 0.9]];
+    n.forEach(function (x) {
+      tone(x[0], x[2], 0.12, "square", null, x[1]);
+      tone(x[0] / 2, x[2], 0.08, "triangle", null, x[1]);
+      tone(x[0] * 1.5, x[2], 0.04, "sawtooth", null, x[1]);
+    });
+    tone(1047, 1.2, 0.05, "triangle", null, 1.95);
+  }
+  function throwConfetti() {
+    var cols = ["#ff4d4d", "#ffd23f", "#3fa7ff", "#5ee07a", "#ff7ad9", "#ffffff", "#ff9a3c"];
+    for (var i = 0; i < 160; i++) confetti.push({ x: Math.random() * W, y: -Math.random() * H * 0.8 - 20, vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 140, r: Math.random() * 6, vr: (Math.random() - 0.5) * 8, flip: Math.random() * 6, vf: 4 + Math.random() * 8, col: cols[i % cols.length] });
+  }
+  function stepConfetti(dt) {
+    confetti.forEach(function (c) { c.x += (c.vx + Math.sin(c.flip) * 40) * dt; c.y += c.vy * dt; c.r += c.vr * dt; c.flip += c.vf * dt; if (c.y > H + 20) { c.y = -20; c.x = Math.random() * W; } });
   }
   function levelUpSound() {
     [523, 659, 784, 1047, 784, 1047, 1319].forEach(function (f, i) { tone(f, i === 6 ? 0.6 : 0.14, 0.11, "square", null, i * 0.09); });
@@ -828,13 +848,13 @@
     var s3 = scene3d(), ok = false;
     if (s3) {
       try {
-        s3.sync({ me: me, foe: foe, showFoe: true, W: W, H: H, ground: GROUND, excite: crowd.level(), foeLook: foeLook, dt: Math.min(0.1, Math.max(0, drawNow - (drawLast || drawNow)) / 1000) }); drawLast = drawNow;
+        s3.sync({ me: me, foe: foe, showFoe: true, W: W, H: H, ground: GROUND, excite: crowd.level(), foeLook: foeLook, rays: state === S.LEVELUP ? Math.min(1, T / 0.2) * Math.min(1, (2.1 - T) / 0.5) : 0, dt: Math.min(0.1, Math.max(0, drawNow - (drawLast || drawNow)) / 1000) }); drawLast = drawNow;
         ok = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); ok = false; }
     }
     /* 立体が使えないときは線画で描く */
     if (!ok) { drawBackground(); drawRoo(foe, 0, 0, null); drawRoo(me, 0, 0, null); }
-    if (state === S.LEVELUP) drawRays();
+    if (state === S.LEVELUP && !ok) drawRays();
     drawFx();
     if (state !== S.RESULT && state !== S.INTRO) drawHud();
     ctx.restore();
@@ -842,6 +862,7 @@
     if (state === S.LEVELUP) drawLevelUp();
     if (state === S.READY) drawReady();
     if (res) drawResult();
+    if (confetti.length) drawConfetti();
   }
 
   /* READY… FIGHT!：大きな文字が勢いよく出る */
@@ -897,6 +918,15 @@
     });
     var swap = T > 0.35, pop = swap ? 1 + Math.max(0, 0.5 - (T - 0.35) * 2) : 1;
     drawTag(me.P.head.x, me.P.head.y - 90 * FS - (swap ? Math.max(0, 0.3 - (T - 0.35)) * 120 : 0), "Lv." + (swap ? after : before), 1.4 * pop);
+  }
+
+  /* 全勝したときの紙吹雪 */
+  function drawConfetti() {
+    confetti.forEach(function (c) {
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.r);
+      ctx.scale(1, Math.cos(c.flip)); ctx.fillStyle = c.col; ctx.fillRect(-6, -3.5, 12, 7);
+      ctx.restore();
+    });
   }
 
   /* 結果画面（doji5 の形）。負けたときだけ。たどり着いたレベルだけを出す */
