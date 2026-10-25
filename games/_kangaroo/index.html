@@ -42,9 +42,10 @@
    いつも自分と同じレベルのカンガルーと戦う。全10戦。レベル1から始まり、後半ほど大きく上がって最後はレベル100（1,3,6,10,16,24,35,50,72,100）。
    相手の毛色・グローブ・トランクス・耳や鼻先は毎試合少し変わる。
    体は点とばねの簡単な物理。指でなぞると、押した所からのずれのぶんだけ
-     後ろ → 体を引いて溜める（グローブが光る） / 前 → 乗り出して前の手が伸びる（パンチ）
+     前 → 乗り出して前の手が伸びる（パンチ） / 後ろ → 体を引いてよける
    と、左右だけでおもちゃのように体を引っぱる。グローブが相手に当たったときの勢いがダメージ。
-   溜めるほど次の一撃が強いが、溜め中に打たれるとカウンターで倍のダメージ（ドンケツ式の読み合い）。
+   パンチアウト式：相手は普段ガードを固めていて殴っても防がれる。大振りの前の溜め（グローブが光る）を
+   殴るとカウンターで倍。大振りは引いてよけ、空振りのあとのすきに打ち込む。
    勝つと短いレベルアップの演出のあと、すぐ次の（1つ上のレベルの）相手。負けたら結果を出してレベル1に戻る。
    相手の賢さと速さだけがレベルで上がる。 */
 (function () {
@@ -160,6 +161,11 @@
     else if (n === "chest") o = [12 + 95 * L, -190 + 100 * C];
     else if (n === "head") o = [12 + 95 * L + 28 + 10 * L, -190 + 100 * C - 58 + 5 * C];
     else if (n === "tail") o = [-135, -6];
+    else if (f.guardUp) {
+      /* 構え：両方のグローブを顔の前に */
+      var cx0 = 12 + 95 * L, cy0 = -190 + 100 * C;
+      o = n === "gf" ? [cx0 + 46, cy0 - 56] : [cx0 + 38, cy0 - 38];
+    }
     /* 前の手は伸ばすほど少し下へ弧を描く（かがんだ相手の頭にも届く） */
     else if (n === "gf") o = [12 + 95 * L + 50 + 100 * Math.max(0, L), -190 + 100 * C - 6 - 10 * C + 45 * Math.max(0, L)];
     else o = [12 + 95 * L + 32, -190 + 100 * C - 26];
@@ -169,9 +175,11 @@
     return { x: f.home + f.slide + (o[0] + step) * f.dir * f.sc, y: GROUND + (o[1] - (n === "foot" ? 0 : 0)) * f.sc - hop };
   }
 
-  /* 後ろへ引いている間は溜め。溜めるほど次の一撃が強いが、溜め中に打たれるとカウンターで大きく食らう */
-  var CHARGE_T = 0.8;
-  function charging(f) { return (f.charge || 0) > 0.1; }
+  /* パンチアウト式：相手は普段ガードを固めていて、殴っても防がれる。
+     大振りの前に体を引いて溜める（グローブが光る）→ そこを殴るとカウンター。
+     大振りは引いてよけられ、打ったあとはすき。こちらも打っている最中に打たれるとカウンターを食らう。 */
+  function attacking(f) { return f === foe ? ai.st === "windup" || ai.st === "attack" : f.L > 0.35; }
+  function dodging(f) { return f === me && !f.ko && !(f.stun > 0) && f.L < -0.45; }
 
   var G = 1800, DT = 1 / 60, hitStop = 0, counters = 0;
   /* 全10戦。レベルは1から始まり、後半ほど大きく上がって最後がレベル100 */
@@ -329,6 +337,8 @@
         var t = b.P[tg[0]], r = (tg[1] + GLOVE_R) * a.sc;
         var dx = t.x - gl.x, dy = t.y - gl.y, d = Math.hypot(dx, dy);
         if (d >= r || d < 0.001) return;
+        /* 引いてよけている間は当たらない */
+        if (dodging(b)) return;
         var nx = dx / d, ny = dy / d;
         var vx = ((gl.x - gl.px) - (t.x - t.px)) / DT, vy = ((gl.y - gl.py) - (t.y - t.py)) / DT;
         var vn = vx * nx + vy * ny;
@@ -338,9 +348,16 @@
         t.x += nx * over * 0.5; t.y += ny * over * 0.5;
         if (vn < 300 || a.cool[g] > 0 || b.ko || a.ko || a.stun > 0) return;
         a.cool[g] = 0.25;
+        /* ガードの上から：ダメージなし、はね返される */
+        if (b.guardUp) {
+          a.slide -= nx * 25; b.slide += nx * 8;
+          fx.push({ x: gl.x + nx * 12, y: gl.y + ny * 12, t: 0, big: false });
+          noiseHit(0.08, 500, 0.35, 0.8); tone(110, 0.12, 0.18, "sine", 70);
+          return;
+        }
         var head = tg[0] === "head";
-        /* 溜めた一撃ほど強い。溜め中の相手に当てるとカウンターで倍 */
-        var power = a.powT > 0 ? a.pow : 0, counter = charging(b);
+        /* 打とうとしている最中の相手に当てるとカウンターで倍 */
+        var power = 0, counter = attacking(b);
         var dmg = Math.min(16, (vn - 300) / 50 * (head ? 1.2 : 0.6) + (head ? 2 : 1)) * (0.6 + 1.6 * power);
         if (counter) dmg *= 2;
         dmg = Math.min(35, dmg);
@@ -348,9 +365,10 @@
         /* 当たった勢いで相手の体を押す */
         t.px -= nx * vn * DT * (0.6 + power); t.py -= ny * vn * DT * (0.6 + power);
         b.slide += nx * vn * (0.03 + 0.05 * power);
-        a.powT = 0;
+        if (b === foe && !counter && ai.st === "recover") ai.t += 0.15;
         if (counter) {
-          b.charge = 0; b.stun = 0.5; b.slide += nx * 80;
+          b.charge = 0; b.slide += nx * 80;
+          if (b === foe) { ai.st = "stun"; ai.t = 1.1; } else b.stun = 0.6;
           fx.push({ x: gl.x + nx * 12, y: gl.y + ny * 12, t: 0, big: true, guard: true, ang: Math.atan2(ny, nx) });
           parrySound(); counters++;
           crowd.ooh(1); crowd.applause(0.8); crowd.excite(0.6);
@@ -404,13 +422,7 @@
   }
   function stepFighter(f, dt) {
     if (f.stun > 0) { f.stun -= dt; f.L = -0.5; }
-    /* 引いている間は溜まる。前へ出した瞬間に溜めた分の一撃になる */
-    var back = !f.ko && !(f.stun > 0) && f.L < -0.3;
-    if (back) f.charge = Math.min(1, (f.charge || 0) + dt / CHARGE_T);
-    else if (f.charge > 0 && f.L > 0) { f.pow = f.charge; f.powT = 0.4; f.charge = 0; }
-    else f.charge = Math.max(0, (f.charge || 0) - dt * 2);
-    if (f.powT > 0) f.powT -= dt;
-    f.C = (f.charge || 0) * 0.3;
+    f.C = f.crouch || 0;
     f.cool.gf = Math.max(0, f.cool.gf - dt); f.cool.gb = Math.max(0, f.cool.gb - dt);
     f.hurtT = Math.max(0, f.hurtT - dt);
     f.slide *= Math.pow(0.1, dt);
@@ -432,7 +444,7 @@
     state = S.READY; T = 0; fightT = 0; lastHit = 0; lowCheer = false;
     announce("Ready?", 0.95);
     me = fighter(P1X, 1); foe = fighter(P2X, -1);
-    ai = { L: 0, C: 0, goalL: 0, goalC: 0, think: 0.6, punchT: 0, react: null, chargeT: 0, saw: false };
+    ai = { L: 0, st: "idle", t: 0.8 };
     before = after = level; outcome = "";
     foeLook = makeLook();
   }
@@ -440,39 +452,42 @@
   /* ============ 相手（同じレベル） ============
      頭の中の指を動かす速さ・こちらの踏み込みに気づく速さと確かさがレベルで上がる。 */
   function cpuSkill() {
+    var p = power();
     return {
-      delay: 0.65 - power() * 0.56,
-      sure: 0.08 + power() * 0.84,
-      pace: 1.7 - power() * 1.32,
-      speed: 4.5 + power() * 12.5
+      windup: 1.0 - p * 0.62,   /* 溜めの長さ＝カウンターを狙える時間 */
+      recover: 0.95 - p * 0.55, /* 打ったあとのすき */
+      idle: 1.5 - p * 0.9,      /* 構えて待つ時間 */
+      double: p * 0.5           /* 強いほど続けてもう一発 */
     };
   }
   function stepCpu(dt) {
     var k = cpuSkill();
-    if (foe.ko || foe.stun > 0) { ai.L = foe.L; ai.C = foe.C; return; }
-    /* こちらが溜め始めたら、小突いてカウンターを狙う（レベルが高いほど速く確か） */
-    if (!charging(me)) ai.saw = false;
-    else if (!ai.saw) { ai.saw = true; if (Math.random() < k.sure) ai.react = { t: k.delay }; }
-    if (ai.react) {
-      ai.react.t -= dt;
-      if (ai.react.t <= 0) { ai.react = null; ai.chargeT = 0; ai.punchT = 0.2; }
-    }
-    if (ai.punchT > 0) { ai.punchT -= dt; ai.goalL = 1; }
-    else if (ai.chargeT > 0) { ai.chargeT -= dt; ai.goalL = -0.85; if (ai.chargeT <= 0) ai.punchT = 0.25; }
-    else {
-      ai.goalL = -0.15 + Math.sin(T * 3) * 0.12;
-      ai.think -= dt;
-      /* こちらがすきだらけなら狙う */
-      if (me.stun > 0 && Math.random() < k.sure) ai.think = Math.min(ai.think, k.delay);
-      if (ai.think <= 0) {
-        ai.think = k.pace * (0.5 + Math.random());
-        /* 溜めて大きく打つか、すぐ小突くか。弱いうちは長く溜めがち（カウンターの的） */
-        if (Math.random() < 0.75 - 0.3 * power()) ai.chargeT = 0.4 + Math.random() * (1.4 - power());
-        else ai.punchT = 0.2;
+    if (foe.ko) return;
+    ai.t -= dt;
+    var goal = 0, sp = 6;
+    foe.guardUp = false; foe.crouch = 0; foe.charge = 0;
+    if (ai.st === "idle") {
+      foe.guardUp = true; goal = -0.1 + Math.sin(T * 3) * 0.1;
+      if (me.stun > 0) ai.t = Math.min(ai.t, 0.15);
+      if (ai.t <= 0) { ai.st = "windup"; ai.t = k.windup * (0.85 + Math.random() * 0.3); ai.w = ai.t; }
+    } else if (ai.st === "windup") {
+      goal = -0.75; sp = 3; foe.crouch = 0.25; foe.charge = 1 - ai.t / ai.w;
+      if (ai.t <= 0) { ai.st = "attack"; ai.t = 0.28; }
+    } else if (ai.st === "attack") {
+      goal = 1; sp = 16;
+      if (ai.t <= 0) {
+        if (Math.random() < k.double && !ai.again) { ai.again = true; ai.st = "windup"; ai.t = ai.w = k.windup * 0.5; }
+        else { ai.again = false; ai.st = "recover"; ai.t = k.recover; }
       }
+    } else if (ai.st === "recover") {
+      goal = 0.3; sp = 3; foe.crouch = 0.2;
+      if (ai.t <= 0) { ai.st = "idle"; ai.t = k.idle * (0.6 + Math.random() * 0.8); }
+    } else if (ai.st === "stun") {
+      goal = -0.25; sp = 4; foe.crouch = 0.4;
+      if (ai.t <= 0) { ai.st = "idle"; ai.t = k.idle * 0.5; }
     }
-    var sp = k.speed * dt;
-    ai.L += Math.max(-sp, Math.min(sp, ai.goalL - ai.L));
+    sp *= dt;
+    ai.L += Math.max(-sp, Math.min(sp, goal - ai.L));
     foe.L = ai.L;
   }
 
@@ -506,7 +521,7 @@
     if (state === S.FIGHT) {
       fightT += dt;
       /* 指のずれがそのまま体の引っぱり */
-      /* 左右だけ。後ろに引くと溜め、前に払うとパンチ */
+      /* 左右だけ。前に払うとパンチ、後ろに引くとよける */
       if (drag) me.L = Math.max(-1, Math.min(1, drag.dx / 90));
       else me.L += (keyL - me.L) * Math.min(1, dt * 14);
       stepCpu(dt);
@@ -794,7 +809,7 @@
     /* 立体が使えないときは線画で描く */
     if (!ok) { drawBackground(); drawRoo(foe, 0, 0, null); drawRoo(me, 0, 0, null); }
     if (state === S.LEVELUP) drawRays();
-    if (state === S.FIGHT) { drawCharge(me); drawCharge(foe); }
+    if (state === S.FIGHT) drawCharge(foe);
     drawFx();
     if (state !== S.RESULT && state !== S.INTRO) drawHud();
     ctx.restore();
@@ -804,7 +819,7 @@
     if (res) drawResult();
   }
 
-  /* 溜め：前のグローブが溜まるほど大きく光る（満タンで脈打つ） */
+  /* 相手の大振りの溜め：前のグローブが溜まるほど大きく光る（満タンで脈打つ） */
   function drawCharge(f) {
     var c = f.charge || 0;
     if (c <= 0.05) return;
@@ -890,7 +905,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { counters: counters, state: state, level: level, before: before, after: after, outcome: outcome, me: me && { hp: me.hp, L: me.L, C: me.C, head: [me.P.head.x, me.P.head.y], gf: [me.P.gf.x, me.P.gf.y] }, foe: foe && { hp: foe.hp, ko: foe.ko, head: [foe.P.head.x, foe.P.head.y] }, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { counters: counters, state: state, level: level, before: before, after: after, outcome: outcome, me: me && { hp: me.hp, L: me.L, C: me.C, head: [me.P.head.x, me.P.head.y], gf: [me.P.gf.x, me.P.gf.y] }, foe: foe && { hp: foe.hp, charge: foe.charge, st: ai && ai.st, ko: foe.ko, head: [foe.P.head.x, foe.P.head.y] }, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
