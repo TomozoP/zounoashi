@@ -122,7 +122,7 @@
   var level = 1;
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", FIGHT: "fight", END: "end", LEVELUP: "levelup", RESULT: "result" };
+  var S = { INTRO: "intro", READY: "ready", FIGHT: "fight", END: "end", LEVELUP: "levelup", RESULT: "result" };
   var state, T, shake = 0, fx = [], sparks = [], before = level, after = level, outcome = "";
   var TIME = 45;
   var GROUND, PANEL, P1X, P2X, FS = 1;
@@ -179,6 +179,103 @@
   function height(f) { return f.C > 0.5 ? "low" : "high"; }
 
   var G = 1800, DT = 1 / 60, hitStop = 0, parries = 0;
+  var READY_T = 0.95, readyFight = false, lastHit = 0, lowCheer = false;
+
+  /* 掛け声。読み上げが使えない端末では文字だけ */
+  function announce(text, rate) {
+    if (!AC) return;
+    try {
+      var sy = window.speechSynthesis;
+      if (!sy || typeof SpeechSynthesisUtterance !== "function") return;
+      sy.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = "en-US"; u.rate = rate || 1; u.pitch = 0.7; u.volume = 1;
+      sy.speak(u);
+    } catch (e) {}
+  }
+
+  /* ============ 観客のガヤ ============
+     ずっと鳴るざわめき（盛り上がりで大きくなる）に、どよめき・歓声・拍手・ブーイングを重ねる。
+     どれもノイズを人の声の帯域に通して作る。 */
+  var crowd = (function () {
+    var bed = null, bedGain = null, ex = 0;
+    function src() { var b = AC.createBufferSource(); b.buffer = NOISE; b.loop = true; return b; }
+    function band(freq, q) { var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q; return f; }
+    function env(g, n, a, peak, hold, rel) {
+      g.gain.setValueAtTime(0.0001, n);
+      g.gain.exponentialRampToValueAtTime(peak, n + a);
+      g.gain.setValueAtTime(peak, n + a + hold);
+      g.gain.exponentialRampToValueAtTime(0.0001, n + a + hold + rel);
+    }
+    var api = {
+      start: function () {
+        if (!AC || !NOISE || bed) return;
+        bed = src(); bedGain = AC.createGain(); bedGain.gain.value = 0.0001;
+        var f1 = band(520, 0.7), f2 = band(1300, 1.2), lp = AC.createBiquadFilter();
+        lp.type = "lowpass"; lp.frequency.value = 2400;
+        bed.connect(f1); bed.connect(f2); f1.connect(lp); f2.connect(lp); lp.connect(bedGain); bedGain.connect(AC.destination);
+        bed.start();
+      },
+      stop: function () {
+        if (!bed) return;
+        var n = AC.currentTime, b = bed;
+        bedGain.gain.cancelScheduledValues(n); bedGain.gain.setTargetAtTime(0.0001, n, 0.3);
+        setTimeout(function () { try { b.stop(); } catch (e) {} }, 1500);
+        bed = null; ex = 0;
+      },
+      excite: function (v) { ex = Math.min(1, ex + v); },
+      level: function () { return ex; },
+      step: function (dt) {
+        var hot = me && foe && (me.hp < 30 || foe.hp < 30) ? 0.35 : 0;
+        ex = Math.max(hot, ex - dt * 0.25);
+        if (bed) bedGain.gain.setTargetAtTime(0.05 + ex * 0.12, AC.currentTime, 0.25);
+      },
+      /* どよめき「おおっ」：オの響きの帯域を、少し上がる高さで */
+      ooh: function (p) {
+        if (!AC || !NOISE) return;
+        var n = AC.currentTime, s = src(), g = AC.createGain(), f1 = band(420, 5), f2 = band(800, 5);
+        f1.frequency.setValueAtTime(380, n); f1.frequency.linearRampToValueAtTime(520, n + 0.5);
+        f2.frequency.setValueAtTime(760, n); f2.frequency.linearRampToValueAtTime(900, n + 0.5);
+        s.connect(f1); s.connect(f2); f1.connect(g); f2.connect(g); g.connect(AC.destination);
+        env(g, n, 0.12, 0.5 * p + 0.15, 0.15, 0.6);
+        s.start(n, Math.random()); s.stop(n + 1.2);
+      },
+      /* 歓声：広い帯域のわーっ */
+      cheer: function (dur, p) {
+        if (!AC || !NOISE) return;
+        var n = AC.currentTime, s = src(), g = AC.createGain(), f1 = band(900, 0.6), f2 = band(2200, 1);
+        s.connect(f1); s.connect(f2); f1.connect(g); f2.connect(g); g.connect(AC.destination);
+        env(g, n, 0.15, 0.22 * (p || 1) + 0.05, dur * 0.5, dur * 0.7);
+        s.start(n, Math.random()); s.stop(n + dur * 1.4 + 0.3);
+      },
+      /* 拍手：短いノイズの粒をたくさん */
+      applause: function (dur) {
+        if (!AC || !NOISE) return;
+        var n = AC.currentTime, hp = AC.createBiquadFilter(), out = AC.createGain();
+        hp.type = "bandpass"; hp.frequency.value = 2200; hp.Q.value = 0.8; out.gain.value = 0.5;
+        hp.connect(out); out.connect(AC.destination);
+        var count = Math.round(dur * 90);
+        for (var i = 0; i < count; i++) {
+          var t = n + Math.random() * dur, s = AC.createBufferSource(), g = AC.createGain();
+          s.buffer = NOISE; s.connect(g); g.connect(hp);
+          var fade = 1 - (t - n) / dur * 0.7;
+          g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime((0.15 + Math.random() * 0.25) * fade, t + 0.002);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+          s.start(t, Math.random() * 1.5); s.stop(t + 0.04);
+        }
+      },
+      /* ブーイング「ぶー」：低いウの響き */
+      boo: function () {
+        if (!AC || !NOISE) return;
+        var n = AC.currentTime, s = src(), g = AC.createGain(), f1 = band(300, 6), f2 = band(620, 6);
+        f1.frequency.setValueAtTime(320, n); f1.frequency.linearRampToValueAtTime(260, n + 1.3);
+        s.connect(f1); s.connect(f2); f1.connect(g); f2.connect(g); g.connect(AC.destination);
+        env(g, n, 0.25, 0.45, 0.7, 0.6);
+        s.start(n, Math.random()); s.stop(n + 1.8);
+      }
+    };
+    return api;
+  })();
   function physics(f) {
     var p, n, i;
     for (i = 0; i < NAMES.length; i++) {
@@ -237,6 +334,7 @@
           a.stun = 0.6; a.slide -= nx * 40;
           fx.push({ x: gl.x + nx * 12, y: gl.y + ny * 12, t: 0, big: false, guard: true, ang: Math.atan2(ny, nx) });
           parrySound(); parries++;
+          lastHit = fightT; crowd.ooh(0.6); crowd.applause(0.7); crowd.excite(0.4);
           hitStop = 0.09; shake = Math.max(shake, 0.12);
           return;
         }
@@ -250,6 +348,9 @@
         fx.push({ x: gl.x + nx * 18, y: gl.y + ny * 18, t: 0, big: big });
         shake = Math.max(shake, big ? 0.25 : 0.1);
         punchSound(dmg / 16);
+        lastHit = fightT;
+        if (big) { crowd.ooh(1); crowd.excite(0.6); } else crowd.excite(0.25);
+        if (!lowCheer && b.hp < 30 && b.hp > 0) { lowCheer = true; crowd.cheer(0.9, 0.6); }
         if (big) hitStop = Math.max(hitStop, 0.05);
         if (b.hp <= 0) { b.hp = 0; knockOut(b); }
       });
@@ -279,6 +380,7 @@
   }
   function knockOut(f) {
     f.ko = true; f.muscle = 0; f.C = 0;
+    crowd.cheer(2.4, 1); crowd.applause(2.6); crowd.excite(1);
     endFight();
   }
   function bodies(a, b) {
@@ -300,6 +402,7 @@
   var me, foe, ai;
   function newRound() {
     level = 1;
+    crowd.start();
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     fx = []; sparks = []; shake = 0; drag = null;
@@ -307,7 +410,8 @@
   }
   /* 次の試合。演出なしですぐ始まる */
   function nextBout() {
-    state = S.FIGHT; T = 0; fightT = 0;
+    state = S.READY; T = 0; fightT = 0; lastHit = 0; lowCheer = false;
+    announce("Ready?", 0.95);
     me = fighter(P1X, 1); foe = fighter(P2X, -1);
     ai = { L: 0, C: 0, goalL: 0, goalC: 0, think: 0.6, punchT: 0, react: null, guardFor: 0 };
     before = after = level; outcome = "";
@@ -369,7 +473,15 @@
     /* 防いだ瞬間だけ、ほんの少し止める */
     if (hitStop > 0) { hitStop -= dt; return; }
     for (var si = sparks.length - 1; si >= 0; si--) { var sp = sparks[si]; sp.t += dt; sp.y += sp.vy * dt; if (sp.t > 1.2) sparks.splice(si, 1); }
+    crowd.step(dt);
     if (state === S.INTRO) { me.L = Math.sin(T * 2) * 0.1; stepFighter(me, dt); stepFighter(foe, dt); return; }
+    /* READY… FIGHT! のあいだは構えたまま */
+    if (state === S.READY) {
+      stepFighter(me, dt); stepFighter(foe, dt);
+      if (T >= READY_T && !readyFight) { readyFight = true; announce("Fight!", 1.15); bell(0); crowd.cheer(0.9, 0.5); }
+      if (T >= READY_T + 0.55) { state = S.FIGHT; T = 0; readyFight = false; }
+      return;
+    }
     if (state === S.FIGHT) {
       fightT += dt;
       /* 指のずれがそのまま体の引っぱり */
@@ -379,7 +491,9 @@
       stepFighter(me, dt); stepFighter(foe, dt);
       bodies(me, foe);
       hits(me, foe); hits(foe, me);
-      if (fightT >= TIME && state === S.FIGHT) endFight();
+      /* 長く当たりがないとブーイング */
+      if (fightT - lastHit > 6) { lastHit = fightT; crowd.boo(); }
+      if (fightT >= TIME && state === S.FIGHT) { endFight(); crowd.cheer(1.2, 0.6); }
       return;
     }
     if (state === S.END) {
@@ -387,7 +501,7 @@
       stepFighter(me, dt); stepFighter(foe, dt); bodies(me, foe);
       if (outcome === "win" && T > 0.6) { level = after; state = S.LEVELUP; T = 0; levelUpSound(); }
       else if (outcome === "draw" && T > 0.6) nextBout();
-      else if (outcome === "lose" && T > 1.4) { level = after; state = S.RESULT; tone(330, 0.3, 0.1, "triangle", 220); }
+      else if (outcome === "lose" && T > 1.4) { level = after; state = S.RESULT; crowd.stop(); tone(330, 0.3, 0.1, "triangle", 220); }
       return;
     }
     if (state === S.LEVELUP) {
@@ -638,7 +752,9 @@
   var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.KangarooScene(); }) : function () { return null; };
   if (!window.Z3) scene3d.drop = function () {};
 
+  var drawLast = 0, drawNow = 0;
   function draw() {
+    drawNow = performance.now();
     var res = state === S.RESULT;
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, res);
     ctx.clearRect(0, 0, W, H);
@@ -647,7 +763,7 @@
     var s3 = scene3d(), ok = false;
     if (s3) {
       try {
-        s3.sync({ me: me, foe: foe, showFoe: true, W: W, H: H, ground: GROUND });
+        s3.sync({ me: me, foe: foe, showFoe: true, W: W, H: H, ground: GROUND, excite: crowd.level(), dt: Math.min(0.1, Math.max(0, drawNow - (drawLast || drawNow)) / 1000) }); drawLast = drawNow;
         ok = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); ok = false; }
     }
@@ -655,11 +771,32 @@
     if (!ok) { drawBackground(); drawRoo(foe, 0, 0, null); drawRoo(me, 0, 0, null); }
     if (state === S.LEVELUP) drawRays();
     drawFx();
-    if (state !== S.RESULT) drawHud();
+    if (state !== S.RESULT && state !== S.INTRO) drawHud();
     ctx.restore();
     if (state === S.FIGHT && drag) drawFinger();
     if (state === S.LEVELUP) drawLevelUp();
+    if (state === S.READY) drawReady();
     if (res) drawResult();
+  }
+
+  /* READY… FIGHT!：大きな文字が勢いよく出る */
+  function drawReady() {
+    var fight = T >= READY_T, t = fight ? T - READY_T : T;
+    var text = fight ? "FIGHT!" : "READY", k = Math.min(1, t / 0.12);
+    var sc = fight ? 1.6 - 0.6 * k : 1.25 - 0.25 * k;
+    ctx.save();
+    if (fight && t < 0.12) { ctx.fillStyle = "rgba(255,255,255," + (0.5 - t * 4) + ")"; ctx.fillRect(0, 0, W, H); }
+    ctx.translate(W / 2, GROUND - 400 * FS);
+    ctx.scale(sc, sc);
+    ctx.globalAlpha = Math.min(1, t / 0.08);
+    ctx.font = "italic 900 " + (fight ? 92 : 76) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.lineJoin = "round"; ctx.lineWidth = 10; ctx.strokeStyle = "rgba(0,0,0,.75)";
+    ctx.strokeText(text, 0, 0);
+    var g = ctx.createLinearGradient(0, -46, 0, 46);
+    if (fight) { g.addColorStop(0, "#fff3b0"); g.addColorStop(1, "#ff8a1f"); } else { g.addColorStop(0, "#ffffff"); g.addColorStop(1, "#bfd8ff"); }
+    ctx.fillStyle = g; ctx.fillText(text, 0, 0);
+    ctx.restore();
   }
 
   /* 指の押した所と今の所（おもちゃの操作棒） */
