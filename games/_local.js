@@ -355,5 +355,6 @@ window.DRAFT_GAMES = [
     "play": "games/_taiyaki/index.html",
     "full": true,
     "catch": "好きな画像の形でたい焼きを焼く"
-  }
+  },
+  {"type":"lab","tags":[],"id":"minicar","title":"ミニカーチキンレース","year":2026,"date":"2026-10-25","plays":null,"url":"","img":"games/_minicar/img/thumb.webp","play":"games/_minicar/index.html","full":true,"catch":"ミニカーを引っ張って机の端ギリギリで止める"},
 ];
