@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>カンガルーバトル</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #fff; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* カンガルーバトル
+
+   自分のレベルは端末に覚えておき、相手はいつも同じレベルのカンガルー。
+   マッチングでは違うレベルのカンガルーは素通りし、同じレベルの1匹だけが跳ねてきて構える。
+   体は点とばねの簡単な物理。指でなぞると、押した所からのずれのぶんだけ
+     前後 → 体を前に乗り出す（前の手が伸びる） / 下 → かがむ
+   と、おもちゃのように体を引っぱる。グローブが相手の頭や胸に当たったときの勢いがダメージ。
+   かがむと頭が下がって、相手のパンチが上を抜ける。
+   勝つとレベル+1（レベルアップの演出）、負けると-1（1より下にはならない）。相手の賢さと速さだけがレベルで上がる。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+  }
+  function bell(delay) {
+    tone(1180, 1.2, 0.16, "sine", null, delay); tone(2950, 0.6, 0.05, "sine", null, delay); tone(1770, 0.9, 0.06, "triangle", null, delay);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ レベル（端末に保存） ============ */
+  var SAVE = "kangaroo-level";
+  function loadLevel() {
+    try { var v = parseInt(window.localStorage.getItem(SAVE), 10); return v > 0 ? v : 1; } catch (e) { return 1; }
+  }
+  function saveLevel(v) { try { window.localStorage.setItem(SAVE, String(v)); } catch (e) {} }
+  var level = loadLevel();
+
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", MATCH: "match", FIGHT: "fight", END: "end", LEVELUP: "levelup", RESULT: "result" };
+  var state, T, shake = 0, fx = [], passers = [], sparks = [], before = level, after = level, outcome = "";
+  var TIME = 45;
+  var GROUND, PANEL, P1X, P2X, FS = 1;
+  function place() {
+    PANEL = Math.round(H - Math.max(190, H * 0.2));
+    FS = Math.min(1.3, Math.max(1, (PANEL - 120) / 420));
+    GROUND = Math.min(PANEL - 50, Math.round(H * 0.6));
+    P1X = W / 2 - 100 * FS; P2X = W / 2 + 100 * FS;
+  }
+
+  /* ============ 体（点とばね） ============
+     右向きのときの足元からの位置。左向きは左右を返す。 */
+  var REST = { foot: [0, 0], hip: [-15, -85], chest: [12, -190], head: [40, -248], tail: [-135, -6], gf: [62, -196], gb: [46, -214] };
+  var NAMES = ["foot", "hip", "chest", "head", "tail", "gf", "gb"];
+  var MUSCLE = { foot: 0.5, hip: 0.22, chest: 0.2, head: 0.28, tail: 0.2, gf: 0.3, gb: 0.3 };
+  var STICKS = [["foot", "hip"], ["hip", "chest"], ["chest", "head"], ["hip", "tail"]];
+  var GLOVE_R = 17;
+
+  function fighter(home, dir, sc) {
+    var f = { home: home, dir: dir, sc: sc || FS, slide: 0, hp: 100, ko: false, L: 0, C: 0, cool: { gf: 0, gb: 0 }, hurtT: 0, muscle: 1, hop: 0, P: {}, len: {} };
+    NAMES.forEach(function (n) {
+      var x = home + REST[n][0] * dir * f.sc, y = GROUND + REST[n][1] * f.sc;
+      f.P[n] = { x: x, y: y, px: x, py: y };
+    });
+    STICKS.forEach(function (s) { f.len[s[0] + s[1]] = dist(f.P[s[0]], f.P[s[1]]); });
+    return f;
+  }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  /* 指（相手は頭の中の指）から決まる、各部の行きたい位置 */
+  function target(f, n) {
+    var L = f.L, C = f.C, o;
+    if (n === "foot") o = [0, 0];
+    else if (n === "hip") o = [-15 + 18 * L, -85 + 30 * C];
+    else if (n === "chest") o = [12 + 55 * L, -190 + 85 * C];
+    else if (n === "head") o = [12 + 55 * L + 28 + 8 * L, -190 + 85 * C - 58 + 5 * C];
+    else if (n === "tail") o = [-135, -6];
+    else if (n === "gf") o = [12 + 55 * L + 50 + 75 * Math.max(0, L), -190 + 85 * C - 6 - 10 * C];
+    else o = [12 + 55 * L + 32, -190 + 85 * C - 26];
+    var hop = f.hopY || 0;
+    return { x: f.home + f.slide + o[0] * f.dir * f.sc, y: GROUND + (o[1] - (n === "foot" ? 0 : 0)) * f.sc - hop };
+  }
+
+  var G = 1800, DT = 1 / 60;
+  function physics(f) {
+    var p, n, i;
+    for (i = 0; i < NAMES.length; i++) {
+      p = f.P[NAMES[i]];
+      var vx = (p.x - p.px) * 0.96, vy = (p.y - p.py) * 0.96;
+      p.px = p.x; p.py = p.y;
+      p.x += vx; p.y += vy + G * DT * DT;
+    }
+    var m = f.muscle;
+    for (i = 0; i < NAMES.length; i++) {
+      n = NAMES[i]; p = f.P[n];
+      var t = target(f, n), k = MUSCLE[n] * (n === "foot" ? Math.max(0.05, m) : m);
+      p.x += (t.x - p.x) * k; p.y += (t.y - p.y) * k;
+    }
+    for (var it = 0; it < 4; it++) {
+      STICKS.forEach(function (s) { keep(f.P[s[0]], f.P[s[1]], f.len[s[0] + s[1]], f.len[s[0] + s[1]]); });
+      /* 腕は伸び縮みする縄（短すぎず、長すぎず） */
+      keep(f.P.chest, f.P.gf, 20 * f.sc, 110 * f.sc);
+      keep(f.P.chest, f.P.gb, 20 * f.sc, 100 * f.sc);
+    }
+    for (i = 0; i < NAMES.length; i++) {
+      p = f.P[NAMES[i]];
+      if (p.y > GROUND) { p.y = GROUND; p.px = p.x - (p.x - p.px) * 0.6; }
+      if (p.x < 8) p.x = 8; if (p.x > W - 8) p.x = W - 8;
+    }
+  }
+  function keep(a, b, lo, hi) {
+    var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.001;
+    var want = d < lo ? lo : d > hi ? hi : d;
+    if (want === d) return;
+    var k = (d - want) / d * 0.5;
+    a.x += dx * k; a.y += dy * k; b.x -= dx * k; b.y -= dy * k;
+  }
+
+  /* グローブが相手の頭・胸に当たったか。勢い（近づく速さ）でダメージ */
+  function hits(a, b) {
+    ["gf", "gb"].forEach(function (g) {
+      var gl = a.P[g];
+      [["head", 24], ["chest", 36]].forEach(function (tg) {
+        var t = b.P[tg[0]], r = (tg[1] + GLOVE_R) * a.sc;
+        var dx = t.x - gl.x, dy = t.y - gl.y, d = Math.hypot(dx, dy);
+        if (d >= r || d < 0.001) return;
+        var nx = dx / d, ny = dy / d;
+        var vx = ((gl.x - gl.px) - (t.x - t.px)) / DT, vy = ((gl.y - gl.py) - (t.y - t.py)) / DT;
+        var vn = vx * nx + vy * ny;
+        /* 重なりを押し戻す */
+        var over = r - d;
+        gl.x -= nx * over * 0.5; gl.y -= ny * over * 0.5;
+        t.x += nx * over * 0.5; t.y += ny * over * 0.5;
+        if (vn < 300 || a.cool[g] > 0 || b.ko || a.ko) return;
+        a.cool[g] = 0.25;
+        var head = tg[0] === "head";
+        var dmg = Math.min(16, (vn - 300) / 50 * (head ? 1.2 : 0.6) + (head ? 2 : 1));
+        b.hp -= dmg; b.hurtT = 0.25;
+        /* 当たった勢いで相手の体を押す */
+        t.px -= nx * vn * DT * 0.6; t.py -= ny * vn * DT * 0.6;
+        b.slide += nx * vn * 0.03;
+        var big = dmg > 10;
+        fx.push({ x: gl.x + nx * 18, y: gl.y + ny * 18, t: 0, big: big });
+        shake = Math.max(shake, big ? 0.25 : 0.1);
+        noiseHit(big ? 0.3 : 0.14, big ? 220 : 650, big ? 0.45 : 0.3, 0.8);
+        tone(big ? 90 : 160, big ? 0.3 : 0.1, big ? 0.22 : 0.14, "sine", big ? 45 : 80);
+        if (b.hp <= 0) { b.hp = 0; knockOut(b); }
+      });
+    });
+  }
+  function knockOut(f) {
+    f.ko = true; f.muscle = 0; f.C = 0;
+    endFight();
+  }
+  function bodies(a, b) {
+    /* 胸どうし・腰どうしは重ならない */
+    [["chest", 40], ["hip", 44], ["head", 26]].forEach(function (e) {
+      var p = a.P[e[0]], q = b.P[e[0]], r = e[1] * 2 * a.sc, d = dist(p, q);
+      if (d < r && d > 0.001) { var k = (r - d) / d * 0.5, dx = q.x - p.x, dy = q.y - p.y; p.x -= dx * k; p.y -= dy * k; q.x += dx * k; q.y += dy * k; }
+    });
+  }
+  function stepFighter(f, dt) {
+    f.cool.gf = Math.max(0, f.cool.gf - dt); f.cool.gb = Math.max(0, f.cool.gb - dt);
+    f.hurtT = Math.max(0, f.hurtT - dt);
+    f.slide *= Math.pow(0.1, dt);
+    f.hop += dt;
+    physics(f);
+  }
+
+  var me, foe, ai;
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.MATCH; T = 0; fx = []; sparks = []; shake = 0;
+    me = fighter(P1X, 1); foe = fighter(W + 220, -1);
+    ai = { L: 0, C: 0, goalL: 0, goalC: 0, think: 1, punchT: 0, react: null, crouchFor: 0 };
+    before = after = level; outcome = "";
+    drag = null; fightT = 0;
+    makePassers();
+  }
+
+  /* マッチング：違うレベルのカンガルーが跳ねて通り過ぎ、最後に同じレベルの1匹が来る */
+  function makePassers() {
+    passers = [];
+    for (var i = 0; i < 5; i++) {
+      var lv;
+      do { lv = Math.max(1, level + Math.round((Math.random() - 0.5) * 30)); } while (lv === level);
+      var dir = Math.random() < 0.5 ? 1 : -1, sc = 0.55 + Math.random() * 0.2;
+      passers.push({ lv: lv, t0: 0.15 + i * 0.42, dir: dir, sc: sc, y: -40 - Math.random() * 60, spd: 260 + Math.random() * 140, body: fighter(0, dir, sc) });
+    }
+  }
+
+  /* ============ 相手（同じレベル） ============
+     頭の中の指を動かす速さ・こちらの踏み込みに気づく速さと確かさがレベルで上がる。 */
+  function cpuSkill() {
+    return {
+      delay: Math.max(0.08, 0.45 - (level - 1) * 0.03),
+      sure: Math.min(0.92, 0.25 + (level - 1) * 0.05),
+      pace: Math.max(0.35, 1.1 - (level - 1) * 0.04),
+      speed: 7 + Math.min(10, (level - 1) * 0.5)
+    };
+  }
+  function stepCpu(dt) {
+    var k = cpuSkill();
+    if (foe.ko) return;
+    /* こちらの前の手が速く近づいてきたら、かがむ */
+    var g = me.P.gf, gv = -(g.x - g.px) / DT * foe.dir * -1;
+    var lunge = (g.x - g.px) / DT * me.dir;
+    if (!ai.react && lunge > 500 && ai.crouchFor <= 0 && Math.random() < k.sure * 0.25) ai.react = { t: k.delay, act: "crouch" };
+    if (me.C > 0.6 && !ai.react && ai.punchT <= 0 && Math.random() < dt * 3 * k.sure) ai.react = { t: k.delay, act: "lowpunch" };
+    if (ai.react) {
+      ai.react.t -= dt;
+      if (ai.react.t <= 0) {
+        if (ai.react.act === "crouch") { ai.crouchFor = 0.45; }
+        else { ai.punchT = 0.22; ai.punchLow = true; }
+        ai.react = null;
+      }
+    }
+    if (ai.crouchFor > 0) { ai.crouchFor -= dt; ai.goalC = 1; ai.goalL = -0.3; }
+    else if (ai.punchT > 0) { ai.punchT -= dt; ai.goalL = 1; ai.goalC = ai.punchLow ? 0.9 : 0; }
+    else {
+      ai.goalC = 0; ai.goalL = -0.15 + Math.sin(T * 3) * 0.12;
+      ai.think -= dt;
+      if (ai.think <= 0) { ai.think = k.pace * (0.5 + Math.random()); ai.punchT = 0.2; ai.punchLow = Math.random() < 0.2; }
+    }
+    var sp = k.speed * dt;
+    ai.L += Math.max(-sp, Math.min(sp, ai.goalL - ai.L));
+    ai.C += Math.max(-sp, Math.min(sp, ai.goalC - ai.C));
+    foe.L = ai.L; foe.C = ai.C;
+  }
+
+  function endFight() {
+    if (state !== S.FIGHT) return;
+    state = S.END; T = 0;
+    if (me.hp > foe.hp) { outcome = "win"; after = level + 1; }
+    else if (me.hp < foe.hp) { outcome = "lose"; after = Math.max(1, level - 1); }
+    else { outcome = "draw"; after = level; }
+    bell(0); bell(0.25); bell(0.5);
+  }
+
+  /* ============ 進行 ============ */
+  var drag = null, keyL = 0, keyC = 0, fightT = 0;
+  function update(dt) {
+    T += dt;
+    shake = Math.max(0, shake - dt);
+    for (var i = fx.length - 1; i >= 0; i--) { fx[i].t += dt; if (fx[i].t > 0.22) fx.splice(i, 1); }
+    for (var si = sparks.length - 1; si >= 0; si--) { var sp = sparks[si]; sp.t += dt; sp.y += sp.vy * dt; if (sp.t > 1.2) sparks.splice(si, 1); }
+    if (state === S.INTRO) { me.L = Math.sin(T * 2) * 0.1; stepFighter(me, dt); return; }
+    if (state === S.MATCH) {
+      stepFighter(me, dt);
+      passers.forEach(function (p) { p.x = p.dir > 0 ? -140 + (T - p.t0) * p.spd : W + 140 - (T - p.t0) * p.spd; });
+      var arrive = 2.6;
+      if (T > arrive) {
+        var k = Math.min(1, (T - arrive) / 0.8);
+        foe.home = W + 220 + (P2X - W - 220) * k;
+        foe.hopY = k < 1 ? Math.abs(Math.sin(k * Math.PI * 3)) * 60 * FS : 0;
+      }
+      stepFighter(foe, dt);
+      if (T > arrive + 0.85 && !foe.ready) { foe.ready = true; bell(0); }
+      if (T > arrive + 1.6) { state = S.FIGHT; T = 0; fightT = 0; }
+      return;
+    }
+    if (state === S.FIGHT) {
+      fightT += dt;
+      /* 指のずれがそのまま体の引っぱり */
+      if (drag) { me.L = Math.max(-1, Math.min(1, drag.dx / 110)); me.C = Math.max(0, Math.min(1, drag.dy / 110)); }
+      else { me.L += (keyL - me.L) * Math.min(1, dt * 14); me.C += (keyC - me.C) * Math.min(1, dt * 14); }
+      stepCpu(dt);
+      stepFighter(me, dt); stepFighter(foe, dt);
+      bodies(me, foe);
+      hits(me, foe); hits(foe, me);
+      if (fightT >= TIME && state === S.FIGHT) endFight();
+      return;
+    }
+    if (state === S.END) {
+      me.L *= 0.9; me.C *= 0.9; if (!foe.ko) { foe.L *= 0.9; foe.C *= 0.9; }
+      stepFighter(me, dt); stepFighter(foe, dt); bodies(me, foe);
+      if (T > 2) {
+        level = after; saveLevel(level);
+        if (outcome === "win") { state = S.LEVELUP; T = 0; levelUpSound(); }
+        else { state = S.RESULT; if (outcome === "lose") tone(330, 0.3, 0.1, "triangle", 220); }
+      }
+      return;
+    }
+    if (state === S.LEVELUP) {
+      me.hopY = Math.abs(Math.sin(T * 6)) * 30;
+      stepFighter(me, dt); stepFighter(foe, dt);
+      if (Math.random() < dt * 40) sparks.push({ x: me.P.chest.x + (Math.random() - 0.5) * 220, y: GROUND - Math.random() * 40, vy: -200 - Math.random() * 260, t: 0 });
+      if (T > 2.8) { state = S.RESULT; me.hopY = 0; }
+      return;
+    }
+    if (state === S.RESULT) { stepFighter(me, dt); stepFighter(foe, dt); }
+  }
+  function levelUpSound() {
+    [523, 659, 784, 1047, 784, 1047, 1319].forEach(function (f, i) { tone(f, i === 6 ? 0.6 : 0.14, 0.11, "square", null, i * 0.09); });
+    tone(1568, 0.8, 0.06, "triangle", null, 0.66);
+  }
+
+  /* ============ 入力 ============
+     押した所からのずれで体を引っぱる。指を離すと元の構えに戻る。 */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (x == null || state !== S.FIGHT) return;
+    drag = { x0: x, y0: y, x: x, y: y, dx: 0, dy: 0 };
+  }
+  function move(x, y) {
+    if (!drag) return;
+    drag.x = x; drag.y = y; drag.dx = x - drag.x0; drag.dy = y - drag.y0;
+  }
+  function up() { drag = null; }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    if (drag) return;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) { var p = atCanvas(e); move(p.x, p.y); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); keyL = keyC = 0; });
+
+  /* 本番以外だけ、数字キーで場面を飛ばせる */
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function toFight() { newRound(); state = S.FIGHT; foe.home = P2X; foe = fighter(P2X, -1); fightT = 0; }
+  function debugKey(n) {
+    if (n === 1) { if (state !== S.FIGHT) toFight(); foe.hp = 0; knockOut(foe); }
+    if (n === 2) { if (state !== S.FIGHT) toFight(); me.hp = 0; knockOut(me); }
+    if (n === 3) { level += 10; saveLevel(level); before = after = level; }
+    if (n === 4) { level = 1; saveLevel(level); before = after = level; }
+    if (n === 5) { if (state === S.MATCH) T = 2.6; }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var k = e.key;
+    var esc = k === "Escape";
+    var go = e.code === "Space" || k === " " || k === "Enter";
+    var fw = k === "ArrowRight" || k === "d" || k === "D", bk = k === "ArrowLeft" || k === "a" || k === "A";
+    var dn = k === "ArrowDown" || k === "s" || k === "S";
+    if (!esc && !go && !fw && !bk && !dn) return;
+    e.preventDefault();
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (state === S.FIGHT) {
+      if (fw || go) keyL = 1; if (bk) keyL = -1; if (dn) keyC = 1;
+      return;
+    }
+    if (go && !e.repeat) down();
+  });
+  window.addEventListener("keyup", function (e) {
+    var k = e.key;
+    if (k === "ArrowRight" || k === "d" || k === "D" || k === "ArrowLeft" || k === "a" || k === "A" || e.code === "Space" || k === " " || k === "Enter") keyL = 0;
+    if (k === "ArrowDown" || k === "s" || k === "S") keyC = 0;
+    if ((e.code === "Space" || k === " " || k === "Enter") && state === S.INTRO) startButton.click();
+  });
+
+  function doShare() {
+    var text;
+    if (outcome === "win") text = zT("Lv." + before + "のカンガルーを倒してLv." + after + "になった", "Beat a Lv." + before + " kangaroo and reached Lv." + after);
+    else if (outcome === "lose") text = zT("Lv." + before + "のカンガルーに負けてLv." + after + "になった", "Lost to a Lv." + before + " kangaroo and dropped to Lv." + after);
+    else text = zT("Lv." + before + "のカンガルーと互角だった", "Went toe-to-toe with a Lv." + before + " kangaroo");
+    window.zResultActions.x({ text: text + zT(" #カンガルーバトル", " #KangarooBattle") });
+  }
+
+  /* ============ 描画 ============ */
+  var INK = "#141414";
+  function stroke(w) { ctx.lineWidth = w || 4; ctx.strokeStyle = INK; ctx.lineJoin = "round"; ctx.lineCap = "round"; }
+  function blob(fn, fill) { ctx.beginPath(); fn(); ctx.fillStyle = fill || "#fff"; ctx.fill(); ctx.stroke(); }
+  function ell(x, y, rx, ry, rot) { ctx.ellipse(x, y, rx, ry, rot || 0, 0, Math.PI * 2); }
+
+  /* 物理の点からカンガルーを描く（線画） */
+  function drawRoo(f, ox, oy, tag) {
+    var P = f.P, d = f.dir, s = f.sc;
+    ctx.save();
+    ctx.translate(ox || 0, oy || 0);
+    if (f.hurtT > 0) ctx.translate(-8 * d * Math.sin(f.hurtT * 60), 0);
+    stroke(4 * Math.min(1, s));
+    function arm(g) {
+      var sx = P.chest.x + (P.head.x - P.chest.x) * 0.25, sy = P.chest.y + (P.head.y - P.chest.y) * 0.25, e = P[g];
+      ctx.lineWidth = 15 * s; ctx.strokeStyle = INK; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(e.x, e.y); ctx.stroke();
+      ctx.lineWidth = 9 * s; ctx.strokeStyle = "#fff"; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(e.x, e.y); ctx.stroke();
+      stroke(4 * Math.min(1, s));
+      blob(function () { ell(e.x, e.y, 19 * s, 16 * s, 0); });
+      ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(e.x - 8 * d * s, e.y - 10 * s); ctx.lineTo(e.x - 8 * d * s, e.y + 10 * s); ctx.stroke();
+      stroke(4 * Math.min(1, s));
+    }
+    arm("gb");
+    /* しっぽ：腰から先へ細くなる */
+    var hx = P.hip.x, hy = P.hip.y, tx = P.tail.x, ty = P.tail.y;
+    var nx = -(ty - hy), ny = tx - hx, nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+    blob(function () {
+      ctx.moveTo(hx + nx * 20 * s, hy + ny * 20 * s);
+      ctx.quadraticCurveTo((hx + tx) / 2 + nx * 4 * s, (hy + ty) / 2 + ny * 4 * s - 10 * s, tx, ty);
+      ctx.quadraticCurveTo((hx + tx) / 2 - nx * 10 * s, (hy + ty) / 2 - ny * 10 * s + 8 * s, hx - nx * 20 * s, hy - ny * 20 * s);
+      ctx.closePath();
+    });
+    /* 脚：太ももと長い足 */
+    var fx0 = P.foot.x, fy0 = P.foot.y;
+    blob(function () { ctx.moveTo(fx0 - 12 * d * s, fy0 - 14 * s); ctx.lineTo(fx0 + 92 * d * s, fy0 - 4 * s); ctx.quadraticCurveTo(fx0 + 100 * d * s, fy0, fx0 + 88 * d * s, fy0 + 2 * s); ctx.lineTo(fx0 - 10 * d * s, fy0 + 2 * s); ctx.closePath(); });
+    var tmx = hx + (fx0 - hx) * 0.35, tmy = hy + (fy0 - hy) * 0.35;
+    blob(function () { ell(tmx, tmy, 38 * s, 50 * s, Math.atan2(fy0 - hy, fx0 - hx) - Math.PI / 2 - 0.2 * d); });
+    /* 胴：腰から胸 */
+    var cx = P.chest.x, cy = P.chest.y, ang = Math.atan2(cy - hy, cx - hx), bl = Math.hypot(cx - hx, cy - hy);
+    blob(function () { ell((hx + cx) / 2, (hy + cy) / 2 - 10 * s, bl / 2 + 40 * s, 40 * s, ang); });
+    ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + 10 * d * s, cy + 18 * s); ctx.quadraticCurveTo((hx + cx) / 2 + 26 * d * s, (hy + cy) / 2, hx + 26 * d * s, hy - 6 * s); ctx.stroke();
+    stroke(4 * Math.min(1, s));
+    /* 頭：胸から頭への向きで傾ける */
+    var ha = Math.atan2(P.head.y - cy, P.head.x - cx), base = Math.atan2(-58, 28 * d);
+    ctx.save();
+    ctx.translate(P.head.x, P.head.y);
+    ctx.rotate(ha - base);
+    ctx.scale(d * s, s);
+    blob(function () { ell(-6, -36, 9, 24, -0.25); });
+    blob(function () { ell(6, -38, 9, 24, 0.2); });
+    blob(function () { ctx.moveTo(-18, 8); ctx.bezierCurveTo(-26, -24, 10, -30, 28, -14); ctx.quadraticCurveTo(52, -6, 54, 4); ctx.quadraticCurveTo(50, 14, 30, 14); ctx.quadraticCurveTo(0, 22, -18, 8); ctx.closePath(); });
+    ctx.fillStyle = INK; ctx.lineWidth = 3;
+    if (f.ko) { ctx.beginPath(); ctx.moveTo(10, -10); ctx.lineTo(20, -2); ctx.moveTo(20, -10); ctx.lineTo(10, -2); ctx.stroke(); }
+    else if (f.hurtT > 0) { ctx.beginPath(); ctx.moveTo(10, -9); ctx.lineTo(20, -5); ctx.lineTo(10, -1); ctx.stroke(); }
+    else { ctx.beginPath(); ell(15, -6, 3.5, 4.5); ctx.fill(); }
+    ctx.beginPath(); ell(52, 2, 3, 2.5); ctx.fill();
+    ctx.restore();
+    arm("gf");
+    ctx.restore();
+    if (tag) drawTag(P.head.x + (ox || 0), P.head.y + (oy || 0) - 80 * s, tag, s);
+  }
+  function drawTag(x, y, text, sc) {
+    ctx.save();
+    ctx.font = "900 " + Math.round(26 * sc) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    var w = ctx.measureText(text).width + 22 * sc, h = 38 * sc;
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - w / 2, y - h / 2, w, h, 8 * sc) : ctx.rect(x - w / 2, y - h / 2, w, h); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.fillText(text, x, y + 1);
+    ctx.restore();
+  }
+
+  var dotLayer = null;
+  function drawBackground() {
+    ctx.fillStyle = "#fbfaf6"; ctx.fillRect(0, 0, W, H);
+    /* 戦っている間は集中線 */
+    if (state === S.FIGHT || state === S.END) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(20,20,20,.13)";
+      var cx = W / 2, cy = GROUND - 170 * FS, r = Math.max(W, H);
+      var rnd = 7;
+      for (var i = 0; i < 90; i++) {
+        rnd = (rnd * 9301 + 49297) % 233280;
+        var a = i / 90 * Math.PI * 2 + rnd / 233280 * 0.05, r0 = 200 + (rnd % 120);
+        ctx.lineWidth = 1 + (rnd % 3);
+        ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    /* 地面：線と網点 */
+    ctx.fillStyle = "#e9e6dc"; ctx.fillRect(0, GROUND, W, PANEL - GROUND);
+    /* 網点は一度だけ描いて写す */
+    var gh = PANEL - GROUND;
+    if (!dotLayer || dotLayer.height !== gh) {
+      dotLayer = document.createElement("canvas"); dotLayer.width = W; dotLayer.height = Math.max(1, gh);
+      var g = dotLayer.getContext("2d");
+      g.fillStyle = "rgba(20,20,20,.25)";
+      for (var y = 8; y < gh; y += 9) for (var x = (y / 9 & 1) * 4.5; x < W; x += 9) { g.beginPath(); g.arc(x, y, 1.4, 0, Math.PI * 2); g.fill(); }
+    }
+    ctx.drawImage(dotLayer, 0, GROUND);
+    stroke(4); ctx.beginPath(); ctx.moveTo(0, GROUND); ctx.lineTo(W, GROUND); ctx.stroke();
+    ctx.fillStyle = "#1b1b1d"; ctx.fillRect(0, PANEL, W, H - PANEL);
+  }
+  function drawHud() {
+    var y = 26, bw = 200, bh = 22;
+    [[me, 20, 1], [foe, W - 20 - bw, -1]].forEach(function (e) {
+      var f = e[0], x = e[1];
+      stroke(3); ctx.fillStyle = "#fff"; ctx.fillRect(x, y, bw, bh); ctx.strokeRect(x, y, bw, bh);
+      var w = bw * Math.max(0, f.hp) / 100;
+      ctx.fillStyle = INK;
+      if (e[2] > 0) ctx.fillRect(x + 3, y + 3, Math.max(0, w - 6), bh - 6); else ctx.fillRect(x + bw - Math.max(0, w - 6) - 3, y + 3, Math.max(0, w - 6), bh - 6);
+    });
+    ctx.fillStyle = INK; ctx.font = "900 34px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(String(Math.max(0, Math.ceil(TIME - fightT))), W / 2, y - 6);
+  }
+  function drawFx() {
+    fx.forEach(function (e) {
+      var k = e.t / 0.22, r = (e.big ? 70 : 42) * (0.6 + k * 0.6);
+      ctx.save(); ctx.translate(e.x, e.y);
+      ctx.beginPath();
+      for (var i = 0; i < 24; i++) { var a = i / 24 * Math.PI * 2, rr = i % 2 ? r : r * 0.45; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+      ctx.closePath();
+      ctx.fillStyle = e.guard ? "#fff" : "#fff"; ctx.globalAlpha = 1 - k * 0.6; ctx.fill(); stroke(e.big ? 5 : 3); ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function draw() {
+    var res = state === S.RESULT;
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, res);
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake * 40, (Math.random() - 0.5) * shake * 30);
+    drawBackground();
+    if (state === S.MATCH) {
+      passers.forEach(function (p) {
+        if (p.x == null || T < p.t0) return;
+        var hop = Math.abs(Math.sin((T - p.t0) * 7)) * 40;
+        drawRoo(p.body, p.x, p.y - hop, "Lv." + p.lv);
+      });
+    }
+    if (state === S.LEVELUP) drawRays();
+    if (state !== S.INTRO) drawRoo(foe, 0, 0, state === S.MATCH ? "Lv." + level : null);
+    drawRoo(me, 0, 0, state === S.INTRO || state === S.MATCH ? "Lv." + level : null);
+    drawFx();
+    if (state === S.FIGHT || state === S.END) drawHud();
+    ctx.restore();
+    if (state === S.FIGHT && drag) drawFinger();
+    if (state === S.LEVELUP) drawLevelUp();
+    if (res) drawResult();
+  }
+
+  /* 指の押した所と今の所（おもちゃの操作棒） */
+  function drawFinger() {
+    ctx.save();
+    ctx.strokeStyle = "rgba(128,128,128,.7)"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(drag.x0, drag.y0, 34, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(drag.x0, drag.y0); ctx.lineTo(drag.x, drag.y); ctx.stroke();
+    ctx.fillStyle = "rgba(128,128,128,.8)"; ctx.beginPath(); ctx.arc(drag.x, drag.y, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  /* レベルアップ：後光・舞い上がる光・札の数字が跳ねて変わる */
+  function drawRays() {
+    var cx = me.P.chest.x, cy = me.P.chest.y + 20;
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(T * 0.6);
+    for (var i = 0; i < 16; i++) {
+      ctx.rotate(Math.PI / 8);
+      ctx.fillStyle = i % 2 ? "rgba(255,214,64,.55)" : "rgba(255,240,170,.45)";
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(900, -70); ctx.lineTo(900, 70); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+  function drawLevelUp() {
+    var k = Math.min(1, T / 0.25);
+    if (T < 0.25) { ctx.fillStyle = "rgba(255,255,255," + (1 - k) + ")"; ctx.fillRect(0, 0, W, H); }
+    sparks.forEach(function (sp) {
+      ctx.fillStyle = "rgba(255,200,40," + (1 - sp.t / 1.2) + ")";
+      ctx.save(); ctx.translate(sp.x, sp.y); ctx.rotate(sp.t * 6);
+      ctx.beginPath(); for (var i = 0; i < 8; i++) { var a = i / 8 * Math.PI * 2, r = i % 2 ? 4 : 11; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.fill();
+      ctx.restore();
+    });
+    var swap = T > 0.9, pop = swap ? 1 + Math.max(0, 0.5 - (T - 0.9) * 2) : 1;
+    drawTag(me.P.head.x, me.P.head.y - 90 * FS - (swap ? Math.max(0, 0.3 - (T - 0.9)) * 120 : 0), "Lv." + (swap ? after : before), 1.4 * pop);
+  }
+
+  /* 結果画面（doji5 の形）。レベルの移り変わりだけを出す */
+  function resultButtons() { return window.zResultActions.row(W, H * 0.6); }
+  function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,10,10,.62)"; ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10;
+    ctx.font = "800 54px sans-serif";
+    ctx.fillText("Lv." + before + (before === after ? "" : "  →"), W / 2, H * 0.36);
+    ctx.font = "800 108px sans-serif";
+    ctx.fillText("Lv." + after, W / 2, H * 0.5);
+    ctx.restore();
+    window.zResultActions.drawButtons(ctx, resultButtons());
+  }
+
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, level: level, before: before, after: after, outcome: outcome, me: me && { hp: me.hp, L: me.L, C: me.C, head: [me.P.head.x, me.P.head.y], gf: [me.P.gf.x, me.P.gf.y] }, foe: foe && { hp: foe.hp, ko: foe.ko, head: [foe.P.head.x, foe.P.head.y] }, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(800);
+      r.key();
+      if (!await r.until(function () { return state === S.FIGHT; }, 8)) throw Error("始まらない");
+      await r.wait(3000);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  layout();
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  var last = performance.now(), stepAcc = 0;
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      stepAcc += dt;
+      while (stepAcc >= 1 / 60) { update(1 / 60); stepAcc -= 1 / 60; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
