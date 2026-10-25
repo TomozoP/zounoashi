@@ -42,10 +42,10 @@
    いつも自分と同じレベルのカンガルーと戦う。全10戦。レベル1から始まり、後半ほど大きく上がって最後はレベル100（1,3,6,10,16,24,35,50,72,100）。
    相手の毛色・グローブ・トランクス・耳や鼻先は毎試合少し変わる。
    体は点とばねの簡単な物理。指でなぞると、押した所からのずれのぶんだけ
-     前 → 体を乗り出して前の手が伸びる / 下 → かがむ / 後ろ → ガード
-   と、おもちゃのように体を引っぱる。グローブが相手に当たったときの勢いがダメージ。
-   立って打てば上段、かがんで打てば下段。ガードも立てば上段、かがめば下段で、高さが合うと防げて、
-   打った方がはじかれてすきができる（軽い読み合い）。
+     前 → 体を乗り出して前の手が伸びる（パンチ） / 後ろ → ガード
+   と、左右だけでおもちゃのように体を引っぱる。グローブが相手に当たったときの勢いがダメージ。
+   引いた直後（0.3秒）に受けるとパリィで、打った方がはじかれてすきができる。
+   ガードを出しっぱなしだと防ぎきれず少し削られる（タイミングの読み合い）。
    勝つと短いレベルアップの演出のあと、すぐ次の（1つ上のレベルの）相手。負けたら結果を出してレベル1に戻る。
    相手の賢さと速さだけがレベルで上がる。 */
 (function () {
@@ -177,7 +177,8 @@
 
   /* 後ろへ引いている間はガード。高さはかがみ具合で決まる */
   function guarding(f) { return !f.ko && !(f.stun > 0) && f.L < -0.35; }
-  function height(f) { return f.C > 0.5 ? "low" : "high"; }
+  /* 引いた直後だけパリィ。出しっぱなしのガードは少し削られる */
+  var PARRY_T = 0.3;
 
   var G = 1800, DT = 1 / 60, hitStop = 0, parries = 0;
   /* 全10戦。レベルは1から始まり、後半ほど大きく上がって最後がレベル100 */
@@ -344,8 +345,16 @@
         t.x += nx * over * 0.5; t.y += ny * over * 0.5;
         if (vn < 300 || a.cool[g] > 0 || b.ko || a.ko || a.stun > 0) return;
         a.cool[g] = 0.25;
-        /* 上段・下段とガードの高さが合えば防がれ、打った方がはじかれてすきができる */
-        if (guarding(b) && height(b) === height(a)) {
+        /* 引いた直後のガードで受けるとパリィ：打った方がはじかれてすきができる */
+        if (guarding(b) && b.guardT > PARRY_T) {
+          b.hp -= Math.min(5, (vn - 300) / 50 * 0.35 + 1); b.hurtT = 0.12;
+          a.slide -= nx * 15; b.slide += nx * 10;
+          fx.push({ x: gl.x + nx * 12, y: gl.y + ny * 12, t: 0, big: false });
+          noiseHit(0.1, 500, 0.35, 0.8); tone(120, 0.12, 0.15, "sine", 70);
+          lastHit = fightT;
+          return;
+        }
+        if (guarding(b)) {
           b.hp -= 0.5;
           a.hurtT = 0.3;
           a.stun = 0.6; a.slide -= nx * 40;
@@ -408,7 +417,9 @@
     });
   }
   function stepFighter(f, dt) {
-    if (f.stun > 0) { f.stun -= dt; f.L = -0.5; f.C = 0; }
+    if (f.stun > 0) { f.stun -= dt; f.L = -0.5; }
+    f.C = 0;
+    f.guardT = guarding(f) ? (f.guardT || 0) + dt : 0;
     f.cool.gf = Math.max(0, f.cool.gf - dt); f.cool.gb = Math.max(0, f.cool.gb - dt);
     f.hurtT = Math.max(0, f.hurtT - dt);
     f.slide *= Math.pow(0.1, dt);
@@ -450,22 +461,25 @@
     if (foe.ko || foe.stun > 0) { ai.L = foe.L; ai.C = foe.C; return; }
     /* こちらの前の手が速く近づいてきたら、高さを読んでガード（レベルが高いほど速く確か） */
     var g = me.P.gf, lunge = (g.x - g.px) / DT * me.dir;
-    if (!ai.react && lunge > 450 && ai.guardFor <= 0 && ai.punchT <= 0 && Math.random() < 0.35 + k.sure * 0.4) {
-      var right = Math.random() < k.sure;
-      ai.react = { t: k.delay, low: (height(me) === "low") === right };
-    }
+    /* こちらの踏み込みを見て、ちょうどよく引いてパリィを狙う（レベルが高いほど速く確か） */
+    if (!ai.react && lunge > 450 && ai.guardFor <= 0 && ai.punchT <= 0 && Math.random() < k.sure) ai.react = { t: k.delay };
     if (ai.react) {
       ai.react.t -= dt;
-      if (ai.react.t <= 0) { ai.guardFor = 0.5; ai.guardLow = ai.react.low; ai.react = null; }
+      if (ai.react.t <= 0) { ai.guardFor = 0.45; ai.react = null; }
     }
-    if (ai.guardFor > 0) { ai.guardFor -= dt; ai.goalL = -0.7; ai.goalC = ai.guardLow ? 0.85 : 0; }
-    else if (ai.punchT > 0) { ai.punchT -= dt; ai.goalL = 1; ai.goalC = ai.punchLow ? 0.85 : 0; }
+    if (ai.guardFor > 0) { ai.guardFor -= dt; ai.goalL = -0.7; ai.goalC = 0; }
+    else if (ai.punchT > 0) { ai.punchT -= dt; ai.goalL = 1; ai.goalC = 0; }
     else {
       ai.goalC = 0; ai.goalL = -0.15 + Math.sin(T * 3) * 0.12;
       ai.think -= dt;
       /* こちらがすきだらけなら狙う */
       if (me.stun > 0 && Math.random() < k.sure) ai.think = Math.min(ai.think, k.delay);
-      if (ai.think <= 0) { ai.think = k.pace * (0.5 + Math.random()); ai.punchT = 0.2; ai.punchLow = Math.random() < 0.4; }
+      if (ai.think <= 0) {
+        ai.think = k.pace * (0.5 + Math.random());
+        /* 弱いうちはガードを出しっぱなしで固まることがある（削れる） */
+        if (Math.random() < 0.3 * (1 - power())) ai.guardFor = 0.9 + Math.random() * 0.8;
+        else ai.punchT = 0.2;
+      }
     }
     var sp = k.speed * dt;
     ai.L += Math.max(-sp, Math.min(sp, ai.goalL - ai.L));
@@ -503,8 +517,9 @@
     if (state === S.FIGHT) {
       fightT += dt;
       /* 指のずれがそのまま体の引っぱり */
-      if (drag) { me.L = Math.max(-1, Math.min(1, drag.dx / 90)); me.C = Math.max(0, Math.min(1, drag.dy / 90)); }
-      else { me.L += (keyL - me.L) * Math.min(1, dt * 14); me.C += (keyC - me.C) * Math.min(1, dt * 14); }
+      /* 左右だけ。前に払うとパンチ、後ろに引くとガード */
+      if (drag) me.L = Math.max(-1, Math.min(1, drag.dx / 90));
+      else me.L += (keyL - me.L) * Math.min(1, dt * 14);
       stepCpu(dt);
       stepFighter(me, dt); stepFighter(foe, dt);
       bodies(me, foe);
@@ -588,7 +603,7 @@
     e.preventDefault();
     if (esc) { if (!e.repeat) newRound(); return; }
     if (state === S.FIGHT) {
-      if (fw || go) keyL = 1; if (bk) keyL = -1; if (dn) keyC = 1;
+      if (fw || go) keyL = 1; if (bk) keyL = -1;
       return;
     }
     if (go && !e.repeat) down();
