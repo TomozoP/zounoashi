@@ -42,8 +42,8 @@
    いつも自分と同じレベルのカンガルーと戦う。全10戦。レベル1から始まり、後半ほど大きく上がって最後はレベル100（1,3,6,10,16,24,35,50,72,100）。
    相手の毛色・グローブ・トランクス・耳や鼻先は毎試合少し変わる。
    体は点とばねの簡単な物理。指でなぞると、押した所からのずれのぶんだけ
-     前 → 乗り出して前の手が伸びる（パンチ） / 後ろ → 体を引いてグローブを顔の前に上げる
-     下 → かがむ / 上 → 伸びる（打つ高さ・受ける高さが変わる）
+     指のずれのぶんだけ前のグローブの行き先が動く（上下左右）。グローブはそこへゆっくり追いつき、
+     体は届くように乗り出す・かがむ。後ろへ引くと後ろの手も顔の前に上がる。
    と、おもちゃのように体を引っぱる。ルールは物理だけ：グローブどうしがぶつかればガード、
    体に当たればヒットで、ぶつかった速さがそのまま威力。
    勝つと短いレベルアップの演出のあと、すぐ次の（1つ上のレベルの）相手。負けたら結果を出してレベル1に戻る。
@@ -131,7 +131,7 @@
     PANEL = Math.round(H - Math.max(190, H * 0.2));
     FS = Math.min(1.3, Math.max(1, (PANEL - 120) / 420));
     GROUND = Math.min(PANEL - 30, Math.round(H * 0.7));
-    P1X = W / 2 - 100 * FS; P2X = W / 2 + 100 * FS;
+    P1X = W / 2 - 135 * FS; P2X = W / 2 + 135 * FS;
   }
 
   /* ============ 体（点とばね） ============
@@ -161,6 +161,8 @@
     else if (n === "chest") o = [12 + 95 * L, -190 + 100 * C];
     else if (n === "head") o = [12 + 95 * L + 28 + 10 * L, -190 + 100 * C - 58 + 5 * C];
     else if (n === "tail") o = [-135, -6];
+    /* 自分の前のグローブは指で動かす位置へ（体はそれについてくる） */
+    else if (n === "gf" && f.fist) o = [62 + f.fist.x, -196 + f.fist.y];
     else if (f.guardUp) {
       /* 構え：両方のグローブを顔の前に */
       var cx0 = 12 + 95 * L, cy0 = -190 + 100 * C;
@@ -449,7 +451,7 @@
   function nextBout() {
     state = S.READY; T = 0; fightT = 0; lastHit = 0; lowCheer = false;
     announce("Ready?", 0.95);
-    me = fighter(P1X, 1); foe = fighter(P2X, -1);
+    me = fighter(P1X, 1); foe = fighter(P2X, -1); me.fist = { x: 0, y: 0 };
     ai = { L: 0, C: 0, aimC: 0, think: 0.8, punchT: 0, guardT: 0, react: null, saw: false };
     before = after = level; outcome = "";
     foeLook = makeLook();
@@ -501,7 +503,12 @@
   }
 
   /* ============ 進行 ============ */
-  var drag = null, keyL = 0, keyC = 0, fightT = 0, FOLLOW = 5;
+  var drag = null, keyL = 0, keyC = 0, fightT = 0, FOLLOW = 3.2;
+  /* 指のずれ → グローブの行き先（構えの位置からのずれ） */
+  function fistAim() {
+    var x = drag ? drag.dx * 1.6 : keyL > 0 ? 250 : keyL * 110, y = drag ? drag.dy * 1.6 : keyC * 150;
+    return { x: Math.max(-110, Math.min(250, x)), y: Math.max(-130, Math.min(170, y)) };
+  }
   function update(dt) {
     T += dt;
     shake = Math.max(0, shake - dt);
@@ -521,11 +528,12 @@
     if (state === S.FIGHT) {
       fightT += dt;
       /* 指のずれがそのまま体の引っぱり */
-      /* 前に払うとパンチ、後ろに引くとグローブを上げて受ける。上下でかがむ・伸びる */
-      /* 体は指の位置へゆっくり追いつく（大きく動くほど時間がかかるので先読みになる） */
-      var inL = drag ? Math.max(-1, Math.min(1, drag.dx / 90)) : keyL, inC = drag ? Math.max(-0.35, Math.min(1, drag.dy / 90)) : keyC;
-      var follow = Math.min(1, dt * FOLLOW);
-      me.L += (inL - me.L) * follow; me.C += (inC - me.C) * follow;
+      
+      /* 指で前のグローブの位置を動かす。グローブはそこへゆっくり追いつき、体は届くように乗り出す・かがむ */
+      var aim = fistAim(), follow = Math.min(1, dt * FOLLOW);
+      me.fist.x += (aim.x - me.fist.x) * follow; me.fist.y += (aim.y - me.fist.y) * follow;
+      me.L = me.fist.x > 0 ? Math.min(1, me.fist.x / 245) : Math.max(-1, me.fist.x / 110);
+      me.C = Math.max(-0.35, Math.min(1, me.fist.y / 150));
       stepCpu(dt);
       stepFighter(me, dt); stepFighter(foe, dt);
       bodies(me, foe);
@@ -850,6 +858,10 @@
     ctx.beginPath(); ctx.arc(drag.x0, drag.y0, 34, 0, Math.PI * 2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(drag.x0, drag.y0); ctx.lineTo(drag.x, drag.y); ctx.stroke();
     ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.beginPath(); ctx.arc(drag.x, drag.y, 16, 0, Math.PI * 2); ctx.fill();
+    /* グローブの行き先にうすい輪 */
+    var a = fistAim(), gx = me.home + me.slide + (62 + a.x) * me.dir * me.sc, gy = GROUND + (-196 + a.y) * me.sc;
+    ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(gx, gy, GLOVE_R * 1.4 * me.sc, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
   }
   /* レベルアップ：後光・舞い上がる光・札の数字が跳ねて変わる */
