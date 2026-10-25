@@ -90,7 +90,7 @@
   };
 
   /* 物理の点（2Dのpx）から形を置く */
-  Roo.prototype.sync = function (f, map, z) {
+  Roo.prototype.sync = function (f, map, z, other) {
     var v = this.v, P = f.P, d = f.dir, s = f.sc;
     ["foot", "hip", "chest", "head", "tail", "gf", "gb"].forEach(function (n) {
       v[n] = v[n] || new T.Vector3();
@@ -154,9 +154,17 @@
     this.gloveF.position.copy(gF); this.gloveF.scale.set(1.1 * s, 0.95 * s, 0.95 * s);
     this.cuffB.position.lerpVectors(eB, gB, 0.72); this.cuffB.quaternion.copy(this.foreB.quaternion); this.cuffB.scale.setScalar(s);
     this.cuffF.position.lerpVectors(eF, gF, 0.72); this.cuffF.quaternion.copy(this.foreF.quaternion); this.cuffF.scale.setScalar(s);
-    /* 頭：胸から頭への向きで傾ける */
-    var hx = v.head.x - chest.x, hy = v.head.y - chest.y;
-    var rot = Math.atan2(hy, hx) - Math.atan2(0.58, 0.28 * d);
+    /* 頭：いつも相手の顔の方を向く（倒れたら胸から頭への向き） */
+    var rot;
+    if (other && !f.ko) {
+      v.look = v.look || new T.Vector3();
+      map(other.P.head, v.look);
+      var a = Math.atan2(v.look.y - v.head.y, (v.look.x - v.head.x) * d);
+      rot = Math.max(-0.6, Math.min(0.6, a)) * d;
+    } else {
+      var hx = v.head.x - chest.x, hy = v.head.y - chest.y;
+      rot = Math.atan2(hy, hx) - Math.atan2(0.58, 0.28 * d);
+    }
     this.head.position.copy(v.head);
     this.head.rotation.set(0, 0, rot);
     this.head.scale.set(d * s, s, s);
@@ -275,8 +283,8 @@
   KangarooScene.prototype.sync = function (s) {
     var W = s.W, G = s.ground;
     function map(p, out) { out.set((p.x - W / 2) / 100, (G - p.y) / 100, 0); return out; }
-    if (s.me) this.me.sync(s.me, map, 0.15);
-    if (s.foe) this.foe.sync(s.foe, map, -0.15);
+    if (s.me) this.me.sync(s.me, map, 0.15, s.foe);
+    if (s.foe) this.foe.sync(s.foe, map, -0.15, s.me);
     if (s.foeLook && s.foeLook !== this.foeLook) { this.foeLook = s.foeLook; this.foe.setLook(s.foeLook); }
     this.foe.group.visible = !!s.showFoe;
     this.furM[0].emissive.setRGB(0.14 * this.me.hurt, 0, 0);
