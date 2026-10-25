@@ -39,13 +39,14 @@
 <script>
 /* カンガルーバトル
 
-   いつも自分と同じレベルのカンガルーと戦う。毎回レベル1から。
+   いつも自分と同じレベルのカンガルーと戦う。レベル10から10ずつ上がり、レベル100に勝てば終わり。
+   相手の毛色・グローブ・トランクス・耳や鼻先は毎試合少し変わる。
    体は点とばねの簡単な物理。指でなぞると、押した所からのずれのぶんだけ
      前 → 体を乗り出して前の手が伸びる / 下 → かがむ / 後ろ → ガード
    と、おもちゃのように体を引っぱる。グローブが相手に当たったときの勢いがダメージ。
    立って打てば上段、かがんで打てば下段。ガードも立てば上段、かがめば下段で、高さが合うと防げて、
    打った方がはじかれてすきができる（軽い読み合い）。
-   勝つと短いレベルアップの演出のあと、すぐ次の（1つ上のレベルの）相手。負けたら結果を出してレベル1に戻る。
+   勝つと短いレベルアップの演出のあと、すぐ次の（1つ上のレベルの）相手。負けたら結果を出してレベル10に戻る。
    相手の賢さと速さだけがレベルで上がる。 */
 (function () {
   "use strict";
@@ -118,8 +119,8 @@
     else { try { AC.resume(); } catch (e) {} }
   });
 
-  /* ============ レベル ============ 毎回レベル1から。勝ち抜いた数で上がる */
-  var level = 1;
+  /* ============ レベル ============ 毎回レベル10から。勝つと10ずつ上がり100が最後 */
+  var level = 10;
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", READY: "ready", FIGHT: "fight", END: "end", LEVELUP: "levelup", RESULT: "result" };
@@ -179,6 +180,19 @@
   function height(f) { return f.C > 0.5 ? "low" : "high"; }
 
   var G = 1800, DT = 1 / 60, hitStop = 0, parries = 0;
+  /* レベルは10から10ずつ、100が最後 */
+  var START_LV = 10, STEP_LV = 10, MAX_LV = 100;
+  function stage() { return Math.max(1, Math.min(10, level / STEP_LV)); }
+  /* 相手の見た目を毎試合少し変える */
+  var FURS = [0x96704e, 0x8a5a3a, 0xb98a5a, 0x6e5446, 0x9c7a62, 0xc0a07a, 0x7d7470, 0xa4553a, 0x5e4a3e];
+  var GEAR = [0x1d48b8, 0x1f8a3a, 0x222222, 0xe0b31b, 0x7a2fb0, 0xf0f0f0, 0xe06a1b, 0x18a7b5, 0xd04a8a];
+  var foeLook = null;
+  function pick(a) { return a[(Math.random() * a.length) | 0]; }
+  function makeLook() {
+    var g = pick(GEAR), t;
+    do { t = pick(GEAR); } while (t === g && Math.random() < 0.6);
+    return { fur: pick(FURS), glove: g, trunks: t, ear: 0.8 + Math.random() * 0.5, snout: 0.85 + Math.random() * 0.4 };
+  }
   var READY_T = 0.95, readyFight = false, lastHit = 0, lowCheer = false;
 
   /* 掛け声。読み上げが使えない端末では文字だけ */
@@ -401,7 +415,7 @@
 
   var me, foe, ai;
   function newRound() {
-    level = 1;
+    level = START_LV;
     crowd.start();
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
@@ -415,16 +429,17 @@
     me = fighter(P1X, 1); foe = fighter(P2X, -1);
     ai = { L: 0, C: 0, goalL: 0, goalC: 0, think: 0.6, punchT: 0, react: null, guardFor: 0 };
     before = after = level; outcome = "";
+    foeLook = makeLook();
   }
 
   /* ============ 相手（同じレベル） ============
      頭の中の指を動かす速さ・こちらの踏み込みに気づく速さと確かさがレベルで上がる。 */
   function cpuSkill() {
     return {
-      delay: Math.max(0.08, 0.45 - (level - 1) * 0.03),
-      sure: Math.min(0.92, 0.25 + (level - 1) * 0.05),
-      pace: Math.max(0.35, 1.1 - (level - 1) * 0.04),
-      speed: 7 + Math.min(10, (level - 1) * 0.5)
+      delay: 0.45 - (stage() - 1) * 0.04,
+      sure: 0.25 + (stage() - 1) * 0.075,
+      pace: 1.1 - (stage() - 1) * 0.08,
+      speed: 7 + (stage() - 1) * 1.1
     };
   }
   function stepCpu(dt) {
@@ -458,8 +473,8 @@
   function endFight() {
     if (state !== S.FIGHT) return;
     state = S.END; T = 0;
-    if (me.hp > foe.hp) { outcome = "win"; after = level + 1; }
-    else if (me.hp < foe.hp) { outcome = "lose"; after = 1; }
+    if (me.hp > foe.hp) { outcome = level >= MAX_LV ? "champ" : "win"; after = Math.min(MAX_LV, level + STEP_LV); }
+    else if (me.hp < foe.hp) { outcome = "lose"; after = START_LV; }
     else { outcome = "draw"; after = level; }
     if (outcome === "lose") { bell(0); bell(0.25); bell(0.5); }
   }
@@ -501,6 +516,7 @@
       stepFighter(me, dt); stepFighter(foe, dt); bodies(me, foe);
       if (outcome === "win" && T > 0.6) { level = after; state = S.LEVELUP; T = 0; levelUpSound(); }
       else if (outcome === "draw" && T > 0.6) nextBout();
+      else if (outcome === "champ" && T > 1.6) { state = S.RESULT; crowd.cheer(2.5, 1); crowd.applause(3); levelUpSound(); }
       else if (outcome === "lose" && T > 1.4) { level = after; state = S.RESULT; crowd.stop(); tone(330, 0.3, 0.1, "triangle", 220); }
       return;
     }
@@ -554,8 +570,8 @@
   function debugKey(n) {
     if (n === 1) { if (state !== S.FIGHT) toFight(); foe.hp = 0; knockOut(foe); }
     if (n === 2) { if (state !== S.FIGHT) toFight(); me.hp = 0; knockOut(me); }
-    if (n === 3) { level += 10; before = after = level; }
-    if (n === 4) { level = 1; before = after = level; }
+    if (n === 3) { level = Math.min(MAX_LV, level + STEP_LV); before = after = level; foeLook = makeLook(); }
+    if (n === 4) { level = START_LV; before = after = level; foeLook = makeLook(); }
   }
 
   window.addEventListener("keydown", function (e) {
@@ -583,10 +599,11 @@
 
   function doShare() {
     var text;
-    if (before > 1) text = zT("Lv." + before + "まで勝ち上がったカンガルー", "My kangaroo fought its way up to Lv." + before);
-    else text = zT("Lv.1のカンガルーに負けた", "Lost to a Lv.1 kangaroo");
+    if (outcome === "champ") text = zT("Lv.100の頂点に立ったカンガルー", "My kangaroo reached the top: Lv.100");
+    else text = zT("Lv." + before + "まで勝ち上がったカンガルー", "My kangaroo fought its way up to Lv." + before);
     window.zResultActions.x({ text: text + zT(" #カンガルーバトル", " #KangarooBattle") });
   }
+
 
   /* ============ 描画 ============ */
   var INK = "#141414";
@@ -763,7 +780,7 @@
     var s3 = scene3d(), ok = false;
     if (s3) {
       try {
-        s3.sync({ me: me, foe: foe, showFoe: true, W: W, H: H, ground: GROUND, excite: crowd.level(), dt: Math.min(0.1, Math.max(0, drawNow - (drawLast || drawNow)) / 1000) }); drawLast = drawNow;
+        s3.sync({ me: me, foe: foe, showFoe: true, W: W, H: H, ground: GROUND, excite: crowd.level(), foeLook: foeLook, dt: Math.min(0.1, Math.max(0, drawNow - (drawLast || drawNow)) / 1000) }); drawLast = drawNow;
         ok = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); ok = false; }
     }

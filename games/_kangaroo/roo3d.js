@@ -28,6 +28,7 @@
     this.upper = add(sph, M.fur);     /* 胸（細い・なで肩） */
     this.belly = add(sph, M.belly);
     this.neck = add(new T.CapsuleGeometry(1, 1, 4, 10), M.fur);
+    this.trunks = add(sph, M.trunks);
     this.thigh = add(sph, M.fur);
     this.foot = add(new T.CapsuleGeometry(1, 1, 4, 10), M.dark);
     this.tail = add(new T.CylinderGeometry(0.045, 0.2, 1, 14), M.fur);
@@ -43,22 +44,39 @@
     var h = this.head = new T.Group(); g.add(h);
     function hadd(geo, m, x, y, z, sx, sy, sz) { var o = new T.Mesh(geo, m); o.position.set(x, y, z); o.scale.set(sx || 1, sy || 1, sz || 1); o.castShadow = true; h.add(o); return o; }
     hadd(sph, M.fur, 0, 0, 0, 0.2, 0.17, 0.17);
-    hadd(sph, M.fur, 0.2, -0.06, 0, 0.24, 0.11, 0.12);
-    hadd(sph, M.belly, 0.2, -0.12, 0, 0.18, 0.05, 0.09);
-    hadd(sph, M.nose, 0.43, -0.03, 0, 0.045, 0.035, 0.05);
+    /* 鼻先は長さを変えられるよう、まとめて1つの組にする */
+    var sn = this.snout = new T.Group(); h.add(sn);
+    function sadd(m, x, y, z, sx, sy, sz) { var o = new T.Mesh(sph, m); o.position.set(x, y, z); o.scale.set(sx, sy, sz); o.castShadow = true; sn.add(o); }
+    sadd(M.fur, 0.2, -0.06, 0, 0.24, 0.11, 0.12);
+    sadd(M.belly, 0.2, -0.12, 0, 0.18, 0.05, 0.09);
+    sadd(M.nose, 0.43, -0.03, 0, 0.045, 0.035, 0.05);
+    this.ears = [];
     hadd(sph, M.eye, 0.11, 0.06, 0.15, 0.035, 0.04, 0.03);
     hadd(sph, M.eye, 0.11, 0.06, -0.15, 0.035, 0.04, 0.03);
     var ear = new T.ConeGeometry(0.075, 0.34, 12);
+    var self = this;
     [-1, 1].forEach(function (s) {
-      var e = hadd(ear, M.fur, -0.06, 0.3, 0.09 * s);
-      e.rotation.set(0.25 * s, 0, 0.22);
-      var inner = hadd(ear, M.ear, -0.045, 0.29, 0.1 * s, 0.6, 0.85, 0.5);
-      inner.rotation.set(0.25 * s, 0, 0.22);
+      var eg = new T.Group(); eg.position.set(-0.06, 0.16, 0.09 * s); eg.rotation.set(0.25 * s, 0, 0.22); h.add(eg);
+      var e = new T.Mesh(ear, M.fur); e.position.y = 0.14; e.castShadow = true; eg.add(e);
+      var inner = new T.Mesh(ear, M.ear); inner.position.set(0.015, 0.13, 0.01 * s); inner.scale.set(0.6, 0.85, 0.5); eg.add(inner);
+      self.ears.push(eg);
     });
     scene.add(g);
+    this.M = M;
     this.hurt = 0;
     this.v = {};
   }
+
+  /* 見た目の違い：毛色・グローブ・トランクスの色、耳と鼻先の長さ */
+  Roo.prototype.setLook = function (L) {
+    var M = this.M;
+    M.fur.color.setHex(L.fur);
+    M.belly.color.setHex(L.fur).lerp(new T.Color(0xf3dcc0), 0.55);
+    M.glove.color.setHex(L.glove);
+    M.trunks.color.setHex(L.trunks);
+    this.ears.forEach(function (e) { e.scale.set(1, L.ear, 1); });
+    this.snout.scale.set(L.snout, 1, 1);
+  };
 
   /* 物理の点（2Dのpx）から形を置く */
   Roo.prototype.sync = function (f, map, z) {
@@ -80,6 +98,10 @@
     this.belly.position.lerpVectors(hip, chest, 0.42);
     this.belly.position.x += 0.14 * d * s; this.belly.position.z += 0.06;
     this.belly.scale.set(0.3 * s, len * 0.38 + 0.2 * s, 0.34 * s);
+    /* トランクス：腰まわりを少し大きく包む */
+    between(this.trunks, hip, chest);
+    this.trunks.position.lerpVectors(hip, chest, 0.2);
+    this.trunks.scale.set(0.5 * s, 0.32 * s, 0.44 * s);
     /* 首：胸から頭までつなぐ（離れない） */
     var nk = tmpV.copy(v.head).sub(chest).multiplyScalar(0.1).add(chest).clone();
     between(this.neck, nk, v.head);
@@ -214,11 +236,14 @@
       eye: mat(0x0c0c0c, { roughness: 0.15 }),
       nose: mat(0x2a1a14, { roughness: 0.4 }),
       glove: mat(0xc01c1c, { roughness: 0.32 }),
+      trunks: mat(0x8a1414, { roughness: 0.55 }),
       cuff: mat(0xf2f2f2, { roughness: 0.5 })
     };
     var M2 = {}; for (var k in M) M2[k] = M[k];
     M2.glove = mat(0x1d48b8, { roughness: 0.32 });
     M2.fur = mat(0x96704e, { roughness: 0.95 });
+    M2.belly = mat(0xdcb48a, { roughness: 0.95 });
+    M2.trunks = mat(0x1d48b8, { roughness: 0.55 });
     this.me = new Roo(sc, M);
     this.foe = new Roo(sc, M2);
     this.furM = [M.fur, M2.fur];
@@ -230,6 +255,7 @@
     function map(p, out) { out.set((p.x - W / 2) / 100, (G - p.y) / 100, 0); return out; }
     if (s.me) this.me.sync(s.me, map, 0.15);
     if (s.foe) this.foe.sync(s.foe, map, -0.15);
+    if (s.foeLook && s.foeLook !== this.foeLook) { this.foeLook = s.foeLook; this.foe.setLook(s.foeLook); }
     this.foe.group.visible = !!s.showFoe;
     this.furM[0].emissive.setRGB(0.14 * this.me.hurt, 0, 0);
     this.furM[1].emissive.setRGB(0.14 * this.foe.hurt, 0, 0);
