@@ -133,10 +133,10 @@
     this.tailTip.position.copy(v.tail);
     /* 腕とグローブ */
     var sh = tmpV.copy(v.head).sub(chest).multiplyScalar(0.25).add(chest).clone();
-    /* 腕とグローブはいつも胴より手前（カメラ側）に出す */
-    var shB = sh.clone(); shB.z = z + 0.34 * s;
+    /* グローブはいつも胴より手前（カメラ側）に出す。奥の腕は肩を奥に残し、胴の横から前へ回す */
+    var shB = sh.clone(); shB.z = z - 0.12 * s;
     var shF = sh.clone(); shF.z = z + 0.5 * s;
-    var gB = v.gb.clone(); gB.z = z + 0.42 * s;
+    var gB = v.gb.clone(); gB.z = z + 0.4 * s;
     var gF = v.gf.clone(); gF.z = z + 0.62 * s;
     /* ひじは下へ曲がる。肩とグローブが近いほど深く曲がり、伸ばすとまっすぐに近づく */
     function elbow(a, b) {
