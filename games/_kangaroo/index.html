@@ -38,9 +38,10 @@
 
    いつも自分と同じレベルのカンガルーと戦う。毎回レベル1から。
    体は点とばねの簡単な物理。指でなぞると、押した所からのずれのぶんだけ
-     前後 → 体を前に乗り出す（前の手が伸びる） / 下 → かがむ
-   と、おもちゃのように体を引っぱる。グローブが相手の頭や胸に当たったときの勢いがダメージ。
-   かがむと頭が下がって、相手のパンチが上を抜ける。
+     前 → 体を乗り出して前の手が伸びる / 下 → かがむ / 後ろ → ガード
+   と、おもちゃのように体を引っぱる。グローブが相手に当たったときの勢いがダメージ。
+   立って打てば上段、かがんで打てば下段。ガードも立てば上段、かがめば下段で、高さが合うと防げて、
+   打った方がはじかれてすきができる（軽い読み合い）。
    勝つと短いレベルアップの演出のあと、すぐ次の（1つ上のレベルの）相手。負けたら結果を出してレベル1に戻る。
    相手の賢さと速さだけがレベルで上がる。 */
 (function () {
@@ -156,13 +157,23 @@
     else if (n === "chest") o = [12 + 95 * L, -190 + 100 * C];
     else if (n === "head") o = [12 + 95 * L + 28 + 10 * L, -190 + 100 * C - 58 + 5 * C];
     else if (n === "tail") o = [-135, -6];
-    else if (n === "gf") o = [12 + 95 * L + 50 + 100 * Math.max(0, L), -190 + 100 * C - 6 - 10 * C];
+    else if (guarding(f)) {
+      /* ガード：立てば顔の前（上段）、かがめばお腹の前（下段） */
+      var low = f.C > 0.5, cx0 = 12 + 95 * L, cy0 = -190 + 100 * C;
+      o = n === "gf" ? [cx0 + 42, cy0 + (low ? 34 : -62)] : [cx0 + 34, cy0 + (low ? 20 : -48)];
+    }
+    /* 前の手は伸ばすほど少し下へ弧を描く（かがんだ相手の頭にも届く） */
+    else if (n === "gf") o = [12 + 95 * L + 50 + 100 * Math.max(0, L), -190 + 100 * C - 6 - 10 * C + 45 * Math.max(0, L)];
     else o = [12 + 95 * L + 32, -190 + 100 * C - 26];
     var hop = f.hopY || 0;
     /* 足も少し踏み出す・下がる */
     var step = (n === "tail" || n === "foot" ? 1 : 0) * L * 30;
     return { x: f.home + f.slide + (o[0] + step) * f.dir * f.sc, y: GROUND + (o[1] - (n === "foot" ? 0 : 0)) * f.sc - hop };
   }
+
+  /* 後ろへ引いている間はガード。高さはかがみ具合で決まる */
+  function guarding(f) { return !f.ko && !(f.stun > 0) && f.L < -0.35; }
+  function height(f) { return f.C > 0.5 ? "low" : "high"; }
 
   var G = 1800, DT = 1 / 60;
   function physics(f) {
@@ -203,7 +214,7 @@
   function hits(a, b) {
     ["gf", "gb"].forEach(function (g) {
       var gl = a.P[g];
-      [["head", 24], ["chest", 36]].forEach(function (tg) {
+      [["head", 24], ["chest", 36], ["hip", 34]].forEach(function (tg) {
         var t = b.P[tg[0]], r = (tg[1] + GLOVE_R) * a.sc;
         var dx = t.x - gl.x, dy = t.y - gl.y, d = Math.hypot(dx, dy);
         if (d >= r || d < 0.001) return;
@@ -214,8 +225,17 @@
         var over = r - d;
         gl.x -= nx * over * 0.5; gl.y -= ny * over * 0.5;
         t.x += nx * over * 0.5; t.y += ny * over * 0.5;
-        if (vn < 300 || a.cool[g] > 0 || b.ko || a.ko) return;
+        if (vn < 300 || a.cool[g] > 0 || b.ko || a.ko || a.stun > 0) return;
         a.cool[g] = 0.25;
+        /* 上段・下段とガードの高さが合えば防がれ、打った方がはじかれてすきができる */
+        if (guarding(b) && height(b) === height(a)) {
+          b.hp -= 0.5;
+          a.stun = 0.5; a.hurtT = 0.3; a.slide -= nx * 30;
+          fx.push({ x: gl.x + nx * 12, y: gl.y + ny * 12, t: 0, big: false, guard: true });
+          tone(1500, 0.12, 0.09, "triangle"); tone(2250, 0.1, 0.05, "square"); noiseHit(0.06, 3000, 0.1, 3);
+          shake = Math.max(shake, 0.06);
+          return;
+        }
         var head = tg[0] === "head";
         var dmg = Math.min(16, (vn - 300) / 50 * (head ? 1.2 : 0.6) + (head ? 2 : 1));
         b.hp -= dmg; b.hurtT = 0.25;
@@ -243,6 +263,7 @@
     });
   }
   function stepFighter(f, dt) {
+    if (f.stun > 0) { f.stun -= dt; f.L = -0.5; f.C = 0; }
     f.cool.gf = Math.max(0, f.cool.gf - dt); f.cool.gb = Math.max(0, f.cool.gb - dt);
     f.hurtT = Math.max(0, f.hurtT - dt);
     f.slide *= Math.pow(0.1, dt);
@@ -262,7 +283,7 @@
   function nextBout() {
     state = S.FIGHT; T = 0; fightT = 0;
     me = fighter(P1X, 1); foe = fighter(P2X, -1);
-    ai = { L: 0, C: 0, goalL: 0, goalC: 0, think: 0.6, punchT: 0, react: null, crouchFor: 0 };
+    ai = { L: 0, C: 0, goalL: 0, goalC: 0, think: 0.6, punchT: 0, react: null, guardFor: 0 };
     before = after = level; outcome = "";
   }
 
@@ -278,26 +299,25 @@
   }
   function stepCpu(dt) {
     var k = cpuSkill();
-    if (foe.ko) return;
-    /* こちらの前の手が速く近づいてきたら、かがむ */
-    var g = me.P.gf, gv = -(g.x - g.px) / DT * foe.dir * -1;
-    var lunge = (g.x - g.px) / DT * me.dir;
-    if (!ai.react && lunge > 500 && ai.crouchFor <= 0 && Math.random() < k.sure * 0.25) ai.react = { t: k.delay, act: "crouch" };
-    if (me.C > 0.6 && !ai.react && ai.punchT <= 0 && Math.random() < dt * 3 * k.sure) ai.react = { t: k.delay, act: "lowpunch" };
+    if (foe.ko || foe.stun > 0) { ai.L = foe.L; ai.C = foe.C; return; }
+    /* こちらの前の手が速く近づいてきたら、高さを読んでガード（レベルが高いほど速く確か） */
+    var g = me.P.gf, lunge = (g.x - g.px) / DT * me.dir;
+    if (!ai.react && lunge > 450 && ai.guardFor <= 0 && ai.punchT <= 0 && Math.random() < 0.35 + k.sure * 0.4) {
+      var right = Math.random() < k.sure;
+      ai.react = { t: k.delay, low: (height(me) === "low") === right };
+    }
     if (ai.react) {
       ai.react.t -= dt;
-      if (ai.react.t <= 0) {
-        if (ai.react.act === "crouch") { ai.crouchFor = 0.45; }
-        else { ai.punchT = 0.22; ai.punchLow = true; }
-        ai.react = null;
-      }
+      if (ai.react.t <= 0) { ai.guardFor = 0.5; ai.guardLow = ai.react.low; ai.react = null; }
     }
-    if (ai.crouchFor > 0) { ai.crouchFor -= dt; ai.goalC = 1; ai.goalL = -0.3; }
-    else if (ai.punchT > 0) { ai.punchT -= dt; ai.goalL = 1; ai.goalC = ai.punchLow ? 0.9 : 0; }
+    if (ai.guardFor > 0) { ai.guardFor -= dt; ai.goalL = -0.7; ai.goalC = ai.guardLow ? 0.85 : 0; }
+    else if (ai.punchT > 0) { ai.punchT -= dt; ai.goalL = 1; ai.goalC = ai.punchLow ? 0.85 : 0; }
     else {
       ai.goalC = 0; ai.goalL = -0.15 + Math.sin(T * 3) * 0.12;
       ai.think -= dt;
-      if (ai.think <= 0) { ai.think = k.pace * (0.5 + Math.random()); ai.punchT = 0.2; ai.punchLow = Math.random() < 0.2; }
+      /* こちらがすきだらけなら狙う */
+      if (me.stun > 0 && Math.random() < k.sure) ai.think = Math.min(ai.think, k.delay);
+      if (ai.think <= 0) { ai.think = k.pace * (0.5 + Math.random()); ai.punchT = 0.2; ai.punchLow = Math.random() < 0.4; }
     }
     var sp = k.speed * dt;
     ai.L += Math.max(-sp, Math.min(sp, ai.goalL - ai.L));
