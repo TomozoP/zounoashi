@@ -67,7 +67,9 @@
     parent.add(m); return m;
   }
   /* 門の形の枠（左右の柱と上の梁） */
-  function frame(self, g, h) {
+  function frame(self, parent, h) {
+    var g = parent.tall = new T.Group();
+    parent.add(g);
     var M = self.M;
     mesh(new T.BoxGeometry(0.22, h, 0.22), M.yellow, -1.42, h / 2, 0, g);
     mesh(new T.BoxGeometry(0.22, h, 0.22), M.yellow, 1.42, h / 2, 0, g);
@@ -190,13 +192,15 @@
       for (var j = 0; j < this.built.length; j++) if (this.built[j].tr === tr) b = this.built[j];
       if (!b) { b = { tr: tr, g: buildTrap(this, tr) }; this.scene.add(b.g); }
       poseTrap(b.g, tr);
+      /* 通り過ぎた門の枠は、手前で車を隠すので見せない */
+      if (b.g.tall) b.g.tall.visible = tr.zc < s.camZ + 0.5;
       next.push(b);
     }
     for (j = 0; j < this.built.length; j++) if (next.indexOf(this.built[j]) < 0) this.scene.remove(this.built[j].g);
     this.built = next;
 
-    this.camera.position.set(0.25, 6.8, s.camZ + 4.6);
-    this.camera.lookAt(0, 0, s.camZ - 3.6);
+    this.camera.position.set(2.0, 4.0, s.camZ + 5.2);
+    this.camera.lookAt(0, 0.3, s.camZ - 4.2);
     var key = this.lights.key;
     key.position.set(-4, 8, s.camZ + 2);
     key.target.position.set(0, 0, s.camZ - 4);
