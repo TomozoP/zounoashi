@@ -343,5 +343,5 @@ window.DRAFT_GAMES = [
     "catch": "上司の説教に拍で相づちを打つ"
   },
   {"type":"lab","tags":[],"id":"taiyaki","title":"好きなたい焼き","year":2026,"date":"2026-10-24","plays":null,"url":"","img":"games/_taiyaki/img/thumb.webp","play":"games/_taiyaki/index.html","full":true,"catch":"好きな画像の形でたい焼きを焼く"},
-  {"type":"lab","tags":[],"id":"kangaroo","title":"カンガルーバトル","year":2026,"date":"2026-10-25","plays":null,"url":"","img":"games/_kangaroo/img/thumb.webp","play":"games/_kangaroo/index.html","full":true,"catch":"同じレベルのカンガルーとだけ戦う"},
+  {"type":"lab","tags":[],"id":"kangaroo","title":"カンガルーファイト","year":2026,"date":"2026-10-25","plays":null,"url":"","img":"games/_kangaroo/img/thumb.webp","play":"games/_kangaroo/index.html","full":true,"catch":"同じレベルのカンガルーとだけ戦う"},
 ];
