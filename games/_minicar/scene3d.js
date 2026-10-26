@@ -8,7 +8,7 @@
 
   function GameScene() {
     T = global.THREE;
-    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces" }, camera: { fov: 44, near: 0.1, far: 80 }, finish: { vignette: 0.28, grain: 0.02 } });
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces" }, camera: { fov: 54, near: 0.1, far: 80 }, finish: { vignette: 0.28, grain: 0.02 } });
     this.scene = st.scene;
     this.camera = st.camera;
     this.scene.background = new T.Color(0x1c1f2a);
@@ -72,8 +72,8 @@
     parent.add(g);
     var M = self.M;
     mesh(new T.BoxGeometry(0.22, h, 0.22), M.yellow, -1.42, h / 2, 0, g);
-    mesh(new T.BoxGeometry(0.22, h, 0.22), M.yellow, 1.42, h / 2, 0, g);
-    mesh(new T.BoxGeometry(3.06, 0.22, 0.3), M.yellow, 0, h, 0, g);
+    /* 手前（カメラ側）の柱は置かない。横から見たときにトラップを隠すため、奥の柱からの片持ちにする */
+    mesh(new T.BoxGeometry(2.0, 0.22, 0.3), M.yellow, -0.53, h, 0, g);
   }
 
   /* トラップ1つ分（道の板ごと）。動く部品は g.part に入れる */
@@ -181,6 +181,7 @@
     var c = this.car;
     c.group.position.set(s.x, s.y, s.z);
     c.body.rotation.set(-s.pitch, s.yaw, s.roll);
+    c.body.scale.set(s.sx, s.sy, s.sz);                /* 潰れ・へこみ */
     for (var i = 0; i < 4; i++) c.wheels[i].rotation.x = s.wheel;
 
     /* 近くのトラップだけ作って動かす。遠くなったものは捨てる */
@@ -192,15 +193,13 @@
       for (var j = 0; j < this.built.length; j++) if (this.built[j].tr === tr) b = this.built[j];
       if (!b) { b = { tr: tr, g: buildTrap(this, tr) }; this.scene.add(b.g); }
       poseTrap(b.g, tr);
-      /* 通り過ぎた門の枠は、手前で車を隠すので見せない */
-      if (b.g.tall) b.g.tall.visible = tr.zc < s.camZ + 0.5;
       next.push(b);
     }
     for (j = 0; j < this.built.length; j++) if (next.indexOf(this.built[j]) < 0) this.scene.remove(this.built[j].g);
     this.built = next;
 
-    this.camera.position.set(2.0, 4.0, s.camZ + 5.2);
-    this.camera.lookAt(0, 0.3, s.camZ - 4.2);
+    this.camera.position.set(4.6, 5.4, s.camZ + 3.2);
+    this.camera.lookAt(0, 0, s.camZ - 2.6);
     var key = this.lights.key;
     key.position.set(-4, 8, s.camZ + 2);
     key.target.position.set(0, 0, s.camZ - 4);
