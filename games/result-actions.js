@@ -125,7 +125,7 @@
         a.href = actions.follow.url; a.target = '_blank'; a.rel = 'noopener';
         a.setAttribute('aria-label', actions.follow.text()); a.hidden = true;
         a.style.cssText = 'position:absolute;border-radius:999px;touch-action:manipulation;';
-        parent.appendChild(a);
+        if (parent && parent.appendChild) parent.appendChild(a);
         return a;
       },
       box: function (ctx, buttons, W) {
