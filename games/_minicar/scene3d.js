@@ -193,9 +193,10 @@
       mesh(new T.CylinderGeometry(0.2, 0.2, 1.7, 14), M.red, 0, 2.6 + 0.85 + 0.11, 0, g);
       mesh(new T.CylinderGeometry(0.24, 0.24, 0.08, 14), M.dark, 0, 2.6 + 1.75, 0, g);
       var blk = new T.Group();
-      mesh(new T.BoxGeometry(1.9, 0.8, 0.9), M.steel, 0, 0.5, 0, blk);
-      mesh(new T.BoxGeometry(2.0, 0.1, 1.0), M.dark, 0, 0.95, 0, blk);          /* 上のふち */
-      mesh(new T.BoxGeometry(1.94, 0.12, 0.94), M.stripe, 0, 0.06, 0, blk);     /* 下の縞（押す面） */
+      var dep = (tr.half || 0.45) * 2;                   /* 連続プレスは奥行きの薄い小型 */
+      mesh(new T.BoxGeometry(1.9, 0.8, dep), M.steel, 0, 0.5, 0, blk);
+      mesh(new T.BoxGeometry(2.0, 0.1, dep + 0.1), M.dark, 0, 0.95, 0, blk);   /* 上のふち */
+      mesh(new T.BoxGeometry(1.94, 0.12, dep + 0.04), M.stripe, 0, 0.06, 0, blk); /* 下の縞（押す面） */
       mesh(new T.CylinderGeometry(0.1, 0.1, 1.9, 12), M.chrome, 0, 1.95, 0, blk);
       g.add(blk); g.part = blk;
     } else if (tr.kind === "hammer") {
@@ -366,8 +367,9 @@
     var ahead = s.ahead == null ? s.camZ - 4 : Math.max(s.camZ - 9, Math.min(s.camZ - 2.5, s.ahead));
     var mid = s.camZ * 0.62 + ahead * 0.38, span = s.camZ - ahead;
     if (this.cam == null) this.cam = { mid: mid, span: span };
-    this.cam.mid += (mid - this.cam.mid) * 0.08;      /* 急に跳ばないように少しずつ寄せる */
-    this.cam.span += (span - this.cam.span) * 0.05;
+    var now = global.performance.now(), dt = Math.min(0.25, ((now - (this.camT || now)) / 1000)); this.camT = now;
+    this.cam.mid += (mid - this.cam.mid) * (1 - Math.exp(-dt * 5));     /* 急に跳ばないように、実時間で少しずつ寄せる */
+    this.cam.span += (span - this.cam.span) * (1 - Math.exp(-dt * 3));
     var m = this.cam.mid, d = 2.2 + this.cam.span * 0.75;
     this.camera.position.set(d * 0.75, d * 0.95, m + d * 0.95);
     this.camera.lookAt(0, 0.2, m);
