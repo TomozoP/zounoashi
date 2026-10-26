@@ -11,8 +11,8 @@
     var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces" }, camera: { fov: 54, near: 0.1, far: 80 }, finish: { vignette: 0.28, grain: 0.02 } });
     this.scene = st.scene;
     this.camera = st.camera;
-    this.scene.background = new T.Color(0x1c1f2a);
-    this.scene.fog = new T.Fog(0x1c1f2a, 22, 48);
+    this.scene.background = new T.Color(0x9fc4dc);   /* 明るい水色。暗い金属や黄・橙・赤のトラップが溶けない */
+    this.scene.fog = new T.Fog(0x9fc4dc, 24, 50);
     var L = this.lights = Z3.lights(this.scene, { shadows: true, shadowSize: 7 });
     this.scene.add(L.key.target);
 
@@ -38,8 +38,8 @@
       for (var i = -2; i < 4; i++) { g.beginPath(); g.moveTo(i * 48, 0); g.lineTo(i * 48 + 24, 0); g.lineTo(i * 48 + 24 + h, h); g.lineTo(i * 48 + h, h); g.fill(); }
     });
     this.M = {
-      steel: Z3.std(0x5d6670, { roughness: 0.35, metalness: 0.7 }),
-      dark: Z3.std(0x2c3138, { roughness: 0.5, metalness: 0.6 }),
+      steel: Z3.std(0x47505c, { roughness: 0.4, metalness: 0.5 }),
+      dark: Z3.std(0x2a2e35, { roughness: 0.5, metalness: 0.4 }),
       yellow: Z3.std(0xf2c230, { roughness: 0.5 }),
       red: Z3.std(0xc8322a, { roughness: 0.45, metalness: 0.2 }),
       orange: Z3.std(0xe8792a, { roughness: 0.5 }),
@@ -160,14 +160,47 @@
       var b = new T.Mesh(new T.BoxGeometry(w, h, l), m);
       b.position.set(x, y, z); b.castShadow = true; body.add(b); return b;
     }
-    box(0.4, 0.12, 0.8, red, 0, 0.13, 0);              /* 車体 */
-    box(0.34, 0.1, 0.38, dark, 0, 0.24, 0.04);         /* 窓 */
-    box(0.32, 0.02, 0.32, red, 0, 0.3, 0.05);          /* 屋根 */
-    box(0.42, 0.04, 0.04, chrome, 0, 0.1, -0.41);      /* バンパー */
-    box(0.42, 0.04, 0.04, chrome, 0, 0.1, 0.41);
-    var lamp = Z3.std(0xfff3c0, { emissive: 0x665c30 });
-    box(0.07, 0.04, 0.02, lamp, -0.13, 0.15, -0.405);
-    box(0.07, 0.04, 0.02, lamp, 0.13, 0.15, -0.405);
+    var white = Z3.std(0xf6f3ea, { roughness: 0.35 });
+    var black = Z3.std(0x16181c, { roughness: 0.6 });
+    /* 上がすぼまった箱（キャビン・ボンネットの丸み代わり） */
+    function taper(w, h, l, m, x, y, z, kx, kz, dz) {
+      var geo = new T.BoxGeometry(w, h, l), a = geo.attributes.position;
+      for (var i = 0; i < a.count; i++) if (a.getY(i) > 0) { a.setX(i, a.getX(i) * kx); a.setZ(i, a.getZ(i) * kz + (dz || 0)); }
+      geo.computeVertexNormals();
+      var b = new T.Mesh(geo, m); b.position.set(x, y, z); b.castShadow = true; body.add(b); return b;
+    }
+    taper(0.4, 0.1, 0.8, red, 0, 0.12, 0, 0.96, 0.97);          /* 車体の下半分 */
+    taper(0.38, 0.05, 0.78, red, 0, 0.195, 0, 0.92, 0.94);      /* 肩の丸み */
+    taper(0.34, 0.11, 0.4, dark, 0, 0.275, 0.05, 0.8, 0.62, 0.02); /* 窓（前後に傾いたガラス） */
+    taper(0.27, 0.025, 0.25, red, 0, 0.342, 0.06, 0.95, 0.9);   /* 屋根 */
+    /* 白いストライプ（ボンネット・屋根・トランク） */
+    box(0.07, 0.006, 0.2, white, -0.045, 0.221, -0.27); box(0.07, 0.006, 0.2, white, 0.045, 0.221, -0.27);
+    box(0.05, 0.006, 0.22, white, -0.035, 0.356, 0.06); box(0.05, 0.006, 0.22, white, 0.035, 0.356, 0.06);
+    box(0.07, 0.006, 0.12, white, -0.045, 0.221, 0.33); box(0.07, 0.006, 0.12, white, 0.045, 0.221, 0.33);
+    /* 横のゼッケン */
+    [-1, 1].forEach(function (k) {
+      var disc = new T.Mesh(new T.CylinderGeometry(0.055, 0.055, 0.006, 16), white);
+      disc.rotation.z = Math.PI / 2; disc.position.set(k * 0.2, 0.15, -0.02); body.add(disc);
+      box(0.006, 0.05, 0.012, black, k * 0.204, 0.15, -0.02);
+      box(0.03, 0.015, 0.03, red, k * 0.18, 0.25, -0.15);       /* ドアミラー */
+    });
+    /* 前：グリル・ライト・バンパー */
+    box(0.2, 0.05, 0.01, black, 0, 0.14, -0.4);
+    var lamp = Z3.std(0xfff3c0, { emissive: 0x8a7d40 });
+    var tail = Z3.std(0xff3a2a, { emissive: 0x801010 });
+    [-1, 1].forEach(function (k) {
+      var hl = new T.Mesh(new T.CylinderGeometry(0.03, 0.03, 0.015, 12), lamp);
+      hl.rotation.x = Math.PI / 2; hl.position.set(k * 0.14, 0.15, -0.402); body.add(hl);
+      box(0.08, 0.035, 0.01, tail, k * 0.13, 0.16, 0.4);
+    });
+    box(0.42, 0.04, 0.04, chrome, 0, 0.09, -0.41);     /* バンパー */
+    box(0.42, 0.04, 0.04, chrome, 0, 0.09, 0.41);
+    var pipe = new T.Mesh(new T.CylinderGeometry(0.015, 0.015, 0.06, 8), chrome);   /* マフラー */
+    pipe.rotation.x = Math.PI / 2; pipe.position.set(-0.12, 0.07, 0.42); body.add(pipe);
+    /* タイヤの上の黒いふち */
+    [[-0.2, -0.27], [0.2, -0.27], [-0.2, 0.27], [0.2, 0.27]].forEach(function (p) {
+      box(0.03, 0.03, 0.2, black, p[0] > 0 ? 0.205 : -0.205, 0.19, p[1]);
+    });
     var tire = Z3.std(0x18181a, { roughness: 0.9 }), hub = Z3.std(0xbfc3c8, { roughness: 0.3, metalness: 0.8 });
     var wheels = [];
     [[-0.2, -0.27], [0.2, -0.27], [-0.2, 0.27], [0.2, 0.27]].forEach(function (p) {
