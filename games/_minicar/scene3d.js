@@ -140,6 +140,7 @@
     return g;
   }
   function poseTrap(g, tr) {
+    if (!g.part) return;                               /* ゴールの先の道など、動く部品がないもの */
     var p = tr.pose;
     if (tr.kind === "press") g.part.position.y = 0.02 + p * 1.5;
     else if (tr.kind === "hammer") g.part.rotation.z = p;
