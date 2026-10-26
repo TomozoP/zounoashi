@@ -203,7 +203,7 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
 
   <div id="mid">
     <div id="stage">
-      <div id="script"><div id="scriptTabs"><button type="button" data-st="script" aria-pressed="true">台本</button><button type="button" data-st="post" aria-pressed="false">投稿</button><button type="button" data-st="rec" aria-pressed="false">録画</button></div><textarea id="scriptText" placeholder="台本" spellcheck="false"></textarea><div id="ttsRow" hidden><select id="ttsStyle" title="読み方"><option value="normal">ふつう</option><option value="clear">はきはき</option><option value="genki">元気</option><option value="calm">落ち着き</option><option value="free">自由</option></select><select id="ttsSpeed" title="速さ"><option value="1.2">ゆっくり</option><option value="1" selected>ふつうの速さ</option><option value="0.85">はやい</option></select><select id="ttsPause" title="文と文の間"><option value="0">間なし</option><option value="0.15" selected>間 短め</option><option value="0.4">間 ふつう</option><option value="0.8">間 長め</option><option value="1.5">間 とても長め</option></select><input id="ttsAssist" type="text" maxlength="100" placeholder="この文の雰囲気で読む" hidden><button type="button" id="ttsBtn" title="選んだ文か、台本全部を読み上げて置く">読み上げ</button></div>
+      <div id="script"><div id="scriptTabs"><button type="button" data-st="script" aria-pressed="true">台本</button><button type="button" data-st="post" aria-pressed="false">投稿</button><button type="button" data-st="rec" aria-pressed="false">録画</button></div><textarea id="scriptText" placeholder="台本" spellcheck="false"></textarea><div id="ttsRow" hidden><select id="ttsVoice" title="声"><option value="me">tomozo の声</option></select><select id="ttsStyle" title="読み方"><option value="normal">ふつう</option><option value="clear">はきはき</option><option value="genki">元気</option><option value="calm">落ち着き</option><option value="free">自由</option></select><select id="ttsSpeed" title="速さ"><option value="1.2">ゆっくり</option><option value="1" selected>ふつうの速さ</option><option value="0.85">はやい</option></select><select id="ttsPause" title="文と文の間"><option value="0">間なし</option><option value="0.15" selected>間 短め</option><option value="0.4">間 ふつう</option><option value="0.8">間 長め</option><option value="1.5">間 とても長め</option></select><input id="ttsAssist" type="text" maxlength="100" placeholder="この文の雰囲気で読む" hidden><button type="button" id="ttsBtn" title="選んだ文か、台本全部を読み上げて置く">読み上げ</button></div>
         <div id="postPane" hidden>
           <label for="postX">X の投稿文（動画つき）</label><textarea id="postX" spellcheck="false"></textarea>
           <label for="postX2">X の投稿文（ツリーの2つ目）</label><textarea id="postX2" spellcheck="false"></textarea>
@@ -1671,6 +1671,7 @@ function fillPost(g) {
   const te = $('postTitleEn');
   if (g.en && $('postTitle').value === g.title && (!te.value || te.value === te.dataset.auto)) { te.value = te.dataset.auto = g.en; te.dataset.ja = g.title; }
   if (!$('postYt').value) $('postYt').value = '【ここで遊べます】' + g.url + '\n【X】 https://x.com/TomozoP';
+  addCredits();
   fillSubEn();
 }
 // 英語の字幕は、タイムラインの字幕（ヘッダー以外）1枚ごとに1行。同じ時間で YouTube へ字幕ファイルとして上げる
@@ -1761,10 +1762,11 @@ function postX() {
   else toast('書き出した動画を、開いた投稿画面へドラッグしてください', 5000);
 }
 function postYT(button) {
+  addCredits();
   if (YT_CLIENT_ID) {
     // 公開で上げる。審査前のアプリだと YouTube 側で非公開に固定されるので、そのときは YouTube Studio を開く
     if (!lastExport) { toast('先に書き出してください'); return; }
-    ytUpload(lastExport.file(), $('postTitle').value || 'ゲーム', $('postYt').value, button, () => ({ title: $('postTitleEn').value.trim(), description: $('postYtEn').value, srt: enSrt() }));
+    ytUpload(lastExport.file(), $('postTitle').value || 'ゲーム', $('postYt').value, button, () => ({ title: $('postTitleEn').value.trim(), description: [$('postYtEn').value.replace(/\n*$/, ''), ...vvCredits().filter(c => !$('postYtEn').value.includes(c))].join('\n'), srt: enSrt() }));
   } else {
     copyText($('postYt').value); open('https://www.youtube.com/upload', '_blank');
     if (lastExport) lastExport.save();
@@ -2555,9 +2557,37 @@ function ttsParams() {
   p.length = +((p.length || 0.73) * +$('ttsSpeed').value).toFixed(3); p.pause = +$('ttsPause').value;
   return p;
 }
-function syncTtsAssist() { $('ttsAssist').hidden = $('ttsStyle').value !== 'free'; }
+function syncTtsAssist() { const vv = $('ttsVoice').value !== 'me'; $('ttsStyle').hidden = vv; $('ttsAssist').hidden = vv || $('ttsStyle').value !== 'free'; }
+// VOICEVOX：このPCで VOICEVOX を起動していれば（127.0.0.1:50021）、キャラの声も選べる。
+// 規約でクレジット「VOICEVOX:キャラ名」が要るので、使ったキャラは YouTube の説明文に足す
+const VV_URL = 'http://127.0.0.1:50021';
+let vvList = [];
+async function loadVoicevox() {
+  try {
+    const sp = await (await fetch(VV_URL + '/speakers')).json(), sel = $('ttsVoice'), cur = sel.value;
+    vvList = sp.flatMap(c => c.styles.map(st => ({ id: st.id, name: c.name, label: c.name + (c.styles.length > 1 ? '（' + st.name + '）' : '') })));
+    sel.querySelectorAll('option[data-vv]').forEach(o => o.remove());
+    for (const v of vvList) { const o = document.createElement('option'); o.value = 'vv' + v.id; o.textContent = v.label; o.dataset.vv = 1; sel.append(o); }
+    let saved = cur; try { saved = localStorage.getItem('cakeCut.ttsVoice') || cur; } catch (e) {}
+    if ([...sel.options].some(o => o.value === saved)) sel.value = saved;
+  } catch (e) {}
+  syncTtsAssist();
+}
+async function voicevoxTts(id, text, speed) {
+  const q = await (await fetch(VV_URL + '/audio_query?speaker=' + id + '&text=' + encodeURIComponent(text), { method: 'POST' })).json();
+  q.speedScale = +(1 / speed).toFixed(3); q.prePhonemeLength = 0.05; q.postPhonemeLength = 0.05;
+  const r = await fetch(VV_URL + '/synthesis?speaker=' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) });
+  if (!r.ok) throw new Error(r.status);
+  return r.blob();
+}
+function vvCredits() { return [...new Set(aclips.map(a => a.credit).filter(Boolean))]; }
+function addCredits() {
+  const el = $('postYt'); if (!el.value) return;
+  const miss = vvCredits().filter(c => !el.value.includes(c));
+  if (miss.length) { el.value = el.value.replace(/\n*$/, '') + '\n' + miss.join('\n'); el.dispatchEvent(new Event('change')); }
+}
 // 選んだ読み方と速さはこのブラウザに残す
-['ttsStyle', 'ttsSpeed', 'ttsPause', 'ttsAssist'].forEach(id => {
+['ttsVoice', 'ttsStyle', 'ttsSpeed', 'ttsPause', 'ttsAssist'].forEach(id => {
   const el = $(id), ok = v => el.tagName !== 'SELECT' || [...el.options].some(o => o.value === v);
   try { const v = localStorage.getItem('cakeCut.' + id); if (v != null && ok(v)) el.value = v; } catch (e) {}
   el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => { try { localStorage.setItem('cakeCut.' + id, el.value); } catch (e) {} syncTtsAssist(); });
@@ -2573,7 +2603,7 @@ async function startVoice() {
   for (let i = 0; i < 90; i++) { await new Promise(r => setTimeout(r, 1000)); if (await pingVoice()) { toast('声を起動しました'); return true; } }
   toast('声を起動できませんでした'); return false;
 }
-if (voiceOn) { syncTtsBtn(); pingVoice(); }
+if (voiceOn) { syncTtsBtn(); pingVoice(); loadVoicevox(); $('ttsVoice').addEventListener('focus', () => { if (!vvList.length) loadVoicevox(); }); }
 // 選んだ文（なければ台本全部）を1文ずつ読み上げ、声のレーンの再生位置から並べて置く。
 // 字幕は1枚ぶんずつに分け、声のクリップも字幕と同じ所で切る（切れ目は近くのいちばん静かな所に寄せる）
 function quietAt(raw, t, span = 0.12) {
@@ -2593,13 +2623,18 @@ async function speakScript() {
   if (!units.length) return;
   voiceBusy = true; $('ttsBtn').disabled = true;
   try {
-    if (!voiceReady && !await pingVoice() && !await startVoice()) throw 0;
+    const vv = vvList.find(x => 'vv' + x.id === $('ttsVoice').value), credit = vv ? 'VOICEVOX:' + vv.name : '';
+    if (!vv && !voiceReady && !await pingVoice() && !await startVoice()) throw 0;
     const prm = ttsParams(), got = [];
     for (let i = 0; i < units.length; i++) {
       toast('読み上げ中 ' + (i + 1) + ' / ' + units.length, 60000);
-      const r = await fetch(VOICE_URL + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...prm, text: units[i] }) });
-      if (!r.ok) throw new Error(r.status);
-      const blob = await r.blob(); got.push({ text: units[i], blob, raw: await actx.decodeAudioData(await blob.arrayBuffer()) });
+      let blob;
+      if (vv) blob = await voicevoxTts(vv.id, units[i], +$('ttsSpeed').value);
+      else {
+        const r = await fetch(VOICE_URL + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...prm, text: units[i] }) });
+        if (!r.ok) throw new Error(r.status);
+        blob = await r.blob();
+      } got.push({ text: units[i], blob, raw: await actx.decodeAudioData(await blob.arrayBuffer()) });
     }
     $('toast').style.display = 'none';
     commit();
@@ -2612,7 +2647,7 @@ async function speakScript() {
       parts.forEach((p, k) => {
         acc += [...p].length;
         const to = k === parts.length - 1 ? dur : quietAt(g.raw, dur * acc / total);
-        aclips.push({ id: nid(), buf: bid, in: from, out: to, at: t + from, gain: 1, lane: 'vo', name: '読み上げ' });
+        aclips.push({ id: nid(), buf: bid, in: from, out: to, at: t + from, gain: 1, lane: 'vo', name: '読み上げ', ...(credit && { credit }) });
         subs.push({ id: nid(), text: p, start: t + from, end: t + to });
         from = to;
       });
@@ -2621,6 +2656,7 @@ async function speakScript() {
     subs.sort((x, y) => x.start - y.start);
     playhead = t - prm.pause;
     changed(true);
+    if (credit) { addCredits(); toast('YouTube の説明文に「' + credit + '」を足しました'); }
   } catch (e) { if (e !== 0) { voiceReady = false; toast('読み上げに失敗しました'); } }
   voiceBusy = false; $('ttsBtn').disabled = false;
 }
