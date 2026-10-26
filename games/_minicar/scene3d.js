@@ -96,6 +96,14 @@
     } else {
       var road = roadBox(self, tr.z0, tr.z1); road.position.z -= tr.zc; g.add(road);
     }
+    if ((tr.k + 1) % 10 === 0) {                       /* ステージのゴール：市松模様の線 */
+      if (!self.goalTex) self.goalTex = Z3.canvasTex(128, 32, function (c, w, h) {
+        for (var i = 0; i < 16; i++) for (var j = 0; j < 4; j++) { c.fillStyle = (i + j) % 2 ? "#111" : "#f4f4f4"; c.fillRect(i * 8, j * 8, 8, 8); }
+      });
+      var goal = new T.Mesh(new T.PlaneGeometry(ROAD, 0.65), Z3.std(0xffffff, { map: self.goalTex }));
+      goal.rotation.x = -Math.PI / 2; goal.position.set(0, 0.006, tr.z1 - tr.zc + 0.33); goal.receiveShadow = true;
+      g.add(goal);
+    }
     if (tr.kind === "press") {
       frame(self, g, 2.6);
       var blk = new T.Group();
@@ -171,7 +179,21 @@
       w.position.set(p[0], 0.09, p[1]);
       body.add(w); wheels.push(w);
     });
-    return { group: g, body: body, wheels: wheels };
+    /* お尻のゼンマイのネジ（蝶の形のつまみ）。z の軸まわりに回る */
+    var brass = Z3.std(0xd9a93a, { roughness: 0.3, metalness: 0.85 });
+    var key = new T.Group();
+    key.position.set(0, 0.17, 0.43);
+    var shaft = new T.Mesh(new T.CylinderGeometry(0.018, 0.018, 0.14, 8), brass);
+    shaft.rotation.x = Math.PI / 2; shaft.position.z = 0.06; shaft.castShadow = true; key.add(shaft);
+    [-1, 1].forEach(function (k) {
+      var lobe = new T.Mesh(new T.CylinderGeometry(0.075, 0.075, 0.022, 16), brass);
+      lobe.rotation.x = Math.PI / 2;                    /* 円盤の面をカメラ（後ろ）へ向ける */
+      lobe.scale.set(1, 1, 1);
+      lobe.position.set(k * 0.085, 0, 0.13);
+      lobe.castShadow = true; key.add(lobe);
+    });
+    body.add(key);
+    return { group: g, body: body, wheels: wheels, key: key };
   }
 
   GameScene.prototype.reset = function () {};
@@ -183,6 +205,7 @@
     c.body.rotation.set(-s.pitch, s.yaw, s.roll);
     c.body.scale.set(s.sx, s.sy, s.sz);                /* 潰れ・へこみ */
     for (var i = 0; i < 4; i++) c.wheels[i].rotation.x = s.wheel;
+    c.key.rotation.z = s.key || 0;
 
     /* 近くのトラップだけ作って動かす。遠くなったものは捨てる */
     var next = [];
