@@ -198,10 +198,9 @@
     for (j = 0; j < this.built.length; j++) if (next.indexOf(this.built[j]) < 0) this.scene.remove(this.built[j].g);
     this.built = next;
 
-    /* back（0〜1）で、角度はそのままカメラを後ろへずらし、車の後方を映す */
-    var b = s.back || 0, e = b * b * (3 - 2 * b), shift = e * 2.4;
-    this.camera.position.set(4.6, 5.4, s.camZ + 3.2 + shift);
-    this.camera.lookAt(0, 0, s.camZ - 2.6 + shift);
+    /* 車をいつも画面の真ん中あたりに置いて追いかける（右うしろのななめ上から） */
+    this.camera.position.set(4.0, 4.6, s.camZ + 4.0);
+    this.camera.lookAt(0, 0.1, s.camZ);
     var key = this.lights.key;
     key.position.set(-4, 8, s.camZ + 2);
     key.target.position.set(0, 0, s.camZ - 4);
