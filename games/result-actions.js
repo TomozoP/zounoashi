@@ -133,7 +133,7 @@
         ctx.save(); ctx.font = '700 18px sans-serif';
         var w = ctx.measureText(actions.follow.text()).width + 56;
         ctx.restore();
-        return { x: W / 2 - w / 2, y: b.y + b.h + 10, w: w, h: 34 };
+        return { x: W / 2 - w / 2, y: b.y + b.h + 40, w: w, h: 34 };
       },
       draw: function (ctx, f) {
         var r = f.h / 2;
