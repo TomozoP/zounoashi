@@ -8,6 +8,8 @@
 
   /* 配色の候補。確認用に URL の ?pal=1 などで切り替える */
   var PALS = [
+    /* 実物寄り：部屋の机の上。背景はぼかした部屋、金属は映り込みあり */
+    { real: true, bg: 0xcdbca6, road: 0xffffff, side: 0x6e4526, frame: 0xe0b021, red: 0xb3261e, orange: 0xd9631e, steel: 0x8a9099, dark: 0x30343a, box: 0x9aa1a9, light: 0.9 },
     { bg: 0x9fc4dc, road: 0xffffff, side: 0x7a4c2a, frame: 0xf2c230, red: 0xc8322a, orange: 0xe8792a, steel: 0x47505c, dark: 0x2a2e35, box: 0x8a949f },
     /* 1 ポップ：濃い空色に、原色の黄・赤・青 */
     { bg: 0x46c8ff, road: 0xffe2c0, side: 0x9a5a2a, frame: 0xffd400, red: 0xff2d55, orange: 0xff8a00, steel: 0x3b5bdb, dark: 0x1f2a5c, box: 0x4dabf7, light: 1.15 },
@@ -20,6 +22,42 @@
   ];
   var PAL = PALS[+((/[?&]pal=(\d)/.exec(global.location.search) || [])[1] || 0)] || PALS[0];
 
+  /* 部屋（壁・窓・本棚・観葉植物・ぼけた灯り）を、小さな絵に描く */
+  function paintRoom(g, w, h) {
+    var gr = g.createLinearGradient(0, 0, 0, h);
+    gr.addColorStop(0, "#e9dcc8"); gr.addColorStop(0.62, "#d2bfa5"); gr.addColorStop(0.66, "#8a6a4c"); gr.addColorStop(1, "#5e4632");
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    g.fillStyle = "#fffaf0"; g.fillRect(w * 0.6, h * 0.08, w * 0.24, h * 0.42);            /* 窓 */
+    g.fillStyle = "rgba(170,205,235,.8)"; g.fillRect(w * 0.62, h * 0.11, w * 0.2, h * 0.36);
+    g.fillStyle = "#6b4a30"; g.fillRect(w * 0.06, h * 0.18, w * 0.34, h * 0.42);           /* 本棚 */
+    var cols = ["#c0392b", "#2e86c1", "#f1c40f", "#27ae60", "#8e44ad", "#e67e22", "#ecf0f1"], r = Z3.rng(5);
+    for (var row = 0; row < 3; row++) for (var x = w * 0.08; x < w * 0.38; x += 2 + r() * 2) {
+      g.fillStyle = cols[Math.floor(r() * cols.length)];
+      var bh = h * (0.08 + r() * 0.04); g.fillRect(x, h * (0.3 + row * 0.13) - bh, 1.6, bh);
+    }
+    g.fillStyle = "#3f7d3a";                                                                    /* 観葉植物 */
+    for (var i = 0; i < 9; i++) { g.beginPath(); g.arc(w * (0.47 + Math.sin(i) * 0.04), h * (0.32 + Math.cos(i * 1.7) * 0.08), 3 + r() * 2, 0, 7); g.fill(); }
+    g.fillStyle = "#a0522d"; g.fillRect(w * 0.44, h * 0.42, w * 0.06, h * 0.2);
+    for (i = 0; i < 6; i++) {                                                                   /* ぼけた灯り */
+      g.fillStyle = "rgba(255,236,190," + (0.25 + r() * 0.3) + ")";
+      g.beginPath(); g.arc(r() * w, r() * h * 0.6, 2 + r() * 3, 0, 7); g.fill();
+    }
+    /* 箱ぼかしを数回かけて、ピントの外れた背景にする */
+    var im = g.getImageData(0, 0, w, h), d = im.data, t = new Float32Array(d.length);
+    for (var pass = 0; pass < 3; pass++) for (var dir = 0; dir < 2; dir++) {
+      for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) for (var c = 0; c < 3; c++) {
+        var sum = 0, n = 0;
+        for (var k = -2; k <= 2; k++) {
+          var xx = dir ? x : Math.min(w - 1, Math.max(0, x + k)), yy = dir ? Math.min(h - 1, Math.max(0, y + k)) : y;
+          sum += d[(yy * w + xx) * 4 + c]; n++;
+        }
+        t[(y * w + x) * 4 + c] = sum / n;
+      }
+      for (var j = 0; j < d.length; j++) if (j % 4 !== 3) d[j] = t[j];
+    }
+    g.putImageData(im, 0, 0);
+  }
+
   function GameScene() {
     T = global.THREE;
     var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces" }, camera: { fov: 54, near: 0.1, far: 80 }, finish: { vignette: 0.28, grain: 0.02 } });
@@ -27,6 +65,21 @@
     this.camera = st.camera;
     this.scene.background = new T.Color(PAL.bg);     /* 暗い金属や黄・橙・赤のトラップが溶けない明るさ */
     this.scene.fog = new T.Fog(PAL.bg, 24, 50);
+    if (PAL.real) {
+      /* ぼかした部屋の絵。小さく描いて引き伸ばすと、ぼけて見える */
+      var room = Z3.canvasTex(96, 48, paintRoom);
+      room.minFilter = room.magFilter = T.LinearFilter; room.generateMipmaps = false;
+      this.scene.background = room;
+      /* 同じ絵を周りの景色として映り込みに使う（金属が金属らしく見える） */
+      try {
+        var env = Z3.canvasTex(96, 48, paintRoom);
+        env.mapping = T.EquirectangularReflectionMapping;
+        var pm = new T.PMREMGenerator(this.stage.renderer);
+        this.scene.environment = pm.fromEquirectangular(env).texture;
+        pm.dispose();
+      } catch (e) {}
+      this.scene.fog = new T.Fog(0xc9b49a, 26, 55);
+    }
     var L = this.lights = Z3.lights(this.scene, { shadows: true, shadowSize: 7, scale: PAL.light || 1 });
     this.scene.add(L.key.target);
 
