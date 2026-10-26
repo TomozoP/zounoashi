@@ -198,8 +198,10 @@
     for (j = 0; j < this.built.length; j++) if (next.indexOf(this.built[j]) < 0) this.scene.remove(this.built[j].g);
     this.built = next;
 
-    this.camera.position.set(4.6, 5.4, s.camZ + 3.2);
-    this.camera.lookAt(0, 0, s.camZ - 2.6);
+    /* back（0〜1）で、車の前方を見る位置から、後ろを見る位置へ回り込む */
+    var b = s.back || 0, e = b * b * (3 - 2 * b);
+    this.camera.position.set(4.6, 5.4 - e * 0.6, s.camZ + 3.2 - e * 5.6);
+    this.camera.lookAt(0, 0, s.camZ - 2.6 + e * 4.0);
     var key = this.lights.key;
     key.position.set(-4, 8, s.camZ + 2);
     key.target.position.set(0, 0, s.camZ - 4);
