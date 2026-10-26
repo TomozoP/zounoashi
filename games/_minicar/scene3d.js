@@ -157,14 +157,20 @@
     } else if (tr.kind === "pusher") {
       g.part = [];
       [-1, 1].forEach(function (s) {
-        /* 道の外にせり出した台と、壁がしまわれる箱。壁は箱の口から出入りする */
-        mesh(new T.BoxGeometry(0.95, THICK, 1.1), M.wood2, s * 1.75, -THICK / 2, 0, g);
-        mesh(new T.BoxGeometry(0.72, 0.6, 0.98), M.box, s * 1.86, 0.3, 0, g);
-        mesh(new T.BoxGeometry(0.74, 0.05, 1.0), M.yellow, s * 1.86, 0.6, 0, g);       /* 箱のふち */
-        mesh(new T.BoxGeometry(0.03, 0.54, 0.86), M.dark, s * 1.495, 0.29, 0, g);      /* 箱の口 */
-        var wall = new T.Group();
-        mesh(new T.BoxGeometry(0.9, 0.5, 0.8), M.orange, 0, 0.26, 0, wall);
-        mesh(new T.BoxGeometry(0.06, 0.5, 0.82), M.stripe, -s * 0.46, 0.26, 0, wall);
+        /* 横向きの油圧プレス：道の外の台に寝かせたシリンダーから、棒が押し板を押し出す */
+        mesh(new T.BoxGeometry(1.6, THICK, 1.1), M.wood2, s * 2.1, -THICK / 2, 0, g);           /* 台 */
+        mesh(new T.BoxGeometry(1.2, 0.12, 0.5), M.dark, s * 2.12, 0.06, 0, g);                   /* 取り付け台 */
+        [1.72, 2.55].forEach(function (x) { mesh(new T.BoxGeometry(0.08, 0.3, 0.46), M.dark, s * x, 0.2, 0, g); });
+        var cyl = mesh(new T.CylinderGeometry(0.19, 0.19, 1.25, 16), M.red, s * 2.125, 0.3, 0, g);  /* シリンダー */
+        cyl.rotation.z = Math.PI / 2;
+        var cap = mesh(new T.CylinderGeometry(0.22, 0.22, 0.06, 16), M.dark, s * 1.5, 0.3, 0, g);
+        cap.rotation.z = Math.PI / 2;
+        var wall = new T.Group();                       /* 原点は押し板の内側の面 */
+        mesh(new T.BoxGeometry(0.26, 0.5, 0.8), M.orange, s * 0.13, 0.27, 0, wall);              /* 押し板 */
+        mesh(new T.BoxGeometry(0.03, 0.5, 0.82), M.stripe, s * 0.0, 0.27, 0, wall);              /* 押す面の縞 */
+        mesh(new T.BoxGeometry(0.3, 0.06, 0.84), M.dark, s * 0.13, 0.53, 0, wall);               /* 上のふち */
+        var rod = mesh(new T.CylinderGeometry(0.07, 0.07, 1.2, 12), M.chrome, s * (0.26 + 0.6), 0.3, 0, wall);   /* 閉じても開いてもシリンダーの中に残る長さ */
+        rod.rotation.z = Math.PI / 2;
         wall.userData.s = s;
         g.add(wall); g.part.push(wall);
       });
@@ -177,7 +183,7 @@
     if (tr.kind === "press") g.part.position.y = 0.02 + p * 1.5;
     else if (tr.kind === "hammer") g.part.rotation.z = p;
     else if (tr.kind === "spinner") g.part.rotation.y = -p;
-    else if (tr.kind === "pusher") g.part.forEach(function (w) { w.position.x = w.userData.s * (1.15 - p * 1.0 + 0.45); });
+    else if (tr.kind === "pusher") g.part.forEach(function (w) { w.position.x = w.userData.s * (1.15 - p * 1.0); });
     else g.part.forEach(function (h) { h.rotation.z = -h.userData.s * p * 1.45; });
   }
 
