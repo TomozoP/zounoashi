@@ -6,14 +6,28 @@
   var T, Z3 = global.Z3;
   var ROAD = 2.6, THICK = 0.3;
 
+  /* 配色の候補。確認用に URL の ?pal=1 などで切り替える */
+  var PALS = [
+    { bg: 0x9fc4dc, road: 0xffffff, side: 0x7a4c2a, frame: 0xf2c230, red: 0xc8322a, orange: 0xe8792a, steel: 0x47505c, dark: 0x2a2e35, box: 0x8a949f },
+    /* 1 ポップ：濃い空色に、原色の黄・赤・青 */
+    { bg: 0x46c8ff, road: 0xffe2c0, side: 0x9a5a2a, frame: 0xffd400, red: 0xff2d55, orange: 0xff8a00, steel: 0x3b5bdb, dark: 0x1f2a5c, box: 0x4dabf7, light: 1.15 },
+    /* 2 おもちゃ：ピンクの背景、ミントの道、パステル */
+    { bg: 0xffcfe6, road: 0x9be8d0, plain: true, side: 0x4fbf9f, frame: 0xffe066, red: 0xff6b8a, orange: 0xffa94d, steel: 0x8e7cf0, dark: 0x4b3f8a, box: 0xb197fc, light: 1.15 },
+    /* 3 レース場：オレンジのプラ道（おもちゃのコース）に青と黄緑 */
+    { bg: 0xbfe9ff, road: 0xff7a1a, plain: true, side: 0xd25a00, frame: 0x1e88ff, red: 0xff3040, orange: 0x7ed321, steel: 0x2f3640, dark: 0x1b1f24, box: 0x74c0fc, light: 1.1 },
+    /* 4 夕焼け：橙の空、木の道、青緑・紫・桃 */
+    { bg: 0xffa36c, road: 0xffd2a8, side: 0x7a4428, frame: 0x2ec4b6, red: 0x9b5de5, orange: 0xf15bb5, steel: 0x3a3a6a, dark: 0x24243e, box: 0x5fd3c8 }
+  ];
+  var PAL = PALS[+((/[?&]pal=(\d)/.exec(global.location.search) || [])[1] || 0)] || PALS[0];
+
   function GameScene() {
     T = global.THREE;
     var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces" }, camera: { fov: 54, near: 0.1, far: 80 }, finish: { vignette: 0.28, grain: 0.02 } });
     this.scene = st.scene;
     this.camera = st.camera;
-    this.scene.background = new T.Color(0x9fc4dc);   /* 明るい水色。暗い金属や黄・橙・赤のトラップが溶けない */
-    this.scene.fog = new T.Fog(0x9fc4dc, 24, 50);
-    var L = this.lights = Z3.lights(this.scene, { shadows: true, shadowSize: 7 });
+    this.scene.background = new T.Color(PAL.bg);     /* 暗い金属や黄・橙・赤のトラップが溶けない明るさ */
+    this.scene.fog = new T.Fog(PAL.bg, 24, 50);
+    var L = this.lights = Z3.lights(this.scene, { shadows: true, shadowSize: 7, scale: PAL.light || 1 });
     this.scene.add(L.key.target);
 
     /* 机の木目 */
@@ -29,8 +43,9 @@
         g.stroke();
       }
     });
-    var side = Z3.std(0x7a4c2a);
-    this.roadMat = [side, side, Z3.std(0xffffff, { map: wood, roughness: 0.55 }), side, side, side];
+    var side = Z3.std(PAL.side);
+    var top = PAL.plain ? Z3.std(PAL.road, { roughness: 0.35 }) : Z3.std(PAL.road, { map: wood, roughness: 0.55 });
+    this.roadMat = [side, side, top, side, side, side];
     /* 注意の縞（黄と黒） */
     var stripe = Z3.canvasTex(128, 128, function (g, w, h) {
       g.fillStyle = "#f2c230"; g.fillRect(0, 0, w, h);
@@ -38,14 +53,14 @@
       for (var i = -2; i < 4; i++) { g.beginPath(); g.moveTo(i * 48, 0); g.lineTo(i * 48 + 24, 0); g.lineTo(i * 48 + 24 + h, h); g.lineTo(i * 48 + h, h); g.fill(); }
     });
     this.M = {
-      steel: Z3.std(0x47505c, { roughness: 0.4, metalness: 0.5 }),
-      dark: Z3.std(0x2a2e35, { roughness: 0.5, metalness: 0.4 }),
-      yellow: Z3.std(0xf2c230, { roughness: 0.5 }),
-      red: Z3.std(0xc8322a, { roughness: 0.45, metalness: 0.2 }),
-      orange: Z3.std(0xe8792a, { roughness: 0.5 }),
+      steel: Z3.std(PAL.steel, { roughness: 0.4, metalness: 0.4 }),
+      dark: Z3.std(PAL.dark, { roughness: 0.5, metalness: 0.3 }),
+      yellow: Z3.std(PAL.frame, { roughness: 0.45 }),
+      red: Z3.std(PAL.red, { roughness: 0.4, metalness: 0.2 }),
+      orange: Z3.std(PAL.orange, { roughness: 0.45 }),
       chrome: Z3.std(0xd0d4da, { roughness: 0.2, metalness: 0.9 }),
-      box: Z3.std(0x8a949f, { roughness: 0.5, metalness: 0.3 }),
-      wood2: Z3.std(0x7a4c2a),
+      box: Z3.std(PAL.box, { roughness: 0.5, metalness: 0.3 }),
+      wood2: Z3.std(PAL.side),
       stripe: Z3.std(0xffffff, { map: stripe, roughness: 0.5 })
     };
 
