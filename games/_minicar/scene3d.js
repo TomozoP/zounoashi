@@ -198,9 +198,16 @@
     for (j = 0; j < this.built.length; j++) if (next.indexOf(this.built[j]) < 0) this.scene.remove(this.built[j].g);
     this.built = next;
 
-    /* 車をいつも画面の真ん中あたりに置いて追いかける（右うしろのななめ上から） */
-    this.camera.position.set(4.0, 4.6, s.camZ + 4.0);
-    this.camera.lookAt(0, 0.1, s.camZ);
+    /* 車と、次にくぐるトラップが両方入るように追いかける（右うしろのななめ上から）。
+       間が開くほど引いて、車は画面の下寄り・トラップは上寄りに映る */
+    var ahead = s.ahead == null ? s.camZ - 4 : Math.max(s.camZ - 9, Math.min(s.camZ - 2.5, s.ahead));
+    var mid = s.camZ * 0.62 + ahead * 0.38, span = s.camZ - ahead;
+    if (this.cam == null) this.cam = { mid: mid, span: span };
+    this.cam.mid += (mid - this.cam.mid) * 0.08;      /* 急に跳ばないように少しずつ寄せる */
+    this.cam.span += (span - this.cam.span) * 0.05;
+    var m = this.cam.mid, d = 2.2 + this.cam.span * 0.75;
+    this.camera.position.set(d * 0.75, d * 0.95, m + d * 0.95);
+    this.camera.lookAt(0, 0.2, m);
     var key = this.lights.key;
     key.position.set(-4, 8, s.camZ + 2);
     key.target.position.set(0, 0, s.camZ - 4);
