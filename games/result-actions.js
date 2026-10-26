@@ -120,13 +120,66 @@
     follow: {
       url: 'https://x.com/intent/follow?screen_name=TomozoP',
       text: function () { return global.zT ? global.zT('作者をフォロー', 'Follow the creator', '제작자 팔로우', '关注作者', '追蹤作者') : '作者をフォロー'; },
-      link: function (parent) {
+      /* self を true にすると、リンク自体がボタンの絵を持つ（キャンバスに描かない過去作用。at で位置を合わせる） */
+      link: function (parent, self) {
         var a = document.createElement('a');
         a.href = actions.follow.url; a.target = '_blank'; a.rel = 'noopener';
         a.setAttribute('aria-label', actions.follow.text()); a.hidden = true;
         a.style.cssText = 'position:absolute;border-radius:999px;touch-action:manipulation;';
+        if (self) {
+          try {
+            var m = document.createElement('canvas').getContext('2d'), f = actions.follow.box(m, [{ y: 0, h: 0 }], 0), k = 3;
+            var c = document.createElement('canvas'); c.width = Math.ceil(f.w * k + 6); c.height = Math.ceil(f.h * k + 6);
+            var g = c.getContext('2d'); g.scale(k, k); actions.follow.draw(g, { x: 1, y: 1, w: f.w, h: f.h });
+            a.style.backgroundImage = 'url(' + c.toDataURL() + ')';
+            a.style.backgroundSize = '100% 100%';
+            a.style.backgroundRepeat = 'no-repeat';
+            a.style.zIndex = '3';
+            a._followSize = { w: f.w + 2, h: f.h + 2 };
+          } catch (e) {}
+        }
         if (parent && parent.appendChild) parent.appendChild(a);
         return a;
+      },
+      /* 結果ボタンを自前で描く過去作用：結果画面を描くたびに show(canvas, ボタン, W, H) を呼ぶ。
+         呼ばれなくなると自動で隠れる。ボタン {x,y,w,h} でも円 {x,y,r} でもよい */
+      show: function (canvas, button, W, H) {
+        if (!canvas || !button) return;
+        var f = actions.follow, a = f._shown;
+        if (!a) {
+          if (!document.body || !canvas.getBoundingClientRect) return;
+          a = f._shown = f.link(document.body, true);
+          a.style.position = 'fixed';
+        }
+        /* 次のコマまでに show が呼ばれなければ隠す（時間でなくコマで見る） */
+        a._mark = true;
+        if (!a._watch && global.requestAnimationFrame) {
+          a._watch = true;
+          global.requestAnimationFrame(function check() {
+            global.requestAnimationFrame(function () {
+              if (!a._mark) { a.hidden = true; a._watch = false; return; }
+              a._mark = false; check();
+            });
+          });
+        }
+        var b = button.r != null ? { x: button.x - button.r, y: button.y - button.r, w: button.r * 2, h: button.r * 2 } : button;
+        var r = canvas.getBoundingClientRect(), k = r.width / W, s = a._followSize;
+        if (!s || !k) return;
+        var y = b.y + b.h + 40;
+        if (y + s.h > H - 8) y = Math.max(b.y + b.h + 8, H - 8 - s.h);
+        if (y + s.h > H - 2) y = b.y - 12 - s.h;
+        a.style.left = (r.left + (W / 2 - s.w / 2) * k) + 'px'; a.style.top = (r.top + y * (r.height / H)) + 'px';
+        a.style.width = s.w * k + 'px'; a.style.height = s.h * (r.height / H) + 'px';
+        a.hidden = false;
+      },
+      /* 過去作用：button（結果ボタンのどれか）の下に置く。画面の下に入らなければ間を詰め、それでも無理ならボタンの上に置く */
+      at: function (link, button, W, H, visible) {
+        if (!link) return;
+        if (!visible || !button || !link._followSize) { actions.place(link, { x: 0, y: 0, w: 0, h: 0 }, W, H, false); return; }
+        var s = link._followSize, y = button.y + button.h + 40;
+        if (y + s.h > H - 8) y = Math.max(button.y + button.h + 8, H - 8 - s.h);
+        if (y + s.h > H - 2) y = button.y - 12 - s.h;
+        actions.place(link, { x: W / 2 - s.w / 2, y: y, w: s.w, h: s.h }, W, H, true);
       },
       box: function (ctx, buttons, W) {
         var b = buttons[0];
