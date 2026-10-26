@@ -43,6 +43,9 @@
       yellow: Z3.std(0xf2c230, { roughness: 0.5 }),
       red: Z3.std(0xc8322a, { roughness: 0.45, metalness: 0.2 }),
       orange: Z3.std(0xe8792a, { roughness: 0.5 }),
+      chrome: Z3.std(0xd0d4da, { roughness: 0.2, metalness: 0.9 }),
+      box: Z3.std(0x8a949f, { roughness: 0.5, metalness: 0.3 }),
+      wood2: Z3.std(0x7a4c2a),
       stripe: Z3.std(0xffffff, { map: stripe, roughness: 0.5 })
     };
 
@@ -71,9 +74,15 @@
     var g = parent.tall = new T.Group();
     parent.add(g);
     var M = self.M;
-    mesh(new T.BoxGeometry(0.22, h, 0.22), M.yellow, -1.42, h / 2, 0, g);
     /* 手前（カメラ側）の柱は置かない。横から見たときにトラップを隠すため、奥の柱からの片持ちにする */
-    mesh(new T.BoxGeometry(2.0, 0.22, 0.3), M.yellow, -0.53, h, 0, g);
+    mesh(new T.BoxGeometry(0.5, 0.06, 0.5), M.dark, -1.5, 0.03, 0, g);          /* 足もとの板 */
+    mesh(new T.BoxGeometry(0.22, h + 0.11, 0.22), M.yellow, -1.5, (h + 0.11) / 2, 0, g);
+    mesh(new T.BoxGeometry(2.1, 0.22, 0.3), M.yellow, -0.55, h, 0, g);
+    var brace = mesh(new T.BoxGeometry(0.1, 0.9, 0.1), M.yellow, -1.2, h - 0.33, 0, g);   /* 斜めの支え */
+    brace.rotation.z = -Math.PI / 4;
+    [-1.5, 0.4].forEach(function (x) {                                            /* ボルト */
+      mesh(new T.CylinderGeometry(0.035, 0.035, 0.32, 8), M.dark, x, h, 0, g).rotation.x = Math.PI / 2;
+    });
   }
 
   /* トラップ1つ分（道の板ごと）。動く部品は g.part に入れる */
@@ -84,6 +93,12 @@
       var hole = 0.7;
       var a = roadBox(self, tr.z0, tr.zc + hole), b = roadBox(self, tr.zc - hole, tr.z1);
       a.position.z -= tr.zc; b.position.z -= tr.zc; g.add(a); g.add(b);
+      /* 穴のふち（金属の枠）と、蝶番の軸 */
+      [-1, 1].forEach(function (k) {
+        mesh(new T.BoxGeometry(ROAD, 0.03, 0.08), M.dark, 0, 0.005, k * (hole + 0.04), g);
+        mesh(new T.BoxGeometry(0.08, THICK, hole * 2), M.dark, k * (ROAD / 2 - 0.04), -THICK / 2, 0, g);
+        mesh(new T.CylinderGeometry(0.03, 0.03, hole * 2, 8), M.steel, k * (ROAD / 2 - 0.02), -0.02, 0, g).rotation.x = Math.PI / 2;
+      });
       /* 外側に蝶番がある2枚の扉。開くと下へ垂れる */
       g.part = [];
       [-1, 1].forEach(function (s) {
@@ -106,33 +121,50 @@
     }
     if (tr.kind === "press") {
       frame(self, g, 2.6);
+      /* 梁の上の油圧シリンダー。押す棒はいつもこの筒の中に収まる */
+      mesh(new T.CylinderGeometry(0.2, 0.2, 1.7, 14), M.red, 0, 2.6 + 0.85 + 0.11, 0, g);
+      mesh(new T.CylinderGeometry(0.24, 0.24, 0.08, 14), M.dark, 0, 2.6 + 1.75, 0, g);
       var blk = new T.Group();
-      mesh(new T.BoxGeometry(1.9, 0.9, 0.9), M.steel, 0, 0.45, 0, blk);
-      mesh(new T.BoxGeometry(1.92, 0.12, 0.92), M.stripe, 0, 0.06, 0, blk);
-      mesh(new T.CylinderGeometry(0.12, 0.12, 1.4, 10), M.dark, 0, 1.6, 0, blk);
+      mesh(new T.BoxGeometry(1.9, 0.8, 0.9), M.steel, 0, 0.5, 0, blk);
+      mesh(new T.BoxGeometry(2.0, 0.1, 1.0), M.dark, 0, 0.95, 0, blk);          /* 上のふち */
+      mesh(new T.BoxGeometry(1.94, 0.12, 0.94), M.stripe, 0, 0.06, 0, blk);     /* 下の縞（押す面） */
+      mesh(new T.CylinderGeometry(0.1, 0.1, 1.9, 12), M.chrome, 0, 1.95, 0, blk);
       g.add(blk); g.part = blk;
     } else if (tr.kind === "hammer") {
       frame(self, g, 2.95);
+      [-1, 1].forEach(function (k) { mesh(new T.BoxGeometry(0.2, 0.3, 0.04), M.dark, 0, 2.72, k * 0.17, g); });   /* 軸受けの板 */
       var piv = new T.Group();
-      piv.position.set(0, 2.75, 0);
-      mesh(new T.CylinderGeometry(0.05, 0.05, 2.2, 8), M.dark, 0, -1.1, 0, piv);
-      mesh(new T.BoxGeometry(0.62, 0.46, 0.6), M.red, 0, -2.45, 0, piv);
-      mesh(new T.CylinderGeometry(0.1, 0.1, 0.34, 10), M.steel, 0, 0, 0, piv).rotation.x = Math.PI / 2;
+      piv.position.set(0, 2.72, 0);
+      mesh(new T.CylinderGeometry(0.08, 0.08, 0.42, 12), M.chrome, 0, 0, 0, piv).rotation.x = Math.PI / 2;   /* 軸 */
+      mesh(new T.CylinderGeometry(0.045, 0.045, 2.2, 8), M.steel, 0, -1.1, 0, piv);                       /* 柄 */
+      /* 槌の頭：振れる向き（左右）に軸をもつ太い円柱と、両端の金具 */
+      var head = mesh(new T.CylinderGeometry(0.26, 0.26, 0.7, 18), M.red, 0, -2.35, 0, piv);
+      head.rotation.z = Math.PI / 2;
+      [-1, 1].forEach(function (k) {
+        mesh(new T.CylinderGeometry(0.28, 0.28, 0.06, 18), M.dark, k * 0.36, -2.35, 0, piv).rotation.z = Math.PI / 2;
+      });
+      mesh(new T.CylinderGeometry(0.07, 0.07, 0.1, 10), M.dark, 0, -2.06, 0, piv);
       g.add(piv); g.part = piv;
     } else if (tr.kind === "spinner") {
-      var post = mesh(new T.CylinderGeometry(0.16, 0.2, 0.5, 12), M.yellow, -1.45, 0.25, 0, g);
-      post.castShadow = true;
+      mesh(new T.CylinderGeometry(0.3, 0.32, 0.06, 18), M.dark, -1.45, 0.03, 0, g);     /* 台座 */
+      mesh(new T.CylinderGeometry(0.15, 0.18, 0.42, 16), M.yellow, -1.45, 0.24, 0, g);  /* 回る軸の箱 */
       var arm = new T.Group();
-      arm.position.set(-1.45, 0.16, 0);
-      mesh(new T.BoxGeometry(2.8, 0.14, 0.14), M.orange, 1.4, 0, 0, arm);
+      arm.position.set(-1.45, 0.2, 0);
+      mesh(new T.CylinderGeometry(0.17, 0.17, 0.12, 16), M.dark, 0, 0.0, 0, arm);        /* 軸の頭 */
+      mesh(new T.BoxGeometry(2.7, 0.12, 0.13), M.stripe, 1.45, 0, 0, arm);              /* 縞の腕 */
+      mesh(new T.CylinderGeometry(0.09, 0.09, 0.16, 12), M.dark, 2.8, 0, 0, arm);        /* 先のゴム */
       g.add(arm); g.part = arm;
     } else if (tr.kind === "pusher") {
       g.part = [];
       [-1, 1].forEach(function (s) {
-        mesh(new T.BoxGeometry(0.3, 0.6, 1.0), M.dark, s * 1.45, 0.3, 0, g);
+        /* 道の外にせり出した台と、壁がしまわれる箱。壁は箱の口から出入りする */
+        mesh(new T.BoxGeometry(0.95, THICK, 1.1), M.wood2, s * 1.75, -THICK / 2, 0, g);
+        mesh(new T.BoxGeometry(0.72, 0.6, 0.98), M.box, s * 1.86, 0.3, 0, g);
+        mesh(new T.BoxGeometry(0.74, 0.05, 1.0), M.yellow, s * 1.86, 0.6, 0, g);       /* 箱のふち */
+        mesh(new T.BoxGeometry(0.03, 0.54, 0.86), M.dark, s * 1.495, 0.29, 0, g);      /* 箱の口 */
         var wall = new T.Group();
-        mesh(new T.BoxGeometry(0.9, 0.5, 0.8), M.orange, 0, 0.25, 0, wall);
-        mesh(new T.BoxGeometry(0.06, 0.5, 0.82), M.stripe, -s * 0.46, 0.25, 0, wall);
+        mesh(new T.BoxGeometry(0.9, 0.5, 0.8), M.orange, 0, 0.26, 0, wall);
+        mesh(new T.BoxGeometry(0.06, 0.5, 0.82), M.stripe, -s * 0.46, 0.26, 0, wall);
         wall.userData.s = s;
         g.add(wall); g.part.push(wall);
       });
