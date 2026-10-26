@@ -199,7 +199,7 @@
     this.built = next;
 
     /* back（0〜1）で、角度はそのままカメラを後ろへずらし、車の後方を映す */
-    var b = s.back || 0, e = b * b * (3 - 2 * b), shift = e * 5;
+    var b = s.back || 0, e = b * b * (3 - 2 * b), shift = e * 2.4;
     this.camera.position.set(4.6, 5.4, s.camZ + 3.2 + shift);
     this.camera.lookAt(0, 0, s.camZ - 2.6 + shift);
     var key = this.lights.key;
