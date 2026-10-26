@@ -355,5 +355,6 @@ window.DRAFT_GAMES = [
     "play": "games/_taiyaki/index.html",
     "full": true,
     "catch": "好きな画像の形でたい焼きを焼く"
-  }
+  },
+  {"type":"lab","tags":[],"id":"atari","title":"あたりくじ","year":2026,"date":"2026-10-26","plays":null,"url":"","img":"games/_atari/img/thumb.webp","play":"games/_atari/index.html","full":true,"catch":"「あた」で始まるハズレ100本から、あたりを引く"},
 ];
