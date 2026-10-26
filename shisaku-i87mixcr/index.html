@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="kangaroo-1792921954561">
+<meta name="preview-version" content="nejimaki-1793013651119">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>【プレビュー】カンガルーファイト</title>
+<title>【プレビュー】ネジマキランナウェイ</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
   #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
   #wrap { position: relative; touch-action: none; }
-  canvas { display: block; background: #14161c; }
+  canvas { display: block; background: #1d1714; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
@@ -32,29 +32,26 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/random-bowling/vendor/three.min.js?v=kangaroo-1792921954561"></script>
-<script src="../games/three-base.js?v=kangaroo-1792921954561"></script>
-<script src="roo3d.js?v=kangaroo-1792921954561"></script>
-<script src="../games/start.js?v=kangaroo-1792921954561"></script>
-<script src="../games/view.js?v=kangaroo-1792921954561"></script>
-<script src="../games/audio.js?v=kangaroo-1792921954561"></script>
-<script src="../games/lang.js?v=kangaroo-1792921954561"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=kangaroo-1792921954561"></script>
-<script src="../games/result-actions.js?v=kangaroo-1792921954561"></script>
-<script src="../games/action-icons.js?v=kangaroo-1792921954561"></script>
-<script src="../games/pad.js?v=kangaroo-1792921954561"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/start.js?v=nejimaki-1793013651119"></script>
+<script src="../games/view.js?v=nejimaki-1793013651119"></script>
+<script src="../games/audio.js?v=nejimaki-1793013651119"></script>
+<script src="../games/lang.js?v=nejimaki-1793013651119"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=nejimaki-1793013651119"></script>
+<script src="../games/result-actions.js?v=nejimaki-1793013651119"></script>
+<script src="../games/action-icons.js?v=nejimaki-1793013651119"></script>
+<script src="../games/pad.js?v=nejimaki-1793013651119"></script>
+<script src="../games/celebrate.js?v=nejimaki-1793013651119"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/random-bowling/vendor/three.min.js?v=nejimaki-1793013651119"></script>
+<script src="../games/three-base.js?v=nejimaki-1793013651119"></script>
+<script src="scene3d.js?v=nejimaki-1793013651119"></script>
 <script>
-/* カンガルーファイト
+/* ネジマキランナウェイ
 
-   いつも自分と同じレベルのカンガルーと戦う。全10戦。レベルは 1,10,20…80,99（レベルは飾りで、強さは10戦かけて少しずつ上がる）。
-   相手の毛色・グローブ・トランクス・耳や鼻先は毎試合少し変わる。
-   体は点とばねの簡単な物理。指でなぞると、押した所からのずれのぶんだけ
-     指のずれのぶんだけ前のグローブの行き先が動く（上下左右）。グローブはそこへゆっくり追いつき、
-     体は届くように乗り出す・かがむ。後ろへ引くと後ろの手も顔の前に上がる。
-   と、おもちゃのように体を引っぱる。ルールは物理だけ：グローブどうしがぶつかればガード、
-   体に当たればヒットで、ぶつかった速さがそのまま威力。
-   勝つと短いレベルアップの演出のあと、すぐ次の（1つ上のレベルの）相手。負けたら結果を出してレベル1に戻る。
-   相手の賢さと速さだけがレベルで上がる。 */
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
 (function () {
   "use strict";
 
@@ -63,22 +60,30 @@
   var wrap = document.getElementById("wrap");
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
+  /* 結果画面の「作者をフォロー」（共通。ボタン列の下に控えめに出す） */
+  var followLink = window.zResultActions.follow.link(shareButton.parentNode);
 
-
-  /* ============ 画面 ============ */
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
   var W = 540, H = 960;
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
-    place();
+
+    place();                                   /* 高さが決まってから置き直す */
+
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
 
-  /* ============ 音 ============ */
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
   var AC = null, NOISE = null;
-  function resumeAudio() { window.zAudioResume(AC); }
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
   wrap.addEventListener("touchstart", audioOn, { passive: true });
   wrap.addEventListener("touchend", resumeAudio, { passive: true });
   wrap.addEventListener("pointerup", resumeAudio, true);
@@ -101,7 +106,7 @@
     o.frequency.setValueAtTime(freq, n);
     if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
     g.gain.setValueAtTime(0.0001, n);
-    g.gain.exponentialRampToValueAtTime(vol, n + 0.005);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
     o.connect(g); g.connect(AC.destination);
     o.start(n); o.stop(n + dur + 0.05);
@@ -115,10 +120,7 @@
     g.gain.setValueAtTime(vol, n);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
     s.connect(f); f.connect(g); g.connect(AC.destination);
-    s.start(n, Math.random()); s.stop(n + dur + 0.05);
-  }
-  function bell(delay) {
-    tone(1180, 1.2, 0.16, "sine", null, delay); tone(2950, 0.6, 0.05, "sine", null, delay); tone(1770, 0.9, 0.06, "triangle", null, delay);
+    s.start(n); s.stop(n + dur + 0.05);
   }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
@@ -126,862 +128,513 @@
     else { try { AC.resume(); } catch (e) {} }
   });
 
-  /* ============ レベル ============ 毎回レベル1から。勝つと1ずつ上がり100が最後 */
-  var level = 1;
-
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", READY: "ready", FIGHT: "fight", END: "end", LEVELUP: "levelup", RESULT: "result" };
-  var hideHud = false, state, T, shake = 0, fx = [], sparks = [], confetti = [], before = level, after = level, outcome = "";
-  var TIME = 45;
-  var GROUND, PANEL, P1X, P2X, FS = 1;
-  function place() {
-    PANEL = Math.round(H - Math.max(190, H * 0.2));
-    FS = Math.min(1.3, Math.max(1, (PANEL - 120) / 420));
-    GROUND = Math.min(PANEL - 30, Math.round(H * 0.7));
-    P1X = W / 2 - 135 * FS; P2X = W / 2 + 135 * FS;
-  }
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+  /* 単位は 1 = 100mm。車は -z の向きへ走る。z は車の重心（車の長さ 0.8 なので前後の端は z∓0.4） */
+  var START_Z = 2.5, HALF = 0.4, DECEL = 4, GAIN = 4.6, GRAV = 28, STAGE = 10;   /* 1ステージ = トラップ10個 */
+  var phase, z, x, y, pitch, roll, yaw, vx, vy, vz, spin, v, pull, wheel, base, startY, lastClick, endT, keyHold, crashZ;
+  var noUI = false, guided = false, diedAt = null, traps, edgeZ, sx, sy, sz, crushBy, resT, keyAng = 0, goalZ, clearT, songStep, confetti = null;
+  var runOsc = null, runGain = null;
+  var KINDS = ["press", "hammer", "spinner", "pusher", "door"];
 
-  /* ============ 体（点とばね） ============
-     右向きのときの足元からの位置。左向きは左右を返す。 */
-  var REST = { foot: [0, 0], hip: [-15, -85], chest: [12, -190], head: [40, -248], tail: [-135, -6], gf: [62, -196], gb: [46, -214] };
-  var NAMES = ["foot", "hip", "chest", "head", "tail", "gf", "gb"];
-  var MUSCLE = { foot: 0.5, hip: 0.22, chest: 0.2, head: 0.28, tail: 0.2, gf: 0.3, gb: 0.3 };
-  var STICKS = [["foot", "hip"], ["hip", "chest"], ["chest", "head"], ["hip", "tail"]];
-  var GLOVE_R = 17;
+  function place() {}
 
-  function fighter(home, dir, sc) {
-    var f = { home: home, dir: dir, sc: sc || FS, slide: 0, hp: 100, ko: false, L: 0, C: 0, cool: { gf: 0, gb: 0 }, hurtT: 0, muscle: 1, hop: 0, P: {}, len: {} };
-    NAMES.forEach(function (n) {
-      var x = home + REST[n][0] * dir * f.sc, y = GROUND + REST[n][1] * f.sc;
-      f.P[n] = { x: x, y: y, px: x, py: y };
-    });
-    STICKS.forEach(function (s) { f.len[s[0] + s[1]] = dist(f.P[s[0]], f.P[s[1]]); });
-    return f;
-  }
-  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-
-  /* 指（相手は頭の中の指）から決まる、各部の行きたい位置 */
-  function target(f, n) {
-    var L = f.L, C = f.C, o;
-    if (n === "foot") o = [0, 0];
-    else if (n === "hip") o = [-15 + 30 * L, -85 + 42 * C];
-    else if (n === "chest") o = [12 + 95 * L, -190 + 100 * C];
-    else if (n === "head") o = [12 + 95 * L + 28 + 10 * L, -190 + 100 * C - 58 + 5 * C];
-    else if (n === "tail") o = [-135, -6];
-    /* 自分の前のグローブは指で動かす位置へ（体はそれについてくる） */
-    else if (n === "gf" && f.fist) o = [62 + f.fist.x, -196 + f.fist.y];
-    else if (f.guardUp) {
-      /* 構え：両方のグローブを顔の前に */
-      var cx0 = 12 + 95 * L, cy0 = -190 + 100 * C;
-      o = n === "gf" ? [cx0 + 46, cy0 - 56] : [cx0 + 38, cy0 - 38];
-    }
-    /* 前の手は伸ばすほど少し下へ弧を描く（かがんだ相手の頭にも届く） */
-    else if (n === "gf") o = [12 + 95 * L + 50 + 100 * Math.max(0, L), -190 + 100 * C - 6 - 10 * C + 45 * Math.max(0, L)];
-    else o = [12 + 95 * L + 32, -190 + 100 * C - 26];
-    var hop = f.hopY || 0;
-    /* 足も少し踏み出す・下がる */
-    var step = (n === "tail" || n === "foot" ? 1 : 0) * L * 30;
-    return { x: f.home + f.slide + (o[0] + step) * f.dir * f.sc, y: GROUND + (o[1] - (n === "foot" ? 0 : 0)) * f.sc - hop };
-  }
-
-  /* ルールなしの物理の殴り合い。グローブどうしがぶつかればガード、体に当たればヒット、速さが威力 */
-  var clashCool = 0;
-  function gloveClash(a, b) {
-    ["gf", "gb"].forEach(function (ga) {
-      ["gf", "gb"].forEach(function (gb) {
-        var p = a.P[ga], q = b.P[gb], r = GLOVE_R * 2 * a.sc, d = dist(p, q);
-        if (d >= r || d < 0.001) return;
-        var nx = (q.x - p.x) / d, ny = (q.y - p.y) / d, over = r - d;
-        var vx = ((p.x - p.px) - (q.x - q.px)) / DT, vy = ((p.y - p.py) - (q.y - q.py)) / DT, vn = vx * nx + vy * ny;
-        p.x -= nx * over * 0.5; p.y -= ny * over * 0.5; q.x += nx * over * 0.5; q.y += ny * over * 0.5;
-        if (vn < 250 || clashCool > 0) return;
-        /* 速くぶつけた方がはね返される */
-        clashCool = 0.15;
-        var va = ((p.x - p.px) * nx + (p.y - p.py) * ny) / DT, vb = -((q.x - q.px) * nx + (q.y - q.py) * ny) / DT;
-        if (va >= vb) a.slide -= nx * 22; else b.slide += nx * 22;
-        p.px = p.x + nx * vn * DT * 0.35; p.py = p.y + ny * vn * DT * 0.35;
-        q.px = q.x - nx * vn * DT * 0.35; q.py = q.y - ny * vn * DT * 0.35;
-        a.cool[ga] = b.cool[gb] = 0.2;
-        fx.push({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, t: 0, big: false, guard: true, ang: Math.atan2(ny, nx) * (va >= vb ? 1 : -1) + (va >= vb ? Math.PI : 0) });
-        blockSound(Math.min(1, (vn - 250) / 900));
-        lastHit = fightT; crowd.excite(0.15);
-        if (vn > 700) crowd.ooh(0.4);
-      });
-    });
-  }
-  function blockSound(p) {
-    if (!AC) return;
-    noiseHit(0.04, 2400, 0.3 + p * 0.2, 0.6);
-    noiseHit(0.08, 700, 0.35 + p * 0.25, 0.8);
-    tone(150, 0.1, 0.16 + p * 0.1, "sine", 80);
-  }
-
-  var G = 1800, DT = 1 / 60, hitStop = 0, slowT = 0, slowAcc = 0;
-  /* 全10戦。レベルは1から始まり、後半ほど大きく上がって最後がレベル100 */
-  var LEVELS = [1, 10, 20, 30, 40, 50, 60, 70, 80, 99];
-  var START_LV = 1, MAX_LV = 99;
-  function nextLevel() { var i = LEVELS.indexOf(level); return LEVELS[Math.min(LEVELS.length - 1, i + 1)]; }
-  /* 強さ 0〜0.6。10戦かけて少しずつ上がるだけ（むずかしすぎない） */
-  function power() { var i = Math.max(0, LEVELS.indexOf(level)); return i / (LEVELS.length - 1) * 0.6; }
-  /* 相手の見た目を毎試合少し変える */
-  var FURS = [0xc49a70, 0xb88258, 0xdcb282, 0xa08474, 0xc6a48a, 0xe2c69e, 0xaaa29c, 0xcc7e5a, 0x92786a];
-  var GEAR = [0x1d48b8, 0x1f8a3a, 0x222222, 0xe0b31b, 0x7a2fb0, 0xf0f0f0, 0xe06a1b, 0x18a7b5, 0xd04a8a];
-  var foeLook = null;
-  function pick(a) { return a[(Math.random() * a.length) | 0]; }
-  function makeLook() {
-    var g = pick(GEAR), t;
-    do { t = pick(GEAR); } while (t === g && Math.random() < 0.6);
-    return { fur: pick(FURS), glove: g, trunks: t, ear: 0.8 + Math.random() * 0.5, snout: 0.85 + Math.random() * 0.4 };
-  }
-  var READY_T = 0.95, readyFight = false, lastHit = 0, lowCheer = false;
-
-  /* 掛け声。読み上げが使えない端末では文字だけ */
-  function announce(text, rate) {
-    if (!AC) return;
-    try {
-      var sy = window.speechSynthesis;
-      if (!sy || typeof SpeechSynthesisUtterance !== "function") return;
-      sy.cancel();
-      var u = new SpeechSynthesisUtterance(text);
-      u.lang = "en-US"; u.rate = rate || 1; u.pitch = 0.7; u.volume = 1;
-      sy.speak(u);
-    } catch (e) {}
-  }
-
-  /* ============ 観客のガヤ ============
-     ずっと鳴るざわめき（盛り上がりで大きくなる）に、どよめき・歓声・拍手・ブーイングを重ねる。
-     どれもノイズを人の声の帯域に通して作る。 */
-  var crowd = (function () {
-    var bed = null, bedGain = null, ex = 0;
-    function src() { var b = AC.createBufferSource(); b.buffer = NOISE; b.loop = true; return b; }
-    function band(freq, q) { var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q; return f; }
-    function env(g, n, a, peak, hold, rel) {
-      g.gain.setValueAtTime(0.0001, n);
-      g.gain.exponentialRampToValueAtTime(peak, n + a);
-      g.gain.setValueAtTime(peak, n + a + hold);
-      g.gain.exponentialRampToValueAtTime(0.0001, n + a + hold + rel);
-    }
-    var api = {
-      start: function () {
-        if (!AC || !NOISE || bed) return;
-        bed = src(); bedGain = AC.createGain(); bedGain.gain.value = 0.0001;
-        var f1 = band(520, 0.7), f2 = band(1300, 1.2), lp = AC.createBiquadFilter();
-        lp.type = "lowpass"; lp.frequency.value = 2400;
-        bed.connect(f1); bed.connect(f2); f1.connect(lp); f2.connect(lp); lp.connect(bedGain); bedGain.connect(AC.destination);
-        bed.start();
-      },
-      stop: function () {
-        if (!bed) return;
-        var n = AC.currentTime, b = bed;
-        bedGain.gain.cancelScheduledValues(n); bedGain.gain.setTargetAtTime(0.0001, n, 0.3);
-        setTimeout(function () { try { b.stop(); } catch (e) {} }, 1500);
-        bed = null; ex = 0;
-      },
-      excite: function (v) { ex = Math.min(1, ex + v); },
-      level: function () { return ex; },
-      step: function (dt) {
-        var hot = me && foe && (me.hp < 30 || foe.hp < 30) ? 0.35 : 0;
-        ex = Math.max(hot, ex - dt * 0.25);
-        if (bed) bedGain.gain.setTargetAtTime(0.05 + ex * 0.12, AC.currentTime, 0.25);
-      },
-      /* どよめき「おおっ」：オの響きの帯域を、少し上がる高さで */
-      ooh: function (p) {
-        if (!AC || !NOISE) return;
-        var n = AC.currentTime, s = src(), g = AC.createGain(), f1 = band(420, 5), f2 = band(800, 5);
-        f1.frequency.setValueAtTime(380, n); f1.frequency.linearRampToValueAtTime(520, n + 0.5);
-        f2.frequency.setValueAtTime(760, n); f2.frequency.linearRampToValueAtTime(900, n + 0.5);
-        s.connect(f1); s.connect(f2); f1.connect(g); f2.connect(g); g.connect(AC.destination);
-        env(g, n, 0.12, 0.5 * p + 0.15, 0.15, 0.6);
-        s.start(n, Math.random()); s.stop(n + 1.2);
-      },
-      /* 歓声：広い帯域のわーっ */
-      cheer: function (dur, p) {
-        if (!AC || !NOISE) return;
-        var n = AC.currentTime, s = src(), g = AC.createGain(), f1 = band(900, 0.6), f2 = band(2200, 1);
-        s.connect(f1); s.connect(f2); f1.connect(g); f2.connect(g); g.connect(AC.destination);
-        env(g, n, 0.15, 0.22 * (p || 1) + 0.05, dur * 0.5, dur * 0.7);
-        s.start(n, Math.random()); s.stop(n + dur * 1.4 + 0.3);
-      },
-      /* 拍手：短いノイズの粒をたくさん */
-      applause: function (dur) {
-        if (!AC || !NOISE) return;
-        var n = AC.currentTime, hp = AC.createBiquadFilter(), out = AC.createGain();
-        hp.type = "bandpass"; hp.frequency.value = 2200; hp.Q.value = 0.8; out.gain.value = 0.5;
-        hp.connect(out); out.connect(AC.destination);
-        var count = Math.round(dur * 90);
-        for (var i = 0; i < count; i++) {
-          var t = n + Math.random() * dur, s = AC.createBufferSource(), g = AC.createGain();
-          s.buffer = NOISE; s.connect(g); g.connect(hp);
-          var fade = 1 - (t - n) / dur * 0.7;
-          g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime((0.15 + Math.random() * 0.25) * fade, t + 0.002);
-          g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
-          s.start(t, Math.random() * 1.5); s.stop(t + 0.04);
-        }
-      },
-      /* ブーイング「ぶー」：低いウの響き */
-      boo: function () {
-        if (!AC || !NOISE) return;
-        var n = AC.currentTime, s = src(), g = AC.createGain(), f1 = band(300, 6), f2 = band(620, 6);
-        f1.frequency.setValueAtTime(320, n); f1.frequency.linearRampToValueAtTime(260, n + 1.3);
-        s.connect(f1); s.connect(f2); f1.connect(g); f2.connect(g); g.connect(AC.destination);
-        env(g, n, 0.25, 0.45, 0.7, 0.6);
-        s.start(n, Math.random()); s.stop(n + 1.8);
-      }
-    };
-    return api;
-  })();
-  function physics(f) {
-    var p, n, i;
-    for (i = 0; i < NAMES.length; i++) {
-      p = f.P[NAMES[i]];
-      var vx = (p.x - p.px) * 0.96, vy = (p.y - p.py) * 0.96;
-      p.px = p.x; p.py = p.y;
-      p.x += vx; p.y += vy + G * DT * DT;
-    }
-    var m = f.muscle;
-    for (i = 0; i < NAMES.length; i++) {
-      n = NAMES[i]; p = f.P[n];
-      var t = target(f, n), k = MUSCLE[n] * (n === "foot" ? Math.max(0.05, m) : m);
-      p.x += (t.x - p.x) * k; p.y += (t.y - p.y) * k;
-    }
-    for (var it = 0; it < 4; it++) {
-      STICKS.forEach(function (s) { keep(f.P[s[0]], f.P[s[1]], f.len[s[0] + s[1]], f.len[s[0] + s[1]]); });
-      /* 腕は伸び縮みする縄（短すぎず、長すぎず） */
-      keep(f.P.chest, f.P.gf, 20 * f.sc, 150 * f.sc);
-      keep(f.P.chest, f.P.gb, 20 * f.sc, 110 * f.sc);
-    }
-    for (i = 0; i < NAMES.length; i++) {
-      p = f.P[NAMES[i]];
-      if (p.y > GROUND) { p.y = GROUND; p.px = p.x - (p.x - p.px) * 0.6; }
-      if (p.x < 8) p.x = 8; if (p.x > W - 8) p.x = W - 8;
-    }
-  }
-  function keep(a, b, lo, hi) {
-    var dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.001;
-    var want = d < lo ? lo : d > hi ? hi : d;
-    if (want === d) return;
-    var k = (d - want) / d * 0.5;
-    a.x += dx * k; a.y += dy * k; b.x -= dx * k; b.y -= dy * k;
-  }
-
-  /* グローブが相手の頭・胸に当たったか。勢い（近づく速さ）でダメージ */
-  function hits(a, b) {
-    ["gf", "gb"].forEach(function (g) {
-      var gl = a.P[g];
-      [["head", 24], ["chest", 36], ["hip", 34]].forEach(function (tg) {
-        var t = b.P[tg[0]], r = (tg[1] + GLOVE_R) * a.sc;
-        var dx = t.x - gl.x, dy = t.y - gl.y, d = Math.hypot(dx, dy);
-        if (d >= r || d < 0.001) return;
-        var nx = dx / d, ny = dy / d;
-        var vx = ((gl.x - gl.px) - (t.x - t.px)) / DT, vy = ((gl.y - gl.py) - (t.y - t.py)) / DT;
-        var vn = vx * nx + vy * ny;
-        /* 重なりを押し戻す */
-        var over = r - d;
-        gl.x -= nx * over * 0.5; gl.y -= ny * over * 0.5;
-        t.x += nx * over * 0.5; t.y += ny * over * 0.5;
-        if (vn < 300 || a.cool[g] > 0 || b.ko || a.ko || a.stun > 0) return;
-        a.cool[g] = 0.25;
-        var head = tg[0] === "head";
-        /* ぶつかった速さがそのまま威力。頭は効く */
-        var dmg = Math.min(22, (vn - 300) / 60 * (head ? 1.3 : 0.7) + 1);
-        b.hp -= dmg; b.hurtT = 0.25;
-        /* 当たった勢いで相手の体を押す */
-        t.px -= nx * vn * DT * 1.1; t.py -= ny * vn * DT * 1.1;
-        /* ノックバック：体ごと後ろへ滑り、一瞬力が抜けてぐらつく。打った方も少し反動で下がる */
-        b.sv = (b.sv || 0) + nx * vn * (head ? 0.45 : 0.35);
-        a.sv = (a.sv || 0) - nx * vn * 0.06;
-        b.wobble = Math.min(0.5, 0.15 + vn / 3000);
-        var big = dmg > 10;
-        fx.push({ x: gl.x + nx * 18, y: gl.y + ny * 18, t: 0, big: big });
-        shake = Math.max(shake, big ? 0.25 : 0.1);
-        punchSound(dmg / 16);
-        lastHit = fightT;
-        if (big) { crowd.ooh(1); crowd.excite(0.6); } else crowd.excite(0.25);
-        if (!lowCheer && b.hp < 30 && b.hp > 0) { lowCheer = true; crowd.cheer(0.9, 0.6); }
-        if (big) hitStop = Math.max(hitStop, 0.05);
-        if (b.hp <= 0) { b.hp = 0; knockOut(b); }
-      });
-    });
-  }
-  /* パリィの音：澄んだ金属の「キィン」。高い倍音を少しずらして重ね、長めに響かせる */
-  function parrySound() {
-    if (!AC) return;
-    [[2093, 0.5, 0.11], [3136, 0.42, 0.07], [4699, 0.3, 0.05], [6272, 0.18, 0.03]].forEach(function (p) {
-      tone(p[0], p[1], p[2], "sine");
-      tone(p[0] * 1.006, p[1] * 0.9, p[2] * 0.6, "sine");
-    });
-    tone(1046, 0.25, 0.06, "triangle", 1568);
-    noiseHit(0.05, 6000, 0.25, 0.7);
-    tone(120, 0.12, 0.18, "sine", 60);
-  }
-  /* 殴った音：革の「バシッ」（短い高めの破裂）と、体に響く「ドスッ」（低く沈む音）を重ねる。
-     p は強さ 0〜1。強いほど低音が厚く長い */
-  function punchSound(p) {
-    if (!AC) return;
-    p = Math.max(0, Math.min(1, p));
-    noiseHit(0.035, 3200, 0.35 + p * 0.2, 0.6);
-    noiseHit(0.07 + p * 0.05, 1100, 0.5 + p * 0.3, 0.7);
-    noiseHit(0.12 + p * 0.12, 380, 0.45 + p * 0.4, 0.9);
-    tone(170 + p * 20, 0.16 + p * 0.18, 0.28 + p * 0.2, "sine", 48);
-    if (p > 0.5) tone(70, 0.35, 0.25 * p, "sine", 35);
-  }
-  function knockOut(f) {
-    f.ko = true; f.muscle = 0; f.C = 0;
-    slowT = 1.1; slowAcc = 0;
-    crowd.cheer(2.4, 1); crowd.applause(2.6); crowd.excite(1);
-    endFight();
-  }
-  function bodies(a, b) {
-    /* 胸どうし・腰どうしは重ならない */
-    [["chest", 40], ["hip", 44], ["head", 26]].forEach(function (e) {
-      var p = a.P[e[0]], q = b.P[e[0]], r = e[1] * 2 * a.sc, d = dist(p, q);
-      if (d < r && d > 0.001) { var k = (r - d) / d * 0.5, dx = q.x - p.x, dy = q.y - p.y; p.x -= dx * k; p.y -= dy * k; q.x += dx * k; q.y += dy * k; }
-    });
-  }
-  function stepFighter(f, dt) {
-    if (f.stun > 0) { f.stun -= dt; f.L = -0.5; }
-    /* 後ろへ引くと両方のグローブが顔の前に上がる */
-    f.guardUp = !f.ko && !(f.stun > 0) && f.L < -0.3;
-    f.cool.gf = Math.max(0, f.cool.gf - dt); f.cool.gb = Math.max(0, f.cool.gb - dt);
-    f.hurtT = Math.max(0, f.hurtT - dt);
-    /* 吹っ飛ぶ勢いは床でこすれて止まり、元の立ち位置へはゆっくり戻る。ロープに当たると跳ね返る */
-    f.slide += (f.sv || 0) * dt;
-    f.sv = (f.sv || 0) * Math.pow(0.02, dt);
-    f.slide *= Math.pow(0.5, dt);
-    var x = f.home + f.slide;
-    if (x < 70 || x > W - 70) { f.slide = Math.max(70, Math.min(W - 70, x)) - f.home; f.sv = -f.sv * 0.4; }
-    if (!f.ko) { f.wobble = Math.max(0, (f.wobble || 0) - dt); f.muscle = f.wobble > 0 ? 0.35 : Math.min(1, f.muscle + dt * 4); }
-    f.hop += dt;
-    physics(f);
-  }
-
-  var me, foe, ai;
   function newRound() {
-    level = START_LV;
-    crowd.start();
     shareButton.hidden = true;
-    document.getElementById("start").hidden = true;
-    fx = []; sparks = []; confetti = []; shake = 0; drag = null;
-    nextBout();
-  }
-  /* 次の試合。演出なしですぐ始まる */
-  function nextBout() {
-    state = S.READY; T = 0; fightT = 0; lastHit = 0; lowCheer = false;
-    announce("Ready?", 0.95);
-    me = fighter(P1X, 1); foe = fighter(P2X, -1); me.fist = { x: 0, y: 0 };
-    ai = { L: 0, C: 0, aimC: 0, think: 0.8, punchT: 0, guardT: 0, react: null, saw: false };
-    before = after = level; outcome = "";
-    foeLook = makeLook();
+    document.getElementById("start").hidden=true;
+    state = S.PLAY;
+    score = 0;
+    T = 0;
+    held = false;
+    phase = "aim";
+    z = START_Z; x = 0; y = 0; pitch = 0; roll = 0; yaw = 0; vx = vy = vz = spin = 0;
+    v = 0; pull = 0; wheel = 0; base = z; sx = sy = sz = 1; crushBy = null; resT = 0; clearT = null; diedAt = null; songStep = 0; confetti = null; lastClick = 0; endT = 0; keyHold = false; crashZ = null;
+    traps = []; edgeZ = 0;
+    moreTraps();
+    runSound(0);
   }
 
-  /* ============ 相手（同じレベル） ============
-     頭の中の指を動かす速さ・こちらの踏み込みに気づく速さと確かさがレベルで上がる。 */
-  function cpuSkill() {
-    var p = power();
-    return {
-      delay: 0.65 - p * 0.5,    /* こちらのパンチに気づく速さ */
-      sure: 0.1 + p * 0.8,      /* 気づいてグローブで受ける確かさ */
-      pace: 1.6 - p * 1.1       /* 打つ間隔 */
-    };
-  }
-  function stepCpu(dt) {
-    var k = cpuSkill();
-    if (foe.ko) return;
-    /* こちらの前の手が速く近づいてきたら、引いてグローブで受ける */
-    var g = me.P.gf, lunge = (g.x - g.px) / DT * me.dir;
-    if (lunge < 200) ai.saw = false;
-    else if (lunge > 450 && !ai.saw) { ai.saw = true; if (ai.punchT <= 0 && Math.random() < k.sure) ai.react = { t: k.delay }; }
-    /* 受けるときは、こちらの高さに合わせて（読み違えることもある）かがむ・伸びる */
-    if (ai.react) { ai.react.t -= dt; if (ai.react.t <= 0) { ai.react = null; ai.guardT = 0.5; ai.aimC = Math.random() < k.sure ? me.C : Math.random() * 1.2 - 0.3; } }
-    var goal, goalC;
-    if (ai.guardT > 0) { ai.guardT -= dt; goal = -0.6; goalC = ai.aimC; }
-    else if (ai.punchT > 0) { ai.punchT -= dt; goal = 1; goalC = ai.aimC; }
-    else {
-      goal = -0.1 + Math.sin(T * 3) * 0.12; goalC = 0.15 + Math.sin(T * 1.7) * 0.15;
-      ai.think -= dt;
-      if (me.stun > 0) ai.think = Math.min(ai.think, k.delay);
-      /* 打つ高さは上・下をばらばらに */
-      if (ai.think <= 0) { ai.think = k.pace * (0.5 + Math.random()); ai.punchT = 0.35; ai.aimC = Math.random() < 0.4 ? 0.6 + Math.random() * 0.4 : Math.random() * 0.3 - 0.3; }
+  /* 前のほうへトラップを足していく（どこまでも続く）。あとのものほど周期が短い */
+  function moreTraps(ahead) {
+    /* トラップ10個でゴール。その先はトラップのない道 */
+    while (traps.length < STAGE) {
+      if (traps.length === 6) {
+        /* 後半の連続プレス：小さなプレス3つが短い間隔で、タイミングをずらして上下する。
+           プレスの間（車1台分あまり）で止まりながら、少しずつ進まないと抜けられない */
+        var per = 2.4 * (0.9 + Math.random() * 0.2), base0 = Math.random();
+        for (var j = 0; j < 3; j++) {
+          var a0 = j === 0 ? 2.8 : 1.0, b0 = j === 2 ? 2.8 : 1.0;
+          traps.push({ k: traps.length, kind: "press", half: 0.3, z0: edgeZ, zc: edgeZ - a0, z1: edgeZ - a0 - b0,
+            period: per, off: (base0 + j * 0.36) % 1, pose: 0 });
+          edgeZ -= a0 + b0;
+        }
+        continue;
+      }
+      var k = traps.length, a = 2.7 + Math.random() * 1.0, b = 2.7 + Math.random() * 1.0;
+      var kind = k === 0 ? "press" : k === 1 ? "hammer" : KINDS[Math.floor(Math.random() * KINDS.length)];
+      if (k > 1 && kind === traps[k - 1].kind) kind = KINDS[(KINDS.indexOf(kind) + 1 + Math.floor(Math.random() * 4)) % KINDS.length];
+      var speedUp = Math.max(0.55, 1 - k * 0.025);
+      traps.push({ k: k, kind: kind, z0: edgeZ, zc: edgeZ - a, z1: edgeZ - a - b,
+        period: (kind === "spinner" ? 2.2 : 2.3) * speedUp * (0.85 + Math.random() * 0.3), off: Math.random(), pose: 0 });
+      edgeZ -= a + b;
     }
-    /* 体の追いつき方はこちらと同じ。打つときは素早く払ったのと同じ速さ */
-    var follow = Math.min(1, dt * (ai.punchT > 0 ? 14 : FOLLOW));
-    ai.L += (goal - ai.L) * follow;
-    ai.C += (goalC - ai.C) * follow;
-    foe.L = ai.L; foe.C = ai.C;
+    if (traps.length === STAGE) {
+      traps.push({ k: STAGE, kind: "end", z0: edgeZ, zc: edgeZ - 6, z1: edgeZ - 12, period: 1, off: 0, pose: 0 });
+      goalZ = edgeZ;
+    }
   }
 
-  function endFight() {
-    if (state !== S.FIGHT) return;
-    state = S.END; T = 0;
-    if (me.hp > foe.hp) { outcome = level >= MAX_LV ? "champ" : "win"; after = nextLevel(); }
-    else if (me.hp < foe.hp) { outcome = "lose"; after = START_LV; }
-    else { outcome = "draw"; after = level; }
-    if (outcome === "lose") { bell(0); bell(0.25); bell(0.5); }
+  /* 0〜1 を区切りで繋いだ動き。[[u, 値], ...] の間を直線で結ぶ */
+  function ramp(u, pts) {
+    for (var i = 1; i < pts.length; i++) if (u <= pts[i][0]) {
+      var a = pts[i - 1], b = pts[i];
+      return a[1] + (b[1] - a[1]) * (u - a[0]) / (b[0] - a[0]);
+    }
+    return pts[pts.length - 1][1];
+  }
+  /* トラップの今の形（pose）と、車（重心 cz）に当たるか。"hit" / "fall" / null */
+  function trapPose(tr) {
+    if (tr.kind === "end") return;
+    var u = ((T / tr.period + tr.off) % 1 + 1) % 1;
+    if (tr.kind === "press") tr.pose = ramp(u, [[0, 1], [0.5, 1], [0.58, 0], [0.75, 0], [1, 1]]);       /* 1=上がっている */
+    else if (tr.kind === "hammer") tr.pose = 0.48 * Math.sin(u * Math.PI * 2);   /* 振れの角度（柱に当たらない幅） */
+    else if (tr.kind === "spinner") tr.pose = u * Math.PI * 2;                                           /* 腕の向き */
+    else if (tr.kind === "pusher") tr.pose = ramp(u, [[0, 0], [0.45, 0], [0.55, 1], [0.75, 1], [1, 0]]); /* 1=閉じている */
+    else tr.pose = ramp(u, [[0, 0], [0.5, 0], [0.56, 1], [0.8, 1], [0.92, 0], [1, 0]]);                  /* 1=開いている */
+  }
+  function trapHit(tr, cz) {
+    if (tr.kind === "end") return null;
+    var d = cz - tr.zc, p = tr.pose;
+    if (tr.kind === "press") return Math.abs(d) < (tr.half || 0.45) + HALF && 0.02 + p * 1.5 < 0.33 ? "hit" : null;
+    if (tr.kind === "hammer") return Math.abs(d) < 0.3 + HALF && Math.abs(2.35 * Math.sin(p)) < 0.55 ? "hit" : null;
+    if (tr.kind === "spinner") {
+      var c = Math.cos(p);
+      if (c < 1.4 / 2.8) return null;                                    /* 腕が道まで届いていない */
+      return Math.abs(cz - (tr.zc + 1.4 * Math.tan(p))) < 0.08 + HALF ? "hit" : null;
+    }
+    if (tr.kind === "pusher") return Math.abs(d) < 0.4 + HALF && 1.15 - p * 1.0 < 0.22 ? "hit" : null;
+    return Math.abs(d) < 0.6 && p > 0.4 ? "fall" : null;
+  }
+
+  /* カメラ用：車の前にある、まだ抜けていない一番近いトラップの奥の端 */
+  function aheadZ() {
+    for (var i = 0; i < traps.length; i++) if (traps[i].zc - 0.9 < z - HALF) return traps[i].zc - 1.2;
+    return z - 4;
+  }
+
+  /* 引いた量から走る距離を決めて、離す */
+  function launch() {
+    if (pull < 0.05) { pull = 0; z = base; phase = "aim"; return; }
+    v = Math.sqrt(2 * DECEL * GAIN * pull);
+    phase = "run";
+    noiseHit(0.08, 2400, 0.12, 3);
+  }
+  function setPull(p) {
+    p = Math.max(0, p);                        /* 引ける量に上限はない */
+    if (Math.abs(p - lastClick) >= 0.035) { lastClick = p; windClick(p); }
+    if (p > 0.5) guided = true;                /* 一度しっかり引いたら、引き方のガイドは出さない */
+    wheel -= (p - pull) / 0.09;
+    keyAng += (p - pull) * 9;                  /* 引くとお尻のネジが巻かれる */
+    pull = p;
+    z = base + pull;
+  }
+  /* 当たったトラップで壊れ方を変える。プレスはぺちゃんこ、閉じる壁は細く、振り子・回転バーは吹っ飛んでへこむ */
+  /* ネジを巻く音：歯車の爪がカチカチ鳴り、巻くほど高く硬くなる */
+  function windClick(p) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 2600 + p * 900; f.Q.value = 6;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(0.35, n + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + 0.03);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random()); s.stop(n + 0.05);
+    tone(900 + p * 260, 0.025, 0.035, "square");
+  }
+  /* やられたトラップの直前に車を戻す。トラップとタイムはそのまま続く */
+  function respawn() {
+    var tr = diedAt;
+    if (!tr) { newRound(); return; }
+    z = base = tr.z0 - 0.2; x = y = pitch = roll = yaw = vx = vy = vz = spin = 0;
+    v = 0; pull = 0; lastClick = 0; sx = sy = sz = 1; crushBy = null; crashZ = null; endT = 0;
+    for (var i = 0; i < traps.length; i++) { traps[i].under = false; traps[i].bumped = false; }
+    phase = "aim";
+    songStep = Math.min(SONG.length, Math.floor(Math.max(0, (START_Z - z) / (START_Z - goalZ)) * SONG.length));
+    tone(660, 0.08, 0.06, "triangle"); tone(990, 0.12, 0.05, "triangle", null, 0.07);
+  }
+  function crash(kind, tr) {
+    phase = "crash"; crashZ = z; endT = 0; runSound(0); diedAt = tr || null;
+    crushBy = tr && (tr.kind === "press" || tr.kind === "pusher") ? tr : null;
+    if (crushBy) {
+      vx = vy = vz = spin = 0; v = 0;
+      noiseHit(0.45, 500, 0.45, 0.6); tone(120, 0.35, 0.18, "square", 50);
+      tone(2400, 0.12, 0.05, "square", 900, 0.05);
+    } else if (kind === "hit") {
+      sz = 0.72; sy = 0.85;
+      noiseHit(0.08, 3000, 0.2, 2);
+      vx = (Math.random() < 0.5 ? -1 : 1) * (2.5 + Math.random() * 2); vy = 7; vz = -v * 0.4 - 1; spin = 9 + Math.random() * 6;
+      noiseHit(0.3, 900, 0.4, 0.8); tone(180, 0.25, 0.15, "square", 70);
+    } else {
+      vx = 0; vy = 0; vz = -v; spin = 0;
+      tone(700, 0.6, 0.1, "triangle", 120);
+    }
+  }
+  function runSound(speed) {
+    if (!AC) return;
+    if (!runOsc && speed > 0) {
+      runOsc = AC.createOscillator(); runGain = AC.createGain();
+      runOsc.type = "sawtooth"; runGain.gain.value = 0;
+      var f = AC.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 900;
+      runOsc.connect(f); f.connect(runGain); runGain.connect(AC.destination); runOsc.start();
+    }
+    if (!runOsc) return;
+    var n = AC.currentTime;
+    runOsc.frequency.setTargetAtTime(60 + speed * 40, n, 0.03);
+    runGain.gain.setTargetAtTime(speed > 0 ? Math.min(0.06, 0.012 + speed * 0.005) : 0, n, 0.04);
+  }
+
+  /* BGM（自作の節）。曲の位置は車の進み具合そのもの。進むと前へ流れ、ネジを巻いて下がると巻き戻り、
+     ゴールでちょうど最後の和音になる。止まっている間は鳴らない。
+     8小節 × 16分音符。数はドからの半音、null は休み。和音進行 C→Am→F→G、C→Am→F G→C */
+  var SONG = [
+    0, null, 4, 7, null, 4, 0, null, 2, null, 4, null, 7, null, null, null,
+    9, null, 7, 4, null, 7, 9, null, 12, null, 9, null, 7, null, null, null,
+    5, null, 9, 12, null, 9, 5, null, 7, null, 9, null, 5, null, null, null,
+    7, null, 11, 14, null, 11, 7, null, 5, null, 4, null, 2, null, null, null,
+    0, null, 4, 7, null, 12, 11, null, 9, null, 7, null, 4, null, null, null,
+    9, null, 12, 16, null, 12, 9, null, 7, null, 9, null, 12, null, null, null,
+    5, null, 9, 12, null, 9, 7, null, 11, null, 14, null, 11, null, 7, null,
+    12, null, 11, null, 9, null, 7, null, 4, null, 2, null, 4, null, 7, 12
+  ];
+  var ROOTS = [-12, -15, -19, -17, -12, -15, -19, -24];
+  function note(st) { return 523.25 * Math.pow(2, st / 12); }
+  function songAt(i, back) {
+    var m = SONG[i];
+    if (back) {                                /* 巻き戻し：テープを逆に早回ししたような、高く短く下がる音 */
+      if (m != null) tone(note(m) * 1.5, 0.06, 0.07, "square", note(m) * 1.1);
+      else tone(note(ROOTS[i >> 4] + 24) * 1.5, 0.03, 0.025, "square");
+      return;
+    }
+    if (m != null) tone(note(m), 0.12, 0.045, "square");
+    if (i % 8 === 0) tone(note(i >> 4 === 6 && i % 16 === 8 ? -17 : ROOTS[i >> 4]), 0.2, 0.06, "triangle");
+    if (i % 2 === 1) noiseHit(0.03, 7000, 0.03, 1);
+  }
+  function songFollow() {
+    var f = Math.max(0, Math.min(1, (START_Z - z) / (START_Z - goalZ)));
+    var step = Math.min(SONG.length, Math.floor(f * SONG.length));
+    if (step === songStep) return;
+    var back = step < songStep, n = 0;
+    while (step !== songStep && n < 4) {        /* 一度にたくさん鳴らさない */
+      if (back) { songStep--; songAt(songStep, true); }
+      else { songAt(songStep, false); songStep++; }
+      n++;
+    }
+    songStep = step;
+  }
+  function songEnd() {                         /* ゴールの和音（曲の最後） */
+    [0, 4, 7, 12].forEach(function (m) { tone(note(m), 1.2, 0.06, "triangle"); });
+    tone(note(-24), 1.2, 0.08, "triangle");
   }
 
   /* ============ 進行 ============ */
-  var drag = null, keyL = 0, keyC = 0, fightT = 0, FOLLOW = 4, fingerSp = 0, lastAim = null;
-  /* 指のずれ → グローブの行き先（構えの位置からのずれ） */
-  function fistAim() {
-    var x = drag ? drag.dx * 1.6 : keyL > 0 ? 250 : keyL * 110, y = drag ? drag.dy * 1.6 : keyC * 150;
-    return { x: Math.max(-110, Math.min(250, x)), y: Math.max(-130, Math.min(170, y)) };
-  }
   function update(dt) {
+    if (state === S.RESULT) {
+      /* しばらくしたら自動でもう一度 */
+      resT += dt; T += dt;                     /* トラップは動き続ける（潰れた車が見える） */
+      for (var j = 0; j < traps.length; j++) trapPose(traps[j]);
+      return;
+    }
+    if (state !== S.PLAY) return;
     T += dt;
-    shake = Math.max(0, shake - dt);
-    for (var i = fx.length - 1; i >= 0; i--) { fx[i].t += dt; if (fx[i].t > (fx[i].guard ? 0.4 : 0.22)) fx.splice(i, 1); }
-    /* 防いだ瞬間だけ、ほんの少し止める */
-    if (hitStop > 0) { hitStop -= dt; return; }
-    /* KOの瞬間はスロー：体の動きだけ間引いて進める */
-    if (slowT > 0) { slowT -= dt; slowAcc += 0.3; if (slowAcc < 1) return; slowAcc -= 1; }
-    for (var si = sparks.length - 1; si >= 0; si--) { var sp = sparks[si]; sp.t += dt; sp.y += sp.vy * dt; if (sp.t > 1.2) sparks.splice(si, 1); }
-    crowd.step(dt);
-    if (state === S.INTRO) { me.L = Math.sin(T * 2) * 0.1; stepFighter(me, dt); stepFighter(foe, dt); return; }
-    /* READY… FIGHT! のあいだは構えたまま */
-    if (state === S.READY) {
-      stepFighter(me, dt); stepFighter(foe, dt);
-      if (T >= READY_T && !readyFight) { readyFight = true; announce("Fight!", 1.15); bell(0); crowd.cheer(0.9, 0.5); }
-      if (T >= READY_T + 0.55) { state = S.FIGHT; T = 0; readyFight = false; }
-      return;
+    for (var i = 0; i < traps.length; i++) trapPose(traps[i]);
+
+    if (phase === "aim" && keyHold) setPull(pull + dt * 0.9);
+    if (phase === "aim" || phase === "run") songFollow();
+    if (phase === "run") {
+      /* 減速は式どおりに進め、止まる位置が刻みでずれないようにする */
+      var nv = v - DECEL * dt, dz = nv > 0 ? (v + nv) / 2 * dt : v * v / (2 * DECEL);
+      z -= dz; wheel += dz / 0.09; v = Math.max(0, nv);
+      keyAng -= dz / GAIN * 9;                 /* 走るとほどけて逆に回る */
+      runSound(v);
+      if (v <= 0) { phase = "aim"; base = z; pull = 0; lastClick = 0; moreTraps(); }
     }
-    if (state === S.FIGHT) {
-      fightT += dt;
-      /* 指のずれがそのまま体の引っぱり */
-      
-      /* 指で前のグローブの位置を動かす。グローブはそこへゆっくり追いつき、体は届くように乗り出す・かがむ */
-      /* 指を速く動かすほど速く追いつく（ゆっくりなら重く、素早く払えば鋭いパンチ） */
-      var aim = fistAim();
-      var fs = Math.hypot(aim.x - (lastAim ? lastAim.x : aim.x), aim.y - (lastAim ? lastAim.y : aim.y)) / dt;
-      lastAim = aim;
-      fingerSp = Math.max(fs, fingerSp * Math.pow(0.002, dt));
-      var follow = Math.min(1, dt * Math.min(28, FOLLOW + fingerSp / 90));
-      me.fist.x += (aim.x - me.fist.x) * follow; me.fist.y += (aim.y - me.fist.y) * follow;
-      me.L = me.fist.x > 0 ? Math.min(1, me.fist.x / 245) : Math.max(-1, me.fist.x / 110);
-      me.C = Math.max(-0.35, Math.min(1, me.fist.y / 150));
-      stepCpu(dt);
-      stepFighter(me, dt); stepFighter(foe, dt);
-      bodies(me, foe);
-      clashCool = Math.max(0, clashCool - dt);
-      gloveClash(me, foe);
-      hits(me, foe); hits(foe, me);
-      /* 長く当たりがないとブーイング */
-      if (fightT - lastHit > 6) { lastHit = fightT; crowd.boo(); }
-      if (fightT >= TIME && state === S.FIGHT) { endFight(); crowd.cheer(1.2, 0.6); }
-      return;
+    if (phase === "aim" || phase === "run") {
+      /* くぐり抜けた数。トラップの区間を車の後ろの端が抜けたら1つ */
+      var n = 0;
+      for (i = 0; i < traps.length; i++) {
+        var tr = traps[i], hit = trapHit(tr, z);
+        if (hit && (tr.kind === "press" || tr.kind === "pusher") && !tr.under) {
+          /* 下りている（閉じている）所へ横から突っ込んだだけなら、手前でコツンと止まる。
+             潰されるのは、下に入っている所へ下りてきたときだけ */
+          var face = (tr.kind === "press" ? tr.half || 0.45 : 0.4) + HALF + 0.01;
+          if (phase === "run") {
+            z = tr.zc + face;
+            v = 0; phase = "aim"; base = z; pull = 0; lastClick = 0; moreTraps(); runSound(0);
+          } else {                             /* 引いて後ろの壁に当たったときは、そこまでしか引けない */
+            z = tr.zc - face; pull = Math.max(0, z - base);
+          }
+          if (!tr.bumped) { noiseHit(0.1, 1200, 0.25, 1.2); tone(320, 0.08, 0.08, "square", 200); }
+          tr.bumped = true;
+          hit = null;
+        }
+        else tr.bumped = false;
+        if (hit) { crash(hit, tr); break; }
+        tr.under = Math.abs(z - tr.zc) < (tr.kind === "press" ? tr.half || 0.45 : 0.4) + HALF;
+        if (z + HALF < tr.zc - 0.9) n++;
+      }
+      if (phase !== "crash" && z + HALF < goalZ) {   /* ゴール */
+        clearT = T; phase = "clear"; endT = 0; runSound(0);
+        songEnd();
+        if (window.zCelebrate) { confetti = window.zCelebrate.confetti(); confetti.rain = false; confetti.burst(W, H, 160); }
+      }
+      if (n > score) { score = n; tone(1320, 0.07, 0.06, "triangle"); tone(1760, 0.09, 0.05, "triangle", null, 0.06); }
+    } else if (phase === "clear") {
+      /* ゴールの先へ惰性で少し進んで止まる */
+      endT += dt;
+      v = Math.max(0, v - (4 + v * 3) * dt); z -= v * dt; wheel += v * dt / 0.09;
+      if (endT > 1.6) state = S.RESULT;
+    } else if (phase === "crash") {
+      endT += dt;
+      if (!crushBy) {                          /* 潰れた車はその場に残す（重力で床を抜けない） */
+        vy -= GRAV * dt;
+        x += vx * dt; y += vy * dt; z += vz * dt;
+        pitch += spin * dt; roll += spin * 0.6 * dt; yaw += vx * 0.5 * dt;
+      }
+      if (crushBy) {
+        /* 見た目どおりに潰す（一度潰れたら戻らない） */
+        if (crushBy.kind === "press") sy = Math.min(sy, Math.max(0.12, (0.02 + crushBy.pose * 1.5) / 0.32));
+        else sx = Math.min(sx, Math.max(0.28, (1.15 - crushBy.pose * 1.0) / 0.21));
+      }
+      if (endT > 1.8) respawn();               /* 結果画面は出さず、やられたトラップの直前から自動で再開 */
     }
-    if (state === S.END) {
-      me.L *= 0.9; me.C *= 0.9; if (!foe.ko) { foe.L *= 0.9; foe.C *= 0.9; }
-      stepFighter(me, dt); stepFighter(foe, dt); bodies(me, foe);
-      if (outcome === "win" && T > 1.5) { level = after; state = S.LEVELUP; T = 0; levelUpSound(); }
-      else if (outcome === "draw" && T > 0.6) nextBout();
-      else if (outcome === "champ" && T > 2.2) { state = S.RESULT; crowd.cheer(2.5, 1); crowd.applause(3); fanfare(); throwConfetti(); }
-      else if (outcome === "lose" && T > 2) { level = after; state = S.RESULT; crowd.stop(); tone(330, 0.3, 0.1, "triangle", 220); }
-      return;
-    }
-    if (state === S.LEVELUP) {
-      me.hopY = Math.abs(Math.sin(T * 6)) * 30;
-      stepFighter(me, dt); stepFighter(foe, dt);
-      if (Math.random() < dt * 40) sparks.push({ x: me.P.chest.x + (Math.random() - 0.5) * 220, y: GROUND - Math.random() * 40, vy: -200 - Math.random() * 260, t: 0 });
-      if (T > 2.1) { me.hopY = 0; nextBout(); }
-      return;
-    }
-    if (state === S.RESULT) { stepFighter(me, dt); stepFighter(foe, dt); stepConfetti(dt); }
-  }
-  /* 全勝：ファンファーレと紙吹雪 */
-  function fanfare() {
-    /* 自作の節：駆け上がって、ひと跳ねしてから長く鳴らす */
-    var n = [[392, 0, 0.09], [523, 0.09, 0.09], [659, 0.18, 0.09], [784, 0.27, 0.22], [880, 0.52, 0.09], [784, 0.62, 0.09], [988, 0.72, 0.22], [1047, 0.98, 1.0]];
-    n.forEach(function (x) {
-      tone(x[0], x[2] + 0.05, 0.11, "triangle", null, x[1]);
-      tone(x[0] / 2, x[2] + 0.05, 0.06, "square", null, x[1]);
-    });
-    [523, 659, 784].forEach(function (f) { tone(f, 1.0, 0.05, "triangle", null, 0.98); });
-  }
-  function throwConfetti() {
-    var cols = ["#ff4d4d", "#ffd23f", "#3fa7ff", "#5ee07a", "#ff7ad9", "#ffffff", "#ff9a3c"];
-    for (var i = 0; i < 160; i++) confetti.push({ x: Math.random() * W, y: -Math.random() * H * 0.8 - 20, vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 140, r: Math.random() * 6, vr: (Math.random() - 0.5) * 8, flip: Math.random() * 6, vf: 4 + Math.random() * 8, col: cols[i % cols.length] });
-  }
-  function stepConfetti(dt) {
-    confetti.forEach(function (c) { c.x += (c.vx + Math.sin(c.flip) * 40) * dt; c.y += c.vy * dt; c.r += c.vr * dt; c.flip += c.vf * dt; if (c.y > H + 20) { c.y = -20; c.x = Math.random() * W; } });
-  }
-  function levelUpSound() {
-    [523, 659, 784, 1047, 784, 1047, 1319].forEach(function (f, i) { tone(f, i === 6 ? 0.6 : 0.14, 0.11, "square", null, i * 0.09); });
-    tone(1568, 0.8, 0.06, "triangle", null, 0.66);
   }
 
   /* ============ 入力 ============
-     押した所からのずれで体を引っぱる。指を離すと元の構えに戻る。 */
-  function down(x, y) {
-    if (state === S.INTRO) return;
+     タップとスペースキーで同じことができるようにする。
+     x が null のときはキー操作（場所を指さない）。 */
+  function down(px, py) {
+    if(state===S.INTRO)return;
     audioOn();
     if (state === S.RESULT) {
-      var hit = x == null ? "retry" : hitButton(x, y);
+      var hit = px == null ? "retry" : hitButton(px, py);
       if (hit === "retry") newRound();
       return;
     }
-    if (x == null || state !== S.FIGHT) return;
-    drag = { x0: x, y0: y, x: x, y: y, dx: 0, dy: 0 };
+    if (phase === "run") {                     /* 走っている間はタップでいつでも止まる */
+      v = 0; phase = "aim"; base = z; pull = 0; lastClick = 0; moreTraps();
+      runSound(0); noiseHit(0.12, 1800, 0.18, 1.5);
+      /* 止めた指のまま、続けてドラッグで引ける */
+    }
+    if (phase !== "aim") return;
+    held = true;
+    if (px == null) { keyHold = true; return; }
+    startY = py;
   }
-  function move(x, y) {
-    if (!drag) return;
-    drag.x = x; drag.y = y; drag.dx = x - drag.x0; drag.dy = y - drag.y0;
+  function move(px, py) {
+    if (state !== S.PLAY || !held) return;
+    if (phase === "aim") setPull((py - startY) / 120);
   }
-  function up() { drag = null; }
+  function up() {
+    if (!held) return;
+    held = false;
+    keyHold = false;
+    if (state === S.PLAY && phase === "aim") launch();
+  }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
-    e.preventDefault();
-    if (drag) return;
+    e.preventDefault(); keyMode = false;
     var p = atCanvas(e); down(p.x, p.y);
   });
-  wrap.addEventListener("pointermove", function (e) { var p = atCanvas(e); move(p.x, p.y); });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
   wrap.addEventListener("pointercancel", function () { up(); });
-  window.addEventListener("blur", function () { up(); keyL = keyC = 0; });
+  window.addEventListener("blur", function () { up(); });
 
-  /* 本番以外だけ、数字キーで場面を飛ばせる */
+  /* 本番以外（手元・確認用ページ・制作中の固定リンク）だけ、数字キーで場面を飛ばせる。
+     本番（www.zounoashi.com/games/ 以下）では効かない。 */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
-  function toFight() { newRound(); }
   function debugKey(n) {
-    if (n === 1) { if (state !== S.FIGHT) toFight(); foe.hp = 0; knockOut(foe); }
-    if (n === 2) { if (state !== S.FIGHT) toFight(); me.hp = 0; knockOut(me); }
-    if (n === 3) { level = nextLevel(); before = after = level; foeLook = makeLook(); }
-    if (n === 4) { level = START_LV; before = after = level; foeLook = makeLook(); }
+    /* 1=次のトラップの手前へ 2=その場で壊れる 3=最後のトラップの手前へ 4=連続プレスの手前へ */
+    if (state !== S.PLAY) newRound();
+    if (phase !== "aim") return;
+    if (n === 2) { v = 3; crash("hit"); return; }
+    var skip = n === 1 ? 0 : n === 3 ? STAGE - 1 : n === 4 ? 6 : null;
+    if (skip == null) return;
+    for (var i = 0; i < traps.length; i++) if (traps[i].zc < z - 0.5) break;
+    var tr = traps[Math.min(STAGE - 1, n >= 3 ? skip : i + skip)];
+    if (!tr) return;
+    z = base = tr.z0 - HALF - 0.05; pull = 0;
+    moreTraps();
   }
 
   window.addEventListener("keydown", function (e) {
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
-    var k = e.key;
-    var esc = k === "Escape";
-    var go = e.code === "Space" || k === " " || k === "Enter";
-    var fw = k === "ArrowRight" || k === "d" || k === "D", bk = k === "ArrowLeft" || k === "a" || k === "A";
-    var dn = k === "ArrowDown" || k === "s" || k === "S";
-    if (!esc && !go && !fw && !bk && !dn) return;
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (!esc && !go && !left && !right) return;
     e.preventDefault();
+    if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
-    if (state === S.FIGHT) {
-      if (fw || go) keyL = 1; if (bk) keyL = -1; if (dn) keyC = 1;
+    if (left || right) {
+      if (state !== S.PLAY) return;
+      /* ▼UPDATE: 左右キー（選ぶものがあるとき。目印は keyMode のときだけ出す） */
       return;
     }
-    if (go && !e.repeat) down();
+    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    down();
   });
   window.addEventListener("keyup", function (e) {
-    var k = e.key;
-    if (k === "ArrowRight" || k === "d" || k === "D" || k === "ArrowLeft" || k === "a" || k === "A" || e.code === "Space" || k === " " || k === "Enter") keyL = 0;
-    if (k === "ArrowDown" || k === "s" || k === "S") keyC = 0;
-    if ((e.code === "Space" || k === " " || k === "Enter") && state === S.INTRO) startButton.click();
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
   });
 
   function doShare() {
-    var text;
-    if (outcome === "champ") text = zT("Lv.99の頂点に立ったカンガルー", "My kangaroo reached the top: Lv.99", "Lv.99 정상에 오른 캥거루", "登上Lv.99顶点的袋鼠", "登上Lv.99頂點的袋鼠");
-    else text = zT("Lv." + before + "まで勝ち上がったカンガルー", "My kangaroo fought its way up to Lv." + before, "Lv." + before + "까지 올라간 캥거루", "一路打到Lv." + before + "的袋鼠", "一路打到Lv." + before + "的袋鼠");
-    window.zResultActions.x({ text: text + zT(" #カンガルーファイト", " #KangarooFight", " #캥거루파이트", " #袋鼠格斗", " #袋鼠格鬥") });
+    /* ▼SHARE: シェアされる文。正方形サムネの共有リンクは share.js が付ける。
+       URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
+    /* 英語のときのハッシュタグは英語のゲーム名にする（空白・記号は除く） */
+    var t = (clearT || 0).toFixed(2);
+    var text = zT("ゼンマイのミニカーでトラップ10個を" + t + "秒でくぐり抜けました", "My wind-up minicar dodged 10 traps in " + t + "s", "태엽 미니카로 함정 10개를 " + t + "초 만에 빠져나갔습니다", "发条迷你车用" + t + "秒穿过了10个陷阱", "發條迷你車用" + t + "秒穿過了10個陷阱");
+    window.zResultActions.x({ text: text + zT(" #ネジマキランナウェイ", " #WindUpRunaway", " #태엽런어웨이", " #发条大逃亡", " #發條大逃亡") });
   }
-
 
   /* ============ 描画 ============ */
-  var INK = "#141414";
-  function stroke(w) { ctx.lineWidth = w || 4; ctx.strokeStyle = INK; ctx.lineJoin = "round"; ctx.lineCap = "round"; }
-  function blob(fn, fill) { ctx.beginPath(); fn(); ctx.fillStyle = fill || "#fff"; ctx.fill(); ctx.stroke(); }
-  function ell(x, y, rx, ry, rot) { ctx.ellipse(x, y, rx, ry, rot || 0, 0, Math.PI * 2); }
-
-  /* 物理の点からカンガルーを描く（線画） */
-  function drawRoo(f, ox, oy, tag) {
-    var P = f.P, d = f.dir, s = f.sc;
-    ctx.save();
-    ctx.translate(ox || 0, oy || 0);
-    if (f.hurtT > 0) ctx.translate(-8 * d * Math.sin(f.hurtT * 60), 0);
-    stroke(4 * Math.min(1, s));
-    function arm(g) {
-      var sx = P.chest.x + (P.head.x - P.chest.x) * 0.25, sy = P.chest.y + (P.head.y - P.chest.y) * 0.25, e = P[g];
-      ctx.lineWidth = 15 * s; ctx.strokeStyle = INK; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(e.x, e.y); ctx.stroke();
-      ctx.lineWidth = 9 * s; ctx.strokeStyle = "#fff"; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(e.x, e.y); ctx.stroke();
-      stroke(4 * Math.min(1, s));
-      blob(function () { ell(e.x, e.y, 19 * s, 16 * s, 0); });
-      ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(e.x - 8 * d * s, e.y - 10 * s); ctx.lineTo(e.x - 8 * d * s, e.y + 10 * s); ctx.stroke();
-      stroke(4 * Math.min(1, s));
-    }
-    arm("gb");
-    /* しっぽ：腰から先へ細くなる */
-    var hx = P.hip.x, hy = P.hip.y, tx = P.tail.x, ty = P.tail.y;
-    var nx = -(ty - hy), ny = tx - hx, nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
-    blob(function () {
-      ctx.moveTo(hx + nx * 20 * s, hy + ny * 20 * s);
-      ctx.quadraticCurveTo((hx + tx) / 2 + nx * 4 * s, (hy + ty) / 2 + ny * 4 * s - 10 * s, tx, ty);
-      ctx.quadraticCurveTo((hx + tx) / 2 - nx * 10 * s, (hy + ty) / 2 - ny * 10 * s + 8 * s, hx - nx * 20 * s, hy - ny * 20 * s);
-      ctx.closePath();
-    });
-    /* 脚：太ももと長い足 */
-    var fx0 = P.foot.x, fy0 = P.foot.y;
-    blob(function () { ctx.moveTo(fx0 - 12 * d * s, fy0 - 14 * s); ctx.lineTo(fx0 + 92 * d * s, fy0 - 4 * s); ctx.quadraticCurveTo(fx0 + 100 * d * s, fy0, fx0 + 88 * d * s, fy0 + 2 * s); ctx.lineTo(fx0 - 10 * d * s, fy0 + 2 * s); ctx.closePath(); });
-    var tmx = hx + (fx0 - hx) * 0.35, tmy = hy + (fy0 - hy) * 0.35;
-    blob(function () { ell(tmx, tmy, 38 * s, 50 * s, Math.atan2(fy0 - hy, fx0 - hx) - Math.PI / 2 - 0.2 * d); });
-    /* 胴：腰から胸 */
-    var cx = P.chest.x, cy = P.chest.y, ang = Math.atan2(cy - hy, cx - hx), bl = Math.hypot(cx - hx, cy - hy);
-    blob(function () { ell((hx + cx) / 2, (hy + cy) / 2 - 10 * s, bl / 2 + 40 * s, 40 * s, ang); });
-    ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + 10 * d * s, cy + 18 * s); ctx.quadraticCurveTo((hx + cx) / 2 + 26 * d * s, (hy + cy) / 2, hx + 26 * d * s, hy - 6 * s); ctx.stroke();
-    stroke(4 * Math.min(1, s));
-    /* 頭：胸から頭への向きで傾ける */
-    var ha = Math.atan2(P.head.y - cy, P.head.x - cx), base = Math.atan2(-58, 28 * d);
-    ctx.save();
-    ctx.translate(P.head.x, P.head.y);
-    ctx.rotate(ha - base);
-    ctx.scale(d * s, s);
-    blob(function () { ell(-6, -36, 9, 24, -0.25); });
-    blob(function () { ell(6, -38, 9, 24, 0.2); });
-    blob(function () { ctx.moveTo(-18, 8); ctx.bezierCurveTo(-26, -24, 10, -30, 28, -14); ctx.quadraticCurveTo(52, -6, 54, 4); ctx.quadraticCurveTo(50, 14, 30, 14); ctx.quadraticCurveTo(0, 22, -18, 8); ctx.closePath(); });
-    ctx.fillStyle = INK; ctx.lineWidth = 3;
-    if (f.ko) { ctx.beginPath(); ctx.moveTo(10, -10); ctx.lineTo(20, -2); ctx.moveTo(20, -10); ctx.lineTo(10, -2); ctx.stroke(); }
-    else if (f.hurtT > 0) { ctx.beginPath(); ctx.moveTo(10, -9); ctx.lineTo(20, -5); ctx.lineTo(10, -1); ctx.stroke(); }
-    else { ctx.beginPath(); ell(15, -6, 3.5, 4.5); ctx.fill(); }
-    ctx.beginPath(); ell(52, 2, 3, 2.5); ctx.fill();
-    ctx.restore();
-    arm("gf");
-    ctx.restore();
-    if (tag) drawTag(P.head.x + (ox || 0), P.head.y + (oy || 0) - 80 * s, tag, s);
-  }
-  function drawTag(x, y, text, sc) {
-    ctx.save();
-    ctx.font = "900 " + Math.round(26 * sc) + "px sans-serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    var w = ctx.measureText(text).width + 22 * sc, h = 38 * sc;
-    ctx.fillStyle = INK; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - w / 2, y - h / 2, w, h, 8 * sc) : ctx.rect(x - w / 2, y - h / 2, w, h); ctx.fill();
-    ctx.fillStyle = "#fff"; ctx.fillText(text, x, y + 1);
-    ctx.restore();
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
   }
 
-  var dotLayer = null;
-  function drawBackground() {
-    ctx.fillStyle = "#fbfaf6"; ctx.fillRect(0, 0, W, H);
-    /* 戦っている間は集中線 */
-    if (state === S.FIGHT || state === S.END) {
-      ctx.save();
-      ctx.strokeStyle = "rgba(20,20,20,.13)";
-      var cx = W / 2, cy = GROUND - 170 * FS, r = Math.max(W, H);
-      var rnd = 7;
-      for (var i = 0; i < 90; i++) {
-        rnd = (rnd * 9301 + 49297) % 233280;
-        var a = i / 90 * Math.PI * 2 + rnd / 233280 * 0.05, r0 = 200 + (rnd % 120);
-        ctx.lineWidth = 1 + (rnd % 3);
-        ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke();
-      }
-      ctx.restore();
-    }
-    /* 地面：線と網点 */
-    ctx.fillStyle = "#e9e6dc"; ctx.fillRect(0, GROUND, W, PANEL - GROUND);
-    /* 網点は一度だけ描いて写す */
-    var gh = PANEL - GROUND;
-    if (!dotLayer || dotLayer.height !== gh) {
-      dotLayer = document.createElement("canvas"); dotLayer.width = W; dotLayer.height = Math.max(1, gh);
-      var g = dotLayer.getContext("2d");
-      g.fillStyle = "rgba(20,20,20,.25)";
-      for (var y = 8; y < gh; y += 9) for (var x = (y / 9 & 1) * 4.5; x < W; x += 9) { g.beginPath(); g.arc(x, y, 1.4, 0, Math.PI * 2); g.fill(); }
-    }
-    ctx.drawImage(dotLayer, 0, GROUND);
-    stroke(4); ctx.beginPath(); ctx.moveTo(0, GROUND); ctx.lineTo(W, GROUND); ctx.stroke();
-    ctx.fillStyle = "#1b1b1d"; ctx.fillRect(0, PANEL, W, H - PANEL);
-  }
-  function drawHud() {
-    var y = 26, bw = 200, bh = 18;
-    [[me, 20, 1], [foe, W - 20 - bw, -1]].forEach(function (e) {
-      var f = e[0], x = e[1];
-      ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.fillRect(x - 3, y - 3, bw + 6, bh + 6);
-      var w = (bw) * Math.max(0, f.hp) / 100;
-      ctx.fillStyle = f.hp > 30 ? "#f2c94c" : "#e8503a";
-      if (e[2] > 0) ctx.fillRect(x, y, w, bh); else ctx.fillRect(x + bw - w, y, w, bh);
-    });
-    /* 体力の下にお互いのレベル（いつも同じ） */
-    ctx.save();
-    ctx.shadowColor = "rgba(0,0,0,.7)"; ctx.shadowBlur = 6;
-    ctx.fillStyle = "#fff"; ctx.font = "800 24px sans-serif"; ctx.textBaseline = "top";
-    ctx.textAlign = "left"; ctx.fillText("Lv." + before, 20, y + bh + 10);
-    ctx.textAlign = "right"; ctx.fillText("Lv." + before, W - 20, y + bh + 10);
-    ctx.font = "800 34px sans-serif"; ctx.textAlign = "center";
-    ctx.fillText(String(Math.max(0, Math.ceil(TIME - fightT))), W / 2, y - 8);
-    ctx.restore();
-  }
-  /* パリィ：白く光る輪が広がり、はじいた向きに火花が散る */
-  function drawParry(e) {
-    var k = e.t / 0.4, r = 18 + k * 90;
-    ctx.save(); ctx.translate(e.x, e.y);
-    if (k < 0.25) { ctx.fillStyle = "rgba(255,255,255," + (1 - k * 4) + ")"; ctx.beginPath(); ctx.arc(0, 0, 46, 0, Math.PI * 2); ctx.fill(); }
-    ctx.globalAlpha = 1 - k;
-    ctx.lineWidth = 7 * (1 - k) + 1; ctx.strokeStyle = "#ffffff";
-    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
-    ctx.lineWidth = 3 * (1 - k) + 1; ctx.strokeStyle = "#7fd3ff";
-    ctx.beginPath(); ctx.arc(0, 0, r * 0.82, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = "#bfe8ff"; ctx.lineCap = "round";
-    for (var i = 0; i < 9; i++) {
-      var a = e.ang + (i - 4) * 0.28, r0 = 20 + k * 70, r1 = r0 + 30 * (1 - k) + 10;
-      ctx.lineWidth = i % 2 ? 3 : 5;
-      ctx.beginPath(); ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.stroke();
-    }
-    ctx.restore();
-  }
-  function drawFx() {
-    fx.forEach(function (e) {
-      if (e.guard) { drawParry(e); return; }
-      /* 当たった所に白い光がはじけて、細かい粒が飛ぶ */
-      var k = e.t / 0.22, r = (e.big ? 90 : 55) * (0.5 + k * 0.7);
-      ctx.save(); ctx.translate(e.x, e.y);
-      var g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-      g.addColorStop(0, "rgba(255,255,240," + (0.95 - k * 0.9) + ")");
-      g.addColorStop(0.4, "rgba(255,220,160," + (0.5 - k * 0.5) + ")");
-      g.addColorStop(1, "rgba(255,200,120,0)");
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "rgba(255,245,220," + (1 - k) + ")"; ctx.lineCap = "round";
-      for (var i = 0; i < (e.big ? 12 : 7); i++) {
-        var a = i * 2.4 + e.x, r0 = 14 + k * r * 0.9, r1 = r0 + 14 * (1 - k);
-        ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.stroke();
-      }
-      ctx.restore();
-    });
-  }
+  /* 立体の場面。three.js が使えないときは平面の絵のまま */
+  var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene(); }) : function () { return null; };
 
-
-  /* 立体の場面。開いた直後に作れなくても何度か作り直す */
-  var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.KangarooScene(); }) : function () { return null; };
-  if (!window.Z3) scene3d.drop = function () {};
-
-  var drawLast = 0, drawNow = 0;
   function draw() {
-    drawNow = performance.now();
-    var res = state === S.RESULT;
-    window.zResultActions.place(shareButton, resultButtons()[1], W, H, res);
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
-    ctx.save();
-    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake * 40, (Math.random() - 0.5) * shake * 30);
-    var s3 = scene3d(), ok = false;
-    if (s3) {
-      try {
-        s3.sync({ me: me, foe: foe, showFoe: true, W: W, H: H, ground: GROUND, excite: crowd.level(), foeLook: foeLook, rays: state === S.LEVELUP ? Math.min(1, T / 0.2) * Math.min(1, (2.1 - T) / 0.5) : 0, dt: Math.min(0.1, Math.max(0, drawNow - (drawLast || drawNow)) / 1000) }); drawLast = drawNow;
-        ok = s3.draw(ctx, W, H);
-      } catch (e) { scene3d.drop(); ok = false; }
-    }
-    /* 立体が使えないときは線画で描く */
-    if (!ok) { drawBackground(); drawRoo(foe, 0, 0, null); drawRoo(me, 0, 0, null); }
-    if (state === S.LEVELUP && !ok) drawRays();
-    drawFx();
-    if (state !== S.RESULT && state !== S.INTRO && !hideHud) drawHud();
-    ctx.restore();
-    /* 指の印は出さない */
-    if (state === S.LEVELUP) drawLevelUp();
-    if (state === S.READY && !hideHud) drawReady();
-    if (res) drawResult();
-    if (confetti.length) drawConfetti();
+
+    /* ▼DRAW: ここに絵。立体の上に、文字やボタンを2Dで描く */
+    var s3 = scene3d(), drew = false;
+    if (s3) { try { s3.sync({ x: x, y: y, z: z, pitch: pitch, roll: roll, yaw: yaw, wheel: wheel, key: keyAng, ahead: aheadZ(), sx: sx, sy: sy, sz: sz, camZ: crashZ == null ? z : crashZ, traps: traps }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (!drew) { ctx.fillStyle = "#1d1714"; ctx.fillRect(0, 0, W, H); }
+
+    if (state === S.PLAY && phase !== "crash" && !noUI) drawProgress();
+    if (state === S.PLAY && phase === "aim" && !guided && !held && !noUI) drawGuide();
+    if (confetti) { confetti.step(1 / 60, W, H); confetti.draw(ctx); }
+    if (state === S.RESULT) drawResult();
   }
 
-  /* READY… FIGHT!：大きな文字が勢いよく出る */
-  function drawReady() {
-    var fight = T >= READY_T, t = fight ? T - READY_T : T;
-    var text = fight ? "FIGHT!" : "READY", k = Math.min(1, t / 0.12);
-    var sc = fight ? 1.6 - 0.6 * k : 1.25 - 0.25 * k;
-    ctx.save();
-    if (fight && t < 0.12) { ctx.fillStyle = "rgba(255,255,255," + (0.5 - t * 4) + ")"; ctx.fillRect(0, 0, W, H); }
-    ctx.translate(W / 2, Math.max(150, GROUND - 330 * FS));
-    sc *= Math.min(1, W / 460);
-    ctx.scale(sc, sc);
-    ctx.globalAlpha = Math.min(1, t / 0.08);
-    ctx.font = "italic 900 " + (fight ? 92 : 76) + "px sans-serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.lineJoin = "round"; ctx.lineWidth = 10; ctx.strokeStyle = "rgba(0,0,0,.75)";
-    ctx.strokeText(text, 0, 0);
-    var g = ctx.createLinearGradient(0, -46, 0, 46);
-    if (fight) { g.addColorStop(0, "#fff3b0"); g.addColorStop(1, "#ff8a1f"); } else { g.addColorStop(0, "#ffffff"); g.addColorStop(1, "#bfd8ff"); }
-    ctx.fillStyle = g; ctx.fillText(text, 0, 0);
-    ctx.restore();
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない）。
+     基本は doji5 の形（暗くして中央に白い大きなスコア）。
+     盆栽・炒飯のように作ったものを見せるゲームは、暗くせず「作品を見せる形」にする：
+       var L = window.zResultActions.showcase(W, H, { sizes: [104, 76, 30] });
+       L.lines[i].y（textBaseline "top"）に上から文字、L.subject の枠の中央に作品を大きく、
+       resultButtons() は L.buttons を返す。文字は上端から積むので画面からはみ出さない。 */
+  function resultButtons() {
+    return window.zResultActions.row(W, H * 0.62);
   }
-
-  /* 指の押した所と今の所（おもちゃの操作棒） */
-  function drawFinger() {
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,.45)"; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.arc(drag.x0, drag.y0, 34, 0, Math.PI * 2); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(drag.x0, drag.y0); ctx.lineTo(drag.x, drag.y); ctx.stroke();
-    ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.beginPath(); ctx.arc(drag.x, drag.y, 16, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
+  function hitButton(x, y) {
+    return window.zResultActions.hit(resultButtons(), x, y);
   }
-  /* レベルアップ：後光・舞い上がる光・札の数字が跳ねて変わる */
-  function drawRays() {
-    var cx = me.P.chest.x, cy = me.P.chest.y + 20;
+  /* 上のステージの進み具合。今のステージのスタートからゴール（10個目の先）まで */
+  function drawProgress() {
+    var st = 0, a = { z0: START_Z }, b = { z1: goalZ };
+    var f = Math.max(0, Math.min(1, (a.z0 - z) / (a.z0 - b.z1)));
+    var bw = 380, bh = 16, bx = (W - bw) / 2, by = 40;
     ctx.save();
-    ctx.translate(cx, cy); ctx.rotate(T * 0.6);
-    for (var i = 0; i < 16; i++) {
-      ctx.rotate(Math.PI / 8);
-      ctx.fillStyle = i % 2 ? "rgba(255,214,64,.28)" : "rgba(255,240,170,.2)";
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(900, -70); ctx.lineTo(900, 70); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,.45)"; roundRect(bx - 3, by - 3, bw + 6, bh + 6, (bh + 6) / 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.18)"; roundRect(bx, by, bw, bh, bh / 2); ctx.fill();
+    if (f > 0) { ctx.fillStyle = "#f2c230"; roundRect(bx, by, Math.max(bh, bw * f), bh, bh / 2); ctx.fill(); }
+    ctx.fillStyle = "rgba(0,0,0,.35)";                 /* トラップの位置の目盛り */
+    for (var i = 1; i < STAGE; i++) {
+      var t = traps[st * STAGE + i]; if (!t) break;
+      ctx.fillRect(bx + bw * (a.z0 - t.z0) / (a.z0 - b.z1) - 1, by + 3, 2, bh - 6);
     }
     ctx.restore();
   }
-  function drawLevelUp() {
-    var k = Math.min(1, T / 0.25);
-    if (T < 0.25) { ctx.fillStyle = "rgba(255,255,255," + (1 - k) + ")"; ctx.fillRect(0, 0, W, H); }
-    sparks.forEach(function (sp) {
-      ctx.fillStyle = "rgba(255,200,40," + (1 - sp.t / 1.2) + ")";
-      ctx.save(); ctx.translate(sp.x, sp.y); ctx.rotate(sp.t * 6);
-      ctx.beginPath(); for (var i = 0; i < 8; i++) { var a = i / 8 * Math.PI * 2, r = i % 2 ? 4 : 11; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.fill();
-      ctx.restore();
-    });
-    var swap = T > 0.35, pop = swap ? 1 + Math.max(0, 0.5 - (T - 0.35) * 2) : 1;
-    drawTag(me.P.head.x, me.P.head.y - 90 * FS - (swap ? Math.max(0, 0.3 - (T - 0.35)) * 120 : 0), "Lv." + (swap ? after : before), 1.4 * pop);
+  /* 引き方のガイド：指先の丸が下へなぞる動きをくり返す（文字は出さない） */
+  function drawGuide() {
+    var u = (T % 1.6) / 1.6, k = Math.min(1, u / 0.75), e = k * k * (3 - 2 * k);
+    var gx = W * 0.5, y0 = H * 0.55, y1 = H * 0.55 + 190, gy = y0 + (y1 - y0) * e;
+    var a = u < 0.08 ? u / 0.08 : u > 0.85 ? Math.max(0, (1 - u) / 0.15) : 1;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = "rgba(255,255,255,.75)"; ctx.lineWidth = 10; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(gx, y0); ctx.lineTo(gx, gy); ctx.stroke();       /* なぞった跡 */
+    ctx.fillStyle = "#fff"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(gx, gy, 30, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,.5)";                                        /* 下向きの矢印 */
+    ctx.beginPath(); ctx.moveTo(gx - 26, y1 + 46); ctx.lineTo(gx + 26, y1 + 46); ctx.lineTo(gx, y1 + 80); ctx.closePath(); ctx.fill();
+    ctx.restore();
   }
-
-  /* 全勝したときの紙吹雪 */
-  function drawConfetti() {
-    confetti.forEach(function (c) {
-      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.r);
-      ctx.scale(1, Math.cos(c.flip)); ctx.fillStyle = c.col; ctx.fillRect(-6, -3.5, 12, 7);
-      ctx.restore();
-    });
+  function scoreText() {
+    return (clearT || 0).toFixed(2) + zT("秒", "s", "초", "秒", "秒");
   }
-
-  /* 結果画面（doji5 の形）。負けたときだけ。たどり着いたレベルだけを出す */
-  function resultButtons() { return window.zResultActions.row(W, H * 0.6); }
-  function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,10,10,.62)"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
     ctx.save();
-    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-    ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10;
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
     ctx.font = "800 108px sans-serif";
-    ctx.fillText("Lv." + before, W / 2, H * 0.48);
+    ctx.textAlign = "center";
+    ctx.fillText(scoreText(), W / 2, H * 0.45);
     ctx.restore();
     window.zResultActions.drawButtons(ctx, resultButtons());
+    window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
   }
 
-
-  /* ============ 覗き穴 ============ */
-  /* サムネ撮影用：{ hud: false } で体力バー・レベル・READY…FIGHT! の文字を隠す */
-  window.__thumbnail = async function (setup) {
-    Object.keys(setup || {}).forEach(function (k) { if (k !== "hud") throw Error("未対応の撮影指定: " + k); });
-    hideHud = !!setup && setup.hud === false;
-  };
+  /* ============ 覗き穴 ============
+     テスト（games/_tools/ の道具）から中を見るためのもの。読むのと進めるだけ。
+     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
+  /* サムネ撮影用：連続プレスの手前で、UIを消して撮る */
+  window.__thumbnail = function () { newRound(); debugKey(4); noUI = true; return new Promise(function (r) { setTimeout(r, 1500); }); };
   window.__probe = {
-    now: function () { return { state: state, level: level, before: before, after: after, outcome: outcome, me: me && { hp: me.hp, L: me.L, C: me.C, head: [me.P.head.x, me.P.head.y], gf: [me.P.gf.x, me.P.gf.y] }, foe: foe && { hp: foe.hp, ko: foe.ko, head: [foe.P.head.x, foe.P.head.y] }, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    hideUI: function () { noUI = true; },
+    now: function () { return { tz: traps && traps.slice(5, 10).map(function (t) { return t.kind + Math.round(t.zc); }).join(","), state: state, phase: phase, z: z, score: score, lastKind: traps && traps[STAGE - 1] && traps[STAGE - 1].kind, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); }
   };
 
+  /* ============ 手元用の動画撮影 ============
+     record.js が呼ぶ自動操作。ゲームに合わせて run の中だけ書き換える。 */
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
-      await r.wait(800);
+      await r.wait(1000);
       r.key();
-      if (!await r.until(function () { return state === S.FIGHT; }, 8)) throw Error("始まらない");
-      await r.wait(3000);
+      await r.wait(800);
+      debugKey(1); await r.wait(1500); debugKey(2);
+      if (!await r.until(function () { return phase === "aim" && z > 2; }, 10)) throw Error("やり直しにならない");
+      await r.wait(1500);
     }
   };
 
   /* ============ ループ ============ */
-  var startButton = document.getElementById("start");
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
-  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  newRound();state=S.INTRO;startButton.hidden=false;
   layout();
-  newRound(); state = S.INTRO; startButton.hidden = false;
-  var last = performance.now(), stepAcc = 0;
+  var last = performance.now();
+  var stepAcc = 0;
   function loop(now) {
+    /* 端末の速さや画面のコマ数（60Hz/120Hz）で挙動が変わらないように、描画が遅れても
+       ゲームの時間は実際の時間どおり進め、update はいつもちょうど 1/60 秒ずつ呼ぶ（余りは次へ持ち越す）。
+       タブから戻ってきたときの大きな空白だけは切り捨てる */
     var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
     last = now;
     if (!window.__recordManual) {
@@ -998,11 +651,11 @@
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=kangaroo-1792921954561" : "./recorder-ui.js?v=kangaroo-1792921954561";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=nejimaki-1793013651119" : "./recorder-ui.js?v=nejimaki-1793013651119";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=kangaroo-1792921954561"></script>
-<script src="./preview-header.js?v=kangaroo-1792921954561"></script>
+<script src="./auto-reload.js?v=nejimaki-1793013651119"></script>
+<script src="./preview-header.js?v=nejimaki-1793013651119"></script>
 </body>
 </html>

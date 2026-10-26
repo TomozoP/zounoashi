@@ -1,366 +1,384 @@
-/* 倒してもいいですかゲームの3Dの絵（three.js）。土台は games/three-base.js の Z3。
-   人の作りはアツアツ一輪車と同じ（玉の頭、棒の手足、玉の胴）。鼻はなし。
-   単位はメートル。進む向き（座席の前）が +x、手前（カメラ側）が +z。
-   当たり判定に使う形（背もたれの箱・後ろの人の頭）もここで決めて、ゲーム側から使う。
-   カメラは真横から遠近なし（正射影）で写すので、画面で見える形と当たりの形がそのまま一致する。 */
+/* 立体の場面（three.js）。どこまでも続く机の道と、トラップと、ミニカー。
+   長さの単位は 1 = 100mm。車は -z の向きへ走る。道の上面が y=0、幅は 2.6。
+   トラップの動き（pose）と当たりはゲーム側（index.html）で決め、ここは見た目だけ。 */
 (function (global) {
   "use strict";
   var T, Z3 = global.Z3;
+  var ROAD = 2.6, THICK = 0.3;
 
-  var PITCH = 0.78;                             /* 座席の間隔 */
-  var SEAT_Y = 0.45;                            /* 座面の高さ */
-  var BACK = { u0: -0.12, u1: 0.02, v0: 0, v1: 0.95 };  /* 背もたれ（軸から見た箱。u は前が＋、v は上） */
-  var HEAD_R = 0.14;
-  /* キャップ（頭の中心から見た形。頭と一緒に nd だけ回る）。てっぺんの丸みと前に出たつば */
-  var CAP = { dome: { x: -0.005, y: 0.045, rx: 0.15, ry: 0.11 }, brim: { x0: 0.09, x1: 0.24, y: 0.04, t: 0.016 } };
-  /* 後ろの人の頭の外形の点（頭の中心から、回す前）。当たりはこの点と背もたれの箱の距離で見る（キャップは自分だけ） */
-  var OUTLINE = (function () {
-    var pts = [], n = 360;
-    for (var i = 0; i < n; i++) { var a = i / n * Math.PI * 2; pts.push([Math.cos(a) * HEAD_R, Math.sin(a) * HEAD_R]); }
-    return pts;
-  })();
+  /* 配色の候補。確認用に URL の ?pal=1 などで切り替える */
+  var PALS = [
+    /* 実物寄り：部屋の机の上。背景はぼかした部屋、金属は映り込みあり */
+    { real: true, bg: 0xcdbca6, road: 0xffffff, side: 0x6e4526, frame: 0xe0b021, red: 0xb3261e, orange: 0xd9631e, steel: 0x8a9099, dark: 0x30343a, box: 0x9aa1a9, light: 0.9 },
+    { bg: 0x9fc4dc, road: 0xffffff, side: 0x7a4c2a, frame: 0xf2c230, red: 0xc8322a, orange: 0xe8792a, steel: 0x47505c, dark: 0x2a2e35, box: 0x8a949f },
+    /* 1 ポップ：濃い空色に、原色の黄・赤・青 */
+    { bg: 0x46c8ff, road: 0xffe2c0, side: 0x9a5a2a, frame: 0xffd400, red: 0xff2d55, orange: 0xff8a00, steel: 0x3b5bdb, dark: 0x1f2a5c, box: 0x4dabf7, light: 1.15 },
+    /* 2 おもちゃ：ピンクの背景、ミントの道、パステル */
+    { bg: 0xffcfe6, road: 0x9be8d0, plain: true, side: 0x4fbf9f, frame: 0xffe066, red: 0xff6b8a, orange: 0xffa94d, steel: 0x8e7cf0, dark: 0x4b3f8a, box: 0xb197fc, light: 1.15 },
+    /* 3 レース場：オレンジのプラ道（おもちゃのコース）に青と黄緑 */
+    { bg: 0xbfe9ff, road: 0xff7a1a, plain: true, side: 0xd25a00, frame: 0x1e88ff, red: 0xff3040, orange: 0x7ed321, steel: 0x2f3640, dark: 0x1b1f24, box: 0x74c0fc, light: 1.1 },
+    /* 4 夕焼け：橙の空、木の道、青緑・紫・桃 */
+    { bg: 0xffa36c, road: 0xffd2a8, side: 0x7a4428, frame: 0x2ec4b6, red: 0x9b5de5, orange: 0xf15bb5, steel: 0x3a3a6a, dark: 0x24243e, box: 0x5fd3c8 }
+  ];
+  var PAL = PALS[+((/[?&]pal=(\d)/.exec(global.location.search) || [])[1] || 0)] || PALS[0];
 
-  /* 背もたれの軸（自分の座席は x=0 に置く） */
-  function pivot(seatX) { return { x: seatX - 0.04, y: SEAT_Y }; }
-
-  /* 後ろの人の頭と鼻の先。lean は前かがみの角度（ラジアン） */
-  function backHead(lean) {
-    var hip = { x: -PITCH + 0.12, y: SEAT_Y + 0.08 };
-    var sh = { x: hip.x + Math.sin(lean) * 0.46, y: hip.y + Math.cos(lean) * 0.46 };
-    var a2 = lean + 0.08;
-    var head = { x: sh.x + Math.sin(a2) * 0.24, y: sh.y + Math.cos(a2) * 0.24 };
-    var nd = 0.14;                              /* 背もたれに頭をあずけて少し上向き */
-    return { hip: hip, sh: sh, head: head, nd: nd };
-  }
-
-  /* 点から背もたれの箱までの距離。a は倒した角度（ラジアン、後ろへ） */
-  function distToBack(a, p) {
-    var pv = pivot(0), dx = p.x - pv.x, dy = p.y - pv.y;
-    var c = Math.cos(a), s = Math.sin(a);
-    /* 箱は軸のまわりに a だけ後ろ（-x）へ倒れている。点を箱の向きに戻す */
-    var u = dx * c + dy * s, v = -dx * s + dy * c;
-    var cu = Math.max(BACK.u0, Math.min(BACK.u1, u)), cv = Math.max(BACK.v0, Math.min(BACK.v1, v));
-    var du = u - cu, dv = v - cv;
-    return { d: Math.sqrt(du * du + dv * dv), near: { x: pv.x + cu * c - cv * s, y: pv.y + cu * s + cv * c } };
-  }
-  /* すき間（メートル）。頭の外形のいちばん近い点まで */
-  function gapAt(a, lean) {
-    var b = backHead(lean), c = Math.cos(b.nd), s = Math.sin(b.nd), best = null;
-    for (var i = 0; i < OUTLINE.length; i++) {
-      var o = OUTLINE[i], p = { x: b.head.x + o[0] * c - o[1] * s, y: b.head.y + o[0] * s + o[1] * c };
-      var h = distToBack(a, p);
-      if (!best || h.d < best.gap) best = { gap: h.d, at: p, near: h.near, r: 0 };
+  /* 部屋（壁・窓・本棚・観葉植物・ぼけた灯り）を、小さな絵に描く */
+  function paintRoom(g, w, h) {
+    var gr = g.createLinearGradient(0, 0, 0, h);
+    gr.addColorStop(0, "#e9dcc8"); gr.addColorStop(0.62, "#d2bfa5"); gr.addColorStop(0.66, "#8a6a4c"); gr.addColorStop(1, "#5e4632");
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    g.fillStyle = "#fffaf0"; g.fillRect(w * 0.6, h * 0.08, w * 0.24, h * 0.42);            /* 窓 */
+    g.fillStyle = "rgba(170,205,235,.8)"; g.fillRect(w * 0.62, h * 0.11, w * 0.2, h * 0.36);
+    g.fillStyle = "#6b4a30"; g.fillRect(w * 0.06, h * 0.18, w * 0.34, h * 0.42);           /* 本棚 */
+    var cols = ["#c0392b", "#2e86c1", "#f1c40f", "#27ae60", "#8e44ad", "#e67e22", "#ecf0f1"], r = Z3.rng(5);
+    for (var row = 0; row < 3; row++) for (var x = w * 0.08; x < w * 0.38; x += 2 + r() * 2) {
+      g.fillStyle = cols[Math.floor(r() * cols.length)];
+      var bh = h * (0.08 + r() * 0.04); g.fillRect(x, h * (0.3 + row * 0.13) - bh, 1.6, bh);
     }
-    return best;
+    g.fillStyle = "#3f7d3a";                                                                    /* 観葉植物 */
+    for (var i = 0; i < 9; i++) { g.beginPath(); g.arc(w * (0.47 + Math.sin(i) * 0.04), h * (0.32 + Math.cos(i * 1.7) * 0.08), 3 + r() * 2, 0, 7); g.fill(); }
+    g.fillStyle = "#a0522d"; g.fillRect(w * 0.44, h * 0.42, w * 0.06, h * 0.2);
+    for (i = 0; i < 6; i++) {                                                                   /* ぼけた灯り */
+      g.fillStyle = "rgba(255,236,190," + (0.25 + r() * 0.3) + ")";
+      g.beginPath(); g.arc(r() * w, r() * h * 0.6, 2 + r() * 3, 0, 7); g.fill();
+    }
+    /* 箱ぼかしを数回かけて、ピントの外れた背景にする */
+    var im = g.getImageData(0, 0, w, h), d = im.data, t = new Float32Array(d.length);
+    for (var pass = 0; pass < 3; pass++) for (var dir = 0; dir < 2; dir++) {
+      for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) for (var c = 0; c < 3; c++) {
+        var sum = 0, n = 0;
+        for (var k = -2; k <= 2; k++) {
+          var xx = dir ? x : Math.min(w - 1, Math.max(0, x + k)), yy = dir ? Math.min(h - 1, Math.max(0, y + k)) : y;
+          sum += d[(yy * w + xx) * 4 + c]; n++;
+        }
+        t[(y * w + x) * 4 + c] = sum / n;
+      }
+      for (var j = 0; j < d.length; j++) if (j % 4 !== 3) d[j] = t[j];
+    }
+    g.putImageData(im, 0, 0);
   }
 
-  function Scene3D() {
+  function GameScene() {
     T = global.THREE;
-    var self = this;
-    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.45 }, finish: { vignette: 0.06, grain: 0 } });
-    var sc = this.scene = st.scene;
-    this.camera = st.camera = new T.OrthographicCamera(-1, 1, 1, -1, 0.1, 40);
-    sc.background = new T.Color("#ebe7dc");
-    var L = Z3.lights(sc, { shadows: true, shadowSize: 2.5, scale: 1.25 });   /* くすまないよう、はっきりめ */
-    L.key.position.set(2, 5, 4);
-    this.geo = { ball: new T.SphereGeometry(1, 18, 12), tube: new T.CylinderGeometry(1, 1, 1, 12), box: new T.BoxGeometry(1, 1, 1) };
-    this.mats = {};
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces" }, camera: { fov: 54, near: 0.1, far: 80 }, finish: { vignette: 0.28, grain: 0.02 } });
+    this.scene = st.scene;
+    this.camera = st.camera;
+    this.scene.background = new T.Color(PAL.bg);     /* 暗い金属や黄・橙・赤のトラップが溶けない明るさ */
+    this.scene.fog = new T.Fog(PAL.bg, 24, 50);
+    if (PAL.real) {
+      /* ぼかした部屋の絵。小さく描いて引き伸ばすと、ぼけて見える */
+      var room = Z3.canvasTex(96, 48, paintRoom);
+      room.minFilter = room.magFilter = T.LinearFilter; room.generateMipmaps = false;
+      this.scene.background = room;
+      /* 同じ絵を周りの景色として映り込みに使う（金属が金属らしく見える） */
+      try {
+        var env = Z3.canvasTex(96, 48, paintRoom);
+        env.mapping = T.EquirectangularReflectionMapping;
+        var pm = new T.PMREMGenerator(this.stage.renderer);
+        this.scene.environment = pm.fromEquirectangular(env).texture;
+        pm.dispose();
+      } catch (e) {}
+      this.scene.fog = new T.Fog(0xc9b49a, 26, 55);
+    }
+    var L = this.lights = Z3.lights(this.scene, { shadows: true, shadowSize: 7, scale: PAL.light || 1 });
+    this.scene.add(L.key.target);
 
-    /* 床と壁 */
-    var floor = this.part(sc, "box", "#8d887b", -0.4, -1, 1.5, 7, 2, 4.6);
-    floor.castShadow = false; floor.receiveShadow = true;
-    var wallC = "#ebe7dc";
-    this.part(sc, "box", wallC, -0.4, 0.38, -0.75, 7, 0.76, 0.04).receiveShadow = true;
-    this.part(sc, "box", wallC, -0.4, 2.0, -0.75, 7, 1.2, 0.04).receiveShadow = true;
-    this.part(sc, "box", "#c9c4b6", -0.4, 0.77, -0.72, 7, 0.04, 0.08);
-    this.part(sc, "box", "#c9c4b6", -0.4, 1.4, -0.72, 7, 0.04, 0.06);
-    [-2.5, -1.45, -0.4, 0.65, 1.7].forEach(function (x) { self.part(sc, "box", wallC, x, 1.08, -0.75, 0.12, 0.66, 0.05); });
-    /* 窓の外の景色（流れる） */
-    this.sceneryTex = Z3.canvasTex(1024, 256, function (g, w, h) {
-      var sky = g.createLinearGradient(0, 0, 0, h);
-      sky.addColorStop(0, "#7fb9ea"); sky.addColorStop(1, "#d6ecfa");
-      g.fillStyle = sky; g.fillRect(0, 0, w, h);
-      g.fillStyle = "#6c86a8"; g.beginPath(); g.moveTo(260, h); g.lineTo(440, 70); g.lineTo(520, 70); g.lineTo(700, h); g.fill();
-      g.fillStyle = "#fff"; g.beginPath(); g.moveTo(410, 108); g.lineTo(440, 70); g.lineTo(520, 70); g.lineTo(550, 108); g.lineTo(505, 98); g.lineTo(480, 112); g.lineTo(455, 98); g.fill();
-      g.fillStyle = "#6b8f4e";
-      for (var i = 0; i < 14; i++) { g.beginPath(); g.ellipse(i * 80 + 20, h - 26, 60, 40, 0, 0, Math.PI * 2); g.fill(); }
+    /* 机の木目 */
+    var wood = Z3.canvasTex(256, 512, function (g, w, h) {
+      g.fillStyle = "#b07a48"; g.fillRect(0, 0, w, h);
+      var r = Z3.rng(3);
+      for (var i = 0; i < 50; i++) {
+        var x = r() * w;
+        g.strokeStyle = "rgba(" + (r() < 0.5 ? "80,45,20," : "210,160,110,") + (0.08 + r() * 0.12) + ")";
+        g.lineWidth = 1 + r() * 4;
+        g.beginPath(); g.moveTo(x, 0);
+        for (var y = 0; y <= h; y += 64) g.lineTo(x + Math.sin(y * 0.01 + i) * 6, y);
+        g.stroke();
+      }
     });
-    this.sceneryTex.wrapS = T.RepeatWrapping;
-    var view = new T.Mesh(new T.PlaneGeometry(7, 0.62), new T.MeshBasicMaterial({ map: this.sceneryTex }));
-    view.position.set(-0.4, 1.09, -0.8); sc.add(view);
-    /* 荷物棚 */
-    this.part(sc, "box", "#b9b4a6", -0.4, 1.9, -0.5, 7, 0.03, 0.4);
+    var side = Z3.std(PAL.side);
+    var top = PAL.plain ? Z3.std(PAL.road, { roughness: 0.35 }) : Z3.std(PAL.road, { map: wood, roughness: 0.55 });
+    this.roadMat = [side, side, top, side, side, side];
+    /* 注意の縞（黄と黒） */
+    var stripe = Z3.canvasTex(128, 128, function (g, w, h) {
+      g.fillStyle = "#f2c230"; g.fillRect(0, 0, w, h);
+      g.fillStyle = "#1b1b1b";
+      for (var i = -2; i < 4; i++) { g.beginPath(); g.moveTo(i * 48, 0); g.lineTo(i * 48 + 24, 0); g.lineTo(i * 48 + 24 + h, h); g.lineTo(i * 48 + h, h); g.fill(); }
+    });
+    this.M = {
+      steel: Z3.std(PAL.steel, { roughness: 0.4, metalness: 0.4 }),
+      dark: Z3.std(PAL.dark, { roughness: 0.5, metalness: 0.3 }),
+      yellow: Z3.std(PAL.frame, { roughness: 0.45 }),
+      red: Z3.std(PAL.red, { roughness: 0.4, metalness: 0.2 }),
+      orange: Z3.std(PAL.orange, { roughness: 0.45 }),
+      chrome: Z3.std(0xd0d4da, { roughness: 0.2, metalness: 0.9 }),
+      box: Z3.std(PAL.box, { roughness: 0.5, metalness: 0.3 }),
+      wood2: Z3.std(PAL.side),
+      stripe: Z3.std(0xffffff, { map: stripe, roughness: 0.5 })
+    };
 
-    /* 座席2つ（自分・後ろ） */
-    this.myBack = this.seat(0);
-    this.backBack = this.seat(-PITCH);
-    this.backBack.rotation.z = 0.03;   /* 後ろの人の座席はほぼ直角 */
-
-    /* 人 */
-    this.me = this.person({ coat: "#3a6fb8", pants: "#2e3442", skin: "#f1c7a1", cap: "#d8412f", hand: "#f1c7a1" });
-    this.him = this.person({ coat: "#5d7a4a", pants: "#3a3530", skin: "#eab993", hair: "#2a2420", hand: "#eab993" });
-    /* スマホ */
-    this.phone = this.part(sc, "box", "#1d1f24", 0, 0, 0, 0.075, 0.008, 0.14);
-    this.phoneScreen = this.part(sc, "box", "#9fd8ff", 0, 0, 0, 0.06, 0.002, 0.12, { emissive: "#6fb8ef", emissiveIntensity: 0.6 });
-
-    this.t = 0;
+    this.add(roadBox(this, 7, 0));                     /* スタートの台 */
+    this.built = [];                                   /* 作ったトラップ（トラップの物ごと覚える） */
+    this.car = makeCar();
+    this.scene.add(this.car.group);
   }
 
-  Scene3D.prototype.mat = function (color, opt) {
-    var key = color + JSON.stringify(opt || {});
-    if (!this.mats[key]) {
-      var o = { color: color, roughness: 0.85 };
-      for (var k in opt) o[k] = opt[k];
-      this.mats[key] = new T.MeshStandardMaterial(o);
-    }
-    return this.mats[key];
-  };
-  Scene3D.prototype.part = function (parent, kind, color, x, y, z, sx, sy, sz, opt) {
-    var m = new T.Mesh(this.geo[kind], typeof color === "string" ? this.mat(color, opt) : color);
-    m.position.set(x, y, z); m.scale.set(sx, sy, sz);
-    m.castShadow = true; m.receiveShadow = true;
-    parent.add(m);
+  GameScene.prototype.add = function (o) { this.scene.add(o); return o; };
+
+  /* z0 から z1（z0 > z1）までの道の板 */
+  function roadBox(self, z0, z1) {
+    var m = new T.Mesh(new T.BoxGeometry(ROAD, THICK, z0 - z1), self.roadMat);
+    m.position.set(0, -THICK / 2, (z0 + z1) / 2);
+    m.receiveShadow = true;
     return m;
-  };
-  /* 太さのある棒を a から b へ渡す（a, b は {x, y, z}） */
-  Scene3D.prototype.segment = function (mesh, a, b) {
-    var from = new T.Vector3(a.x, a.y, a.z || 0), to = new T.Vector3(b.x, b.y, b.z || 0);
-    var d = to.clone().sub(from), len = d.length();
-    mesh.position.copy(from).addScaledVector(d, 0.5);
-    mesh.scale.y = Math.max(0.001, len);
-    mesh.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), d.normalize());
-  };
-
-  /* 座席。背もたれのまとまりを返す（軸で回す） */
-  Scene3D.prototype.seat = function (x) {
-    var sc = this.scene, blue = "#2f4f86", self = this;
-    this.part(sc, "box", blue, x + 0.22, SEAT_Y - 0.06, 0, 0.5, 0.12, 0.48);
-    this.part(sc, "box", "#6f747c", x + 0.22, 0.18, 0, 0.36, 0.3, 0.06);
-    [-0.25, 0.25].forEach(function (z) {
-      self.part(sc, "box", "#4a4f57", x + 0.2, SEAT_Y + 0.2, z, 0.42, 0.05, 0.06);
-      self.part(sc, "box", "#4a4f57", x + 0.0, SEAT_Y + 0.08, z, 0.05, 0.2, 0.05);
+  }
+  function mesh(geo, mat, x, y, z, parent) {
+    var m = new T.Mesh(geo, mat);
+    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
+    parent.add(m); return m;
+  }
+  /* 門の形の枠（左右の柱と上の梁） */
+  function frame(self, parent, h) {
+    var g = parent.tall = new T.Group();
+    parent.add(g);
+    var M = self.M;
+    /* 手前（カメラ側）の柱は置かない。横から見たときにトラップを隠すため、奥の柱からの片持ちにする */
+    mesh(new T.BoxGeometry(0.5, 0.06, 0.5), M.dark, -1.5, 0.03, 0, g);          /* 足もとの板 */
+    mesh(new T.BoxGeometry(0.22, h + 0.11, 0.22), M.yellow, -1.5, (h + 0.11) / 2, 0, g);
+    mesh(new T.BoxGeometry(2.1, 0.22, 0.3), M.yellow, -0.55, h, 0, g);
+    var brace = mesh(new T.BoxGeometry(0.1, 0.9, 0.1), M.yellow, -1.2, h - 0.33, 0, g);   /* 斜めの支え */
+    brace.rotation.z = -Math.PI / 4;
+    [-1.5, 0.4].forEach(function (x) {                                            /* ボルト */
+      mesh(new T.CylinderGeometry(0.035, 0.035, 0.32, 8), M.dark, x, h, 0, g).rotation.x = Math.PI / 2;
     });
-    var pv = pivot(x), g = new T.Group();
-    g.position.set(pv.x, pv.y, 0);
-    sc.add(g);
-    var u = (BACK.u0 + BACK.u1) / 2;
-    this.part(g, "box", blue, u, (BACK.v0 + BACK.v1) / 2, 0, BACK.u1 - BACK.u0, BACK.v1 - BACK.v0, 0.48);
-    /* 頭の部分の白いカバー */
-    this.part(g, "box", "#f2f2ee", BACK.u1 - 0.03, BACK.v1 - 0.12, 0, 0.07, 0.24, 0.3);   /* 前側だけに出る（裏の当たりの面は変えない） */
-    /* 背中側の板と、たたんだテーブル */
-    this.part(g, "box", "#26447a", BACK.u0 - 0.004, 0.45, 0, 0.01, 0.6, 0.4);
-    this.part(g, "box", "#cfcac0", BACK.u0 - 0.012, 0.42, 0, 0.012, 0.3, 0.36);
-    return g;
-  };
+  }
 
-  /* 人（アツアツ一輪車の作り）。座った姿勢は pose() で毎回置く */
-  Scene3D.prototype.person = function (o) {
-    var sc = this.scene, p = { o: o };
-    p.thigh = this.part(sc, "tube", o.pants, 0, 0, 0, 0.06, 1, 0.06);
-    p.shin = this.part(sc, "tube", o.pants, 0, 0, 0, 0.05, 1, 0.05);
-    p.knee = this.part(sc, "ball", o.pants, 0, 0, 0, 0.06, 0.06, 0.06);
-    p.foot = this.part(sc, "ball", "#3b2a22", 0, 0, 0, 0.09, 0.045, 0.055);
-    p.hips = this.part(sc, "ball", o.pants, 0, 0, 0, 0.14, 0.1, 0.15);
-    p.torso = this.part(sc, "ball", o.coat, 0, 0, 0, 0.16, 0.26, 0.17);
-    p.upper = this.part(sc, "tube", o.coat, 0, 0, 0, 0.045, 1, 0.045);
-    p.fore = this.part(sc, "tube", o.coat, 0, 0, 0, 0.04, 1, 0.04);
-    p.elbow = this.part(sc, "ball", o.coat, 0, 0, 0, 0.045, 0.045, 0.045);
-    p.hand = this.part(sc, "ball", o.hand, 0, 0, 0, 0.045, 0.045, 0.045);
-    p.neck = this.part(sc, "tube", o.skin, 0, 0, 0, 0.05, 1, 0.05);
-    var head = p.head = new T.Group();
-    sc.add(head);
-    p.faceMat = this.mat(o.skin).clone();
-    p.faceMat.emissive = new T.Color("#ff2010"); p.faceMat.emissiveIntensity = 0;
-    var face = new T.Mesh(this.geo.ball, p.faceMat); face.scale.setScalar(HEAD_R); face.castShadow = true; head.add(face);
-    if (o.hair) {                                /* 短い髪：頭の玉にぴったり（当たりの形を変えない） */
-      var hair = new T.Mesh(new T.SphereGeometry(HEAD_R * 1.002, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.42), this.mat(o.hair));
-      hair.rotation.z = 0.5; hair.castShadow = true; head.add(hair);
-    }
-    if (o.cap) {
-      var D = CAP.dome, B = CAP.brim;
-      var dome = new T.Mesh(new T.SphereGeometry(1, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), this.mat(o.cap));
-      dome.scale.set(D.rx, D.ry, 0.15); dome.position.set(D.x, D.y, 0); dome.castShadow = true; head.add(dome);
-      this.part(head, "box", o.cap, (B.x0 + B.x1) / 2, B.y, 0, B.x1 - B.x0, B.t, 0.2);
-      this.part(head, "ball", o.cap, D.x, D.y + D.ry, 0, 0.02, 0.012, 0.02);
-    }
-    return p;
-  };
-  /* 座った姿勢。hip, sh（肩）, head（頭の中心）, nd（鼻の向き）, knee, foot, elbow, hand（いずれも x, y）、z は体の奥行き */
-  Scene3D.prototype.pose = function (p, q) {
-    var z = 0.12;
-    function P(a, dz) { return { x: a.x, y: a.y, z: dz == null ? z : dz }; }
-    this.segment(p.thigh, P(q.hip), P(q.knee));
-    this.segment(p.shin, P(q.knee), P(q.foot));
-    p.knee.position.set(q.knee.x, q.knee.y, z);
-    p.foot.position.set(q.foot.x + 0.06, q.foot.y, z);
-    p.hips.position.set(q.hip.x, q.hip.y, 0);
-    var mid = { x: (q.hip.x + q.sh.x) / 2, y: (q.hip.y + q.sh.y) / 2 };
-    p.torso.position.set(mid.x, mid.y + 0.04, 0);
-    p.torso.rotation.z = -Math.atan2(q.sh.x - q.hip.x, q.sh.y - q.hip.y);
-    this.segment(p.upper, P(q.sh, 0.17), P(q.elbow, 0.18));
-    this.segment(p.fore, P(q.elbow, 0.18), P(q.hand, 0.14));
-    p.elbow.position.set(q.elbow.x, q.elbow.y, 0.18);
-    p.hand.position.set(q.hand.x, q.hand.y, 0.14);
-    p.head.position.set(q.head.x, q.head.y, 0);
-    p.head.rotation.z = q.nd;
-    /* 首：肩の上から頭の下まで */
-    var ux = q.sh.x - q.hip.x, uy = q.sh.y - q.hip.y, ul = Math.sqrt(ux * ux + uy * uy) || 1;
-    this.segment(p.neck, { x: q.sh.x - ux / ul * 0.05, y: q.sh.y - uy / ul * 0.05, z: 0 }, { x: q.head.x, y: q.head.y - 0.05, z: 0 });
-    p.q = q;
-  };
-
-  /* 状態を写す。s: { t, angle（ラジアン）, lean, near（0〜1 近さ）, angry（0〜1）, mag } */
-  Scene3D.prototype.sync = function (s) {
-    var dt = Math.max(0, Math.min(0.1, s.t - this.t)); this.t = s.t;
-    this.sceneryTex.offset.x = (this.sceneryTex.offset.x + dt * 0.35) % 1;
-    var a = s.angle;
-    this.myBack.rotation.z = a;
-
-    /* 自分：背もたれにもたれる */
-    var pv = pivot(0), c = Math.cos(a), sn = Math.sin(a);
-    function onBack(u, v) { return { x: pv.x + u * c - v * sn, y: pv.y + u * sn + v * c }; }
-    var hip = onBack(0.14, 0.1), sh = onBack(0.16, 0.56), head = onBack(0.2, 0.8);
-    var knee = { x: hip.x + 0.42, y: SEAT_Y + 0.08 }, foot = { x: knee.x + 0.05, y: 0.05 };
-    this.pose(this.me, { hip: hip, sh: sh, head: head, nd: a * 0.6, knee: knee, foot: foot,
-      elbow: { x: sh.x + 0.05, y: SEAT_Y + 0.24 }, hand: { x: knee.x - 0.1, y: SEAT_Y + 0.14 } });
-
-    if (s.rag && !this.rag) this.ragStart();
-    if (!s.rag && this.rag) this.ragReset();
-    if (this.rag) {
-      this.rag.world.step(1 / 60, dt, 4);
-      this.rag.parts.forEach(function (o) {
-        o.g.position.set(o.b.position.x, o.b.position.y, o.b.position.z);
-        o.g.quaternion.set(o.b.quaternion.x, o.b.quaternion.y, o.b.quaternion.z, o.b.quaternion.w);
+  /* トラップ1つ分（道の板ごと）。動く部品は g.part に入れる */
+  function buildTrap(self, tr) {
+    var g = new T.Group(), M = self.M;
+    g.position.z = tr.zc;
+    if (tr.kind === "door") {
+      var hole = 0.7;
+      var a = roadBox(self, tr.z0, tr.zc + hole), b = roadBox(self, tr.zc - hole, tr.z1);
+      a.position.z -= tr.zc; b.position.z -= tr.zc; g.add(a); g.add(b);
+      /* 穴のふち（金属の枠）と、蝶番の軸 */
+      [-1, 1].forEach(function (k) {
+        mesh(new T.BoxGeometry(ROAD, 0.03, 0.08), M.dark, 0, 0.005, k * (hole + 0.04), g);
+        mesh(new T.BoxGeometry(0.08, THICK, hole * 2), M.dark, k * (ROAD / 2 - 0.04), -THICK / 2, 0, g);
+        mesh(new T.CylinderGeometry(0.03, 0.03, hole * 2, 8), M.steel, k * (ROAD / 2 - 0.02), -0.02, 0, g).rotation.x = Math.PI / 2;
       });
-      var R = this.rag, na = R.torso.pointToWorldFrame(R.nkA), hp = R.head.position;
-      this.segment(this.him.neck, { x: na.x, y: na.y, z: na.z }, { x: hp.x, y: hp.y, z: hp.z });
-      this.him.faceMat.emissiveIntensity = 0.8;
+      /* 外側に蝶番がある2枚の扉。開くと下へ垂れる */
+      g.part = [];
+      [-1, 1].forEach(function (s) {
+        var hinge = new T.Group();
+        hinge.position.set(s * ROAD / 2, -0.02, 0);
+        mesh(new T.BoxGeometry(ROAD / 2, 0.04, hole * 2), M.stripe, -s * ROAD / 4, 0, 0, hinge);
+        hinge.userData.s = s;
+        g.add(hinge); g.part.push(hinge);
+      });
     } else {
-    /* 後ろの人：ふつうに座ってスマホ。近いと頭がふるえて顔が赤くなる */
-    /* 頭は当たりの形と同じ場所・向きに置く（ずらさない） */
-    var b = backHead(s.lean), back = 0;
-    var bh = { x: b.head.x, y: b.head.y };
-    /* 前の座席が近いので、ひざは低めに手前で止め、手も体に寄せる（倒れてきた背もたれに食い込まない） */
-    var bknee = { x: b.hip.x + 0.36, y: SEAT_Y + 0.07 }, bfoot = { x: bknee.x + 0.02, y: 0.05 };
-    var hand = { x: b.hip.x + 0.22, y: b.hip.y + 0.2 };
-    this.pose(this.him, { hip: b.hip, sh: { x: b.sh.x - back * 0.6, y: b.sh.y }, head: bh, nd: b.nd,
-      knee: bknee, foot: bfoot, elbow: { x: b.sh.x + 0.04, y: b.sh.y - 0.27 }, hand: hand });
-    this.him.faceMat.emissiveIntensity = Math.max(s.angry * 0.8, Math.max(0, s.near - 0.5) * 0.6);
-    this.phone.position.set(hand.x + 0.02, hand.y + 0.03, 0.08);
-    this.phone.rotation.set(0, 0, 0.5);
-    this.phoneScreen.position.set(hand.x + 0.016, hand.y + 0.042, 0.08);
-    this.phoneScreen.rotation.set(0, 0, 0.5);
+      var road = roadBox(self, tr.z0, tr.z1); road.position.z -= tr.zc; g.add(road);
     }
-
-    /* カメラ：真横から遠近なし（見た目と当たりを一致させる）。横1.75mを写し、縦長の画面では上下が広がる */
-    var vw = 1.75, vh = vw * s.H / s.W, cx = -0.4, cy = 0.95;
-    var cam = this.camera;
-    cam.left = -vw / 2; cam.right = vw / 2; cam.top = vh / 2; cam.bottom = -vh / 2;
-    cam.updateProjectionMatrix();
-    cam.position.set(cx, cy, 6);
-    cam.lookAt(cx, cy, 0);
-  };
-
-  /* ============ ぶつかったらラグドール（アツアツ一輪車と同じ作り。cannon.js） ============
-     後ろの人を頭・胴・太もも・すね・上腕・前腕に分けて、関節でつないだ物理の体にする。
-     ぶつかり分け：床・座席1 / 体2（体どうしはぶつけない） */
-  Scene3D.prototype.ragStart = function () {
-    var C = global.CANNON, self = this, p = this.him, q = p.q;
-    if (!C || !q) return;
-    var world = new C.World({ gravity: new C.Vec3(0, -9.8, 0) });
-    world.broadphase = new C.NaiveBroadphase();
-    world.solver.iterations = 15;
-    world.defaultContactMaterial.friction = 0.5;
-    world.defaultContactMaterial.restitution = 0.25;
-    function fixed(shape, x, y, z, rz) {
-      var b = new C.Body({ mass: 0, collisionFilterGroup: 1, collisionFilterMask: -1 });
-      b.addShape(shape); b.position.set(x, y, z);
-      if (rz) b.quaternion.setFromEuler(0, 0, rz);
-      world.addBody(b); return b;
-    }
-    var ground = fixed(new C.Plane(), 0, 0, 0); ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-    var wall = fixed(new C.Plane(), 0, 0, -0.72); wall.quaternion.setFromEuler(0, 0, 0);
-    /* 後ろの人の座面と背もたれ、自分の背もたれ */
-    fixed(new C.Box(new C.Vec3(0.25, 0.06, 0.24)), -PITCH + 0.22, SEAT_Y - 0.06, 0);
-    var bp = pivot(-PITCH), mp = pivot(0), hv = (BACK.v1 - BACK.v0) / 2, hu = (BACK.u1 - BACK.u0) / 2, cu = (BACK.u0 + BACK.u1) / 2;
-    function backBody(pv, a) {
-      var cx = pv.x + cu * Math.cos(a) - hv * Math.sin(a), cy = pv.y + cu * Math.sin(a) + hv * Math.cos(a);
-      fixed(new C.Box(new C.Vec3(hu, hv, 0.24)), cx, cy, 0, a);
-    }
-    backBody(bp, this.backBack.rotation.z);
-    backBody(mp, this.myBack.rotation.z);
-    var moved = [], parts = [];
-    function part(meshes, center, quat, shape, mass, vel, damp) {
-      var g = new T.Group();
-      g.position.copy(center); g.quaternion.copy(quat);
-      self.scene.add(g);
-      meshes.forEach(function (m) {
-        moved.push({ m: m, parent: m.parent, p: m.position.clone(), q: m.quaternion.clone(), s: m.scale.clone() });
-        g.attach(m);
+    if ((tr.k + 1) % 10 === 0) {                       /* ステージのゴール：市松模様の線 */
+      if (!self.goalTex) self.goalTex = Z3.canvasTex(128, 32, function (c, w, h) {
+        for (var i = 0; i < 16; i++) for (var j = 0; j < 4; j++) { c.fillStyle = (i + j) % 2 ? "#111" : "#f4f4f4"; c.fillRect(i * 8, j * 8, 8, 8); }
       });
-      var b = new C.Body({ mass: mass, linearDamping: 0.05, angularDamping: damp || 0.4, collisionFilterGroup: 2, collisionFilterMask: 1 });
-      b.addShape(shape);
-      b.position.set(center.x, center.y, center.z);
-      b.quaternion.set(quat.x, quat.y, quat.z, quat.w);
-      b.velocity.set(vel[0], vel[1], vel[2]);
-      world.addBody(b);
-      parts.push({ g: g, b: b });
-      return b;
+      var goal = new T.Mesh(new T.PlaneGeometry(ROAD, 0.65), Z3.std(0xffffff, { map: self.goalTex }));
+      goal.rotation.x = -Math.PI / 2; goal.position.set(0, 0.006, tr.z1 - tr.zc + 0.33); goal.receiveShadow = true;
+      g.add(goal);
     }
-    function V(a, z) { return new T.Vector3(a.x, a.y, z || 0); }
-    function limb(meshes, a, bpt, r, mass, vel, za, zb) {
-      var A = V(a, za), B = V(bpt, zb), mid = A.clone().add(B).multiplyScalar(0.5);
-      var qt = new T.Quaternion().setFromUnitVectors(new T.Vector3(0, 1, 0), B.clone().sub(A).normalize());
-      return part(meshes, mid, qt, new C.Box(new C.Vec3(r, Math.max(0.02, A.distanceTo(B) / 2), r)), mass, vel);
+    if (tr.kind === "press") {
+      frame(self, g, 2.6);
+      /* 梁の上の油圧シリンダー。押す棒はいつもこの筒の中に収まる */
+      mesh(new T.CylinderGeometry(0.2, 0.2, 1.7, 14), M.red, 0, 2.6 + 0.85 + 0.11, 0, g);
+      mesh(new T.CylinderGeometry(0.24, 0.24, 0.08, 14), M.dark, 0, 2.6 + 1.75, 0, g);
+      var blk = new T.Group();
+      var dep = (tr.half || 0.45) * 2;                   /* 連続プレスは奥行きの薄い小型 */
+      mesh(new T.BoxGeometry(1.9, 0.8, dep), M.steel, 0, 0.5, 0, blk);
+      mesh(new T.BoxGeometry(2.0, 0.1, dep + 0.1), M.dark, 0, 0.95, 0, blk);   /* 上のふち */
+      mesh(new T.BoxGeometry(1.94, 0.12, dep + 0.04), M.stripe, 0, 0.06, 0, blk); /* 下の縞（押す面） */
+      mesh(new T.CylinderGeometry(0.1, 0.1, 1.9, 12), M.chrome, 0, 1.95, 0, blk);
+      g.add(blk); g.part = blk;
+    } else if (tr.kind === "hammer") {
+      frame(self, g, 2.95);
+      [-1, 1].forEach(function (k) { mesh(new T.BoxGeometry(0.2, 0.3, 0.04), M.dark, 0, 2.72, k * 0.17, g); });   /* 軸受けの板 */
+      var piv = new T.Group();
+      piv.position.set(0, 2.72, 0);
+      mesh(new T.CylinderGeometry(0.08, 0.08, 0.42, 12), M.chrome, 0, 0, 0, piv).rotation.x = Math.PI / 2;   /* 軸 */
+      mesh(new T.CylinderGeometry(0.045, 0.045, 2.2, 8), M.steel, 0, -1.1, 0, piv);                       /* 柄 */
+      /* 槌の頭：振れる向き（左右）に軸をもつ太い円柱と、両端の金具 */
+      var head = mesh(new T.CylinderGeometry(0.26, 0.26, 0.7, 18), M.red, 0, -2.35, 0, piv);
+      head.rotation.z = Math.PI / 2;
+      [-1, 1].forEach(function (k) {
+        mesh(new T.CylinderGeometry(0.28, 0.28, 0.06, 18), M.dark, k * 0.36, -2.35, 0, piv).rotation.z = Math.PI / 2;
+      });
+      mesh(new T.CylinderGeometry(0.07, 0.07, 0.1, 10), M.dark, 0, -2.06, 0, piv);
+      g.add(piv); g.part = piv;
+    } else if (tr.kind === "spinner") {
+      mesh(new T.CylinderGeometry(0.3, 0.32, 0.06, 18), M.dark, -1.45, 0.03, 0, g);     /* 台座 */
+      mesh(new T.CylinderGeometry(0.15, 0.18, 0.42, 16), M.yellow, -1.45, 0.24, 0, g);  /* 回る軸の箱 */
+      var arm = new T.Group();
+      arm.position.set(-1.45, 0.2, 0);
+      mesh(new T.CylinderGeometry(0.17, 0.17, 0.12, 16), M.dark, 0, 0.0, 0, arm);        /* 軸の頭 */
+      mesh(new T.BoxGeometry(2.7, 0.12, 0.13), M.stripe, 1.45, 0, 0, arm);              /* 縞の腕 */
+      mesh(new T.CylinderGeometry(0.09, 0.09, 0.16, 12), M.dark, 2.8, 0, 0, arm);        /* 先のゴム */
+      g.add(arm); g.part = arm;
+    } else if (tr.kind === "pusher") {
+      g.part = [];
+      [-1, 1].forEach(function (s) {
+        /* 横向きの油圧プレス：道の外の台に寝かせたシリンダーから、棒が押し板を押し出す */
+        mesh(new T.BoxGeometry(1.6, THICK, 1.1), M.wood2, s * 2.1, -THICK / 2, 0, g);           /* 台 */
+        mesh(new T.BoxGeometry(1.2, 0.12, 0.5), M.dark, s * 2.12, 0.06, 0, g);                   /* 取り付け台 */
+        [1.72, 2.55].forEach(function (x) { mesh(new T.BoxGeometry(0.08, 0.3, 0.46), M.dark, s * x, 0.2, 0, g); });
+        var cyl = mesh(new T.CylinderGeometry(0.19, 0.19, 1.25, 16), M.red, s * 2.125, 0.3, 0, g);  /* シリンダー */
+        cyl.rotation.z = Math.PI / 2;
+        var cap = mesh(new T.CylinderGeometry(0.22, 0.22, 0.06, 16), M.dark, s * 1.5, 0.3, 0, g);
+        cap.rotation.z = Math.PI / 2;
+        var wall = new T.Group();                       /* 原点は押し板の内側の面 */
+        mesh(new T.BoxGeometry(0.26, 0.5, 0.8), M.orange, s * 0.13, 0.27, 0, wall);              /* 押し板 */
+        mesh(new T.BoxGeometry(0.03, 0.5, 0.82), M.stripe, s * 0.0, 0.27, 0, wall);              /* 押す面の縞 */
+        mesh(new T.BoxGeometry(0.3, 0.06, 0.84), M.dark, s * 0.13, 0.53, 0, wall);               /* 上のふち */
+        var rod = mesh(new T.CylinderGeometry(0.07, 0.07, 1.2, 12), M.chrome, s * (0.26 + 0.6), 0.3, 0, wall);   /* 閉じても開いてもシリンダーの中に残る長さ */
+        rod.rotation.z = Math.PI / 2;
+        wall.userData.s = s;
+        g.add(wall); g.part.push(wall);
+      });
     }
-    function joint(b1, b2, pt, z) {
-      var c = new C.Vec3(pt.x, pt.y, z || 0);
-      world.addConstraint(new C.PointToPointConstraint(b1, b1.pointToLocalFrame(c), b2, b2.pointToLocalFrame(c)));
+    return g;
+  }
+  function poseTrap(g, tr) {
+    if (!g.part) return;                               /* ゴールの先の道など、動く部品がないもの */
+    var p = tr.pose;
+    if (tr.kind === "press") g.part.position.y = 0.02 + p * 1.5;
+    else if (tr.kind === "hammer") g.part.rotation.z = p;
+    else if (tr.kind === "spinner") g.part.rotation.y = -p;
+    else if (tr.kind === "pusher") g.part.forEach(function (w) { w.position.x = w.userData.s * (1.15 - p * 1.0); });
+    else g.part.forEach(function (h) { h.rotation.z = -h.userData.s * p * 1.45; });
+  }
+
+  /* ミニカー。原点は重心の真下（道の上面）。長さ0.8 = 80mm */
+  function makeCar() {
+    var g = new T.Group(), body = new T.Group();
+    g.add(body);
+    var red = Z3.std(0xd8262c, { roughness: 0.3, metalness: 0.2 });
+    var dark = Z3.std(0x1d2633, { roughness: 0.15, metalness: 0.4 });
+    var chrome = Z3.std(0xd0d4da, { roughness: 0.25, metalness: 0.9 });
+    function box(w, h, l, m, x, y, z) {
+      var b = new T.Mesh(new T.BoxGeometry(w, h, l), m);
+      b.position.set(x, y, z); b.castShadow = true; body.add(b); return b;
     }
-    /* はね飛ばされる勢い：頭は後ろ上へ、体は通路（手前）へ */
-    var push = [-1.6, 1.2, 1.6];
-    var mid = { x: (q.hip.x + q.sh.x) / 2, y: (q.hip.y + q.sh.y) / 2 };
-    var tq = new T.Quaternion().setFromEuler(new T.Euler(0, 0, p.torso.rotation.z));
-    var torso = part([p.hips, p.torso], V(mid), tq, new C.Box(new C.Vec3(0.15, 0.27, 0.15)), 30, [push[0] * 0.5, push[1] * 0.6, push[2]]);
-    var hq = new T.Quaternion().setFromEuler(new T.Euler(0, 0, q.nd));
-    var head = part([p.head], V(q.head), hq, new C.Sphere(HEAD_R), 6, [push[0] * 0.6, push[1] * 0.6, push[2] * 0.6], 0.85);
-    /* 首は円すいの範囲(約25°)でしか曲がらない関節にして、頭が暴れすぎないようにする */
-    var nk = new C.Vec3(q.head.x * 0.4 + q.sh.x * 0.6, q.head.y * 0.4 + q.sh.y * 0.6, 0);
-    var ax = new C.Vec3(q.head.x - q.sh.x, q.head.y - q.sh.y, 0); ax.normalize();
-    world.addConstraint(new C.ConeTwistConstraint(torso, head, {
-      pivotA: torso.pointToLocalFrame(nk), pivotB: head.pointToLocalFrame(nk),
-      axisA: torso.vectorToLocalFrame(ax), axisB: head.vectorToLocalFrame(ax),
-      angle: 0.45, twistAngle: 0.2
-    }));
-    var th = limb([p.thigh, p.knee], q.hip, q.knee, 0.055, 7, [0, 0.4, push[2] * 0.7], 0.12, 0.12);
-    var sh = limb([p.shin, p.foot], q.knee, q.foot, 0.045, 4, [0.3, 0.2, push[2] * 0.5], 0.12, 0.12);
-    joint(torso, th, q.hip, 0.12); joint(th, sh, q.knee, 0.12);
-    var up = limb([p.upper, p.elbow], q.sh, q.elbow, 0.045, 2.5, [push[0] * 0.4, push[1], push[2]], 0.17, 0.18);
-    var fo = limb([p.fore, p.hand, this.phone, this.phoneScreen], q.elbow, q.hand, 0.04, 2, [0.5, 2, push[2]], 0.18, 0.14);
-    joint(torso, up, q.sh, 0.17); joint(up, fo, q.elbow, 0.18);
-    /* 首：胴の肩の点と頭の中心を毎フレーム棒でつなぐ（頭が取れて見えないように） */
-    var nkA = torso.pointToLocalFrame(new C.Vec3(q.sh.x, q.sh.y, 0));
-    this.rag = { world: world, parts: parts, moved: moved, torso: torso, head: head, nkA: nkA };
-  };
-  Scene3D.prototype.ragReset = function () {
-    var self = this;
-    if (!this.rag) return;
-    this.rag.moved.forEach(function (o) {
-      o.parent.add(o.m);
-      o.m.position.copy(o.p); o.m.quaternion.copy(o.q); o.m.scale.copy(o.s);
+    var white = Z3.std(0xf6f3ea, { roughness: 0.35 });
+    var black = Z3.std(0x16181c, { roughness: 0.6 });
+    /* 上がすぼまった箱（キャビン・ボンネットの丸み代わり） */
+    function taper(w, h, l, m, x, y, z, kx, kz, dz) {
+      var geo = new T.BoxGeometry(w, h, l), a = geo.attributes.position;
+      for (var i = 0; i < a.count; i++) if (a.getY(i) > 0) { a.setX(i, a.getX(i) * kx); a.setZ(i, a.getZ(i) * kz + (dz || 0)); }
+      geo.computeVertexNormals();
+      var b = new T.Mesh(geo, m); b.position.set(x, y, z); b.castShadow = true; body.add(b); return b;
+    }
+    taper(0.4, 0.1, 0.8, red, 0, 0.12, 0, 0.96, 0.97);          /* 車体の下半分 */
+    taper(0.38, 0.05, 0.78, red, 0, 0.195, 0, 0.92, 0.94);      /* 肩の丸み */
+    taper(0.34, 0.11, 0.4, dark, 0, 0.275, 0.05, 0.8, 0.62, 0.02); /* 窓（前後に傾いたガラス） */
+    taper(0.27, 0.025, 0.25, red, 0, 0.342, 0.06, 0.95, 0.9);   /* 屋根 */
+    /* 白いストライプ（ボンネット・屋根・トランク） */
+    box(0.07, 0.006, 0.2, white, -0.045, 0.221, -0.27); box(0.07, 0.006, 0.2, white, 0.045, 0.221, -0.27);
+    box(0.05, 0.006, 0.22, white, -0.035, 0.356, 0.06); box(0.05, 0.006, 0.22, white, 0.035, 0.356, 0.06);
+    box(0.07, 0.006, 0.12, white, -0.045, 0.221, 0.33); box(0.07, 0.006, 0.12, white, 0.045, 0.221, 0.33);
+    /* 横のゼッケン */
+    [-1, 1].forEach(function (k) {
+      var disc = new T.Mesh(new T.CylinderGeometry(0.055, 0.055, 0.006, 16), white);
+      disc.rotation.z = Math.PI / 2; disc.position.set(k * 0.2, 0.15, -0.02); body.add(disc);
+      box(0.006, 0.05, 0.012, black, k * 0.204, 0.15, -0.02);
+      box(0.03, 0.015, 0.03, red, k * 0.18, 0.25, -0.15);       /* ドアミラー */
     });
-    this.rag.parts.forEach(function (o) { self.scene.remove(o.g); });
-    this.rag = null;
+    /* 前：グリル・ライト・バンパー */
+    box(0.2, 0.05, 0.01, black, 0, 0.14, -0.4);
+    var lamp = Z3.std(0xfff3c0, { emissive: 0x8a7d40 });
+    var tail = Z3.std(0xff3a2a, { emissive: 0x801010 });
+    [-1, 1].forEach(function (k) {
+      var hl = new T.Mesh(new T.CylinderGeometry(0.03, 0.03, 0.015, 12), lamp);
+      hl.rotation.x = Math.PI / 2; hl.position.set(k * 0.14, 0.15, -0.402); body.add(hl);
+      box(0.08, 0.035, 0.01, tail, k * 0.13, 0.16, 0.4);
+    });
+    box(0.42, 0.04, 0.04, chrome, 0, 0.09, -0.41);     /* バンパー */
+    box(0.42, 0.04, 0.04, chrome, 0, 0.09, 0.41);
+    var pipe = new T.Mesh(new T.CylinderGeometry(0.015, 0.015, 0.06, 8), chrome);   /* マフラー */
+    pipe.rotation.x = Math.PI / 2; pipe.position.set(-0.12, 0.07, 0.42); body.add(pipe);
+    /* タイヤの上の黒いふち */
+    [[-0.2, -0.27], [0.2, -0.27], [-0.2, 0.27], [0.2, 0.27]].forEach(function (p) {
+      box(0.03, 0.03, 0.2, black, p[0] > 0 ? 0.205 : -0.205, 0.19, p[1]);
+    });
+    var tire = Z3.std(0x18181a, { roughness: 0.9 }), hub = Z3.std(0xbfc3c8, { roughness: 0.3, metalness: 0.8 });
+    var wheels = [];
+    [[-0.2, -0.27], [0.2, -0.27], [-0.2, 0.27], [0.2, 0.27]].forEach(function (p) {
+      var w = new T.Group();
+      var t = new T.Mesh(new T.CylinderGeometry(0.09, 0.09, 0.07, 16), tire);
+      t.rotation.z = Math.PI / 2; t.castShadow = true; w.add(t);
+      var h = new T.Mesh(new T.CylinderGeometry(0.045, 0.045, 0.075, 8), hub);
+      h.rotation.z = Math.PI / 2; w.add(h);
+      w.add(new T.Mesh(new T.BoxGeometry(0.076, 0.02, 0.12), hub));
+      w.position.set(p[0], 0.09, p[1]);
+      body.add(w); wheels.push(w);
+    });
+    /* お尻のゼンマイのネジ（蝶の形のつまみ）。z の軸まわりに回る */
+    var brass = Z3.std(0xd9a93a, { roughness: 0.3, metalness: 0.85 });
+    var key = new T.Group();
+    key.position.set(0, 0.17, 0.43);
+    var shaft = new T.Mesh(new T.CylinderGeometry(0.018, 0.018, 0.14, 8), brass);
+    shaft.rotation.x = Math.PI / 2; shaft.position.z = 0.06; shaft.castShadow = true; key.add(shaft);
+    [-1, 1].forEach(function (k) {
+      var lobe = new T.Mesh(new T.CylinderGeometry(0.075, 0.075, 0.022, 16), brass);
+      lobe.rotation.x = Math.PI / 2;                    /* 円盤の面をカメラ（後ろ）へ向ける */
+      lobe.scale.set(1, 1, 1);
+      lobe.position.set(k * 0.085, 0, 0.13);
+      lobe.castShadow = true; key.add(lobe);
+    });
+    body.add(key);
+    return { group: g, body: body, wheels: wheels, key: key };
+  }
+
+  GameScene.prototype.reset = function () {};
+
+  /* s: { x, y, z, pitch, roll, yaw, wheel, camZ, traps } */
+  GameScene.prototype.sync = function (s) {
+    var c = this.car;
+    c.group.position.set(s.x, s.y, s.z);
+    c.body.rotation.set(-s.pitch, s.yaw, s.roll);
+    c.body.scale.set(s.sx, s.sy, s.sz);                /* 潰れ・へこみ */
+    for (var i = 0; i < 4; i++) c.wheels[i].rotation.x = s.wheel;
+    c.key.rotation.z = s.key || 0;
+
+    /* 近くのトラップだけ作って動かす。遠くなったものは捨てる */
+    var next = [];
+    for (i = 0; i < s.traps.length; i++) {
+      var tr = s.traps[i];
+      if (tr.z1 > s.camZ + 10 || tr.z0 < s.camZ - 50) continue;
+      var b = null;
+      for (var j = 0; j < this.built.length; j++) if (this.built[j].tr === tr) b = this.built[j];
+      if (!b) { b = { tr: tr, g: buildTrap(this, tr) }; this.scene.add(b.g); }
+      poseTrap(b.g, tr);
+      next.push(b);
+    }
+    for (j = 0; j < this.built.length; j++) if (next.indexOf(this.built[j]) < 0) this.scene.remove(this.built[j].g);
+    this.built = next;
+
+    /* 車と、次にくぐるトラップが両方入るように追いかける（右うしろのななめ上から）。
+       間が開くほど引いて、車は画面の下寄り・トラップは上寄りに映る */
+    var ahead = s.ahead == null ? s.camZ - 4 : Math.max(s.camZ - 9, Math.min(s.camZ - 2.5, s.ahead));
+    var mid = s.camZ * 0.62 + ahead * 0.38, span = s.camZ - ahead;
+    if (this.cam == null) this.cam = { mid: mid, span: span };
+    var now = global.performance.now(), dt = Math.min(0.25, ((now - (this.camT || now)) / 1000)); this.camT = now;
+    this.cam.mid += (mid - this.cam.mid) * (1 - Math.exp(-dt * 5));     /* 急に跳ばないように、実時間で少しずつ寄せる */
+    this.cam.span += (span - this.cam.span) * (1 - Math.exp(-dt * 3));
+    var m = this.cam.mid, d = 2.2 + this.cam.span * 0.75;
+    this.camera.position.set(d * 0.75, d * 0.95, m + d * 0.95);
+    this.camera.lookAt(0, 0.2, m);
+    var key = this.lights.key;
+    key.position.set(-4, 8, s.camZ + 2);
+    key.target.position.set(0, 0, s.camZ - 4);
   };
 
-  /* 場面の点（x, y, z=0）を画面の座標へ */
-  Scene3D.prototype.project = function (p, W, H) {
-    var v = new T.Vector3(p.x, p.y, p.z || 0).project(this.camera);
-    return { x: (v.x + 1) / 2 * W, y: (1 - v.y) / 2 * H };
-  };
+  GameScene.prototype.draw = function (ctx, W, H) { return this.stage.draw(ctx, W, H); };
 
-  Scene3D.prototype.draw = function (ctx, W, H) { return this.stage.draw(ctx, W, H); };
-
-  global.Scene3D = Scene3D;
-  global.zRecline = { gapAt: gapAt, backHead: backHead };
+  global.GameScene = GameScene;
 })(window);
