@@ -125,7 +125,7 @@
   /* 単位は 1 = 100mm。車は -z の向きへ走る。z は車の重心（車の長さ 0.8 なので前後の端は z∓0.4） */
   var START_Z = 2.5, HALF = 0.4, DECEL = 4, GAIN = 4.6, GRAV = 28, STAGE = 10;   /* 1ステージ = トラップ10個 */
   var phase, z, x, y, pitch, roll, yaw, vx, vy, vz, spin, v, pull, wheel, base, startY, lastClick, endT, keyHold, crashZ;
-  var traps, edgeZ, sx, sy, sz, crushBy, resT, keyAng = 0, goalZ, clearT, songStep, confetti = null;
+  var guided = false, diedAt = null, traps, edgeZ, sx, sy, sz, crushBy, resT, keyAng = 0, goalZ, clearT, songStep, confetti = null;
   var runOsc = null, runGain = null;
   var KINDS = ["press", "hammer", "spinner", "pusher", "door"];
 
@@ -140,7 +140,7 @@
     held = false;
     phase = "aim";
     z = START_Z; x = 0; y = 0; pitch = 0; roll = 0; yaw = 0; vx = vy = vz = spin = 0;
-    v = 0; pull = 0; wheel = 0; base = z; sx = sy = sz = 1; crushBy = null; resT = 0; clearT = null; songStep = 0; confetti = null; lastClick = 0; endT = 0; keyHold = false; crashZ = null;
+    v = 0; pull = 0; wheel = 0; base = z; sx = sy = sz = 1; crushBy = null; resT = 0; clearT = null; diedAt = null; songStep = 0; confetti = null; lastClick = 0; endT = 0; keyHold = false; crashZ = null;
     traps = []; edgeZ = 0;
     moreTraps();
     runSound(0);
@@ -212,6 +212,7 @@
   function setPull(p) {
     p = Math.max(0, p);                        /* 引ける量に上限はない */
     if (Math.abs(p - lastClick) >= 0.035) { lastClick = p; windClick(p); }
+    if (p > 0.5) guided = true;                /* 一度しっかり引いたら、引き方のガイドは出さない */
     wheel -= (p - pull) / 0.09;
     keyAng += (p - pull) * 9;                  /* 引くとお尻のネジが巻かれる */
     pull = p;
@@ -231,8 +232,19 @@
     s.start(n, Math.random()); s.stop(n + 0.05);
     tone(900 + p * 260, 0.025, 0.035, "square");
   }
+  /* やられたトラップの直前に車を戻す。トラップとタイムはそのまま続く */
+  function respawn() {
+    var tr = diedAt;
+    if (!tr) { newRound(); return; }
+    z = base = tr.z0 - 0.2; x = y = pitch = roll = yaw = vx = vy = vz = spin = 0;
+    v = 0; pull = 0; lastClick = 0; sx = sy = sz = 1; crushBy = null; crashZ = null; endT = 0;
+    for (var i = 0; i < traps.length; i++) { traps[i].under = false; traps[i].bumped = false; }
+    phase = "aim";
+    songStep = Math.min(SONG.length, Math.floor(Math.max(0, (START_Z - z) / (START_Z - goalZ)) * SONG.length));
+    tone(660, 0.08, 0.06, "triangle"); tone(990, 0.12, 0.05, "triangle", null, 0.07);
+  }
   function crash(kind, tr) {
-    phase = "crash"; crashZ = z; endT = 0; runSound(0);
+    phase = "crash"; crashZ = z; endT = 0; runSound(0); diedAt = tr || null;
     crushBy = tr && (tr.kind === "press" || tr.kind === "pusher") ? tr : null;
     if (crushBy) {
       vx = vy = vz = spin = 0; v = 0;
@@ -374,7 +386,7 @@
         if (crushBy.kind === "press") sy = Math.min(sy, Math.max(0.12, (0.02 + crushBy.pose * 1.5) / 0.32));
         else sx = Math.min(sx, Math.max(0.28, (1.15 - crushBy.pose * 1.0) / 0.21));
       }
-      if (endT > 1.8) newRound();              /* 結果画面は出さず、自動でもう一度 */
+      if (endT > 1.8) respawn();               /* 結果画面は出さず、やられたトラップの直前から自動で再開 */
     }
   }
 
@@ -494,6 +506,7 @@
     if (!drew) { ctx.fillStyle = "#1d1714"; ctx.fillRect(0, 0, W, H); }
 
     if (state === S.PLAY && phase !== "crash") drawProgress();
+    if (state === S.PLAY && phase === "aim" && !guided && !held) drawGuide();
     if (confetti) { confetti.step(1 / 60, W, H); confetti.draw(ctx); }
     if (state === S.RESULT) drawResult();
   }
@@ -524,6 +537,21 @@
       var t = traps[st * STAGE + i]; if (!t) break;
       ctx.fillRect(bx + bw * (a.z0 - t.z0) / (a.z0 - b.z1) - 1, by + 3, 2, bh - 6);
     }
+    ctx.restore();
+  }
+  /* 引き方のガイド：指先の丸が下へなぞる動きをくり返す（文字は出さない） */
+  function drawGuide() {
+    var u = (T % 1.6) / 1.6, k = Math.min(1, u / 0.75), e = k * k * (3 - 2 * k);
+    var gx = W * 0.5, y0 = H * 0.55, y1 = H * 0.55 + 190, gy = y0 + (y1 - y0) * e;
+    var a = u < 0.08 ? u / 0.08 : u > 0.85 ? Math.max(0, (1 - u) / 0.15) : 1;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = "rgba(255,255,255,.75)"; ctx.lineWidth = 10; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(gx, y0); ctx.lineTo(gx, gy); ctx.stroke();       /* なぞった跡 */
+    ctx.fillStyle = "#fff"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(gx, gy, 30, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,.5)";                                        /* 下向きの矢印 */
+    ctx.beginPath(); ctx.moveTo(gx - 26, y1 + 46); ctx.lineTo(gx + 26, y1 + 46); ctx.lineTo(gx, y1 + 80); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
   function scoreText() {
