@@ -2558,22 +2558,35 @@ function ttsParams() {
   return p;
 }
 function syncTtsAssist() { const vv = $('ttsVoice').value !== 'me'; $('ttsStyle').hidden = vv; $('ttsAssist').hidden = vv || $('ttsStyle').value !== 'free'; }
-// VOICEVOX：このPCで VOICEVOX を起動していれば（127.0.0.1:50021）、キャラの声も選べる。
+// VOICEVOX：PCの読み上げ係（5123）が VOICEVOX の声も出す（/vv/speakers・/vv/tts）。止まっていれば押したときに起動する。
+// VOICEVOX 本体を起動していれば（127.0.0.1:50021）そちらも使える。キャラの一覧はこのブラウザに覚えておく
 // 規約でクレジット「VOICEVOX:キャラ名」が要るので、使ったキャラは YouTube の説明文に足す
 const VV_URL = 'http://127.0.0.1:50021';
-let vvList = [];
-async function loadVoicevox() {
-  try {
-    const sp = await (await fetch(VV_URL + '/speakers')).json(), sel = $('ttsVoice'), cur = sel.value;
-    vvList = sp.flatMap(c => c.styles.map(st => ({ id: st.id, name: c.name, label: c.name + (c.styles.length > 1 ? '（' + st.name + '）' : '') })));
-    sel.querySelectorAll('option[data-vv]').forEach(o => o.remove());
-    for (const v of vvList) { const o = document.createElement('option'); o.value = 'vv' + v.id; o.textContent = v.label; o.dataset.vv = 1; sel.append(o); }
-    let saved = cur; try { saved = localStorage.getItem('cakeCut.ttsVoice') || cur; } catch (e) {}
-    if ([...sel.options].some(o => o.value === saved)) sel.value = saved;
-  } catch (e) {}
+let vvList = [], vvApp = false;
+function setVoicevox(sp) {
+  const sel = $('ttsVoice');
+  vvList = sp.flatMap(c => c.styles.map(st => ({ id: st.id, name: c.name, label: c.name + (c.styles.length > 1 ? '（' + st.name + '）' : '') })));
+  sel.querySelectorAll('option[data-vv]').forEach(o => o.remove());
+  for (const v of vvList) { const o = document.createElement('option'); o.value = 'vv' + v.id; o.textContent = v.label; o.dataset.vv = 1; sel.append(o); }
+  let saved = sel.value; try { saved = localStorage.getItem('cakeCut.ttsVoice') || saved; } catch (e) {}
+  if ([...sel.options].some(o => o.value === saved)) sel.value = saved;
   syncTtsAssist();
 }
+try { setVoicevox(JSON.parse(localStorage.getItem('cakeCut.vvSpeakers') || '[]')); } catch (e) {}
+async function loadVoicevox() {
+  let sp = null;
+  try { const r = await fetch(VOICE_URL + '/vv/speakers'); if (r.ok) { sp = await r.json(); vvApp = false; } } catch (e) {}
+  if (!sp) try { sp = await (await fetch(VV_URL + '/speakers')).json(); vvApp = true; } catch (e) {}
+  if (!sp || !sp.length) return;
+  try { localStorage.setItem('cakeCut.vvSpeakers', JSON.stringify(sp.map(c => ({ name: c.name, styles: c.styles.map(s => ({ id: s.id, name: s.name })) })))); } catch (e) {}
+  setVoicevox(sp);
+}
 async function voicevoxTts(id, text, speed) {
+  if (!vvApp) {
+    const r = await fetch(VOICE_URL + '/vv/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, text, speed: +(1 / speed).toFixed(3) }) });
+    if (!r.ok) throw new Error(r.status);
+    return r.blob();
+  }
   const q = await (await fetch(VV_URL + '/audio_query?speaker=' + id + '&text=' + encodeURIComponent(text), { method: 'POST' })).json();
   q.speedScale = +(1 / speed).toFixed(3); q.prePhonemeLength = 0.05; q.postPhonemeLength = 0.05;
   const r = await fetch(VV_URL + '/synthesis?speaker=' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) });
@@ -2600,10 +2613,10 @@ async function pingVoice() {
 async function startVoice() {
   const a = document.createElement('a'); a.href = 'cakecut-voice:start'; a.click();
   toast('声を起動しています', 60000);
-  for (let i = 0; i < 90; i++) { await new Promise(r => setTimeout(r, 1000)); if (await pingVoice()) { toast('声を起動しました'); return true; } }
+  for (let i = 0; i < 90; i++) { await new Promise(r => setTimeout(r, 1000)); if (await pingVoice()) { toast('声を起動しました'); loadVoicevox(); return true; } }
   toast('声を起動できませんでした'); return false;
 }
-if (voiceOn) { syncTtsBtn(); pingVoice(); loadVoicevox(); $('ttsVoice').addEventListener('focus', () => { if (!vvList.length) loadVoicevox(); }); }
+if (voiceOn) { syncTtsBtn(); pingVoice().then(loadVoicevox); $('ttsVoice').addEventListener('focus', () => { if (!vvList.length) loadVoicevox(); }); }
 // 選んだ文（なければ台本全部）を1文ずつ読み上げ、声のレーンの再生位置から並べて置く。
 // 字幕は1枚ぶんずつに分け、声のクリップも字幕と同じ所で切る（切れ目は近くのいちばん静かな所に寄せる）
 function quietAt(raw, t, span = 0.12) {
@@ -2624,7 +2637,7 @@ async function speakScript() {
   voiceBusy = true; $('ttsBtn').disabled = true;
   try {
     const vv = vvList.find(x => 'vv' + x.id === $('ttsVoice').value), credit = vv ? 'VOICEVOX:' + vv.name : '';
-    if (!vv && !voiceReady && !await pingVoice() && !await startVoice()) throw 0;
+    if ((!vv || !vvApp) && !voiceReady && !await pingVoice() && !await startVoice()) throw 0;
     const prm = ttsParams(), got = [];
     for (let i = 0; i < units.length; i++) {
       toast('読み上げ中 ' + (i + 1) + ' / ' + units.length, 60000);
