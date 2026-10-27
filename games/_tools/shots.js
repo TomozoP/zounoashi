@@ -5,6 +5,7 @@
      node games/_tools/shots.js hoge -w 2.5          # キーを押してから撮るまでの秒数（既定 1.5）
      node games/_tools/shots.js hoge -p 5            # 始めてから「遊び中」を撮り・キーを押すまでの秒数（既定 4。立体は撮影中の動きが遅いので長め）
      node games/_tools/shots.js hoge --size 844x390  # 横長の画面で撮る
+     node games/_tools/shots.js hoge --lang en       # 英語で撮る（ko / zh / tw も。既定は日本語）
 
    Playwright の Chromium で撮ります（Claude のクラウドには入っています）。
    games/_tools/_bin/shots/hoge.png ができます（スマホの縦長、1場面ずつ番号つき）。
@@ -24,6 +25,8 @@ var keys = opt("-k", "1,2,3,4,5,6,7,8,9").split(",").filter(Boolean);
 var wait = parseFloat(opt("-w", "1.5")) * 1000;
 var play = parseFloat(opt("-p", "4")) * 1000;
 var size = opt("--size", "390x844").split("x").map(Number);
+var lang = opt("--lang", "ja"), locales = { ja: "ja-JP", en: "en-US", ko: "ko-KR", zh: "zh-CN", tw: "zh-TW" };
+if (!locales[lang]) { console.error("--lang は ja / en / ko / zh / tw"); process.exit(1); }
 var root = workflow.root, rel = path.relative(root, gameDir).replace(/\\/g, "/");
 var outDir = path.join(root, "games/_tools/_bin/shots");
 fs.mkdirSync(outDir, { recursive: true });
@@ -41,12 +44,12 @@ var server = http.createServer(function (req, res) {
 });
 
 server.listen(0, "127.0.0.1", async function () {
-  var url = "http://127.0.0.1:" + server.address().port + "/" + rel + "/index.html";
+  var url = "http://127.0.0.1:" + server.address().port + "/" + rel + "/index.html?lang=" + lang;
   var chromium;
   try { chromium = require("playwright").chromium; } catch (e) { console.error("playwright が要ります（Claude のクラウドには入っています）。"); process.exit(1); }
   var browser = await chromium.launch(), shots = [], errors = [];
   async function scene(label, key) {
-    var page = await browser.newPage({ viewport: { width: size[0], height: size[1] }, locale: "ja-JP" });
+    var page = await browser.newPage({ viewport: { width: size[0], height: size[1] }, locale: locales[lang] });
     page.on("pageerror", function (e) { errors.push(label + ": " + e.message); });
     try {
       await page.goto(url); await page.waitForTimeout(900);
@@ -73,7 +76,7 @@ server.listen(0, "127.0.0.1", async function () {
   await browser.close(); browser = await chromium.launch();
   var sheet = await browser.newPage({ viewport: { width: cols * (w + 10) + 10, height: rows * (h + 44) + 10 } });
   await sheet.setContent(html); await sheet.waitForTimeout(300);
-  var out = path.join(outDir, id + ".png");
+  var out = path.join(outDir, id + (lang === "ja" ? "" : "-" + lang) + ".png");
   await sheet.screenshot({ path: out });
   await browser.close(); server.close();
   errors.forEach(function (e) { console.log("エラー " + e); });

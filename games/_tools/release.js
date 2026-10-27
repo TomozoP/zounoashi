@@ -57,4 +57,4 @@ if (!hasThumb) {
 run("publish.js", [id].concat(dateArg));
 run("preview-link.js", [id]);
 console.log("\nOK  公開の形にしました。サムネを目で確かめ、差分を見て commit・push してください。");
-console.log("    push のあと: node games/_tools/verify-deploy.js " + id);
+console.log("    push のあと: node games/_tools/pages-status.js（クラウドから）／ node games/_tools/verify-deploy.js " + id + "（サイトを開ける環境で）");
