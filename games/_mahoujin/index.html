@@ -270,6 +270,44 @@
     return c;
   }
 
+  /* ボスの大きな絵。ドットの大きさを他と揃えるため、拡大ではなく Scale2x/3x で細かく描き直し、上に光・下に影を足す */
+  function bigSprite(name, color, sc) {
+    var key = "big" + name + color + sc;
+    if (sprCache[key]) return sprCache[key];
+    var src = sprite(name, color, 0), w = src.width, h = src.height;
+    var sd = new Uint32Array(src.getContext("2d").getImageData(0, 0, w, h).data.buffer);
+    function P(x, y) { x = Math.max(0, Math.min(w - 1, x)); y = Math.max(0, Math.min(h - 1, y)); return sd[y * w + x]; }
+    var W2 = w * sc, H2 = h * sc, out = new Uint32Array(W2 * H2);
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+      var A = P(x - 1, y - 1), B = P(x, y - 1), C = P(x + 1, y - 1), D = P(x - 1, y), E = P(x, y), F = P(x + 1, y), G = P(x - 1, y + 1), H = P(x, y + 1), I = P(x + 1, y + 1), e;
+      if (sc === 2) {
+        e = [D === B && B !== F && D !== H ? D : E, B === F && B !== D && F !== H ? F : E,
+             D === H && D !== B && H !== F ? D : E, H === F && D !== H && B !== F ? F : E];
+      } else {
+        var db = D === B && B !== F && D !== H, bf = B === F && B !== D && F !== H, dh = D === H && D !== B && H !== F, hf = H === F && D !== H && B !== F;
+        e = [db ? D : E, (db && E !== C) || (bf && E !== A) ? B : E, bf ? F : E,
+             (db && E !== G) || (dh && E !== A) ? D : E, E, (bf && E !== I) || (hf && E !== C) ? F : E,
+             dh ? D : E, (dh && E !== I) || (hf && E !== G) ? H : E, hf ? F : E];
+      }
+      for (var j = 0; j < sc; j++) for (var i = 0; i < sc; i++) out[(y * sc + j) * W2 + x * sc + i] = e[j * sc + i];
+    }
+    var c = document.createElement("canvas"); c.width = W2; c.height = H2;
+    var g = c.getContext("2d"), im = g.createImageData(W2, H2), o8 = new Uint8ClampedArray(out.buffer);
+    for (var y2 = 0; y2 < H2; y2++) for (var x2 = 0; x2 < W2; x2++) {
+      var q = (y2 * W2 + x2) * 4;
+      if (!o8[q + 3]) continue;
+      var r = o8[q], gg = o8[q + 1], b = o8[q + 2];
+      if (r + gg + b < 90) { im.data.set([r, gg, b, 255], q); continue; }
+      var up = y2 === 0 || !o8[q - W2 * 4 + 3], dn = y2 === H2 - 1 || !o8[q + W2 * 4 + 3];
+      var lf = x2 === 0 || !o8[q - 1], k = up ? 0.22 : lf ? 0.1 : dn ? -0.28 : 0;
+      if (k > 0) { r += (255 - r) * k; gg += (255 - gg) * k; b += (255 - b) * k; } else if (k < 0) { r *= 1 + k; gg *= 1 + k; b *= 1 + k; }
+      im.data.set([r, gg, b, 255], q);
+    }
+    g.putImageData(im, 0, 0);
+    sprCache[key] = c;
+    return c;
+  }
+
   /* 場所ごとの色 [空上, 空下, 遠景, 地面, 地面の影, 近景] */
   var BG = [
     ["#5aa8f0", "#bfe6ff", "#6cc06a", "#7ccf4a", "#5a9a30", "#3f8a3a"],
@@ -304,7 +342,7 @@
     BW = Math.ceil(canvas.width / PX);
     BH = Math.ceil(SH * k / PX);
     buf = document.createElement("canvas"); buf.width = BW; buf.height = BH;
-    bctx = buf.getContext("2d");
+    bctx = buf.getContext("2d"); bctx.imageSmoothingEnabled = false;
     /* 石の床もドットで一度だけ描いておく */
     var fw = Math.ceil(canvas.width / PX) + 2, fh = Math.ceil(canvas.height / PX) + 2;
     floorCv.width = fw; floorCv.height = fh;
@@ -1088,9 +1126,9 @@
     /* 魔物 */
     ev.e.forEach(function (e, j) {
       if (!e.alive) return;
-      var spr = sprite(e.shape, e.color, 0);
       var sc = e.boss ? (e.shape === "maou" || e.shape === "dragon" ? 3 : 2) : 1;
-      var w = spr.width * sc, h = spr.height * sc;
+      var spr = sc > 1 ? bigSprite(e.shape, e.color, sc) : sprite(e.shape, e.color, 0);
+      var w = spr.width, h = spr.height;
       var ex = e.boss ? 104 - w / 2 + 6 : 84 + j * (ev.e.length > 3 ? 12 : 14);
       var ey = gy - h + (e.shape === "bat" || e.shape === "ghost" ? -6 + Math.round(Math.sin(T * 6 + j) * 2) : 0);
       if (e.boss) ex = Math.round(ex);
@@ -1212,6 +1250,7 @@
     read: function (canvasLike) { scanCv.width = canvasLike.width; scanCv.height = canvasLike.height; scanCtx.drawImage(canvasLike, 0, 0); return tryRead(); },
     hideUI: function (v) { hideUI = v !== false; },
     star: function () { return hero ? starOf() : 0; },
+    big: function (n, c, sc) { return (sc > 1 ? bigSprite(n, c, sc) : sprite(n, c, 0)).toDataURL(); },
     /* 職業ごとの見た目を並べた画像（確認用） */
     jobSheet: function () {
       var jobs = Object.keys(window.MahoSim.JOBS), c = document.createElement("canvas"), g = c.getContext("2d");
