@@ -355,5 +355,6 @@ window.DRAFT_GAMES = [
     "play": "games/_taiyaki/index.html",
     "full": true,
     "catch": "好きな画像の形でたい焼きを焼く"
-  }
+  },
+  {"type":"lab","tags":[],"id":"mahoujin","title":"魔法陣ゲーム","year":2026,"date":"2026-10-27","plays":null,"url":"","img":"games/_mahoujin/img/thumb.webp","play":"games/_mahoujin/index.html","full":true,"catch":"魔法陣から勇者を召喚"},
 ];
