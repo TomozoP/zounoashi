@@ -52,6 +52,11 @@
     gate: ["ついに魔王の間にたどり着いた…", "At last, the Demon King's chamber...", "마침내 마왕의 방에 도착했다…", "终于抵达了魔王之间……", "終於抵達了魔王之間……"],
     maou: ["魔王「よくぞ来た、{a}よ」", "Demon King: \"So you have come, {a}.\"", "마왕 「잘 왔다, {a}여」", "魔王「你终于来了，{a}」", "魔王「你終於來了，{a}」"],
     clear: ["魔王をたおした！ 世界に平和が戻った！", "The Demon King is defeated! Peace returns!", "마왕을 쓰러뜨렸다! 세계에 평화가 돌아왔다!", "打倒了魔王！世界恢复了和平！", "打倒了魔王！世界恢復了和平！"],
+    flee: ["{a}は逃げ出した！", "{a} ran away!", "{a}은(는) 도망쳤다!", "{a}逃跑了！", "{a}逃跑了！"],
+    yawn: ["{a}はあくびをしている", "{a} is yawning", "{a}은(는) 하품을 하고 있다", "{a}在打哈欠", "{a}在打哈欠"],
+    steal: ["{a}は{b}から{c}ゴールドぬすんだ", "{a} stole {c} gold from {b}", "{a}은(는) {b}에게서 {c} 골드를 훔쳤다", "{a}从{b}那里偷了{c}金币", "{a}從{b}那裡偷了{c}金幣"],
+    fire: ["{a}の血がたぎる！", "{a}'s blood is boiling!", "{a}의 피가 끓어오른다!", "{a}热血沸腾！", "{a}熱血沸騰！"],
+    snack: ["{a}は薬草をおやつに食べた", "{a} snacked on an herb", "{a}은(는) 약초를 간식으로 먹었다", "{a}把药草当零食吃了", "{a}把藥草當零食吃了"],
     over: ["{a}の冒険はここで終わった", "{a}'s adventure ends here", "{a}의 모험은 여기서 끝났다", "{a}的冒险到此结束了", "{a}的冒險到此結束了"]
   };
   var AREAS = [
@@ -119,6 +124,37 @@
   /* 難しさ（勝率がごく低くなるように合わせた値） */
   var K = { regen: 0.2, mhp: 4.5, matk: 1.5, mdef: 0.9, mexp: 0.7, bhp: 2.2, alv: 2.2, ex: 2.0, blv: 2, maouLv: 3, maouHp: 1.8, maouAtk: 1.2 };
 
+  /* 性格 [ja, en, ko, zh, tw] */
+  var TRAITS = {
+    brave: ["ゆうかん", "Brave", "용감", "勇敢", "勇敢"],
+    coward: ["おくびょう", "Timid", "겁쟁이", "胆小", "膽小"],
+    hasty: ["せっかち", "Hasty", "성급", "急躁", "急躁"],
+    lazy: ["のんき", "Easygoing", "느긋", "悠哉", "悠哉"],
+    sly: ["ずるがしこい", "Sly", "교활", "狡猾", "狡猾"],
+    hot: ["ねっけつ", "Hot-blooded", "열혈", "热血", "熱血"],
+    lucky: ["ラッキー", "Lucky", "행운아", "幸运儿", "幸運兒"],
+    glutton: ["くいしんぼう", "Glutton", "먹보", "贪吃鬼", "貪吃鬼"]
+  };
+  /* 呪文のような名前（コードから決まる文字の並び） */
+  var KANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわがぎぐげござじずぜぞだでどばびぶべぼぱぴぷぺぽ";
+  function jumon(rand, lang) {
+    var n, out = "", i;
+    if (lang === "ja") {
+      n = 3 + Math.floor(rand() * 3);
+      for (i = 0; i < n; i++) out += KANA.charAt(Math.floor(rand() * KANA.length));
+      return out;
+    }
+    if (lang === "ko") {
+      n = 2 + Math.floor(rand() * 3);
+      for (i = 0; i < n; i++) out += String.fromCharCode(0xAC00 + (Math.floor(rand() * 19) * 21 + Math.floor(rand() * 21)) * 28 + (rand() < 0.3 ? 1 + Math.floor(rand() * 27) : 0));
+      return out;
+    }
+    var C = "bcdfghjklmnpqrstvwxyz", V = "aeiouy";
+    n = 4 + Math.floor(rand() * 4);
+    for (i = 0; i < n; i++) out += (i % 2 ? V : C).charAt(Math.floor(rand() * (i % 2 ? V : C).length));
+    return out.charAt(0).toUpperCase() + out.slice(1);
+  }
+
   function run(base, opt) {
     opt = opt || {};
     if (opt.K) for (var kk in opt.K) K[kk] = opt.K[kk];
@@ -141,6 +177,8 @@
       exp: 0, alive: true, look: base.look
     };
     var party = [hero];
+    var TR = base.trait || "";
+    if (TR === "glutton") herbs = 1;
 
     function atkOf(p) { return p.atk + (p === hero ? W_ATK[wpn] : 0); }
     function defOf(p) { return p.def + (p === hero ? A_DEF[arm] : 0); }
@@ -175,9 +213,11 @@
       if (list[0].boss) log("boss", L("boss", mname));
       else if (list.length > 1) log("appear", L("appearN", mname, list.length));
       else log("appear", L("appear", mname));
+      var hot = false;
+      if (TR === "coward" && !list[0].boss && rand() < 0.14) { log("flee", L("flee", hero.name)); enemies = []; return true; }
       for (var round = 0; round < 40; round++) {
         var actors = [];
-        party.forEach(function (p) { if (p.alive) actors.push({ p: p, o: p.spd + rand() * 10 }); });
+        party.forEach(function (p) { if (p.alive) actors.push({ p: p, o: p.spd + rand() * 10 + (TR === "hasty" ? 30 : 0) }); });
         enemies.forEach(function (e) { if (e.alive) { actors.push({ e: e, o: e.spd + rand() * 10 }); if (e.twice) actors.push({ e: e, o: e.spd + rand() * 10 - 5 }); } });
         actors.sort(function (a, b) { return b.o - a.o; });
         for (var i = 0; i < actors.length; i++) {
@@ -186,7 +226,8 @@
           if (!liveE.length) break;
           if (A.p) {
             if (!A.p.alive) continue;
-            partyAct(A.p, liveE);
+            if (TR === "hot" && !hot && hero.hp < hero.mhp * 0.4) { hot = true; log("fire", L("fire", hero.name)); }
+            partyAct(A.p, liveE, hot);
           } else {
             if (!A.e.alive) continue;
             enemyAct(A.e);
@@ -198,9 +239,10 @@
       if (enemies.some(function (e) { return e.alive; })) return false;
       var ex = 0, gd = 0;
       list.forEach(function (e) { ex += e.exp; gd += e.gold; });
+      if (TR === "sly") gd = Math.round(gd * 1.6);
       gold += gd;
       log("won", L("won", "", "", ex, gd));
-      party.forEach(function (p) { gain(p, ex); if (p.alive) p.hp = Math.min(p.mhp, p.hp + Math.round(p.mhp * K.regen)); });
+      party.forEach(function (p) { gain(p, ex); if (p.alive) p.hp = Math.min(p.mhp, p.hp + Math.round(p.mhp * (TR === "lazy" ? 0.35 : K.regen))); });
       enemies = [];
       return true;
     }
@@ -209,8 +251,10 @@
       log(k, t, { who: who, tgt: enemies.indexOf(e), dmg: dmg });
       if (e.hp <= 0 && e.alive) { e.alive = false; log("kill", L("kill", e.name), { tgt: enemies.indexOf(e) }); }
     }
-    function partyAct(p, liveE) {
+    function partyAct(p, liveE, hot) {
       var who = party.indexOf(p);
+      if (TR === "lazy" && rand() < 0.07) { log("yawn", L("yawn", p.name), { who: who }); return; }
+      if (TR === "sly" && rand() < 0.1) { var st = ri(3, 10) * (area + 1); gold += st; log("steal", L("steal", p.name, liveE[0].name, st), { who: who }); return; }
       /* 回復 */
       if (p.job === "priest" || (p === hero && p.mag > p.atk * 1.2)) {
         var low = party.filter(function (q) { return q.alive && q.hp < q.mhp * 0.45; }).sort(function (a, b) { return a.hp / a.mhp - b.hp / b.mhp; })[0];
@@ -221,11 +265,12 @@
           return;
         }
       }
-      if (p === hero && hero.hp < hero.mhp * 0.3 && herbs > 0) {
+      var herbAt = TR === "brave" ? 0.2 : TR === "glutton" ? 0.35 : 0.3;
+      if (p === hero && hero.hp < hero.mhp * herbAt && herbs > 0) {
         herbs--;
         var hh = Math.round(hero.mhp * 0.45);
         hero.hp = Math.min(hero.mhp, hero.hp + hh);
-        log("heal", L("herb", hero.name, "", hh), { who: 0, heal: 0 });
+        log("heal", L(TR === "glutton" && rand() < 0.5 ? "snack" : "herb", hero.name, "", hh), { who: 0, heal: 0 });
         return;
       }
       var t = pick(liveE);
@@ -243,9 +288,9 @@
         hurtEnemy(t, ds, "spell", L("spell", p.name, t.name, ds), who);
         return;
       }
-      if (rand() < 0.05 - p.spd * 0.0005) { log("miss", L("miss", p.name), { who: who }); return; }
-      var crit = rand() < 0.04 + p.luk * 0.004 + (p.job === "thief" ? 0.12 : 0);
-      var mul = p.job === "warrior" ? 1.2 : 1;
+      if (rand() < 0.05 - p.spd * 0.0005 + (TR === "hasty" ? 0.08 : 0)) { log("miss", L("miss", p.name), { who: who }); return; }
+      var crit = rand() < 0.04 + p.luk * 0.004 + (TR === "brave" ? 0.08 : 0);
+      var mul = hot ? 1.12 : 1;
       var d = Math.round(atkOf(p) * mul * (0.85 + rand() * 0.3) - (crit ? 0 : t.def * 0.5));
       if (crit) d = Math.round(atkOf(p) * mul * 1.8);
       d = Math.max(1, d);
@@ -255,7 +300,7 @@
       var live = party.filter(function (p) { return p.alive; });
       var t = rand() < 0.4 && hero.alive ? hero : pick(live);
       var ti = party.indexOf(t);
-      if (rand() < Math.min(0.25, t.spd * 0.004 + t.luk * 0.003)) { log("dodge", L("dodge", e.name, t.name), { tgt: enemies.indexOf(e), at: ti }); return; }
+      if (rand() < Math.min(0.3, t.spd * 0.004 + t.luk * 0.003 + (TR === "coward" ? 0.08 : 0))) { log("dodge", L("dodge", e.name, t.name), { tgt: enemies.indexOf(e), at: ti }); return; }
       var d = Math.max(1, Math.round(e.atk * (0.85 + rand() * 0.3) - defOf(t) * 0.5));
       t.hp = Math.max(0, t.hp - d);
       log("hit", L("eatk", e.name, t.name, d), { tgt: enemies.indexOf(e), at: ti, dmg: d });
@@ -288,7 +333,7 @@
           if (!battle(list)) return finish(false);
         } else if (r < 0.72) {
           var c = rand();
-          if (c < 0.12 + hero.luk * 0.004 && wpn < 6) {
+          if (c < 0.12 + hero.luk * 0.004 + (TR === "lucky" ? 0.1 : 0) && wpn < 6) {
             var tier = Math.min(6, Math.max(wpn + 1, area + 1 + (rand() < hero.luk * 0.006 ? 1 : 0)));
             if (area >= 4 && rand() < hero.luk * 0.008) tier = 6;
             wpn = tier;
@@ -339,5 +384,5 @@
     }
   }
 
-  global.MahoSim = { run: run, AREAS: AREAS, rngOf: rngOf };
+  global.MahoSim = { run: run, AREAS: AREAS, rngOf: rngOf, TRAITS: TRAITS, jumon: jumon };
 })(typeof window !== "undefined" ? window : globalThis);
