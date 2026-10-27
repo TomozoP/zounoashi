@@ -61,6 +61,7 @@
     H = view.gameHeight;
     place();
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+    setupPix();
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
@@ -292,9 +293,38 @@
   function place() {
     CX = W / 2; CY = Math.round(H * 0.42); CR = 230; QS = 290;
     SH = Math.round(H * 0.4 / 4) * 4;
-    BH = SH / 4;
+  }
+  /* ドットを画面の画素にぴったり合わせる。
+     ドット1つ = 端末の画素 PX 個（整数）。ゲームの座標では U（だいたい4） */
+  var PX = 4, U = 4, floorCv = document.createElement("canvas");
+  function setupPix() {
+    var k = canvas.width / W;
+    PX = Math.max(1, Math.round(4 * k));
+    U = PX / k;
+    BW = Math.ceil(canvas.width / PX);
+    BH = Math.ceil(SH * k / PX);
     buf = document.createElement("canvas"); buf.width = BW; buf.height = BH;
     bctx = buf.getContext("2d");
+    /* 石の床もドットで一度だけ描いておく */
+    var fw = Math.ceil(canvas.width / PX) + 2, fh = Math.ceil(canvas.height / PX) + 2;
+    floorCv.width = fw; floorCv.height = fh;
+    var g = floorCv.getContext("2d");
+    g.fillStyle = "#16121e"; g.fillRect(0, 0, fw, fh);
+    for (var y = 0, row = 0; y < fh; y += 9, row++) for (var x = row % 2 ? -7 : 0; x < fw; x += 14) {
+      var v = ((x * 31 + y * 17) % 7 + 7) % 7;
+      g.fillStyle = v < 2 ? "#231d2e" : v < 4 ? "#1f1929" : "#1c1725";
+      g.fillRect(x + 1, y + 1, 13, 8);
+      g.fillStyle = "rgba(255,255,255,.035)"; g.fillRect(x + 1, y + 1, 13, 1);
+    }
+  }
+  /* 小さな絵を、今の位置で整数倍に拡大して画素に合わせて置く（揺れなどの平行移動も効く） */
+  function blitPix(img, dx, dy, q) {
+    var m = ctx.getTransform();
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, Math.round(dx + m.e), Math.round(dy + m.f), img.width * q, img.height * q);
+    ctx.restore();
   }
 
   function newRound() {
@@ -302,7 +332,7 @@
     document.getElementById("start").hidden = true;
     state = S.SCAN;
     T = 0; held = false;
-    qr = null; readFail = -9;
+    qr = null; readFail = -9; hasPhoto = false;
     hero = null; run = null; ev = null;
     if (confetti) confetti.clear();
   }
@@ -325,6 +355,9 @@
       var k = Math.min(1, 1200 / Math.max(im.width, im.height));
       scanCv.width = Math.round(im.width * k); scanCv.height = Math.round(im.height * k);
       scanCtx.drawImage(im, 0, 0, scanCv.width, scanCv.height);
+      photoBg.width = scanCv.width; photoBg.height = scanCv.height;
+      photoBg.getContext("2d").drawImage(scanCv, 0, 0);
+      hasPhoto = true;
       if (!tryRead()) { readFail = T; seq([[220, 0, 0.12], [165, 0.13, 0.2]], "square", 0.05); }
     };
     im.src = url;
@@ -341,6 +374,16 @@
       video.srcObject = s;
       var p = video.play(); if (p && p.catch) p.catch(function () {});
     }).catch(function () {});
+  }
+  /* 読み取りと召喚の背景は、カメラの映像（なければ選んだ写真、それもなければ石の床） */
+  var photoBg = document.createElement("canvas"), hasPhoto = false;
+  function drawBackdrop(dark) {
+    var src = video && video.videoWidth ? video : hasPhoto ? photoBg : null;
+    if (!src) { drawFloor(); return; }
+    var vw = src.videoWidth || src.width, vh = src.videoHeight || src.height, sc = Math.max((W + 40) / vw, (H + 40) / vh);
+    ctx.fillStyle = "#000"; ctx.fillRect(-20, -20, W + 40, H + 40);
+    ctx.drawImage(src, CX - vw * sc / 2, H / 2 - vh * sc / 2, vw * sc, vh * sc);
+    ctx.fillStyle = "rgba(14,8,28," + dark + ")"; ctx.fillRect(-20, -20, W + 40, H + 40);
   }
   function stopCamera() {
     if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
@@ -457,7 +500,7 @@
     return { hair: n(HAIR.length), style: n(HEADS.length), skin: n(SKIN.length), armor: n(ARMOR.length), weapon: n(4), cape: r() < 0.4 ? n(ARMOR.length) : -1 };
   }
   function useQR(data, mat, N, force) {
-    stopCamera();
+    
     qr = { data: data, mat: mat, N: N };
     var A = heroOf(data, mat, N);
     hero = dressUp(A.stats);
@@ -478,6 +521,7 @@
     if (stR === 1) noiseHit(0.5, 300, 0.06, 0.6);
   }
   function startAdventure(from) {
+    stopCamera();
     state = S.ADV; T = 0;
     evIdx = (from || 0) - 1; evAcc = 0; ev = null;
     logLines = []; logScroll = 0; scroll = 0; pops = []; anim = {}; endT = -1;
@@ -666,12 +710,8 @@
   /* 石の床（ドット） */
   function drawFloor() {
     ctx.fillStyle = "#16121e";
-    ctx.fillRect(0, 0, W, H);
-    for (var y = 0; y < H; y += 36) for (var x = (y / 36) % 2 ? -27 : 0; x < W; x += 54) {
-      var v = ((x * 31 + y * 17) % 7);
-      ctx.fillStyle = v < 2 ? "#221c2c" : v < 4 ? "#1e1828" : "#1b1624";
-      ctx.fillRect(x + 2, y + 2, 50, 32);
-    }
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    blitPix(floorCv, -PX, -PX, PX);
   }
   /* QRの模様を魔法陣として描く。k は現れ方（0→1、真ん中から広がる） */
   var circRGB = "220,190,255", circGlow = "#b070ff";
@@ -721,19 +761,12 @@
     }
   }
   function drawScan() {
-    drawFloor();
     var x0 = CX - QS / 2, y0 = CY - QS / 2;
-    ctx.save();
-    ctx.beginPath(); ctx.arc(CX, CY, CR - 22, 0, Math.PI * 2); ctx.clip();
-    ctx.fillStyle = "#0c0a14"; ctx.fillRect(CX - CR, CY - CR, CR * 2, CR * 2);
-    if (video && video.videoWidth) {
-      var vw = video.videoWidth, vh = video.videoHeight, sc = Math.max(CR * 2 / vw, CR * 2 / vh);
-      ctx.globalAlpha = 0.85;
-      ctx.drawImage(video, CX - vw * sc / 2, CY - vh * sc / 2, vw * sc, vh * sc);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "rgba(60,20,120,.25)"; ctx.fillRect(CX - CR, CY - CR, CR * 2, CR * 2);
+    drawBackdrop(0.3);
+    if (!(video && video.videoWidth) && !hasPhoto) {
+      ctx.fillStyle = "#0c0a14";
+      ctx.beginPath(); ctx.arc(CX, CY, CR - 22, 0, Math.PI * 2); ctx.fill();
     }
-    ctx.restore();
     drawCircle(1, 14);
     /* 読み取り枠の四隅 */
     ctx.save();
@@ -764,8 +797,8 @@
   }
   function photoRect() { return { x: CX - 80, y: Math.min(H - 90, CY + CR + 50), w: 160, h: 64 }; }
   function drawBig(img, x, y, sc) {
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, Math.round(x - img.width * sc / 2), Math.round(y - img.height * sc), img.width * sc, img.height * sc);
+    var m = ctx.getTransform(), q = Math.max(1, Math.round(sc * m.a));
+    blitPix(img, m.a * x - img.width * q / 2, m.d * y - img.height * q, q);
   }
   function starOf(h) { var J = window.MahoSim.JOBS[(h || hero).cls]; return J ? J[0] : 1; }
   function jobName() { var t = (window.MahoSim.JOBS[hero.cls] || [0, []])[1]; return zT(t[0], t[1], t[2], t[3], t[4]); }
@@ -838,7 +871,7 @@
     var shake = st >= 4 && sumT > 0.8 && sumT < 1.5 ? (1.5 - sumT) * (st === 5 ? 14 : 8) : 0;
     ctx.save();
     if (shake) ctx.translate(Math.sin(sumT * 70) * shake, Math.cos(sumT * 53) * shake * 0.6);
-    drawFloor();
+    drawBackdrop(0.55);
     var k = Math.min(1, sumT / 1.2);
     /* 読み取れた魔法陣が床に倒れて奥行きが出る。色は★で変わっていく */
     var e = Math.min(1, Math.max(0, (sumT - 0.15) / 0.7)); e = e * e * (3 - 2 * e);
@@ -914,47 +947,58 @@
     }
   }
 
-  function partyX(i) { return (46 - i * 12 + 5) * 4; }
+  function partyX(i) { return (46 - i * 12 + 5) * U; }
   function enemyX(i, list) {
     var n = list.length;
-    if (list[0] && list[0].boss) return 104 * 4;
-    return (84 + i * (n > 3 ? 12 : 14)) * 4 + 24;
+    if (list[0] && list[0].boss) return 104 * U;
+    return (84 + i * (n > 3 ? 12 : 14) + 6) * U;
+  }
+  function mixHex(a, b, t) {
+    var x = parseInt(a.slice(1), 16), y = parseInt(b.slice(1), 16);
+    function ch(sh) { return Math.round(((x >> sh) & 255) * (1 - t) + ((y >> sh) & 255) * t); }
+    return "rgb(" + ch(16) + "," + ch(8) + "," + ch(0) + ")";
   }
   function drawScene() {
     var a = ev ? ev.area : 0, c = BG[a];
     var b = bctx;
     var gy = BH - 14;
-    var g = b.createLinearGradient(0, 0, 0, gy);
-    g.addColorStop(0, c[0]); g.addColorStop(1, c[1]);
-    b.fillStyle = g; b.fillRect(0, 0, BW, BH);
+    /* 空はなめらかにせず、6段の帯で塗る（ドットらしく） */
+    for (var band = 0; band < 6; band++) {
+      b.fillStyle = mixHex(c[0], c[1], band / 5);
+      var y0 = Math.floor(gy * band / 6), y1 = Math.floor(gy * (band + 1) / 6);
+      b.fillRect(0, y0, BW, y1 - y0);
+    }
+    b.fillRect(0, gy, BW, BH - gy);
     /* 遠景 */
     b.fillStyle = c[2];
     for (var x = 0; x < BW; x++) {
-      var wx = x + scroll * 0.3;
+      var wx = x + Math.floor(scroll * 0.3);
       var h = a === 2 || a === 5 ? 0 : 10 + Math.sin(wx * 0.07) * 6 + Math.sin(wx * 0.19) * 3;
       if (a === 3 || a === 4) h = 18 + Math.abs(((wx * 0.6) % 40) - 20) * 0.9;
+      h = Math.round(h);
       b.fillRect(x, gy - h, 1, h);
     }
     if (a === 2 || a === 5) {
       /* 天井・壁 */
       for (var x2 = 0; x2 < BW; x2 += 1) {
-        var wx2 = x2 + scroll * 0.5;
-        var hh = a === 2 ? 6 + Math.abs(((wx2 * 0.9) % 16) - 8) : 4;
+        var wx2 = x2 + Math.floor(scroll * 0.5);
+        var hh = a === 2 ? Math.round(6 + Math.abs(((wx2 * 0.9) % 16) - 8)) : 4;
         b.fillRect(x2, 0, 1, hh);
       }
       if (a === 5) {
         b.fillStyle = c[5];
-        for (var px = -((scroll * 0.6) % 32); px < BW; px += 32) { b.fillRect(Math.round(px), 4, 6, gy - 4); }
+        for (var px = -(Math.floor(scroll * 0.6) % 32); px < BW; px += 32) { b.fillRect(px, 4, 6, gy - 4); }
       }
     }
     /* 地面 */
     b.fillStyle = c[3]; b.fillRect(0, gy, BW, BH - gy);
     b.fillStyle = c[4];
-    for (var tx = -((scroll) % 8); tx < BW; tx += 8) b.fillRect(Math.round(tx), gy + 3 + ((Math.round(tx + scroll) / 8) % 2) * 4, 3, 2);
+    var sc0 = Math.floor(scroll);
+    for (var tx = -(sc0 % 8); tx < BW; tx += 8) b.fillRect(tx, gy + 3 + (((tx + sc0) / 8) % 2) * 4, 3, 2);
     b.fillRect(0, gy, BW, 1);
     /* 近景の飾り */
     b.fillStyle = c[5];
-    for (var dx = -((scroll * 1.0) % 46); dx < BW + 10; dx += 46) {
+    for (var dx = -(Math.floor(scroll) % 46); dx < BW + 10; dx += 46) {
       var X = Math.round(dx);
       if (a === 0 || a === 1) { b.fillRect(X + 3, gy - 12, 2, 12); b.fillRect(X, gy - 18, 8, 8); if (a === 1) b.fillRect(X - 1, gy - 24, 10, 8); }
       else if (a === 2) { b.fillRect(X, 6, 3, 6); b.fillRect(X + 1, 12, 1, 3); }
@@ -1007,8 +1051,7 @@
   function drawAdv() {
     ctx.fillStyle = "#0c0a14"; ctx.fillRect(0, 0, W, H);
     drawScene();
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(buf, 0, 0, BW * 4, BH * 4);
+    blitPix(buf, 0, 0, PX);
     if (hideUI) return;
     drawPops();
     /* 仲間のHPと、魔王城までの道のり */
