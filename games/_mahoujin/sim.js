@@ -53,6 +53,8 @@
     maou: ["魔王「よくぞ来た、{a}よ」", "Demon King: \"So you have come, {a}.\"", "마왕 「잘 왔다, {a}여」", "魔王「你终于来了，{a}」", "魔王「你終於來了，{a}」"],
     clear: ["魔王をたおした！ 世界に平和が戻った！", "The Demon King is defeated! Peace returns!", "마왕을 쓰러뜨렸다! 세계에 평화가 돌아왔다!", "打倒了魔王！世界恢复了和平！", "打倒了魔王！世界恢復了和平！"],
     flee: ["{a}は逃げ出した！", "{a} ran away!", "{a}은(는) 도망쳤다!", "{a}逃跑了！", "{a}逃跑了！"],
+    gear: ["{a}は{b}を手にしている", "{a} holds the {b}", "{a}은(는) {b}을(를) 들고 있다", "{a}手持{b}", "{a}手持{b}"],
+    curse: ["呪いが{a}をむしばむ… {c}のダメージ", "The curse eats at {a}... {c} damage", "저주가 {a}을(를) 좀먹는다… {c}의 피해", "诅咒侵蚀着{a}……受到{c}点伤害", "詛咒侵蝕著{a}……受到{c}點傷害"],
     dance: ["{a}はおどっている", "{a} is dancing", "{a}은(는) 춤추고 있다", "{a}在跳舞", "{a}在跳舞"],
     yawn: ["{a}はあくびをしている", "{a} is yawning", "{a}은(는) 하품을 하고 있다", "{a}在打哈欠", "{a}在打哈欠"],
     steal: ["{a}は{b}から{c}ゴールドぬすんだ", "{a} stole {c} gold from {b}", "{a}은(는) {b}에게서 {c} 골드를 훔쳤다", "{a}从{b}那里偷了{c}金币", "{a}從{b}那裡偷了{c}金幣"],
@@ -184,7 +186,7 @@
     var CL = JOBS[base.cls];
     if (CL) {
       var m = CL[2];
-      base = { hp: Math.round(base.hp * m[0]), atk: base.atk * m[1], def: base.def * m[2], mag: base.mag * m[3], spd: base.spd * m[4], luk: base.luk * m[5], look: base.look, trait: base.trait, name: base.name, cls: base.cls };
+      base = { gear: base.gear, hp: Math.round(base.hp * m[0]), atk: base.atk * m[1], def: base.def * m[2], mag: base.mag * m[3], spd: base.spd * m[4], luk: base.luk * m[5], look: base.look, trait: base.trait, name: base.name, cls: base.cls };
     }
     var events = [];
     var area = 0, prog = 0, gold = 0, herbs = 1, wpn = 0, arm = 0;
@@ -199,7 +201,10 @@
     var TR = base.trait || "";
     if (TR === "glutton") herbs = 1;
 
-    function atkOf(p) { return p.atk + (p === hero ? W_ATK[wpn] : 0); }
+    /* 召喚のときに持っていた武器（QRから作る）。店や宝箱の武器のほうが強ければそちらを使う */
+    var gear = base.gear || { atk: 0, mag: 0, cursed: false, name: "" };
+    function atkOf(p) { return p.atk + Math.max(W_ATK[wpn], gear.atk); }
+    function magOf(p) { return p.mag + gear.mag; }
     function defOf(p) { return p.def + (p === hero ? A_DEF[arm] : 0); }
     function snap() {
       return {
@@ -261,6 +266,11 @@
       if (TR === "sly") gd = Math.round(gd * 1.6);
       gold += gd;
       log("won", L("won", "", "", ex, gd));
+      if (gear.cursed && hero.alive) {
+        var cd = Math.max(1, Math.round(hero.mhp * 0.06));
+        hero.hp = Math.max(1, hero.hp - cd);
+        log("curse", L("curse", hero.name, "", cd), { at: 0, dmg: cd });
+      }
       party.forEach(function (p) { gain(p, ex); if (p.alive) p.hp = Math.min(p.mhp, p.hp + Math.round(p.mhp * (TR === "lazy" ? 0.35 : K.regen))); });
       enemies = [];
       return true;
@@ -276,10 +286,10 @@
       if (TR === "lazy" && rand() < 0.07) { log("yawn", L("yawn", p.name), { who: who }); return; }
       if (TR === "sly" && rand() < 0.1) { var st = ri(3, 10) * (area + 1); gold += st; log("steal", L("steal", p.name, liveE[0].name, st), { who: who }); return; }
       /* 回復 */
-      if (p.job === "priest" || (p === hero && p.mag > p.atk * 1.2)) {
+      if (p.job === "priest" || (p === hero && magOf(p) > p.atk * 1.2)) {
         var low = party.filter(function (q) { return q.alive && q.hp < q.mhp * 0.45; }).sort(function (a, b) { return a.hp / a.mhp - b.hp / b.mhp; })[0];
         if (low && (p.job === "priest" || rand() < 0.5)) {
-          var hv = Math.round(p.mag * 2.2 + p.lv * 2 + rand() * 6);
+          var hv = Math.round(magOf(p) * 2.2 + p.lv * 2 + rand() * 6);
           low.hp = Math.min(low.mhp, low.hp + hv);
           log("heal", L("heal", p.name, low.name, hv), { who: who, heal: party.indexOf(low) });
           return;
@@ -294,9 +304,9 @@
         return;
       }
       var t = pick(liveE);
-      if (p.job === "mage" || (p === hero && p.mag > p.atk && rand() < 0.45)) {
+      if (p.job === "mage" || (p === hero && magOf(p) > p.atk && rand() < 0.45)) {
         if (liveE.length > 1 && (p.job === "mage" || rand() < 0.5)) {
-          var da = Math.max(1, Math.round(p.mag * (0.9 + rand() * 0.3) - t.def * 0.15));
+          var da = Math.max(1, Math.round(magOf(p) * (0.9 + rand() * 0.3) - t.def * 0.15));
           log("spell", L("spellAll", p.name, "", da), { who: who, all: 1, dmg: da });
           liveE.forEach(function (e) {
             e.hp = Math.max(0, e.hp - da);
@@ -304,7 +314,7 @@
           });
           return;
         }
-        var ds = Math.max(1, Math.round(p.mag * (1.3 + rand() * 0.4) - t.def * 0.2));
+        var ds = Math.max(1, Math.round(magOf(p) * (1.3 + rand() * 0.4) - t.def * 0.2));
         hurtEnemy(t, ds, "spell", L("spell", p.name, t.name, ds), who);
         return;
       }
@@ -338,6 +348,7 @@
     }
 
     log("summon", L("summon", hero.name), { who: 0 });
+    if (gear.name) log("gear", L("gear", hero.name, gear.name));
     log("walk", L("depart", hero.name));
     var STEPS = 11;
     for (area = 0; area < 6; area++) {
@@ -390,7 +401,7 @@
         p.hp = p.mhp;
       });
       log("inn", L("inn"));
-      if (wpn < 5 && gold >= PRICE[wpn + 1]) { gold -= PRICE[wpn + 1]; wpn++; log("buy", L("buy", w(WEAPONS[wpn]))); }
+      if (wpn < 5 && gold >= PRICE[wpn + 1] && W_ATK[wpn + 1] > gear.atk) { gold -= PRICE[wpn + 1]; wpn++; log("buy", L("buy", w(WEAPONS[wpn]))); }
       if (arm < 5 && gold >= PRICE[arm + 1]) { gold -= PRICE[arm + 1]; arm++; log("buy", L("buy", w(ARMORS[arm]))); }
       var hb = Math.min(5, Math.floor(gold / 20));
       if (hb > 0) { herbs += hb; gold -= hb * 20; log("buy", L("buyH", "", "", hb)); }
