@@ -167,7 +167,7 @@
   function heroRows(L) {
     var rows = HEADS[L.style].concat(BODY).map(function (r) { return r.split(""); });
     if (L.cape >= 0) for (var y = 5; y < 10; y++) { if (rows[y][1] === ".") rows[y][1] = "c"; if (rows[y][2] === ".") rows[y][2] = "c"; }
-    WEAPON[L.weapon].forEach(function (p) { rows[p[1]][p[0]] = p[2]; });
+    (WEAPON[L.weapon] || []).forEach(function (p) { rows[p[1]][p[0]] = p[2]; });
     return rows.map(function (r) { return r.join(""); });
   }
   function shade(hex, k) {
@@ -177,7 +177,7 @@
   }
   var sprCache = {};
   function sprite(name, color, look) {
-    var obj = look && typeof look === "object";
+    var obj = name === "hero" && look && typeof look === "object";
     var key = name + color + (obj ? JSON.stringify(look) : look);
     if (sprCache[key]) return sprCache[key];
     var rows = obj ? heroRows(look) : SPR[name], c = document.createElement("canvas");
@@ -220,7 +220,7 @@
   var CX, CY, CR, QS, SH, BW = 135, BH, buf, bctx;
   var RATE = 15;                               /* 等速での1秒あたりのログの行数 */
   var FAST = 5;                                /* 冒険の再生の倍速 */
-  var lastSfx = 0;
+  var lastSfx = 0, starShown = 0;
 
   function place() {
     CX = W / 2; CY = Math.round(H * 0.42); CR = 230; QS = 290;
@@ -333,9 +333,29 @@
       stats: {
         hp: Math.round(30 + 30 * mix(f.size)), atk: Math.round(6 + 8 * r()), def: Math.round(3 + 8 * mix(f.dark)),
         mag: Math.round(3 + 10 * mix(f.sym)), spd: Math.round(4 + 10 * r()), luk: Math.round(2 + 10 * r()),
-        look: lookOf(r), trait: TRAIT_IDS[Math.floor(r() * TRAIT_IDS.length)], name: window.MahoSim.jumon(r, LANG)
+        look: lookOf(r), trait: TRAIT_IDS[Math.floor(r() * TRAIT_IDS.length)], name: window.MahoSim.jumon(r, LANG),
+        cls: clsOf(r)
       }
     };
+  }
+  /* レア度（★1〜★5）と、その★の職業 */
+  var STAR_P = [0.4, 0.3, 0.18, 0.09, 0.03];
+  function clsOf(r) {
+    var x = r(), star = 1;
+    for (var i = 0; i < STAR_P.length; i++) { if (x < STAR_P[i]) { star = i + 1; break; } x -= STAR_P[i]; }
+    var J = window.MahoSim.JOBS, list = Object.keys(J).filter(function (k) { return J[k][0] === star; });
+    return list[Math.floor(r() * list.length)];
+  }
+  /* 職業らしい見た目に寄せる [髪型, 武器(-1は素手), 鎧の色, マント] */
+  var JOB_LOOK = { jester: [1, -1], villager: [null, 1], thief: [4, 0], fighter: [null, -1], swordsman: [null, 0],
+    mage: [null, 2], priest: [null, 2, 6], knight: [3, 3], sage: [null, 2, null, 3], legend: [0, 0, null, 4] };
+  function dressUp(st) {
+    var j = JOB_LOOK[st.cls] || [], L = st.look;
+    if (j[0] != null) L.style = j[0];
+    if (j[1] != null) L.weapon = j[1];
+    if (j[2] != null) L.armor = j[2];
+    if (j[3] != null) L.cape = j[3];
+    return st;
   }
   /* 見た目（髪の色・髪型・肌・鎧の色・武器・マント）もコードから決める */
   var TRAIT_IDS = ["brave", "coward", "hasty", "lazy", "sly", "hot", "lucky", "glutton"];
@@ -347,7 +367,8 @@
     stopCamera();
     qr = { data: data, mat: mat, N: N };
     var A = heroOf(data, mat, N);
-    hero = A.stats;
+    hero = dressUp(A.stats);
+    starShown = 0;
     run = window.MahoSim.run(hero, { seed: A.seed, lang: LANG });
     if (force) run = force(A);
     state = S.SUMMON; sumT = 0;
@@ -401,7 +422,17 @@
     }
     if (state === S.SUMMON) {
       sumT += dt;
-      if (sumT > 5.2) startAdventure();
+      /* ★をひとつずつ出す。★4以上はお祝い */
+      var st = starOf(), want = Math.max(0, Math.min(st, Math.floor((sumT - 1.8) / 0.22) + 1));
+      while (starShown < want) {
+        starShown++;
+        tone(660 * Math.pow(1.19, starShown), 0.12, 0.05, "square");
+        if (starShown === st && st >= 4) {
+          window.zCelebrate.play(AC, st === 5 ? "fanfare" : "levelup", { volume: 0.8, delay: 0.1 });
+          if (st === 5) confetti.burst(W, H, 140);
+        }
+      }
+      if (sumT > 5.2 + (starOf() >= 4 ? 1.2 : 0)) startAdventure();
       return;
     }
     if (state === S.ADV) {
@@ -463,9 +494,10 @@
     return { data: "debug-" + seed, mat: mat, N: N };
   }
   function debugKey(n) {
-    /* 1: 試し用のQRで召喚  2: 冒険の終わり近くへ  3: 魔王に勝てる勇者を召喚（魔王の間の手前から） */
+    /* 1: 試し用のQRで召喚  2: 冒険の終わり近くへ  3: 魔王に勝てる勇者を召喚（魔王の間の手前から）  4: ★5の勇者を召喚 */
     var q = fakeQR(Math.floor(Math.random() * 1e6));
     if (n === 1) useQR(q.data, q.mat, q.N);
+    if (n === 4) useQR(q.data, q.mat, q.N, function (A) { A.stats.cls = "legend"; dressUp(A.stats); return window.MahoSim.run(A.stats, { seed: A.seed, lang: LANG }); });
     if (n === 2 && state === S.ADV) { evIdx = Math.max(evIdx, run.events.length - 25); }
     if (n === 3) {
       useQR(q.data, q.mat, q.N, function (A) {
@@ -498,7 +530,7 @@
   });
 
   function doShare() {
-    var tn = traitName(), nm = run.name + zT("（" + tn + "）", " (" + tn + ")", " (" + tn + ")", "（" + tn + "）", "（" + tn + "）");
+    var tn = traitName(), nm = "★" + starOf() + " " + jobName() + " " + run.name + zT("（" + tn + "）", " (" + tn + ")", " (" + tn + ")", "（" + tn + "）", "（" + tn + "）");
     var tag = zT(" #魔法陣ゲーム", " #MagicCircleQuest", " #MagicCircleQuest", " #MagicCircleQuest", " #MagicCircleQuest");
     var text = run.win
       ? zT("勇者" + nm + "が魔王をたおした！（Lv" + run.lv + "）", "Hero " + nm + " defeated the Demon King! (Lv" + run.lv + ")",
@@ -611,14 +643,32 @@
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(img, Math.round(x - img.width * sc / 2), Math.round(y - img.height * sc), img.width * sc, img.height * sc);
   }
+  function starOf() { var J = window.MahoSim.JOBS[hero.cls]; return J ? J[0] : 1; }
+  function jobName() { var t = (window.MahoSim.JOBS[hero.cls] || [0, []])[1]; return zT(t[0], t[1], t[2], t[3], t[4]); }
+  var STAR_C = ["#c8c8d8", "#7ad0ff", "#7aff8a", "#d08aff", "#ffd040"];
+  function drawStars(x, y, size, n) {
+    var st = starOf();
+    ctx.save();
+    ctx.font = "bold " + size + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (var i = 0; i < 5; i++) {
+      var sx = x + (i - 2) * size * 1.05;
+      ctx.fillStyle = i < n ? STAR_C[st - 1] : "rgba(255,255,255,.14)";
+      if (i < n && st >= 4) { ctx.shadowColor = STAR_C[st - 1]; ctx.shadowBlur = 14; } else ctx.shadowBlur = 0;
+      ctx.fillText("★", sx, y);
+    }
+    ctx.restore();
+  }
   function traitName() {
     var t = window.MahoSim.TRAITS[hero.trait] || [];
     return zT(t[0], t[1], t[2], t[3], t[4]);
   }
   function statRows() {
+    /* 職業の倍率をかけた値（冒険で使うのと同じ） */
+    var m = (window.MahoSim.JOBS[hero.cls] || [0, 0, [1, 1, 1, 1, 1, 1]])[2];
+    function v(x, i) { return Math.round(x * m[i]); }
     return [
-      ["HP", hero.hp, 60], [zT("攻撃", "ATK", "공격", "攻击", "攻擊"), hero.atk, 14], [zT("防御", "DEF", "방어", "防御", "防禦"), hero.def, 11],
-      [zT("魔力", "MAG", "마력", "魔力", "魔力"), hero.mag, 13], [zT("素早さ", "SPD", "민첩", "敏捷", "敏捷"), hero.spd, 14], [zT("運", "LUK", "운", "运气", "運氣"), hero.luk, 12]
+      ["HP", v(hero.hp, 0), 80], [zT("攻撃", "ATK", "공격", "攻击", "攻擊"), v(hero.atk, 1), 20], [zT("防御", "DEF", "방어", "防御", "防禦"), v(hero.def, 2), 15],
+      [zT("魔力", "MAG", "마력", "魔力", "魔力"), v(hero.mag, 3), 22], [zT("素早さ", "SPD", "민첩", "敏捷", "敏捷"), v(hero.spd, 4), 18], [zT("運", "LUK", "운", "运气", "運氣"), v(hero.luk, 5), 16]
     ];
   }
   function drawSummon() {
@@ -644,18 +694,20 @@
       var a = Math.min(1, (sumT - 1.6) / 0.4);
       ctx.save();
       ctx.globalAlpha = a;
-      var py = Math.round(H * 0.63), ph = Math.min(H - py - 20, 360);
+      var py = Math.round(H * 0.63), ph = Math.min(H - py - 16, 390);
       ctx.fillStyle = "rgba(10,8,20,.88)";
       ctx.strokeStyle = "#e8e0ff"; ctx.lineWidth = 4;
       ctx.fillRect(40, py, W - 80, ph); ctx.strokeRect(40, py, W - 80, ph);
       ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = "bold 40px monospace";
-      ctx.fillText(run.name, W / 2, py + 40, W - 120);
+      drawStars(W / 2, py + 34, 34, starShown);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 38px monospace";
+      ctx.fillText(run.name, W / 2, py + 80, W - 120);
       ctx.font = "bold 24px monospace"; ctx.fillStyle = "#ffd890";
-      ctx.fillText(traitName(), W / 2, py + 82, W - 120);
-      var rows = statRows(), rh = (ph - 116) / rows.length;
+      ctx.fillText(jobName() + " / " + traitName(), W / 2, py + 118, W - 120);
+      var rows = statRows(), rh = (ph - 150) / rows.length;
       rows.forEach(function (r, i) {
-        var y = py + 108 + i * rh + rh / 2;
+        var y = py + 140 + i * rh + rh / 2;
         ctx.textAlign = "left"; ctx.font = "bold 24px monospace"; ctx.fillStyle = "#cfc8ea";
         ctx.fillText(r[0], 66, y);
         ctx.textAlign = "right"; ctx.fillStyle = "#fff";
@@ -836,6 +888,10 @@
     ctx.fillStyle = "#fff";
     ctx.font = "bold 34px monospace";
     ctx.fillText(run.name, W / 2, H * 0.35);
+    drawStars(W / 2, H * 0.12, 40, starOf());
+    ctx.font = "bold 24px monospace"; ctx.fillStyle = "#ffd890";
+    ctx.fillText(jobName() + " / " + traitName(), W / 2, H * 0.385, W - 40);
+    ctx.fillStyle = "#fff";
     ctx.font = "800 56px sans-serif";
     ctx.fillText(run.win ? zT("魔王討伐", "Demon King Slain", "마왕 토벌", "讨伐魔王", "討伐魔王") : run.areaName, W / 2, H * 0.44, W - 40);
     ctx.font = "800 72px sans-serif";

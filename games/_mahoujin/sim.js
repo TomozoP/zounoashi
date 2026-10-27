@@ -53,6 +53,7 @@
     maou: ["魔王「よくぞ来た、{a}よ」", "Demon King: \"So you have come, {a}.\"", "마왕 「잘 왔다, {a}여」", "魔王「你终于来了，{a}」", "魔王「你終於來了，{a}」"],
     clear: ["魔王をたおした！ 世界に平和が戻った！", "The Demon King is defeated! Peace returns!", "마왕을 쓰러뜨렸다! 세계에 평화가 돌아왔다!", "打倒了魔王！世界恢复了和平！", "打倒了魔王！世界恢復了和平！"],
     flee: ["{a}は逃げ出した！", "{a} ran away!", "{a}은(는) 도망쳤다!", "{a}逃跑了！", "{a}逃跑了！"],
+    dance: ["{a}はおどっている", "{a} is dancing", "{a}은(는) 춤추고 있다", "{a}在跳舞", "{a}在跳舞"],
     yawn: ["{a}はあくびをしている", "{a} is yawning", "{a}은(는) 하품을 하고 있다", "{a}在打哈欠", "{a}在打哈欠"],
     steal: ["{a}は{b}から{c}ゴールドぬすんだ", "{a} stole {c} gold from {b}", "{a}은(는) {b}에게서 {c} 골드를 훔쳤다", "{a}从{b}那里偷了{c}金币", "{a}從{b}那裡偷了{c}金幣"],
     fire: ["{a}の血がたぎる！", "{a}'s blood is boiling!", "{a}의 피가 끓어오른다!", "{a}热血沸腾！", "{a}熱血沸騰！"],
@@ -122,7 +123,7 @@
   }
 
   /* 難しさ（勝率がごく低くなるように合わせた値） */
-  var K = { regen: 0.2, mhp: 4.5, matk: 1.5, mdef: 0.9, mexp: 0.7, bhp: 2.2, alv: 2.2, ex: 2.0, blv: 2, maouLv: 3, maouHp: 1.8, maouAtk: 1.2 };
+  var K = { regen: 0.2, mhp: 4.5, matk: 1.5, mdef: 0.9, mexp: 0.7, bhp: 2.2, alv: 2.2, ex: 2.0, blv: 2, maouLv: 3, maouHp: 2.6, maouAtk: 1.35 };
 
   /* 性格 [ja, en, ko, zh, tw] */
   var TRAITS = {
@@ -134,6 +135,19 @@
     hot: ["ねっけつ", "Hot-blooded", "열혈", "热血", "熱血"],
     lucky: ["ラッキー", "Lucky", "행운아", "幸运儿", "幸運兒"],
     glutton: ["くいしんぼう", "Glutton", "먹보", "贪吃鬼", "貪吃鬼"]
+  };
+  /* 職業 [★, 名前5言語, 能力の倍率 hp atk def mag spd luk] */
+  var JOBS = {
+    jester: [1, ["遊び人", "Jester", "놀이꾼", "艺人", "藝人"], [0.8, 0.75, 0.7, 0.6, 1.1, 1.6]],
+    villager: [1, ["村人", "Villager", "마을 사람", "村民", "村民"], [0.85, 0.8, 0.8, 0.5, 0.9, 1.0]],
+    thief: [2, ["盗賊", "Thief", "도적", "盗贼", "盜賊"], [0.9, 0.95, 0.85, 0.6, 1.4, 1.3]],
+    fighter: [2, ["武闘家", "Martial Artist", "무도가", "武斗家", "武鬥家"], [1.0, 1.2, 0.9, 0.4, 1.2, 1.0]],
+    swordsman: [3, ["剣士", "Swordsman", "검사", "剑士", "劍士"], [1.1, 1.2, 1.1, 0.6, 1.0, 1.0]],
+    mage: [3, ["魔法使い", "Mage", "마법사", "魔法师", "魔法師"], [0.9, 0.7, 0.85, 1.6, 1.0, 1.0]],
+    priest: [3, ["僧侶", "Priest", "성직자", "僧侣", "僧侶"], [1.05, 0.85, 1.1, 1.35, 0.9, 1.0]],
+    knight: [4, ["騎士", "Knight", "기사", "骑士", "騎士"], [1.3, 1.25, 1.35, 0.6, 0.9, 1.0]],
+    sage: [4, ["賢者", "Sage", "현자", "贤者", "賢者"], [1.1, 0.9, 1.1, 1.8, 1.1, 1.1]],
+    legend: [5, ["伝説の勇者", "Legendary Hero", "전설의 용사", "传说中的勇者", "傳說中的勇者"], [1.45, 1.45, 1.4, 1.4, 1.3, 1.3]]
   };
   /* 呪文のような名前（コードから決まる文字の並び） */
   var KANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわがぎぐげござじずぜぞだでどばびぶべぼぱぴぷぺぽ";
@@ -167,6 +181,11 @@
     function ri(a, b) { return a + Math.floor(rand() * (b - a + 1)); }
     function pick(arr) { return arr[Math.floor(rand() * arr.length)]; }
 
+    var CL = JOBS[base.cls];
+    if (CL) {
+      var m = CL[2];
+      base = { hp: Math.round(base.hp * m[0]), atk: base.atk * m[1], def: base.def * m[2], mag: base.mag * m[3], spd: base.spd * m[4], luk: base.luk * m[5], look: base.look, trait: base.trait, name: base.name, cls: base.cls };
+    }
     var events = [];
     var area = 0, prog = 0, gold = 0, herbs = 1, wpn = 0, arm = 0;
     var enemies = [];
@@ -253,6 +272,7 @@
     }
     function partyAct(p, liveE, hot) {
       var who = party.indexOf(p);
+      if (base.cls === "jester" && rand() < 0.1) { log("yawn", L("dance", p.name), { who: who }); return; }
       if (TR === "lazy" && rand() < 0.07) { log("yawn", L("yawn", p.name), { who: who }); return; }
       if (TR === "sly" && rand() < 0.1) { var st = ri(3, 10) * (area + 1); gold += st; log("steal", L("steal", p.name, liveE[0].name, st), { who: who }); return; }
       /* 回復 */
@@ -384,5 +404,5 @@
     }
   }
 
-  global.MahoSim = { run: run, AREAS: AREAS, rngOf: rngOf, TRAITS: TRAITS, jumon: jumon };
+  global.MahoSim = { run: run, AREAS: AREAS, rngOf: rngOf, TRAITS: TRAITS, JOBS: JOBS, jumon: jumon };
 })(typeof window !== "undefined" ? window : globalThis);
