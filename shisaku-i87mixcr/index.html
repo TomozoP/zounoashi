@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="atari-1793056361231">
+<meta name="preview-version" content="mahoujin-1793142690948">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>【プレビュー】あたり引くだけくじ</title>
+<title>【プレビュー】魔法陣ゲーム</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -16,8 +16,9 @@
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
   #start[hidden] { display:none; }
-  #share-button, #kuji-share { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
-  #share-button[hidden], #kuji-share[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden], #photo-button[hidden] { display:none; }
+  #photo-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
   /* 制作中の確認ページであることを常に見せる。canvasの外なので録画には入らない */
   #preview-label { position:fixed; left:0; right:0; top:0; z-index:10; padding:4px 0; background:#e8443a; color:#fff; font:bold 14px sans-serif; text-align:center; letter-spacing:.2em; pointer-events:none; }
@@ -31,25 +32,24 @@
   <canvas id="c"></canvas>
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
-  <button id="kuji-share" type="button" aria-label="Xでシェア" hidden></button>
+  <button id="photo-button" type="button" aria-label="画像を選ぶ" hidden></button>
+  <input id="photo-input" type="file" accept="image/*" hidden>
 </div></div>
-<script src="../games/start.js?v=atari-1793056361231"></script>
-<script src="../games/view.js?v=atari-1793056361231"></script>
-<script src="../games/audio.js?v=atari-1793056361231"></script>
-<script src="../games/lang.js?v=atari-1793056361231"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=atari-1793056361231"></script>
-<script src="../games/celebrate.js?v=atari-1793056361231"></script>
-<script src="../games/result-actions.js?v=atari-1793056361231"></script>
-<script src="../games/action-icons.js?v=atari-1793056361231"></script>
-<script src="../games/pad.js?v=atari-1793056361231"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/start.js?v=mahoujin-1793142690948"></script>
+<script src="../games/view.js?v=mahoujin-1793142690948"></script>
+<script src="../games/audio.js?v=mahoujin-1793142690948"></script>
+<script src="../games/lang.js?v=mahoujin-1793142690948"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=mahoujin-1793142690948"></script>
+<script src="../games/result-actions.js?v=mahoujin-1793142690948"></script>
+<script src="../games/action-icons.js?v=mahoujin-1793142690948"></script>
+<script src="../games/pad.js?v=mahoujin-1793142690948"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/celebrate.js?v=mahoujin-1793142690948"></script>
+<script src="jsQR.js?v=mahoujin-1793142690948"></script>   <!-- QRの読み取り（Apache-2.0） -->
+<script src="sim.js?v=mahoujin-1793142690948"></script>
 <script>
-/* あたり引くだけくじ
-
-   書き換えるところの目印は3つ。
-     ▼UPDATE … 進行と入力
-     ▼DRAW   … 絵
-     ▼SHARE  … シェアの文
-   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
+/* 魔法陣ゲーム
+   魔法陣を描く → 形から勇者の名前とステータスが決まる → 冒険を見守る（上で冒険、下にログ）。
+   冒険の中身は sim.js が召喚のときに最後まで計算し、ここでは1行ずつ高速に再生する。 */
 (function () {
   "use strict";
 
@@ -58,33 +58,24 @@
   var wrap = document.getElementById("wrap");
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
-  /* 結果画面の「作者をフォロー」（共通。ボタン列の下に控えめに出す） */
   var followLink = window.zResultActions.follow.link(shareButton.parentNode);
-  /* 遊んでいる間の右上のシェア：さっき引いたくじの言葉をポストする */
-  var kujiShare = document.getElementById("kuji-share");
-  window.zResultActions.bind(kujiShare, shareKuji);
+  var LANG = window.zLangFull || "ja";
 
-  /* ============ 画面 ============
-     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
-     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
+  /* ============ 画面 ============ */
   var W = 540, H = 960;
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
-
-    place();                                   /* 高さが決まってから置き直す */
-
+    place();
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+    setupPix();
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
 
-  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  /* ============ 音 ============ */
   var AC = null, NOISE = null;
-  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
-  function resumeAudio() {
-    window.zAudioResume(AC);
-  }
+  function resumeAudio() { window.zAudioResume(AC); }
   wrap.addEventListener("touchstart", audioOn, { passive: true });
   wrap.addEventListener("touchend", resumeAudio, { passive: true });
   wrap.addEventListener("pointerup", resumeAudio, true);
@@ -128,264 +119,589 @@
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
     else { try { AC.resume(); } catch (e) {} }
   });
+  /* 音の並び [周波数, 遅れ(秒), 長さ(秒)]。節はすべて自作 */
+  function seq(list, type, vol) {
+    list.forEach(function (n) { tone(n[0], n[2], vol, type, 0, n[1]); });
+  }
+  function sweep(dur, f0, f1, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter(), g = AC.createGain(), n = AC.currentTime;
+    f.type = "bandpass"; f.Q.value = q || 2;
+    f.frequency.setValueAtTime(f0, n); f.frequency.exponentialRampToValueAtTime(f1, n + dur);
+    g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(vol, n + dur * 0.4); g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  /* 地域に入ったときの短い合図（地域ごとに音色と和音を変える） */
+  var AREA_SND = [
+    [[[523, 0, 0.1], [659, 0.08, 0.1], [784, 0.16, 0.22]], "triangle"],
+    [[[440, 0, 0.12], [523, 0.1, 0.12], [659, 0.2, 0.26]], "sine"],
+    [[[294, 0, 0.14], [349, 0.12, 0.14], [440, 0.24, 0.3]], "triangle"],
+    [[[1319, 0, 0.08], [988, 0.07, 0.08], [1568, 0.14, 0.3]], "sine"],
+    [[[196, 0, 0.14], [233, 0.12, 0.14], [294, 0.24, 0.3]], "sawtooth"],
+    [[[247, 0, 0.18], [294, 0.16, 0.18], [349, 0.32, 0.4]], "square"]
+  ];
+  function sfx(k) {
+    switch (k) {
+      case "atk": noiseHit(0.06, 1800, 0.07, 2); tone(220, 0.05, 0.03, "square", 110); break;
+      case "crit": noiseHit(0.1, 2400, 0.1, 2); tone(880, 0.08, 0.04, "square", 440); tone(1760, 0.1, 0.03, "square", 0, 0.05); break;
+      case "spell": tone(500, 0.12, 0.04, "triangle", 1400); sweep(0.15, 800, 3000, 0.04); break;
+      case "heal": tone(660, 0.08, 0.04, "sine", 990); tone(990, 0.1, 0.03, "sine", 0, 0.06); tone(1320, 0.12, 0.02, "sine", 0, 0.12); break;
+      case "hit": noiseHit(0.07, 700, 0.08, 1.5); tone(160, 0.06, 0.04, "square", 90); break;
+      case "dodge": sweep(0.12, 3000, 900, 0.05, 1.5); break;
+      case "miss": sweep(0.1, 1500, 600, 0.03, 1); break;
+      case "kill": tone(440, 0.07, 0.04, "square", 880); noiseHit(0.08, 3200, 0.04, 3); break;
+      case "won": seq([[659, 0, 0.06], [988, 0.06, 0.1]], "square", 0.03); break;
+      case "lv": seq([[784, 0, 0.06], [988, 0.06, 0.06], [1319, 0.12, 0.14]], "square", 0.04); break;
+      case "fall": tone(300, 0.25, 0.06, "triangle", 90); break;
+      case "boss": tone(110, 0.5, 0.08, "sawtooth", 70); noiseHit(0.5, 150, 0.08, 0.7); break;
+      case "gate": tone(82, 0.9, 0.08, "sawtooth", 55); noiseHit(0.8, 120, 0.1, 0.6); break;
+      case "maou": seq([[147, 0, 0.3], [139, 0.25, 0.3], [131, 0.5, 0.5]], "sawtooth", 0.05); break;
+      case "chest": seq([[1046, 0, 0.06], [1568, 0.05, 0.12]], "square", 0.04); break;
+      case "buy": case "steal": seq([[1568, 0, 0.05], [2093, 0.05, 0.12]], "square", 0.035); break;
+      case "town": seq([[523, 0, 0.12], [659, 0.1, 0.12], [587, 0.2, 0.12], [784, 0.3, 0.24]], "triangle", 0.04); break;
+      case "inn": seq([[392, 0, 0.18], [523, 0.16, 0.18], [659, 0.32, 0.4]], "sine", 0.05); break;
+      case "revive": seq([[523, 0, 0.1], [784, 0.08, 0.2]], "sine", 0.04); break;
+      case "spring": seq([[880, 0, 0.06], [1175, 0.07, 0.06], [988, 0.14, 0.06], [1319, 0.21, 0.12]], "sine", 0.04); break;
+      case "trap": noiseHit(0.15, 400, 0.08, 1); tone(140, 0.15, 0.05, "square", 80); break;
+      case "yawn": tone(300, 0.3, 0.04, "sine", 200); break;
+      case "fire": tone(200, 0.25, 0.05, "sawtooth", 600); break;
+      case "flee": seq([[700, 0, 0.04], [600, 0.05, 0.04], [500, 0.1, 0.04], [400, 0.15, 0.04]], "square", 0.03); break;
+      case "summon": sweep(0.4, 600, 4000, 0.05); break;
+      case "enter": break;
+      case "curse": tone(180, 0.3, 0.05, "sawtooth", 120); break;
+      case "gear": seq([[988, 0, 0.06], [1319, 0.05, 0.14]], "triangle", 0.04); break;
+    }
+  }
+  /* 負けたときの自作の短い下がり節 */
+  function sadPhrase() { seq([[523, 0, 0.22], [466, 0.22, 0.22], [392, 0.44, 0.22], [311, 0.66, 0.6]], "triangle", 0.06); }
+
+  /* ============ ドット絵 ============ */
+  var SPR = {
+    hero: ["...hhhh...", "..hhhhhh..", "..hhsskh..", "..hsssss..", "...ssss..w", "..aaaaa..w", ".saaaaaasw", ".s.aaaa..y", "...aaaa...", "...a..a...", "...b..b...", "..bb..bb.."],
+    warrior: ["...mmmm...", "..mmmmmm..", "..mssskm..", "..msssss..", "...ssss.xx", ".mmaaaamxx", ".saaaaaas.", ".s.aaaa...", "...aaaa...", "...a..a...", "...m..m...", "..mm..mm.."],
+    mage: ["....pp....", "...pppp..o", "..pppppp.t", ".ppppppppt", "...sssk..t", "...ssss..t", "..rrrrr..t", ".srrrrrrst", "..rrrrr..t", "..rrrrr...", ".rrrrrrr..", "..b...b..."],
+    priest: ["...cccc...", "..ccyycc..", "..csssk...", "..ssssss..", "...ssss...", "..ccccc...", ".scccccs..", "..ccycc...", "..ccycc...", "..ccccc...", ".ccccccc..", "..b...b..."],
+    thief: ["...gggg...", "..gggggg..", "..ggsskg..", "..gsssss..", "...ssss...", "..gaaaa...", ".saaaaaasd", ".s.aaaa...", "...aaaa...", "...a..a...", "...b..b...", "..bb..bb.."],
+    tomb: ["..........", "..........", "..........", "..........", "....qq....", "..qqqqqq..", "....qq....", "....qq....", "....qq....", "...qqqq...", "..qqqqqq..", ".QQQQQQQQ."],
+    slime: ["............", "............", "............", "............", ".....cc.....", "....cccc....", "...cwcccc...", "..cwccccccc.", "..ckcckcccc.", ".cccccccccc.", ".cccddddccc.", "..dddddddd.."],
+    bat: ["............", "c..........c", "cc...cc...cc", "ccc.cccc.ccc", "cccccccccccc", "ccc.ckkc.ccc", "cc..cccc..cc", "c....ww....c", "............", "............", "............", "............"],
+    beast: ["............", "............", "............", "..c.........", ".ccc........", "ckcccccccc..", "cccccccccccc", "wcccccccccc.", ".cddcccccdc.", ".dc.d..d.cd.", ".d..d..d..d.", ".d..d..d..d."],
+    ghost: ["............", "....cccc....", "...cccccc...", "..cckcckcc..", "..cccccccc..", "..cccwwccc..", "..cccccccc..", "..cccccccc..", "..cccccccc..", "..c.cc.cc.c.", "............", "............"],
+    skel: ["....cccc....", "...ckcckc...", "...cccccc...", "....cdcd....", "..s..cc.....", "..s.cccc....", "..scc..cc...", "..y.cccc....", ".....cc.....", "....c..c....", "....c..c....", "...cc..cc..."],
+    golem: ["....cccc....", "...ckcckc...", "...cccccc...", ".cccccccccc.", "cccdccccdccc", "ccc.cccc.ccc", "cc..cdcc..cc", "....cccc....", "...cc..cc...", "...cc..cc...", "..ccc..ccc..", "..ddd..ddd.."],
+    dragon: ["............", "..cc......l.", ".ckcc....ll.", "ccccc...lll.", "wwcc...llll.", "..cc..clll..", "..cccccccc..", ".cccdddccccc", ".ccdddddcc.c", "..ccccccc..c", "..c.c..c.c..", ".cc.cc.cc.cc"],
+    maou: ["..y......y..", "..yy....yy..", "...yccccy...", "...crkkrc...", "...cccccc...", "..pppccppp..", ".ppppccpppp.", "pppcccccccpp", "pp.cccccc.pp", "p..cccccc..p", "...cc..cc...", "..ccc..ccc.."]
+  };
+  var HAIR = ["#f4d03f", "#8b4a1a", "#2a2a33", "#e04848", "#4a80e0", "#e8e8f0", "#3ac06a", "#ff8ac8"];
+  var ARMOR = ["#3a6ad8", "#c83a3a", "#3aa04a", "#8a4ad8", "#d8a03a", "#2ab0b0", "#e8e8f0", "#3a3a48"];
+  var SKIN = ["#f2c8a0", "#e0a878", "#b87850", "#8a5434"];
+  /* 勇者の頭（髪型）5種と体。武器は右手（列9）に重ねる */
+  var HEADS = [
+    ["...hhhh...", "..hhhhhh..", "..hhsskh..", "..hsssss..", "...ssss..."],
+    ["..h.h.h...", ".hhhhhhh..", "..hhsskh..", "..hsssss..", "...ssss..."],
+    ["...hhhh...", "..hhhhhh..", ".hhhsskh..", ".hhsssss..", ".hh.ssss.."],
+    ["...mmmm...", "..mmmmmm..", "..mmsskm..", "..msssss..", "...ssss..."],
+    ["..........", "..hhhhhh..", "..aaaaaa..", "..hsssks..", "...ssss..."]
+  ];
+  var BODY = ["..aaaaa...", ".saaaaaas.", ".s.aaaa...", "...aaaa...", "...a..a...", "...b..b...", "..bb..bb.."];
+  var WEAPON = [
+    [[9, 3, "w"], [9, 4, "w"], [9, 5, "w"], [9, 6, "w"], [9, 7, "y"]],
+    [[8, 3, "x"], [9, 3, "x"], [8, 4, "x"], [9, 4, "t"], [9, 5, "t"], [9, 6, "t"], [9, 7, "t"]],
+    [[9, 2, "o"], [9, 3, "t"], [9, 4, "t"], [9, 5, "t"], [9, 6, "t"], [9, 7, "t"], [9, 8, "t"], [9, 9, "t"]],
+    [[9, 0, "w"], [9, 1, "w"], [9, 2, "t"], [9, 3, "t"], [9, 4, "t"], [9, 5, "t"], [9, 6, "t"], [9, 7, "t"], [9, 8, "t"]]
+  ];
+  /* 職業ごとの頭と体（剣士は髪型つきの基本形）。a は主の色、d は濃い布、W は白、r は赤 */
+  var JOB_SPR = {
+    jester: [["r......a..", "rr....aa..", ".rrryaaa..", "..sssk....", "..ssss...."],
+      ["..rarar...", ".sararars.", ".s.rara...", "...arar...", "...r..a...", "...b..b...", "..bb..bb.."]],
+    villager: [["...yyyy...", ".yyyyyyyy.", "..hsssk...", "..hsssss..", "...ssss..."],
+      ["..aaaaa...", ".saaaaaas.", ".s.aaaa...", "...tttt...", "...t..t...", "...b..b...", "..bb..bb.."]],
+    thief: [["...dddd...", "..dddddd..", "..ddsskd..", "..dddddd..", "...dddd..."],
+      ["..ddddd...", ".sdddddds.", ".s.yaaa...", "...dddd...", "...d..d...", "...d..d...", "..bb..bb.."]],
+    fighter: [["...hhhh...", "..hhhhhh..", "..aaaaaa..", "..hsssks..", "...ssss..."],
+      ["..WWWWW...", "ssWWWWWWs.", "...kkkk...", "...WWWW...", "...W..W...", "...s..s...", "..ss..ss.."]],
+    mage: [[".....aa...", "....aaa...", "...aaaa...", ".aaaaaaaa.", "..hsssk..."],
+      ["..aaaaa...", ".saaaaaas.", "..aaaaa...", "..aaaaa...", ".aaaaaaa..", ".aaaaaaa..", "..b...b..."]],
+    priest: [["...WWWW...", "..WWyWWW..", "..Wsssk...", "..Wsssss..", "...ssss..."],
+      ["..WaWWW...", ".sWaWWWWs.", "..WaWyW...", "..WaWyW...", "..WWWWW...", ".WWWWWWW..", "..b...b..."]],
+    knight: [["....aa....", "...mmmm...", "..mmmmmm..", "..mmkkkm..", "...mmmm..."],
+      ["..maaam...", "aamaaaams.", "aya.aaa...", "aaamaam...", ".a.m..m...", "...m..m...", "..mm..mm.."]],
+    sage: [["...hhhh...", "..yyyyyy..", ".hhhsskh..", ".hhsssss..", ".hh.ssss.."],
+      ["..ayyya...", ".saaaaaas.", "..aayaa...", "..aayaa...", ".aaayaaa..", ".aaaaaaa..", "..b...b..."]],
+    legend: [["..y.y.y...", "..yyyyyy..", "..hhsskh..", "..hsssss..", "...ssss..."],
+      ["..yaaay...", ".saaaaaas.", ".s.ayya...", "...aaaa...", "...y..y...", "...m..m...", "..mm..mm.."]]
+  };
+  function heroRows(L) {
+    var J = JOB_SPR[L.job];
+    var rows = (J ? J[0].concat(J[1]) : HEADS[L.style].concat(BODY)).map(function (r) { return r.split(""); });
+    if (L.cape >= 0 && L.job !== "knight") for (var y = 5; y < 10; y++) { if (rows[y][1] === ".") rows[y][1] = "c"; if (rows[y][2] === ".") rows[y][2] = "c"; }
+    (WEAPON[L.weapon] || []).forEach(function (p) { rows[p[1]][p[0]] = p[2]; });
+    return rows.map(function (r) { return r.join(""); });
+  }
+  function shade(hex, k) {
+    var n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+    function f(v) { return Math.max(0, Math.min(255, Math.round(k < 0 ? v * (1 + k) : v + (255 - v) * k))); }
+    return "rgb(" + f(r) + "," + f(g) + "," + f(b) + ")";
+  }
+  var sprCache = {};
+  function sprite(name, color, look) {
+    var obj = name === "hero" && look && typeof look === "object";
+    var key = name + color + (obj ? JSON.stringify(look) : look);
+    if (sprCache[key]) return sprCache[key];
+    var rows = obj ? heroRows(look) : SPR[name], c = document.createElement("canvas");
+    c.width = rows[0].length; c.height = rows.length;
+    var g = c.getContext("2d");
+    var pal = {
+      k: "#141018", s: "#f2c8a0", w: name === "dragon" ? shade(color, 0.5) : "#f4f4f4", y: "#f0d050", b: "#5a3a22",
+      h: HAIR[look % 6], a: ARMOR[(look * 5 + 1) % 6], m: "#b8bcc8", x: "#c8ccd8", p: "#3a4ab8", r: "#4a5ad0", o: "#ffe060",
+      t: "#8a5a2a", c: name === "priest" ? "#f4f0e8" : color, g: "#3a8a4a", d: name === "thief" ? "#d8dce8" : shade(color || "#888888", -0.35),
+      q: "#9a9aa8", Q: "#5a5a68", l: shade(color || "#888888", 0.35)
+    };
+    if (name === "maou") { pal.c = "#6a4a9a"; pal.p = "#7a1020"; pal.r = "#ff3030"; pal.y = "#e8e0c8"; }
+    if (name === "slime" || name === "ghost") pal.w = "#ffffff";
+    if (obj) {
+      pal.h = HAIR[look.hair]; pal.a = ARMOR[look.armor]; pal.s = SKIN[look.skin]; pal.c = look.cape >= 0 ? shade(ARMOR[look.cape], -0.25) : "";
+      pal.d = "#2c2a3a"; pal.W = "#f4f2ea"; pal.r = "#e04848";
+      if (look.job === "jester" && look.armor === 1) pal.a = "#f0d040";
+      if (look.job === "legend") { pal.a = "#3a6ad8"; pal.c = "#c02a2a"; pal.w = "#fffbe0"; }
+    }
+    for (var y = 0; y < rows.length; y++) for (var x = 0; x < rows[y].length; x++) {
+      var ch = rows[y][x];
+      if (ch === ".") continue;
+      g.fillStyle = pal[ch] || "#f0f";
+      g.fillRect(x, y, 1, 1);
+    }
+    sprCache[key] = c;
+    return c;
+  }
+
+  /* 場所ごとの色 [空上, 空下, 遠景, 地面, 地面の影, 近景] */
+  var BG = [
+    ["#5aa8f0", "#bfe6ff", "#6cc06a", "#7ccf4a", "#5a9a30", "#3f8a3a"],
+    ["#245a40", "#4f8a5a", "#1f4a2e", "#4a7a32", "#2e5220", "#163a20"],
+    ["#140f1c", "#2a2232", "#3a3044", "#4e4450", "#2e2834", "#5a4e64"],
+    ["#7aa0d0", "#d8e8f8", "#f0f4ff", "#e8f0ff", "#b0c4e0", "#c8d8f0"],
+    ["#3a0e0e", "#8a2a10", "#2a1818", "#40302c", "#ff6a1a", "#1e1212"],
+    ["#120a22", "#2a1440", "#3a3050", "#4a4060", "#2a2440", "#5a4a78"]
+  ];
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", WIN: "win", RESULT: "result" };
-  var state, score, T, held, keyMode = false;
-
-  /* ハズレは全部「あた」で始まり、3文字目は「り」以外（全部文章）。あたりは1本だけ */
-  var HAZURE = "あたまが痛いです あたまをなでてほしい あたらしい靴を買った あたためますか？ あたしはハズレ あたまから行こう あたまでは分かってる あたらしい風が吹く あたたかいお茶どうぞ あたため直してね あたえられた仕事 あたまが真っ白 あたったら教えて あたったことがない あたるも八卦 あたらしい電話 あたまいいね あたまを使おう あたまに乗せてみて あたふたしないで あたいの事キライなんだろ あたかも当たりのように あたみに行きたい あたしが当たりよ あたまを冷やそう あたまを下げてね あたらしい自分 あたらしい朝が来た あたらしいのが欲しい あたらないでね あたらなかったね あたらずとも遠からず あたるとうれしい あたるかなあ あたる気がしない あたるまでやる あたっていますか あたって砕けろ あたっちゃった？ あたったかも あたためておくね あたためてから あたためすぎた あたたかい手だね あたたかい布団 あたたかくしてね あたたまるねえ あたしに任せて あたしもそう思う あたしのせいじゃない あたしってダメね あたしでいいの？ あたいを誰だと思ってる あたいに任せな あたかも本物だ あたかも夢のよう あたふたしてきた あたふたするな あたまの体操 あたまがかゆい あたまがボサボサ あたまを抱える あたまをぶつけた あたまにきた あたまを切り替えて あたまの中は真っ白 あたまが上がらない あたまうちだね あたまでっかちだね あたま数が足りない あたまから落ちた あたえる喜び あたえすぎはダメ あたえた物は返る あたみで温泉 あたみのお土産 あたごやまに登る あたらしい友だち あたらしいくじを引く あたらしい世界へ あたしもう帰る あたたかい味噌汁 あたまいいフリ あたまをスッキリ あたるも当たらぬも あたれあたれあたれ あたろうとしている あたらんかったわ あたまが割れそう あたまが冴えてきた あたらしい帽子だよ あたためた牛乳 あたたかい風が吹く あたふたしちゃうね あたかも知ってたかのよう あたしの番だね あたいは知らない あたるといいなあ あたたたたたたたたたたたたたたたたたたたたたたたたたたたぁ！ あたしのこと覚えてる？".split(" ");
-  var ATARI = "あたり";
-
-  var STEP = 38;                               /* 文字の間（棒の上の長さ） */
-  var MY, CX = 270, RX = 226, RY = 40;         /* 筒の口 */
-  var sticks, flying, popup, confetti, sel, grab, winT, lastWord;
+  var S = { INTRO: "intro", SCAN: "scan", SUMMON: "summon", ADV: "adv", RESULT: "result" };
+  var state, T, held = false, keyMode = false;
+  var qr, readFail = -9;
+  var hero, run, ev, evIdx, evAcc, logLines, logScroll, scroll, pops, anim, endT, sumT, confetti, hideUI = false;
+  var CX, CY, CR, QS, SH, BW = 135, BH, buf, bctx;
+  var RATE = 15;                               /* 等速での1秒あたりのログの行数 */
+  var FAST = 5;                                /* 冒険の再生の倍速 */
+  var lastSfx = 0, starShown = 0, sndHero = false, lastPing = 0, lastStep = 0;
 
   function place() {
-    MY = Math.round(H * 0.64);
+    CX = W / 2; CY = Math.round(H * 0.42); CR = 230; QS = 290;
+    SH = Math.round(H * 0.4 / 4) * 4;
   }
-
-  function shuffle(a) {
-    for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; }
-    return a;
-  }
-
-  function makeSticks() {
-    var words = shuffle(HAZURE.concat([ATARI]));
-    var list = [];
-    for (var i = 0; i < words.length; i++) {
-      var w = words[i];
-      var z = Math.random();                   /* 奥0〜手前1 */
-      var xm = CX + (Math.random() * 2 - 1) * (RX - 34) * Math.sqrt(1 - Math.pow(z * 2 - 1, 2) * 0.5);
-      var a = (xm - CX) / RX * 0.26 + (Math.random() - 0.5) * 0.06;
-      var dy = (z - 0.5) * RY * 1.2;
-      /* 最初は棒の先（1文字分の余白）だけが見えていて、1文字目からは筒の手前のふちに隠れている */
-      var gap = (RY * Math.sqrt(Math.max(0, 1 - Math.pow((xm - CX) / RX, 2))) - dy) / Math.cos(a) + 4;
-      list.push({
-        word: w, z: z, xm: xm, dy: dy, a: a, gap: gap,
-        dx: Math.sin(a), dyu: -Math.cos(a),     /* 上向き */
-        v: STEP - gap + Math.random() * 30 - 6,                        /* 口から上に出ている長さ（棒の先から1文字分あけて1文字目） */
-        len: gap + w.length * STEP + STEP,       /* 言葉の下も1文字分あける */        /* 口から下に埋まっている長さ */
-        p: 0, hue: Math.random()
-      });
+  /* ドットを画面の画素にぴったり合わせる。
+     ドット1つ = 端末の画素 PX 個（整数）。ゲームの座標では U（だいたい4） */
+  var PX = 4, U = 4, floorCv = document.createElement("canvas");
+  function setupPix() {
+    var k = canvas.width / W;
+    PX = Math.max(1, Math.round(4 * k));
+    U = PX / k;
+    BW = Math.ceil(canvas.width / PX);
+    BH = Math.ceil(SH * k / PX);
+    buf = document.createElement("canvas"); buf.width = BW; buf.height = BH;
+    bctx = buf.getContext("2d");
+    /* 石の床もドットで一度だけ描いておく */
+    var fw = Math.ceil(canvas.width / PX) + 2, fh = Math.ceil(canvas.height / PX) + 2;
+    floorCv.width = fw; floorCv.height = fh;
+    var g = floorCv.getContext("2d");
+    g.fillStyle = "#16121e"; g.fillRect(0, 0, fw, fh);
+    for (var y = 0, row = 0; y < fh; y += 9, row++) for (var x = row % 2 ? -7 : 0; x < fw; x += 14) {
+      var v = ((x * 31 + y * 17) % 7 + 7) % 7;
+      g.fillStyle = v < 2 ? "#231d2e" : v < 4 ? "#1f1929" : "#1c1725";
+      g.fillRect(x + 1, y + 1, 13, 8);
+      g.fillStyle = "rgba(255,255,255,.035)"; g.fillRect(x + 1, y + 1, 13, 1);
     }
-    list.sort(function (A, B) { return A.z - B.z; });
-    return list;
+  }
+  /* 小さな絵を、今の位置で整数倍に拡大して画素に合わせて置く（揺れなどの平行移動も効く） */
+  function blitPix(img, dx, dy, q) {
+    var m = ctx.getTransform();
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, Math.round(dx + m.e), Math.round(dy + m.f), img.width * q, img.height * q);
+    ctx.restore();
   }
 
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
-    state = S.PLAY;
-    score = 0;
-    T = 0;
-    held = false;
-    sticks = makeSticks();
-    flying = [];
-    popup = null;
-    grab = null;
-    sel = 0;
-    winT = 0;
-    lastWord = null;
-    confetti = window.zCelebrate ? window.zCelebrate.confetti() : null;
-    if (confetti) confetti.rain = false;
+    state = S.SCAN;
+    T = 0; held = false;
+    qr = null; readFail = -9; hasPhoto = false;
+    hero = null; run = null; ev = null;
+    if (confetti) confetti.clear();
   }
+  function beginScan() { newRound(); startCamera(); }
 
-  /* 棒の上の点（tip から s 下）。引いた分 p だけ上にずれる */
-  function mouthY(st) { return MY + st.dy; }
-  function pt(st, s) {
-    var k = st.v + st.p - s;
-    return { x: st.xm + st.dx * k, y: mouthY(st) + st.dyu * k };
+  /* ============ QRを読む ============
+     カメラに映ったQR（または選んだ画像のQR）を読み取り、その模様をそのまま魔法陣にする。 */
+  var video = null, stream = null, lastScan = 0;
+  var scanCv = document.createElement("canvas"), scanCtx = scanCv.getContext("2d", { willReadFrequently: true });
+  var photoButton = document.getElementById("photo-button"), photoInput = document.getElementById("photo-input");
+  ["pointerdown", "pointerup"].forEach(function (name) { photoButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  photoButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); tone(1200, 0.04, 0.04, "square"); photoInput.click(); });
+  photoInput.addEventListener("change", function () {
+    var f = photoInput.files && photoInput.files[0];
+    photoInput.value = "";
+    if (!f || state !== S.SCAN) return;
+    var url = URL.createObjectURL(f), im = new Image();
+    im.onload = function () {
+      URL.revokeObjectURL(url);
+      var k = Math.min(1, 1200 / Math.max(im.width, im.height));
+      scanCv.width = Math.round(im.width * k); scanCv.height = Math.round(im.height * k);
+      scanCtx.drawImage(im, 0, 0, scanCv.width, scanCv.height);
+      photoBg.width = scanCv.width; photoBg.height = scanCv.height;
+      photoBg.getContext("2d").drawImage(scanCv, 0, 0);
+      hasPhoto = true;
+      if (!tryRead()) { readFail = T; seq([[220, 0, 0.12], [165, 0.13, 0.2]], "square", 0.05); }
+    };
+    im.src = url;
+  });
+  function startCamera() {
+    var md = navigator.mediaDevices;
+    if (!md || !md.getUserMedia) return;
+    md.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }).then(function (s) {
+      if (state !== S.SCAN) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
+      stopCamera();
+      stream = s;
+      video = document.createElement("video");
+      video.muted = true; video.playsInline = true; video.setAttribute("playsinline", "");
+      video.srcObject = s;
+      var p = video.play(); if (p && p.catch) p.catch(function () {});
+    }).catch(function () {});
   }
-
-  function pop(st) {
-    var i = sticks.indexOf(st);
-    if (i < 0) return;
-    sticks.splice(i, 1);
-    if (grab && grab.st === st) grab = null;
-    held = false;
-    score++;
-    lastWord = st.word;
-    if (sel >= sticks.length) sel = Math.max(0, sticks.length - 1);
-    var top = pt(st, 0);
-    if (st.word === ATARI) {
-      state = S.WIN;
-      winT = 0;
-      var c = pt(st, st.v + st.gap + 1.5 * STEP);
-      flying.push({ st: st, x: c.x, y: c.y, vx: 0, vy: 0, r: st.a, vr: 0, win: true });
-      popup = { word: st.word, t: 0, win: true };
-      noiseHit(0.08, 2400, 0.25, 2);
-      if (AC && window.zCelebrate) window.zCelebrate.play(AC, "fanfare");
-      if (confetti) confetti.burst(W, H, 180);
-      return;
+  /* 読み取りと召喚の背景は、カメラの映像（なければ選んだ写真、それもなければ石の床） */
+  var photoBg = document.createElement("canvas"), hasPhoto = false;
+  function drawBackdrop(dark) {
+    var src = video && video.videoWidth ? video : hasPhoto ? photoBg : null;
+    if (!src) { drawFloor(); return; }
+    var vw = src.videoWidth || src.width, vh = src.videoHeight || src.height, sc = Math.max((W + 40) / vw, (H + 40) / vh);
+    ctx.fillStyle = "#000"; ctx.fillRect(-20, -20, W + 40, H + 40);
+    ctx.drawImage(src, CX - vw * sc / 2, H / 2 - vh * sc / 2, vw * sc, vh * sc);
+    ctx.fillStyle = "rgba(14,8,28," + dark + ")"; ctx.fillRect(-20, -20, W + 40, H + 40);
+  }
+  function stopCamera() {
+    if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+    stream = null; video = null;
+  }
+  function scanFrame() {
+    if (!video || video.readyState < 2 || !video.videoWidth) return;
+    var vw = video.videoWidth, vh = video.videoHeight, k = Math.min(1, 640 / Math.max(vw, vh));
+    scanCv.width = Math.round(vw * k); scanCv.height = Math.round(vh * k);
+    scanCtx.drawImage(video, 0, 0, scanCv.width, scanCv.height);
+    tryRead();
+  }
+  function tryRead() {
+    var w = scanCv.width, h = scanCv.height;
+    if (!w || !h || !window.jsQR) return false;
+    var img = scanCtx.getImageData(0, 0, w, h), d = img.data;
+    var r = window.jsQR(d, w, h, { inversionAttempts: "attemptBoth" });
+    if (!r || !r.location) return false;
+    /* 四隅から升目の真ん中を拾って、模様を取り出す */
+    var L = r.location, A = L.topLeftCorner, B = L.topRightCorner, C = L.bottomLeftCorner, D = L.bottomRightCorner;
+    var N = 17 + 4 * (r.version || 1), lum = [], lo = 255, hi = 0;
+    for (var j = 0; j < N; j++) for (var i = 0; i < N; i++) {
+      var u = (i + 0.5) / N, v = (j + 0.5) / N;
+      var x = A.x + u * (B.x - A.x) + v * (C.x - A.x) + u * v * (D.x - B.x - C.x + A.x);
+      var y = A.y + u * (B.y - A.y) + v * (C.y - A.y) + u * v * (D.y - B.y - C.y + A.y);
+      var px = Math.max(0, Math.min(w - 1, Math.round(x))), py = Math.max(0, Math.min(h - 1, Math.round(y))), o = (py * w + px) * 4;
+      var g = d[o] * 0.3 + d[o + 1] * 0.59 + d[o + 2] * 0.11;
+      lum.push(g); if (g < lo) lo = g; if (g > hi) hi = g;
     }
-    flying.push({ st: st, x: top.x, y: top.y, vx: (Math.random() - 0.5) * 500, vy: -500 - Math.random() * 200, r: st.a, vr: (Math.random() - 0.5) * 14 });
-    popup = { word: st.word, t: 0 };
-    noiseHit(0.06, 1800, 0.2, 2);
-    tone(150, 0.32, 0.12, "sawtooth", 110, 0.05);
+    var mid = (lo + hi) / 2, dark = lum.map(function (g) { return g < mid; });
+    /* 白黒が反転したQRなら戻す（左上の角は黒） */
+    if (!dark[0]) dark = dark.map(function (b) { return !b; });
+    useQR(r.data || "", dark, N);
+    return true;
+  }
+
+  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+  function fnv(str) {
+    var h = 2166136261;
+    for (var i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+    return h >>> 0;
+  }
+  /* QRの中身と模様から勇者を決める。同じQRならいつも同じ勇者・同じ冒険になる */
+  function heroOf(data, mat, N) {
+    var h = fnv(data + "|" + N), dk = 0, sym = 0, r = window.MahoSim.rngOf(h ^ 0x5bd1e995);
+    for (var j = 0; j < N; j++) for (var i = 0; i < N; i++) {
+      if (mat[j * N + i]) dk++;
+      if (mat[j * N + i] === mat[j * N + (N - 1 - i)]) sym++;
+    }
+    var f = {
+      size: clamp01((N - 21) / 24), dark: clamp01((dk / (N * N) - 0.44) / 0.12), sym: clamp01((sym / (N * N) - 0.5) / 0.25)
+    };
+    /* 模様の特徴を半分、コードから引いた運を半分 */
+    function mix(v) { return 0.5 * v + 0.5 * r(); }
+    return {
+      seed: h,
+      stats: {
+        hp: Math.round(30 + 30 * mix(f.size)), atk: Math.round(6 + 8 * r()), def: Math.round(3 + 8 * mix(f.dark)),
+        mag: Math.round(3 + 10 * mix(f.sym)), spd: Math.round(4 + 10 * r()), luk: Math.round(2 + 10 * r()),
+        look: lookOf(r), trait: TRAIT_IDS[Math.floor(r() * TRAIT_IDS.length)], name: window.MahoSim.jumon(r, LANG),
+        cls: clsOf(r), gr: [r(), r(), r()]
+      }
+    };
+  }
+  /* レア度（★1〜★5）と、その★の職業 */
+  var STAR_P = [0.4, 0.3, 0.18, 0.09, 0.03];
+  function clsOf(r) {
+    var x = r(), star = 1;
+    for (var i = 0; i < STAR_P.length; i++) { if (x < STAR_P[i]) { star = i + 1; break; } x -= STAR_P[i]; }
+    var J = window.MahoSim.JOBS, list = Object.keys(J).filter(function (k) { return J[k][0] === star; });
+    return list[Math.floor(r() * list.length)];
+  }
+  /* 職業らしい見た目に寄せる [髪型, 武器(-1は素手), 鎧の色, マント] */
+  var JOB_LOOK = { jester: [1, -1], villager: [null, 1], thief: [4, 0], fighter: [null, -1], swordsman: [null, 0],
+    mage: [null, 2], priest: [null, 2, 6], knight: [3, 3], sage: [null, 2, null, 3], legend: [0, 0, null, 4] };
+  function dressUp(st) {
+    var j = JOB_LOOK[st.cls] || [], L = st.look;
+    if (j[0] != null) L.style = j[0];
+    if (j[1] != null) L.weapon = j[1];
+    if (j[2] != null) L.armor = j[2];
+    if (j[3] != null) L.cape = j[3];
+    L.job = st.cls;
+    st.gear = gearOf(st);
+    return st;
+  }
+  /* 持っている武器。形は見た目の武器、素材は★で、ことばはコードで決まる */
+  var W_TYPE = [["剣", "Sword", "검", "剑", "劍"], ["斧", "Axe", "도끼", "斧", "斧"], ["杖", "Staff", "지팡이", "杖", "杖"], ["槍", "Spear", "창", "枪", "槍"]];
+  var W_FIST = ["ナックル", "Knuckles", "너클", "拳套", "拳套"];
+  var W_MAT = [["木", "Wooden", "나무", "木", "木"], ["銅", "Copper", "구리", "铜", "銅"], ["鉄", "Iron", "철", "铁", "鐵"], ["鋼", "Steel", "강철", "钢", "鋼"],
+    ["銀", "Silver", "은", "银", "銀"], ["ミスリル", "Mithril", "미스릴", "秘银", "秘銀"], ["竜骨", "Dragonbone", "용뼈", "龙骨", "龍骨"]];
+  var W_MAT_ATK = [2, 4, 8, 13, 19, 27, 38];
+  /* [ことば, 強さの倍率, 呪い]。ことばなしが半分 */
+  var W_ADJ = [[null, 1], [null, 1], [["さびた", "Rusty", "녹슨", "生锈的", "生鏽的"], 0.6], [["光る", "Shining", "빛나는", "闪耀的", "閃耀的"], 1.25],
+    [null, 1], [["呪われた", "Cursed", "저주받은", "被诅咒的", "被詛咒的"], 1.7, true], [null, 1], [["さびた", "Rusty", "녹슨", "生锈的", "生鏽的"], 0.6], [["光る", "Shining", "빛나는", "闪耀的", "閃耀的"], 1.25], [null, 1]];
+  function gearOf(st) {
+    var g = st.gr, star = starOf(st);
+    var mat = Math.max(0, Math.min(6, star - 1 + Math.floor(g[0] * 3) - 1 + (star === 5 ? 1 : 0)));
+    var adj = W_ADJ[Math.floor(g[1] * W_ADJ.length)];
+    var wt = st.look.weapon, type = wt >= 0 ? W_TYPE[wt] : W_FIST;
+    var p = Math.round(W_MAT_ATK[mat] * adj[1]);
+    var li = { ja: 0, en: 1, ko: 2, zh: 3, tw: 4 }[LANG] || 0;
+    function w(a) { return a[li] || a[1]; }
+    var a = adj[0] ? w(adj[0]) : "", m = w(W_MAT[mat]), t = w(type), name;
+    if (li === 0) name = a + m + "の" + t;
+    else if (li === 1) name = (a ? a + " " : "") + m + " " + t;
+    else if (li === 2) name = (a ? a + " " : "") + m + " " + t;
+    else name = a + m + t;
+    return { name: name, atk: wt === 2 ? Math.round(p / 4) : p, mag: wt === 2 ? Math.round(p * 0.8) : 0, cursed: !!adj[2] };
+  }
+  /* 見た目（髪の色・髪型・肌・鎧の色・武器・マント）もコードから決める */
+  var TRAIT_IDS = ["brave", "coward", "hasty", "lazy", "sly", "hot", "lucky", "glutton"];
+  function lookOf(r) {
+    function n(k) { return Math.floor(r() * k); }
+    return { hair: n(HAIR.length), style: n(HEADS.length), skin: n(SKIN.length), armor: n(ARMOR.length), weapon: n(4), cape: r() < 0.4 ? n(ARMOR.length) : -1 };
+  }
+  function useQR(data, mat, N, force) {
+    
+    qr = { data: data, mat: mat, N: N };
+    var A = heroOf(data, mat, N);
+    hero = dressUp(A.stats);
+    starShown = 0;
+    run = window.MahoSim.run(hero, { seed: A.seed, lang: LANG });
+    if (force) run = force(A);
+    state = S.SUMMON; sumT = 0;
+    /* 読めた合図 → 床に倒れる → 光の柱 */
+    seq([[1047, 0, 0.08], [1319, 0.06, 0.08], [1568, 0.12, 0.08], [2093, 0.18, 0.3]], "sine", 0.05);
+    sweep(0.8, 300, 1400, 0.06, 1.2);
+    tone(220, 1.4, 0.05, "sine", 880, 0.3);
+    tone(330, 1.4, 0.03, "triangle", 1320, 0.4);
+    sndHero = false;
+    sparks = []; rings = []; puffs = [];
+    var stR = starOf();
+    if (stR >= 4) { tone(55, 1.6, 0.09, "sawtooth", 41, 0.5); noiseHit(1.4, 90, 0.1, 0.5); }
+    if (stR === 5) seq([[523, 0.9, 1.6], [659, 0.95, 1.6], [784, 1.0, 1.6], [1047, 1.05, 1.6]], "sine", 0.03);
+    if (stR === 1) noiseHit(0.5, 300, 0.06, 0.6);
+  }
+  function startAdventure(from) {
+    stopCamera();
+    state = S.ADV; T = 0;
+    evIdx = (from || 0) - 1; evAcc = 0; ev = null;
+    logLines = []; logScroll = 0; scroll = 0; pops = []; anim = {}; endT = -1;
+    nextEvent();
+  }
+  function addPop(p) {
+    p.y = pops.filter(function (q) { return Math.abs(q.x - p.x) < 40 && q.t < 0.4; }).length * 28;
+    pops.push(p);
+  }
+  function nextEvent() {
+    evIdx++;
+    if (evIdx >= run.events.length) { endT = 0; return; }
+    ev = run.events[evIdx];
+    logLines.push({ t: ev.t, k: ev.k });
+    if (logLines.length > 60) logLines.shift();
+    logScroll = 1;
+    var a = ev.act;
+    anim = { t: 0 };
+    if (a) {
+      if (a.who != null && /atk|crit|spell|heal/.test(ev.k)) anim.lunge = a.who;
+      if (a.tgt != null && /hit|dodge/.test(ev.k)) anim.elunge = a.tgt;
+      if (a.dmg != null && /atk|crit|spell/.test(ev.k)) {
+        if (a.all) ev.e.forEach(function (e, i) { addPop({ x: enemyX(i, ev.e), y: 0, v: a.dmg, t: 0, c: "#fff" }); });
+        else { anim.shake = a.tgt; addPop({ x: enemyX(a.tgt, ev.e), y: 0, v: a.dmg, t: 0, c: ev.k === "crit" ? "#ffd040" : "#fff" }); }
+      }
+      if (a.at != null && ev.k === "hit") { anim.hurt = a.at; addPop({ x: partyX(a.at), y: 0, v: a.dmg, t: 0, c: "#ff6a5a" }); }
+      if (ev.k === "trap") { anim.hurt = 0; addPop({ x: partyX(0), y: 0, v: a.dmg, t: 0, c: "#ff6a5a" }); }
+      if (a.heal != null) addPop({ x: partyX(a.heal), y: 0, v: "+", t: 0, c: "#7aff8a" });
+    }
+    /* 音は重ならないように間引く（大事な出来事は必ず鳴らす） */
+    if (/lv|fall|boss|gate|maou|town|inn|enter|clear|over/.test(ev.k) || T - lastSfx > 0.07) {
+      lastSfx = T;
+      if (ev.k === "enter") { var a = AREA_SND[ev.area]; seq(a[0], a[1], 0.05); }
+      else sfx(ev.k);
+    }
+    if (ev.k === "clear") { window.zCelebrate.play(AC, "fanfare"); confetti.burst(W, H, 160); }
+    if (ev.k === "over") sadPhrase();
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
-    if (state === S.INTRO || state === S.RESULT) return;
     T += dt;
-    if (popup) popup.t += dt;
     if (confetti) confetti.step(dt, W, H);
-    for (var i = flying.length - 1; i >= 0; i--) {
-      var f = flying[i];
-      if (f.win) continue;
-      f.vy += 1800 * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.r += f.vr * dt;
-      if (f.y > H + 700) flying.splice(i, 1);
-    }
-    if (state === S.WIN) {
-      winT += dt;
-      if (winT > 2.4) { state = S.RESULT; }
+    if (state === S.SCAN) {
+      if (T - lastScan > 0.15) { lastScan = T; scanFrame(); }
+      if (video && T - lastPing > 1.4) { lastPing = T; tone(1760, 0.18, 0.012, "sine", 1500); }
       return;
     }
-    for (var j = 0; j < sticks.length; j++) {
-      var st = sticks[j];
-      if (grab && grab.st === st) {
-        if (grab.key) st.p += 520 * dt;
-      } else if (st.p > 0) {
-        st.p = Math.max(0, st.p - 420 * dt);   /* 手を離すと戻っていく */
+    if (state === S.SUMMON) {
+      sumT += dt;
+      summonFx(dt);
+      /* ★をひとつずつ出す。★4以上はお祝い */
+      if (!sndHero && sumT > 1.0) { sndHero = true; seq([[784, 0, 0.5], [1175, 0.02, 0.6], [1568, 0.05, 0.7]], "sine", 0.04); noiseHit(0.4, 5000, 0.03, 2); }
+      var st = starOf(), want = Math.max(0, Math.min(st, Math.floor((sumT - 1.8) / 0.22) + 1));
+      while (starShown < want) {
+        starShown++;
+        tone(660 * Math.pow(1.19, starShown), 0.12, 0.05, "square");
+        if (starShown === st && st === 1) tone(300, 0.3, 0.05, "triangle", 150, 0.18);
+        if (starShown === st && st === 3) tone(1568, 0.25, 0.04, "sine", 0, 0.12);
+        if (starShown === st && st >= 4) {
+          window.zCelebrate.play(AC, st === 5 ? "fanfare" : "levelup", { volume: 0.8, delay: 0.1 });
+          if (st === 5) confetti.burst(W, H, 140);
+        }
       }
-      if (st.p >= st.len) { pop(st); j--; }
+      if (sumT > 5.2 + (starOf() >= 4 ? 1.2 : 0)) startAdventure();
+      return;
+    }
+    if (state === S.ADV) {
+      var real = dt;
+      dt *= FAST;
+      if (anim) anim.t += dt;
+      logScroll = Math.max(0, logScroll - dt * RATE * 1.6);
+      pops.forEach(function (p) { p.t += dt; });
+      pops = pops.filter(function (p) { return p.t < 0.7; });
+      var walking = ev && (!ev.e.length || ev.e.every(function (e) { return !e.alive; }));
+      if (walking) {
+        scroll += dt * 40;
+        if (T - lastStep > 0.14) { lastStep = T; noiseHit(0.025, 2600, 0.015, 2); }
+      }
+      if (endT >= 0) {
+        endT += real;
+        if (endT > 1.8) { state = S.RESULT; shareButton.hidden = false; noiseHit(0.2, 180, 0.08, 0.8); tone(98, 0.3, 0.06, "sine", 60); }
+        return;
+      }
+      evAcc += dt * RATE;
+      while (evAcc >= 1 && endT < 0) { evAcc -= 1; nextEvent(); }
     }
   }
 
   /* ============ 入力 ============ */
-  function pick(x, y) {
-    var best = null, bd = 30;
-    for (var i = sticks.length - 1; i >= 0; i--) {
-      var st = sticks[i], a = pt(st, 0), b = pt(st, st.v + st.p);
-      var vx = b.x - a.x, vy = b.y - a.y, L = vx * vx + vy * vy;
-      var t = L ? Math.max(0, Math.min(1, ((x - a.x) * vx + (y - a.y) * vy) / L)) : 0;
-      var d = Math.hypot(a.x + vx * t - x, a.y + vy * t - y) - (1 - st.z) * 3;
-      if (d < bd) { bd = d; best = st; }
-    }
-    return best;
-  }
-
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
-      if (hit === "retry") newRound();
+      if (hit === "retry") beginScan();
       return;
     }
-    if (state !== S.PLAY) return;
-    if (x == null) {                           /* キー：選んでいる棒を引き続ける */
-      var ks = sticks[sel];
-      if (!ks) return;
-      grab = { st: ks, key: true };
-      forceNext(ks);
-      held = true;
-      tone(520, 0.05, 0.06, "triangle");
-      return;
-    }
-    var st = pick(x, y);
-    if (!st) return;
-    held = true;
-    grab = { st: st, x: x, y: y, p0: st.p };
-    forceNext(st);
-    tone(520, 0.05, 0.06, "triangle");
+    if (state === S.SUMMON) { if (sumT > 1.6) startAdventure(); return; }
   }
-  function move(x, y) {
-    if (state !== S.PLAY || !held || !grab || grab.key) return;
-    var st = grab.st;
-    var d = (x - grab.x) * st.dx + (y - grab.y) * st.dyu;
-    var np = Math.max(0, grab.p0 + d);
-    if (Math.floor(np / STEP) !== Math.floor(st.p / STEP) && np > st.p) noiseHit(0.03, 900 + Math.random() * 400, 0.05, 3);
-    st.p = np;
-  }
-  function up() {
-    if (!held) return;
-    held = false;
-    grab = null;
-  }
+  function move() {}
+  function up() { held = false; }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault(); keyMode = false;
     var p = atCanvas(e); down(p.x, p.y);
   });
-  wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
-  });
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
   wrap.addEventListener("pointercancel", function () { up(); });
   window.addEventListener("blur", function () { up(); });
 
-  /* 本番以外（手元・確認用ページ・制作中の固定リンク）だけ、数字キーで場面を飛ばせる。
-     本番（www.zounoashi.com/games/ 以下）では効かない。 */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
-  var nextWord = null;                         /* デバッグ：次につかんだ棒をこの言葉にする */
-  function debugKey(n) {
-    if (state !== S.PLAY) return;
-    var i;
-    if (n === 1) nextWord = ATARI;             /* 1: 次に引く棒があたり */
-    else if (n === 2) nextWord = "";           /* 2: 次に引く棒がハズレ */
-    else if (n === 3) {                        /* 3: ハズレを90本ぬく */
-      for (var k = 0; k < 90; k++) {
-        for (i = 0; i < sticks.length; i++) if (sticks[i].word !== ATARI) { sticks.splice(i, 1); score++; break; }
-      }
-      sel = 0;
-    } else if (n === 4) nextWord = "あたいの事キライなんだろ";   /* 4: 次に引く棒が「あたいの事キライなんだろ」 */
-  }
-  /* つかんだ棒と、言葉が nextWord の棒の中身を入れ替える */
-  function forceNext(st) {
-    if (nextWord === null) return;
-    var want = nextWord;
-    nextWord = null;
-    var other = null;
-    for (var i = 0; i < sticks.length; i++) {
-      var o = sticks[i];
-      if (o !== st && (want === "" ? o.word !== ATARI && st.word === ATARI : o.word === want)) { other = o; break; }
+  /* 試し用のQRっぽい模様（3つの角の目印＋でたらめな升目） */
+  function fakeQR(seed) {
+    var N = 25, mat = [], r = window.MahoSim.rngOf(seed);
+    for (var j = 0; j < N; j++) for (var i = 0; i < N; i++) {
+      var f = finder(i, j) || finder(N - 1 - i, j) || finder(i, N - 1 - j);
+      mat.push(f !== null ? f : r() < 0.5);
     }
-    if (!other) return;
-    var w = st.word; st.word = other.word; other.word = w;
-    st.len = st.gap + st.word.length * STEP + STEP;
-    other.len = other.gap + other.word.length * STEP + STEP;
+    function finder(i, j) {
+      if (i > 7 || j > 7) return null;
+      if (i === 7 || j === 7) return false;
+      var m = Math.max(Math.abs(i - 3), Math.abs(j - 3));
+      return m !== 2;
+    }
+    return { data: "debug-" + seed, mat: mat, N: N };
+  }
+  function debugKey(n) {
+    /* 1: 試し用のQRで召喚  2: 冒険の終わり近くへ  3: 魔王に勝てる勇者を召喚（魔王の間の手前から）  4: ★5の勇者を召喚 */
+    var q = fakeQR(Math.floor(Math.random() * 1e6));
+    if (n === 1) useQR(q.data, q.mat, q.N);
+    if (n === 4) useQR(q.data, q.mat, q.N, function (A) { A.stats.cls = "legend"; dressUp(A.stats); return window.MahoSim.run(A.stats, { seed: A.seed, lang: LANG }); });
+    if (n === 2 && state === S.ADV) { evIdx = Math.max(evIdx, run.events.length - 25); }
+    if (n === 3) {
+      useQR(q.data, q.mat, q.N, function (A) {
+        for (var s = 1; s < 4000; s++) {
+          var r = window.MahoSim.run(A.stats, { seed: A.seed + s * 7919, lang: LANG });
+          if (r.win) return r;
+        }
+        return run;
+      });
+      var g = 0;
+      run.events.forEach(function (e, i) { if (!g && e.k === "gate") g = i; });
+      sumT = 5;
+      startAdventure(Math.max(0, g - 3));
+    }
   }
 
   window.addEventListener("keydown", function (e) {
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
-    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
-    if (!esc && !go && !left && !right) return;
+    if (!esc && !go) return;
     e.preventDefault();
     if (!esc) keyMode = true;
-    if (esc) { if (!e.repeat) newRound(); return; }
-    if (left || right) {
-      if (state !== S.PLAY || held || !sticks.length) return;
-      /* 左右は口の位置の順に選ぶ */
-      var order = sticks.slice().sort(function (A, B) { return A.xm - B.xm; });
-      var k = order.indexOf(sticks[sel]);
-      k = Math.max(0, Math.min(order.length - 1, k + (right ? 1 : -1)));
-      sel = sticks.indexOf(order[k]);
-      return;
-    }
-    if (e.repeat) return;                      /* 押しっぱなしで連発しない */
+    if (esc) { if (!e.repeat) { stopCamera(); beginScan(); } return; }
+    if (e.repeat) return;
     down();
   });
   window.addEventListener("keyup", function (e) {
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
   });
 
-  function shareKuji() {
-    if (!lastWord) return;
-    window.zResultActions.x({ text: zT("「" + lastWord + "」を引いた", "I drew「" + lastWord + "」", "「" + lastWord + "」를 뽑았다", "抽到了「" + lastWord + "」", "抽到了「" + lastWord + "」") +
-      zT(" #あたり引くだけくじ", " #AtariKuji", " #AtariKuji", " #AtariKuji", " #AtariKuji") });
-  }
-  function kujiBox() { return { id: "share", x: W - 16 - 84, y: 16, w: 84, h: 54, label: "Xでシェア" }; }
-
   function doShare() {
-    /* 英語のときのハッシュタグは英語のゲーム名にする（空白・記号は除く） */
-    window.zResultActions.x({ text: zT(score + "本目で「あたり」を引いた", "Drew「あたり」on pull #" + score, score + "번째에 「あたり」를 뽑았다", "第" + score + "根抽中了「あたり」", "第" + score + "根抽中了「あたり」") +
-      zT(" #あたり引くだけくじ", " #AtariKuji", " #AtariKuji", " #AtariKuji", " #AtariKuji") });
+    var nm = "★" + starOf() + " " + titleName() + " " + run.name;
+    var tag = zT(" #魔法陣ゲーム", " #MagicCircleQuest", " #MagicCircleQuest", " #MagicCircleQuest", " #MagicCircleQuest");
+    var text = run.win
+      ? zT(nm + "が魔王をたおした！（Lv" + run.lv + "）", nm + " defeated the Demon King! (Lv" + run.lv + ")",
+        nm + "이(가) 마왕을 쓰러뜨렸다! (Lv" + run.lv + ")", nm + "打倒了魔王！（Lv" + run.lv + "）", nm + "打倒了魔王！（Lv" + run.lv + "）")
+      : zT(nm + "は" + run.areaName + "で力尽きた（Lv" + run.lv + "）", nm + " fell in the " + run.areaName + " (Lv" + run.lv + ")",
+        nm + "은(는) " + run.areaName + "에서 쓰러졌다 (Lv" + run.lv + ")", nm + "倒在了" + run.areaName + "（Lv" + run.lv + "）", nm + "倒在了" + run.areaName + "（Lv" + run.lv + "）");
+    window.zResultActions.x({ text: text + tag });
   }
 
   /* ============ 描画 ============ */
@@ -398,119 +714,390 @@
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
   }
-
-  var SW = 34;                                 /* 棒の太さ */
-  function woodColor(st) { var l = 80 + st.hue * 6; return "hsl(36,48%," + l + "%)"; }
-
-  /* 棒1本を、根元のローカル座標で描く（上向きが -y）。from〜to は tip からの長さ */
-  function stickShape(st, from, to, lit) {
-    ctx.fillStyle = lit ? "#fff3cf" : woodColor(st);
-    ctx.strokeStyle = "rgba(90,60,30,.55)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(-SW / 2, to - SW / 2);
-    ctx.lineTo(-SW / 2, from + SW / 2);
-    ctx.arc(0, from + SW / 2, SW / 2, Math.PI, 0);
-    ctx.lineTo(SW / 2, to - SW / 2);
-    ctx.arc(0, to - SW / 2, SW / 2, 0, Math.PI);   /* 下の端も丸く */
-    ctx.closePath();
-    ctx.fill();
-    if (st.word === ATARI) {                   /* あたりの棒は根元が赤い */
-      ctx.save(); ctx.clip();
-      ctx.fillStyle = "#e0322b";
-      ctx.fillRect(-SW, to - 26, SW * 2, 30);
+  /* 石の床（ドット） */
+  function drawFloor() {
+    ctx.fillStyle = "#16121e";
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    blitPix(floorCv, -PX, -PX, PX);
+  }
+  /* QRの模様を魔法陣として描く。k は現れ方（0→1、真ん中から広がる） */
+  var circRGB = "220,190,255", circGlow = "#b070ff";
+  function drawCircle(k, glow) {
+    ctx.save();
+    ctx.shadowColor = circGlow; ctx.shadowBlur = glow;
+    ctx.strokeStyle = "rgba(" + circRGB + "," + Math.min(1, k * 1.5) + ")";
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(CX, CY, CR, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(CX, CY, CR - 18, 0, Math.PI * 2); ctx.stroke();
+    /* 円の間の目盛り */
+    for (var t = 0; t < 48; t++) {
+      var a = t / 48 * Math.PI * 2 + T * 0.1, r1 = CR - 15, r2 = t % 4 ? CR - 6 : CR - 2;
+      ctx.beginPath(); ctx.moveTo(CX + Math.cos(a) * r1, CY + Math.sin(a) * r1); ctx.lineTo(CX + Math.cos(a) * r2, CY + Math.sin(a) * r2); ctx.stroke();
+    }
+    if (qr) {
+      var N = qr.N, cs = QS / N, x0 = CX - QS / 2, y0 = CY - QS / 2, R = k * N * 0.8;
+      ctx.fillStyle = "rgba(" + circRGB + ",.95)";
+      for (var j = 0; j < N; j++) for (var i = 0; i < N; i++) {
+        if (!qr.mat[j * N + i]) continue;
+        if (Math.hypot(i - N / 2, j - N / 2) > R) continue;
+        ctx.fillRect(x0 + i * cs + 1, y0 + j * cs + 1, cs - 2, cs - 2);
+      }
+    }
+    ctx.restore();
+  }
+  /* 魔法陣を別の画面に描いてから、床に寝かせた形（手前が大きい）で1行ずつ写す。
+     tilt は傾き（0=正面、1.2≒69度）、cy は寝かせたときの中心の高さ */
+  var circCv = document.createElement("canvas"), circCtx = circCv.getContext("2d");
+  function drawCircleTilted(k, glow, tilt, cy) {
+    /* 画面の細かさ（端末の画素）に合わせて描く。1倍で描くとスマホでぼやける */
+    var S = (CR + 40) * 2, q = canvas.width / W, P = Math.round(S * q);
+    if (circCv.width !== P) { circCv.width = P; circCv.height = P; }
+    var oc = ctx, ox = CX, oy = CY;
+    circCtx.setTransform(1, 0, 0, 1, 0, 0);
+    circCtx.clearRect(0, 0, P, P);
+    circCtx.setTransform(q, 0, 0, q, 0, 0);
+    ctx = circCtx; CX = S / 2; CY = S / 2;
+    try { drawCircle(k, glow); } finally { ctx = oc; CX = ox; CY = oy; }
+    var R = S / 2, f = 700, cs = Math.cos(tilt), sn = Math.sin(tilt), step = 1;
+    for (var v = -R; v < R; v += step) {
+      var sc = f / (f - v * sn), sc2 = f / (f - (v + step) * sn);
+      var y1 = cy + v * cs * sc, y2 = cy + (v + step) * cs * sc2;
+      var w = S * sc;
+      ctx.drawImage(circCv, 0, (v + R) * q, P, step * q, CX - w / 2, y1, w, Math.max(1, y2 - y1 + 0.6));
+    }
+  }
+  function drawScan() {
+    var x0 = CX - QS / 2, y0 = CY - QS / 2;
+    drawBackdrop(0.3);
+    if (!(video && video.videoWidth) && !hasPhoto) {
+      ctx.fillStyle = "#0c0a14";
+      ctx.beginPath(); ctx.arc(CX, CY, CR - 22, 0, Math.PI * 2); ctx.fill();
+    }
+    drawCircle(1, 14);
+    /* 読み取り枠の四隅 */
+    ctx.save();
+    ctx.strokeStyle = T - readFail < 2.5 ? "#ff6a5a" : "rgba(235,215,255,.9)";
+    ctx.lineWidth = 6; ctx.lineCap = "round";
+    var e = 36;
+    [[x0, y0, 1, 1], [x0 + QS, y0, -1, 1], [x0, y0 + QS, 1, -1], [x0 + QS, y0 + QS, -1, -1]].forEach(function (c) {
+      ctx.beginPath(); ctx.moveTo(c[0], c[1] + e * c[3]); ctx.lineTo(c[0], c[1]); ctx.lineTo(c[0] + e * c[2], c[1]); ctx.stroke();
+    });
+    ctx.restore();
+    if (state === S.SCAN && T - readFail < 2.5) {
+      ctx.save();
+      ctx.font = "bold 26px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "#ffb0a8";
+      ctx.fillText(zT("QRコードが読み取れませんでした", "Couldn't read a QR code", "QR 코드를 읽지 못했습니다", "未能读取二维码", "未能讀取QR碼"), CX, CY + CR + 22, W - 40);
       ctx.restore();
     }
-    ctx.stroke();
+    if (state === S.SCAN) {
+      var b = photoRect();
+      ctx.save();
+      roundRect(b.x, b.y, b.w, b.h, b.h / 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 4; ctx.strokeStyle = "#16202e"; ctx.stroke();
+      ctx.fillStyle = "#16202e";
+      window.zActionIcon(ctx, "画像を選ぶ", b.x + b.w / 2, b.y + b.h / 2, 34);
+      ctx.restore();
+    }
   }
-  function stickText(st, upto) {
-    ctx.fillStyle = "#2a160c";
-    ctx.font = "900 29px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    var base = st.v + st.gap;
-    for (var i = 0; i < st.word.length; i++) {
-      var s = base + i * STEP + STEP / 2;
-      if (s > upto) break;
-      ctx.fillText(st.word[i], 0, s + 1);   /* 文字は棒に沿ってまっすぐ */
+  function photoRect() { return { x: CX - 80, y: Math.min(H - 90, CY + CR + 50), w: 160, h: 64 }; }
+  function drawBig(img, x, y, sc) {
+    var m = ctx.getTransform(), q = Math.max(1, Math.round(sc * m.a));
+    blitPix(img, m.a * x - img.width * q / 2, m.d * y - img.height * q, q);
+  }
+  function starOf(h) { var J = window.MahoSim.JOBS[(h || hero).cls]; return J ? J[0] : 1; }
+  function jobName() { var t = (window.MahoSim.JOBS[hero.cls] || [0, []])[1]; return zT(t[0], t[1], t[2], t[3], t[4]); }
+  var STAR_C = ["#c8c8d8", "#7ad0ff", "#7aff8a", "#d08aff", "#ffd040"];
+  function drawStars(x, y, size, n) {
+    var st = starOf();
+    ctx.save();
+    ctx.font = "bold " + size + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (var i = 0; i < 5; i++) {
+      var sx = x + (i - 2) * size * 1.05;
+      ctx.fillStyle = i < n ? STAR_C[st - 1] : "rgba(255,255,255,.14)";
+      if (i < n && st >= 4) { ctx.shadowColor = STAR_C[st - 1]; ctx.shadowBlur = 14; } else ctx.shadowBlur = 0;
+      ctx.fillText("★", sx, y);
+    }
+    ctx.restore();
+  }
+  /* 「○○な○○」（性格＋職業） */
+  var TRAIT_ADJ = {
+    brave: ["ゆうかんな", "Brave", "용감한", "勇敢的", "勇敢的"], coward: ["おくびょうな", "Timid", "겁 많은", "胆小的", "膽小的"],
+    hasty: ["せっかちな", "Hasty", "성급한", "急躁的", "急躁的"], lazy: ["のんきな", "Easygoing", "느긋한", "悠哉的", "悠哉的"],
+    sly: ["ずるがしこい", "Sly", "교활한", "狡猾的", "狡猾的"], hot: ["ねっけつの", "Hot-blooded", "열혈", "热血的", "熱血的"],
+    lucky: ["ラッキーな", "Lucky", "운 좋은", "幸运的", "幸運的"], glutton: ["くいしんぼうの", "Gluttonous", "먹보", "贪吃的", "貪吃的"]
+  };
+  function titleName() {
+    var a = TRAIT_ADJ[hero.trait] || ["", "", "", "", ""];
+    var adj = zT(a[0], a[1], a[2], a[3], a[4]);
+    return adj + (LANG === "en" || LANG === "ko" ? " " : "") + jobName();
+  }
+  function traitName() {
+    var t = window.MahoSim.TRAITS[hero.trait] || [];
+    return zT(t[0], t[1], t[2], t[3], t[4]);
+  }
+  function statRows() {
+    /* 職業の倍率をかけた値（冒険で使うのと同じ） */
+    var m = (window.MahoSim.JOBS[hero.cls] || [0, 0, [1, 1, 1, 1, 1, 1]])[2];
+    function v(x, i) { return Math.round(x * m[i]); }
+    return [
+      ["HP", v(hero.hp, 0), 80], [zT("攻撃", "ATK", "공격", "攻击", "攻擊"), v(hero.atk, 1) + hero.gear.atk, 50], [zT("防御", "DEF", "방어", "防御", "防禦"), v(hero.def, 2), 15],
+      [zT("魔力", "MAG", "마력", "魔力", "魔力"), v(hero.mag, 3) + hero.gear.mag, 40], [zT("素早さ", "SPD", "민첩", "敏捷", "敏捷"), v(hero.spd, 4), 18], [zT("運", "LUK", "운", "运气", "運氣"), v(hero.luk, 5), 16]
+    ];
+  }
+  /* ★ごとの召喚の演出 [光の色(r,g,b), 柱の太さ, 柱の濃さ, 魔法陣の色, 魔法陣の光] */
+  var RARE_FX = [
+    ["190,190,205", 0.45, 0.35, "200,195,215", "#8a86a0"],
+    ["150,200,255", 0.8, 0.6, "190,215,255", "#5a9aff"],
+    ["150,255,190", 1.0, 0.75, "200,255,220", "#4ad08a"],
+    ["225,170,255", 1.35, 0.85, "230,200,255", "#b060ff"],
+    ["255,220,120", 1.75, 0.95, "255,230,150", "#ffb020"]
+  ];
+  var sparks = [], rings = [], puffs = [];
+  function summonFx(dt) {
+    var st = starOf(), cy = CY + 90;
+    var rate = [0, 6, 22, 45, 90][st - 1];
+    if (sumT > 0.4 && sumT < 4) {
+      var n = Math.floor(rate * dt + Math.random());
+      for (var i = 0; i < n; i++) sparks.push({ x: CX + (Math.random() - 0.5) * CR * 1.6, y: cy + (Math.random() - 0.5) * 60, v: 80 + Math.random() * 160, t: 0, life: 0.8 + Math.random() * 0.8, s: 3 + Math.floor(Math.random() * 3) * 2 });
+    }
+    if (st >= 4 && sumT > 0.6 && sumT < 3.4 && (!rings.length || rings[rings.length - 1].t > (st === 5 ? 0.35 : 0.55))) rings.push({ t: 0 });
+    if (st === 1 && sumT > 1.0 && !puffs.length) for (var p = 0; p < 9; p++) puffs.push({ x: CX + (Math.random() - 0.5) * 120, y: cy - 20 - Math.random() * 60, r: 18 + Math.random() * 22, t: 0 });
+    sparks.forEach(function (s) { s.t += dt; s.y -= s.v * dt; });
+    sparks = sparks.filter(function (s) { return s.t < s.life; });
+    rings.forEach(function (r) { r.t += dt; });
+    rings = rings.filter(function (r) { return r.t < 1.2; });
+    puffs.forEach(function (p) { p.t += dt; p.y -= 30 * dt; p.r += 20 * dt; });
+    puffs = puffs.filter(function (p) { return p.t < 1.4; });
+  }
+  function drawSummon() {
+    var st = starOf(), fx = RARE_FX[st - 1];
+    /* ★4以上は柱が立つときに画面が少し揺れる（明滅はさせない） */
+    var shake = st >= 4 && sumT > 0.8 && sumT < 1.5 ? (1.5 - sumT) * (st === 5 ? 14 : 8) : 0;
+    ctx.save();
+    if (shake) ctx.translate(Math.sin(sumT * 70) * shake, Math.cos(sumT * 53) * shake * 0.6);
+    drawBackdrop(0.55);
+    var k = Math.min(1, sumT / 1.2);
+    /* 読み取れた魔法陣が床に倒れて奥行きが出る。色は★で変わっていく */
+    var e = Math.min(1, Math.max(0, (sumT - 0.15) / 0.7)); e = e * e * (3 - 2 * e);
+    var cy = CY + e * 90;
+    if (sumT > 0.5) { circRGB = fx[3]; circGlow = fx[4]; }
+    drawCircleTilted(Math.min(1, sumT / 0.7), 14 + k * (st >= 4 ? 50 : 30), e * 1.2, cy);
+    circRGB = "220,190,255"; circGlow = "#b070ff";
+    /* 床に広がる光の輪（★4以上） */
+    rings.forEach(function (r) {
+      var rr = CR * (0.6 + r.t * 1.4);
+      ctx.strokeStyle = "rgba(" + fx[0] + "," + (0.6 * (1 - r.t / 1.2)) + ")";
+      ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.ellipse(CX, cy, rr, rr * 0.36, 0, 0, Math.PI * 2); ctx.stroke();
+    });
+    /* ★5は後ろでゆっくり回る光の筋 */
+    if (st === 5 && sumT > 0.9) {
+      ctx.save();
+      ctx.translate(CX, cy - 120);
+      ctx.rotate(sumT * 0.4);
+      ctx.fillStyle = "rgba(255,225,130," + Math.min(0.22, (sumT - 0.9) * 0.3) + ")";
+      for (var i = 0; i < 12; i++) {
+        ctx.rotate(Math.PI / 6);
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-40, -700); ctx.lineTo(40, -700); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    }
+    /* 光の柱（明滅させず、ゆっくり立ち上がる）。★が高いほど太く濃い */
+    var pw = (40 + k * 120) * fx[1];
+    var top = st === 1 ? Math.max(0, cy - 380) : 0;
+    var g = ctx.createLinearGradient(CX - pw, 0, CX + pw, 0);
+    g.addColorStop(0, "rgba(" + fx[0] + ",0)"); g.addColorStop(0.5, "rgba(" + fx[0] + "," + (fx[2] * Math.min(1, sumT / 0.8) * (sumT > 1.8 ? Math.max(0.25, 1 - (sumT - 1.8)) : 1)) + ")"); g.addColorStop(1, "rgba(" + fx[0] + ",0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(CX - pw, top, pw * 2, cy - top);
+    if (st >= 3) {
+      var g2 = ctx.createLinearGradient(CX - pw * 0.25, 0, CX + pw * 0.25, 0);
+      g2.addColorStop(0, "rgba(255,255,255,0)"); g2.addColorStop(0.5, "rgba(255,255,255," + (0.5 * Math.min(1, sumT / 0.8) * (sumT > 1.8 ? Math.max(0, 1 - (sumT - 1.8)) : 1)) + ")"); g2.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g2; ctx.fillRect(CX - pw * 0.25, 0, pw * 0.5, cy);
+    }
+    /* 立ちのぼる粒（ドット） */
+    sparks.forEach(function (s) {
+      ctx.fillStyle = "rgba(" + fx[0] + "," + (1 - s.t / s.life) + ")";
+      ctx.fillRect(Math.round(s.x / 2) * 2, Math.round(s.y / 2) * 2, s.s, s.s);
+    });
+    if (sumT > 1.0) {
+      var hy = cy + 30 - Math.min(1, (sumT - 1.0) / 0.6) * 30;
+      ctx.globalAlpha = Math.min(1, (sumT - 1.0) / 0.5);
+      drawBig(sprite("hero", "", hero.look), CX, hy, 14);
+      ctx.globalAlpha = 1;
+    }
+    /* ★1は煙がぽふっと出るだけ */
+    puffs.forEach(function (p) {
+      ctx.fillStyle = "rgba(170,165,185," + (0.55 * (1 - p.t / 1.4)) + ")";
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.restore();
+    if (sumT > 1.6 && !hideUI) {
+      var a = Math.min(1, (sumT - 1.6) / 0.4);
+      ctx.save();
+      ctx.globalAlpha = a;
+      var py = Math.round(H * 0.64), ph = 210;
+      ctx.fillStyle = "rgba(10,8,20,.88)";
+      ctx.strokeStyle = "#e8e0ff"; ctx.lineWidth = 4;
+      ctx.fillRect(40, py, W - 80, ph); ctx.strokeRect(40, py, W - 80, ph);
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      drawStars(W / 2, py + 36, 34, starShown);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 40px monospace";
+      ctx.fillText(run.name, W / 2, py + 86, W - 120);
+      ctx.font = "bold 28px monospace"; ctx.fillStyle = "#ffd890";
+      ctx.fillText(titleName(), W / 2, py + 134, W - 120);
+      ctx.font = "bold 24px monospace"; ctx.fillStyle = hero.gear.cursed ? "#ff8a8a" : "#bfe8ff";
+      ctx.fillText(hero.gear.name, W / 2, py + 176, W - 120);
+      ctx.restore();
     }
   }
 
-  function drawStick(st, lit) {
-    var top = pt(st, 0);
-    var whole = st.v + st.len;                 /* 筒の中まで全部描いて、手前の壁で隠す */
+  function partyX(i) { return (46 - i * 12 + 5) * U; }
+  function enemyX(i, list) {
+    var n = list.length;
+    if (list[0] && list[0].boss) return 104 * U;
+    return (84 + i * (n > 3 ? 12 : 14) + 6) * U;
+  }
+  function mixHex(a, b, t) {
+    var x = parseInt(a.slice(1), 16), y = parseInt(b.slice(1), 16);
+    function ch(sh) { return Math.round(((x >> sh) & 255) * (1 - t) + ((y >> sh) & 255) * t); }
+    return "rgb(" + ch(16) + "," + ch(8) + "," + ch(0) + ")";
+  }
+  function drawScene() {
+    var a = ev ? ev.area : 0, c = BG[a];
+    var b = bctx;
+    var gy = BH - 14;
+    /* 空はなめらかにせず、6段の帯で塗る（ドットらしく） */
+    for (var band = 0; band < 6; band++) {
+      b.fillStyle = mixHex(c[0], c[1], band / 5);
+      var y0 = Math.floor(gy * band / 6), y1 = Math.floor(gy * (band + 1) / 6);
+      b.fillRect(0, y0, BW, y1 - y0);
+    }
+    b.fillRect(0, gy, BW, BH - gy);
+    /* 遠景 */
+    b.fillStyle = c[2];
+    for (var x = 0; x < BW; x++) {
+      var wx = x + Math.floor(scroll * 0.3);
+      var h = a === 2 || a === 5 ? 0 : 10 + Math.sin(wx * 0.07) * 6 + Math.sin(wx * 0.19) * 3;
+      if (a === 3 || a === 4) h = 18 + Math.abs(((wx * 0.6) % 40) - 20) * 0.9;
+      h = Math.round(h);
+      b.fillRect(x, gy - h, 1, h);
+    }
+    if (a === 2 || a === 5) {
+      /* 天井・壁 */
+      for (var x2 = 0; x2 < BW; x2 += 1) {
+        var wx2 = x2 + Math.floor(scroll * 0.5);
+        var hh = a === 2 ? Math.round(6 + Math.abs(((wx2 * 0.9) % 16) - 8)) : 4;
+        b.fillRect(x2, 0, 1, hh);
+      }
+      if (a === 5) {
+        b.fillStyle = c[5];
+        for (var px = -(Math.floor(scroll * 0.6) % 32); px < BW; px += 32) { b.fillRect(px, 4, 6, gy - 4); }
+      }
+    }
+    /* 地面 */
+    b.fillStyle = c[3]; b.fillRect(0, gy, BW, BH - gy);
+    b.fillStyle = c[4];
+    var sc0 = Math.floor(scroll);
+    for (var tx = -(sc0 % 8); tx < BW; tx += 8) b.fillRect(tx, gy + 3 + (((tx + sc0) / 8) % 2) * 4, 3, 2);
+    b.fillRect(0, gy, BW, 1);
+    /* 近景の飾り */
+    b.fillStyle = c[5];
+    for (var dx = -(Math.floor(scroll) % 46); dx < BW + 10; dx += 46) {
+      var X = Math.round(dx);
+      if (a === 0 || a === 1) { b.fillRect(X + 3, gy - 12, 2, 12); b.fillRect(X, gy - 18, 8, 8); if (a === 1) b.fillRect(X - 1, gy - 24, 10, 8); }
+      else if (a === 2) { b.fillRect(X, 6, 3, 6); b.fillRect(X + 1, 12, 1, 3); }
+      else if (a === 3) { b.fillRect(X, gy - 6, 9, 6); b.fillStyle = "#ffffff"; b.fillRect(X + 1, gy - 7, 7, 2); b.fillStyle = c[5]; }
+      else if (a === 4) { b.fillStyle = "#ff8a2a"; b.fillRect(X, gy + 6, 12, 2); b.fillStyle = c[5]; }
+      else if (a === 5) { b.fillStyle = "#ffb040"; b.fillRect(X + 2, gy - 22, 2, 3); b.fillStyle = c[5]; }
+    }
+    if (!ev) return;
+    var at = anim ? anim.t : 1, lunge = at < 0.12 ? Math.sin(at / 0.12 * Math.PI) : 0;
+    var walking = !ev.e.length || ev.e.every(function (e) { return !e.alive; });
+    /* 仲間 */
+    for (var i = ev.p.length - 1; i >= 0; i--) {
+      var p = ev.p[i];
+      var spr = !p.alive ? sprite("tomb", "", 0) : sprite(p.job, "", p.look || 0);
+      var sx = 46 - i * 12, sy = gy - 12;
+      if (p.alive && walking) sy -= Math.floor((T * 8 + i) % 2);
+      if (anim && anim.lunge === i) sx += Math.round(lunge * 6);
+      if (anim && anim.hurt === i && at < 0.2) sx += (Math.floor(at * 40) % 2 ? -1 : 1);
+      b.drawImage(spr, sx, sy);
+    }
+    /* 魔物 */
+    ev.e.forEach(function (e, j) {
+      if (!e.alive) return;
+      var spr = sprite(e.shape, e.color, 0);
+      var sc = e.boss ? (e.shape === "maou" || e.shape === "dragon" ? 3 : 2) : 1;
+      var w = spr.width * sc, h = spr.height * sc;
+      var ex = e.boss ? 104 - w / 2 + 6 : 84 + j * (ev.e.length > 3 ? 12 : 14);
+      var ey = gy - h + (e.shape === "bat" || e.shape === "ghost" ? -6 + Math.round(Math.sin(T * 6 + j) * 2) : 0);
+      if (e.boss) ex = Math.round(ex);
+      if (anim && anim.elunge === j) ex -= Math.round(lunge * 6);
+      if (anim && (anim.shake === j || (ev.act && ev.act.all)) && at < 0.2) ex += (Math.floor(at * 40) % 2 ? -1 : 1);
+      b.drawImage(spr, ex, ey, w, h);
+    });
+  }
+  function drawPops() {
     ctx.save();
-    ctx.translate(top.x, top.y);
-    ctx.rotate(st.a);
-    stickShape(st, 0, whole, lit);
-    stickText(st, whole);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = "bold 30px monospace";
+    ctx.lineWidth = 6; ctx.strokeStyle = "#140f1c";
+    pops.forEach(function (p) {
+      var y = SH - 90 - p.y - p.t * 60;
+      ctx.globalAlpha = Math.min(1, (0.7 - p.t) * 4);
+      ctx.strokeText(String(p.v), p.x, y);
+      ctx.fillStyle = p.c; ctx.fillText(String(p.v), p.x, y);
+    });
     ctx.restore();
   }
-
-  function cupBot() { return H + 80; }   /* 底は画面の外 */
-  function drawCupBack() {
-    /* 筒の中（奥側） */
-    ctx.fillStyle = "#3a0d0b";
-    ctx.beginPath(); ctx.ellipse(CX, MY, RX, RY, 0, 0, Math.PI * 2); ctx.fill();
-    /* ふちの奥側は棒より奥に描く */
-    ctx.strokeStyle = "rgba(247,217,164,.6)";
-    ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.ellipse(CX, MY, RX, RY, 0, Math.PI, Math.PI * 2); ctx.stroke();
-  }
-  function drawCupFront() {
-    var bot = cupBot();
-    var g = ctx.createLinearGradient(CX - RX, 0, CX + RX, 0);
-    g.addColorStop(0, "#9e1d18"); g.addColorStop(0.35, "#e2443a"); g.addColorStop(0.55, "#d8372e"); g.addColorStop(1, "#7d1511");
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.moveTo(CX - RX, MY);
-    ctx.ellipse(CX, MY, RX, RY, 0, Math.PI, 0, true);
-    ctx.lineTo(CX + RX - 14, bot);
-    ctx.ellipse(CX, bot, RX - 14, RY * 0.9, 0, 0, Math.PI);
-    ctx.closePath();
-    ctx.fill();
-    /* 白い帯 */
+  var LOGC = { lv: "#ffe060", join: "#7aff8a", fall: "#ff6a5a", over: "#ff6a5a", boss: "#ffb04a", gate: "#ffb04a", maou: "#e0a0ff",
+    clear: "#ffe060", gear: "#bfe8ff", curse: "#ff8a8a", heal: "#9affc8", chest: "#ffd890", enter: "#9ad0ff", town: "#9ad0ff", inn: "#9ad0ff", buy: "#ffd890", hit: "#ffc8c0", summon: "#e8d8ff", won: "#d8d8e8", revive: "#7aff8a" };
+  function drawAdv() {
+    ctx.fillStyle = "#0c0a14"; ctx.fillRect(0, 0, W, H);
+    drawScene();
+    blitPix(buf, 0, 0, PX);
+    if (hideUI) return;
+    drawPops();
+    /* 仲間のHPと、魔王城までの道のり */
+    var y0 = SH;
+    ctx.fillStyle = "#16121f"; ctx.fillRect(0, y0, W, 96);
+    ctx.fillStyle = "#e8e0ff"; ctx.fillRect(0, y0, W, 4);
+    var bx = 24, bw = W - 48, by = y0 + 22;
+    ctx.fillStyle = "#2a2440"; ctx.fillRect(bx, by - 4, bw, 8);
+    for (var i = 0; i < 6; i++) { ctx.fillStyle = BG[i][3]; ctx.fillRect(bx + bw * i / 6 + 1, by - 4, bw / 6 - 2, 8); }
+    var pr = ev ? ev.prog : 0;
+    ctx.fillStyle = "#2a2440"; ctx.fillRect(bx + bw * pr, by - 4, bw * (1 - pr), 8);
+    drawBig(sprite("hero", "", hero.look), bx + bw * pr, by + 6, 2);
+    drawBig(sprite("maou", "", 0), bx + bw - 4, by + 8, 2);
+    if (ev) ev.p.forEach(function (p, i) {
+      var cw = W - 48, x = 24 + i * cw, y = y0 + 46;
+      ctx.globalAlpha = p.alive ? 1 : 0.45;
+      drawBig(sprite(p.job, "", p.look || 0), x + 14, y + 40, 3);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 18px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+      ctx.fillText("Lv" + p.lv, x + 34, y + 2);
+      ctx.fillStyle = "#3a2a3a"; ctx.fillRect(x + 34, y + 26, cw - 44, 10);
+      var f = p.mhp ? p.hp / p.mhp : 0;
+      ctx.fillStyle = f > 0.5 ? "#6ae07a" : f > 0.25 ? "#ffd040" : "#ff5a4a";
+      ctx.fillRect(x + 34, y + 26, (cw - 44) * f, 10);
+      ctx.globalAlpha = 1;
+    });
+    /* ログ */
+    var ly = y0 + 100, lh = 30, top = ly + 6, bottom = H - 8;
     ctx.save();
-    ctx.clip();
-    ctx.fillStyle = "rgba(255,248,235,.92)";
-    var by = MY + 150;
-    ctx.beginPath();
-    ctx.ellipse(CX, by, RX + 4, RY, 0, 0, Math.PI);
-    ctx.ellipse(CX, by + 54, RX + 4, RY, 0, Math.PI, 0, true);
-    ctx.fill();
-    ctx.restore();
-    /* ふち */
-    ctx.strokeStyle = "#f7d9a4";
-    ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.ellipse(CX, MY, RX, RY, 0, 0, Math.PI); ctx.stroke();
-  }
-
-  function drawPopup() {
-    if (!popup) return;
-    var t = popup.t;
-    if (!popup.win && t > 1.1) return;
-    var a = popup.win ? 1 : Math.min(1, (1.1 - t) / 0.25);
-    var s = Math.min(1, t / 0.12);
-    var n = popup.word.length;
-    var per = Math.ceil(n / Math.ceil(n / 12));   /* 12文字より長いと何行かに分ける */
-    var fs = popup.win ? 120 : Math.min(76, 500 / per);
-    ctx.save();
-    ctx.globalAlpha = a;
-    ctx.translate(W / 2, H * 0.2);
-    ctx.scale(0.7 + 0.3 * s, 0.7 + 0.3 * s);
-    ctx.font = "900 " + fs + "px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = 14;
-    ctx.strokeStyle = popup.win ? "#b3120c" : "#3b2a20";
-    var lines = [];
-    for (var i = 0; i < n; i += per) lines.push(popup.word.slice(i, i + per));
-    for (var j = 0; j < lines.length; j++) {
-      var ly = (j - (lines.length - 1) / 2) * fs * 1.15;
-      ctx.strokeText(lines[j], 0, ly);
-      ctx.fillStyle = popup.win ? "#fff36b" : "#fff";
-      ctx.fillText(lines[j], 0, ly);
+    ctx.beginPath(); ctx.rect(0, ly, W, H - ly); ctx.clip();
+    ctx.fillStyle = "#0c0a14"; ctx.fillRect(0, ly, W, H - ly);
+    ctx.font = "bold 20px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    var n = logLines.length;
+    for (var k = n - 1; k >= 0; k--) {
+      var yy = bottom - (n - 1 - k) * lh + logScroll * lh - 6;
+      if (yy < top) break;
+      var L = logLines[k];
+      ctx.globalAlpha = k === n - 1 ? 1 : Math.max(0.35, 1 - (n - 1 - k) * 0.06);
+      ctx.fillStyle = LOGC[L.k] || "#f0f0f8";
+      ctx.fillText(L.t, 18, yy, W - 36);
     }
     ctx.restore();
   }
@@ -519,133 +1106,93 @@
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
-
-    var bg = ctx.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, "#f6e7c8"); bg.addColorStop(1, "#e2c99a");
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, W, H);
-
-    drawCupBack();
-    var lit = grab ? grab.st : (keyMode && state === S.PLAY ? sticks[sel] : null);
-    var order = sticks;
-    if (lit) { order = sticks.filter(function (x) { return x !== lit; }); order.push(lit); }   /* 持ち上げ中の棒はいちばん手前に */
-    for (var i = 0; i < order.length; i++) {
-      var st = order[i];
-      ctx.save();
-      ctx.beginPath(); ctx.rect(0, 0, W, cupBot() - 8); ctx.clip();
-      drawStick(st, st === lit);
-      ctx.restore();
-    }
-    drawCupFront();
-
-    /* 抜けた棒 */
-    for (var j = 0; j < flying.length; j++) {
-      var f = flying[j], fs = f.st;
-      ctx.save();
-      if (f.win) {
-        var k = Math.min(1, winT / 0.5), e = 1 - Math.pow(1 - k, 3);
-        var len = fs.v + fs.len;
-        var tx = f.x + (W / 2 - f.x) * e, ty = f.y + (H * 0.42 - f.y) * e;
-        ctx.translate(tx, ty);
-        ctx.rotate(f.r * (1 - e));
-        ctx.scale(1 + e * 0.6, 1 + e * 0.6);
-        ctx.translate(0, -(fs.v + fs.gap + 1.5 * STEP));
-        stickShape(fs, 0, len, false);
-        stickText(fs, len);
-      } else {
-        ctx.translate(f.x, f.y);
-        ctx.rotate(f.r);
-        stickShape(fs, 0, fs.v + fs.len, false);
-        stickText(fs, fs.v + fs.len);
-      }
-      ctx.restore();
-    }
-
-    drawPopup();
-    var kv = !!lastWord && (state === S.PLAY || state === S.WIN);
-    window.zResultActions.place(kujiShare, kujiBox(), W, H, kv);
-    if (kv) window.zResultActions.drawButtons(ctx, [kujiBox()]);
-    if (confetti) confetti.draw(ctx);
-
+    ctx.textBaseline = "alphabetic";
+    window.zResultActions.place(photoButton, photoRect(), W, H, state === S.SCAN);
+    if (state === S.INTRO || state === S.SCAN) drawScan();
+    else if (state === S.SUMMON) drawSummon();
+    else drawAdv();
     if (state === S.RESULT) drawResult();
+    if (confetti) confetti.draw(ctx);
   }
 
   function resultButtons() {
-    return window.zResultActions.row(W, H * 0.62);
+    return window.zResultActions.row(W, H * 0.66);
   }
   function hitButton(x, y) {
     return window.zResultActions.hit(resultButtons(), x, y);
   }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillStyle = "rgba(10,8,16,.72)";
     ctx.fillRect(0, 0, W, H);
     ctx.save();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10;
+    drawBig(sprite(run.win ? "hero" : "tomb", "", hero.look), W / 2, H * 0.3, 10);
     ctx.fillStyle = "#fff";
-    ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowBlur = 10;
-    ctx.font = "800 108px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(zT(score + "本目", "#" + score, score + "번째", "第" + score + "根", "第" + score + "根"), W / 2, H * 0.45);
+    ctx.font = "bold 34px monospace";
+    ctx.fillText(run.name, W / 2, H * 0.35);
+    drawStars(W / 2, H * 0.12, 40, starOf());
+    ctx.font = "bold 24px monospace"; ctx.fillStyle = "#ffd890";
+    ctx.fillText(titleName(), W / 2, H * 0.385, W - 40);
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 56px sans-serif";
+    ctx.fillText(run.win ? zT("魔王討伐", "Demon King Slain", "마왕 토벌", "讨伐魔王", "討伐魔王") : run.areaName, W / 2, H * 0.44, W - 40);
+    ctx.font = "800 72px sans-serif";
+    ctx.fillText("Lv" + run.lv, W / 2, H * 0.53);
     ctx.restore();
     window.zResultActions.drawButtons(ctx, resultButtons());
     window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
   }
 
-  /* ============ 覗き穴 ============
-     テスト（games/_tools/ の道具）から中を見るためのもの。読むのと進めるだけ。
-     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
-  /* サムネ用：手前のまん中の棒を「あたいの事キライなんだろ」にして、途中まで引き出したところ */
-  window.__thumbnail = function () {
-    newRound();
-    var best = null;
-    sticks.forEach(function (st) { if (st.z > 0.6 && (!best || Math.abs(st.xm - CX) < Math.abs(best.xm - CX))) best = st; });
-    var other = sticks.filter(function (st) { return st.word === "あたいの事キライなんだろ"; })[0];
-    if (other && other !== best) { other.word = best.word; other.len = other.gap + other.word.length * STEP + STEP; }
-    best.word = "あたいの事キライなんだろ";
-    best.len = best.gap + best.word.length * STEP + STEP;
-    best.p = best.len * 0.62;
-    grab = { st: best, x: 0, y: 0, p0: best.p };
-    return new Promise(function (r) { setTimeout(r, 300); });
-  };
+  /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, left: sticks ? sticks.length : 0, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { state: state, W: W, H: H, ev: evIdx, total: run ? run.events.length : 0, win: run && run.win, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
-    hideUI: function () { document.getElementById("start").hidden = true; }
+    auto: function () { var q = fakeQR(7); useQR(q.data, q.mat, q.N); },
+    read: function (canvasLike) { scanCv.width = canvasLike.width; scanCv.height = canvasLike.height; scanCtx.drawImage(canvasLike, 0, 0); return tryRead(); },
+    hideUI: function (v) { hideUI = v !== false; },
+    star: function () { return hero ? starOf() : 0; },
+    /* 職業ごとの見た目を並べた画像（確認用） */
+    jobSheet: function () {
+      var jobs = Object.keys(window.MahoSim.JOBS), c = document.createElement("canvas"), g = c.getContext("2d");
+      c.width = jobs.length * 120; c.height = 3 * 150; g.fillStyle = "#16121e"; g.fillRect(0, 0, c.width, c.height); g.imageSmoothingEnabled = false;
+      jobs.forEach(function (j, i) {
+        for (var v = 0; v < 3; v++) {
+          var L = { hair: (i + v * 3) % 8, style: v % 3, skin: (i + v) % 4, armor: (i * 3 + v * 2) % 8, weapon: 0, cape: v === 1 ? 2 : -1 };
+          var st = { cls: j, look: L, gr: [0.5, 0, 0.5] }; dressUp(st);
+          g.drawImage(sprite("hero", "", L), i * 120 + 10, v * 150 + 6, 100, 120);
+        }
+      });
+      return c.toDataURL();
+    }
   };
 
-  /* ============ 手元用の動画撮影 ============ */
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
-      await r.wait(1000);
+      await r.wait(800);
       r.key();
-      for (var n = 0; n < 6 && state === S.PLAY; n++) {
-        sel = Math.floor(Math.random() * sticks.length);
-        if (n === 5) for (var i = 0; i < sticks.length; i++) if (sticks[i].word === ATARI) sel = i;
-        grab = { st: sticks[sel], key: true }; held = true;
-        await r.until(function () { return !grab; }, 5);
-        await r.wait(700);
-      }
-      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("勝敗が出ない");
+      await r.wait(500);
+      window.__probe.auto();
+      if (!await r.until(function () { return state === S.ADV; }, 10)) throw Error("召喚されない");
+      if (!await r.until(function () { return state === S.RESULT; }, 120)) throw Error("冒険が終わらない");
       await r.wait(1500);
     }
   };
-  /* ============ ループ ============ */
-  var startButton=document.getElementById('start');
-  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
-  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
 
-  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
-  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
-  newRound();state=S.INTRO;startButton.hidden=false;
+  /* ============ ループ ============ */
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); beginScan(); });
+  confetti = window.zCelebrate.confetti();
+  confetti.rain = false;
   layout();
+  newRound(); state = S.INTRO; startButton.hidden = false;
   var last = performance.now();
   var stepAcc = 0;
   function loop(now) {
-    /* 端末の速さや画面のコマ数（60Hz/120Hz）で挙動が変わらないように、描画が遅れても
-       ゲームの時間は実際の時間どおり進め、update はいつもちょうど 1/60 秒ずつ呼ぶ（余りは次へ持ち越す）。
-       タブから戻ってきたときの大きな空白だけは切り捨てる */
     var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
     last = now;
     if (!window.__recordManual) {
@@ -662,11 +1209,11 @@
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=atari-1793056361231" : "./recorder-ui.js?v=atari-1793056361231";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=mahoujin-1793142690948" : "./recorder-ui.js?v=mahoujin-1793142690948";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=atari-1793056361231"></script>
-<script src="./preview-header.js?v=atari-1793056361231"></script>
+<script src="./auto-reload.js?v=mahoujin-1793142690948"></script>
+<script src="./preview-header.js?v=mahoujin-1793142690948"></script>
 </body>
 </html>
