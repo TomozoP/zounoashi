@@ -38,14 +38,13 @@
     won: ["戦闘に勝利！ {c}の経験値と{d}ゴールド", "Victory! {c} EXP and {d} gold", "전투 승리! 경험치 {c}, {d} 골드", "战斗胜利！获得{c}经验值和{d}金币", "戰鬥勝利！獲得{c}經驗值和{d}金幣"],
     lvup: ["{a}はレベル{c}に上がった！", "{a} reached level {c}!", "{a}은(는) 레벨 {c}이(가) 되었다!", "{a}升到了{c}级！", "{a}升到了{c}級！"],
     fall: ["{a}は倒れた…", "{a} has fallen...", "{a}은(는) 쓰러졌다…", "{a}倒下了……", "{a}倒下了……"],
-    join: ["{b}の{a}が仲間になった！", "{a} the {b} joined the party!", "{b} {a}이(가) 동료가 되었다!", "{b}{a}成为了同伴！", "{b}{a}成為了同伴！"],
     chestG: ["宝箱を見つけた！ {c}ゴールド手に入れた", "Found a chest! Got {c} gold", "보물상자 발견! {c} 골드 획득", "发现宝箱！获得{c}金币", "發現寶箱！獲得{c}金幣"],
     chestH: ["宝箱を見つけた！ 薬草を手に入れた", "Found a chest! Got an herb", "보물상자 발견! 약초를 얻었다", "发现宝箱！获得了药草", "發現寶箱！獲得了藥草"],
     chestE: ["宝箱を見つけた！ {a}を手に入れた", "Found a chest! Got the {a}", "보물상자 발견! {a}을(를) 얻었다", "发现宝箱！获得了{a}", "發現寶箱！獲得了{a}"],
     trap: ["わなだ！ {a}は{c}のダメージ", "A trap! {a} takes {c} damage", "함정이다! {a}은(는) {c}의 피해", "是陷阱！{a}受到{c}点伤害", "是陷阱！{a}受到{c}點傷害"],
-    spring: ["泉を見つけた。みんなの傷が癒えた", "Found a spring. Wounds are healed", "샘을 발견했다. 모두의 상처가 나았다", "发现了泉水。大家的伤痊愈了", "發現了泉水。大家的傷痊癒了"],
+    spring: ["泉を見つけた。傷が癒えた", "Found a spring. Wounds are healed", "샘을 발견했다. 상처가 나았다", "发现了泉水。伤痊愈了", "發現了泉水。傷痊癒了"],
     town: ["{a}の町に着いた", "Arrived at the town of {a}", "{a} 마을에 도착했다", "抵达了{a}镇", "抵達了{a}鎮"],
-    inn: ["宿屋に泊まった。全員回復！", "Rested at the inn. Fully recovered!", "여관에서 묵었다. 전원 회복!", "在旅店住了一晚。全员恢复！", "在旅店住了一晚。全員恢復！"],
+    inn: ["宿屋に泊まった。HPが全回復！", "Rested at the inn. HP fully restored!", "여관에서 묵었다. HP 전부 회복!", "在旅店住了一晚。HP完全恢复！", "在旅店住了一晚。HP完全恢復！"],
     revive: ["{a}が生き返った", "{a} was revived", "{a}이(가) 되살아났다", "{a}复活了", "{a}復活了"],
     buy: ["{a}を買った！", "Bought the {a}!", "{a}을(를) 샀다!", "买了{a}！", "買了{a}！"],
     buyH: ["薬草を{c}個買った", "Bought {c} herbs", "약초를 {c}개 샀다", "买了{c}个药草", "買了{c}個藥草"],
@@ -80,12 +79,6 @@
     ["dragon", "#e03a2a", "レッドドラゴン", "Red Dragon", "레드 드래곤", "赤龙", "赤龍"],
     ["maou", "#5a2a8a", "魔王", "Demon King", "마왕", "魔王", "魔王"]
   ];
-  var JOBS = {
-    warrior: ["戦士", "Warrior", "전사", "战士", "戰士"],
-    mage: ["魔法使い", "Mage", "마법사", "魔法师", "魔法師"],
-    priest: ["僧侶", "Priest", "성직자", "僧侣", "僧侶"],
-    thief: ["盗賊", "Thief", "도적", "盗贼", "盜賊"]
-  };
   var WEAPONS = [
     null,
     ["銅の剣", "Copper Sword", "구리 검", "铜剑", "銅劍"],
@@ -124,7 +117,7 @@
   }
 
   /* 難しさ（勝率がごく低くなるように合わせた値） */
-  var K = { regen: 0.2, mhp: 6, matk: 2.0, mdef: 0.9, mexp: 0.7, bhp: 2.2, alv: 2.2, ex: 2.3, blv: 2, maouLv: 10, maouHp: 1.8, maouAtk: 1.5 };
+  var K = { regen: 0.2, mhp: 4.5, matk: 1.5, mdef: 0.9, mexp: 0.7, bhp: 2.2, alv: 2.2, ex: 2.0, blv: 2, maouLv: 3, maouHp: 1.8, maouAtk: 1.2 };
 
   function run(base, opt) {
     opt = opt || {};
@@ -175,26 +168,6 @@
         log("lv", L("lvup", p.name, "", p.lv), { who: party.indexOf(p) });
       }
     }
-    function newAlly() {
-      var have = {};
-      party.forEach(function (p) { have[p.job] = 1; });
-      var opts = ["warrior", "mage", "priest", "thief"].filter(function (j) { return !have[j]; });
-      var job = pick(opts);
-      var lv = Math.max(1, hero.lv - ri(0, 2));
-      var G = {
-        warrior: { hp: 11, atk: 2.4, def: 1.6, mag: 0.2, spd: 0.6 },
-        mage: { hp: 6, atk: 0.8, def: 0.7, mag: 2.6, spd: 0.9 },
-        priest: { hp: 8, atk: 1.0, def: 1.1, mag: 2.0, spd: 0.7 },
-        thief: { hp: 8, atk: 1.8, def: 0.9, mag: 0.3, spd: 1.6 }
-      }[job];
-      var a = { name: makeName(rand, li), job: job, lv: lv, g: G, exp: 0, alive: true,
-        mhp: 22 + G.hp * lv, atk: 5 + G.atk * lv, def: 3 + G.def * lv, mag: 3 + G.mag * lv, spd: 4 + G.spd * lv, luk: ri(2, 10),
-        look: ri(0, 5) };
-      a.hp = a.mhp;
-      party.push(a);
-      log("join", L("join", a.name, w(JOBS[job])), { who: party.length - 1 });
-    }
-
     /* 戦闘。全滅か勇者が倒れたら false */
     function battle(list) {
       enemies = list;
@@ -322,13 +295,11 @@
             log("chest", L("chestE", w(WEAPONS[wpn])));
           } else if (c < 0.45) { herbs++; log("chest", L("chestH")); }
           else { var gg = ri(5, 20) * (area + 1); gold += gg; log("chest", L("chestG", "", "", gg)); }
-        } else if (r < 0.8 && party.length < 4 && rand() < 0.55 + hero.luk * 0.01) {
-          newAlly();
-        } else if (r < 0.86) {
+        } else if (r < 0.8) {
           var td = Math.round(hero.mhp * (0.12 + rand() * 0.15));
           hero.hp = Math.max(1, hero.hp - td);
           log("trap", L("trap", hero.name, "", td), { at: 0, dmg: td });
-        } else if (r < 0.91) {
+        } else if (r < 0.87) {
           party.forEach(function (p) { if (p.alive) p.hp = p.mhp; });
           log("spring", L("spring"));
         } else {
