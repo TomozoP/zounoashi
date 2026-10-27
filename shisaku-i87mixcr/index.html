@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="mahoujin-1793143128388">
+<meta name="preview-version" content="mahoujin-1793144083577">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>【プレビュー】魔法陣ゲーム</title>
 <style>
@@ -35,17 +35,17 @@
   <button id="photo-button" type="button" aria-label="画像を選ぶ" hidden></button>
   <input id="photo-input" type="file" accept="image/*" hidden>
 </div></div>
-<script src="../games/start.js?v=mahoujin-1793143128388"></script>
-<script src="../games/view.js?v=mahoujin-1793143128388"></script>
-<script src="../games/audio.js?v=mahoujin-1793143128388"></script>
-<script src="../games/lang.js?v=mahoujin-1793143128388"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=mahoujin-1793143128388"></script>
-<script src="../games/result-actions.js?v=mahoujin-1793143128388"></script>
-<script src="../games/action-icons.js?v=mahoujin-1793143128388"></script>
-<script src="../games/pad.js?v=mahoujin-1793143128388"></script>   <!-- ジョイパッドと、絵の外のタップ -->
-<script src="../games/celebrate.js?v=mahoujin-1793143128388"></script>
-<script src="jsQR.js?v=mahoujin-1793143128388"></script>   <!-- QRの読み取り（Apache-2.0） -->
-<script src="sim.js?v=mahoujin-1793143128388"></script>
+<script src="../games/start.js?v=mahoujin-1793144083577"></script>
+<script src="../games/view.js?v=mahoujin-1793144083577"></script>
+<script src="../games/audio.js?v=mahoujin-1793144083577"></script>
+<script src="../games/lang.js?v=mahoujin-1793144083577"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=mahoujin-1793144083577"></script>
+<script src="../games/result-actions.js?v=mahoujin-1793144083577"></script>
+<script src="../games/action-icons.js?v=mahoujin-1793144083577"></script>
+<script src="../games/pad.js?v=mahoujin-1793144083577"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/celebrate.js?v=mahoujin-1793144083577"></script>
+<script src="jsQR.js?v=mahoujin-1793144083577"></script>   <!-- QRの読み取り（Apache-2.0） -->
+<script src="sim.js?v=mahoujin-1793144083577"></script>
 <script>
 /* 魔法陣ゲーム
    魔法陣を描く → 形から勇者の名前とステータスが決まる → 冒険を見守る（上で冒険、下にログ）。
@@ -382,6 +382,9 @@
       video = document.createElement("video");
       video.muted = true; video.playsInline = true; video.setAttribute("playsinline", "");
       video.srcObject = s;
+      /* 画面に置いておかないと映像の更新が止まる端末がある（見えない大きさで置く） */
+      video.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none;";
+      document.body.appendChild(video);
       var p = video.play(); if (p && p.catch) p.catch(function () {});
     }).catch(function () {});
   }
@@ -397,35 +400,71 @@
   }
   function stopCamera() {
     if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
-    stream = null; video = null;
+    if (video && video.parentNode) video.parentNode.removeChild(video);
+    stream = null; video = null; qwBusy = false;
   }
-  /* 読み取りは「全体」「真ん中を拡大」「もっと拡大」を順に試す。遠くの小さなQRや細かいQRも拾えるように */
-  var scanMode = 0, bdBusy = false, bd = null;
+  /* 読み取りは「全体」「真ん中を拡大」「もっと拡大」を順に試す。遠くの小さなQRや細かいQRも拾えるように。
+     重い計算は裏（Worker）でして、カメラの映像が止まらないようにする */
+  var scanMode = 0, bdBusy = false, bd = null, qrWorker = null, qwBusy = false;
   try { if (window.BarcodeDetector) bd = new window.BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { bd = null; }
-  function grab(sx, sy, sw, sh, max) {
+  try {
+    var qs = document.querySelector('script[src*="jsQR"]');
+    if (qs && window.Worker && window.Blob) {
+      /* 映像の切り出し・画素の読み出し・QRの解読まで、全部裏でする（OffscreenCanvas がない端末は画素だけ表で読む） */
+      var src = "importScripts(" + JSON.stringify(qs.src) + ");var oc=null,og=null;" +
+        "onmessage=function(e){var m=e.data,r=null,d,w=m.w,h=m.h;try{if(m.bmp){if(!oc){oc=new OffscreenCanvas(w,h);og=oc.getContext('2d',{willReadFrequently:true});}" +
+        "if(oc.width!==w||oc.height!==h){oc.width=w;oc.height=h;}og.drawImage(m.bmp,0,0,w,h);m.bmp.close();d=og.getImageData(0,0,w,h).data;}else d=new Uint8ClampedArray(m.buf);" +
+        "r=jsQR(d,w,h,{inversionAttempts:m.inv});}catch(x){if(m.bmp)return postMessage({fail:1});}" +
+        "if(r&&r.location)postMessage({r:{data:r.data,version:r.version,location:r.location},buf:d.buffer,w:w,h:h},[d.buffer]);else postMessage(null);};";
+      qrWorker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+      qrWorker.onmessage = function (e) {
+        qwBusy = false;
+        var m = e.data;
+        if (m && m.fail) { useBitmap = false; return; }
+        if (m && m.r && state === S.SCAN) finishRead(m.r, new Uint8ClampedArray(m.buf), m.w, m.h);
+      };
+      qrWorker.onerror = function () { qrWorker = null; qwBusy = false; };
+    }
+  } catch (e) { qrWorker = null; }
+  var useBitmap = !!(window.createImageBitmap && window.OffscreenCanvas);
+  /* 映像の (sx,sy,sw,sh) を長い辺 max まで縮めて読む */
+  function readRect(sx, sy, sw, sh, max, inv) {
     var k = Math.min(1, max / Math.max(sw, sh)), cw = Math.max(1, Math.round(sw * k)), ch = Math.max(1, Math.round(sh * k));
+    if (qrWorker && useBitmap) {
+      qwBusy = true;
+      var v = video;
+      window.createImageBitmap(v, Math.round(sx), Math.round(sy), Math.round(sw), Math.round(sh), { resizeWidth: cw, resizeHeight: ch }).then(function (bmp) {
+        if (video !== v || state !== S.SCAN) { bmp.close(); qwBusy = false; return; }
+        qrWorker.postMessage({ bmp: bmp, w: cw, h: ch, inv: inv }, [bmp]);
+      }).catch(function () { useBitmap = false; qwBusy = false; });
+      return;
+    }
     if (scanCv.width !== cw || scanCv.height !== ch) { scanCv.width = cw; scanCv.height = ch; }
     scanCtx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+    if (!qrWorker) { tryRead(inv); return; }
+    var im = scanCtx.getImageData(0, 0, cw, ch);
+    qwBusy = true;
+    qrWorker.postMessage({ buf: im.data.buffer, w: cw, h: ch, inv: inv }, [im.data.buffer]);
   }
   function scanFrame() {
-    if (!video || video.readyState < 2 || !video.videoWidth) return;
+    if (!video || video.readyState < 2 || !video.videoWidth || qwBusy) return;
     var vw = video.videoWidth, vh = video.videoHeight, m = scanMode++ % 3;
     /* 端末にQR読み取りが入っていれば、まずそれで場所を見つけて、そこだけを細かく読む */
-    if (bd && !bdBusy) {
+    if (bd && !bdBusy && scanMode % 2 === 0) {
       bdBusy = true;
       var v = video;
       bd.detect(v).then(function (list) {
         bdBusy = false;
-        if (!list || !list.length || state !== S.SCAN || video !== v) return;
+        if (!list || !list.length || state !== S.SCAN || video !== v || qwBusy) return;
         var b = list[0].boundingBox, pad = Math.max(b.width, b.height) * 0.15;
         var sx = Math.max(0, b.x - pad), sy = Math.max(0, b.y - pad);
-        grab(sx, sy, Math.min(vw - sx, b.width + pad * 2), Math.min(vh - sy, b.height + pad * 2), 800);
-        tryRead("attemptBoth");
+        readRect(sx, sy, Math.min(vw - sx, b.width + pad * 2), Math.min(vh - sy, b.height + pad * 2), 700, "attemptBoth");
       }).catch(function () { bdBusy = false; bd = null; });
+      return;
     }
-    if (m === 0) grab(0, 0, vw, vh, 960);
-    else { var f = m === 1 ? 0.6 : 0.35, s = Math.min(vw, vh) * f; grab((vw - s) / 2, (vh - s) / 2, s, s, 800); }
-    tryRead(scanMode % 6 < 3 ? "dontInvert" : "onlyInvert");
+    var inv = scanMode % 6 < 3 ? "dontInvert" : "onlyInvert";
+    if (m === 0) readRect(0, 0, vw, vh, 720, inv);
+    else { var f = m === 1 ? 0.6 : 0.35, s = Math.min(vw, vh) * f; readRect((vw - s) / 2, (vh - s) / 2, s, s, 560, inv); }
   }
   function tryRead(inv) {
     var w = scanCv.width, h = scanCv.height;
@@ -433,6 +472,10 @@
     var img = scanCtx.getImageData(0, 0, w, h), d = img.data;
     var r = window.jsQR(d, w, h, { inversionAttempts: inv || "attemptBoth" });
     if (!r || !r.location) return false;
+    finishRead(r, d, w, h);
+    return true;
+  }
+  function finishRead(r, d, w, h) {
     /* 四隅から升目の真ん中を拾って、模様を取り出す */
     var L = r.location, A = L.topLeftCorner, B = L.topRightCorner, C = L.bottomLeftCorner, D = L.bottomRightCorner;
     var N = 17 + 4 * (r.version || 1), lum = [], lo = 255, hi = 0;
@@ -448,7 +491,6 @@
     /* 白黒が反転したQRなら戻す（左上の角は黒） */
     if (!dark[0]) dark = dark.map(function (b) { return !b; });
     useQR(r.data || "", dark, N);
-    return true;
   }
 
   function clamp01(v) { return Math.max(0, Math.min(1, v)); }
@@ -597,7 +639,7 @@
     T += dt;
     if (confetti) confetti.step(dt, W, H);
     if (state === S.SCAN) {
-      if (T - lastScan > 0.1) { lastScan = T; scanFrame(); }
+      if (T - lastScan > 0.15) { lastScan = T; scanFrame(); }
       if (video && T - lastPing > 1.4) { lastPing = T; tone(1760, 0.18, 0.012, "sine", 1500); }
       return;
     }
@@ -1233,11 +1275,11 @@
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=mahoujin-1793143128388" : "./recorder-ui.js?v=mahoujin-1793143128388";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=mahoujin-1793144083577" : "./recorder-ui.js?v=mahoujin-1793144083577";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=mahoujin-1793143128388"></script>
-<script src="./preview-header.js?v=mahoujin-1793143128388"></script>
+<script src="./auto-reload.js?v=mahoujin-1793144083577"></script>
+<script src="./preview-header.js?v=mahoujin-1793144083577"></script>
 </body>
 </html>
