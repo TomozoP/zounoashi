@@ -179,6 +179,17 @@ html.gameOnly #gameTools button{padding:6px 10px;white-space:nowrap}
 html.gameOnly,html.gameOnly body{background:#000;overflow:hidden}
 html.gameOnly #app{display:none}
 html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;border-radius:0;box-shadow:none}
+/* スマホ：録画が終わったら、トリムと投稿（X・YouTube）だけの画面 */
+#cakePost{position:fixed;inset:0;z-index:40;background:#000;display:flex;flex-direction:column}
+#cakePost[hidden]{display:none}
+#cakePost .cpBar{display:flex;align-items:center;gap:8px;height:44px;padding:0 10px;background:var(--panel);border-bottom:1px solid var(--line)}
+#cakePost video{flex:1 1 0;min-height:0;width:100%;object-fit:contain;background:#000}
+#cakePost .cpTrim{padding:10px 14px 0;background:var(--panel)}
+#cakePost .cpRow{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+#cakePost .cpRow span{min-width:3.5em;font-variant-numeric:tabular-nums}
+#cakePost .cpRow input{flex:1}
+#cakePost .cpActs{display:flex;gap:10px;padding:8px 14px calc(12px + env(safe-area-inset-bottom));background:var(--panel)}
+#cakePost .cpActs button{flex:1;padding:12px 0;font-size:16px;font-weight:700}
 @media (max-width:820px){
   #mid{grid-template-columns:1fr}
   .split{display:none}
@@ -392,6 +403,15 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
   <div class="acts" id="ovActs"><button id="ovCancel">中止</button></div>
 </div></div>
 <div id="toast"></div>
+<div id="cakePost" hidden>
+  <div class="cpBar"><button type="button" id="cpBack">撮り直す</button><span id="cpLen" style="margin-left:auto"></span></div>
+  <video id="cpVideo" playsinline preload="auto"></video>
+  <div class="cpTrim">
+    <div class="cpRow"><span>はじめ</span><input type="range" id="cpIn" min="0" max="1" step="0.1" value="0"><span id="cpInT">0.0</span></div>
+    <div class="cpRow"><span>おわり</span><input type="range" id="cpOut" min="0" max="1" step="0.1" value="1"><span id="cpOutT">0.0</span></div>
+  </div>
+  <div class="cpActs"><button type="button" class="primary" id="cpX">X</button><button type="button" class="primary" id="cpYt">YouTube</button></div>
+</div>
 
 <video id="vA" muted playsinline preload="auto" hidden></video>
 <video id="vB" muted playsinline preload="auto" hidden></video>
@@ -452,6 +472,8 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
     try { state = frame && frame.contentWindow.zRecorder ? frame.contentWindow.zRecorder.state() : ''; } catch (e) {}
     if (rec) { rec.textContent = { recording: '停止', preparing: '準備中', saving: '書き出し中' }[state] || '録画'; rec.classList.toggle('on', state === 'recording'); }
   }, 300);
+  /* スマホ：投稿画面から「撮り直す」でゲームを開き直す */
+  window.__cakeGame = function (on) { var panel = document.getElementById('gamePanel'); if (panel.firstChild) panel.firstChild.remove(); if (on) load(panel); };
   addEventListener('DOMContentLoaded', function () {
     var panel = document.getElementById('gamePanel');
     /* ボタンを押したあとは、キー操作がゲームに届くようにゲームへ戻す */
@@ -2688,7 +2710,101 @@ refresh();
 /* ゲームだけを出すときは、保存した編集を読み込まない */
 if (!window.__cakeGameOnly) restoreProject();
 /* 制作中のゲームの録画を受け取って並びに入れる（録画パネルから呼ばれる） */
-if (!window.__cakeGameOnly) window.zCakeCut = { take: (blob, name) => addFiles([new File([blob], name, { type: blob.type })]) };
+window.zCakeCut = { take: window.__cakeGameOnly ? phoneTake : (blob, name) => addFiles([new File([blob], name, { type: blob.type })]) };
+/* ---------- スマホ：録画のあとはトリムと投稿だけ ----------
+   録れた動画を見ながら、はじめ・おわりを決める。切るときは範囲を再生しながら録り直す（範囲がそのままなら元の動画を使う）。
+   X は共有メニュー（X のアプリ・ビデオを保存）、YouTube は PC と同じく直接上げる */
+let cp = null;
+function phoneTake(blob, name) {
+  if (!(blob.type || '').startsWith('video') || /-audio\./.test(name)) return;
+  const v = $('cpVideo');
+  if (cp) URL.revokeObjectURL(cp.url);
+  cp = { blob, name, url: URL.createObjectURL(blob), dur: 0, file: null, key: '' };
+  v.src = cp.url;
+  v.onloadedmetadata = () => {
+    if (!isFinite(v.duration)) { v.currentTime = 1e9; v.ondurationchange = () => { if (isFinite(v.duration)) { v.ondurationchange = null; v.currentTime = 0; cpRange(v.duration); } }; return; }
+    cpRange(v.duration);
+  };
+  $('cakePost').hidden = false;
+  // 録画の書き出しが終わってからゲームを閉じる（後ろで音が鳴らないように）
+  setTimeout(() => window.__cakeGame(false), 1500);
+  lastExport = null;
+  postInfo().then(g => { fillPost(g); cp.info = g; });
+}
+function cpRange(d) {
+  cp.dur = d;
+  for (const id of ['cpIn', 'cpOut']) $(id).max = d.toFixed(1);
+  $('cpIn').value = 0; $('cpOut').value = d.toFixed(1); cpShow();
+}
+const cpIn = () => +$('cpIn').value, cpOut = () => Math.min(cp.dur, +$('cpOut').value);
+function cpShow() {
+  $('cpInT').textContent = cpIn().toFixed(1); $('cpOutT').textContent = cpOut().toFixed(1);
+  $('cpLen').textContent = (cpOut() - cpIn()).toFixed(1) + '秒';
+}
+for (const id of ['cpIn', 'cpOut']) $(id).oninput = () => {
+  if (cpOut() - cpIn() < 0.5) { if (id === 'cpIn') $('cpIn').value = Math.max(0, cpOut() - 0.5); else $('cpOut').value = Math.min(cp.dur, cpIn() + 0.5); }
+  const v = $('cpVideo'); v.pause(); v.currentTime = id === 'cpIn' ? cpIn() : cpOut(); cpShow();
+};
+// 画面をタップで範囲を再生／止める。おわりまで来たら、はじめに戻す
+$('cpVideo').onclick = () => { const v = $('cpVideo'); if (cp && cp.cutting) return; if (v.paused) { if (v.currentTime < cpIn() || v.currentTime >= cpOut() - 0.05) v.currentTime = cpIn(); v.play(); } else v.pause(); };
+$('cpVideo').ontimeupdate = () => { const v = $('cpVideo'); if (cp && !cp.cutting && !v.paused && v.currentTime >= cpOut()) { v.pause(); v.currentTime = cpIn(); } };
+$('cpBack').onclick = () => { $('cpVideo').pause(); $('cakePost').hidden = true; window.__cakeGame(true); };
+// 今の範囲の動画を用意する。切っていなければ元の動画、切ったら範囲を再生しながら録り直す
+let cpAudio = null;
+function cpCut(button) {
+  const a = cpIn(), b = cpOut(), key = a + '-' + b;
+  if (cp.file && cp.key === key) return Promise.resolve(cp.file);
+  const d = new Date(), p2 = n => String(n).padStart(2, '0');
+  const stamp = d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
+  const stem = ((cp.info && cp.info.title) || 'short').replace(/[\\/:*?"<>|\s]/g, '') + '_' + stamp;
+  const done = blob => {
+    const file = new File([blob], stem + ((blob.type || '').includes('mp4') ? '.mp4' : '.webm'), { type: blob.type || 'video/mp4' });
+    cp.file = file; cp.key = key;
+    lastExport = { file: () => file, save: () => { const x = document.createElement('a'); x.href = URL.createObjectURL(file); x.download = file.name; document.body.appendChild(x); x.click(); x.remove(); }, info: Promise.resolve(cp.info || {}) };
+    return file;
+  };
+  if (a < 0.05 && b > cp.dur - 0.05) return Promise.resolve(done(cp.blob));
+  const v = $('cpVideo');
+  if (!cpAudio) { const ac = new AudioContext(), src = ac.createMediaElementSource(v), dest = ac.createMediaStreamDestination(); src.connect(ac.destination); src.connect(dest); cpAudio = { ac, dest }; }
+  cpAudio.ac.resume();
+  const c = document.createElement('canvas'); c.width = v.videoWidth - v.videoWidth % 2; c.height = v.videoHeight - v.videoHeight % 2; const x = c.getContext('2d');
+  const stream = new MediaStream([...c.captureStream(30).getVideoTracks(), ...cpAudio.dest.stream.getAudioTracks()]);
+  const mime = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12e6, audioBitsPerSecond: 192e3 }), chunks = [];
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  const label = button.textContent; cp.cutting = true;
+  document.querySelectorAll('#cakePost button, #cakePost input').forEach(el => el.disabled = true);
+  v.pause(); v.currentTime = a;
+  return new Promise(ok => {
+    rec.onstop = () => {
+      stream.getVideoTracks().forEach(t => t.stop()); cp.cutting = false;
+      document.querySelectorAll('#cakePost button, #cakePost input').forEach(el => el.disabled = false);
+      button.textContent = label; v.currentTime = a;
+      ok(done(new Blob(chunks, { type: rec.mimeType || mime })));
+    };
+    const draw = () => {
+      if (!v.seeking) x.drawImage(v, 0, 0, c.width, c.height);
+      if (rec.state === 'inactive') return;
+      if (v.currentTime >= b || v.ended) { v.pause(); x.drawImage(v, 0, 0, c.width, c.height); setTimeout(() => rec.state === 'recording' && rec.stop(), 100); return; }
+      button.textContent = '切り出し中 ' + Math.round(Math.max(0, v.currentTime - a) / (b - a) * 100) + '%';
+      requestAnimationFrame(draw);
+    };
+    v.onseeked = () => { v.onseeked = null; x.drawImage(v, 0, 0, c.width, c.height); rec.start(1000); v.play(); draw(); };
+  });
+}
+// 切り出したら、共有メニューやログインは押した瞬間でないと開けないので、もう一度押してもらう
+async function cpGo(button, act) {
+  if (!cp || !cp.dur) return;
+  const a = cpIn(), b = cpOut(), whole = a < 0.05 && b > cp.dur - 0.05, ready = whole || (cp.file && cp.key === a + '-' + b);
+  const file = await cpCut(button);
+  if (!ready) { toast('切り出しました。もう一度押してください', 4000); return; }
+  act(file);
+}
+$('cpX').onclick = () => cpGo($('cpX'), file => {
+  if (navigator.canShare && navigator.canShare({ files: [file] })) navigator.share({ files: [file], text: xText() }).catch(() => {});
+  else postX();
+});
+$('cpYt').onclick = () => cpGo($('cpYt'), () => postYT($('cpYt')));
 </script>
 </body>
 </html>
