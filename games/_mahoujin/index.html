@@ -15,7 +15,8 @@
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
   #start[hidden] { display:none; }
   #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
-  #share-button[hidden], #photo-button[hidden] { display:none; }
+  #share-button[hidden], #photo-button[hidden], #save-button[hidden] { display:none; }
+  #save-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #photo-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
 </style>
@@ -25,6 +26,7 @@
   <canvas id="c"></canvas>
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+  <button id="save-button" type="button" aria-label="画像を保存" hidden></button>
   <button id="photo-button" type="button" aria-label="画像を選ぶ" hidden></button>
   <input id="photo-input" type="file" accept="image/*" hidden>
 </div></div>
@@ -51,6 +53,17 @@
   var wrap = document.getElementById("wrap");
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
+  var saveButton = document.getElementById("save-button");
+  var pageSaver = null;
+  if (window.claude && window.claude.use) window.claude.use("downloads").then(function (d) { pageSaver = d; }, function () {});
+  window.zResultActions.bind(saveButton, function () {
+    if (!run) return;
+    var cv = makeCard(4), d = new Date();
+    function p2(n) { return (n < 10 ? "0" : "") + n; }
+    var name = zT("魔法陣ゲーム", "MagicCircleQuest", "MagicCircleQuest", "MagicCircleQuest", "MagicCircleQuest") + "_" + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + "-" + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + ".png";
+    if (pageSaver) { cv.toBlob(function (b) { if (b) pageSaver.save({ filename: name, data: b }).catch(function () {}); }, "image/png"); return; }
+    window.zResultActions.saveImage({ canvas: cv, name: name });
+  });
   var followLink = window.zResultActions.follow.link(shareButton.parentNode);
   var LANG = window.zLangFull || "ja";
 
@@ -366,7 +379,7 @@
   }
 
   function newRound() {
-    shareButton.hidden = true;
+    shareButton.hidden = true; saveButton.hidden = true; cardCache = null;
     document.getElementById("start").hidden = true;
     state = S.SCAN;
     T = 0; held = false;
@@ -895,7 +908,6 @@
     }
     ctx.restore();
   }
-  /* 「○○な○○」（性格＋職業） */
   /* 性格からつく二つ名「〇〇の」（同じ性格でも8つのうちどれかはQRで決まる） [ja, en, ko, zh, tw] */
   var EPITHET = {
     brave: [["獅子心の", "Lionheart", "사자심장의", "狮心之", "獅心之"], ["不退転の", "Unyielding", "불퇴전의", "不退之", "不退之"], ["鋼の心の", "Steelheart", "강철 심장의", "钢心之", "鋼心之"], ["先陣の", "Vanguard", "선봉의", "先锋之", "先鋒之"], ["剛勇の", "Valiant", "강용의", "刚勇之", "剛勇之"], ["盾なしの", "Shieldless", "방패 없는", "无盾之", "無盾之"], ["夜明けの", "Dawn", "새벽의", "黎明之", "黎明之"], ["百戦の", "Hundred-Battle", "백전의", "百战之", "百戰之"]],
@@ -1180,7 +1192,8 @@
   }
 
   function draw() {
-    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(shareButton, resultButtons()[2], W, H, state === S.RESULT);
+    window.zResultActions.place(saveButton, resultButtons()[1], W, H, state === S.RESULT);
     window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
     ctx.textBaseline = "alphabetic";
@@ -1193,29 +1206,81 @@
   }
 
   function resultButtons() {
-    return window.zResultActions.row(W, H * 0.66);
+    var bs = window.zResultActions.row(W, H - 54 - Math.max(70, H * 0.09), ["retry", "save", "share"]);
+    bs[1].label = "画像を保存";
+    return bs;
   }
   function hitButton(x, y) {
     return window.zResultActions.hit(resultButtons(), x, y);
   }
+  /* 結果のカード。320×460 を q 倍の画素で描く（保存にも使う） */
+  var CARD_W = 320, CARD_H = 460, cardCache = null;
+  function makeCard(q) {
+    var c = document.createElement("canvas"); c.width = CARD_W * q; c.height = CARD_H * q;
+    var g = c.getContext("2d"), st = starOf(), col = STAR_C[st - 1], fx = RARE_FX[st - 1];
+    g.scale(q, q); g.imageSmoothingEnabled = false;
+    function rr(x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+    /* 枠（★の色） */
+    rr(0, 0, CARD_W, CARD_H, 18); g.fillStyle = col; g.fill();
+    rr(7, 7, CARD_W - 14, CARD_H - 14, 13); g.fillStyle = "#15111f"; g.fill();
+    g.textAlign = "center"; g.textBaseline = "middle";
+    /* ★ */
+    g.font = "bold 26px sans-serif";
+    for (var i = 0; i < 5; i++) { g.fillStyle = i < st ? col : "rgba(255,255,255,.14)"; g.fillText("★", CARD_W / 2 + (i - 2) * 28, 32); }
+    /* 絵の窓：倒れた場所（勝ったら魔王城）の景色と、床の魔法陣 */
+    var ax = 18, ay = 52, aw = CARD_W - 36, ah = 220, area = Math.min(5, run.area), bg = BG[area], gy = ay + ah - 52;
+    g.save();
+    rr(ax, ay, aw, ah, 6); g.clip();
+    for (var band = 0; band < 6; band++) { g.fillStyle = mixHex(bg[0], bg[1], band / 5); g.fillRect(ax, ay + Math.floor((gy - ay) * band / 6), aw, Math.ceil((gy - ay) / 6) + 1); }
+    g.fillStyle = bg[2];
+    for (var x = 0; x < aw; x += 4) { var hh = 14 + Math.round(Math.sin(x * 0.05 + area) * 8 + Math.sin(x * 0.13) * 4); g.fillRect(ax + x, gy - hh, 4, hh); }
+    g.fillStyle = bg[3]; g.fillRect(ax, gy, aw, ay + ah - gy);
+    g.fillStyle = bg[4]; g.fillRect(ax, gy, aw, 4);
+    /* 床の魔法陣（読んだQRの模様をそのまま） */
+    var cx = CARD_W / 2, cy = gy + 26, R = 100;
+    g.save(); g.translate(cx, cy); g.scale(1, 0.3);
+    g.strokeStyle = "rgba(" + fx[3] + ",.9)"; g.lineWidth = 4;
+    g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.stroke();
+    if (qr && qr.mat) {
+      var N = qr.N, m = (R * 1.3) / N;
+      g.fillStyle = "rgba(" + fx[3] + ",.75)";
+      for (var j = 0; j < N; j++) for (var k = 0; k < N; k++) if (qr.mat[j * N + k]) g.fillRect(-R * 0.65 + k * m, -R * 0.65 + j * m, m * 0.86, m * 0.86);
+    }
+    g.restore();
+    /* 勇者 */
+    var spr = sprite("hero", "", hero.look), sc = 12;
+    g.drawImage(spr, Math.round(cx - spr.width * sc / 2), Math.round(cy - spr.height * sc + 6), spr.width * sc, spr.height * sc);
+    g.restore();
+    g.strokeStyle = col; g.lineWidth = 2; rr(ax, ay, aw, ah, 6); g.stroke();
+    /* 名前と肩書 */
+    g.fillStyle = "#fff"; g.font = "bold 32px monospace";
+    g.fillText(run.name, CARD_W / 2, 304, CARD_W - 40);
+    g.fillStyle = "#ffd890"; g.font = "bold 20px monospace";
+    g.fillText(titleName(), CARD_W / 2, 340, CARD_W - 30);
+    /* 結果 */
+    g.fillStyle = "rgba(255,255,255,.12)"; g.fillRect(30, 364, CARD_W - 60, 2);
+    g.fillStyle = run.win ? "#ffe060" : "#fff"; g.font = "800 26px sans-serif";
+    var res = run.win ? zT("魔王討伐", "Demon King Slain", "마왕 토벌", "讨伐魔王", "討伐魔王")
+      : zT(run.areaName + "で力尽きた", "Fell in the " + run.areaName, run.areaName + "에서 쓰러짐", "倒在了" + run.areaName, "倒在了" + run.areaName);
+    g.fillText(res, CARD_W / 2, 394, CARD_W - 40);
+    g.font = "800 30px sans-serif"; g.fillStyle = "#fff";
+    g.fillText("Lv" + run.lv, CARD_W / 2, 432);
+    return c;
+  }
+  function cardBox() {
+    var top = Math.max(20, H * 0.04), bottom = resultButtons()[0].y - 24;
+    var k = Math.min((W - 40) / CARD_W, (bottom - top) / CARD_H), w = CARD_W * k, h = CARD_H * k;
+    return { x: W / 2 - w / 2, y: top + (bottom - top - h) / 2, w: w, h: h, k: k };
+  }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,16,.72)";
+    ctx.fillStyle = "rgba(10,8,16,.8)";
     ctx.fillRect(0, 0, W, H);
+    var b = cardBox(), q = Math.max(1, Math.ceil(b.k * canvas.width / W));
+    if (!cardCache || cardCache.q !== q) cardCache = { q: q, cv: makeCard(q) };
     ctx.save();
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10;
-    drawBig(sprite(run.win ? "hero" : "tomb", "", hero.look), W / 2, H * 0.3, 10);
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 34px monospace";
-    ctx.fillText(run.name, W / 2, H * 0.35);
-    drawStars(W / 2, H * 0.12, 40, starOf());
-    ctx.font = "bold 24px monospace"; ctx.fillStyle = "#ffd890";
-    ctx.fillText(titleName(), W / 2, H * 0.385, W - 40);
-    ctx.fillStyle = "#fff";
-    ctx.font = "800 56px sans-serif";
-    ctx.fillText(run.win ? zT("魔王討伐", "Demon King Slain", "마왕 토벌", "讨伐魔王", "討伐魔王") : run.areaName, W / 2, H * 0.44, W - 40);
-    ctx.font = "800 72px sans-serif";
-    ctx.fillText("Lv" + run.lv, W / 2, H * 0.53);
+    ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 24;
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(cardCache.cv, b.x, b.y, b.w, b.h);
     ctx.restore();
     window.zResultActions.drawButtons(ctx, resultButtons());
     window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
