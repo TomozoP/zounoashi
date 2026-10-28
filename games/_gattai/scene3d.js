@@ -183,6 +183,7 @@
       /* 重なったときにちらつかないよう、くっついた順に少しずつ手前へ */
       g.position.set(p.x / U, -p.y / U, p.kind === "chest" ? 0 : (p.snapped ? 0.02 : 0.08 + p.order * 0.03));
       g.rotation.z = -p.a;
+      g.visible = !(p.flying && s.fpv);           /* コクピットの中からは自分の機体は見えない */
     });
     Object.keys(this.robot).forEach(function (id) { if (!seen[id]) { sc.remove(self.robot[id]); delete self.robot[id]; } });
 
@@ -195,6 +196,7 @@
         sc.add(this.ghost);
       }
       this.ghost.position.set(s.slot.x / U, -s.slot.y / U, 0);
+      this.ghost.rotation.z = -(s.slot.a || 0);
       this.ghost.material.opacity = 0.25 + 0.15 * Math.sin(s.t * 8);
     } else if (this.ghost) { sc.remove(this.ghost); this.ghost = null; }
 
@@ -210,8 +212,18 @@
       K.body.position.y += 0;
     }
 
+    var cam = this.camera;
+    /* コクピット視点: パーツのすぐ後ろから胸の面をまっすぐ見る */
+    if (s.fpv) {
+      if (cam.fov !== s.fpv.fov) { cam.fov = s.fpv.fov; cam.updateProjectionMatrix(); }
+      cam.position.set(s.fpv.x / U, -s.fpv.y / U, s.fpv.z / U);
+      cam.lookAt(s.fpv.x / U, -s.fpv.y / U, 0);
+      this.key.target.position.set(0, 0, 0); this.key.target.updateMatrixWorld();
+      return;
+    }
+    if (cam.fov !== 30) { cam.fov = 30; cam.updateProjectionMatrix(); }
     /* カメラ: cam.x, cam.y を画面の真ん中に、横幅 cam.w px が見えるように */
-    var cam = this.camera, fov = cam.fov * Math.PI / 180;
+    var fov = cam.fov * Math.PI / 180;
     var aspect = cam.aspect || 0.5625;
     var dist = (s.cam.w / U) / 2 / (Math.tan(fov / 2) * aspect);
     cam.position.set(s.cam.x / U, -s.cam.y / U + 0.6, dist);
