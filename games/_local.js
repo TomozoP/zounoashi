@@ -356,5 +356,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "好きな画像の形でたい焼きを焼く"
   },
-  {"type":"lab","tags":[],"id":"gattai","title":"11体合体ロボバトル","year":2026,"date":"2026-10-28","plays":null,"url":"","img":"games/_gattai/img/thumb.webp","play":"games/_gattai/index.html","full":true,"catch":"飛んでくるパーツを受け止めて合体、怪獣を倒す"},
+  {"type":"lab","tags":[],"id":"gattai","title":"超合体！キングガッシンガーロボ","year":2026,"date":"2026-10-28","plays":null,"url":"","img":"games/_gattai/img/thumb.webp","play":"games/_gattai/index.html","full":true,"catch":"飛んでくるパーツを受け止めて合体、怪獣を倒す"},
 ];

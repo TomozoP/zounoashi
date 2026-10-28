@@ -1,4 +1,4 @@
-/* 11体合体ロボバトル: 合体して戦いに入り、勝ち・負けの結果まで行けるか（matter.js を読むので withScripts） */
+/* 超合体！キングガッシンガーロボ: 合体して戦いに入り、勝ち・負けの結果まで行けるか（matter.js を読むので withScripts） */
 var fs = require("fs"), path = require("path");
 var load = require("../harness");
 var dir = fs.existsSync(path.join(__dirname, "../../gattai")) ? "../../gattai" : "../../_gattai";
@@ -7,7 +7,7 @@ function run(perfect, win) {
   g.press(" "); g.step(5);
   g.step(60 * 3);                              /* 何個かは本当に飛ばす */
   g.probe.debug(perfect ? 2 : 3);
-  g.step(60 * 4);
+  g.step(60 * 8);
   var s = g.probe.now(), fought = s.state === "fight";
   for (var i = 0; i < 60 * 6; i++) { if (i % 20 === 0) g.probe.attack(i % 40 ? "kick" : "punch"); g.step(1); }
   g.probe.debug(win ? 4 : 5);
