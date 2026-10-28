@@ -220,6 +220,7 @@
       base = { gear: base.gear, hp: Math.round(base.hp * m[0]), atk: base.atk * m[1], def: base.def * m[2], mag: base.mag * m[3], spd: base.spd * m[4], luk: base.luk * m[5], look: base.look, trait: base.trait, name: base.name, cls: base.cls };
     }
     var events = [];
+    var kills = 0, bossDown = [], killer = null;
     var area = 0, prog = 0, gold = 0, herbs = 1, wpn = 0, arm = 0;
     var enemies = [];
     var hero = {
@@ -309,7 +310,7 @@
     function hurtEnemy(e, dmg, k, t, who) {
       e.hp = Math.max(0, e.hp - dmg);
       log(k, t, { who: who, tgt: enemies.indexOf(e), dmg: dmg });
-      if (e.hp <= 0 && e.alive) { e.alive = false; log("kill", L("kill", e.name), { tgt: enemies.indexOf(e) }); }
+      if (e.hp <= 0 && e.alive) { e.alive = false; downed(e); log("kill", L("kill", e.name), { tgt: enemies.indexOf(e) }); }
     }
     function partyAct(p, liveE, hot) {
       var who = party.indexOf(p);
@@ -341,7 +342,7 @@
           log("spell", L("spellAll", p.name, "", da), { who: who, all: 1, dmg: da });
           liveE.forEach(function (e) {
             e.hp = Math.max(0, e.hp - da);
-            if (e.hp <= 0) { e.alive = false; log("kill", L("kill", e.name), { tgt: enemies.indexOf(e) }); }
+            if (e.hp <= 0) { e.alive = false; downed(e); log("kill", L("kill", e.name), { tgt: enemies.indexOf(e) }); }
           });
           return;
         }
@@ -365,7 +366,7 @@
       var d = Math.max(1, Math.round(e.atk * (0.85 + rand() * 0.3) - defOf(t) * 0.5));
       t.hp = Math.max(0, t.hp - d);
       log("hit", L("eatk", e.name, t.name, d), { tgt: enemies.indexOf(e), at: ti, dmg: d });
-      if (t.hp <= 0) { t.alive = false; log("fall", L("fall", t.name), { at: ti }); }
+      if (t.hp <= 0) { t.alive = false; if (t === hero) killer = e.name; log("fall", L("fall", t.name), { at: ti }); }
     }
     function monster(def, mlv, boss) {
       var m = {
@@ -439,10 +440,21 @@
     }
     return finish(false);
 
+    function downed(e) { kills++; if (e.boss && e.shape !== "maou") bossDown.push(e.name); }
+    /* 来歴のひとこと「〇〇するも、〇〇に死す」 */
+    function digest(win) {
+      var an = w(AREAS[Math.min(5, area)]), b = bossDown[bossDown.length - 1], a;
+      if (b) a = [b + "を倒す", "Slew the " + b, b + "을(를) 쓰러뜨렸", "击败了" + b, "擊敗了" + b];
+      else if (kills) a = ["魔物を" + kills + "体倒す", "Defeated " + kills + " monsters", "마물을 " + kills + "마리 쓰러뜨렸", "击败了" + kills + "只魔物", "擊敗了" + kills + "隻魔物"];
+      else a = ["旅立つ", "Set out on a journey", "길을 떠났", "踏上旅途", "踏上旅途"];
+      if (win) return w([a[0] + "、ついに魔王を討つ", a[1] + ", and at last slew the Demon King", a[2] + "고, 마침내 마왕을 토벌하다", a[3] + "，终于讨伐魔王", a[4] + "，終於討伐魔王"]);
+      if (killer) return w([a[0] + "も、" + an + "にて" + killer + "に死す", a[1] + ", but fell to the " + killer + " in the " + an, a[2] + "으나, " + an + "에서 " + killer + "에게 쓰러지다", a[3] + "，却在" + an + "死于" + killer + "之手", a[4] + "，卻在" + an + "死於" + killer + "之手"]);
+      return w([a[0] + "も、" + an + "に死す", a[1] + ", but fell in the " + an, a[2] + "으나, " + an + "에서 쓰러지다", a[3] + "，却在" + an + "倒下", a[4] + "，卻在" + an + "倒下"]);
+    }
     function finish(win) {
       enemies = enemies.filter(function (e) { return e.alive; });
       if (!win) log("over", L("over", hero.name));
-      return { events: events, win: win, area: area, areaName: w(AREAS[Math.min(5, area)]), lv: hero.lv, name: hero.name, prog: prog };
+      return { events: events, win: win, area: area, areaName: w(AREAS[Math.min(5, area)]), lv: hero.lv, name: hero.name, prog: prog, digest: digest(win) };
     }
   }
 
