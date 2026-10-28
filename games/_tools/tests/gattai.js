@@ -5,8 +5,7 @@ var dir = fs.existsSync(path.join(__dirname, "../../gattai")) ? "../../gattai" :
 function run(perfect, win) {
   var g = load(path.join(__dirname, dir, "index.html"), { withScripts: true, quiet: true });
   g.press(" "); g.step(5);
-  for (var k = 0; k < 4; k++) { g.step(60); g.press(" "); }   /* 何個かは本当に投げる */
-  g.step(60);
+  g.step(60 * 3);                              /* 何個かは本当に飛ばす */
   g.probe.debug(perfect ? 2 : 3);
   g.step(60 * 8);
   var s = g.probe.now(), fought = s.state === "fight";
