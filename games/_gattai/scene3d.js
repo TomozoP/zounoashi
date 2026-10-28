@@ -196,6 +196,7 @@
         sc.add(this.ghost);
       }
       this.ghost.position.set(s.slot.x / U, -s.slot.y / U, 0);
+      this.ghost.rotation.z = -(s.slot.a || 0);
       this.ghost.material.opacity = 0.25 + 0.15 * Math.sin(s.t * 8);
     } else if (this.ghost) { sc.remove(this.ghost); this.ghost = null; }
 
