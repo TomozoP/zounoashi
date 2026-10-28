@@ -6,8 +6,7 @@
   var T, Z3 = global.Z3, U = 100;
 
   var COL = {
-    blue: 0x2d63e0, white: 0xf2f4f8, red: 0xe23a32, yellow: 0xffc928, dark: 0x2a3140, gray: 0x8f99a8,
-    kaiju: 0x4f9a52, belly: 0xc9d77a, kdark: 0x2f6b38
+    blue: 0x2d63e0, white: 0xf2f4f8, red: 0xe23a32, yellow: 0xffc928, dark: 0x2a3140, gray: 0x8f99a8
   };
 
   function GameScene() {
@@ -67,7 +66,8 @@
     var col = new T.Color("hsl(" + Math.round((i * 137.5) % 360) + ",72%,58%)");
     var mesh = new T.Mesh(geo, Z3.std(col, { roughness: 0.45, metalness: 0.15 }));
     mesh.castShadow = true;
-    mesh.add(new T.LineSegments(new T.EdgesGeometry(geo, 35), new T.LineBasicMaterial({ color: 0x16202e })));
+    var edges = new T.LineSegments(new T.EdgesGeometry(geo, 35), new T.LineBasicMaterial({ color: 0x16202e }));
+    mesh.add(edges);
     g.add(mesh);
     /* 県名 */
     var name = sh.name, size = Math.max(0.22, Math.min(0.6, sh.r / U * 0.55));
@@ -79,7 +79,7 @@
     var label = new T.Mesh(new T.PlaneGeometry(size * 2, size), new T.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
     label.position.z = d / 2 + 0.06;
     g.add(label);
-    g.userData = { mesh: mesh, label: label };
+    g.userData = { mesh: mesh, label: label, edges: edges, col: col, sil: null };
     return g;
   }
 
@@ -99,8 +99,14 @@
       /* 重なったときにちらつかないよう、並び順に少しずつ手前へ */
       g.position.set(p.x / U, -p.y / U, (p.id.charAt(0) === "e" ? -0.6 : 0) + n * 0.02);
       g.rotation.z = -p.a;
-      var m = g.userData.mesh.material;
+      var m = g.userData.mesh.material, u = g.userData;
       m.emissive.setHex(p.sel ? 0x333322 : 0x000000);
+      /* できあがったら1色のシルエット（県の境目と県名を消す） */
+      if (u.sil !== (p.sil || null)) {
+        u.sil = p.sil || null;
+        m.color.copy(u.sil ? new T.Color(u.sil) : u.col);
+        u.edges.visible = u.label.visible = !u.sil;
+      }
       g.userData.label.rotation.z = p.a;          /* 県名はいつも読める向き */
     });
     Object.keys(this.robot).forEach(function (id) { if (!seen[id]) { sc.remove(self.robot[id]); delete self.robot[id]; } });
