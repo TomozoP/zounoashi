@@ -356,5 +356,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "好きな画像の形でたい焼きを焼く"
   },
-  {"type":"lab","tags":[],"id":"mahoujin","title":"魔法陣ゲーム","year":2026,"date":"2026-10-27","plays":null,"url":"","img":"games/_mahoujin/img/thumb.webp","play":"games/_mahoujin/index.html","full":true,"catch":"魔法陣から勇者を召喚"},
+  {"type":"lab","tags":[],"id":"mahoujin","title":"QR召喚士","year":2026,"date":"2026-10-27","plays":null,"url":"","img":"games/_mahoujin/img/thumb.webp","play":"games/_mahoujin/index.html","full":true,"catch":"魔法陣から勇者を召喚"},
 ];
