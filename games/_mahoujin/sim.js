@@ -139,18 +139,49 @@
     glutton: ["くいしんぼう", "Glutton", "먹보", "贪吃鬼", "貪吃鬼"]
   };
   /* 職業 [★, 名前5言語, 能力の倍率 hp atk def mag spd luk] */
+  /* 職業 [★, 名前(ja,en,ko,zh,tw), 能力の倍率(hp atk def mag spd luk), 見た目の元になる職業] */
   var JOBS = {
     jester: [1, ["遊び人", "Jester", "놀이꾼", "艺人", "藝人"], [0.8, 0.75, 0.7, 0.6, 1.1, 1.6]],
     villager: [1, ["村人", "Villager", "마을 사람", "村民", "村民"], [0.85, 0.8, 0.8, 0.5, 0.9, 1.0]],
+    bard: [1, ["吟遊詩人", "Bard", "음유시인", "吟游诗人", "吟遊詩人"], [0.8, 0.7, 0.7, 0.8, 1.0, 1.4], "jester"],
+    dancer: [1, ["踊り子", "Dancer", "무희", "舞者", "舞者"], [0.8, 0.75, 0.7, 0.6, 1.3, 1.3], "jester"],
+    woodcutter: [1, ["木こり", "Woodcutter", "나무꾼", "樵夫", "樵夫"], [0.95, 0.9, 0.8, 0.4, 0.8, 0.9], "villager"],
+    fisher: [1, ["漁師", "Fisher", "어부", "渔夫", "漁夫"], [0.9, 0.8, 0.8, 0.5, 0.9, 1.1], "villager"],
+    merchant: [1, ["商人", "Merchant", "상인", "商人", "商人"], [0.85, 0.7, 0.85, 0.5, 0.9, 1.4], "villager"],
+    cook: [1, ["料理人", "Cook", "요리사", "厨师", "廚師"], [0.95, 0.75, 0.8, 0.6, 0.9, 1.0], "villager"],
+    squire: [1, ["見習い戦士", "Squire", "견습 전사", "见习战士", "見習戰士"], [0.9, 0.9, 0.85, 0.4, 0.9, 0.9], "swordsman"],
+    novice: [1, ["見習い魔法使い", "Novice Mage", "견습 마법사", "见习魔法师", "見習魔法師"], [0.75, 0.6, 0.7, 1.1, 0.9, 1.0], "mage"],
     thief: [2, ["盗賊", "Thief", "도적", "盗贼", "盜賊"], [0.9, 0.95, 0.85, 0.6, 1.4, 1.3]],
     fighter: [2, ["武闘家", "Martial Artist", "무도가", "武斗家", "武鬥家"], [1.0, 1.2, 0.9, 0.4, 1.2, 1.0]],
+    hunter: [2, ["狩人", "Hunter", "사냥꾼", "猎人", "獵人"], [0.95, 1.05, 0.85, 0.5, 1.25, 1.1], "thief"],
+    pirate: [2, ["海賊", "Pirate", "해적", "海盗", "海盜"], [1.0, 1.1, 0.85, 0.4, 1.1, 1.2], "thief"],
+    ninja: [2, ["忍者", "Ninja", "닌자", "忍者", "忍者"], [0.85, 1.0, 0.8, 0.7, 1.5, 1.1], "thief"],
+    mercenary: [2, ["傭兵", "Mercenary", "용병", "佣兵", "傭兵"], [1.05, 1.1, 1.0, 0.4, 1.0, 0.9], "swordsman"],
+    axeman: [2, ["斧使い", "Axe Fighter", "도끼잡이", "斧战士", "斧戰士"], [1.1, 1.2, 0.9, 0.3, 0.9, 0.9], "fighter"],
+    monk: [2, ["修道士", "Monk", "수도사", "修道士", "修道士"], [1.0, 0.9, 1.0, 1.0, 1.0, 1.0], "priest"],
+    seer: [2, ["占い師", "Fortune Teller", "점술사", "占卜师", "占卜師"], [0.85, 0.7, 0.8, 1.2, 1.0, 1.4], "mage"],
     swordsman: [3, ["剣士", "Swordsman", "검사", "剑士", "劍士"], [1.1, 1.2, 1.1, 0.6, 1.0, 1.0]],
     mage: [3, ["魔法使い", "Mage", "마법사", "魔法师", "魔法師"], [0.9, 0.7, 0.85, 1.6, 1.0, 1.0]],
     priest: [3, ["僧侶", "Priest", "성직자", "僧侣", "僧侶"], [1.05, 0.85, 1.1, 1.35, 0.9, 1.0]],
+    samurai: [3, ["侍", "Samurai", "사무라이", "武士", "武士"], [1.1, 1.35, 1.05, 0.5, 1.1, 0.9], "swordsman"],
+    spellblade: [3, ["魔法剣士", "Spellblade", "마검사", "魔剑士", "魔劍士"], [1.05, 1.1, 1.05, 1.3, 1.0, 1.0], "swordsman"],
+    alchemist: [3, ["錬金術師", "Alchemist", "연금술사", "炼金术师", "鍊金術師"], [0.95, 0.8, 0.95, 1.4, 0.9, 1.3], "mage"],
+    summoner: [3, ["召喚士", "Summoner", "소환사", "召唤师", "召喚師"], [0.9, 0.7, 0.85, 1.7, 0.95, 1.0], "mage"],
+    brawler: [3, ["格闘王", "Brawler King", "격투왕", "格斗王", "格鬥王"], [1.15, 1.35, 1.0, 0.4, 1.2, 1.0], "fighter"],
+    shadow: [3, ["暗殺者", "Assassin", "암살자", "刺客", "刺客"], [1.0, 1.25, 0.95, 0.6, 1.5, 1.2], "thief"],
     knight: [4, ["騎士", "Knight", "기사", "骑士", "騎士"], [1.3, 1.25, 1.35, 0.6, 0.9, 1.0]],
     sage: [4, ["賢者", "Sage", "현자", "贤者", "賢者"], [1.1, 0.9, 1.1, 1.8, 1.1, 1.1]],
-    legend: [5, ["伝説の勇者", "Legendary Hero", "전설의 용사", "传说中的勇者", "傳說中的勇者"], [1.45, 1.45, 1.4, 1.4, 1.3, 1.3]]
+    paladin: [4, ["聖騎士", "Paladin", "성기사", "圣骑士", "聖騎士"], [1.3, 1.15, 1.3, 1.1, 0.9, 1.0], "knight"],
+    dragoon: [4, ["竜騎士", "Dragoon", "용기사", "龙骑士", "龍騎士"], [1.25, 1.4, 1.2, 0.5, 1.1, 1.0], "knight"],
+    swordsaint: [4, ["剣聖", "Sword Saint", "검성", "剑圣", "劍聖"], [1.2, 1.5, 1.15, 0.6, 1.2, 1.0], "swordsman"],
+    archmage: [4, ["大魔導士", "Archmage", "대마도사", "大魔导士", "大魔導士"], [1.0, 0.8, 1.0, 2.0, 1.1, 1.1], "sage"],
+    fistsaint: [4, ["拳聖", "Fist Saint", "권성", "拳圣", "拳聖"], [1.25, 1.55, 1.1, 0.5, 1.35, 1.0], "fighter"],
+    legend: [5, ["伝説の勇者", "Legendary Hero", "전설의 용사", "传说中的勇者", "傳說中的勇者"], [1.45, 1.45, 1.4, 1.4, 1.3, 1.3]],
+    dragonslayer: [5, ["竜殺し", "Dragonslayer", "용살자", "屠龙者", "屠龍者"], [1.5, 1.6, 1.4, 1.1, 1.2, 1.2], "legend"],
+    heroking: [5, ["勇者王", "Hero King", "용사왕", "勇者王", "勇者王"], [1.55, 1.45, 1.5, 1.3, 1.2, 1.3], "legend"],
+    chosen: [5, ["神託の勇者", "Chosen One", "신탁의 용사", "神谕勇者", "神諭勇者"], [1.4, 1.4, 1.35, 1.6, 1.3, 1.4], "legend"]
   };
+  function jobBase(cls) { var J = JOBS[cls]; return J && J[3] || cls; }
   /* 呪文のような名前（コードから決まる文字の並び） */
   var KANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわがぎぐげござじずぜぞだでどばびぶべぼぱぴぷぺぽ";
   function jumon(rand, lang) {
@@ -282,7 +313,7 @@
     }
     function partyAct(p, liveE, hot) {
       var who = party.indexOf(p);
-      if (base.cls === "jester" && rand() < 0.1) { log("yawn", L("dance", p.name), { who: who }); return; }
+      if (jobBase(base.cls) === "jester" && rand() < 0.1) { log("yawn", L("dance", p.name), { who: who }); return; }
       if (TR === "lazy" && rand() < 0.07) { log("yawn", L("yawn", p.name), { who: who }); return; }
       if (TR === "sly" && rand() < 0.1) { var st = ri(3, 10) * (area + 1); gold += st; log("steal", L("steal", p.name, liveE[0].name, st), { who: who }); return; }
       /* 回復 */
@@ -415,5 +446,5 @@
     }
   }
 
-  global.MahoSim = { run: run, AREAS: AREAS, rngOf: rngOf, TRAITS: TRAITS, JOBS: JOBS, jumon: jumon };
+  global.MahoSim = { run: run, AREAS: AREAS, rngOf: rngOf, TRAITS: TRAITS, JOBS: JOBS, jobBase: jobBase, jumon: jumon };
 })(typeof window !== "undefined" ? window : globalThis);
