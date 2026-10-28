@@ -126,10 +126,13 @@
     window.dispatchEvent(new KeyboardEvent('keydown',o));
     window.dispatchEvent(new KeyboardEvent('keyup',o));
   }
+  /* スマホ（iPhone・Android）。録画は mp4 にして、共有メニューから写真（カメラロール）に入れる */
+  function phone(){var n=navigator;return /Android|iPhone|iPad|iPod/i.test(n.userAgent||'')||((n.maxTouchPoints||0)>1&&/Mac/i.test(n.platform||''));}
   function mime() {
-    /* iPhoneのSafariはwebmで録れないので、書き出すだけの場所ではmp4も使う */
-    return ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].concat(remote?['video/mp4']:[])
-      .filter(function(t){return MediaRecorder.isTypeSupported(t);})[0];
+    /* iPhoneのSafariはwebmで録れないので、書き出すだけの場所ではmp4も使う。スマホでは写真に入るよう mp4 を先に選ぶ */
+    var mp4=['video/mp4;codecs=avc1,mp4a.40.2','video/mp4'], webm=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+    var list=remote&&phone()?mp4.concat(webm):webm.concat(remote?mp4:[]);
+    return list.filter(function(t){return MediaRecorder.isTypeSupported(t);})[0];
   }
   function drawOutput() {
     if(window.__recording&&window.__recording.frame)source=window.__recording.frame();
@@ -266,10 +269,32 @@
     /* Cake Cut の中で開いているときは、ファイルにせず編集の並びへ渡す */
     var cake=cakeCut();
     if(cake){cake.take(blob,name);return name+'（Cake Cutの並びへ）';}
+    /* スマホは共有メニューを開くボタンを出す（押した瞬間でないと開けない）。「ビデオを保存」で写真に入る */
+    if(phone()&&navigator.share&&navigator.canShare){
+      var file=new File([blob],name,{type:blob.type||'video/mp4'});
+      var ok=false;try{ok=navigator.canShare({files:[file]});}catch(e){}
+      if(ok){shareButton(file,blob,name);return name+'（下のボタンから写真に保存）';}
+    }
     var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
     document.body.appendChild(a);a.click();a.remove();
     setTimeout(function(){URL.revokeObjectURL(a.href);},60000);
     return name;
+  }
+  function shareButton(file,blob,name){
+    var b=document.createElement('button');
+    b.type='button';b.textContent='写真に保存';
+    b.style.cssText='position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:2147483647;'+
+      'padding:16px 28px;border:0;border-radius:999px;background:#fff;color:#16202e;font:800 20px sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.4)';
+    ['pointerdown','pointerup','touchstart','touchend'].forEach(function(t){b.addEventListener(t,function(e){e.stopPropagation();},true);});
+    b.addEventListener('click',function(e){
+      e.stopPropagation();
+      navigator.share({files:[file]}).then(function(){b.remove();},function(err){
+        if(err&&err.name==='AbortError')return;
+        b.remove();
+        var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();
+      });
+    });
+    document.body.appendChild(b);
   }
   function fail(error){
     if(separateRecorder&&separateRecorder.state==='recording'){separateRecorder.onerror=null;separateRecorder.stop();}
