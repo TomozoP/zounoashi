@@ -165,7 +165,7 @@
   function kindOf(id) { return id.replace(/[LR]$/, ""); }
   function sideOf(id) { return /L$/.test(id) ? -1 : /R$/.test(id) ? 1 : 0; }
 
-  var SKY_Y = -330;                            /* 合体するときの胸の高さ */
+  var SKY_Y = -430;                            /* 合体するときの胸の高さ */
   var AREA = { x0: -120, x1: 120, y0: SKY_Y - 130, y1: SKY_Y + 100 };
   var SNAP_D = 34, SNAP_A = 0.42;               /* ぴったりはまる幅 */
 
@@ -184,10 +184,10 @@
     T = 0; score = 0; won = false; held = false; fx = []; shake = 0;
     core = { x: 0, y: SKY_Y, vx: 0, vy: 0 };
     pieces = [{ id: "chest", kind: "chest", w: SLOTS.chest.w, h: SLOTS.chest.h, x: 0, y: 0, a: 0, snapped: true, parent: null }];
-    flying = null; queue = ORDER.slice(); spawnWait = 0.8; nextExact = false;
+    flying = null; queue = ORDER.slice(); spawnWait = 0.8; nextExact = false; waiting = null; grab = null;
     engine = null; rBodies = []; joints = []; kaiju = null;
     robotHP = 100; kaijuHP = 100; fightT = 0; attack = null; walkPhase = 0; endT = 0; stunT = 0;
-    cam = { x: 0, y: SKY_Y + 50, w: 560 };
+    cam = { x: 0, y: SKY_Y + 120, w: 640 };
     stick.on = false; keys.l = keys.r = keys.u = keys.d = false;
     if (conf) conf.clear();
     var s3 = scene3d(); if (s3) s3.reset();
@@ -214,20 +214,45 @@
   function has(id) { return pieces.some(function (p) { return p.id === id; }); }
   function angDiff(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
 
-  /* ---------- 合体 ---------- */
+  /* ---------- 合体（投げつけ） ----------
+     パーツは胸の下で待つ。指でつかんではじくと、その速さと回転のまま放物線で飛び、
+     決まった場所の近くに向きも合って届けばぴったりはまり、それ以外は当たった所にくっつく */
+  var waiting = null, grab = null;
+  var HOME_D = 330, GRAV = 1400, VMAX = 2100, GRAB_R = 120;
+  /* 待つ場所は付く側: 腕は左右の下、頭は上、腰・脚は下 */
+  function home() {
+    var from = waiting ? SLOTS[waiting.id].from[0] : "bottom";
+    if (from === "left") return { x: core.x - 220, y: core.y + 260 };
+    if (from === "right") return { x: core.x + 220, y: core.y + 260 };
+    if (from === "top") return { x: core.x, y: core.y - 330 };
+    return { x: core.x, y: core.y + HOME_D };
+  }
   function spawn() {
     var id = queue.shift(), sl = SLOTS[id];
-    var from = sl.from[Math.floor(Math.random() * sl.from.length)];
-    var exact = nextExact; nextExact = false;
-    var off = exact ? 0 : (Math.random() * 2 - 1) * 70;
-    var tilt = exact ? 0 : (Math.random() * 2 - 1) * 0.36;
-    var tx = core.x + sl.x, ty = core.y + sl.y, dist = 520, dx = 0, dy = 0;
-    if (from === "left") { dx = 1; ty += off; } else if (from === "right") { dx = -1; ty += off; }
-    else if (from === "top") { dy = 1; tx += off; } else { dy = -1; tx += off; }
-    var speed = 520 + (10 - queue.length) * 15;
-    flying = { id: id, kind: kindOf(id), w: sl.w, h: sl.h, x: tx - dx * dist, y: ty - dy * dist, a: tilt,
-      vx: dx * speed, vy: dy * speed, spin: 0, t: 0, from: from };
+    waiting = { id: id, kind: kindOf(id), w: sl.w, h: sl.h, x: 0, y: 0, a: 0, t: 0 };
+    var h = home(); waiting.x = h.x; waiting.y = h.y;
+  }
+  function launch(vx, vy, spin) {
+    var f = waiting; waiting = null; grab = null;
+    var sp = Math.hypot(vx, vy);
+    if (sp > VMAX) { vx *= VMAX / sp; vy *= VMAX / sp; }
+    f.vx = vx; f.vy = vy; f.spin = Math.max(-14, Math.min(14, spin)); f.t = 0;
+    if (nextExact) { f.exact = true; nextExact = false; }
+    flying = f;
     SFX.whoosh();
+  }
+  /* キーのとき（と確かめ用）: 決まった場所へ届く放物線で投げる。err で少しずらす */
+  function autoThrow(err) {
+    if (!waiting) return;
+    var sl = SLOTS[waiting.id], tx = core.x + sl.x, ty = core.y + sl.y, T = 0.55;
+    var vx = (tx - waiting.x) / T, vy = (ty - waiting.y) / T - 0.5 * GRAV * T;
+    launch(vx * (1 + (Math.random() - 0.5) * err), vy * (1 + (Math.random() - 0.5) * err), (Math.random() - 0.5) * err * 20);
+  }
+  /* 画面の点 → ゲームの座標（胸の面）。カメラはほぼ正面なので2点から写し方を求める */
+  function toWorld(x, y) {
+    var a = toScreen(cam.x, cam.y), b = toScreen(cam.x + 100, cam.y + 100);
+    var sx = (b.x - a.x) / 100 || 1, sy = (b.y - a.y) / 100 || 1;
+    return { x: cam.x + (x - a.x) / sx, y: cam.y + (y - a.y) / sy };
   }
   function local(p) { return { x: p.x - core.x, y: p.y - core.y, a: p.a }; }
 
@@ -255,25 +280,29 @@
   }
 
   function updateBuild(dt) {
-    /* 胸を動かす（キーのとき） */
-    var kx = (keys.r ? 1 : 0) - (keys.l ? 1 : 0), ky = (keys.d ? 1 : 0) - (keys.u ? 1 : 0);
-    if (kx || ky) { core.x += kx * 320 * dt; core.y += ky * 320 * dt; }
-    core.x = Math.max(AREA.x0, Math.min(AREA.x1, core.x));
-    core.y = Math.max(AREA.y0, Math.min(AREA.y1, core.y));
-
-    if (!flying) {
+    if (waiting) {
+      waiting.t += dt;
+      if (!grab) {                               /* 離したら元の場所へ戻る */
+        var hm = home();
+        waiting.x += (hm.x - waiting.x) * Math.min(1, dt * 12);
+        waiting.y += (hm.y - waiting.y) * Math.min(1, dt * 12);
+      }
+    }
+    if (!flying && !waiting) {
       if (queue.length) { spawnWait -= dt; if (spawnWait <= 0) spawn(); }
       else { spawnWait -= dt; if (spawnWait <= 0) startDone(); }
-    } else {
+    } else if (flying) {
       var f = flying, n = 4, done = false;
       for (var k = 0; k < n && !done; k++) {
         var px = f.x, py = f.y;
-        f.x += f.vx * dt / n; f.y += f.vy * dt / n; f.t += dt / n;
+        f.vy += GRAV * dt / n;
+        f.x += f.vx * dt / n; f.y += f.vy * dt / n; f.t += dt / n; f.a += f.spin * dt / n;
         var sl = SLOTS[f.id];
         /* ぴったり（決まった場所の近くで、向きも合っている） */
         if (has(sl.parent)) {
           var L = local(f);
-          if (Math.hypot(L.x - sl.x, L.y - sl.y) < SNAP_D && Math.abs(angDiff(L.a)) < SNAP_A) { attach(f, true); done = true; break; }
+          var dd = Math.hypot(L.x - sl.x, L.y - sl.y);
+          if ((dd < SNAP_D && Math.abs(angDiff(L.a)) < SNAP_A) || (f.exact && dd < 70)) { attach(f, true); done = true; break; }
         }
         /* ぶつかった所にくっつく */
         for (var i = 0; i < pieces.length; i++) {
@@ -292,11 +321,11 @@
         }
       }
       if (done) { flying = null; spawnWait = 0.45; }
-      else if (f.t > 3.2) { flying = null; spawnWait = 0.3; fx.push({ type: "lost", t: 0, id: f.id }); SFX.lost(); }
+      else if (f.t > 3 || f.y > -10 || Math.abs(f.x - core.x) > 600) { flying = null; spawnWait = 0.3; fx.push({ type: "lost", t: 0, id: f.id }); SFX.lost(); }
     }
-    cam.x += (core.x * 0.5 - cam.x) * Math.min(1, dt * 3);
-    cam.y += (core.y + 50 - cam.y) * Math.min(1, dt * 3);
-    cam.w += (560 - cam.w) * Math.min(1, dt * 2);
+    cam.x += (core.x - cam.x) * Math.min(1, dt * 3);
+    cam.y += (core.y + 120 - cam.y) * Math.min(1, dt * 3);
+    cam.w += (640 - cam.w) * Math.min(1, dt * 2);
   }
 
   /* ============ 合体完了の演出 ============
@@ -665,8 +694,18 @@
       if (hit === "retry") newRound();
       return;
     }
+    if (state === S.BUILD) {
+      if (x == null) { autoThrow(0.25); return; }
+      if (waiting && !grab) {
+        var wp = toWorld(x, y), s0 = toScreen(waiting.x, waiting.y);
+        if (Math.hypot(x - s0.x, y - s0.y) < GRAB_R) {
+          grab = { id: id, ox: wp.x - waiting.x, oy: wp.y - waiting.y, hist: [{ x: wp.x, y: wp.y, t: performance.now() }] };
+        }
+      }
+      return;
+    }
     if (x == null) { doAttack("punch"); return; }
-    if (state === S.BUILD || state === S.LAND) { drag = { id: id, x: x, y: y }; return; }
+    if (state === S.LAND || state === S.DONE) return;
     if (state === S.FIGHT) {
       var bs = padButtons();
       for (var i = 0; i < bs.length; i++) if (Math.hypot(x - bs[i].x, y - bs[i].y) < bs[i].r + 22) { doAttack(bs[i].kind); return; }
@@ -675,10 +714,13 @@
     }
   }
   function move(x, y, id) {
-    if (drag && drag.id === id && state === S.BUILD) {
-      var k = cam.w / W;                       /* 画面の1pxが世界の何pxか */
-      core.x += (x - drag.x) * k * 1.1; core.y += (y - drag.y) * k * 1.1;
-      drag.x = x; drag.y = y;
+    if (grab && grab.id === id && waiting && state === S.BUILD) {
+      var wp = toWorld(x, y), hm = home();
+      var nx = wp.x - grab.ox, ny = wp.y - grab.oy, dx = nx - hm.x, dy = ny - hm.y, d = Math.hypot(dx, dy);
+      if (d > GRAB_R) { nx = hm.x + dx * GRAB_R / d; ny = hm.y + dy * GRAB_R / d; }   /* つかんで動かせるのは待ち場所のまわりだけ */
+      waiting.x = nx; waiting.y = ny;
+      grab.hist.push({ x: wp.x, y: wp.y, t: performance.now() });
+      if (grab.hist.length > 8) grab.hist.shift();
     }
     if (stick.on && stick.id === id) {
       stick.dx = x - stick.ox; stick.dy = y - stick.oy;
@@ -687,7 +729,17 @@
     }
   }
   function up(id) {
-    if (drag && (id == null || drag.id === id)) drag = null;
+    if (grab && (id == null || grab.id === id)) {
+      /* 離す直前の指の速さで投げる。つかんだ所が中心からずれていると回る */
+      var h = grab.hist, now = performance.now(), a = h[0], b = h[h.length - 1];
+      for (var i = 0; i < h.length; i++) if (now - h[i].t < 90) { a = h[i]; break; }
+      var dt = Math.max(0.016, (b.t - a.t) / 1000), vx = (b.x - a.x) / dt, vy = (b.y - a.y) / dt;
+      if (Math.hypot(vx, vy) > 350 && state === S.BUILD && waiting) {
+        var spin = (grab.ox * vy - grab.oy * vx) / (grab.ox * grab.ox + grab.oy * grab.oy + 900) * 0.9;
+        launch(vx * 1.15, vy * 1.15, spin);
+      }
+      grab = null;
+    }
     if (stick.on && (id == null || stick.id === id)) stick.on = false;
   }
 
@@ -705,7 +757,9 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function quickBuild(perfect) {
     if (state !== S.BUILD) return;
-    flying = null;
+    if (waiting) queue.unshift(waiting.id);
+    if (flying) queue.unshift(flying.id);
+    flying = null; waiting = null; grab = null;
     queue.forEach(function (id) {
       var sl = SLOTS[id];
       if (perfect || Math.random() < 0.4) pieces.push({ id: id, kind: kindOf(id), w: sl.w, h: sl.h, x: sl.x, y: sl.y, a: 0, snapped: true, parent: sl.parent, jx: sl.jx, jy: sl.jy, order: pieces.length });
@@ -720,7 +774,7 @@
     queue = []; spawnWait = 0.5;
   }
   function debugKey(n) {
-    if (n === 1 && state === S.BUILD) nextExact = true;          /* 次のパーツはまっすぐ、ぴったりの通り道で来る */
+    if (n === 1 && state === S.BUILD) nextExact = true;          /* 次に投げるパーツは少しずれてもぴったりはまる */
     if (n === 2) quickBuild(true);                               /* 残りを全部ぴったり合体 */
     if (n === 3) quickBuild(false);                              /* 残りをでたらめに合体 */
     if (n === 4 && state === S.FIGHT) kaijuHP = Math.min(kaijuHP, 3);   /* 次の一撃で勝つ */
@@ -747,6 +801,7 @@
     if (state === S.INTRO) return;
     if (state === S.RESULT) { if (go) down(); return; }
     audioOn();
+    if (state === S.BUILD) { autoThrow(0.25); return; }
     doAttack(kick ? "kick" : "punch");
   });
   window.addEventListener("keyup", function (e) {
@@ -771,18 +826,19 @@
       rBodies.forEach(function (b) { var p = b.piece; list.push({ id: p.id, kind: p.kind, w: p.w, h: p.h, x: b.position.x, y: b.position.y, a: b.angle, snapped: p.snapped, order: p.order || 0 }); });
     } else {
       pieces.forEach(function (p) { list.push({ id: p.id, kind: p.kind, w: p.w, h: p.h, x: core.x + p.x, y: core.y + p.y, a: p.a, snapped: p.snapped, order: p.order || 0 }); });
+      if (waiting) list.push({ id: waiting.id, kind: waiting.kind, w: waiting.w, h: waiting.h, x: waiting.x, y: waiting.y, a: waiting.a, snapped: true, order: 20, flying: true });
       if (flying) list.push({ id: flying.id, kind: flying.kind, w: flying.w, h: flying.h, x: flying.x, y: flying.y, a: flying.a, snapped: true, order: 20, flying: true });
     }
     var k = null;
     if (kaiju) k = ["body", "head", "claw"].map(function (n) { var b = kaiju[n]; return { part: n, x: b.position.x, y: b.position.y, a: b.angle }; });
     var sx = 0, sy = 0;
     if (shake > 0) { sx = (Math.random() - 0.5) * shake; sy = (Math.random() - 0.5) * shake; }
-    return { robot: list, kaiju: k, face: kaiju ? kaiju.face : -1, cam: { x: cam.x + sx, y: cam.y + sy, w: cam.w }, t: T, state: state, slot: state === S.BUILD && flying ? slotGhost() : null };
+    return { robot: list, kaiju: k, face: kaiju ? kaiju.face : -1, cam: { x: cam.x + sx, y: cam.y + sy, w: cam.w }, t: T, state: state, slot: state === S.BUILD && (flying || waiting) ? slotGhost() : null };
   }
   function slotGhost() {                         /* 飛んでくるパーツがぴったりはまる場所（うっすら） */
-    var sl = SLOTS[flying.id];
+    var f = flying || waiting, sl = SLOTS[f.id];
     if (!has(sl.parent)) return null;
-    return { kind: flying.kind, id: flying.id, w: sl.w, h: sl.h, x: core.x + sl.x, y: core.y + sl.y };
+    return { kind: f.kind, id: f.id, w: sl.w, h: sl.h, x: core.x + sl.x, y: core.y + sl.y };
   }
 
   var proj = null;
@@ -872,10 +928,15 @@
     for (var i = 0; i < n; i++) {
       var id = ORDER[i], p = null;
       for (var j = 0; j < pieces.length; j++) if (pieces[j].id === id) p = pieces[j];
-      var gone = !p && ORDER.indexOf(id) < ORDER.length - queue.length - (flying ? 1 : 0);
+      var gone = !p && ORDER.indexOf(id) < ORDER.length - queue.length - (flying || waiting ? 1 : 0);
       ctx.fillStyle = p ? (p.snapped ? "#ffd84a" : "#9aa3ad") : gone ? "rgba(0,0,0,.35)" : "rgba(255,255,255,.35)";
       ctx.strokeStyle = "#16202e"; ctx.lineWidth = 2;
       roundRect(x0 + i * (sz + gap), y, sz, sz, 6); ctx.fill(); ctx.stroke();
+    }
+    if (waiting && !grab) {                     /* つかめる印 */
+      var c = toScreen(waiting.x, waiting.y), pr = 1 + 0.08 * Math.sin(waiting.t * 6);
+      ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.lineWidth = 4; ctx.setLineDash([10, 8]);
+      ctx.beginPath(); ctx.arc(c.x, c.y, 62 * pr, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
     }
     if (false) {                                /* 来る方向の予告は出さない */
       var q = toScreen(flying.x, flying.y), m = 34;
@@ -966,6 +1027,7 @@
   /* ============ 覗き穴 ============ */
   window.__probe = {
     dbg: function () { return kaiju && { k: kaiju.body.position, ka: kaiju.body.angle, c: chestB.position, cd: kaiju.cd, stun: stunT, lunge: kaiju.lunge }; },
+    pieces: function () { return pieces.map(function (p) { return p.id + (p.snapped ? "" : "*"); }).join(" "); },
     now: function () { return { state: state, score: score, W: W, H: H, parts: pieces ? pieces.length : 0, robotHP: robotHP, kaijuHP: kaijuHP, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
