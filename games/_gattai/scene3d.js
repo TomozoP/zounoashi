@@ -69,19 +69,38 @@
     mesh.add(e);
     return mesh;
   }
+  /* パーツごとに色を変えて「別々のメカが合体した」感じを出す（左右の対は同じ色） */
+  var PART = {
+    chest: 0xe0322c, head: 0xf2f4f8, uarm: 0x2d63e0, farm: 0xffc21a, waist: 0x3a3f4a, thigh: 0x2fae5a, leg: 0xf07a1e
+  };
   function makePiece(p) {
     var g = new T.Group(), w = p.w / U, h = p.h / U, d;
-    var k = p.kind;
-    if (k === "chest") {
+    var k = p.kind, c = PART[k];
+    if (k === "uarm" || k === "farm") {
+      /* 腕は横向き。縦向きで作って、つなぎ目側が胸のほうへ向くように回す */
+      var inner = new T.Group(), vw = h, vh = w;
+      d = 0.5;
+      if (k === "uarm") {
+        inner.add(outline(box(vw * 0.85, vh, d * 0.85, c)));
+        inner.add(outline(box(vw * 1.25, vh * 0.22, d, COL.white, 0, vh * 0.39)));
+        inner.add(box(vw * 1.0, vh * 0.06, d * 1.02, COL.dark, 0, -vh * 0.2));
+      } else {
+        inner.add(outline(box(vw, vh * 0.68, d, c, 0, vh * 0.16)));
+        inner.add(outline(box(vw * 1.2, vh * 0.34, d * 1.08, COL.dark, 0, -vh * 0.34)));
+        inner.add(box(vw * 1.02, vh * 0.06, d * 1.04, COL.white, 0, -vh * 0.1));
+      }
+      inner.rotation.z = /L$/.test(p.id) ? -Math.PI / 2 : Math.PI / 2;
+      g.add(inner);
+    } else if (k === "chest") {
       d = 0.7;
-      g.add(outline(box(w, h, d, COL.blue)));
+      g.add(outline(box(w, h, d, c)));
       g.add(outline(box(w * 0.8, h * 0.42, 0.1, COL.white, 0, h * 0.2, d / 2 + 0.02)));
       for (var i = 0; i < 3; i++) g.add(box(w * 0.18, h * 0.06, 0.06, COL.dark, -w * 0.22 + i * w * 0.22, h * 0.2, d / 2 + 0.08));
       g.add(outline(box(w * 0.3, h * 0.3, 0.12, COL.yellow, 0, -h * 0.18, d / 2 + 0.03)));
-      g.add(box(w * 0.14, h * 0.14, 0.08, COL.red, 0, -h * 0.18, d / 2 + 0.12, { roughness: 0.3, emissive: 0x551010 }));
+      g.add(box(w * 0.14, h * 0.14, 0.08, 0x38c8ff, 0, -h * 0.18, d / 2 + 0.12, { roughness: 0.3, emissive: 0x1070a0 }));
     } else if (k === "head") {
       d = 0.5;
-      g.add(outline(box(w, h * 0.8, d, COL.white, 0, -h * 0.1)));
+      g.add(outline(box(w, h * 0.8, d, c, 0, -h * 0.1)));
       g.add(box(w * 0.8, h * 0.18, 0.06, 0x111822, 0, h * 0.02, d / 2 + 0.02));
       g.add(box(w * 0.7, h * 0.08, 0.04, 0x9fffd0, 0, h * 0.02, d / 2 + 0.06, { emissive: 0x4fe0a0, emissiveIntensity: 1.2 }));
       g.add(outline(box(w * 0.36, h * 0.16, d * 0.9, COL.red, 0, -h * 0.42)));
@@ -90,29 +109,19 @@
         fin.rotation.z = s * 0.55; g.add(fin);
       });
       g.add(box(w * 0.14, h * 0.14, 0.1, COL.red, 0, h * 0.28, d / 2));
-    } else if (k === "uarm") {
-      d = 0.5;
-      g.add(outline(box(w * 0.8, h, d * 0.85, COL.white)));
-      g.add(outline(box(w * 1.35, h * 0.38, d, COL.blue, 0, h * 0.34)));
-      g.add(box(w * 1.0, h * 0.06, d * 1.02, COL.yellow, 0, h * 0.17));
-    } else if (k === "farm") {
-      d = 0.5;
-      g.add(outline(box(w, h * 0.7, d, COL.blue, 0, h * 0.15)));
-      g.add(outline(box(w * 1.15, h * 0.34, d * 1.05, COL.red, 0, -h * 0.34)));
-      g.add(box(w * 1.0, h * 0.06, d * 1.06, COL.yellow, 0, -h * 0.14));
     } else if (k === "waist") {
       d = 0.6;
-      g.add(outline(box(w, h, d, COL.red)));
-      g.add(outline(box(w * 0.3, h * 0.9, 0.08, COL.white, 0, 0, d / 2 + 0.02)));
+      g.add(outline(box(w, h, d, c)));
+      g.add(outline(box(w * 0.3, h * 0.9, 0.08, COL.yellow, 0, 0, d / 2 + 0.02)));
     } else if (k === "thigh") {
       d = 0.5;
-      g.add(outline(box(w * 0.85, h, d * 0.9, COL.white)));
-      g.add(box(w * 0.9, h * 0.08, d * 0.95, COL.gray, 0, -h * 0.4));
+      g.add(outline(box(w * 0.85, h, d * 0.9, c)));
+      g.add(box(w * 0.9, h * 0.08, d * 0.95, COL.white, 0, -h * 0.4));
     } else if (k === "leg") {
       d = 0.55;
-      g.add(outline(box(w, h * 0.78, d, COL.blue, 0, h * 0.1)));
-      g.add(outline(box(w * 1.3, h * 0.26, d * 1.4, COL.red, 0, -h * 0.37, 0.06)));
-      g.add(box(w * 0.6, h * 0.12, 0.06, COL.yellow, 0, h * 0.25, d / 2 + 0.02));
+      g.add(outline(box(w, h * 0.78, d, c, 0, h * 0.1)));
+      g.add(outline(box(w * 1.3, h * 0.26, d * 1.4, COL.dark, 0, -h * 0.37, 0.06)));
+      g.add(box(w * 0.6, h * 0.12, 0.06, COL.white, 0, h * 0.25, d / 2 + 0.02));
     }
     return g;
   }
