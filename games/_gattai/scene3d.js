@@ -69,13 +69,14 @@
     mesh.add(e);
     return mesh;
   }
-  /* パーツごとに色を変えて「別々のメカが合体した」感じを出す（左右の対は同じ色） */
+  /* パーツごとに色を変えて「別々のメカが合体した」感じを出す（11個すべて別の色） */
   var PART = {
-    chest: 0xe0322c, head: 0xf2f4f8, uarm: 0x2d63e0, farm: 0xffc21a, waist: 0x3a3f4a, thigh: 0x2fae5a, leg: 0xf07a1e
+    chest: 0xe0322c, head: 0xf2f4f8, uarmL: 0x2d63e0, uarmR: 0x22b8d8, farmL: 0xffc21a, farmR: 0xa6d11e,
+    waist: 0x3a3f4a, thighL: 0x2fae5a, thighR: 0x8a4fd8, legL: 0xf07a1e, legR: 0xf0609a
   };
   function makePiece(p) {
     var g = new T.Group(), w = p.w / U, h = p.h / U, d;
-    var k = p.kind, c = PART[k];
+    var k = p.kind, c = PART[p.id];
     if (k === "uarm" || k === "farm") {
       /* 腕は横向き。縦向きで作って、つなぎ目側が胸のほうへ向くように回す */
       var inner = new T.Group(), vw = h, vh = w;
