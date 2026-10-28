@@ -184,10 +184,17 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
 #cakePost[hidden]{display:none}
 #cakePost .cpBar{display:flex;align-items:center;gap:8px;height:44px;padding:0 10px;background:var(--panel);border-bottom:1px solid var(--line)}
 #cakePost video{flex:1 1 0;min-height:0;width:100%;object-fit:contain;background:#000}
-#cakePost .cpTrim{padding:10px 14px 0;background:var(--panel)}
-#cakePost .cpRow{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-#cakePost .cpRow span{min-width:3.5em;font-variant-numeric:tabular-nums}
-#cakePost .cpRow input{flex:1}
+#cakePost .cpTrim{position:relative;padding:34px 12px 10px;background:#000}
+#cpTime{position:absolute;top:4px;transform:translateX(-50%);background:#555c;color:#fff;font-size:14px;padding:2px 8px;border-radius:5px;font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none}
+#cakePost .cpTL{display:flex;gap:4px;height:56px}
+#cpPlay{width:48px;flex:none;border-radius:8px 0 0 8px;background:#444;border:0;display:flex;align-items:center;justify-content:center;padding:0}
+#cpStrip{position:relative;flex:1;touch-action:none;background:#333;border-radius:0 8px 8px 0;overflow:hidden}
+#cpThumbs{position:absolute;left:18px;right:18px;top:4px;bottom:4px;width:calc(100% - 36px);height:calc(100% - 8px)}
+.cpShade{position:absolute;top:0;bottom:0;background:#000a;pointer-events:none}
+#cpBox{position:absolute;top:0;bottom:0;border:4px solid #f5c84c;border-left-width:18px;border-right-width:18px;border-radius:8px;box-sizing:border-box;pointer-events:none}
+#cpBox::before,#cpBox::after{content:"";position:absolute;top:50%;width:4px;height:22px;margin-top:-11px;background:#000;border-radius:2px}
+#cpBox::before{left:-11px}#cpBox::after{right:-11px}
+#cpHead{position:absolute;top:-6px;bottom:-6px;width:3px;margin-left:-1px;background:#fff;border-radius:2px;pointer-events:none}
 #cakePost .cpActs{display:flex;gap:10px;padding:8px 14px calc(12px + env(safe-area-inset-bottom));background:var(--panel)}
 #cakePost .cpActs button{flex:1;padding:12px 0;font-size:16px;font-weight:700}
 @media (max-width:820px){
@@ -406,11 +413,11 @@ html.gameOnly #gamePanel{position:fixed;inset:44px 0 0 0;aspect-ratio:auto;borde
 <div id="cakePost" hidden>
   <div class="cpBar"><button type="button" id="cpBack">撮り直す</button><span id="cpLen" style="margin-left:auto"></span></div>
   <video id="cpVideo" playsinline preload="auto"></video>
-  <div class="cpTrim">
-    <div class="cpRow"><span>はじめ</span><input type="range" id="cpIn" min="0" max="1" step="0.1" value="0"><span id="cpInT">0.0</span></div>
-    <div class="cpRow"><span>おわり</span><input type="range" id="cpOut" min="0" max="1" step="0.1" value="1"><span id="cpOutT">0.0</span></div>
+  <div class="cpTrim"><span id="cpTime">00:00.00</span>
+    <div class="cpTL"><button type="button" id="cpPlay" aria-label="再生"><svg width="22" height="24" viewBox="0 0 22 24"><path id="cpPlayIco" d="M2 2l18 10L2 22z" fill="#fff"/></svg></button>
+      <div id="cpStrip"><canvas id="cpThumbs"></canvas><div class="cpShade" id="cpShadeL"></div><div class="cpShade" id="cpShadeR"></div><div id="cpBox"></div><div id="cpHead"></div></div></div>
   </div>
-  <div class="cpActs"><button type="button" class="primary" id="cpX">X</button><button type="button" class="primary" id="cpYt">YouTube</button></div>
+  <div class="cpActs"><button type="button" id="cpDl" aria-label="動画を保存" style="flex:0 0 56px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M6 10l6 6 6-6M4 20h16"/></svg></button><button type="button" class="primary" id="cpX">X</button><button type="button" class="primary" id="cpYt">YouTube</button></div>
 </div>
 
 <video id="vA" muted playsinline preload="auto" hidden></video>
@@ -2732,21 +2739,60 @@ function phoneTake(blob, name) {
   postInfo().then(g => { fillPost(g); cp.info = g; });
 }
 function cpRange(d) {
-  cp.dur = d;
-  for (const id of ['cpIn', 'cpOut']) $(id).max = d.toFixed(1);
-  $('cpIn').value = 0; $('cpOut').value = d.toFixed(1); cpShow();
+  cp.dur = d; cp.a = 0; cp.b = d; cpShow(); cpThumbs();
 }
-const cpIn = () => +$('cpIn').value, cpOut = () => Math.min(cp.dur, +$('cpOut').value);
+const cpIn = () => cp.a, cpOut = () => Math.min(cp.dur, cp.b);
+// 写真アプリのような帯：黄色い枠の左右をつまんで、はじめ・おわりを決める。白い線は今の位置
+const cpX0 = 18, cpW = () => $('cpStrip').clientWidth - cpX0 * 2, cpPos = t => cpX0 + t / cp.dur * cpW();
 function cpShow() {
-  $('cpInT').textContent = cpIn().toFixed(1); $('cpOutT').textContent = cpOut().toFixed(1);
-  $('cpLen').textContent = (cpOut() - cpIn()).toFixed(1) + '秒';
+  if (!cp || !cp.dur) return;
+  const l = cpPos(cp.a), r = cpPos(cp.b), w = $('cpStrip').clientWidth, v = $('cpVideo');
+  Object.assign($('cpBox').style, { left: (l - cpX0) + 'px', width: (r - l + cpX0 * 2) + 'px' });
+  $('cpShadeL').style.cssText = 'left:0;width:' + Math.max(0, l - cpX0) + 'px'; $('cpShadeR').style.cssText = 'right:0;width:' + Math.max(0, w - r - cpX0) + 'px';
+  const t = Math.min(cp.dur, v.currentTime || 0), x = cpPos(t);
+  $('cpHead').style.left = x + 'px';
+  const st = $('cpStrip').offsetLeft + x; $('cpTime').style.left = Math.max(50, Math.min(innerWidth - 50, st)) + 'px';
+  const f = n => String(Math.floor(n)).padStart(2, '0');
+  $('cpTime').textContent = f(t / 60) + ':' + f(t % 60) + '.' + f(t % 1 * 100);
+  $('cpLen').textContent = (cp.b - cp.a).toFixed(1) + '秒';
+  $('cpPlayIco').setAttribute('d', v.paused ? 'M2 2l18 10L2 22z' : 'M3 2h5v20H3zM14 2h5v20h-5z');
 }
-for (const id of ['cpIn', 'cpOut']) $(id).oninput = () => {
-  if (cpOut() - cpIn() < 0.5) { if (id === 'cpIn') $('cpIn').value = Math.max(0, cpOut() - 0.5); else $('cpOut').value = Math.min(cp.dur, cpIn() + 0.5); }
-  const v = $('cpVideo'); v.pause(); v.currentTime = id === 'cpIn' ? cpIn() : cpOut(); cpShow();
-};
-// 画面をタップで範囲を再生／止める。おわりまで来たら、はじめに戻す
-$('cpVideo').onclick = () => { const v = $('cpVideo'); if (cp && cp.cutting) return; if (v.paused) { if (v.currentTime < cpIn() || v.currentTime >= cpOut() - 0.05) v.currentTime = cpIn(); v.play(); } else v.pause(); };
+// 帯の絵：別の video で頭出ししながら並べる
+async function cpThumbs() {
+  const c = $('cpThumbs'), my = cp; c.width = c.clientWidth * 2; c.height = c.clientHeight * 2;
+  const x = c.getContext('2d'), v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = my.url;
+  await new Promise(r => { v.onloadeddata = r; setTimeout(r, 3000); });
+  const th = c.height, tw = Math.max(8, th * (v.videoWidth / v.videoHeight || 0.5625)), n = Math.ceil(c.width / tw);
+  for (let i = 0; i < n && cp === my; i++) {
+    v.currentTime = Math.min(my.dur - 0.05, (i + 0.5) * tw / c.width * my.dur);
+    await new Promise(r => { v.onseeked = r; setTimeout(r, 1500); });
+    x.drawImage(v, i * tw, 0, tw, th);
+  }
+  v.removeAttribute('src'); v.load();
+}
+(function () {
+  let drag = null;
+  const tAt = e => Math.max(0, Math.min(cp.dur, (e.clientX - $('cpStrip').getBoundingClientRect().left - cpX0) / cpW() * cp.dur));
+  $('cpStrip').onpointerdown = e => {
+    if (!cp || !cp.dur || cp.cutting) return;
+    const px = e.clientX - $('cpStrip').getBoundingClientRect().left, l = cpPos(cp.a), r = cpPos(cp.b);
+    drag = Math.abs(px - (l - cpX0 / 2)) < 26 && px < (l + r) / 2 ? 'a' : Math.abs(px - (r + cpX0 / 2)) < 26 ? 'b' : 'h';
+    $('cpStrip').setPointerCapture(e.pointerId); $('cpVideo').pause(); move(e);
+  };
+  const move = e => {
+    if (!drag) return;
+    const t = tAt(e), v = $('cpVideo');
+    if (drag === 'a') { cp.a = Math.min(t, cp.b - 0.5); v.currentTime = cp.a; }
+    else if (drag === 'b') { cp.b = Math.max(t, cp.a + 0.5); v.currentTime = cp.b; }
+    else v.currentTime = Math.max(cp.a, Math.min(cp.b, t));
+    cpShow();
+  };
+  $('cpStrip').onpointermove = move;
+  $('cpStrip').onpointerup = $('cpStrip').onpointercancel = () => { drag = null; };
+  (function loop() { if (!$('cakePost').hidden) cpShow(); requestAnimationFrame(loop); })();
+})();
+// 再生ボタン・画面タップで範囲を再生／止める。おわりまで来たら、はじめに戻す
+$('cpVideo').onclick = $('cpPlay').onclick = () => { const v = $('cpVideo'); if (!cp || cp.cutting) return; if (v.paused) { if (v.currentTime < cpIn() || v.currentTime >= cpOut() - 0.05) v.currentTime = cpIn(); v.play(); } else v.pause(); };
 $('cpVideo').ontimeupdate = () => { const v = $('cpVideo'); if (cp && !cp.cutting && !v.paused && v.currentTime >= cpOut()) { v.pause(); v.currentTime = cpIn(); } };
 $('cpBack').onclick = () => { $('cpVideo').pause(); $('cakePost').hidden = true; window.__cakeGame(true); };
 // 今の範囲の動画を用意する。切っていなければ元の動画、切ったら範囲を再生しながら録り直す
@@ -2772,14 +2818,14 @@ function cpCut(button) {
   const mime = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
   const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12e6, audioBitsPerSecond: 192e3 }), chunks = [];
   rec.ondataavailable = e => e.data.size && chunks.push(e.data);
-  const label = button.textContent; cp.cutting = true;
+  const label = button.innerHTML; cp.cutting = true;
   document.querySelectorAll('#cakePost button, #cakePost input').forEach(el => el.disabled = true);
   v.pause(); v.currentTime = a;
   return new Promise(ok => {
     rec.onstop = () => {
       stream.getVideoTracks().forEach(t => t.stop()); cp.cutting = false;
       document.querySelectorAll('#cakePost button, #cakePost input').forEach(el => el.disabled = false);
-      button.textContent = label; v.currentTime = a;
+      button.innerHTML = label; v.currentTime = a;
       ok(done(new Blob(chunks, { type: rec.mimeType || mime })));
     };
     const draw = () => {
@@ -2801,6 +2847,8 @@ async function cpGo(button, act) {
   act(file);
 }
 $('cpX').onclick = () => cpGo($('cpX'), () => postX());
+// 動画だけ保存。スマホは共有メニュー（ビデオを保存で写真へ）、使えなければダウンロード
+$('cpDl').onclick = () => cpGo($('cpDl'), file => { if (navigator.canShare && navigator.canShare({ files: [file] })) navigator.share({ files: [file] }).catch(() => {}); else lastExport.save(); });
 $('cpYt').onclick = () => cpGo($('cpYt'), () => postYT($('cpYt')));
 </script>
 </body>
