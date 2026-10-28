@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="mahoujin-1793183979646">
+<meta name="preview-version" content="mahoujin-1793184165665">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>【プレビュー】QR召喚士</title>
 <style>
@@ -37,17 +37,17 @@
   <button id="photo-button" type="button" aria-label="画像を選ぶ" hidden></button>
   <input id="photo-input" type="file" accept="image/*" hidden>
 </div></div>
-<script src="../games/start.js?v=mahoujin-1793183979646"></script>
-<script src="../games/view.js?v=mahoujin-1793183979646"></script>
-<script src="../games/audio.js?v=mahoujin-1793183979646"></script>
-<script src="../games/lang.js?v=mahoujin-1793183979646"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=mahoujin-1793183979646"></script>
-<script src="../games/result-actions.js?v=mahoujin-1793183979646"></script>
-<script src="../games/action-icons.js?v=mahoujin-1793183979646"></script>
-<script src="../games/pad.js?v=mahoujin-1793183979646"></script>   <!-- ジョイパッドと、絵の外のタップ -->
-<script src="../games/celebrate.js?v=mahoujin-1793183979646"></script>
-<script src="jsQR.js?v=mahoujin-1793183979646"></script>   <!-- QRの読み取り（Apache-2.0） -->
-<script src="sim.js?v=mahoujin-1793183979646"></script>
+<script src="../games/start.js?v=mahoujin-1793184165665"></script>
+<script src="../games/view.js?v=mahoujin-1793184165665"></script>
+<script src="../games/audio.js?v=mahoujin-1793184165665"></script>
+<script src="../games/lang.js?v=mahoujin-1793184165665"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=mahoujin-1793184165665"></script>
+<script src="../games/result-actions.js?v=mahoujin-1793184165665"></script>
+<script src="../games/action-icons.js?v=mahoujin-1793184165665"></script>
+<script src="../games/pad.js?v=mahoujin-1793184165665"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/celebrate.js?v=mahoujin-1793184165665"></script>
+<script src="jsQR.js?v=mahoujin-1793184165665"></script>   <!-- QRの読み取り（Apache-2.0） -->
+<script src="sim.js?v=mahoujin-1793184165665"></script>
 <script>
 /* QR召喚士
    魔法陣を描く → 形から勇者の名前とステータスが決まる → 冒険を見守る（上で冒険、下にログ）。
@@ -92,12 +92,20 @@
   wrap.addEventListener("touchstart", audioOn, { passive: true });
   wrap.addEventListener("touchend", resumeAudio, { passive: true });
   wrap.addEventListener("pointerup", resumeAudio, true);
+  /* iPhone はカメラを使うと音の出し方が「録音もする」形に変わり、画面収録で音が崩れる。
+     音は再生だけと伝え、カメラを付けた後・止めた後にも言い直す */
+  function playbackSession() { try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {} }
+  var OUT = null;
   function audioOn() {
     if (AC) { resumeAudio(); return; }
     var C = window.AudioContext || window.webkitAudioContext;
     if (!C) return;
+    playbackSession();
     try { AC = new C(); } catch (e) { return; }
     resumeAudio();
+    /* 音が重なっても割れないよう、全部の音をここに集めて抑える */
+    OUT = AC.createDynamicsCompressor(); OUT.threshold.value = -18; OUT.ratio.value = 8;
+    var mg = AC.createGain(); mg.gain.value = 0.85; OUT.connect(mg); mg.connect(AC.destination);
     var len = Math.floor(AC.sampleRate * 2);
     NOISE = AC.createBuffer(1, len, AC.sampleRate);
     var d = NOISE.getChannelData(0);
@@ -113,7 +121,7 @@
     g.gain.setValueAtTime(0.0001, n);
     g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    o.connect(g); g.connect(AC.destination);
+    o.connect(g); g.connect(OUT);
     o.start(n); o.stop(n + dur + 0.05);
   }
   function noiseHit(dur, freq, vol, q) {
@@ -124,7 +132,7 @@
     var g = AC.createGain(), n = AC.currentTime;
     g.gain.setValueAtTime(vol, n);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.connect(f); f.connect(g); g.connect(OUT);
     s.start(n); s.stop(n + dur + 0.05);
   }
   document.addEventListener("visibilitychange", function () {
@@ -143,7 +151,7 @@
     f.type = "bandpass"; f.Q.value = q || 2;
     f.frequency.setValueAtTime(f0, n); f.frequency.exponentialRampToValueAtTime(f1, n + dur);
     g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(vol, n + dur * 0.4); g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.connect(f); f.connect(g); g.connect(OUT);
     s.start(n); s.stop(n + dur + 0.05);
   }
   /* 地域に入ったときの短い合図（地域ごとに音色と和音を変える） */
@@ -427,6 +435,7 @@
       if (state !== S.SCAN || document.hidden) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
       stopCamera();
       stream = s;
+      playbackSession();
       /* ピントを合わせ続ける（対応している端末だけ） */
       try { var tr = s.getVideoTracks()[0], cap = tr.getCapabilities ? tr.getCapabilities() : {};
         if (cap.focusMode && cap.focusMode.indexOf("continuous") >= 0) tr.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(function () {}); } catch (e) {}
@@ -465,7 +474,7 @@
     else if (state === S.SCAN && !stream) startCamera();
   });
   function stopCamera() {
-    if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); playbackSession(); }
     if (video && video.parentNode) video.parentNode.removeChild(video);
     stream = null; video = null; qwBusy = false;
   }
@@ -674,7 +683,7 @@
       if (ev.k === "enter") { var a = AREA_SND[ev.area]; seq(a[0], a[1], 0.05); }
       else sfx(ev.k);
     }
-    if (ev.k === "clear") { window.zCelebrate.play(AC, "fanfare"); confetti.burst(W, H, 160); }
+    if (ev.k === "clear") { window.zCelebrate.play(AC, "fanfare", { dest: OUT }); confetti.burst(W, H, 160); }
     if (ev.k === "over") sadPhrase();
   }
 
@@ -699,7 +708,7 @@
         if (starShown === st && st === 1) tone(300, 0.3, 0.05, "triangle", 150, 0.18);
         if (starShown === st && st === 3) tone(1568, 0.25, 0.04, "sine", 0, 0.12);
         if (starShown === st && st >= 4) {
-          window.zCelebrate.play(AC, st === 5 ? "fanfare" : "levelup", { volume: 0.8, delay: 0.1 });
+          window.zCelebrate.play(AC, st === 5 ? "fanfare" : "levelup", { volume: 0.8, delay: 0.1, dest: OUT });
           if (st === 5) confetti.burst(W, H, 140);
         }
       }
@@ -1408,11 +1417,11 @@
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=mahoujin-1793183979646" : "./recorder-ui.js?v=mahoujin-1793183979646";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=mahoujin-1793184165665" : "./recorder-ui.js?v=mahoujin-1793184165665";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=mahoujin-1793183979646"></script>
-<script src="./preview-header.js?v=mahoujin-1793183979646"></script>
+<script src="./auto-reload.js?v=mahoujin-1793184165665"></script>
+<script src="./preview-header.js?v=mahoujin-1793184165665"></script>
 </body>
 </html>
