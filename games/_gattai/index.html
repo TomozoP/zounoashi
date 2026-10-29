@@ -221,7 +221,7 @@
     T = 0; won = false; shake = 0; count = 0; endT = 0; forceOut = null; loserPiece = null; stress = stressRaw = 0; broken = null;
     board = []; cur = null; turn = 0;
     deck = [];
-    for (var i = 0; i < SHAPES.length; i++) deck.push(i);   /* 北海道のマスもある（止まったら回した側の負け） */
+    for (var i = 0; i < SHAPES.length; i++) deck.push(i);   /* 北海道も出る（入るわけがないが、置くまでやる） */
     if (conf) conf.clear();
     startSpin();
   }
@@ -239,44 +239,42 @@
   /* ---------- ルーレット（次の県を決める） ---------- */
   /* 円盤に残りの県を並べる。自分の番はタップで回し、あいては自分で回す。ゆっくり止まって、針の先の県に決まる */
   var wheelRot = 0, forceHK = false;
+  /* 目押し: 円盤は一定の速さで回り続け、タップでブレーキ（いつも同じだけ進んで止まる）。あいては適当なところで押す */
+  var SPIN_W = 2.4, BRAKE = 0.35;
   function startSpin() {
     if (!deck.length) { finish(true); return; }
     state = S.SPIN;
-    spin = { seg: deck.slice(), on: false, t: 0, wait: 0, hold: 0, pick: null, a0: wheelRot, D: 0, dur: 0, last: -1 };
+    spin = { seg: deck.slice(), stop: false, v: SPIN_W, done: false, t: 0, hold: 0, pick: null, last: -1, cpuAt: 1 + Math.random() * 1.8 };
   }
   function spinNow() {
-    if (state !== S.SPIN || spin.on) return;
-    var n = spin.seg.length, s = Math.PI * 2 / n, k = Math.floor(Math.random() * n);
-    if (forceHK) { k = spin.seg.indexOf(HK); forceHK = false; }
-    var fin = -Math.PI / 2 - (k + 0.5 + (Math.random() - 0.5) * 0.7) * s;
-    var D = fin - wheelRot;
-    D = ((D % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) + Math.PI * 2 * (4 + Math.floor(Math.random() * 2));
-    spin.on = true; spin.pick = spin.seg[k]; spin.a0 = wheelRot; spin.D = D; spin.dur = 3 + Math.random() * 0.6; spin.t = 0;
-    noiseHit(0.3, 1200, 0.15, 1, 3000);
+    if (state !== S.SPIN || spin.stop) return;
+    spin.stop = true;
+    tone(500, 0.08, 0.12, "square");
   }
   function underNeedle() {
     var n = spin.seg.length, s = Math.PI * 2 / n, a = ((-Math.PI / 2 - wheelRot) % (Math.PI * 2) + Math.PI * 4) % (Math.PI * 2);
     return Math.floor(a / s) % n;
   }
   function updateSpin(dt) {
-    if (!spin.on) {
-      spin.wait += dt;
-      if (cpuTurn() && spin.wait > 0.7) spinNow();
+    spin.t += dt;
+    if (cpuTurn() && spin.t > spin.cpuAt) spinNow();
+    if (!spin.done) {
+      if (spin.stop) spin.v = Math.max(0, spin.v - SPIN_W / BRAKE * dt);
+      wheelRot += spin.v * dt;
+      var k = underNeedle();
+      if (k !== spin.last) { spin.last = k; tone(1100, 0.03, 0.04, "square"); }
+      if (spin.stop && spin.v <= 0) {
+        if (forceHK) {                           /* デバッグ: 北海道のマスに合わせる */
+          var n = spin.seg.length, s = Math.PI * 2 / n;
+          wheelRot = -Math.PI / 2 - (spin.seg.indexOf(HK) + 0.5) * s; forceHK = false;
+        }
+        spin.done = true; spin.pick = spin.seg[underNeedle()];
+        tone(660, 0.12, 0.12, "square"); tone(990, 0.25, 0.12, "square", null, 0.1);
+      }
       return;
     }
-    spin.t += dt;
-    var u = Math.min(1, spin.t / spin.dur);
-    wheelRot = spin.a0 + spin.D * (1 - Math.pow(1 - u, 3));
-    var k = underNeedle();
-    if (k !== spin.last) { spin.last = k; tone(1100, 0.03, 0.05, "square"); }
-    if (u >= 1) {
-      if (!spin.hold) { tone(660, 0.12, 0.12, "square"); tone(990, 0.25, 0.12, "square", null, 0.1); }
-      spin.hold += dt;
-      if (spin.hold > 0.7) {
-        if (spin.pick === HK) { lastBy = turn; collapse(); return; }   /* 北海道は北海道に入らない: 一撃で崩壊 */
-        startPlace(spin.pick);
-      }
-    }
+    spin.hold += dt;
+    if (spin.hold > 0.8) startPlace(spin.pick);
   }
   function startPlace(i) {
     deck.splice(deck.indexOf(i), 1);
@@ -367,7 +365,7 @@
   /* ============ 置いたあとの押し合い ============
      県どうしは少し（TOL px）までなら重なってよい。それより深いと押しのけ合う（回りもする）。
      枠（北海道の線）の外へ出た角は内へ押し戻され、そのぶん枠に力がかかる。力が LIMIT を超えたら枠が崩れる */
-  var TOL = 6, TOLF = 2, LIMIT = 40, stress = 0, stressRaw = 0, lastBy = 0, settleT = 0, broken = null;
+  var TOL = 2, TOLF = 2, LIMIT = 55, stress = 0, stressRaw = 0, lastBy = 0, settleT = 0, broken = null;
   function nearestOn(P, x, y) {
     var best = 1e9, bx = 0, by = 0;
     for (var i = 0; i < P.length; i++) {
@@ -397,7 +395,7 @@
             if (v[0] < Q.bb.x0 || v[0] > Q.bb.x1 || v[1] < Q.bb.y0 || v[1] > Q.bb.y1 || !pointIn(Q.poly, v[0], v[1])) return;
             var n = nearestOn(Q.poly, v[0], v[1]);
             if (n.d <= TOL) return;
-            var c = (n.d - TOL) / n.d * 0.3, dx = (n.x - v[0]) * c, dy = (n.y - v[1]) * c;
+            var c = (n.d - TOL) / n.d * 0.5, dx = (n.x - v[0]) * c, dy = (n.y - v[1]) * c;
             nudge(P, v[0], v[1], dx, dy, wP); nudge(Q, v[0], v[1], -dx, -dy, wQ);
           });
         });
@@ -521,7 +519,7 @@
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    if (n === 4 && state === S.SPIN && humanTurn()) { forceHK = true; spinNow(); return; }   /* 4 北海道に止まる（負け） */
+    if (n === 4 && state === S.SPIN && humanTurn()) { forceHK = true; spinNow(); return; }   /* 4 北海道に止まる */
     if (state === S.SPIN && humanTurn()) { spinNow(); return; }
     if (state !== S.PLACE || !humanTurn()) return;
     if (n === 1 || n === 2) {                     /* 1 自分の県をおまかせで置く  2 そのうえ次の相手は入らない（勝ち） */
@@ -696,19 +694,19 @@
     return { x: W / 2, y: (y0 + y1) / 2 + 6, r: r };
   }
   function drawSpin() {
-    var g = wheelGeom(), n = spin.seg.length, s = Math.PI * 2 / n, done = spin.on && spin.t >= spin.dur;
+    var g = wheelGeom(), n = spin.seg.length, s = Math.PI * 2 / n, done = spin.done;
     var kNow = done ? underNeedle() : -1;
     ctx.save(); ctx.translate(g.x, g.y);
     ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.beginPath(); ctx.arc(4, 6, g.r + 6, 0, Math.PI * 2); ctx.fill();
     for (var k = 0; k < n; k++) {
       var a = wheelRot + k * s, i = spin.seg[k];
       ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, g.r, a, a + s); ctx.closePath();
-      ctx.fillStyle = i === HK ? "#16202e" : prefColor(i); ctx.fill();
-      if (k === kNow && Math.floor(spin.hold * 8) % 2 === 0) { ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.fill(); }
+      ctx.fillStyle = prefColor(i); ctx.fill();
+      if (k === kNow) { ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.fill(); }
       ctx.strokeStyle = "#16202e"; ctx.lineWidth = 1.2; ctx.stroke();
       /* 県名（外から中へ） */
       ctx.save(); ctx.rotate(a + s / 2);
-      ctx.fillStyle = i === HK ? "#ff3a2a" : "#16202e"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "#16202e"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
       ctx.font = "800 " + Math.max(9, Math.min(16, g.r * s * 0.8)) + "px sans-serif";
       ctx.fillText(SHAPES[i].name, g.r - 6, 0);
       ctx.restore();
