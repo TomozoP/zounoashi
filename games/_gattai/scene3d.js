@@ -42,7 +42,7 @@
     shape.closePath();
     var geo = new T.ExtrudeGeometry(shape, { depth: o.boardT, bevelEnabled: false });
     geo.translate(0, 0, -o.boardT); geo.rotateX(-Math.PI / 2);
-    var board = new T.Mesh(geo, [Z3.std(0xd5e8b0, { roughness: 0.9 }), Z3.std(0x8c7a58, { roughness: 1 })]);
+    var board = new T.Mesh(geo, [Z3.std(0x6dbf4b, { roughness: 0.9 }), Z3.std(0x8c7a58, { roughness: 1 })]);
     board.receiveShadow = true; board.castShadow = true;
     sc.add(board);
     var edge = new T.LineSegments(new T.EdgesGeometry(geo, 40), new T.LineBasicMaterial({ color: 0x4d5a3a }));
@@ -73,8 +73,7 @@
     var label = new T.Mesh(new T.PlaneGeometry(size * 2, size), new T.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }));
     label.renderOrder = 10;
     label.rotation.x = -Math.PI / 2; label.position.y = thick / 2 + 0.01;
-    g.add(label);
-    g.userData = { mat: mat, label: label };
+        g.userData = { mat: mat, label: label };
     return g;
   }
 
@@ -98,8 +97,6 @@
       m.transparent = !!p.ghost; m.opacity = p.ghost ? 0.8 : 1;
       m.emissive.setHex(p.bad ? 0x661100 : 0x000000);
       /* 県名はいつも上向き・正面向き（県が回っても読める） */
-      g.updateMatrixWorld();
-      g.userData.label.quaternion.copy(g.quaternion).invert().multiply(FLAT);
     });
     Object.keys(this.items).forEach(function (id) { if (!seen[id]) { sc.remove(self.items[id]); delete self.items[id]; } });
     this.waveTex.offset.set((s.t * 0.01) % 1, (s.t * 0.004) % 1);
