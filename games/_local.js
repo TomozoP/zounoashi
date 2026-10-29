@@ -356,5 +356,5 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "好きな画像の形でたい焼きを焼く"
   },
-  {"type":"lab","tags":[],"id":"gattai","title":"最強都道府県獣バトル","year":2026,"date":"2026-10-28","plays":null,"url":"","img":"games/_gattai/img/thumb.webp","play":"games/_gattai/index.html","full":true,"catch":"5県を合成した県獣で、残りの県獣を全部倒す"},
+  {"type":"lab","tags":[],"id":"gattai","title":"北海道詰め","year":2026,"date":"2026-10-28","plays":null,"url":"","img":"games/_gattai/img/thumb.webp","play":"games/_gattai/index.html","full":true,"catch":"北海道に交互に県を詰め込む、あふれたら負け"},
 ];

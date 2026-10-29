@@ -89,8 +89,30 @@
     this.robot = {};
   };
 
+  /* 器（北海道）: 薄い背板と、開いていない辺の壁 */
+  GameScene.prototype.setBox = function (box) {
+    var sc = this.scene, g = new T.Group(), sh = new T.Shape();
+    box.pts.forEach(function (q, n) { if (n) sh.lineTo(q[0] / U, -q[1] / U); else sh.moveTo(q[0] / U, -q[1] / U); });
+    sh.closePath();
+    var back = new T.Mesh(new T.ExtrudeGeometry(sh, { depth: 0.12, bevelEnabled: false }), Z3.std(0xe9f0e4, { roughness: 0.9 }));
+    back.position.z = -0.42; back.receiveShadow = true;
+    g.add(back);
+    var wallMat = Z3.std(0x3d5a44, { roughness: 0.6 });
+    box.walls.forEach(function (w) {
+      var t = 0.24, len = (w.l + 24) / U;
+      var m = new T.Mesh(new T.BoxGeometry(len, t, 0.8), wallMat);
+      m.position.set(((w.a[0] + w.b[0]) / 2 + w.nx * 12) / U, -((w.a[1] + w.b[1]) / 2 + w.ny * 12) / U, 0);
+      m.rotation.z = -Math.atan2(w.b[1] - w.a[1], w.b[0] - w.a[0]);
+      m.castShadow = true; m.receiveShadow = true;
+      g.add(m);
+    });
+    sc.add(g);
+    this.box = box;
+  };
+
   GameScene.prototype.sync = function (s) {
     var sc = this.scene, self = this, seen = {};
+    if (s.box && this.box !== s.box) this.setBox(s.box);
     s.pieces.forEach(function (p, n) {
       var g = self.robot[p.id];
       if (g && g.userData.pref !== p.i) { sc.remove(g); g = null; }
@@ -100,7 +122,7 @@
       g.position.set(p.x / U, -p.y / U, (p.id.charAt(0) === "e" ? -0.6 : 0) + n * 0.02);
       g.rotation.z = -p.a;
       var m = g.userData.mesh.material, u = g.userData;
-      m.emissive.setHex(p.sel ? 0x333322 : 0x000000);
+      m.emissive.setHex(p.bad ? 0xaa1100 : p.sel ? 0x333322 : 0x000000);
       /* できあがったら1色のシルエット（県の境目と県名を消す） */
       if (u.sil !== (p.sil || null)) {
         u.sil = p.sil || null;

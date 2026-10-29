@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>最強都道府県獣バトル</title>
+<title>北海道詰め</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -40,12 +40,10 @@
 <script src="prefs.js"></script>   <!-- 都道府県の形 -->
 <script src="scene3d.js"></script>
 <script>
-/* 最強都道府県獣バトル
+/* 北海道詰め（仮題）
 
-   1. 47都道府県から5つ選ぶ（どれが中心ということはない）。
-   2. 本物の形と大きさのまま、位置と回転だけ決めて合成する（離して置くと、ほかの県のほうへ寄ってくっつく）。
-      合成中は県ごとに色を分け、できあがったら1つのシルエットにする。
-   3. 残りの42県でできた8体の県獣と順に、物理（matter.js）で戦う。全部倒せるか。
+   北海道の本当の輪郭を器にして、あいてと交互に県を1つずつ入れる（大きさは本物どおり）。
+   県は吊るされた所から、左右に動かして・回して・落とす。止まったときに器からはみ出していたら、入れた側の負け。
    絵は3D（scene3d.js）。ゲームの座標は px（地面が y=0、上がマイナス）。 */
 (function () {
   "use strict";
@@ -170,154 +168,6 @@
   });
   /* 県ごとの色（色相を47に分けて、となりの番号どうしは離す） */
   function prefColor(i) { return "hsl(" + Math.round((i * 137.5) % 360) + ",72%,58%)"; }
-
-  /* 置いたパーツ（x, y は胸＝最初の県からの位置、a は回転）の世界での凸包 */
-  function worldHull(p, ox, oy) {
-    var c = Math.cos(p.a), s = Math.sin(p.a);
-    return SHAPES[p.i].hull.map(function (q) { return [ox + p.x + q[0] * c - q[1] * s, oy + p.y + q[0] * s + q[1] * c]; });
-  }
-  /* 凸包どうしの重なり（分離軸） */
-  function polyOverlap(A, B) {
-    var polys = [A, B];
-    for (var k = 0; k < 2; k++) {
-      var P = polys[k];
-      for (var i = 0; i < P.length; i++) {
-        var p = P[i], q = P[(i + 1) % P.length], ax = -(q[1] - p[1]), ay = q[0] - p[0];
-        var a0 = 1e9, a1 = -1e9, b0 = 1e9, b1 = -1e9;
-        A.forEach(function (v) { var d = v[0] * ax + v[1] * ay; a0 = Math.min(a0, d); a1 = Math.max(a1, d); });
-        B.forEach(function (v) { var d = v[0] * ax + v[1] * ay; b0 = Math.min(b0, d); b1 = Math.max(b1, d); });
-        if (a1 < b0 || b1 < a0) return false;
-      }
-    }
-    return true;
-  }
-  function touchingAny(list, p) {
-    var h = worldHull(p, 0, 0);
-    for (var i = 0; i < list.length; i++) if (list[i] !== p && polyOverlap(h, worldHull(list[i], 0, 0))) return list[i];
-    return null;
-  }
-  /* どこにも触れていなければ、ほかの県（others）の真ん中のほうへ寄せてくっつける */
-  function pullIn(list, p, others) {
-    others = (others || list).filter(function (q) { return q !== p; });
-    if (!others.length || touchingAny(others, p)) return;
-    var cx = 0, cy = 0;
-    others.forEach(function (q) { cx += q.x; cy += q.y; });
-    cx /= others.length; cy /= others.length;
-    for (var k = 0; k < 600; k++) {
-      var dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy) || 1;
-      p.x -= dx / d * 3; p.y -= dy / d * 3;
-      if (touchingAny(others, p) || d < 3) return;
-    }
-  }
-  /* 全部が1つにつながるようにする（はなれた組は大きいほうへ寄せる）。最後に真ん中を原点へ */
-  function groups(list) {
-    var seen = [], out = [];
-    list.forEach(function (p) {
-      if (seen.indexOf(p) >= 0) return;
-      var g = [p]; seen.push(p);
-      for (var n = 0; n < g.length; n++) list.forEach(function (q) {
-        if (seen.indexOf(q) < 0 && polyOverlap(worldHull(g[n], 0, 0), worldHull(q, 0, 0))) { seen.push(q); g.push(q); }
-      });
-      out.push(g);
-    });
-    return out.sort(function (a, b) { return b.length - a.length; });
-  }
-  function settle(list) {
-    for (var t = 0; t < 6; t++) {
-      var gs = groups(list);
-      if (gs.length < 2) break;
-      gs.slice(1).forEach(function (g) { g.forEach(function (p) { pullIn(list, p, gs[0]); }); });
-    }
-    var cx = 0, cy = 0;
-    list.forEach(function (p) { cx += p.x; cy += p.y; });
-    cx /= list.length; cy /= list.length;
-    list.forEach(function (p) { p.x -= cx; p.y -= cy; });
-  }
-  /* でたらめに組む（敵と、自分の最初の並び） */
-  function randomBuild(ids, tidy) {
-    var list = [{ i: ids[0], x: 0, y: 0, a: 0 }];
-    var dirs = [[0, -1], [-1, 0.2], [1, 0.2], [-0.5, 1], [0.5, 1]];
-    for (var n = 1; n < ids.length; n++) {
-      var dv = tidy ? dirs[n] : null, ang = tidy ? Math.atan2(dv[1], dv[0]) : Math.random() * Math.PI * 2;
-      var p = { i: ids[n], x: Math.cos(ang) * 600, y: Math.sin(ang) * 600, a: tidy ? 0 : Math.random() * 6.28 };
-      list.push(p); pullIn(list, p);
-    }
-    settle(list);
-    return list;
-  }
-  function robotName(list) {
-    return list.slice().sort(function (a, b) { return (Math.round(a.y / 50) * 10000 + a.x) - (Math.round(b.y / 50) * 10000 + b.x); })
-      .map(function (p) { return SHAPES[p.i].name.charAt(0); }).join("") + zT("獣", " Beast", "수", "兽", "獸");
-  }
-
-  /* ============ 状態 ============ */
-  var S = { INTRO: "intro", SELECT: "select", ARRANGE: "arrange", DONE: "done", LAND: "land", FIGHT: "fight", RESULT: "result" };
-  var state, T, score, won, fx, shake, cam;
-  var picks, parts, foe, selected, name, foeName, doneT;
-  var engine, me, en, fightT, endT, foes, stage, nextT;
-  var NFOE = 8;
-  var SKY_Y = -330;
-  var conf = window.zCelebrate ? window.zCelebrate.confetti() : null;
-  if (conf) conf.rain = false;
-
-  function newRound() {
-    shareButton.hidden = true;
-    document.getElementById("start").hidden = true;
-    state = S.SELECT;
-    T = 0; score = 0; won = false; fx = []; shake = 0;
-    picks = []; parts = null; selected = null; engine = null; me = en = null; endT = 0; stage = 0; nextT = 0;
-    cam = { x: 0, y: SKY_Y + 40, w: 640 };
-    stick.on = false; keys.l = keys.r = keys.u = keys.d = false;
-    if (conf) conf.clear();
-    var s3 = scene3d(); if (s3) s3.reset();
-  }
-
-  /* ---------- 県を選ぶ ---------- */
-  function chipRects() {
-    var cols = 6, gap = 6, top = 96, cw = (W - 24 - gap * (cols - 1)) / cols;
-    var rows = Math.ceil(SHAPES.length / cols), ch = Math.min(46, (H - top - 130 - gap * (rows - 1)) / rows);
-    return SHAPES.map(function (s, i) {
-      return { i: i, x: 12 + (i % cols) * (cw + gap), y: top + Math.floor(i / cols) * (ch + gap), w: cw, h: ch };
-    });
-  }
-  function nextButton() { return window.zResultActions.row(W, H - 54 - Math.max(24, H * 0.04), ["next"]); }
-  function selectTap(x, y) {
-    if (picks.length === 5 && window.zResultActions.hit(nextButton(), x, y) === "next") { toArrange(); return; }
-    chipRects().forEach(function (r) {
-      if (x < r.x || x > r.x + r.w || y < r.y || y > r.y + r.h) return;
-      var k = picks.indexOf(r.i);
-      if (k >= 0) picks.splice(k, 1);
-      else if (picks.length < 5) picks.push(r.i);
-      tone(k >= 0 ? 520 : 780, 0.08, 0.1, "square");
-    });
-  }
-  function toArrange() {
-    state = S.ARRANGE;
-    parts = randomBuild(picks, true);
-    selected = parts[1];
-    SFX.clang();
-  }
-
-  /* ---------- 並べる（位置と回転） ---------- */
-  var dragP = null;
-  function handlePos(p) {                        /* 回すための取っ手（パーツの上） */
-    var r = SHAPES[p.i].r + 34;
-    return { x: core().x + p.x, y: core().y + p.y - r };
-  }
-  function core() { return { x: 0, y: SKY_Y }; }
-  function arrangeDown(x, y, id) {
-    if (window.zResultActions.hit(nextButton(), x, y) === "next") { startDone(); return; }
-    var w = toWorld(x, y), c = core();
-    if (selected) {
-      var hp = handlePos(selected), hs = toScreen(hp.x, hp.y);
-      if (Math.hypot(x - hs.x, y - hs.y) < 34) { dragP = { id: id, p: selected, rot: true }; return; }
-    }
-    /* いちばん上（後に置いた）から当たりを見る */
-    for (var i = parts.length - 1; i >= 0; i--) {
-      var h = worldHull(parts[i], c.x, c.y);
-      if (pointIn(h, w.x, w.y)) { selected = parts[i]; dragP = { id: id, p: parts[i], ox: w.x - parts[i].x, oy: w.y - parts[i].y }; return; }
-    }
-  }
   function pointIn(h, x, y) {
     var inside = false;
     for (var i = 0, j = h.length - 1; i < h.length; j = i++) {
@@ -325,297 +175,181 @@
     }
     return inside;
   }
-  function arrangeMove(x, y, id) {
-    if (!dragP || dragP.id !== id) return;
-    var w = toWorld(x, y), p = dragP.p, c = core();
-    if (dragP.rot) p.a = Math.atan2(w.x - (c.x + p.x), -(w.y - (c.y + p.y)));
-    else { p.x = w.x - dragP.ox; p.y = w.y - dragP.oy; }
-  }
-  function arrangeUp(id) {
-    if (!dragP || (id != null && dragP.id !== id)) return;
-    pullIn(parts, dragP.p);
-    settle(parts);
-    tone(330, 0.12, 0.15, "square", 200); noiseHit(0.1, 900, 0.2, 1);
-    dragP = null;
+  function segDist(px, py, a, b) {
+    var dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy || 1;
+    var t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / l));
+    return Math.hypot(px - a[0] - dx * t, py - a[1] - dy * t);
   }
 
-  /* ---------- 合体完了の演出 ---------- */
-  var LETTER = 0.16, DONE_LEN;
-  function startDone() {
-    state = S.DONE; doneT = 0; selected = null;
-    name = robotName(parts);
-    DONE_LEN = 0.5 + name.length * LETTER + 1.8;
-    shake = 10;
-    fx.push({ type: "ring", x: core().x, y: core().y, t: 0 });
-    tone(392, 0.25, 0.12, "square"); tone(523, 0.4, 0.12, "square", null, 0.12);
-  }
-  function updateDone(dt) {
-    var before = doneT;
-    doneT += dt;
-    for (var i = 0; i < name.length; i++) {
-      var at = 0.5 + i * LETTER;
-      if (before < at && doneT >= at) { tone(330 * Math.pow(2, i / 12), 0.12, 0.12, "square"); noiseHit(0.08, 2800, 0.18, 2); }
+  /* ============ 器（北海道） ============
+     北海道の本当の輪郭を器にする。外向きの向きが上を向いている辺（屋根）は開けて、そこから県を入れる。
+     底が地面（y=0）に付くように置く */
+  var HK = 0, BOX = null, WALL = 24;
+  function makeBox() {
+    var sh = SHAPES[HK], maxY = -1e9;
+    sh.pts.forEach(function (q) { maxY = Math.max(maxY, q[1]); });
+    var pts = sh.pts.map(function (q) { return [q[0], q[1] - maxY]; });
+    var walls = [], roofs = [], top = 0, left = 1e9, right = -1e9;
+    pts.forEach(function (q) { top = Math.min(top, q[1]); left = Math.min(left, q[0]); right = Math.max(right, q[0]); });
+    for (var i = 0; i < pts.length; i++) {
+      var a = pts[i], b = pts[(i + 1) % pts.length], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+      var nx = dy / l, ny = -dx / l, mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      if (pointIn(pts, mx + nx * 3, my + ny * 3)) { nx = -nx; ny = -ny; }
+      (ny < 0 && open(mx, my) ? roofs : walls).push({ a: a, b: b, nx: nx, ny: ny, l: l });
     }
-    var end = 0.5 + name.length * LETTER;
-    if (before < end && doneT >= end) { shake = 12; if (AC && window.zCelebrate) window.zCelebrate.play(AC, "levelup", { dest: OUT }); }
-    if (doneT >= DONE_LEN) startFight();
-  }
-  function drawDone() {
-    var c = toScreen(core().x, core().y), u = doneT;
-    ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(u * 0.6);
-    ctx.fillStyle = "rgba(255,230,120,.22)";
-    for (var i = 0; i < 12; i++) { ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 900, i / 12 * Math.PI * 2, (i + 0.5) / 12 * Math.PI * 2); ctx.closePath(); ctx.fill(); }
-    ctx.restore();
-    if (u < 0.25) { ctx.fillStyle = "rgba(255,255,255," + (1 - u / 0.25) + ")"; ctx.fillRect(0, 0, W, H); }
-    bigName(name, u, H * 0.16);
-  }
-  function bigName(str, u, y) {
-    var size = Math.min(62, Math.floor((W - 30) / Math.max(1, str.length)));
-    var x0 = W / 2 - size * str.length / 2 + size / 2;
-    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    for (var j = 0; j < str.length; j++) {
-      var t = u - (0.5 + j * LETTER);
-      if (t < 0) break;
-      var k = Math.max(1, 2.6 - t * 14);
-      ctx.save(); ctx.translate(x0 + j * size, y); ctx.scale(k, k);
-      ctx.font = "900 " + size + "px sans-serif";
-      ctx.lineJoin = "round"; ctx.lineWidth = size * 0.22; ctx.strokeStyle = "#16202e"; ctx.strokeText(str[j], 0, 0);
-      var gr = ctx.createLinearGradient(0, -size / 2, 0, size / 2);
-      gr.addColorStop(0, "#fff6b0"); gr.addColorStop(0.5, "#ffc928"); gr.addColorStop(1, "#e2602a");
-      ctx.fillStyle = gr; ctx.fillText(str[j], 0, 0);
-      ctx.restore();
-    }
-    ctx.restore();
-  }
-
-  /* ============ 戦い（matter.js） ============
-     自分と敵、どちらも5県のロボ。関節は組んだときの角度へ戻るバネ。胴（最初の県）はまっすぐ立とうとする */
-  var G = 0.9, STEP = 1000 / 60;
-  var GSTEP = G * 0.001 * STEP * STEP;
-  function makeBot(list, x0, group, isMe, y0) {
-    /* 物理の芯（まっすぐ立とうとする県）は真ん中にいちばん近い県。芯が原点になるよう並べ直す */
-    var mid = list.slice().sort(function (a, b) { return Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y); })[0];
-    list = [mid].concat(list.filter(function (q) { return q !== mid; })).map(function (q) { return { i: q.i, x: q.x - mid.x, y: q.y - mid.y, a: q.a }; });
-    y0 = y0 == null ? SKY_Y : y0;
-    var bodies = list.map(function (p, k) {
-      var c = Math.cos(p.a), s = Math.sin(p.a);
-      var verts = SHAPES[p.i].hull.map(function (q) { return { x: q[0] * c - q[1] * s, y: q[0] * s + q[1] * c }; });
-      var b = M.Bodies.fromVertices(x0 + p.x, y0 + p.y, [verts], {
-        friction: 0.9, frictionAir: 0.02, restitution: 0.05, density: k === 0 ? 0.004 : 0.0025, collisionFilter: { group: group }
-      });
-      M.Body.setPosition(b, { x: x0 + p.x, y: y0 + p.y });
-      b.piece = p; b.bot = null; b.cool = 0; b.pi = k; b.a0 = p.a;
-      return b;
-    });
-    /* つなぎ方: 胴から順に、触れている（いちばん近い）パーツへ */
-    var joints = [], linked = [0];
-    function closest(a, b) {
-      var A = worldHull(list[a], x0, y0), B = worldHull(list[b], x0, y0), best = 1e9, pt = null;
-      A.forEach(function (u) { B.forEach(function (v) { var d = Math.hypot(u[0] - v[0], u[1] - v[1]); if (d < best) { best = d; pt = [(u[0] + v[0]) / 2, (u[1] + v[1]) / 2]; } }); });
-      if (polyOverlap(A, B)) {                   /* 重なっているなら、重なりの真ん中あたり */
-        var inA = B.filter(function (v) { return pointIn(A, v[0], v[1]); });
-        if (inA.length) { var sx = 0, sy = 0; inA.forEach(function (v) { sx += v[0]; sy += v[1]; }); pt = [sx / inA.length, sy / inA.length]; best = 0; }
+    /* 空から見える辺（真上にほかの辺がない）だけを開ける */
+    function open(x, y) {
+      for (var k = 0; k < pts.length; k++) {
+        var p = pts[k], q = pts[(k + 1) % pts.length];
+        if ((p[0] - x) * (q[0] - x) > 0 || p[0] === q[0]) continue;
+        if (p[1] + (q[1] - p[1]) * (x - p[0]) / (q[0] - p[0]) < y - 1) return false;
       }
-      return { d: best, pt: pt };
+      return true;
     }
-    while (linked.length < list.length) {
-      var bestJ = null;
-      for (var i = 0; i < list.length; i++) {
-        if (linked.indexOf(i) >= 0) continue;
-        linked.forEach(function (j) { var c = closest(j, i); if (!bestJ || c.d < bestJ.d) bestJ = { a: j, b: i, d: c.d, pt: c.pt }; });
-      }
-      linked.push(bestJ.b);
-      var A = bodies[bestJ.a], B = bodies[bestJ.b];
-      var cons = M.Constraint.create({ bodyA: A, bodyB: B,
-        pointA: { x: bestJ.pt[0] - A.position.x, y: bestJ.pt[1] - A.position.y },
-        pointB: { x: bestJ.pt[0] - B.position.x, y: bestJ.pt[1] - B.position.y }, length: 0, stiffness: 0.9, damping: 0.1 });
-      joints.push({ c: cons, a: A, b: B, rest: B.angle - A.angle, rx: B.position.x - bestJ.pt[0], ry: B.position.y - bestJ.pt[1] });
-    }
-    var low = 0;
-    list.forEach(function (p) { worldHull(p, 0, 0).forEach(function (q) { low = Math.max(low, q[1]); }); });
-    var bot = { bodies: bodies, joints: joints, core: bodies[0], hp: 100, standH: low, attack: null, isMe: isMe, walk: 0, cd: 1.5, jumpLock: false, list: list, side: 1 };
-    bodies.forEach(function (b) { b.bot = bot; });
-    M.Composite.add(engine.world, bodies);
-    M.Composite.add(engine.world, joints.map(function (j) { return j.c; }));
-    return bot;
+    return { pts: pts, walls: walls, roofs: roofs, top: top, left: left, right: right };
   }
 
-  function startFight() {
-    state = S.LAND; fightT = 0; endT = 0;
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", AIM: "aim", FALL: "fall", RESULT: "result" };
+  var state, T, won, fx, shake, cam;
+  var engine, pieces, deck, cur, turn, count, settleT, calmT, loseBy, cpuPlan, endT, forceOut;
+  var conf = window.zCelebrate ? window.zCelebrate.confetti() : null;
+  if (conf) conf.rain = false;
+  var G = 1, STEP = 1000 / 60;
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    T = 0; won = false; fx = []; shake = 0; count = 0; loseBy = null; endT = 0; forceOut = null;
+    BOX = BOX || makeBox();
     engine = M.Engine.create();
     engine.gravity.y = G;
-    engine.positionIterations = 8; engine.velocityIterations = 6; engine.constraintIterations = 4;
-    M.Composite.add(engine.world, [
-      M.Bodies.rectangle(0, 100, 4000, 200, { isStatic: true, friction: 0.9 }),
-      M.Bodies.rectangle(-900, -700, 200, 1800, { isStatic: true }),
-      M.Bodies.rectangle(900, -700, 200, 1800, { isStatic: true })
-    ]);
-    me = makeBot(parts, -160, -1, true);
-    /* 残りの42県をまぜて、5〜6県ずつ8体の県獣にする */
-    var rest = [];
-    for (var r = 0; r < SHAPES.length; r++) if (picks.indexOf(r) < 0) rest.push(r);
-    for (r = rest.length - 1; r > 0; r--) { var j = Math.floor(Math.random() * (r + 1)), tmp = rest[r]; rest[r] = rest[j]; rest[j] = tmp; }
-    foes = [];
-    for (var n = 0, at = 0; n < NFOE; n++) { var sz = Math.floor((rest.length - at) / (NFOE - n)); foes.push(rest.slice(at, at + sz)); at += sz; }
-    stage = 0;
-    spawnFoe(180, SKY_Y);
-    M.Events.on(engine, "collisionStart", onHit);
-    M.Events.on(engine, "collisionActive", onHit);
-  }
-
-  function spawnFoe(x, y) {
-    if (en) M.Composite.remove(engine.world, en.bodies);
-    foe = randomBuild(foes[stage], false);
-    foeName = robotName(foe);
-    en = makeBot(foe, x, -2 - stage, false, y);
-    en.cd = 1.2;
-  }
-
-  function relSpring(a, b, rest, k, d) {
-    var wa = M.Body.getAngularVelocity(a), wb = M.Body.getAngularVelocity(b);
-    var err = angDiff(rest - (b.angle - a.angle));
-    var dw = k * err - d * (wb - wa);
-    var ia = a.inertia, ib = b.inertia;
-    M.Body.setAngularVelocity(b, wb + dw * ia / (ia + ib));
-    M.Body.setAngularVelocity(a, wa - dw * ib / (ia + ib));
-  }
-  function angDiff(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
-  function lowest(bot) { var l = -1e9; bot.bodies.forEach(function (b) { l = Math.max(l, b.bounds.max.y); }); return l; }
-
-  /* 攻撃: 上のパーツ（punch）か下のパーツ（kick）を、相手のほうへ振る */
-  function botAttack(bot, kind) {
-    if (bot.hp <= 0 || endT > 0) return;
-    if (bot.attack && bot.attack.t < 0.25) return;
-    var other = bot === me ? en : me, facing = other.core.position.x > bot.core.position.x ? 1 : -1;
-    bot.attack = { kind: kind, t: 0, facing: facing };
-    bot.joints.forEach(function (j) {
-      var upper = j.b.position.y < bot.core.position.y + 10;
-      if ((kind === "punch") !== upper) return;
-      var v = M.Body.getVelocity(j.b);
-      M.Body.setVelocity(j.b, { x: v.x + facing * 9, y: v.y - 2 });
+    engine.positionIterations = 10; engine.velocityIterations = 8;
+    var statics = [M.Bodies.rectangle(0, 100, 6000, 200, { isStatic: true, friction: 0.8 })];
+    BOX.walls.forEach(function (w) {
+      var cx = (w.a[0] + w.b[0]) / 2 + w.nx * WALL / 2, cy = (w.a[1] + w.b[1]) / 2 + w.ny * WALL / 2;
+      statics.push(M.Bodies.rectangle(cx, cy, w.l + WALL, WALL, { isStatic: true, friction: 0.6, angle: Math.atan2(w.b[1] - w.a[1], w.b[0] - w.a[0]) }));
     });
-    var cv = M.Body.getVelocity(bot.core);
-    M.Body.setVelocity(bot.core, { x: cv.x + facing * 2, y: cv.y });
-    SFX.swing();
+    statics.forEach(function (b) { b.isWall = true; });
+    M.Composite.add(engine.world, statics);
+    pieces = [];
+    deck = [];
+    for (var i = 0; i < SHAPES.length; i++) if (i !== HK) deck.push(i);
+    for (i = deck.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = deck[i]; deck[i] = deck[j]; deck[j] = t; }
+    turn = 0;
+    cam = { x: (BOX.left + BOX.right) / 2, y: 0, w: 0 };
+    fitCam(true);
+    if (conf) conf.clear();
+    var s3 = scene3d(); if (s3) s3.reset();
+    nextPiece();
   }
-  function doAttack(kind) { if (state === S.FIGHT && me) botAttack(me, kind); }
+  function fitCam(snap) {
+    var w = BOX.right - BOX.left + 70;
+    var visH = w * H / W, y = BOX.top / 2 - 40;
+    if (snap) { cam.w = w; cam.y = y; }
+    else { cam.w += (w - cam.w) * 0.1; cam.y += (y - cam.y) * 0.1; }
+  }
 
-  function driveBot(bot, mx, jump, dt) {
-    var alive = bot.hp > 0, other = bot === me ? en : me;
-    var facing = other.core.position.x > bot.core.position.x ? 1 : -1;
-    if (bot.attack) { bot.attack.t += dt; if (bot.attack.t > 0.4) bot.attack = null; }
-    bot.walk += dt * 9 * Math.abs(mx);
-    bot.joints.forEach(function (j, n) {
-      var off = 0, k = 0.22;
-      var upper = j.b.position.y < bot.core.position.y + 10;
-      if (Math.abs(mx) > 0.1 && !upper) off = Math.sin(bot.walk + n * 2) * 0.35;
-      if (bot.attack && bot.attack.t < 0.3 && (bot.attack.kind === "punch") === upper) {
-        /* つなぎ目から見て、パーツの中心が相手のほうへ動く向きに回す */
-        var sgn = j.ry < 0 ? 1 : -1;
-        off = -facing * sgn * 1.4; k = 0.5;
-      }
-      if (!alive) k = 0.02;
-      relSpring(j.a, j.b, j.rest + off, k, 0.35);
-    });
-    var low = lowest(bot), grounded = low > -8;
-    if (!alive) return;
-    var c = bot.core, w = M.Body.getAngularVelocity(c);
-    M.Body.setAngularVelocity(c, w + angDiff(bot.list[0].a - c.angle) * 0.06 - w * 0.12);
-    if (grounded) {
-      bot.bodies.forEach(function (b) { var v = M.Body.getVelocity(b); M.Body.setVelocity(b, { x: v.x, y: v.y - GSTEP * 0.8 }); });
-      var cv = M.Body.getVelocity(c), ey = -bot.standH * 0.98 - c.position.y;
-      var vy = cv.y + Math.max(-1.2, Math.min(1.2, ey * 0.06)) - cv.y * 0.08;
-      if (ey < -40) vy = Math.max(vy, cv.y);
-      var vx = cv.x + (mx * 3.4 - cv.x) * 0.18;
-      if (jump && !bot.jumpLock) { vy = -11; bot.jumpLock = true; SFX.swing(); }
-      M.Body.setVelocity(c, { x: vx, y: vy });
-    } else {
-      var cv2 = M.Body.getVelocity(c);
-      M.Body.setVelocity(c, { x: cv2.x + (mx * 3.4 - cv2.x) * 0.04, y: cv2.y });
+  /* ---------- 1手（県を吊るして、動かして、落とす） ---------- */
+  function hangY(i) { return BOX.top - SHAPES[i].r - 40; }
+  function nextPiece() {
+    if (!deck.length) { finish(true); return; }
+    var i = deck.pop();
+    cur = { i: i, x: (BOX.left + BOX.right) / 2, y: hangY(i), a: 0, ta: 0 };
+    state = S.AIM;
+    cpuPlan = turn === 1 ? planCPU(cur) : null;
+    if (turn === 1 && forceOut === "cpu") { cpuPlan.x = BOX.right + 120; forceOut = null; }
+    tone(turn ? 392 : 523, 0.1, 0.1, "square");
+  }
+  function hullAt(i, x, y, a) {
+    var c = Math.cos(a), s = Math.sin(a);
+    return SHAPES[i].hull.map(function (q) { return [x + q[0] * c - q[1] * s, y + q[0] * s + q[1] * c]; });
+  }
+  function drop() {
+    if (state !== S.AIM) return;
+    cur.a = cur.ta;
+    var verts = hullAt(cur.i, 0, 0, cur.a).map(function (q) { return { x: q[0], y: q[1] }; });
+    var b = M.Bodies.fromVertices(cur.x, cur.y, [verts], { friction: 0.6, frictionStatic: 0.8, frictionAir: 0.01, restitution: 0.05, density: 0.002 });
+    M.Body.setPosition(b, { x: cur.x, y: cur.y });
+    b.piece = { i: cur.i, a: cur.a }; b.by = turn; b.pi = pieces.length;
+    M.Composite.add(engine.world, b);
+    pieces.push(b);
+    cur = null; state = S.FALL; settleT = 0; calmT = 0;
+    SFX.whoosh();
+  }
+  /* 器からはみ出しているか（凸包の角が北海道の外へ 8px より出ている） */
+  function outside(b) {
+    var P = BOX.pts;
+    for (var k = 0; k < b.vertices.length; k++) {
+      var v = b.vertices[k];
+      if (pointIn(P, v.x, v.y)) continue;
+      var d = 1e9;
+      for (var i = 0; i < P.length; i++) d = Math.min(d, segDist(v.x, v.y, P[i], P[(i + 1) % P.length]));
+      if (d > 8) return true;
     }
-    if (!jump) bot.jumpLock = false;
+    return false;
   }
-
-  function updateFight(dt) {
-    fightT += dt;
-    var mx = 0, jump = false;
-    if (stick.on) { mx = Math.max(-1, Math.min(1, stick.dx / 60)); jump = stick.dy < -45; }
-    mx += (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
-    if (keys.u) jump = true;
-    mx = Math.max(-1, Math.min(1, mx));
-    driveBot(me, mx, jump, dt);
-
-    /* 敵: 近づいて、間をおいて殴る・蹴る */
-    var dx = me.core.position.x - en.core.position.x, dist = Math.abs(dx);
-    var emx = dist > 260 ? (dx > 0 ? 0.6 : -0.6) : (dist < 140 ? (dx > 0 ? -0.3 : 0.3) : 0);
-    var hard = 1 + stage * 0.12;                 /* 後の県獣ほど手が早い */
-    en.cd -= dt * hard * (1 + (100 - en.hp) / 200);
-    if (en.cd <= 0 && dist < 420 && me.hp > 0 && en.hp > 0) { botAttack(en, Math.random() < 0.6 ? "punch" : "kick"); en.cd = 0.9 + Math.random() * 1.1; }
-    driveBot(en, me.hp > 0 && en.hp > 0 ? emx * Math.min(1.5, hard) : 0, false, dt);
-
-    me.bodies.concat(en.bodies).forEach(function (b) { b.cool = Math.max(0, b.cool - dt); });
-    M.Engine.update(engine, STEP);
-    me.bodies.concat(en.bodies).forEach(function (b) {
-      var v = M.Body.getVelocity(b), sp = Math.hypot(v.x, v.y), w = M.Body.getAngularVelocity(b);
-      if (sp > 22) M.Body.setVelocity(b, { x: v.x * 22 / sp, y: v.y * 22 / sp });
-      if (Math.abs(w) > 0.45) M.Body.setAngularVelocity(b, w > 0 ? 0.45 : -0.45);
+  function updateFall(dt) {
+    settleT += dt;
+    var still = true;
+    pieces.forEach(function (b) {
+      if (Math.hypot(b.velocity.x, b.velocity.y) > 0.12 || Math.abs(b.angularVelocity) > 0.004) still = false;
     });
-
-    var mid = (me.core.position.x + en.core.position.x) / 2, span = Math.abs(dx);
-    var cw = Math.max(560, Math.min(1400, span + 380));
-    cam.w += (cw - cam.w) * Math.min(1, dt * 2.5);
-    cam.x += (mid - cam.x) * Math.min(1, dt * 3);
-    var visH = cam.w * H / W;
-    cam.y += ((-visH * 0.5 + visH * 0.24) - cam.y) * Math.min(1, dt * 3);
-
-    if (endT > 0) { endT += dt; if (endT > 2.6) finish(); }
-    else if (nextT > 0) {                        /* 倒した県獣がくずれてから、次の県獣が降ってくる */
-      nextT += dt;
-      if (nextT > 1.6) {
-        nextT = 0; stage++;
-        me.hp = Math.min(100, me.hp + 25);
-        var mx0 = me.core.position.x, sx = mx0 < 0 ? mx0 + 360 : mx0 - 360;
-        spawnFoe(sx, -620);
-        SFX.roar && SFX.roar(stage === NFOE - 1);
-      }
-    } else if (en.hp <= 0 || me.hp <= 0) {
-      var loser = en.hp <= 0 ? en : me;
-      M.Composite.remove(engine.world, loser.joints.map(function (j) { return j.c; }));   /* 負けたほうはバラバラ */
-      loser.bodies.forEach(function (b) { M.Body.setVelocity(b, { x: (Math.random() - 0.5) * 12, y: -5 - Math.random() * 6 }); M.Body.setAngularVelocity(b, (Math.random() - 0.5) * 0.4); });
-      score = Math.round(fightT * 10) / 10;
-      if (en.hp <= 0 && stage < NFOE - 1) { nextT = 0.001; SFX.hit(1); shake = 10; }
-      else {
-        endT = 0.001; won = en.hp <= 0;
-        if (won) {
-          SFX.hit(1);
-          setTimeout(function () { if (won && AC && window.zCelebrate) window.zCelebrate.play(AC, "fanfare", { dest: OUT }); }, 500);
-          if (conf) conf.burst(W, H, 160);
-        } else SFX.lose();
-      }
+    calmT = still ? calmT + dt : 0;
+    if (calmT < 0.5 && settleT < 6) return;
+    var bad = pieces.filter(outside);
+    if (bad.length) {
+      bad.forEach(function (b) { b.bad = true; });
+      loseBy = turn; finish(turn === 1);
+      return;
     }
+    count++;
+    SFX.clang();
+    turn = 1 - turn;
+    nextPiece();
   }
 
-  function onHit(ev) {
-    if (endT > 0 || nextT > 0) return;
-    ev.pairs.forEach(function (pr) {
-      var a = pr.bodyA, b = pr.bodyB;
-      if (!a.bot || !b.bot || a.bot === b.bot) return;
-      var n = pr.collision.normal, va = M.Body.getVelocity(a), vb = M.Body.getVelocity(b);
-      var rel = Math.abs((va.x - vb.x) * n.x + (va.y - vb.y) * n.y);
-      var pt = pr.collision.supports && pr.collision.supports[0] ? pr.collision.supports[0] : a.position;
-      [[a, b], [b, a]].forEach(function (ab) {
-        var at = ab[0], tg = ab[1], bot = at.bot;
-        if (bot.hp <= 0 || tg.bot.hp <= 0 || !bot.attack || bot.attack.t > 0.34 || at.cool > 0 || rel < 3 || at === bot.core) return;
-        var dmg = Math.min(16, (rel - 2) * 1.5) * (tg === tg.bot.core ? 1.2 : 1);
-        tg.bot.hp = Math.max(0, tg.bot.hp - dmg);
-        at.cool = 0.3; bot.attack.t = Math.max(bot.attack.t, 0.3);
-        var dir = tg.position.x > at.position.x ? 1 : -1, cv = M.Body.getVelocity(tg.bot.core);
-        M.Body.setVelocity(tg.bot.core, { x: cv.x + dir * dmg * 0.3, y: cv.y - dmg * 0.1 });
-        fx.push({ type: "spark", x: pt.x, y: pt.y, t: 0, big: dmg > 9, bad: tg.bot === me });
-        shake = Math.max(shake, 4 + dmg * 0.6);
-        if (tg.bot === me) SFX.hurt(dmg / 15); else SFX.hit(dmg / 15);
-      });
+  /* ---------- 相手（いちばん深く入りそうな所と向きを、少しまちがえながら選ぶ） ---------- */
+  function surfaceY(x) {                         /* x の真上から見た、いちばん上の面 */
+    var best = 200;
+    M.Composite.allBodies(engine.world).forEach(function (b) {
+      var V = b.vertices;
+      for (var k = 0; k < V.length; k++) {
+        var p = V[k], q = V[(k + 1) % V.length];
+        if ((p.x - x) * (q.x - x) > 0 || p.x === q.x) continue;
+        var y = p.y + (q.y - p.y) * (x - p.x) / (q.x - p.x);
+        if (y < best) best = y;
+      }
     });
+    return best;
+  }
+  function planCPU(c) {
+    var best = null;
+    for (var n = 0; n < 48; n++) {
+      var a = Math.floor(Math.random() * 12) * Math.PI / 6;
+      var h = hullAt(c.i, 0, 0, a), lo = 1e9, hi = -1e9, bottom = -1e9;
+      h.forEach(function (q) { lo = Math.min(lo, q[0]); hi = Math.max(hi, q[0]); bottom = Math.max(bottom, q[1]); });
+      var x = BOX.left - lo + Math.random() * Math.max(1, (BOX.right - BOX.left) - (hi - lo));
+      var land = 1e9;
+      for (var k = 0; k <= 6; k++) {
+        var sx = x + lo + (hi - lo) * k / 6;
+        land = Math.min(land, surfaceY(sx));
+      }
+      var restY = land - bottom, ok = 1;
+      h.forEach(function (q) { if (!pointIn(BOX.pts, x + q[0], restY + q[1] - 4)) ok = 0; });
+      var score = ok * 1000 + restY + (Math.random() - 0.5) * 50;
+      if (!best || score > best.score) best = { x: x, a: a, score: score };
+    }
+    return { x: best.x, a: best.a, t: 0 };
+  }
+  function updateCPU(dt) {
+    var p = cpuPlan;
+    p.t += dt;
+    if (p.t > 0.35) {
+      cur.x += (p.x - cur.x) * Math.min(1, dt * 5);
+      cur.ta = p.a;
+    }
+    if (p.t > 1.3) drop();
   }
 
   /* ============ 進行 ============ */
@@ -624,37 +358,40 @@
     fx = fx.filter(function (f) { f.t += dt; return f.t < 0.6; });
     shake = Math.max(0, shake - dt * 30);
     T += dt;
-    if (state === S.ARRANGE || state === S.SELECT) {
-      /* 並べたロボ全体が入るように寄る（触っている間は動かさない） */
-      var ext = 120;
-      if (parts) parts.forEach(function (p) { ext = Math.max(ext, Math.abs(p.x) + SHAPES[p.i].r, Math.abs(p.y) + SHAPES[p.i].r); });
-      var tw = state === S.SELECT ? 640 : Math.max(380, Math.min(900, ext * 2 + 140));
-      if (!dragP) cam.w += (tw - cam.w) * Math.min(1, dt * 3);
-      cam.x += (0 - cam.x) * Math.min(1, dt * 3); cam.y += (SKY_Y + 20 - cam.y) * Math.min(1, dt * 3);
-    } else if (state === S.DONE) {
-      updateDone(dt);
-      cam.w += (560 - cam.w) * Math.min(1, dt * 3);
-    } else if (state === S.LAND) {
-      M.Engine.update(engine, STEP);
-      fightT += dt;
-      var visH = cam.w * H / W;
-      cam.w += (620 - cam.w) * Math.min(1, dt * 2);
-      cam.x += (10 - cam.x) * Math.min(1, dt * 3);
-      cam.y += ((-visH * 0.5 + visH * 0.24) - cam.y) * Math.min(1, dt * 2);
-      if (lowest(me) > -6 || fightT > 3) {
-        state = S.FIGHT; fightT = 0; shake = 14; SFX.land();
-        fx.push({ type: "dust", x: me.core.position.x, y: 0, t: 0 });
-      }
-    } else if (state === S.FIGHT) updateFight(dt);
+    if (!engine) return;
+    if (cur) cur.a += angDiff(cur.ta - cur.a) * Math.min(1, dt * 14);
+    if (state === S.AIM && turn === 1) updateCPU(dt);
+    if (state === S.AIM && turn === 0) {
+      var mv = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
+      if (mv) moveCur(mv * 320 * dt);
+    }
+    if (state !== S.INTRO) M.Engine.update(engine, STEP);
+    if (state === S.FALL && endT === 0) updateFall(dt);
+    if (endT > 0) { endT += dt; if (endT > 2.2 && state !== S.RESULT) { state = S.RESULT; shareButton.hidden = false; } }
   }
-  function finish() { state = S.RESULT; shareButton.hidden = false; }
+  function angDiff(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
+  function moveCur(dx) {
+    if (!cur) return;
+    var r = SHAPES[cur.i].r;
+    cur.x = Math.max(BOX.left - r, Math.min(BOX.right + r, cur.x + dx));
+  }
+  function rotateCur() { if (cur && state === S.AIM && turn === 0) { cur.ta += Math.PI / 6; tone(660, 0.05, 0.08, "square"); } }
+  function finish(win) {
+    if (endT > 0) return;
+    won = win; endT = 0.001; state = S.FALL;
+    if (win) {
+      setTimeout(function () { if (won && AC && window.zCelebrate) window.zCelebrate.play(AC, "fanfare", { dest: OUT }); }, 300);
+      if (conf) conf.burst(W, H, 160);
+    } else SFX.lose();
+    shake = 10;
+  }
 
   /* ============ 入力 ============ */
-  var keys = { l: false, r: false, u: false, d: false };
-  var stick = { on: false, id: null, ox: 0, oy: 0, dx: 0, dy: 0 };
-  function padButtons() {
-    var r = 58, y1 = H - 230, y2 = H - 110;
-    return [{ kind: "punch", x: W - 150, y: y1, r: r }, { kind: "kick", x: W - 78, y: y2, r: r }];
+  var keys = { l: false, r: false };
+  var drag = null;
+  function ctrlButtons() {
+    var r = 50, y = H - 96;
+    return [{ kind: "rot", x: W / 2 - 90, y: y, r: r }, { kind: "drop", x: W / 2 + 90, y: y, r: r }];
   }
   function down(x, y, id) {
     if (state === S.INTRO) return;
@@ -664,96 +401,67 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (state === S.SELECT) { if (x == null) { if (picks.length === 5) toArrange(); } else selectTap(x, y); return; }
-    if (state === S.ARRANGE) { if (x == null) startDone(); else arrangeDown(x, y, id); return; }
-    if (x == null) { doAttack("punch"); return; }
-    if (state === S.FIGHT) {
-      var bs = padButtons();
-      for (var i = 0; i < bs.length; i++) if (Math.hypot(x - bs[i].x, y - bs[i].y) < bs[i].r + 22) { doAttack(bs[i].kind); return; }
-      if (x < W * 0.55) { stick = { on: true, id: id, ox: x, oy: y, dx: 0, dy: 0 }; return; }
-      doAttack("punch");
-    }
+    if (state !== S.AIM || turn !== 0 || endT > 0) return;
+    if (x == null) { drop(); return; }
+    var bs = ctrlButtons();
+    for (var i = 0; i < bs.length; i++) if (Math.hypot(x - bs[i].x, y - bs[i].y) < bs[i].r + 16) { if (bs[i].kind === "rot") rotateCur(); else drop(); return; }
+    drag = { id: id, x: x };
   }
   function move(x, y, id) {
-    if (state === S.ARRANGE) arrangeMove(x, y, id);
-    if (stick.on && stick.id === id) {
-      stick.dx = x - stick.ox; stick.dy = y - stick.oy;
-      var d = Math.hypot(stick.dx, stick.dy), mx = 70;
-      if (d > mx) { stick.ox = x - stick.dx * mx / d; stick.oy = y - stick.dy * mx / d; stick.dx *= mx / d; stick.dy *= mx / d; }
-    }
+    if (!drag || drag.id !== id) return;
+    var k = cam.w / W;
+    moveCur((x - drag.x) * k);
+    drag.x = x;
   }
-  function up(id) {
-    if (state === S.ARRANGE) arrangeUp(id);
-    if (stick.on && (id == null || stick.id === id)) stick.on = false;
-  }
+  function up(id) { if (drag && (id == null || drag.id === id)) drag = null; }
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) { e.preventDefault(); var p = atCanvas(e); down(p.x, p.y, e.pointerId); });
   wrap.addEventListener("pointermove", function (e) { var p = atCanvas(e); move(p.x, p.y, e.pointerId); });
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(e.pointerId); });
   wrap.addEventListener("pointercancel", function (e) { up(e.pointerId); });
-  window.addEventListener("blur", function () { up(); keys.l = keys.r = keys.u = keys.d = false; });
+  window.addEventListener("blur", function () { up(); keys.l = keys.r = false; });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    if (n === 1 && state === S.SELECT) { picks = []; while (picks.length < 5) { var r = Math.floor(Math.random() * 47); if (picks.indexOf(r) < 0) picks.push(r); } }  /* 5県をでたらめに選ぶ */
-    if (n === 2 && (state === S.SELECT || state === S.ARRANGE)) { if (state === S.SELECT) { if (picks.length < 5) debugKey(1); toArrange(); } startDone(); }  /* すぐ戦いへ */
-    if (n === 3 && state === S.SELECT) { if (picks.length < 5) debugKey(1); toArrange(); }   /* 並べる画面へ */
-    if (n === 4 && state === S.FIGHT) en.hp = Math.min(en.hp, 3);   /* 次の一撃で勝つ */
-    if (n === 5 && state === S.FIGHT) me.hp = Math.min(me.hp, 3);   /* 次に食らうと負け */
-    if (n === 6 && state === S.FIGHT && stage < NFOE - 1) { stage = NFOE - 2; if (!nextT) en.hp = 0; }   /* 最後の県獣へ */
-  }
-  function keySet(e, on) {
-    var k = e.key;
-    if (k === "ArrowLeft" || k === "a" || k === "A") { keys.l = on; return true; }
-    if (k === "ArrowRight" || k === "d" || k === "D") { keys.r = on; return true; }
-    if (k === "ArrowUp" || k === "w" || k === "W") { keys.u = on; return true; }
-    if (k === "ArrowDown" || k === "s" || k === "S") { keys.d = on; return true; }
-    return false;
+    if (state !== S.AIM || turn !== 0 || endT > 0) return;
+    if (n === 1) { var p = planCPU(cur); cur.x = p.x; cur.ta = cur.a = p.a; drop(); }   /* 自分の県を、相手と同じ考えで置いて落とす */
+    if (n === 2) { forceOut = "cpu"; debugKey(1); }                                     /* 次の相手の県が器の外へ（勝ち） */
+    if (n === 3) { cur.x = BOX.right + 120; drop(); }                                   /* 自分の県を器の外へ（負け） */
   }
   window.addEventListener("keydown", function (e) {
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
     if (e.key === "Escape") { e.preventDefault(); if (!e.repeat && state !== S.INTRO) newRound(); return; }
-    if (keySet(e, true)) { e.preventDefault(); return; }
-    var go = e.code === "Space" || e.key === " " || e.key === "Enter" || e.key === "z" || e.key === "Z";
-    var kick = e.key === "x" || e.key === "X";
-    if (!go && !kick) return;
+    if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") { e.preventDefault(); keys.l = true; return; }
+    if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") { e.preventDefault(); keys.r = true; return; }
+    if (e.key === "ArrowUp" || e.key === "w" || e.key === "W" || e.key === "x" || e.key === "X") { e.preventDefault(); if (!e.repeat) rotateCur(); return; }
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter" || e.key === "ArrowDown";
+    if (!go) return;
     e.preventDefault();
     if (e.repeat || state === S.INTRO) return;
-    if (state !== S.FIGHT) { if (go) down(); return; }
-    audioOn();
-    doAttack(kick ? "kick" : "punch");
+    down();
   });
   window.addEventListener("keyup", function (e) {
-    if (keySet(e, false)) return;
+    if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") keys.l = false;
+    if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") keys.r = false;
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); }
   });
 
   /* ============ シェア ============ */
   function doShare() {
     var text = won
-      ? zT(name + "が残り42県の県獣8体を" + score + "秒で全部倒した", name + " beat all 8 beasts of the other 42 prefectures in " + score + "s", name + "가 나머지 42개 현의 괴수 8마리를 " + score + "초 만에 모두 쓰러뜨렸다", name + "用" + score + "秒打倒了其余42县的全部8只县兽", name + "用" + score + "秒打倒了其餘42縣的全部8隻縣獸")
-      : zT(name + "、8体中" + stage + "体倒して" + foeName + "に敗れる", name + " beat " + stage + " of 8, then lost to " + foeName, name + ", 8마리 중 " + stage + "마리를 쓰러뜨리고 " + foeName + "에게 패배", name + "打倒8只中的" + stage + "只，败给了" + foeName, name + "打倒8隻中的" + stage + "隻，敗給了" + foeName);
-    window.zResultActions.x({ text: text + zT(" #最強都道府県獣バトル", " #PrefectureBeastBattle") });
+      ? zT("北海道に" + count + "県詰めて勝った", "Packed " + count + " prefectures into Hokkaido and won", "홋카이도에 " + count + "개 현을 채워 넣고 이겼다", "在北海道塞进" + count + "个县，赢了", "在北海道塞進" + count + "個縣，贏了")
+      : zT("北海道に" + count + "県詰めたところで、あふれて負けた", "Hokkaido overflowed after " + count + " prefectures", "홋카이도에 " + count + "개 현을 채우고 넘쳐서 졌다", "北海道塞进" + count + "个县后溢出，输了", "北海道塞進" + count + "個縣後溢出，輸了");
+    window.zResultActions.x({ text: text + zT(" #北海道詰め", " #HokkaidoPacking") });
   }
 
   /* ============ 描画 ============ */
   var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene(); }) : function () { return null; };
-  /* できあがった県獣は1色のシルエット */
-  var SIL_ME = "hsl(150,45%,30%)", SIL_FOE = ["hsl(285,40%,34%)", "hsl(5,50%,36%)", "hsl(215,45%,34%)", "hsl(35,55%,36%)", "hsl(320,40%,34%)", "hsl(185,45%,30%)", "hsl(60,40%,32%)", "hsl(0,0%,16%)"];
-  function botSnap(bot, tag) {
-    var sil = bot.isMe ? SIL_ME : SIL_FOE[stage % SIL_FOE.length];
-    return bot.bodies.map(function (b) { return { id: tag + stage + "_" + b.pi, i: b.piece.i, x: b.position.x, y: b.position.y, a: b.angle + b.piece.a, sil: sil }; });
-  }
   function snapshot() {
-    var list = [];
-    if (engine && me) list = botSnap(me, "m").concat(botSnap(en, "e"));
-    else if (parts) {
-      var c = core(), done = state !== S.SELECT && state !== S.ARRANGE;
-      parts.forEach(function (p, k) { list.push({ id: "m" + k, i: p.i, x: c.x + p.x, y: c.y + p.y, a: p.a, sel: p === selected, sil: done ? SIL_ME : null }); });
-    }
+    var list = (pieces || []).map(function (b) { return { id: "p" + b.pi, i: b.piece.i, x: b.position.x, y: b.position.y, a: b.angle + b.piece.a, bad: b.bad && endT > 0 && Math.floor(T * 4) % 2 === 0 }; });
+    if (cur) list.push({ id: "cur" + (pieces ? pieces.length : 0), i: cur.i, x: cur.x, y: cur.y, a: cur.a, sel: true });
     var sx = 0, sy = 0;
     if (shake > 0) { sx = (Math.random() - 0.5) * shake; sy = (Math.random() - 0.5) * shake; }
-    return { pieces: list, cam: { x: cam.x + sx, y: cam.y + sy, w: cam.w }, t: T, state: state };
+    return { pieces: list, box: BOX, cam: { x: cam.x + sx, y: cam.y + sy, w: cam.w }, t: T, state: state };
   }
   var proj = null;
   function toScreen(x, y) {
@@ -761,28 +469,20 @@
     var k = W / cam.w;
     return { x: W / 2 + (x - cam.x) * k, y: H / 2 + (y - cam.y) * k };
   }
-  function toWorld(x, y) {
-    var a = toScreen(cam.x, cam.y), b = toScreen(cam.x + 100, cam.y + 100);
-    var sx = (b.x - a.x) / 100 || 1, sy = (b.y - a.y) / 100 || 1;
-    return { x: cam.x + (x - a.x) / sx, y: cam.y + (y - a.y) / sy };
-  }
 
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
     var s3 = scene3d(), drew = false;
-    if (s3 && state) {
+    if (s3 && BOX) {
       try { s3.sync(snapshot()); drew = s3.draw(ctx, W, H); proj = function (x, y) { return s3.project(x, y, W, H); }; }
       catch (e) { scene3d.drop(); proj = null; }
     }
     if (!drew) { proj = null; drawFlat(); }
     if (hideUI) return;
-    drawFx();
-    if (state === S.SELECT) drawSelect();
-    if (state === S.ARRANGE) drawArrange();
-    if (state === S.DONE) drawDone();
-    if (state === S.FIGHT || state === S.LAND) drawFightUI();
+    if (state === S.AIM && cur) drawAim();
+    if (state !== S.INTRO && state !== S.RESULT) drawHUD();
     if (state === S.RESULT) drawResult();
     if (conf) conf.draw(ctx);
   }
@@ -797,119 +497,49 @@
   }
   function drawFlat() {
     ctx.fillStyle = "#8fb8d8"; ctx.fillRect(0, 0, W, H);
+    if (!BOX) return;
     var g = toScreen(0, 0); ctx.fillStyle = "#6b7280"; ctx.fillRect(0, g.y, W, H - g.y);
     var k = W / cam.w;
+    ctx.beginPath();
+    BOX.pts.forEach(function (q, n) { var s = toScreen(q[0], q[1]); if (n) ctx.lineTo(s.x, s.y); else ctx.moveTo(s.x, s.y); });
+    ctx.closePath(); ctx.fillStyle = "#e8efe6"; ctx.fill();
+    ctx.strokeStyle = "#3a4a3a"; ctx.lineWidth = WALL * k;
+    BOX.walls.forEach(function (w) { var a = toScreen(w.a[0], w.a[1]), b = toScreen(w.b[0], w.b[1]); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); });
     snapshot().pieces.forEach(function (p) {
       var q = toScreen(p.x, p.y);
-      shapePath(p.i, q.x, q.y, p.a, k); ctx.fillStyle = p.sil || prefColor(p.i); ctx.fill();
-      if (!p.sil) { ctx.strokeStyle = "#16202e"; ctx.lineWidth = 2; ctx.stroke(); }
+      shapePath(p.i, q.x, q.y, p.a, k); ctx.fillStyle = p.bad ? "#ff3a2a" : prefColor(p.i); ctx.fill(); ctx.strokeStyle = "#16202e"; ctx.lineWidth = 2; ctx.stroke();
     });
   }
-
-  function drawSelect() {
-    ctx.fillStyle = "rgba(10,14,22,.55)"; ctx.fillRect(0, 0, W, H);
-    /* 選んだ5県（順番） */
-    for (var n = 0; n < 5; n++) {
-      var bx = W / 2 - 2 * 92 + n * 92, by = 46;
-      ctx.fillStyle = picks[n] != null ? prefColor(picks[n]) : "rgba(255,255,255,.18)";
-      ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
-      roundRect(bx - 42, by - 30, 84, 60, 12); ctx.fill(); ctx.stroke();
-      if (picks[n] != null) {
-        var sh = SHAPES[picks[n]], k = 24 / sh.r;
-        shapePath(picks[n], bx, by, 0, k); ctx.fillStyle = "#fff"; ctx.fill();
+  function drawAim() {
+    /* 落ちる先の目安（まっすぐ下へ点線） */
+    var a = toScreen(cur.x, cur.y + SHAPES[cur.i].r * 0.3), b = toScreen(cur.x, surfaceY(cur.x));
+    ctx.save(); ctx.setLineDash([8, 10]); ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
+    if (turn !== 0) return;
+    ctrlButtons().forEach(function (bt) {
+      ctx.fillStyle = "rgba(255,255,255,.92)"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(bt.x, bt.y, bt.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.save(); ctx.translate(bt.x, bt.y); ctx.strokeStyle = "#16202e"; ctx.fillStyle = "#16202e"; ctx.lineWidth = 6; ctx.lineCap = "round";
+      if (bt.kind === "rot") {
+        ctx.beginPath(); ctx.arc(0, 0, 20, -Math.PI * 0.85, Math.PI * 0.55); ctx.stroke();
+        var ex = Math.cos(Math.PI * 0.55) * 20, ey = Math.sin(Math.PI * 0.55) * 20;
+        ctx.beginPath(); ctx.moveTo(ex - 13, ey + 2); ctx.lineTo(ex + 2, ey + 8); ctx.lineTo(ex + 1, ey - 8); ctx.closePath(); ctx.fill();
+      } else {
+        ctx.beginPath(); ctx.moveTo(0, -22); ctx.lineTo(0, 10); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-16, 4); ctx.lineTo(0, 24); ctx.lineTo(16, 4); ctx.closePath(); ctx.fill();
       }
-    }
-    chipRects().forEach(function (r) {
-      var on = picks.indexOf(r.i) >= 0;
-      ctx.fillStyle = on ? prefColor(r.i) : "rgba(255,255,255,.92)";
-      roundRect(r.x, r.y, r.w, r.h, 10); ctx.fill();
-      ctx.strokeStyle = on ? "#16202e" : "rgba(22,32,46,.35)"; ctx.lineWidth = on ? 3 : 1.5; ctx.stroke();
-      ctx.fillStyle = "#16202e"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      var nm = SHAPES[r.i].name;
-      ctx.font = "700 " + (nm.length >= 3 ? 15 : 18) + "px sans-serif";
-      ctx.fillText(nm, r.x + r.w / 2, r.y + r.h / 2 + 1);
-    });
-    if (picks.length === 5) window.zResultActions.drawButtons(ctx, nextButton());
-  }
-
-  function drawArrange() {
-    if (selected) {
-      var hp = handlePos(selected), hs = toScreen(hp.x, hp.y), c = toScreen(core().x + selected.x, core().y + selected.y);
-      ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(hs.x, hs.y); ctx.stroke();
-      ctx.fillStyle = "#fff"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(hs.x, hs.y, 22, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      /* 回す印 */
-      ctx.beginPath(); ctx.arc(hs.x, hs.y, 11, -Math.PI * 0.9, Math.PI * 0.6); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(hs.x + 1, hs.y + 13); ctx.lineTo(hs.x - 6, hs.y + 9); ctx.lineTo(hs.x + 2, hs.y + 5); ctx.stroke();
-    }
-    window.zResultActions.drawButtons(ctx, nextButton());
-  }
-
-  function drawFx() {
-    var k = W / cam.w;
-    fx.forEach(function (f) {
-      var u = f.t / 0.6;
-      if (f.type === "ring") {
-        var q = toScreen(f.x, f.y);
-        ctx.strokeStyle = "rgba(255,226,90," + (1 - u) + ")"; ctx.lineWidth = 8 * (1 - u) + 2;
-        ctx.beginPath(); ctx.arc(q.x, q.y, (20 + u * 160) * k * 1.6, 0, Math.PI * 2); ctx.stroke();
-      } else if (f.type === "spark") {
-        var s = toScreen(f.x, f.y), n = f.big ? 14 : 8, len = (f.big ? 70 : 45) * (0.4 + u);
-        ctx.strokeStyle = f.bad ? "rgba(255,90,60," + (1 - u) + ")" : "rgba(255,240,120," + (1 - u) + ")";
-        ctx.lineWidth = f.big ? 6 : 4;
-        for (var m = 0; m < n; m++) {
-          var c = m / n * Math.PI * 2 + f.x;
-          ctx.beginPath(); ctx.moveTo(s.x + Math.cos(c) * len * 0.3, s.y + Math.sin(c) * len * 0.3); ctx.lineTo(s.x + Math.cos(c) * len, s.y + Math.sin(c) * len); ctx.stroke();
-        }
-        if (u < 0.25) { ctx.fillStyle = "rgba(255,255,255," + (1 - u * 4) + ")"; ctx.beginPath(); ctx.arc(s.x, s.y, f.big ? 34 : 22, 0, Math.PI * 2); ctx.fill(); }
-      } else if (f.type === "dust") {
-        var d = toScreen(f.x, f.y);
-        ctx.fillStyle = "rgba(190,175,150," + (0.6 * (1 - u)) + ")";
-        for (var z = -4; z <= 4; z++) { ctx.beginPath(); ctx.arc(d.x + z * 26 * (0.6 + u * 1.5), d.y - 10 - Math.abs(z) * 2, 22 * (1 - u * 0.5), 0, Math.PI * 2); ctx.fill(); }
-      }
-    });
-  }
-
-  function drawFightUI() {
-    var bw = W * 0.4, bh = 18, y = 26;
-    [[16, me.hp, "#4aa8ff", false], [W - 16 - bw, en.hp, "#ff8a4a", true]].forEach(function (b) {
-      ctx.fillStyle = "rgba(0,0,0,.5)"; roundRect(b[0] - 3, y - 3, bw + 6, bh + 6, 10); ctx.fill();
-      ctx.fillStyle = "#3a1a1a"; roundRect(b[0], y, bw, bh, 8); ctx.fill();
-      var w = bw * b[1] / 100;
-      ctx.fillStyle = b[1] < 30 ? "#ff5a3a" : b[2];
-      if (w > 1) { roundRect(b[3] ? b[0] + bw - w : b[0], y, w, bh, 8); ctx.fill(); }
-    });
-    /* ロボの名前（体力の下） */
-    ctx.font = "800 18px sans-serif"; ctx.textBaseline = "top"; ctx.lineWidth = 4; ctx.strokeStyle = "#16202e"; ctx.fillStyle = "#fff";
-    ctx.textAlign = "left"; ctx.strokeText(name, 16, y + 26); ctx.fillText(name, 16, y + 26);
-    ctx.textAlign = "right"; ctx.strokeText(foeName, W - 16, y + 26); ctx.fillText(foeName, W - 16, y + 26);
-    var sn = (stage + 1) + " / " + NFOE;
-    ctx.textAlign = "center"; ctx.font = "900 22px sans-serif"; ctx.strokeText(sn, W / 2, y + 54); ctx.fillText(sn, W / 2, y + 54);
-    if (state !== S.FIGHT || endT > 0) return;
-    if (stick.on) {
-      ctx.fillStyle = "rgba(255,255,255,.18)"; ctx.strokeStyle = "rgba(255,255,255,.6)"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(stick.ox, stick.oy, 70, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "rgba(255,255,255,.8)"; ctx.beginPath(); ctx.arc(stick.ox + stick.dx, stick.oy + stick.dy, 32, 0, Math.PI * 2); ctx.fill();
-    } else {
-      var sx = 110, sy = H - 150;
-      ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(sx, sy, 70, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.beginPath(); ctx.arc(sx, sy, 32, 0, Math.PI * 2); ctx.fill();
-    }
-    padButtons().forEach(function (b) {
-      var active = me.attack && me.attack.kind === b.kind && me.attack.t < 0.15;
-      ctx.fillStyle = active ? "#ffd84a" : "rgba(255,255,255,.9)"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.save(); ctx.translate(b.x, b.y); ctx.fillStyle = "#16202e";
-      if (b.kind === "punch") {
-        roundRect(-24, -16, 40, 32, 10); ctx.fill();
-        ctx.fillStyle = active ? "#ffd84a" : "#fff";
-        for (var i = 0; i < 3; i++) ctx.fillRect(-6 + i * 10, -16, 2, 14);
-        ctx.fillStyle = "#16202e"; roundRect(-30, -6, 12, 18, 5); ctx.fill();
-      } else { ctx.fillRect(-14, -28, 18, 32); roundRect(-14, 0, 38, 18, 8); ctx.fill(); }
       ctx.restore();
     });
+  }
+  function drawHUD() {
+    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.lineJoin = "round";
+    ctx.font = "900 64px sans-serif"; ctx.lineWidth = 10; ctx.strokeStyle = "#16202e"; ctx.fillStyle = "#fff";
+    ctx.strokeText(count, W / 2, 22); ctx.fillText(count, W / 2, 22);
+    var who = turn === 0 ? zT("あなた", "YOU", "당신", "你", "你") : zT("あいて", "CPU", "상대", "对手", "對手");
+    ctx.font = "800 24px sans-serif"; ctx.lineWidth = 6;
+    ctx.fillStyle = turn === 0 ? "#7fd0ff" : "#ffb07f";
+    if (endT === 0) { ctx.strokeText(who, W / 2, 94); ctx.fillText(who, W / 2, 94); }
+    ctx.restore();
   }
   function roundRect(x, y, w, h, r) {
     ctx.beginPath(); ctx.moveTo(x + r, y);
@@ -920,16 +550,12 @@
   function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
   function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
   function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.6)"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(10,8,6,.55)"; ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.fillStyle = "#fff"; ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10; ctx.textAlign = "center";
-    if (won) {
-      ctx.font = "800 108px sans-serif"; ctx.fillText(score.toFixed(1), W / 2, H * 0.45);
-      ctx.font = "800 40px sans-serif"; ctx.fillText(zT("秒", "sec", "초", "秒", "秒"), W / 2, H * 0.45 + 52);
-    } else {
-      ctx.font = "800 100px sans-serif"; ctx.fillText("LOSE", W / 2, H * 0.43);
-      ctx.font = "800 44px sans-serif"; ctx.fillText(stage + " / " + NFOE, W / 2, H * 0.43 + 64);
-    }
+    ctx.font = "800 96px sans-serif"; ctx.fillText(won ? "WIN" : "LOSE", W / 2, H * 0.36);
+    ctx.font = "800 110px sans-serif"; ctx.fillText(count, W / 2, H * 0.36 + 120);
+    ctx.font = "800 36px sans-serif"; ctx.fillText(zT("県", "prefectures", "현", "县", "縣"), W / 2, H * 0.36 + 166);
     ctx.restore();
     window.zResultActions.drawButtons(ctx, resultButtons());
     window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
@@ -938,24 +564,22 @@
   /* ============ 覗き穴 ============ */
   var hideUI = false;
   window.__probe = {
-    now: function () { return { state: state, score: score, stage: stage, W: W, H: H, picks: picks ? picks.length : 0, myHP: me ? me.hp : 100, foeHP: en ? en.hp : 100, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { state: state, turn: turn, count: count, won: won, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     debug: debugKey,
-    attack: doAttack,
-    hideUI: function () { hideUI = true; }
+    hideUI: function () { hideUI = true; },
+    pieces: function () { return { box: BOX, list: pieces.map(function (b) { return { n: SHAPES[b.piece.i].name, bad: !!b.bad, v: b.vertices.map(function (v) { return [v.x, v.y]; }) }; }) }; }
   };
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
-      await r.wait(1000); r.key(); await r.wait(1000);
-      debugKey(2);
-      if (!await r.until(function () { return state === S.FIGHT; }, 15)) throw Error("戦いにならない");
-      debugKey(4);
-      for (var i = 0; i < 20 && state === S.FIGHT; i++) { keys.r = true; doAttack("punch"); await r.wait(400); }
-      keys.r = false;
-      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("勝敗が出ない");
-      await r.wait(1500);
+      await r.wait(1000); r.key(); await r.wait(800);
+      for (var n = 0; n < 4; n++) {
+        if (!await r.until(function () { return state === S.AIM && turn === 0; }, 15)) break;
+        await r.wait(600); debugKey(1);
+      }
+      await r.wait(3000);
     }
   };
 
@@ -964,9 +588,8 @@
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
   startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
-  newRound(); state = S.INTRO; startButton.hidden = false;
-  parts = randomBuild([12, 10, 13, 11, 8], true);   /* 開始画面に飾るロボ（東京・埼玉・神奈川・千葉・栃木） */
   layout();
+  newRound(); cur = null; state = S.INTRO; startButton.hidden = false;
   var last = performance.now(), stepAcc = 0;
   function loop(now) {
     var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
