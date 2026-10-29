@@ -130,14 +130,14 @@
   }
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", WAIT: "wait", PLAY: "play", OUT: "out", RESULT: "result" };
+  var S = { INTRO: "intro", WAIT: "wait", LINE: "line", PLAY: "play", OUT: "out", RESULT: "result" };
   var state, T, held, keyMode = false;
-  var crowd = [], lift = 0, shake = 0, outT = 0, holdT = 0, won = false, creakT = 0;
+  var crowd = [], lift = 0, shake = 0, outT = 0, holdT = 0, won = false, creakT = 0, camX = 0, lineT = 0;
   var confetti = window.zCelebrate.confetti();
 
   var KX, KY;                                  /* かぶの根元 */
   function place() {
-    KX = 128; KY = Math.round(H * 0.3);
+    KX = 170; KY = Math.round(H * 0.5);
   }
 
   function newRound() {
@@ -146,7 +146,8 @@
     state = S.WAIT;
     T = 0; held = false; lift = 0; shake = 0; outT = 0; holdT = 0; won = false;
     confetti.clear();
-    takeNumber(function (n) { myNo = n; state = S.PLAY; });
+    camX = 0;
+    takeNumber(function (n) { myNo = n; state = S.LINE; lineT = 0; });
   }
 
   function pullOut() {
@@ -162,6 +163,15 @@
     T += dt;
     crowd = people();
     var lucky = myNo > 0 && myNo % NEED === 0;
+    if (state === S.LINE) {
+      lineT += dt;
+      var dur = Math.min(4, 0.8 + placeNo() * 0.035), u = Math.min(1, lineT / dur);
+      camX = camEnd() * (u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2);
+      if (u >= 1) state = S.PLAY;
+    } else {
+      var cg = state === S.PLAY && !held ? camEnd() : 0;
+      camX += (cg - camX) * Math.min(1, dt * (held ? 4 : 3));
+    }
     if (state === S.PLAY) {
       if (held) holdT += dt;
       var goal = held ? (lucky ? Math.min(1, holdT / 1.2) : Math.min(0.45, placeNo() / NEED * 0.5) * Math.min(1, holdT / 0.6)) : 0;
@@ -255,22 +265,14 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
   function hash(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
 
   /* 並び：かぶの右から、畑の上を左右に折り返しながら続く */
+  var GAP = 92;
   function slots(n) {
-    var top = H * 0.42, bottom = H - 30, left = 40, right = W - 30;
-    var s = 96;
-    for (; s > 20; s -= 2) {
-      var cols = Math.floor((right - left) / (s * 0.82));
-      if (Math.ceil(n / cols) * s * 1.06 <= bottom - top) break;
-    }
-    cols = Math.max(1, Math.floor((right - left) / (s * 0.82)));
     var out = [];
-    for (var i = 0; i < n; i++) {
-      var r = Math.floor(i / cols), c = i % cols, dir = r % 2 ? -1 : 1;
-      var x = dir > 0 ? left + (c + 0.5) * s * 0.82 : right - (c + 0.5) * s * 0.82;
-      out.push({ x: x, y: top + r * s * 1.06 + s * 0.9, s: s, dir: dir });
-    }
+    for (var i = 0; i < n; i++) out.push({ x: KX + 200 + i * GAP, y: KY + 110, s: 150, dir: -1 });
     return out;
   }
+  /* カメラ：並んだ直後は先頭から最後尾の自分まで流す。引っぱるとかぶの方へ戻る */
+  function camEnd() { return Math.max(0, KX + 200 + (placeNo() - 1) * GAP - W * 0.62); }
 
   var KINDS = ["jii", "baa", "mago", "inu", "neko", "nezumi"];
   var CLOTHES = ["#3d7be0", "#e05d5d", "#4bb46b", "#e0a33d", "#9a5ce0", "#3dbfc4", "#e07ab8", "#7a8a99", "#c46b3d"];
@@ -297,9 +299,12 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
     else drawHuman(k, h);
     ctx.restore();
     if (p.me) {
-      var ay = sl.y - s * sc * 1.25 - 8 + Math.sin(T * 5) * 3;
-      ctx.fillStyle = "#ff7a45";
-      ctx.beginPath(); ctx.moveTo(sl.x - 9, ay - 12); ctx.lineTo(sl.x + 9, ay - 12); ctx.lineTo(sl.x, ay); ctx.closePath(); ctx.fill();
+      var ay = sl.y - s * sc * 1.25 - 14 + Math.sin(T * 5) * 4;
+      ctx.fillStyle = "#ff7a45"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+      ctx.font = "900 48px sans-serif";
+      ctx.fillText("↓", sl.x, ay);
+      ctx.font = "900 40px sans-serif";
+      ctx.fillText(zT("あなた", "YOU", "나", "你", "你"), sl.x, ay - 50);
     }
   }
   function drawHuman(k, h) {
@@ -376,13 +381,13 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
   function kabuPos() {
     var out = won && (state === S.OUT || state === S.RESULT);
     var u = out ? Math.min(1, outT / 0.6) : 0;
-    var up = lift * 34 + (out ? (1 - Math.pow(1 - u, 3)) * H * 0.12 : 0);
+    var up = lift * 48 + (out ? (1 - Math.pow(1 - u, 3)) * H * 0.12 : 0);
     var sx = state === S.PLAY ? Math.sin(T * 40) * shake * 3 : 0;
     var rot = out ? u * 0.5 : Math.sin(T * 23) * shake * 0.03;
-    return { x: KX + sx, y: KY + 40 - up, rot: rot };
+    return { x: KX + sx, y: KY + 60 - up, rot: rot };
   }
   function drawKabu() {
-    var k = kabuPos(), r = 84;
+    var k = kabuPos(), r = 120;
     ctx.save();
     ctx.translate(k.x, k.y);
     ctx.rotate(k.rot);
@@ -422,8 +427,36 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
     ctx.fillStyle = "#96612f";
     for (var y = KY + 60; y < H; y += 46) ctx.fillRect(0, y, W, 6);
 
-    /* 人数 */
     var n = crowd.length;
+    ctx.save();
+    ctx.translate(-Math.round(camX), 0);
+    /* 綱（かぶ → 並びの順） */
+    var k = kabuPos();
+    var sl = slots(n);
+    var out = won && (state === S.OUT || state === S.RESULT);
+    ctx.strokeStyle = "#e8d39a"; ctx.lineWidth = 5; ctx.lineJoin = "round";
+    if (!out) {
+      ctx.beginPath(); ctx.moveTo(k.x + 40, k.y - 80);
+      if (sl.length) ctx.lineTo(sl[sl.length - 1].x, sl[sl.length - 1].y - 87);
+      ctx.stroke();
+    }
+
+    /* 土に埋まった所を隠すため、かぶは土の手前の穴の上に描き、下を土で塞ぐ */
+    ctx.save();
+    ctx.beginPath(); ctx.rect(camX - 10, 0, W + 20, KY + 20); ctx.clip();
+    drawKabu();
+    ctx.restore();
+    ctx.fillStyle = "#6e4622";
+    ctx.beginPath(); ctx.ellipse(KX, KY + 22, 136, 18, 0, 0, Math.PI * 2); ctx.fill();
+    if (out) { ctx.save(); drawKabu(); ctx.restore(); }
+
+    if (state !== S.WAIT && state !== S.INTRO) for (var i = 0; i < n; i++) {
+      if (sl[i].x < camX - 80 || sl[i].x > camX + W + 80) continue;
+      drawPerson(crowd[i], sl[i], i, crowd[i].pull && state === S.PLAY || out, out);
+    }
+    ctx.restore();
+
+    /* 人数 */
     if (!hideUI) {
     ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#16202e";
@@ -434,28 +467,6 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
     ctx.font = "800 40px sans-serif";
     ctx.fillText("/" + NEED, W - 114, 108);
     }
-
-    /* 綱（かぶ → 並びの順） */
-    var k = kabuPos();
-    var sl = slots(n);
-    var out = won && (state === S.OUT || state === S.RESULT);
-    ctx.strokeStyle = "#e8d39a"; ctx.lineWidth = 5; ctx.lineJoin = "round";
-    if (!out) {
-      ctx.beginPath(); ctx.moveTo(k.x + 6, k.y - 90);
-      sl.forEach(function (q) { ctx.lineTo(q.x - q.dir * q.s * 0.38, q.y - q.s * 0.55); });
-      ctx.stroke();
-    }
-
-    /* 土に埋まった所を隠すため、かぶは土の手前の穴の上に描き、下を土で塞ぐ */
-    ctx.save();
-    ctx.beginPath(); ctx.rect(0, 0, W, KY + 20); ctx.clip();
-    drawKabu();
-    ctx.restore();
-    ctx.fillStyle = "#6e4622";
-    ctx.beginPath(); ctx.ellipse(KX, KY + 22, 96, 14, 0, 0, Math.PI * 2); ctx.fill();
-    if (out) { ctx.save(); drawKabu(); ctx.restore(); }
-
-    if (state !== S.WAIT && state !== S.INTRO) for (var i = 0; i < n; i++) drawPerson(crowd[i], sl[i], i, crowd[i].pull && state === S.PLAY || out, out);
 
     confetti.draw(ctx);
     if (state === S.RESULT) drawResult();
@@ -483,7 +494,7 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
   }
 
   window.__probe = {
-    now: function () { return { state: state, no: myNo, won: won, people: crowd.length, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { cam: Math.round(camX), state: state, no: myNo, won: won, people: crowd.length, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     hideUI: function () { hideUI = true; }
