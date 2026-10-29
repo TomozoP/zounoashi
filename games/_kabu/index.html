@@ -155,6 +155,7 @@
     takeNumber(function (n) { myNo = n; ready = true; });
   }
 
+  var pulls = 0;                               /* 引っぱった回数 */
   function pullOut() {
     state = S.OUT; outT = 0; won = true;
     held = false;
@@ -179,26 +180,27 @@
       if (shownN >= limit) popAcc = Math.min(popAcc, perT());
       var cg = Math.max(0, KX + 200 + (shownN - 1) * GAP - W * 0.62);
       camX += (cg - camX) * Math.min(1, dt * 8);
-      if (ready && shownN >= placeNo() && lineT - appearAt[shownN - 1] > 0.45) { state = S.PLAY; camX = camEnd(); playT = 0; }
+      if (ready && shownN >= placeNo() && lineT - appearAt[shownN - 1] > 0.45) { state = S.PLAY; camX = camEnd(); playT = 0; pulls = 0; held = false; }
     }
-    else if (won && state !== S.PLAY) camX += (0 - camX) * Math.min(1, dt * 1.6);   /* 抜けたら、かぶの方へゆっくり戻る */
+
     if (state === S.PLAY) {
       playT += dt;
-      if (!held && playT > 0.6) { held = true; creakT = 0; }   /* 並び終わったら自動で引っぱる */
+      /* 長押しの間だけ引っぱる。3回引っぱったら結果（1000人目は3回目の途中で抜ける） */
       if (held) holdT += dt;
-      var goal = held ? (lucky ? Math.min(1, holdT / 1.2) : Math.min(0.45, placeNo() / NEED * 0.5) * Math.min(1, holdT / 0.6)) : 0;
-      lift += (goal - lift) * Math.min(1, dt * 4);
+      var last = pulls === 2;
+      var goal = !held ? 0 : lucky && last ? Math.min(1, holdT / 1.2) : (lucky ? 0.25 : Math.min(0.3, 0.05 + placeNo() / NEED * 0.3)) * Math.min(1, holdT / 0.3);
+      lift += (goal - lift) * Math.min(1, dt * (held ? 5 : 8));
       shake = held ? 0.3 + goal : 0;
       if (held) {
         creakT -= dt;
-        if (creakT <= 0) { creakT = 0.55 + Math.random() * 0.3; noiseHit(0.18, 160 + goal * 300, 0.12 + goal * 0.2, 3); }
+        if (creakT <= 0) { creakT = 0.3; noiseHit(0.22, 160 + goal * 300, 0.14 + goal * 0.2, 3); }
       }
-      if (lucky && holdT > 1.2) pullOut();
-      else if (!lucky && holdT > 2.6) { state = S.OUT; outT = 0; held = false; tone(196, 0.4, 0.18, "triangle", 98); }
+      if (lucky && last && held && holdT > 1.2) { pullOut(); camX = 0; }   /* 抜けた瞬間にかぶへ切り替える */
+      else if (pulls >= 3 || last && held && holdT > 2.4) { state = S.OUT; outT = 0; held = false; tone(196, 0.4, 0.18, "triangle", 98); }
     } else if (state === S.OUT) {
       outT += dt;
       lift += (0 - lift) * Math.min(1, dt * 4);
-      if (outT > (won ? 3.2 : 1.0)) state = S.RESULT;
+      if (outT > (won ? 2.8 : 1.0)) state = S.RESULT;
     }
     confetti.step(dt, W, H);
     if (state === S.OUT && won && outT > 0.35 && outT - dt <= 0.35) confetti.burst(W, H, 180);
@@ -213,9 +215,15 @@
       if (hit === "retry") newRound();
       return;
     }
+    if (state !== S.PLAY) return;
+    held = true; holdT = 0; creakT = 0;
   }
   function move() {}
-  function up() {}
+  function up() {
+    if (!held) return;
+    held = false;
+    if (holdT > 0.25) pulls++;
+  }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
@@ -492,18 +500,6 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
     var n = crowd.length;
     drawWorld(camX);
 
-    /* 人数 */
-    if (!hideUI) {
-    ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = "#16202e";
-    ctx.font = "900 92px sans-serif";
-    var shown = state === S.INTRO ? "" : state === S.LINE ? shownN : n;   /* 並ぶのに合わせて数える */
-    ctx.fillText(String(shown), W - 140, 108);
-    ctx.textAlign = "left";
-    ctx.font = "800 40px sans-serif";
-    ctx.fillText("/" + NEED, W - 134, 108);
-    }
-
     confetti.draw(ctx);
     if (state === S.RESULT) drawResult();
   }
@@ -545,8 +541,8 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
     run: async function (r) {
       await r.wait(800);
       debugKey(1); r.key();
-      await r.wait(1500);
-      down(W / 2, H / 2);
+      if (!await r.until(function () { return state === S.PLAY; }, 15)) throw Error("並ばない");
+      for (var i = 0; i < 3 && state === S.PLAY; i++) { await r.wait(500); down(W / 2, H / 2); await r.wait(i < 2 ? 600 : 1500); up(); }
       if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("抜けない");
       await r.wait(1500);
     }
