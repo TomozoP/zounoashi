@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="gattai-1793264427224">
+<meta name="preview-version" content="kabu-1793275702666">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>【プレビュー】広すぎ北海道ゲーム</title>
+<title>【プレビュー】おおきなかぶ</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
   #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
   #wrap { position: relative; touch-action: none; }
-  canvas { display: block; background: #1f2a36; }
+  canvas { display: block; background: #1d1714; }
   /* 長押し中にゲームの絵が選択されないようにする。 */
   #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
@@ -32,24 +32,22 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/start.js?v=gattai-1793264427224"></script>
-<script src="../games/view.js?v=gattai-1793264427224"></script>
-<script src="../games/audio.js?v=gattai-1793264427224"></script>
-<script src="../games/lang.js?v=gattai-1793264427224"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=gattai-1793264427224"></script>
-<script src="../games/result-actions.js?v=gattai-1793264427224"></script>
-<script src="../games/action-icons.js?v=gattai-1793264427224"></script>
-<script src="../games/celebrate.js?v=gattai-1793264427224"></script>   <!-- ファンファーレと紙吹雪 -->
-<script src="../games/random-bowling/vendor/three.min.js?v=gattai-1793264427224"></script>
-<script src="../games/three-base.js?v=gattai-1793264427224"></script>
-<script src="../games/random-bowling/vendor/cannon.js?v=gattai-1793264427224"></script>   <!-- 物理（cannon-es 0.20, MIT） -->
-<script src="prefs.js?v=gattai-1793264427224"></script>   <!-- 都道府県の形 -->
-<script src="scene3d.js?v=gattai-1793264427224"></script>
+<script src="../games/start.js?v=kabu-1793275702666"></script>
+<script src="../games/view.js?v=kabu-1793275702666"></script>
+<script src="../games/audio.js?v=kabu-1793275702666"></script>
+<script src="../games/lang.js?v=kabu-1793275702666"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=kabu-1793275702666"></script>
+<script src="../games/result-actions.js?v=kabu-1793275702666"></script>
+<script src="../games/action-icons.js?v=kabu-1793275702666"></script>
+<script src="../games/pad.js?v=kabu-1793275702666"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/celebrate.js?v=kabu-1793275702666"></script>
+<script src="presence.js?v=kabu-1793275702666"></script>
 <script>
-/* 広すぎ北海道ゲーム
+/* おおきなかぶ
 
-   北海道の輪郭（線）の中に、あいてと交互に県を置いていく。次に置く県はルーレットで決まる（大きさは本物どおり）。
-   県は自分で動かして回して置く。ほかの県とは重ねられない。線からはみ出して置いたら負け。 */
+   同時にこのページを開いている人みんなで、1本のかぶを引っぱる。
+   押している間が「引っぱり中」。同時に100人が引っぱると抜ける。
+   人数は presence.js（公開ブローカー経由）で数える。 */
 (function () {
   "use strict";
 
@@ -58,22 +56,22 @@
   var wrap = document.getElementById("wrap");
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
-  /* 結果画面の「作者をフォロー」（共通。ボタン列の下に控えめに出す） */
   var followLink = window.zResultActions.follow.link(shareButton.parentNode);
 
-  /* ============ 画面 ============ */
+  var NEED = 100;
+
   var W = 540, H = 960;
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
+    place();
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
-    if (!HKP) buildShapes();                     /* 遊んでいる途中で形の倍率は変えない */
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
 
   /* ============ 音 ============ */
-  var AC = null, NOISE = null, OUT = null;
+  var AC = null, NOISE = null;
   function resumeAudio() { window.zAudioResume(AC); }
   wrap.addEventListener("touchstart", audioOn, { passive: true });
   wrap.addEventListener("touchend", resumeAudio, { passive: true });
@@ -84,8 +82,6 @@
     if (!C) return;
     try { AC = new C(); } catch (e) { return; }
     resumeAudio();
-    OUT = AC.createDynamicsCompressor();
-    OUT.connect(AC.destination);
     var len = Math.floor(AC.sampleRate * 2);
     NOISE = AC.createBuffer(1, len, AC.sampleRate);
     var d = NOISE.getChannelData(0);
@@ -101,748 +97,428 @@
     g.gain.setValueAtTime(0.0001, n);
     g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    o.connect(g); g.connect(OUT);
+    o.connect(g); g.connect(AC.destination);
     o.start(n); o.stop(n + dur + 0.05);
   }
-  function noiseHit(dur, freq, vol, q, to, delay) {
+  function noiseHit(dur, freq, vol, q) {
     if (!AC || !NOISE) return;
     var s = AC.createBufferSource(); s.buffer = NOISE;
     var f = AC.createBiquadFilter();
-    var n = AC.currentTime + (delay || 0);
-    f.type = "bandpass"; f.frequency.setValueAtTime(freq, n); f.Q.value = q || 1;
-    if (to) f.frequency.exponentialRampToValueAtTime(to, n + dur);
-    var g = AC.createGain();
-    g.gain.setValueAtTime(0.0001, n);
-    g.gain.exponentialRampToValueAtTime(vol, n + 0.015);
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
     g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    s.connect(f); f.connect(g); g.connect(OUT);
-    s.start(n, Math.random()); s.stop(n + dur + 0.05);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
   }
-  var SFX = {
-    whoosh: function () { noiseHit(0.5, 600, 0.12, 1.2, 2400); },
-    clang: function () {                         /* ぴったりはまった */
-      tone(1180, 0.5, 0.12, "square", 1100); tone(1770, 0.4, 0.07, "triangle"); tone(220, 0.25, 0.2, "square", 110);
-      noiseHit(0.18, 3200, 0.3, 2);
-    },
-    stick: function () { tone(140, 0.25, 0.25, "square", 60); noiseHit(0.2, 500, 0.35, 1); },
-    lost: function () { tone(500, 0.35, 0.08, "triangle", 160); },
-    land: function () { tone(70, 0.6, 0.45, "sine", 35); noiseHit(0.6, 180, 0.6, 0.8); },
-    swing: function () { noiseHit(0.16, 900, 0.12, 1.5, 2600); },
-    hit: function (k) { k = Math.min(1, k); tone(120, 0.18, 0.3 * k + 0.1, "square", 50); noiseHit(0.2, 1400, 0.4 * k + 0.15, 1.2); noiseHit(0.08, 4000, 0.2 * k, 2); },
-    hurt: function (k) { k = Math.min(1, k); tone(90, 0.3, 0.3 * k + 0.1, "sawtooth", 40); noiseHit(0.3, 700, 0.4 * k + 0.1, 1); },
-    roar: function (big) {
-      var d = big ? 1.2 : 0.6;
-      tone(150, d, 0.16, "sawtooth", 70); tone(96, d, 0.14, "sawtooth", 55);
-      noiseHit(d, 900, 0.25, 0.7, 300);
-    },
-    lose: function () { tone(330, 0.4, 0.12, "triangle", 300); tone(262, 0.5, 0.12, "triangle", 240, 0.35); tone(196, 0.9, 0.14, "triangle", 150, 0.75); }
-  };
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
     else { try { AC.resume(); } catch (e) {} }
   });
 
-
-
-  /* ============ 形 ============
-     prefs.js の輪郭（どれも同じ縮尺）を、北海道が画面の幅いっぱいになる倍率にする。各県は自分の重心が原点 */
-  function areaCentroid(p) {
-    var a = 0, cx = 0, cy = 0;
-    for (var i = 0; i < p.length; i++) {
-      var u = p[i], v = p[(i + 1) % p.length], c = u[0] * v[1] - v[0] * u[1];
-      a += c; cx += (u[0] + v[0]) * c; cy += (u[1] + v[1]) * c;
-    }
-    return a ? [cx / (3 * a), cy / (3 * a)] : [0, 0];
-  }
-  var HK = 0, SC = 1, SHAPES = [], HKP = null, HKB = null;
-  function buildShapes() {
-    var raw = window.PREFS || [], hx0 = 1e9, hx1 = -1e9, hy0 = 1e9, hy1 = -1e9;
-    raw[HK].p.forEach(function (q) { hx0 = Math.min(hx0, q[0]); hx1 = Math.max(hx1, q[0]); hy0 = Math.min(hy0, q[1]); hy1 = Math.max(hy1, q[1]); });
-    SC = Math.min((W - 40) / (hx1 - hx0), (H * 0.52) / (hy1 - hy0));
-    SHAPES = raw.map(function (d, i) {
-      var c = areaCentroid(d.p);
-      var pts = d.p.map(function (q) { return [(q[0] - c[0]) * SC, (q[1] - c[1]) * SC]; });
-      var r = 0; pts.forEach(function (q) { r = Math.max(r, Math.hypot(q[0], q[1])); });
-      return { i: i, name: d.n, pts: pts, r: r, area: Math.abs(d.a || 1) };
-    });
-    /* 北海道（器）は、上に余白をとって真ん中に */
-    var ox = W / 2 - ((hx0 + hx1) / 2) * SC, oy = 150 - hy0 * SC;
-    HKP = raw[HK].p.map(function (q) { return [q[0] * SC + ox, q[1] * SC + oy]; });
-    HKB = bbox(HKP);
-    CX = (HKB.x0 + HKB.x1) / 2; CY = (HKB.y0 + HKB.y1) / 2;
-    window.GattaiShapes = SHAPES;                /* scene3d.js が形を読む */
-  }
-  function prefColor(i) { return "hsl(" + Math.round((i * 137.5) % 360) + ",72%,58%)"; }
-
-  /* ---------- 多角形 ---------- */
-  function bbox(P) {
-    var b = { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 };
-    P.forEach(function (q) { b.x0 = Math.min(b.x0, q[0]); b.x1 = Math.max(b.x1, q[0]); b.y0 = Math.min(b.y0, q[1]); b.y1 = Math.max(b.y1, q[1]); });
-    return b;
-  }
-  function placed(i, x, y, a) {
-    var c = Math.cos(a), s = Math.sin(a);
-    return SHAPES[i].pts.map(function (q) { return [x + q[0] * c - q[1] * s, y + q[0] * s + q[1] * c]; });
-  }
-  function pointIn(P, x, y) {
-    var inside = false;
-    for (var i = 0, j = P.length - 1; i < P.length; j = i++) {
-      if ((P[i][1] > y) !== (P[j][1] > y) && x < (P[j][0] - P[i][0]) * (y - P[i][1]) / (P[j][1] - P[i][1]) + P[i][0]) inside = !inside;
-    }
-    return inside;
-  }
-  function cross(a, b, c, d) {                   /* 線分 ab と cd が交わる */
-    var d1 = (d[0] - c[0]) * (a[1] - c[1]) - (d[1] - c[1]) * (a[0] - c[0]);
-    var d2 = (d[0] - c[0]) * (b[1] - c[1]) - (d[1] - c[1]) * (b[0] - c[0]);
-    var d3 = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-    var d4 = (b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0]);
-    return d1 * d2 < 0 && d3 * d4 < 0;
-  }
-  function edgesCross(A, B, bb) {
-    for (var i = 0; i < A.length; i++) {
-      var a = A[i], b = A[(i + 1) % A.length];
-      if (bb && (Math.max(a[0], b[0]) < bb.x0 || Math.min(a[0], b[0]) > bb.x1 || Math.max(a[1], b[1]) < bb.y0 || Math.min(a[1], b[1]) > bb.y1)) continue;
-      for (var j = 0; j < B.length; j++) if (cross(a, b, B[j], B[(j + 1) % B.length])) return true;
-    }
-    return false;
-  }
-  /* 線（北海道の輪郭）からはみ出しているか */
-  function overLine(P) {
-    for (var k = 0; k < P.length; k++) if (!pointIn(HKP, P[k][0], P[k][1])) return true;
-    return edgesCross(P, HKP);
-  }
-  /* ほかの県と重なっているか */
-  /* 見た目の形どうしで比べる（県どうしは物理でぶつからないので、見た目で離れていれば当たらない） */
-  function overlapsAny(P, bb) {
-    for (var n = 0; n < board.length; n++) {
-      var Q = board[n], qb = Q.bb;
-      if (bb.x1 < qb.x0 || bb.x0 > qb.x1 || bb.y1 < qb.y0 || bb.y0 > qb.y1) continue;
-      if (edgesCross(P, Q.poly, qb) || pointIn(Q.poly, P[0][0], P[0][1]) || pointIn(P, Q.poly[0][0], Q.poly[0][1])) return true;
-    }
-    return false;
+  /* ============ 人数 ============ */
+  var net = null;              /* 開始を押してからつなぐ */
+  var bots = [];               /* デバッグ用の手元だけの仲間 */
+  function people() {
+    var list = net ? net.peers() : [{ id: "me", pull: held, since: 0, me: true }];
+    bots.forEach(function (b) { list.push({ id: b.id, pull: held, since: b.since, me: false }); });
+    return list.sort(function (a, b) { return a.since - b.since || (a.id < b.id ? -1 : 1); });
   }
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", MODE: "mode", SPIN: "spin", PLACE: "place", SETTLE: "settle", END: "end", RESULT: "result" };
-  var state, T, won, shake, board, deck, cur, turn, count, spin, cpuMove, endT, forceOut, loserPiece;
-  var conf = window.zCelebrate ? window.zCelebrate.confetti() : null;
-  if (conf) conf.rain = false;
+  var S = { INTRO: "intro", PLAY: "play", OUT: "out", RESULT: "result" };
+  var state, T, held, keyMode = false;
+  var crowd = [], pullN = 0, lift = 0, shake = 0, outT = 0, outN = 0, creakT = 0;
+  var confetti = window.zCelebrate.confetti();
+
+  var KX, KY;                                  /* かぶの根元 */
+  function place() {
+    KX = 128; KY = Math.round(H * 0.3);
+  }
 
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
-    T = 0; won = false; shake = 0; count = 0; endT = 0; forceOut = null; loserPiece = null; fallen = null;
-    newWorld();
-    board = []; cur = null; turn = 0;
-    deck = [];
-    for (var i = 0; i < SHAPES.length; i++) deck.push(i);   /* 北海道も出る（入るわけがないが、置くまでやる） */
-    if (conf) conf.clear();
-    startSpin();
-  }
-  /* 遊び方: "cpu"（あいてはCPU）か "2p"（ふたりで交互） */
-  var mode = "cpu";
-  function cpuTurn() { return mode === "cpu" && turn === 1; }
-  function humanTurn() { return !cpuTurn(); }
-  var PCOL = ["#ff7a45", "#8a5cff"];             /* プレイヤーの色（1P / 2P・CPU） */
-  function modeButtons() {
-    var w = Math.min(220, (W - 60) / 2), h = 170, y = H * 0.66;
-    return [{ m: "cpu", x: W / 2 - w - 10, y: y, w: w, h: h }, { m: "2p", x: W / 2 + 10, y: y, w: w, h: h }];
-  }
-  function trayPos() { return { x: W / 2, y: (HKB.y1 + ctrlY()) / 2 + 10 }; }
-
-  /* ---------- ルーレット（次の県を決める） ---------- */
-  /* 円盤に残りの県を並べる。自分の番はタップで回し、あいては自分で回す。ゆっくり止まって、針の先の県に決まる */
-  var wheelRot = 0, forceHK = false;
-  /* 円盤は回り続け、タップでブレーキ。止まるまでの長さは毎回ばらばらなので、どこで止まるかはランダム。あいては適当なところで押す */
-  var SPIN_W = 13;
-  function startSpin() {
-    if (!deck.length) { finish(true); return; }
-    state = S.SPIN;
-    spin = { seg: deck.filter(function (i) { return board.length || i !== HK; }),   /* 最初の1枚は北海道を出さない（空の北海道にぴったり置けてしまう） */
-       stop: false, v: SPIN_W, done: false, t: 0, hold: 0, pick: null, last: -1, cpuAt: 0.3 + Math.random() * 0.4 };
-  }
-  function spinNow() {
-    if (state !== S.SPIN || spin.stop) return;
-    spin.stop = true; spin.brake = 2.2 + Math.random() * 1.2;
-    tone(500, 0.08, 0.12, "square");
-  }
-  function underNeedle() {
-    var n = spin.seg.length, s = Math.PI * 2 / n, a = ((-Math.PI / 2 - wheelRot) % (Math.PI * 2) + Math.PI * 4) % (Math.PI * 2);
-    return Math.floor(a / s) % n;
-  }
-  function updateSpin(dt) {
-    spin.t += dt;
-    if (cpuTurn() && spin.t > spin.cpuAt) spinNow();
-    if (!spin.done) {
-      if (spin.stop) spin.v = Math.max(0, spin.v * Math.exp(-spin.brake * dt) - 0.9 * dt);   /* 最後はじわっと止まる */
-      wheelRot += spin.v * dt;
-      var k = underNeedle();
-      if (k !== spin.last) { spin.last = k; tone(1100, 0.03, 0.04, "square"); }
-      if (spin.stop && spin.v <= 0) {
-        if (forceHK) {                           /* デバッグ: 北海道のマスに合わせる */
-          var n = spin.seg.length, s = Math.PI * 2 / n;
-          wheelRot = -Math.PI / 2 - (spin.seg.indexOf(HK) + 0.5) * s; forceHK = false;
-        }
-        spin.done = true; spin.pick = spin.seg[underNeedle()];
-        tone(660, 0.12, 0.12, "square"); tone(990, 0.25, 0.12, "square", null, 0.1);
-      }
-      return;
-    }
-    spin.hold += dt;
-    if (spin.hold > 1.0) startPlace(spin.pick);   /* 決まった県を見せる間 */
-  }
-  function startPlace(i) {
-    deck.splice(deck.indexOf(i), 1);
-    cur = { i: i, x: CX, y: CY, a: 0, ta: 0 };
-    state = S.PLACE;
-    cpuMove = null;
-    refreshBoard();
-    if (cpuTurn()) {
-      var best = solve(i);
-      if (!best || (NO_OVERLAP && overlapsAny(placed(i, best.x, best.y, best.a), bbox(placed(i, best.x, best.y, best.a))))) best = outsideSpot(i);
-      if (forceOut === "cpu") { best = { x: HKB.x1 + 250, y: CY, a: 0 }; forceOut = null; }
-      cpuMove = { t: 0, fx: cur.x, fy: cur.y, x: best.x, y: best.y, a: best.a };
-    }
+    state = S.PLAY;
+    T = 0; held = false; lift = 0; shake = 0; outT = 0;
+    confetti.clear();
+    if (net) net.setPulling(false);
   }
 
-  /* ---------- 置ける所を探す（相手と、デバッグの「おまかせ」） ----------
-     線の内側で、ほかの県と重ならない所のうち、線やほかの県にいちばん寄り添う所（少しぶれる） */
-  function deepIn(x, y) {                       /* 重心が線から少し内側（すべっても落ちにくい） */
-    var m = 22;
-    return pointIn(HKP, x, y) && pointIn(HKP, x + m, y) && pointIn(HKP, x - m, y) && pointIn(HKP, x, y + m) && pointIn(HKP, x, y - m);
-  }
-  function solve(i) {
-    var best = null, step = 10, rots = 1;   /* 回さない */
-    for (var r = 0; r < rots; r++) {
-      var a = r * Math.PI * 2 / rots;
-      for (var y = HKB.y0; y <= HKB.y1; y += step) for (var x = HKB.x0; x <= HKB.x1; x += step) {
-        if (!deepIn(x, y)) continue;
-        var P = placed(i, x, y, a), bb = bbox(P);
-        var sc = hug(P) + Math.random() * 6 - (overLine(P) ? 5000 : 0);
-        var HP = placed(i, x, y, a);
-        if (overlapsAny(HP, bbox(HP))) {
-          if (NO_OVERLAP) continue;            /* 置けない所は候補にしない（はみ出しても重ならない所を選ぶ） */
-          /* 重ねるなら、県の上にまるごと乗せる（半分だけ乗ると傾いてすべり落ちる） */
-          var f = onTop(P, bb, x, y);
-          sc -= 1000 + 2000 * Math.min(f, 1 - f) + (f < 0.5 ? 600 : 0);
-        }
-        if (!best || sc > best.sc) best = { x: x, y: y, a: a, sc: sc };
-      }
-    }
-    return best;
-  }
-  /* 角と真ん中のうち、ほかの県の上にある割合（0〜1）。真ん中は重く数える */
-  function onTop(P, bb, cx, cy) {
-    var near = board.filter(function (Q) { return !(bb.x1 < Q.bb.x0 || bb.x0 > Q.bb.x1 || bb.y1 < Q.bb.y0 || bb.y0 > Q.bb.y1); });
-    function over(px, py) { for (var k = 0; k < near.length; k++) if (pointIn(near[k].poly, px, py)) return 1; return 0; }
-    var n = 0, m = 0;
-    for (var k = 0; k < P.length; k += 2) { n += over(P[k][0], P[k][1]); m++; }
-    n += over(cx, cy) * 4; m += 4;
-    return n / m;
-  }
-  function hug(P) {                              /* 線やほかの県の近くにある角の数 */
-    var n = 0, polys = [HKP].concat(board.map(function (b) { return b.poly; }));
-    for (var k = 0; k < P.length; k += 2) {
-      var p = P[k], near = false;
-      for (var m = 0; m < polys.length && !near; m++) {
-        var Q = polys[m];
-        for (var j = 0; j < Q.length; j++) if (Math.abs(Q[j][0] - p[0]) + Math.abs(Q[j][1] - p[1]) < 22) { near = true; break; }
-      }
-      if (near) n++;
-    }
-    return n;
-  }
-  function outsideSpot(i) {                      /* 入る所がない: 重ならない所に置くしかない（はみ出す） */
-    for (var k = 0; k < 200; k++) {
-      var x = HKB.x0 + Math.random() * (HKB.x1 - HKB.x0), y = HKB.y0 + Math.random() * (HKB.y1 - HKB.y0), a = 0;
-      var P = placed(i, x, y, a);
-      if (!overlapsAny(P, bbox(P))) return { x: x, y: y, a: a };
-    }
-    var tp = trayPos();
-    return { x: tp.x, y: tp.y, a: 0 };
-  }
-  function updateCPU(dt) {
-    var m = cpuMove;
-    m.t += dt;
-    var u = Math.min(1, Math.max(0, (m.t - 0.1) / 0.5)), e = u * u * (3 - 2 * u);
-    cur.x = m.fx + (m.x - m.fx) * e; cur.y = m.fy + (m.y - m.fy) * e;
-    cur.a = cur.ta = m.a * e;
-    if (m.t > 0.75) confirm(true);
-  }
-
-  /* ---------- 置く（落とす） ---------- */
-  /* ほかの県と重なる所には置けない（上から見て） */
-  var NO_OVERLAP = true;                         /* ほかの県と重なる所には置けない（tomozo「重なりありだとぬるすぎる」） */
-  function curOverlaps() {
-    if (!cur || !NO_OVERLAP) return false;
-    var P = placed(cur.i, cur.x, cur.y, cur.ta);
-    return overlapsAny(P, bbox(P));
-  }
-  function confirm(force) {
-    if (state !== S.PLACE || !cur) return;
-    if (!force && curOverlaps()) { tone(150, 0.16, 0.18, "square", 110); return; }
-    cur.a = cur.ta;
-    var b = makeBody(cur.i, cur.x, cur.y, cur.a, hoverY());
-    board.push({ i: cur.i, body: b, by: turn, id: "p" + (++pieceSeq) });
-    cur = null; lastBy = turn;
-    noiseHit(0.25, 900, 0.12, 1.2, 400);
-    state = S.SETTLE; settleT = 0; calmT = 0;
-  }
-
-  /* ============ 物理（cannon-es） ============
-     北海道は厚みのある板（三角形に分けた柱の集まり、動かない）。県は凸包を押し出した板。
-     上から落として積む。北海道の板から落ちて海へ行ったら、最後に置いた側の負け */
-  var CN = window.CANNON || (typeof CANNON !== "undefined" ? CANNON : null), UNIT = 100, THICK = 0.22, BOARD_T = 0.5, world = null, pieceSeq = 0;
-  var CX = 0, CY = 0, lastBy = 0, settleT = 0, calmT = 0, fallen = null;
-  function hull(pts) {
-    var p = pts.slice().sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
-    function cr(o, a, b) { return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); }
-    var lo = [], hi = [];
-    p.forEach(function (q) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); });
-    p.slice().reverse().forEach(function (q) { while (hi.length >= 2 && cr(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); });
-    return lo.slice(0, -1).concat(hi.slice(0, -1));
-  }
-  /* 凸な多角形（物理の単位の x, z）を高さ h の柱にする。面の向きは外向きにそろえる */
-  function prism(P, h) {
-    var n = P.length, V = [], F = [], cx = 0, cz = 0;
-    P.forEach(function (q) { cx += q[0]; cz += q[1]; }); cx /= n; cz /= n;
-    P.forEach(function (q) { V.push(new CN.Vec3(q[0], -h / 2, q[1])); });
-    P.forEach(function (q) { V.push(new CN.Vec3(q[0], h / 2, q[1])); });
-    var bot = [], top = [];
-    for (var i = 0; i < n; i++) { bot.push(i); top.push(n + i); }
-    F.push(bot, top);
-    for (i = 0; i < n; i++) F.push([i, (i + 1) % n, n + (i + 1) % n, n + i]);
-    F = F.map(function (f) {
-      var a = V[f[0]], b = V[f[1]], c = V[f[2]];
-      var nx = (b.y - a.y) * (c.z - a.z) - (b.z - a.z) * (c.y - a.y), ny = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z), nz = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-      var mx = 0, my = 0, mz = 0;
-      f.forEach(function (k) { mx += V[k].x; my += V[k].y; mz += V[k].z; });
-      mx = mx / f.length - cx; my /= f.length; mz = mz / f.length - cz;
-      return nx * mx + ny * my + nz * mz < 0 ? f.slice().reverse() : f;
-    });
-    return new CN.ConvexPolyhedron({ vertices: V, faces: F });
-  }
-  function newWorld() {
-    world = new CN.World({ gravity: new CN.Vec3(0, -18, 0), allowSleep: true });
-    world.broadphase = new CN.SAPBroadphase(world);
-    world.solver.iterations = 12;
-    world.defaultContactMaterial.friction = 0.02;  /* ほぼつるつる（tomozo「摩擦ほぼゼロ」）。積むとすべり落ちる */
-    world.defaultContactMaterial.restitution = 0.02;
-    /* 北海道の板: 当たりは平らな大きい板。重心が北海道の外へ出た県は、板をすり抜けて海へ落ちる（端から転げ落ちる代わり） */
-    var ground = new CN.Body({ mass: 0, position: new CN.Vec3(0, -BOARD_T / 2, 0), collisionFilterGroup: 2, collisionFilterMask: 1 });
-    ground.addShape(new CN.Box(new CN.Vec3(20, BOARD_T / 2, 20)));
-    world.addBody(ground);
-  }
-  function makeBody(i, x, y, a, h) {
-    var sh = SHAPES[i];
-    if (!sh.hull) sh.hull = hull(sh.pts).map(function (q) { return [q[0] / UNIT, q[1] / UNIT]; });
-    var area = 0, H = sh.hull;
-    for (var k = 0; k < H.length; k++) { var p = H[k], q = H[(k + 1) % H.length]; area += p[0] * q[1] - q[0] * p[1]; }
-    var b = new CN.Body({ mass: Math.abs(area) / 2 * THICK * 10, position: new CN.Vec3((x - CX) / UNIT, h, (y - CY) / UNIT), linearDamping: 0.05, angularDamping: 0.2, collisionFilterGroup: 1, collisionFilterMask: NO_OVERLAP ? 2 : 3 });   /* 重ねないときは県どうしはぶつからない（凸包の当たりで、見た目では離れているのに当たるのを防ぐ） */
-    b.addShape(prism(H, THICK));
-    b.quaternion.setFromAxisAngle(new CN.Vec3(0, 1, 0), -a);
-    b.sleepSpeedLimit = 0.15; b.sleepTimeLimit = 0.4;
-    world.addBody(b);
-    return b;
-  }
-  /* 置いた県の、上から見た位置と向き（px） */
-  function refreshBoard() {
-    board.forEach(function (p) {
-      var b = p.body, v = b.quaternion.vmult(new CN.Vec3(1, 0, 0));
-      p.x = b.position.x * UNIT + CX; p.y = b.position.z * UNIT + CY; p.a = Math.atan2(v.z, v.x);
-      p.poly = placed(p.i, p.x, p.y, p.a); p.bb = bbox(p.poly);
-    });
-  }
-  function hoverY() {                            /* 吊るす高さ: いちばん高い県より少し上 */
-    var top = 0;
-    board.forEach(function (p) { top = Math.max(top, p.body.position.y + THICK); });
-    return top + 0.6;
-  }
-  /* 県のうち陸の上にある部分（点で拾う）を囲んだ形の中に、重心があるか */
-  function supported(p) {
-    var b = p.body, v = b.quaternion.vmult(new CN.Vec3(1, 0, 0));
-    var x = b.position.x * UNIT + CX, y = b.position.z * UNIT + CY;
-    if (pointIn(HKP, x, y)) return true;
-    var P = placed(p.i, x, y, Math.atan2(v.z, v.x)), bb = bbox(P), pts = [];
-    P.forEach(function (q) { if (pointIn(HKP, q[0], q[1])) pts.push(q); });
-    var st = Math.max(6, Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) / 10);
-    for (var gy = bb.y0; gy <= bb.y1; gy += st) for (var gx = bb.x0; gx <= bb.x1; gx += st)
-      if (pointIn(P, gx, gy) && pointIn(HKP, gx, gy)) pts.push([gx, gy]);
-    if (pts.length < 3) return false;
-    return pointIn(hull(pts), x, y);
-  }
-  function physStep() {
-    world.step(1 / 60);
-    board.forEach(function (p) {
-      var b = p.body;
-      /* 板の高さ（ほかの県の上ではない）まで下りてきて、陸に乗っている所で支えきれない（重心が支えの外）なら、板から外して落とす */
-      if (b.collisionFilterMask & 2 && b.position.y < THICK * 1.2 && b.sleepState !== CN.Body.SLEEPING && !supported(p)) {
-        b.collisionFilterMask = NO_OVERLAP ? 0 : 1; b.wakeUp();
-        var ox = b.position.x, oz = b.position.z, d = Math.hypot(ox, oz) || 1;
-        b.angularVelocity.set(oz / d * 3, 0, -ox / d * 3);
-        b.velocity.x += ox / d * 0.8; b.velocity.z += oz / d * 0.8;
-      }
-      if (p.body.position.y < -BOARD_T - 0.3 && !p.fell) {   /* 海へ落ちた */
-        p.fell = true;
-        if (!fallen) { fallen = p; SFX.land(); noiseHit(0.6, 500, 0.4, 0.8, 150); finish(lastBy === 1); }
-      }
-      if (p.body.position.y < -8 && p.body.type !== CN.Body.STATIC) { p.body.sleep(); p.body.type = CN.Body.STATIC; }
-    });
-  }
-  function updateSettle(dt) {
-    settleT += dt;
-    var still = true;
-    board.forEach(function (p) { if (!p.fell && p.body.sleepState !== CN.Body.SLEEPING && p.body.velocity.length() > 0.12) still = false; });
-    calmT = still ? calmT + dt : 0;
-    if ((calmT > 0.25 && settleT > 0.7) || settleT > 3.5) { count++; turn = 1 - turn; startSpin(); }
-  }
-  function finish(win) {
-    won = win; state = S.END; endT = 0; cur = null;
-    if (win) {
-      setTimeout(function () { if (won && AC && window.zCelebrate) window.zCelebrate.play(AC, "fanfare", { dest: OUT }); }, 300);
-      if (conf) conf.burst(W, H, 160);
-    } else SFX.lose();
-    shake = 10;
+  function pullOut(n) {
+    if (state !== S.PLAY) return;
+    state = S.OUT; outT = 0; outN = Math.max(n, NEED);
+    held = false; if (net) net.setPulling(false);
+    noiseHit(0.5, 300, 0.5, 0.6);
+    tone(220, 0.35, 0.25, "triangle", 880);
+    window.zCelebrate.play(AC, "fanfare", { delay: 0.35 });
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
-    if (conf) conf.step(dt, W, H);
-    shake = Math.max(0, shake - dt * 30);
     T += dt;
-    if (cur && !(cpuMove && state === S.PLACE)) cur.a += angDiff(cur.ta - cur.a) * Math.min(1, dt * 16);
-    if (world && state !== S.INTRO && state !== S.MODE) physStep();
-    if (state === S.SETTLE) updateSettle(dt);
-    else if (state === S.SPIN) updateSpin(dt);
-    else if (state === S.PLACE && cpuTurn()) updateCPU(dt);
-    else if (state === S.PLACE) {
-      var mx = (keys.r ? 1 : 0) - (keys.l ? 1 : 0), my = (keys.d ? 1 : 0) - (keys.u ? 1 : 0);
-      if (mx || my) moveCur(mx * 260 * dt, my * 260 * dt);
-    } else if (state === S.END) {
-      endT += dt;
-      if (endT > 2) { state = S.RESULT; shareButton.hidden = false; }
+    crowd = people();
+    pullN = crowd.filter(function (p) { return p.pull; }).length;
+    if (state === S.PLAY) {
+      var goal = Math.min(1, pullN / NEED);
+      lift += (goal - lift) * Math.min(1, dt * 3);
+      shake = pullN > 0 ? 0.3 + goal : 0;
+      if (held) {
+        creakT -= dt;
+        if (creakT <= 0) { creakT = 0.55 + Math.random() * 0.3; noiseHit(0.18, 160 + goal * 300, 0.12 + goal * 0.2, 3); }
+      }
+      if (pullN >= NEED) { if (net) net.sendDone(); pullOut(pullN); }
+    } else if (state === S.OUT) {
+      outT += dt;
+      if (outT > 2.6) { state = S.RESULT; }
     }
-  }
-  function angDiff(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
-  function moveCur(dx, dy) {
-    cur.x = Math.max(HKB.x0 - 200, Math.min(HKB.x1 + 200, cur.x + dx));
-    cur.y = Math.max(HKB.y0 - 200, Math.min(HKB.y1 + 200, cur.y + dy));
+    confetti.step(dt, W, H);
+    if (state === S.OUT && outT > 0.35 && outT - dt <= 0.35) confetti.burst(W, H, 180);
   }
 
   /* ============ 入力 ============ */
-  var keys = { l: false, r: false, u: false, d: false };
-  var drag = null;
-  function ctrlY() { return H - 86; }
-  function ctrlButtons() {
-    return [];                                   /* 回転・決定のボタンはなし（押してずらし、離すと落ちる） */
-  }
-  function down(x, y, id) {
+  function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
-    if (state === S.MODE) {
-      var pick = "cpu";
-      if (x != null) { pick = null; modeButtons().forEach(function (b) { if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) pick = b.m; }); }
-      if (pick) { mode = pick; tone(780, 0.1, 0.12, "square"); newRound(); }
-      return;
-    }
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
       if (hit === "retry") newRound();
       return;
     }
-    if (state === S.SPIN && humanTurn()) { spinNow(); return; }   /* タップで回す */
-    if (state !== S.PLACE || !humanTurn()) return;
-    if (x == null) { confirm(); return; }
-    drag = { id: id, x: x, y: y, g: groundAt(x, y) };
+    if (state !== S.PLAY) return;
+    held = true; creakT = 0;
+    if (net) net.setPulling(true);
   }
-  /* 指の位置を、県を吊るしている高さの面へ写す（3Dで描けないときは画面のまま） */
-  function groundAt(x, y) {
-    var s3 = scene3d();
-    if (s3 && proj3) { var g = s3.ground(x, y, W, H, hoverY()); if (g) return { x: g.x * UNIT + CX, y: g.z * UNIT + CY }; }
-    return { x: x, y: y };
+  function move() {}
+  function up() {
+    if (!held) return;
+    held = false;
+    if (net) net.setPulling(false);
   }
-  function move(x, y, id) {
-    if (!drag || drag.id !== id || !cur || !humanTurn() || state !== S.PLACE) return;
-    var g = groundAt(x, y);
-    moveCur(g.x - drag.g.x, g.y - drag.g.y);
-    drag.g = g;
-  }
-  function up(id) {
-    if (!drag || (id != null && drag.id !== id)) return;
-    drag = null;
-    if (id != null && state === S.PLACE && humanTurn()) confirm();   /* 離したら落とす（重なる所なら落とさない） */
-  }
+
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
-  wrap.addEventListener("pointerdown", function (e) { e.preventDefault(); var p = atCanvas(e); down(p.x, p.y, e.pointerId); });
-  wrap.addEventListener("pointermove", function (e) { var p = atCanvas(e); move(p.x, p.y, e.pointerId); });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(e.pointerId); });
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) { var p = atCanvas(e); move(p.x, p.y); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
   wrap.addEventListener("pointercancel", function () { up(); });
-  window.addEventListener("blur", function () { up(); keys.l = keys.r = keys.u = keys.d = false; });
+  window.addEventListener("blur", function () { up(); });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    if (n === 4 && state === S.SPIN && humanTurn()) { forceHK = true; spinNow(); return; }   /* 4 北海道に止まる */
-    if (state === S.SPIN && humanTurn()) { spinNow(); return; }
-    if (state !== S.PLACE || !humanTurn()) return;
-    if (n === 1 || n === 2) {                     /* 1 自分の県をおまかせで置く  2 そのうえ次の相手は海に落とす（勝ち） */
-      var b = solve(cur.i);
-      if (!b || (NO_OVERLAP && overlapsAny(placed(cur.i, b.x, b.y, b.a), bbox(placed(cur.i, b.x, b.y, b.a))))) b = outsideSpot(cur.i);
-      cur.x = b.x; cur.y = b.y; cur.a = cur.ta = b.a;
-      if (n === 2) forceOut = "cpu";
-      confirm();
+    /* 1=手元だけの仲間を10人足す 2=仲間を99人にする（次に押すと100人で抜ける） 3=仲間を消す */
+    if (n === 1 || n === 2) {
+      var want = n === 1 ? bots.length + 10 : NEED - 1 - (net ? net.peers().length - 1 : 0);
+      while (bots.length < want) bots.push({ id: "bot" + bots.length, since: Date.now() + bots.length });
     }
-    if (n === 3) { cur.x = HKB.x1 + 250; cur.y = CY; confirm(); }   /* 3 海に落とす（負け） */
+    if (n === 3) bots = [];
   }
-  function keySet(e, on) {
-    var k = e.key;
-    if (k === "ArrowLeft" || k === "a" || k === "A") { keys.l = on; return true; }
-    if (k === "ArrowRight" || k === "d" || k === "D") { keys.r = on; return true; }
-    if (k === "ArrowUp" || k === "w" || k === "W") { keys.u = on; return true; }
-    if (k === "ArrowDown" || k === "s" || k === "S") { keys.d = on; return true; }
-    return false;
-  }
+
   window.addEventListener("keydown", function (e) {
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
-    if (e.key === "Escape") { e.preventDefault(); if (!e.repeat && state !== S.INTRO) newRound(); return; }
-    if (keySet(e, true)) { e.preventDefault(); return; }
+    var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    if (!go) return;
+    if (!esc && !go) return;
     e.preventDefault();
-    if (e.repeat || state === S.INTRO) return;
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat && state === S.RESULT) newRound(); return; }
+    if (e.repeat) return;
     down();
   });
   window.addEventListener("keyup", function (e) {
-    if (keySet(e, false)) return;
-    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); }
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
   });
 
-  /* ============ シェア ============ */
   function doShare() {
-    var text = mode === "2p"
-      ? zT("北海道に" + count + "県詰めて、" + (won ? "1P" : "2P") + "の勝ち", "Packed " + count + " prefectures into Hokkaido. " + (won ? "1P" : "2P") + " wins", "홋카이도에 " + count + "개 현을 채우고 " + (won ? "1P" : "2P") + " 승리", "在北海道塞进" + count + "个县，" + (won ? "1P" : "2P") + "胜", "在北海道塞進" + count + "個縣，" + (won ? "1P" : "2P") + "勝")
-      : won
-      ? zT("北海道に" + count + "県詰めて勝った", "Packed " + count + " prefectures into Hokkaido and won", "홋카이도에 " + count + "개 현을 채워 넣고 이겼다", "在北海道塞进" + count + "个县，赢了", "在北海道塞進" + count + "個縣，贏了")
-      : zT("北海道に" + count + "県のせたところで、こぼれて負けた", "A prefecture fell off Hokkaido after " + count, "홋카이도에 " + count + "개 현을 올리고 떨어져서 졌다", "北海道放了" + count + "个县后掉下去，输了", "北海道放了" + count + "個縣後掉下去，輸了");
-    window.zResultActions.x({ text: text + zT(" #広すぎ北海道ゲーム", " #HokkaidoIsTooBig", " #너무넓은홋카이도게임", " #北海道太大了游戏", " #北海道太大了遊戲") });
+    window.zResultActions.x({ text: zT(
+      "同時に" + outN + "人で、おおきなかぶを抜いた",
+      "Pulled out the giant turnip with " + outN + " people at once",
+      "동시에 " + outN + "명이서 커다란 순무를 뽑았다",
+      "同时" + outN + "人一起拔出了大萝卜",
+      "同時" + outN + "人一起拔出了大蘿蔔"
+    ) + zT(" #おおきなかぶ", " #TheGiantTurnip", " #커다란순무", " #拔萝卜", " #拔蘿蔔") });
   }
 
   /* ============ 描画 ============ */
-  var BG = "#1f2a36", LINE = "#ffd34a";
-  function path(P) {
+  function roundRect(x, y, w, h, r) {
     ctx.beginPath();
-    P.forEach(function (q, n) { if (n) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
   }
-  function drawPiece(i, P, x, y, a, look, by) {
-    path(P);
-    ctx.fillStyle = look === "bad" ? "#ff2a1a" : PCOL[by];
-    ctx.globalAlpha = look === "hit" ? 0.55 : 1;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = look === "bad" ? "#fff" : "#16202e"; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.stroke();
-    var nm = SHAPES[i].name, fs = Math.max(11, Math.min(26, SHAPES[i].r * 0.32));
-    ctx.font = "800 " + fs + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  function hash(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
+
+  /* 並び：かぶの右から、畑の上を左右に折り返しながら続く */
+  function slots(n) {
+    var top = H * 0.42, bottom = H - 30, left = 40, right = W - 30;
+    var s = 96;
+    for (; s > 20; s -= 2) {
+      var cols = Math.floor((right - left) / (s * 0.82));
+      if (Math.ceil(n / cols) * s * 1.06 <= bottom - top) break;
+    }
+    cols = Math.max(1, Math.floor((right - left) / (s * 0.82)));
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      var r = Math.floor(i / cols), c = i % cols, dir = r % 2 ? -1 : 1;
+      var x = dir > 0 ? left + (c + 0.5) * s * 0.82 : right - (c + 0.5) * s * 0.82;
+      out.push({ x: x, y: top + r * s * 1.06 + s * 0.9, s: s, dir: dir });
+    }
+    return out;
   }
+
+  var KINDS = ["jii", "baa", "mago", "inu", "neko", "nezumi"];
+  var CLOTHES = ["#3d7be0", "#e05d5d", "#4bb46b", "#e0a33d", "#9a5ce0", "#3dbfc4", "#e07ab8", "#7a8a99", "#c46b3d"];
+  var SKIN = ["#f4cfa8", "#e8b68a", "#c98d5e", "#f6dcc0"];
+
+  function drawPerson(p, sl, i, pulling, fallen) {
+    var s = sl.s, k = i < KINDS.length ? KINDS[i] : "hito";
+    var h = hash(p.id);
+    var lean = fallen ? 1.25 : pulling ? 0.42 + Math.sin(T * 9 + i) * 0.05 : 0.06;
+    ctx.save();
+    ctx.translate(sl.x, sl.y);
+    ctx.scale(-sl.dir, 1);                     /* 前（かぶの方）が -x */
+    var sc = k === "nezumi" ? 0.45 : k === "neko" ? 0.6 : k === "inu" ? 0.72 : k === "mago" ? 0.82 : 1;
+    ctx.scale(sc * s / 100, sc * s / 100);
+    /* 影 */
+    ctx.fillStyle = "rgba(60,40,10,.25)";
+    ctx.beginPath(); ctx.ellipse(0, 0, 34, 8, 0, 0, Math.PI * 2); ctx.fill();
+    if (p.me) {
+      ctx.strokeStyle = "#ff7a45"; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.ellipse(0, 0, 42, 11, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.rotate(lean);
+    if (k === "inu" || k === "neko" || k === "nezumi") drawAnimal(k);
+    else drawHuman(k, h);
+    ctx.restore();
+    if (p.me) {
+      var ay = sl.y - s * sc * 1.25 - 8 + Math.sin(T * 5) * 3;
+      ctx.fillStyle = "#ff7a45";
+      ctx.beginPath(); ctx.moveTo(sl.x - 9, ay - 12); ctx.lineTo(sl.x + 9, ay - 12); ctx.lineTo(sl.x, ay); ctx.closePath(); ctx.fill();
+    }
+  }
+  function drawHuman(k, h) {
+    var cloth = k === "jii" ? "#7a5232" : k === "baa" ? "#8a5ca8" : k === "mago" ? "#e04848" : CLOTHES[h % CLOTHES.length];
+    var skin = k === "hito" ? SKIN[(h >> 3) % SKIN.length] : "#f4cfa8";
+    ctx.lineCap = "round";
+    /* 足 */
+    ctx.strokeStyle = "#3a2c22"; ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.moveTo(-6, -30); ctx.lineTo(-14, -2); ctx.moveTo(6, -30); ctx.lineTo(12, -2); ctx.stroke();
+    /* 胴 */
+    ctx.fillStyle = cloth;
+    roundRect(-16, -74, 32, 48, 12); ctx.fill();
+    /* 腕（前へ） */
+    ctx.strokeStyle = cloth; ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.moveTo(-4, -64); ctx.lineTo(-40, -58); ctx.stroke();
+    ctx.fillStyle = skin;
+    ctx.beginPath(); ctx.arc(-42, -58, 6, 0, Math.PI * 2); ctx.fill();
+    /* 頭 */
+    ctx.fillStyle = skin;
+    ctx.beginPath(); ctx.arc(0, -92, 18, 0, Math.PI * 2); ctx.fill();
+    if (k === "jii") {
+      ctx.fillStyle = "#f2f2f2";
+      ctx.beginPath(); ctx.arc(-6, -82, 12, 0.2, Math.PI * 1.1); ctx.fill();
+      ctx.beginPath(); ctx.arc(10, -96, 8, 0, Math.PI * 2); ctx.fill();
+    } else if (k === "baa") {
+      ctx.fillStyle = "#c9c9c9";
+      ctx.beginPath(); ctx.arc(0, -96, 18, Math.PI * 0.95, Math.PI * 2.1); ctx.fill();
+      ctx.beginPath(); ctx.arc(14, -108, 9, 0, Math.PI * 2); ctx.fill();
+    } else if (k === "mago") {
+      ctx.fillStyle = "#2a1f1a";
+      ctx.beginPath(); ctx.arc(0, -96, 18, Math.PI * 0.95, Math.PI * 2.05); ctx.fill();
+      ctx.beginPath(); ctx.arc(16, -86, 7, 0, Math.PI * 2); ctx.fill();
+    } else {
+      var hair = ["#2a1f1a", "#5a3a22", "#1a1a1a", "#8a6a3a", "#c0a060"][(h >> 5) % 5];
+      ctx.fillStyle = hair;
+      ctx.beginPath(); ctx.arc(0, -96, 18, Math.PI * 0.95, Math.PI * 2.05); ctx.fill();
+    }
+    ctx.fillStyle = "#2a1f1a";
+    ctx.beginPath(); ctx.arc(-10, -92, 2.4, 0, Math.PI * 2); ctx.fill();
+  }
+  function drawAnimal(k) {
+    var col = k === "inu" ? "#b07a42" : k === "neko" ? "#9a9a9a" : "#8a8a96";
+    ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineCap = "round";
+    /* 足 */
+    ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.moveTo(-14, -26); ctx.lineTo(-18, -2); ctx.moveTo(14, -26); ctx.lineTo(18, -2); ctx.stroke();
+    /* 胴 */
+    ctx.beginPath(); ctx.ellipse(0, -36, 30, 18, 0, 0, Math.PI * 2); ctx.fill();
+    /* しっぽ */
+    ctx.lineWidth = k === "nezumi" ? 4 : 8;
+    ctx.beginPath(); ctx.moveTo(26, -42);
+    if (k === "nezumi") ctx.quadraticCurveTo(60, -40, 56, -10);
+    else ctx.quadraticCurveTo(44, -60, 40, -74);
+    ctx.stroke();
+    /* 頭 */
+    ctx.beginPath(); ctx.arc(-32, -54, 18, 0, Math.PI * 2); ctx.fill();
+    /* 耳 */
+    if (k === "neko") {
+      ctx.beginPath(); ctx.moveTo(-46, -64); ctx.lineTo(-44, -84); ctx.lineTo(-32, -70); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-28, -70); ctx.lineTo(-18, -84); ctx.lineTo(-16, -62); ctx.fill();
+    } else if (k === "inu") {
+      ctx.fillStyle = "#7a5228";
+      ctx.beginPath(); ctx.ellipse(-22, -64, 7, 14, 0.4, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.beginPath(); ctx.arc(-38, -72, 10, 0, Math.PI * 2); ctx.arc(-22, -72, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#e8a0a8";
+      ctx.beginPath(); ctx.arc(-38, -72, 5, 0, Math.PI * 2); ctx.arc(-22, -72, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = "#2a1f1a";
+    ctx.beginPath(); ctx.arc(-40, -56, 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(-50, -50, 3, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function kabuPos() {
+    var out = state === S.OUT || state === S.RESULT;
+    var u = out ? Math.min(1, outT / 0.6) : 0;
+    var up = lift * 34 + (out ? (1 - Math.pow(1 - u, 3)) * H * 0.12 : 0);
+    var sx = state === S.PLAY ? Math.sin(T * 40) * shake * 3 : 0;
+    var rot = out ? u * 0.5 : Math.sin(T * 23) * shake * 0.03;
+    return { x: KX + sx, y: KY + 40 - up, rot: rot };
+  }
+  function drawKabu() {
+    var k = kabuPos(), r = 84;
+    ctx.save();
+    ctx.translate(k.x, k.y);
+    ctx.rotate(k.rot);
+    /* 葉 */
+    ctx.fillStyle = "#3e9a3a";
+    for (var i = -2; i <= 2; i++) {
+      ctx.save(); ctx.rotate(i * 0.32 + Math.sin(T * 6 + i) * shake * 0.05);
+      ctx.beginPath(); ctx.ellipse(0, -r * 1.7, 22, 70, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+    ctx.strokeStyle = "#2f7a2c"; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(0, -r * 0.9); ctx.lineTo(0, -r * 1.25); ctx.stroke();
+    /* 実 */
+    var g = ctx.createRadialGradient(-26, -10, 10, 0, 0, r * 1.2);
+    g.addColorStop(0, "#ffffff"); g.addColorStop(0.7, "#f1eee6"); g.addColorStop(1, "#d9d2c2");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.bezierCurveTo(r * 1.15, -r, r * 1.2, r * 0.5, 0, r * 1.05);
+    ctx.bezierCurveTo(-r * 1.2, r * 0.5, -r * 1.15, -r, 0, -r);
+    ctx.fill();
+    ctx.strokeStyle = "#d9d2c2"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, r * 1.05); ctx.quadraticCurveTo(6, r * 1.4, -4, r * 1.7); ctx.stroke();
+    ctx.restore();
+    return k;
+  }
+
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
-    var s3 = scene3d(), drew = false;
-    if (s3 && HKP) {
-      try { s3.sync(snapshot()); drew = s3.draw(ctx, W, H); proj3 = drew; }
-      catch (e) { scene3d.drop(); proj3 = false; }
+
+    /* 空と畑 */
+    var sky = ctx.createLinearGradient(0, 0, 0, KY);
+    sky.addColorStop(0, "#7cc8f2"); sky.addColorStop(1, "#cdeefa");
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#a8703f"; ctx.fillRect(0, KY + 20, W, H - KY);
+    ctx.fillStyle = "#96612f";
+    for (var y = KY + 60; y < H; y += 46) ctx.fillRect(0, y, W, 6);
+
+    /* 人数 */
+    var n = crowd.length;
+    if (!hideUI) {
+    ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#16202e";
+    ctx.font = "900 92px sans-serif";
+    var shown = state === S.PLAY ? n : outN;
+    ctx.fillText(String(shown), W - 120, 108);
+    ctx.textAlign = "left";
+    ctx.font = "800 40px sans-serif";
+    ctx.fillText("/" + NEED, W - 114, 108);
     }
-    if (!drew) drawFlat();
-    if (hideUI) return;
-    if (state !== S.INTRO && state !== S.MODE && state !== S.RESULT) drawHUD();
-    if (state === S.SPIN) drawSpin();
-    if (state === S.PLACE && humanTurn()) drawCtrls();
-    if (state === S.MODE) drawMode();
-    if (state === S.RESULT) drawResult();
-    if (conf) conf.draw(ctx);
-  }
-  /* ---------- 立体 ---------- */
-  var proj3 = false;
-  var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene({ hk: HKP, cx: CX, cy: CY, boardT: BOARD_T, thick: THICK }); }) : function () { return null; };
-  function snapshot() {
-    var items = board.map(function (p) {
-      var b = p.body;
-      return { id: p.id, i: p.i, color: PCOL[p.by], x: b.position.x, y: b.position.y, z: b.position.z, q: [b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w], bad: p === fallen };
-    });
-    /* ルーレットが止まった時点で、決まった県を北海道の上に出しておく */
-    if (state === S.SPIN && spin.done && !hideUI) items.push({ id: "cur" + pieceSeq + "_" + spin.pick, i: spin.pick, color: PCOL[turn], x: 0, y: hoverY(), z: 0, yaw: 0, ghost: true });
-    if (cur && state === S.PLACE) items.push({ id: "cur" + pieceSeq + "_" + cur.i, i: cur.i, color: PCOL[turn], x: (cur.x - CX) / UNIT, y: hoverY(), z: (cur.y - CY) / UNIT, yaw: cur.a, ghost: true, bad: curOverlaps() });
-    var sx = 0, sy = 0;
-    if (shake > 0) { sx = (Math.random() - 0.5) * shake * 0.01; sy = (Math.random() - 0.5) * shake * 0.01; }
-    return { items: items, t: T, cam: { x: 0.1, z: state === S.PLACE ? 0.25 : 1.9, tilt: state === S.PLACE ? 89.5 : 72, w: (HKB.x1 - HKB.x0) / UNIT * (state === S.PLACE ? 0.98 : 1.1), sx: sx, sy: sy } };
-  }
-  /* 3Dで描けないとき: 真上から見た平面 */
-  function drawFlat() {
-    drawSea();
-    if (!HKP) return;
-    path(HKP); ctx.fillStyle = "#6dbf4b"; ctx.fill(); ctx.strokeStyle = "#4d5a3a"; ctx.lineWidth = 3; ctx.stroke();
-    refreshBoard();
-    board.forEach(function (p) { drawPiece(p.i, p.poly, p.x, p.y, p.a, p === fallen ? "bad" : null, p.by); });
-    if (cur && state === S.PLACE) drawPiece(cur.i, placed(cur.i, cur.x, cur.y, cur.a), cur.x, cur.y, cur.a, curOverlaps() ? "bad" : "hit", turn);
-  }
-  /* 海（ゆっくり動く波の線） */
-  function drawSea() {
-    var g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#2f86c8"); g.addColorStop(1, "#1d5f9e");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = "rgba(255,255,255,.16)"; ctx.lineWidth = 3; ctx.lineCap = "round";
-    for (var row = 0; row < 14; row++) {
-      var y = 40 + row * (H / 13), off = (T * 14 + row * 57) % 120;
-      for (var x = -120 + off + (row % 2) * 60; x < W + 40; x += 120) {
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + 12, y - 7, x + 24, y); ctx.quadraticCurveTo(x + 36, y + 7, x + 48, y); ctx.stroke();
-      }
+
+    /* 綱（かぶ → 並びの順） */
+    var k = kabuPos();
+    var sl = slots(n);
+    var out = state !== S.PLAY;
+    ctx.strokeStyle = "#e8d39a"; ctx.lineWidth = 5; ctx.lineJoin = "round";
+    if (!out) {
+      ctx.beginPath(); ctx.moveTo(k.x + 6, k.y - 90);
+      sl.forEach(function (q) { ctx.lineTo(q.x - q.dir * q.s * 0.38, q.y - q.s * 0.55); });
+      ctx.stroke();
     }
-  }
-  function drawMode() {
-    modeButtons().forEach(function (b) {
-      ctx.fillStyle = "rgba(255,255,255,.95)"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 4;
-      roundRect(b.x, b.y, b.w, b.h, 22); ctx.fill(); ctx.stroke();
-      var cx = b.x + b.w / 2, cy = b.y + b.h * 0.42;
-      if (b.m === "cpu") { person(cx - 34, cy, PCOL[0]); robot(cx + 34, cy, PCOL[1]); }
-      else { person(cx - 34, cy, PCOL[0]); person(cx + 34, cy, PCOL[1]); }
-      ctx.fillStyle = "#16202e"; ctx.font = "900 30px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(b.m === "cpu" ? "VS CPU" : "2P", cx, b.y + b.h * 0.82);
-    });
-    /* 地図の出典（国土地理院の利用規約・jpn-atlas の BSD-3-Clause による表記） */
-    ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.font = "500 15px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
-    ctx.fillText(zT("地図: 国土地理院「地球地図日本」を加工（jpn-atlas, BSD-3-Clause）", "Map: GSI Japan \"Global Map Japan\", modified (jpn-atlas, BSD-3-Clause)"), W / 2, H - 16);
-  }
-  function person(x, y, c) {
-    ctx.fillStyle = c; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(x, y - 18, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x - 24, y + 30); ctx.quadraticCurveTo(x - 24, y, x, y); ctx.quadraticCurveTo(x + 24, y, x + 24, y + 30); ctx.closePath(); ctx.fill(); ctx.stroke();
-  }
-  function robot(x, y, c) {
-    ctx.fillStyle = c; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(x, y - 40); ctx.lineTo(x, y - 32); ctx.stroke();
-    ctx.beginPath(); ctx.arc(x, y - 42, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    roundRect(x - 18, y - 32, 36, 28, 6); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = "#fff"; ctx.fillRect(x - 10, y - 23, 7, 7); ctx.fillRect(x + 3, y - 23, 7, 7);
-    ctx.fillStyle = c; roundRect(x - 22, y, 44, 30, 8); ctx.fill(); ctx.stroke();
-  }
-  function drawHUD() {
-    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.lineJoin = "round";
-    ctx.font = "900 60px sans-serif"; ctx.fillStyle = "#fff";
-    ctx.fillText(count, W / 2, 18);
-    if (state !== S.END) {
-      var who = mode === "2p" ? (turn === 0 ? "1P" : "2P") : turn === 0 ? zT("あなた", "YOU", "당신", "你", "你") : "CPU";
-      ctx.font = "900 26px sans-serif"; ctx.fillStyle = PCOL[turn]; ctx.lineWidth = 6; ctx.strokeStyle = "#fff"; ctx.strokeText(who, W / 2, 84);
-      ctx.fillText(who, W / 2, 84);
-    }
-    ctx.restore();
-  }
-  function wheelGeom() {
-    /* 上半分だけ画面に出す大きな円 */
-    var r = W * 0.47;
-    return { x: W / 2, y: H - 6, r: r };
-  }
-  function drawSpin() {
-    var g = wheelGeom(), n = spin.seg.length, s = Math.PI * 2 / n, done = spin.done;
-    var kNow = done ? underNeedle() : -1;
-    ctx.save(); ctx.translate(g.x, g.y);
-    ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.beginPath(); ctx.arc(4, 6, g.r + 6, 0, Math.PI * 2); ctx.fill();
-    for (var k = 0; k < n; k++) {
-      var a = wheelRot + k * s, i = spin.seg[k];
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, g.r, a, a + s); ctx.closePath();
-      ctx.fillStyle = prefColor(i); ctx.fill();
-      if (k === kNow) { ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.fill(); }
-      ctx.strokeStyle = "#16202e"; ctx.lineWidth = 1.2; ctx.stroke();
-      /* 県名（外から中へ） */
-      ctx.save(); ctx.rotate(a + s / 2);
-      ctx.fillStyle = "#16202e"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-      ctx.font = "500 " + Math.max(9, Math.min(20, g.r * s * 0.75)) + "px sans-serif";
-      ctx.fillText(SHAPES[i].name, g.r - 6, 0);
-      ctx.restore();
-    }
-    ctx.lineWidth = 5; ctx.strokeStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, g.r, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, g.r * 0.16, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3; ctx.stroke();
-    ctx.restore();
-    /* 針（上） */
-    ctx.fillStyle = PCOL[turn]; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(g.x - 16, g.y - g.r - 22); ctx.lineTo(g.x + 16, g.y - g.r - 22); ctx.lineTo(g.x, g.y - g.r + 14); ctx.closePath(); ctx.fill(); ctx.stroke();
-    /* 決まった県を大きく */
-    if (done) {
-      var nm = SHAPES[spin.pick].name, py = g.y - g.r * 0.45;
-      var pop = 1 + 0.5 * Math.max(0, 1 - spin.hold / 0.18);
-      ctx.save(); ctx.translate(g.x, py); ctx.scale(pop, pop); ctx.translate(-g.x, -py);
-      ctx.font = "900 44px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
-      ctx.lineWidth = 10; ctx.strokeStyle = "#16202e"; ctx.strokeText(nm, g.x, py); ctx.fillStyle = "#ffd34a"; ctx.fillText(nm, g.x, py);
-      ctx.restore();
-    }
-  }
-  function drawCtrls() {
-    ctrlButtons().forEach(function (b) {
-      ctx.fillStyle = b.kind === "ok" ? (curOverlaps() ? "#b9b2a0" : "#ffd34a") : "rgba(255,255,255,.92)"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.save(); ctx.translate(b.x, b.y); ctx.strokeStyle = "#16202e"; ctx.fillStyle = "#16202e"; ctx.lineWidth = 6; ctx.lineCap = "round"; ctx.lineJoin = "round";
-      if (b.kind === "ok") { ctx.beginPath(); ctx.moveTo(-17, 1); ctx.lineTo(-5, 14); ctx.lineTo(18, -12); ctx.stroke(); }
-      else {
-        if (b.kind === "rotL") ctx.scale(-1, 1);
-        ctx.beginPath(); ctx.arc(0, 0, 18, -Math.PI * 0.85, Math.PI * 0.55); ctx.stroke();
-        var ex = Math.cos(Math.PI * 0.55) * 18, ey = Math.sin(Math.PI * 0.55) * 18;
-        ctx.beginPath(); ctx.moveTo(ex - 12, ey + 2); ctx.lineTo(ex + 2, ey + 8); ctx.lineTo(ex + 1, ey - 8); ctx.closePath(); ctx.fill();
-      }
-      ctx.restore();
-    });
-  }
-  function roundRect(x, y, w, h, r) {
-    ctx.beginPath(); ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
-  }
-  function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
-  function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
-  function drawResult() {
-    ctx.fillStyle = "rgba(10,8,6,.55)"; ctx.fillRect(0, 0, W, H);
+
+    /* 土に埋まった所を隠すため、かぶは土の手前の穴の上に描き、下を土で塞ぐ */
     ctx.save();
-    ctx.fillStyle = "#fff"; ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10; ctx.textAlign = "center";
-    if (mode === "2p") { ctx.fillStyle = PCOL[won ? 0 : 1]; ctx.font = "900 96px sans-serif"; ctx.fillText((won ? "1P" : "2P") + " WIN", W / 2, H * 0.36); ctx.fillStyle = "#fff"; }
-    else { ctx.font = "800 96px sans-serif"; ctx.fillText(won ? "WIN" : "LOSE", W / 2, H * 0.36); }
-    ctx.font = "800 110px sans-serif"; ctx.fillText(count, W / 2, H * 0.36 + 120);
-    ctx.font = "800 36px sans-serif"; ctx.fillText(zT("県", "prefectures", "현", "县", "縣"), W / 2, H * 0.36 + 166);
+    ctx.beginPath(); ctx.rect(0, 0, W, KY + 20); ctx.clip();
+    drawKabu();
+    ctx.restore();
+    ctx.fillStyle = "#6e4622";
+    ctx.beginPath(); ctx.ellipse(KX, KY + 22, 96, 14, 0, 0, Math.PI * 2); ctx.fill();
+    if (out) { ctx.save(); drawKabu(); ctx.restore(); }
+
+    for (var i = 0; i < n; i++) drawPerson(crowd[i], sl[i], i, crowd[i].pull, out);
+
+    if (DEBUG && net && net.status() === 0) {
+      ctx.fillStyle = "rgba(22,32,46,.5)"; ctx.font = "600 18px sans-serif"; ctx.textAlign = "left";
+      ctx.fillText("offline", 12, 24);
+    }
+
+    confetti.draw(ctx);
+    if (state === S.RESULT) drawResult();
+  }
+
+  function resultButtons() {
+    return window.zResultActions.row(W, H * 0.62);
+  }
+  function hitButton(x, y) {
+    return window.zResultActions.hit(resultButtons(), x, y);
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.5)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(outN), W / 2, H * 0.45);
     ctx.restore();
     window.zResultActions.drawButtons(ctx, resultButtons());
     window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
   }
 
-  /* ============ 覗き穴 ============ */
-  var hideUI = false;
   window.__probe = {
-    now: function () { return { state: state, turn: turn, count: count, won: won, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { state: state, people: crowd.length, pulling: pullN, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
-    debug: debugKey,
-    hideUI: function () { hideUI = true; },
-    bodies: function () { return board.map(function (p) { return [SHAPES[p.i].name, +p.body.position.x.toFixed(2), +p.body.position.y.toFixed(2), +p.body.position.z.toFixed(2)]; }); }
+    hideUI: function () { hideUI = true; }
   };
+  var hideUI = false;
+
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
-      await r.wait(1000); r.key(); await r.wait(800);
-      for (var n = 0; n < 4; n++) {
-        if (!await r.until(function () { return state === S.SPIN && turn === 0; }, 15)) break;
-        await r.wait(500); spinNow();
-        if (!await r.until(function () { return state === S.PLACE && turn === 0; }, 15)) break;
-        await r.wait(600); debugKey(1);
-      }
-      await r.wait(2000);
+      await r.wait(800);
+      debugKey(2);
+      await r.wait(1500);
+      down(W / 2, H / 2);
+      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("抜けない");
+      await r.wait(1500);
     }
   };
 
-  /* ============ ループ ============ */
-  var startButton = document.getElementById("start");
+  var startButton = document.getElementById('start');
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
-  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); startButton.hidden = true; state = S.MODE; });
+  ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener('click', function (e) {
+    e.stopPropagation(); audioOn(); resumeAudio();
+    if (!net) net = window.zPresence({ topic: "zounoashi/kabu/v1", onDone: function (n) { pullOut(NEED); } });
+    newRound();
+  });
+  newRound(); state = S.INTRO; startButton.hidden = false;
   layout();
-  board = []; count = 0; turn = 0; T = 0; shake = 0; state = S.INTRO; startButton.hidden = false;
-  var last = performance.now(), stepAcc = 0;
+  var last = performance.now();
+  var stepAcc = 0;
   function loop(now) {
     var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
     last = now;
@@ -860,11 +536,11 @@
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=gattai-1793264427224" : "./recorder-ui.js?v=gattai-1793264427224";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=kabu-1793275702666" : "./recorder-ui.js?v=kabu-1793275702666";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=gattai-1793264427224"></script>
-<script src="./preview-header.js?v=gattai-1793264427224"></script>
+<script src="./auto-reload.js?v=kabu-1793275702666"></script>
+<script src="./preview-header.js?v=kabu-1793275702666"></script>
 </body>
 </html>
