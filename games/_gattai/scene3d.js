@@ -95,7 +95,7 @@
       else { g.quaternion.identity(); g.rotation.y = -p.yaw; }
       var m = g.userData.mat;
       m.transparent = !!p.ghost; m.opacity = p.ghost ? 0.8 : 1;
-      m.emissive.setHex(p.bad ? 0x661100 : 0x000000);
+      m.emissive.setHex(p.bad ? (p.ghost ? 0xcc1100 : 0x661100) : 0x000000);
       /* 県名はいつも上向き・正面向き（県が回っても読める） */
     });
     Object.keys(this.items).forEach(function (id) { if (!seen[id]) { sc.remove(self.items[id]); delete self.items[id]; } });
