@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="kabu-1793275702666">
+<meta name="preview-version" content="kabu-1793277897273">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>【プレビュー】おおきなかぶ</title>
 <style>
@@ -32,16 +32,15 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/start.js?v=kabu-1793275702666"></script>
-<script src="../games/view.js?v=kabu-1793275702666"></script>
-<script src="../games/audio.js?v=kabu-1793275702666"></script>
-<script src="../games/lang.js?v=kabu-1793275702666"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=kabu-1793275702666"></script>
-<script src="../games/result-actions.js?v=kabu-1793275702666"></script>
-<script src="../games/action-icons.js?v=kabu-1793275702666"></script>
-<script src="../games/pad.js?v=kabu-1793275702666"></script>   <!-- ジョイパッドと、絵の外のタップ -->
-<script src="../games/celebrate.js?v=kabu-1793275702666"></script>
-<script src="presence.js?v=kabu-1793275702666"></script>
+<script src="../games/start.js?v=kabu-1793277897273"></script>
+<script src="../games/view.js?v=kabu-1793277897273"></script>
+<script src="../games/audio.js?v=kabu-1793277897273"></script>
+<script src="../games/lang.js?v=kabu-1793277897273"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=kabu-1793277897273"></script>
+<script src="../games/result-actions.js?v=kabu-1793277897273"></script>
+<script src="../games/action-icons.js?v=kabu-1793277897273"></script>
+<script src="../games/pad.js?v=kabu-1793277897273"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/celebrate.js?v=kabu-1793277897273"></script>
 <script>
 /* おおきなかぶ
 
@@ -117,19 +116,30 @@
     else { try { AC.resume(); } catch (e) {} }
   });
 
-  /* ============ 人数 ============ */
-  var net = null;              /* 開始を押してからつなぐ */
-  var bots = [];               /* デバッグ用の手元だけの仲間 */
+  /* ============ 何人目か ============
+     開始のたびに共通のカウンターを1つ進めて、その番号をもらう。100の倍数の人だけが抜ける。 */
+  var COUNTER = "https://api.counterapi.dev/v1/zounoashi/kabu/up";
+  var myNo = 0, nextNo = 0;      /* nextNo はデバッグで次の番号を決めるとき */
+  function takeNumber(done) {
+    if (nextNo) { var n = nextNo; nextNo = 0; setTimeout(function () { done(n); }, 300); return; }
+    var fin = false;
+    function end(n) { if (!fin) { fin = true; done(n); } }
+    setTimeout(function () { end(0); }, 6000);
+    fetch(COUNTER, { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
+      end(Number(j.count != null ? j.count : j.value) || 0);
+    }).catch(function () { end(0); });
+  }
+  function placeNo() { return myNo ? (myNo - 1) % NEED + 1 : 1; }
   function people() {
-    var list = net ? net.peers() : [{ id: "me", pull: held, since: 0, me: true }];
-    bots.forEach(function (b) { list.push({ id: b.id, pull: held, since: b.since, me: false }); });
-    return list.sort(function (a, b) { return a.since - b.since || (a.id < b.id ? -1 : 1); });
+    var n = placeNo(), base = myNo - n, list = [];
+    for (var i = 1; i <= n; i++) list.push({ id: "p" + (base + i), pull: held || state !== S.PLAY, me: i === n });
+    return list;
   }
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", OUT: "out", RESULT: "result" };
+  var S = { INTRO: "intro", WAIT: "wait", PLAY: "play", OUT: "out", RESULT: "result" };
   var state, T, held, keyMode = false;
-  var crowd = [], pullN = 0, lift = 0, shake = 0, outT = 0, outN = 0, creakT = 0;
+  var crowd = [], lift = 0, shake = 0, outT = 0, holdT = 0, won = false, creakT = 0;
   var confetti = window.zCelebrate.confetti();
 
   var KX, KY;                                  /* かぶの根元 */
@@ -140,16 +150,15 @@
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
-    state = S.PLAY;
-    T = 0; held = false; lift = 0; shake = 0; outT = 0;
+    state = S.WAIT;
+    T = 0; held = false; lift = 0; shake = 0; outT = 0; holdT = 0; won = false;
     confetti.clear();
-    if (net) net.setPulling(false);
+    takeNumber(function (n) { myNo = n; state = S.PLAY; });
   }
 
-  function pullOut(n) {
-    if (state !== S.PLAY) return;
-    state = S.OUT; outT = 0; outN = Math.max(n, NEED);
-    held = false; if (net) net.setPulling(false);
+  function pullOut() {
+    state = S.OUT; outT = 0; won = true;
+    held = false;
     noiseHit(0.5, 300, 0.5, 0.6);
     tone(220, 0.35, 0.25, "triangle", 880);
     window.zCelebrate.play(AC, "fanfare", { delay: 0.35 });
@@ -159,22 +168,25 @@
   function update(dt) {
     T += dt;
     crowd = people();
-    pullN = crowd.filter(function (p) { return p.pull; }).length;
+    var lucky = myNo > 0 && myNo % NEED === 0;
     if (state === S.PLAY) {
-      var goal = Math.min(1, pullN / NEED);
-      lift += (goal - lift) * Math.min(1, dt * 3);
-      shake = pullN > 0 ? 0.3 + goal : 0;
+      if (held) holdT += dt;
+      var goal = held ? (lucky ? Math.min(1, holdT / 1.2) : Math.min(0.45, placeNo() / NEED * 0.5) * Math.min(1, holdT / 0.6)) : 0;
+      lift += (goal - lift) * Math.min(1, dt * 4);
+      shake = held ? 0.3 + goal : 0;
       if (held) {
         creakT -= dt;
         if (creakT <= 0) { creakT = 0.55 + Math.random() * 0.3; noiseHit(0.18, 160 + goal * 300, 0.12 + goal * 0.2, 3); }
       }
-      if (pullN >= NEED) { if (net) net.sendDone(); pullOut(pullN); }
+      if (lucky && holdT > 1.2) pullOut();
+      else if (!lucky && holdT > 2.6) { state = S.OUT; outT = 0; held = false; tone(196, 0.4, 0.18, "triangle", 98); }
     } else if (state === S.OUT) {
       outT += dt;
-      if (outT > 2.6) { state = S.RESULT; }
+      lift += (0 - lift) * Math.min(1, dt * 4);
+      if (outT > (won ? 2.6 : 1.0)) state = S.RESULT;
     }
     confetti.step(dt, W, H);
-    if (state === S.OUT && outT > 0.35 && outT - dt <= 0.35) confetti.burst(W, H, 180);
+    if (state === S.OUT && won && outT > 0.35 && outT - dt <= 0.35) confetti.burst(W, H, 180);
   }
 
   /* ============ 入力 ============ */
@@ -188,13 +200,11 @@
     }
     if (state !== S.PLAY) return;
     held = true; creakT = 0;
-    if (net) net.setPulling(true);
   }
   function move() {}
   function up() {
     if (!held) return;
     held = false;
-    if (net) net.setPulling(false);
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -209,12 +219,9 @@
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    /* 1=手元だけの仲間を10人足す 2=仲間を99人にする（次に押すと100人で抜ける） 3=仲間を消す */
-    if (n === 1 || n === 2) {
-      var want = n === 1 ? bots.length + 10 : NEED - 1 - (net ? net.peers().length - 1 : 0);
-      while (bots.length < want) bots.push({ id: "bot" + bots.length, since: Date.now() + bots.length });
-    }
-    if (n === 3) bots = [];
+    /* 1=次のもう一度で100人目になる 2=次は37人目 */
+    if (n === 1) nextNo = 100;
+    if (n === 2) nextNo = 37;
   }
 
   window.addEventListener("keydown", function (e) {
@@ -234,11 +241,11 @@
 
   function doShare() {
     window.zResultActions.x({ text: zT(
-      "同時に" + outN + "人で、おおきなかぶを抜いた",
-      "Pulled out the giant turnip with " + outN + " people at once",
-      "동시에 " + outN + "명이서 커다란 순무를 뽑았다",
-      "同时" + outN + "人一起拔出了大萝卜",
-      "同時" + outN + "人一起拔出了大蘿蔔"
+won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だったので、おおきなかぶは抜けなかった",
+      won ? "I was visitor #" + myNo + " and pulled out the giant turnip" : "I was visitor #" + myNo + ", so the giant turnip didn't budge",
+      won ? myNo + "번째로 커다란 순무를 뽑았다" : myNo + "번째라서 커다란 순무는 뽑히지 않았다",
+      won ? "我是第" + myNo + "人，拔出了大萝卜" : "我是第" + myNo + "人，大萝卜没拔出来",
+      won ? "我是第" + myNo + "人，拔出了大蘿蔔" : "我是第" + myNo + "人，大蘿蔔沒拔出來"
     ) + zT(" #おおきなかぶ", " #TheGiantTurnip", " #커다란순무", " #拔萝卜", " #拔蘿蔔") });
   }
 
@@ -374,7 +381,7 @@
   }
 
   function kabuPos() {
-    var out = state === S.OUT || state === S.RESULT;
+    var out = won && (state === S.OUT || state === S.RESULT);
     var u = out ? Math.min(1, outT / 0.6) : 0;
     var up = lift * 34 + (out ? (1 - Math.pow(1 - u, 3)) * H * 0.12 : 0);
     var sx = state === S.PLAY ? Math.sin(T * 40) * shake * 3 : 0;
@@ -428,7 +435,7 @@
     ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#16202e";
     ctx.font = "900 92px sans-serif";
-    var shown = state === S.PLAY ? n : outN;
+    var shown = state === S.WAIT || state === S.INTRO ? "" : n;
     ctx.fillText(String(shown), W - 120, 108);
     ctx.textAlign = "left";
     ctx.font = "800 40px sans-serif";
@@ -438,7 +445,7 @@
     /* 綱（かぶ → 並びの順） */
     var k = kabuPos();
     var sl = slots(n);
-    var out = state !== S.PLAY;
+    var out = won && (state === S.OUT || state === S.RESULT);
     ctx.strokeStyle = "#e8d39a"; ctx.lineWidth = 5; ctx.lineJoin = "round";
     if (!out) {
       ctx.beginPath(); ctx.moveTo(k.x + 6, k.y - 90);
@@ -455,12 +462,7 @@
     ctx.beginPath(); ctx.ellipse(KX, KY + 22, 96, 14, 0, 0, Math.PI * 2); ctx.fill();
     if (out) { ctx.save(); drawKabu(); ctx.restore(); }
 
-    for (var i = 0; i < n; i++) drawPerson(crowd[i], sl[i], i, crowd[i].pull, out);
-
-    if (DEBUG && net && net.status() === 0) {
-      ctx.fillStyle = "rgba(22,32,46,.5)"; ctx.font = "600 18px sans-serif"; ctx.textAlign = "left";
-      ctx.fillText("offline", 12, 24);
-    }
+    if (state !== S.WAIT && state !== S.INTRO) for (var i = 0; i < n; i++) drawPerson(crowd[i], sl[i], i, crowd[i].pull && state === S.PLAY || out, out);
 
     confetti.draw(ctx);
     if (state === S.RESULT) drawResult();
@@ -481,14 +483,14 @@
     ctx.shadowBlur = 10;
     ctx.font = "800 108px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(String(outN), W / 2, H * 0.45);
+    ctx.fillText(myNo ? String(myNo) : "?", W / 2, H * 0.45);
     ctx.restore();
     window.zResultActions.drawButtons(ctx, resultButtons());
     window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
   }
 
   window.__probe = {
-    now: function () { return { state: state, people: crowd.length, pulling: pullN, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { state: state, no: myNo, won: won, people: crowd.length, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     hideUI: function () { hideUI = true; }
@@ -499,7 +501,7 @@
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
       await r.wait(800);
-      debugKey(2);
+      debugKey(1); r.key();
       await r.wait(1500);
       down(W / 2, H / 2);
       if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("抜けない");
@@ -512,7 +514,6 @@
   ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
   startButton.addEventListener('click', function (e) {
     e.stopPropagation(); audioOn(); resumeAudio();
-    if (!net) net = window.zPresence({ topic: "zounoashi/kabu/v1", onDone: function (n) { pullOut(NEED); } });
     newRound();
   });
   newRound(); state = S.INTRO; startButton.hidden = false;
@@ -536,11 +537,11 @@
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=kabu-1793275702666" : "./recorder-ui.js?v=kabu-1793275702666";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=kabu-1793277897273" : "./recorder-ui.js?v=kabu-1793277897273";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=kabu-1793275702666"></script>
-<script src="./preview-header.js?v=kabu-1793275702666"></script>
+<script src="./auto-reload.js?v=kabu-1793277897273"></script>
+<script src="./preview-header.js?v=kabu-1793277897273"></script>
 </body>
 </html>
