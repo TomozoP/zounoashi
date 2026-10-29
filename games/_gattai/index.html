@@ -291,7 +291,7 @@
     refreshBoard();
     if (cpuTurn()) {
       var best = solve(i);
-      if (!best || overlapsAny(placed(i, best.x, best.y, best.a), bbox(placed(i, best.x, best.y, best.a)))) best = outsideSpot(i);
+      if (!best || (NO_OVERLAP && overlapsAny(placed(i, best.x, best.y, best.a), bbox(placed(i, best.x, best.y, best.a))))) best = outsideSpot(i);
       if (forceOut === "cpu") { best = { x: HKB.x1 + 250, y: CY, a: 0 }; forceOut = null; }
       cpuMove = { t: 0, fx: cur.x, fy: cur.y, x: best.x, y: best.y, a: best.a };
     }
@@ -299,26 +299,36 @@
 
   /* ---------- 置ける所を探す（相手と、デバッグの「おまかせ」） ----------
      線の内側で、ほかの県と重ならない所のうち、線やほかの県にいちばん寄り添う所（少しぶれる） */
+  function deepIn(x, y) {                       /* 重心が線から少し内側（すべっても落ちにくい） */
+    var m = 22;
+    return pointIn(HKP, x, y) && pointIn(HKP, x + m, y) && pointIn(HKP, x - m, y) && pointIn(HKP, x, y + m) && pointIn(HKP, x, y - m);
+  }
   function solve(i) {
     var best = null, step = 10, rots = 18;
     for (var r = 0; r < rots; r++) {
       var a = r * Math.PI * 2 / rots;
       for (var y = HKB.y0; y <= HKB.y1; y += step) for (var x = HKB.x0; x <= HKB.x1; x += step) {
-        if (!pointIn(HKP, x, y)) continue;
+        if (!deepIn(x, y)) continue;
         var P = placed(i, x, y, a), bb = bbox(P);
-        var sc = hug(P) + Math.random() * 6 - (overLine(P) ? 5000 : 0) - (overlapsAny(P, bb) ? 1000 + squeeze(P, bb) : 0);
+        var sc = hug(P) + Math.random() * 6 - (overLine(P) ? 5000 : 0);
+        if (overlapsAny(P, bb)) {
+          /* 重ねるなら、県の上にまるごと乗せる（半分だけ乗ると傾いてすべり落ちる） */
+          var f = onTop(P, bb, x, y);
+          sc -= 1000 + 2000 * Math.min(f, 1 - f) + (f < 0.5 ? 600 : 0);
+        }
         if (!best || sc > best.sc) best = { x: x, y: y, a: a, sc: sc };
       }
     }
     return best;
   }
-  function squeeze(P, bb) {                      /* ほかの県に入りこんでいる角の数 */
-    var n = 0;
-    board.forEach(function (Q) {
-      if (bb.x1 < Q.bb.x0 || bb.x0 > Q.bb.x1 || bb.y1 < Q.bb.y0 || bb.y0 > Q.bb.y1) return;
-      P.forEach(function (v) { if (pointIn(Q.poly, v[0], v[1])) n++; });
-    });
-    return n;
+  /* 角と真ん中のうち、ほかの県の上にある割合（0〜1）。真ん中は重く数える */
+  function onTop(P, bb, cx, cy) {
+    var near = board.filter(function (Q) { return !(bb.x1 < Q.bb.x0 || bb.x0 > Q.bb.x1 || bb.y1 < Q.bb.y0 || bb.y0 > Q.bb.y1); });
+    function over(px, py) { for (var k = 0; k < near.length; k++) if (pointIn(near[k].poly, px, py)) return 1; return 0; }
+    var n = 0, m = 0;
+    for (var k = 0; k < P.length; k += 2) { n += over(P[k][0], P[k][1]); m++; }
+    n += over(cx, cy) * 4; m += 4;
+    return n / m;
   }
   function hug(P) {                              /* 線やほかの県の近くにある角の数 */
     var n = 0, polys = [HKP].concat(board.map(function (b) { return b.poly; }));
@@ -442,8 +452,8 @@
     world.step(1 / 60);
     board.forEach(function (p) {
       var b = p.body;
-      /* 板の高さまで下りてきて、重心が北海道の外なら、板から外して落とす */
-      if (b.collisionFilterMask & 2 && b.position.y < THICK * 1.6 && !pointIn(HKP, b.position.x * UNIT + CX, b.position.z * UNIT + CY)) {
+      /* 板の高さ（ほかの県の上ではない）まで下りてきて、重心が北海道の外なら、板から外して落とす */
+      if (b.collisionFilterMask & 2 && b.position.y < THICK * 1.2 && !pointIn(HKP, b.position.x * UNIT + CX, b.position.z * UNIT + CY)) {
         b.collisionFilterMask = 1; b.wakeUp();
         var ox = b.position.x, oz = b.position.z, d = Math.hypot(ox, oz) || 1;
         b.angularVelocity.set(oz / d * 3, 0, -ox / d * 3);
@@ -556,7 +566,7 @@
     if (state !== S.PLACE || !humanTurn()) return;
     if (n === 1 || n === 2) {                     /* 1 自分の県をおまかせで置く  2 そのうえ次の相手は海に落とす（勝ち） */
       var b = solve(cur.i);
-      if (!b || overlapsAny(placed(cur.i, b.x, b.y, b.a), bbox(placed(cur.i, b.x, b.y, b.a)))) b = outsideSpot(cur.i);
+      if (!b || (NO_OVERLAP && overlapsAny(placed(cur.i, b.x, b.y, b.a), bbox(placed(cur.i, b.x, b.y, b.a))))) b = outsideSpot(cur.i);
       cur.x = b.x; cur.y = b.y; cur.a = cur.ta = b.a;
       if (n === 2) forceOut = "cpu";
       confirm();
