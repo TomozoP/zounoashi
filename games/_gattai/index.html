@@ -228,24 +228,41 @@
   function trayPos() { return { x: W / 2, y: (HKB.y1 + ctrlY()) / 2 + 10 }; }
 
   /* ---------- ルーレット（次の県を決める） ---------- */
+  /* 円盤に残りの県を並べる。自分の番はタップで回し、あいては自分で回す。ゆっくり止まって、針の先の県に決まる */
+  var wheelRot = 0;
   function startSpin() {
     if (!deck.length) { finish(true); return; }
     state = S.SPIN;
-    var pick = deck[Math.floor(Math.random() * deck.length)];
-    /* 名前がだんだんゆっくり切りかわって、最後に pick で止まる */
-    var ticks = [], t = 0, gap = 0.045;
-    while (t < 1.5) { ticks.push(t); t += gap; gap *= 1.09; }
-    var seq = ticks.map(function () { return deck[Math.floor(Math.random() * deck.length)]; });
-    seq[seq.length - 1] = pick;
-    spin = { t: 0, ticks: ticks, seq: seq, k: 0, pick: pick, hold: 0 };
+    spin = { seg: deck.slice(), on: false, t: 0, wait: 0, hold: 0, pick: null, a0: wheelRot, D: 0, dur: 0, last: -1 };
+  }
+  function spinNow() {
+    if (state !== S.SPIN || spin.on) return;
+    var n = spin.seg.length, s = Math.PI * 2 / n, k = Math.floor(Math.random() * n);
+    var fin = -Math.PI / 2 - (k + 0.5 + (Math.random() - 0.5) * 0.7) * s;
+    var D = fin - wheelRot;
+    D = ((D % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) + Math.PI * 2 * (4 + Math.floor(Math.random() * 2));
+    spin.on = true; spin.pick = spin.seg[k]; spin.a0 = wheelRot; spin.D = D; spin.dur = 3 + Math.random() * 0.6; spin.t = 0;
+    noiseHit(0.3, 1200, 0.15, 1, 3000);
+  }
+  function underNeedle() {
+    var n = spin.seg.length, s = Math.PI * 2 / n, a = ((-Math.PI / 2 - wheelRot) % (Math.PI * 2) + Math.PI * 4) % (Math.PI * 2);
+    return Math.floor(a / s) % n;
   }
   function updateSpin(dt) {
+    if (!spin.on) {
+      spin.wait += dt;
+      if (turn === 1 && spin.wait > 0.7) spinNow();
+      return;
+    }
     spin.t += dt;
-    while (spin.k < spin.ticks.length - 1 && spin.t >= spin.ticks[spin.k + 1]) { spin.k++; tone(900 + (spin.k % 2) * 120, 0.04, 0.06, "square"); }
-    if (spin.k === spin.ticks.length - 1) {
+    var u = Math.min(1, spin.t / spin.dur);
+    wheelRot = spin.a0 + spin.D * (1 - Math.pow(1 - u, 3));
+    var k = underNeedle();
+    if (k !== spin.last) { spin.last = k; tone(1100, 0.03, 0.05, "square"); }
+    if (u >= 1) {
       if (!spin.hold) { tone(660, 0.12, 0.12, "square"); tone(990, 0.25, 0.12, "square", null, 0.1); }
       spin.hold += dt;
-      if (spin.hold > 0.55) startPlace(spin.pick);
+      if (spin.hold > 0.7) startPlace(spin.pick);
     }
   }
   function startPlace(i) {
@@ -378,6 +395,7 @@
       if (hit === "retry") newRound();
       return;
     }
+    if (state === S.SPIN && turn === 0) { spinNow(); return; }   /* タップで回す */
     if (state !== S.PLACE || turn !== 0) return;
     if (x == null) { confirm(); return; }
     var bs = ctrlButtons();
@@ -402,6 +420,7 @@
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
+    if (state === S.SPIN && turn === 0) { spinNow(); return; }
     if (state !== S.PLACE || turn !== 0) return;
     if (n === 1 || n === 2) {                     /* 1 自分の県をおまかせで置く  2 そのうえ次の相手は入らない（勝ち） */
       var b = solve(cur.i) || outsideSpot(cur.i);
@@ -504,18 +523,41 @@
     }
     ctx.restore();
   }
+  function wheelGeom() {
+    var y0 = HKB.y1 + 24, y1 = ctrlY() + 40, r = Math.max(70, Math.min(190, (y1 - y0) / 2 - 8));
+    return { x: W / 2, y: (y0 + y1) / 2 + 6, r: r };
+  }
   function drawSpin() {
-    /* 器の下に、名前が切りかわるルーレット */
-    var tp = trayPos(), bw = 260, bh = 150, x = tp.x - bw / 2, y = tp.y - bh / 2;
-    var i = spin.seq[spin.k], done = spin.k === spin.ticks.length - 1;
-    ctx.fillStyle = done ? "#ffd34a" : "#fff"; roundRect(x, y, bw, bh, 18); ctx.fill();
-    ctx.strokeStyle = turn === 0 ? "#7fd0ff" : "#ffb07f"; ctx.lineWidth = 5; ctx.stroke();
-    var sh = SHAPES[i], k = 44 / sh.r;
-    var P = sh.pts.map(function (q) { return [tp.x - 70 + q[0] * k, tp.y + q[1] * k]; });
-    path(P); ctx.fillStyle = prefColor(i); ctx.fill(); ctx.strokeStyle = "#16202e"; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = "#16202e"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.font = "900 " + (sh.name.length >= 3 ? 34 : 42) + "px sans-serif";
-    ctx.fillText(sh.name, tp.x + 50, tp.y);
+    var g = wheelGeom(), n = spin.seg.length, s = Math.PI * 2 / n, done = spin.on && spin.t >= spin.dur;
+    var kNow = done ? underNeedle() : -1;
+    ctx.save(); ctx.translate(g.x, g.y);
+    ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.beginPath(); ctx.arc(4, 6, g.r + 6, 0, Math.PI * 2); ctx.fill();
+    for (var k = 0; k < n; k++) {
+      var a = wheelRot + k * s, i = spin.seg[k];
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, g.r, a, a + s); ctx.closePath();
+      ctx.fillStyle = prefColor(i); ctx.fill();
+      if (k === kNow && Math.floor(spin.hold * 8) % 2 === 0) { ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.fill(); }
+      ctx.strokeStyle = "#16202e"; ctx.lineWidth = 1.2; ctx.stroke();
+      /* 県名（外から中へ） */
+      ctx.save(); ctx.rotate(a + s / 2);
+      ctx.fillStyle = "#16202e"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      ctx.font = "800 " + Math.max(9, Math.min(16, g.r * s * 0.8)) + "px sans-serif";
+      ctx.fillText(SHAPES[i].name, g.r - 6, 0);
+      ctx.restore();
+    }
+    ctx.lineWidth = 5; ctx.strokeStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, g.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, g.r * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3; ctx.stroke();
+    ctx.restore();
+    /* 針（上） */
+    ctx.fillStyle = turn === 0 ? "#7fd0ff" : "#ffb07f"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(g.x - 16, g.y - g.r - 22); ctx.lineTo(g.x + 16, g.y - g.r - 22); ctx.lineTo(g.x, g.y - g.r + 14); ctx.closePath(); ctx.fill(); ctx.stroke();
+    /* 決まった県を大きく */
+    if (done) {
+      var nm = SHAPES[spin.pick].name;
+      ctx.font = "900 44px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+      ctx.lineWidth = 10; ctx.strokeStyle = "#16202e"; ctx.strokeText(nm, g.x, g.y); ctx.fillStyle = "#ffd34a"; ctx.fillText(nm, g.x, g.y);
+    }
   }
   function drawCtrls() {
     ctrlButtons().forEach(function (b) {
@@ -565,6 +607,8 @@
     run: async function (r) {
       await r.wait(1000); r.key(); await r.wait(800);
       for (var n = 0; n < 4; n++) {
+        if (!await r.until(function () { return state === S.SPIN && turn === 0; }, 15)) break;
+        await r.wait(500); spinNow();
         if (!await r.until(function () { return state === S.PLACE && turn === 0; }, 15)) break;
         await r.wait(600); debugKey(1);
       }

@@ -8,6 +8,7 @@ function run(win) {
   var turns = 0;
   for (var i = 0; i < 60 * 60 && g.probe.now().state !== "result"; i++) {
     var e = g.probe.now();
+    if (e.state === "spin" && e.turn === 0) g.press(" ");
     if (e.state === "place" && e.turn === 0) { turns++; g.probe.debug(win ? 2 : turns >= 2 ? 3 : 1); }
     g.step(1);
   }
