@@ -22,7 +22,7 @@
   ];
   global.OTOKO_STROKES = STROKES;
   var BOX = 1.1;                     /* 貼り絵は字の座標 -1.1〜1.1 を覆う */
-  var TEX = 256;
+  var TEX = Z3 && Z3.mobile ? 384 : 512;
   var SCALE = 1.6, DEPTH = 0.28;
 
   /* 金属の映り込みに使う撮影所の景色（横長の絵を周りに貼る） */
@@ -43,7 +43,7 @@
 
   function GameScene() {
     T = global.THREE;
-    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.05 }, camera: { fov: 32 }, finish: { vignette: 0.36, grain: 0.02 } });
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 1.25 }, camera: { fov: 32 }, finish: { vignette: 0.36, grain: 0.02 } });
     this.scene = st.scene;
     this.camera = st.camera;
     this.scene.background = new T.Color(0x1c1a19);
@@ -55,7 +55,7 @@
       pm.dispose();
     } catch (e) {}
     var L = Z3.lights(this.scene, { shadows: true, shadowSize: 4, scale: 0.8 });
-    L.key.position.set(-3, 7, 6);
+    L.key.position.set(-6, 6, 3);
     this.camera.position.set(1.3, 3.0, 11.6);
     this.camera.lookAt(0, 1.45, 0);
 
@@ -88,23 +88,30 @@
     this.scene.add(bench);
 
     /* 「男」の字 */
-    var cv = this.texCanvas = document.createElement("canvas"); cv.width = cv.height = TEX;
-    var cvM = this.matCanvas = document.createElement("canvas"); cvM.width = cvM.height = TEX;
-    this.colTex = new T.CanvasTexture(cv); this.colTex.colorSpace = T.SRGBColorSpace;
-    this.matTex = new T.CanvasTexture(cvM);
-    [this.colTex, this.matTex].forEach(function (t) { t.repeat.set(1 / (2 * BOX), 1 / (2 * BOX)); t.offset.set(0.5, 0.5); t.anisotropy = 4; });
-    this.face = new T.MeshStandardMaterial({ map: this.colTex, roughnessMap: this.matTex, metalnessMap: this.matTex, roughness: 1, metalness: 1, envMapIntensity: 1.3 });
-    this.side = new T.MeshStandardMaterial({ color: 0x6a3a1c, roughness: 0.9, metalness: 0.2, envMapIntensity: 1.3 });
+    /* 貼り絵は3枚: 色 / 粗さ(緑)と金属らしさ(青) / 凹凸(赤) */
+    var self = this;
+    this.cv = [0, 1, 2].map(function () { var c = document.createElement("canvas"); c.width = c.height = TEX; return c; });
+    this.img = this.cv.map(function (c) { return c.getContext("2d").createImageData(TEX, TEX); });
+    this.tex = this.cv.map(function (c, i) {
+      var t = new T.CanvasTexture(c);
+      if (i === 0) t.colorSpace = T.SRGBColorSpace;
+      t.repeat.set(1 / (2 * BOX), 1 / (2 * BOX)); t.offset.set(0.5, 0.5); t.anisotropy = 8;
+      return t;
+    });
+    this.face = new T.MeshStandardMaterial({ map: this.tex[0], roughnessMap: this.tex[1], metalnessMap: this.tex[1], bumpMap: this.tex[2], bumpScale: 2.2, roughness: 1, metalness: 1, envMapIntensity: 1.15 });
     var glyph = this.glyph = new T.Group();
     var seg = Z3.mobile ? 2 : 3;
-    var self = this;
     STROKES.forEach(function (pts) {
       var sh = new T.Shape();
       pts.forEach(function (p, i) { if (i) sh.lineTo(p[0], p[1]); else sh.moveTo(p[0], p[1]); });
       sh.closePath();
       var geo = new T.ExtrudeGeometry(sh, { depth: DEPTH, bevelEnabled: true, bevelThickness: 0.045, bevelSize: 0.03, bevelSegments: seg, curveSegments: 4 });
       geo.translate(0, 0, -DEPTH / 2);
-      var m = new T.Mesh(geo, [self.face, self.side]);
+      /* 側面も「その場所の字の座標」で貼る（ふちをこすれば側面も磨ける） */
+      var pos = geo.attributes.position, uv = geo.attributes.uv;
+      for (var i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i), pos.getY(i));
+      geo.clearGroups();
+      var m = new T.Mesh(geo, self.face);
       m.castShadow = true; m.receiveShadow = true;
       glyph.add(m);
     });
@@ -179,66 +186,98 @@
     return g;
   }
 
-  /* 錆のむらと細かい粒（毎回同じ） */
-  function makeNoise() {
-    var r = Z3.rng(21), N = TEX, lo = new Float32Array(N * N), hi = new Float32Array(N * N);
-    var G = 12, base = [];
+  /* 錆のむら・穴・削り跡のもと（毎回同じ） */
+  function valueNoise(r, N, G) {
+    var base = [], out = new Float32Array(N * N);
     for (var i = 0; i < (G + 1) * (G + 1); i++) base.push(r());
     for (var y = 0; y < N; y++) for (var x = 0; x < N; x++) {
       var fx = x / N * G, fy = y / N * G, ix = fx | 0, iy = fy | 0, tx = fx - ix, ty = fy - iy;
       tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
       var a = base[iy * (G + 1) + ix], b = base[iy * (G + 1) + ix + 1], c = base[(iy + 1) * (G + 1) + ix], d = base[(iy + 1) * (G + 1) + ix + 1];
-      lo[y * N + x] = (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
-      hi[y * N + x] = r();
+      out[y * N + x] = (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
     }
-    return { lo: lo, hi: hi };
+    return out;
   }
+  function makeNoise() {
+    var r = Z3.rng(21), N = TEX;
+    var n1 = valueNoise(r, N, 6), n2 = valueNoise(r, N, 18), n3 = valueNoise(r, N, 54), n4 = valueNoise(r, N, 140);
+    var fbm = new Float32Array(N * N), pit = new Float32Array(N * N), streak = new Float32Array(N * N), hi = new Float32Array(N * N);
+    var row = [], rowSlow = [];
+    for (var y = 0; y < N; y++) { row.push(r()); }
+    for (var i = 0; i < N * N; i++) {
+      fbm[i] = n1[i] * 0.45 + n2[i] * 0.3 + n3[i] * 0.17 + n4[i] * 0.08;
+      var p = n4[i] * 0.6 + n3[i] * 0.4;
+      pit[i] = Math.max(0, (p - 0.62) / 0.38);          /* 小さな腐食の穴 */
+      hi[i] = r();
+    }
+    /* 紙やすりの横向きの細い削り跡 */
+    for (y = 0; y < N; y++) for (var x = 0; x < N; x++) {
+      var k = y * N + x;
+      streak[k] = (row[y] - 0.5) * (0.6 + 0.8 * n2[k]) + (hi[k] - 0.5) * 0.25;
+    }
+    return { fbm: fbm, pit: pit, streak: streak, hi: hi };
+  }
+  function mix(a, b, t) { return a + (b - a) * t; }
+  function clamp(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
-  /* 磨きの状態 grid（index.html の形: n×n、dirt/rough/shine/fin の Float32Array）から貼り絵を作り直す */
+  /* 磨きの状態 grid（index.html の形: n×n、dirt/rough/shine/fin）から貼り絵を作り直す。
+     grid.rect（{i0, j0, i1, j1} マス）があればそこだけ */
   GameScene.prototype.paint = function (grid) {
-    var N = TEX, n = grid.n, k = n / N;
-    var gc = this.texCanvas.getContext("2d"), gm = this.matCanvas.getContext("2d");
-    var ic = this._ic || (this._ic = gc.createImageData(N, N)), im = this._im || (this._im = gm.createImageData(N, N));
-    var C = ic.data, M = im.data, lo = this.noise.lo, hi = this.noise.hi;
-    var D = grid.dirt, R = grid.rough, S = grid.shine, F = grid.fin;
-    for (var y = 0; y < N; y++) {
-      var gy = Math.min(n - 1.001, Math.max(0, (y + 0.5) * k - 0.5)), y0 = gy | 0, ty = gy - y0;
-      for (var x = 0; x < N; x++) {
-        var gx = Math.min(n - 1.001, Math.max(0, (x + 0.5) * k - 0.5)), x0 = gx | 0, tx = gx - x0;
-        var i00 = y0 * n + x0, i10 = i00 + 1, i01 = i00 + n, i11 = i01 + 1;
+    var N = TEX, n = grid.n, k = n / N, R0 = grid.rect;
+    var x0p = 0, y0p = 0, x1p = N, y1p = N;
+    if (R0) {
+      x0p = Math.max(0, Math.floor((R0.i0 - 1) / k)); x1p = Math.min(N, Math.ceil((R0.i1 + 2) / k));
+      y0p = Math.max(0, Math.floor((R0.j0 - 1) / k)); y1p = Math.min(N, Math.ceil((R0.j1 + 2) / k));
+    }
+    var C = this.img[0].data, M = this.img[1].data, B = this.img[2].data, nz = this.noise;
+    var D = grid.dirt, RO = grid.rough, S = grid.shine, F = grid.fin;
+    for (var y = y0p; y < y1p; y++) {
+      var gy = Math.min(n - 1.001, Math.max(0, (y + 0.5) * k - 0.5)), yy = gy | 0, ty = gy - yy;
+      for (var x = x0p; x < x1p; x++) {
+        var gx = Math.min(n - 1.001, Math.max(0, (x + 0.5) * k - 0.5)), xx = gx | 0, tx = gx - xx;
+        var i00 = yy * n + xx, i10 = i00 + 1, i01 = i00 + n, i11 = i01 + 1;
         var w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
         var d = D[i00] * w00 + D[i10] * w10 + D[i01] * w01 + D[i11] * w11;
-        var ro = R[i00] * w00 + R[i10] * w10 + R[i01] * w01 + R[i11] * w11;
+        var ro = RO[i00] * w00 + RO[i10] * w10 + RO[i01] * w01 + RO[i11] * w11;
         var s = S[i00] * w00 + S[i10] * w10 + S[i01] * w01 + S[i11] * w11;
         var f = F[i00] * w00 + F[i10] * w10 + F[i01] * w01 + F[i11] * w11;
-        var p = y * N + x, nl = lo[p], nh = hi[p];
-        /* 錆は境目をくっきり（むらで早く消える所と残る所） */
-        var dd = Math.max(0, Math.min(1, (d - 0.15 * nl) * 1.25));
+        var p = y * N + x, fb = nz.fbm[p], pt = nz.pit[p], st = nz.streak[p], h = nz.hi[p];
+        /* 錆は穴の中ほど遅くまで残る */
+        var dd = clamp((d - 0.3 * (1 - pt) - 0.1 * fb + 0.12) * 1.6);
         var haze = s * (1 - f);
-        /* 金属の地: ざらざらは暗く粒っぽい、磨くほど明るく均一 */
-        var mc = 0.5 + (nh - 0.5) * 0.22 * ro + (1 - ro) * 0.18 + s * 0.12 + f * 0.06;
-        var cr = mc, cg = mc, cb = mc * 1.03;
-        cr += (0.95 - cr) * haze * 0.55; cg += (0.94 - cg) * haze * 0.55; cb += (0.9 - cb) * haze * 0.55;
-        var rr = (0.30 + 0.5 * nl) * (0.85 + nh * 0.3), rg = (0.15 + 0.2 * nl) * (0.85 + nh * 0.3), rb = 0.07 + 0.06 * nl;
-        cr += (rr - cr) * dd; cg += (rg - cg) * dd; cb += (rb - cb) * dd;
-        var rough = ro * (0.62 + nh * 0.2) + (1 - ro) * (0.34 - s * 0.24 - f * 0.08);
-        rough = Math.max(0.03, rough + haze * 0.3);
-        rough += (0.95 - rough) * dd;
-        var metal = (1 - dd) * (1 - haze * 0.4);
+        var pitVis = pt * ro;                               /* 削ると穴も消える */
+        var sanded = (1 - ro);
+        /* 鉄の地: 黒っぽい黒皮 → 削った灰色（横の削り跡） → 磨いた明るい鋼 */
+        var g = mix(0.24 + fb * 0.1, 0.5 + st * 0.12 * (1 - s), sanded);
+        g = mix(g, 0.66 + st * 0.02, s * 0.8 + f * 0.2);
+        g *= 1 - pitVis * 0.55;
+        var cr = g * 0.98, cg = g, cb = g * 1.04;
+        cr = mix(cr, 0.78, haze * 0.45); cg = mix(cg, 0.77, haze * 0.45); cb = mix(cb, 0.74, haze * 0.45);
+        var rough = mix(0.62 + fb * 0.15 + h * 0.08, 0.36 + Math.abs(st) * 0.2, sanded);
+        rough = mix(rough, 0.05 + Math.abs(st) * 0.03, s * 0.6 + f * 0.4);
+        rough = clamp(rough + haze * 0.4 + pitVis * 0.2);
+        var metal = 0.85 + sanded * 0.15 - haze * 0.3;
+        var hgt = 0.5 - pitVis * 0.35 + (st * 0.12 + (h - 0.5) * 0.05) * ro * (1 - s);
+        /* 錆: こげ茶〜橙〜黄土のむら、ところどころ黒い斑点。ふくらんだ凹凸 */
+        var t = clamp((fb - 0.28) * 1.9 + (h - 0.5) * 0.18), rr, rg, rb;
+        if (t < 0.5) { rr = mix(0.13, 0.33, t / 0.5); rg = mix(0.065, 0.13, t / 0.5); rb = mix(0.045, 0.05, t / 0.5); }
+        else { var u = (t - 0.5) / 0.5; rr = mix(0.33, 0.62, u); rg = mix(0.13, 0.29, u); rb = mix(0.05, 0.1, u); }
+        var spot = clamp((pt - 0.3) * 2);
+        rr *= 1 - spot * 0.6; rg *= 1 - spot * 0.6; rb *= 1 - spot * 0.6;
+        cr = mix(cr, rr, dd); cg = mix(cg, rg, dd); cb = mix(cb, rb, dd);
+        rough = mix(rough, 0.92 + h * 0.08, dd);
+        metal = mix(metal, 0.05, dd);
+        hgt = mix(hgt, 0.55 + fb * 0.3 + (h - 0.5) * 0.12 - spot * 0.2, dd);
         var q = p * 4;
         C[q] = cr * 255; C[q + 1] = cg * 255; C[q + 2] = cb * 255; C[q + 3] = 255;
-        M[q] = 0; M[q + 1] = rough * 255; M[q + 2] = metal * 255; M[q + 3] = 255;
+        M[q] = 0; M[q + 1] = rough * 255; M[q + 2] = clamp(metal) * 255; M[q + 3] = 255;
+        B[q] = B[q + 1] = B[q + 2] = clamp(hgt) * 255; B[q + 3] = 255;
       }
     }
-    gc.putImageData(ic, 0, 0); gm.putImageData(im, 0, 0);
-    this.colTex.needsUpdate = true; this.matTex.needsUpdate = true;
-    /* 側面は全体の進み具合で色を変える */
-    var a = grid.avg || { dirt: 1, rough: 1, shine: 0, fin: 0 };
-    var sd = Math.max(0, Math.min(1, a.dirt * 1.3));
-    var sc = new T.Color(0x5e3418).lerp(new T.Color(0x8a8c92).lerp(new T.Color(0xc8cacc), a.shine), 1 - sd);
-    this.side.color.copy(sc);
-    this.side.roughness = sd * 0.9 + (1 - sd) * (0.55 - a.shine * 0.4 - a.fin * 0.1);
-    this.side.metalness = (1 - sd) * 0.95;
+    for (var c = 0; c < 3; c++) {
+      this.cv[c].getContext("2d").putImageData(this.img[c], 0, 0, x0p, y0p, x1p - x0p, y1p - y0p);
+      this.tex[c].needsUpdate = true;
+    }
   };
 
   /* 画面の点（ゲームの座標）→ 字の座標 {x, y}。外れたら null */

@@ -40,7 +40,7 @@
 <script>
 /* 男磨き
    錆びた「男」の字を、4つの道具（ワイヤーブラシ → 紙やすり → コンパウンド → 布）でこすって磨く。
-   制限時間のあいだにどこまで磨けたかを「%」で出す。 */
+   時間は無制限。右下の「完成」でおしまいにして、どこまで磨けたかを「%」で出す。 */
 (function () {
   "use strict";
 
@@ -143,7 +143,7 @@
   function resetGrid() {
     for (var i = 0; i < N * N; i++) { grid.dirt[i] = rustBase[i]; grid.rough[i] = 1; grid.shine[i] = 0; grid.fin[i] = 0; }
     measure();
-    painted = true;
+    painted = true; grid.rect = null;
   }
   var painted = true;
   function measure() {
@@ -165,6 +165,9 @@
   var RAD = 0.17;
   function stamp(x, y) {
     var ci = Math.round((x + BOX) / CELL - 0.5), cj = Math.round((BOX - y) / CELL - 0.5), rc = Math.ceil(RAD / CELL);
+    /* 描き直す範囲を広げる */
+    if (!painted) grid.rect = { i0: ci - rc, j0: cj - rc, i1: ci + rc, j1: cj + rc };
+    else if (grid.rect) { var g = grid.rect; g.i0 = Math.min(g.i0, ci - rc); g.j0 = Math.min(g.j0, cj - rc); g.i1 = Math.max(g.i1, ci + rc); g.j1 = Math.max(g.j1, cj + rc); }
     for (var j = cj - rc; j <= cj + rc; j++) {
       if (j < 0 || j >= N) continue;
       for (var i = ci - rc; i <= ci + rc; i++) {
@@ -175,16 +178,16 @@
         var w = 1 - q, k = j * N + i;
         var d = grid.dirt[k], r = grid.rough[k], s = grid.shine[k], f = grid.fin[k];
         if (tool === 0) {                          /* ワイヤーブラシ: 錆を落とす。きれいな所は傷がつく */
-          d -= 0.075 * w;
+          d -= 0.045 * w;
           if (d < 0.25) { r += 0.01 * w; s -= 0.06 * w; f -= 0.06 * w; }
         } else if (tool === 1) {                   /* 紙やすり: ざらざらを取る。錆の上は効きにくい */
-          if (d < 0.35) r -= 0.065 * w; else d -= 0.02 * w;
+          if (d < 0.35) r -= 0.04 * w; else d -= 0.012 * w;
           s -= 0.04 * w; f -= 0.04 * w;
         } else if (tool === 2) {                   /* コンパウンド: つやを出す（曇りも乗る） */
-          if (r < 0.4 && d < 0.35) s += 0.065 * w * (1 - r * 1.8);
+          if (r < 0.4 && d < 0.35) s += 0.04 * w * (1 - r * 1.8);
           f -= 0.03 * w;
         } else {                                   /* 布: つやの出た所を拭き上げる */
-          if (s > 0.35) f += 0.075 * w * s;
+          if (s > 0.35) f += 0.045 * w * s;
         }
         grid.dirt[k] = d < 0 ? 0 : d > 1 ? 1 : d;
         grid.rough[k] = r < 0 ? 0 : r > 1 ? 1 : r;
@@ -197,15 +200,15 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
-  var LIMIT = 30;
   var state, score = 0, T, held, keyMode = false, tool = 0, last = null, toolAt = null, rubbing = 0, speed = 0, moved = 0;
   var bits = [], resultT = 0, confetti = null, ended = false;
 
   var TOOL_Y;
   function place() { TOOL_Y = H - 118; }
+  /* 道具4つと「完成」（右端） */
   function toolButtons() {
-    var size = 104, gap = 18, x0 = (W - size * 4 - gap * 3) / 2, out = [];
-    for (var i = 0; i < 4; i++) out.push({ x: x0 + i * (size + gap), y: TOOL_Y, w: size, h: size });
+    var size = 88, gap = 12, x0 = (W - size * 5 - gap * 4) / 2, out = [];
+    for (var i = 0; i < 5; i++) out.push({ x: x0 + i * (size + gap), y: TOOL_Y + 12, w: size, h: size });
     return out;
   }
 
@@ -246,7 +249,7 @@
     rubSound(held ? speed : 0);
     paintT += dt;
     if (paintT > 0.05) { paintT = 0; if (painted) measure(); }
-    if (score >= 100 || T >= LIMIT) finish();
+    if (score >= 100) finish();
   }
 
   /* ============ 入力 ============ */
@@ -299,7 +302,7 @@
     var tb = toolButtons();
     for (var i = 0; i < tb.length; i++) {
       var b = tb[i];
-      if (x >= b.x - 6 && x <= b.x + b.w + 6 && y >= b.y - 6 && y <= b.y + b.h + 6) { pickTool(i); return; }
+      if (x >= b.x - 5 && x <= b.x + b.w + 5 && y >= b.y - 6 && y <= b.y + b.h + 6) { if (i === 4) finish(); else pickTool(i); return; }
     }
     held = true; last = null;
     rubTo(x, y);
@@ -335,7 +338,7 @@
 
   /* 本番以外だけ、数字キーで場面を飛ばせる。
      1: 道具を1つ進め、その道具の前までを全部済ませる（次にこすると次の段階）
-     2: ほぼ磨き終わり（左上の一か所だけ拭き残し） 3: 残り2秒 */
+     2: ほぼ磨き終わり（左上の一か所だけ拭き残し） */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (state !== S.PLAY) return;
@@ -347,13 +350,11 @@
         if (t >= 2) grid.rough[i] = 0;
         if (t >= 3) grid.shine[i] = 1;
       }
-      tool = t; painted = true; measure();
+      tool = t; painted = true; grid.rect = null; measure();
     } else if (n === 2) {
       for (i = 0; i < N * N; i++) { grid.dirt[i] = 0; grid.rough[i] = 0; grid.shine[i] = 1; grid.fin[i] = 1; }
       for (var j = 0; j < 14; j++) for (i = 0; i < 14; i++) { k = (7 + j) * N + 26 + i; grid.fin[k] = 0; grid.shine[k] = 0.3; }
-      tool = 3; painted = true; measure();
-    } else if (n === 3) {
-      T = Math.max(T, LIMIT - 2);
+      tool = 3; painted = true; grid.rect = null; measure();
     }
   }
 
@@ -391,16 +392,21 @@
     for (var i = 0; i < RANKS.length; i++) if (score >= RANKS[i][0]) return zT.apply(null, RANKS[i][1]);
     return "";
   }
+  function took() {
+    var t = Math.round(T || 0), m = Math.floor(t / 60), sec = t % 60;
+    return m ? zT(m + "分" + sec + "秒", m + "m " + sec + "s", m + "분 " + sec + "초", m + "分" + sec + "秒", m + "分" + sec + "秒")
+             : zT(sec + "秒", sec + "s", sec + "초", sec + "秒", sec + "秒");
+  }
   function pct() { return (score >= 100 ? "100" : score.toFixed(1)) + "%"; }
 
   function doShare() {
     /* 英語などのときのハッシュタグはその言語のゲーム名にする */
     window.zResultActions.x({ text:
-      zT("「男」を" + pct() + "まで磨いて「" + rank() + "」になりました",
-         "I polished my 男 to " + pct() + " and became a " + rank(),
-         "「男」을 " + pct() + "까지 갈고닦아 「" + rank() + "」가 되었습니다",
-         "把「男」打磨到" + pct() + "，成为了「" + rank() + "」",
-         "把「男」打磨到" + pct() + "，成為了「" + rank() + "」") +
+      zT(took() + "かけて「男」を" + pct() + "まで磨き、「" + rank() + "」になりました",
+         "I spent " + took() + " polishing my 男 to " + pct() + " and became a " + rank(),
+         took() + " 동안 「男」을 " + pct() + "까지 갈고닦아 「" + rank() + "」가 되었습니다",
+         "花了" + took() + "把「男」打磨到" + pct() + "，成为了「" + rank() + "」",
+         "花了" + took() + "把「男」打磨到" + pct() + "，成為了「" + rank() + "」") +
       zT(" #男磨き", " #ManPolishing", " #남자갈고닦기", " #男人打磨", " #男人打磨") });
   }
 
@@ -426,10 +432,10 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        if (painted) { s3.paint(grid); painted = false; }
+        if (painted) { s3.paint(grid); painted = false; grid.rect = null; }
         s3.sync({ t: state === S.RESULT ? resultT : (T || 0), state: state, tool: tool, toolAt: toolAt, rubbing: rubbing > 0 });
         drew = s3.draw(ctx, W, H);
-      } catch (e) { scene3d.drop(); painted = true; }
+      } catch (e) { scene3d.drop(); painted = true; grid.rect = null; }
     }
     if (!drew) { ctx.fillStyle = "#1c1a19"; ctx.fillRect(0, 0, W, H); }
 
@@ -457,23 +463,22 @@
   }
 
   function drawHud() {
-    /* 残り時間の帯と、磨けた割合 */
-    var left = Math.max(0, 1 - T / LIMIT);
-    ctx.fillStyle = "rgba(0,0,0,.4)"; roundRect(30, 22, W - 60, 12, 6); ctx.fill();
-    ctx.fillStyle = left < 0.2 ? "#ff6a4a" : "#f2ede4"; roundRect(30, 22, (W - 60) * left, 12, 6); ctx.fill();
+    /* 磨けた割合 */
     ctx.save();
     ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "top";
     ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 8;
     ctx.font = "800 56px sans-serif";
-    ctx.fillText(pct(), W / 2, 46);
+    ctx.fillText(pct(), W / 2, 30);
     ctx.restore();
     /* 道具の棚 */
     toolButtons().forEach(function (b, i) {
       ctx.save();
-      ctx.fillStyle = i === tool ? "#fff" : "rgba(255,255,255,.72)";
-      ctx.strokeStyle = i === tool ? "#f7b733" : "#16202e"; ctx.lineWidth = i === tool ? 6 : 3;
-      roundRect(b.x, b.y, b.w, b.h, 22); ctx.fill(); ctx.stroke();
+      var on = i === tool;
+      ctx.fillStyle = i === 4 ? "#ffd75a" : on ? "#fff" : "rgba(255,255,255,.72)";
+      ctx.strokeStyle = on ? "#f7b733" : "#16202e"; ctx.lineWidth = on ? 6 : 3;
+      roundRect(b.x, b.y, b.w, b.h, 20); ctx.fill(); ctx.stroke();
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      ctx.scale(0.85, 0.85);
       drawToolIcon(i);
       ctx.restore();
     });
@@ -499,6 +504,9 @@
       ctx.fillStyle = "#f2c230"; roundRect(-30, -4, 60, 26, 10); ctx.fill();
       ctx.fillStyle = "#f6f2e8";
       ctx.beginPath(); ctx.arc(-8, 26, 6, 0, Math.PI * 2); ctx.arc(6, 28, 5, 0, Math.PI * 2); ctx.fill();
+    } else if (i === 4) {        /* 完成（チェックの印） */
+      ctx.strokeStyle = "#16202e"; ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.moveTo(-24, 0); ctx.lineTo(-7, 18); ctx.lineTo(26, -20); ctx.stroke();
     } else {                     /* 布 */
       ctx.fillStyle = "#3b8fd6";
       ctx.beginPath(); ctx.moveTo(-30, -6); ctx.quadraticCurveTo(-24, -30, 0, -24); ctx.quadraticCurveTo(26, -32, 30, -4);
@@ -541,7 +549,8 @@
     run: async function (r) {
       await r.wait(1000);
       r.key();
-      await r.wait(31000);
+      await r.wait(3000);
+      finish();
       if (!await r.until(function () { return state === S.RESULT; }, 5)) throw Error("結果が出ない");
       await r.wait(1500);
     }
