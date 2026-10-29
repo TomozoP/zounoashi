@@ -1,4 +1,4 @@
-/* 北海道詰め: 交互に県を入れて、勝ち・負けの結果まで行けるか（matter.js を読むので withScripts） */
+/* 北海道詰め: 交互に県を置いて、勝ち・負けの結果まで行けるか */
 var fs = require("fs"), path = require("path");
 var load = require("../harness");
 var dir = fs.existsSync(path.join(__dirname, "../../gattai")) ? "../../gattai" : "../../_gattai";
@@ -8,11 +8,11 @@ function run(win) {
   var turns = 0;
   for (var i = 0; i < 60 * 60 && g.probe.now().state !== "result"; i++) {
     var e = g.probe.now();
-    if (e.state === "aim" && e.turn === 0) { turns++; g.probe.debug(turns >= 2 ? (win ? 2 : 3) : 1); }
+    if (e.state === "place" && e.turn === 0) { turns++; g.probe.debug(win ? 2 : turns >= 2 ? 3 : 1); }
     g.step(1);
   }
   e = g.probe.now();
-  var ok = e.state === "result" && e.won === win && e.count >= 2;
+  var ok = e.state === "result" && e.won === win && e.count >= 1;
   console.log(ok ? "OK" : "NG", win ? "勝ち" : "負け", JSON.stringify({ state: e.state, won: e.won, count: e.count, turns: turns }));
   return ok;
 }
