@@ -355,5 +355,6 @@ window.DRAFT_GAMES = [
     "play": "games/_taiyaki/index.html",
     "full": true,
     "catch": "好きな画像の形でたい焼きを焼く"
-  }
+  },
+  {"type":"lab","tags":[],"id":"otoko","title":"男磨き","year":2026,"date":"2026-10-29","plays":null,"url":"","img":"games/_otoko/img/thumb.webp","play":"games/_otoko/index.html","full":true,"catch":"「男」という漢字を磨く"}
 ];

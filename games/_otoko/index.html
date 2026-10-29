@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>男磨き</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1c1a19; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../celebrate.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="../three-base.js"></script>
+<script src="scene3d.js"></script>
+<script>
+/* 男磨き
+   錆びた「男」の字を、4つの道具（ワイヤーブラシ → 紙やすり → コンパウンド → 布）でこすって磨く。
+   制限時間のあいだにどこまで磨けたかを「%」で出す。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+  /* 結果画面の「作者をフォロー」（共通。ボタン列の下に控えめに出す） */
+  var followLink = window.zResultActions.follow.link(shareButton.parentNode);
+
+  /* ============ 画面 ============ */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null, rubSrc = null, rubFilter = null, rubGain = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    /* こする音：ずっと鳴らしておいて、動かした速さで大きさを変える */
+    rubSrc = AC.createBufferSource(); rubSrc.buffer = NOISE; rubSrc.loop = true;
+    rubFilter = AC.createBiquadFilter(); rubFilter.type = "bandpass";
+    rubGain = AC.createGain(); rubGain.gain.value = 0;
+    rubSrc.connect(rubFilter); rubFilter.connect(rubGain); rubGain.connect(AC.destination);
+    rubSrc.start();
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  /* 道具ごとのこする音 [中心の高さ, 鋭さ, 大きさ] */
+  var RUB_SOUND = [[4200, 0.8, 0.5], [2200, 0.6, 0.42], [700, 1.2, 0.5], [1100, 0.7, 0.22]];
+  function rubSound(speed) {
+    if (!rubGain) return;
+    var s = RUB_SOUND[tool], n = AC.currentTime;
+    rubFilter.frequency.setTargetAtTime(s[0] * (0.85 + Math.min(1, speed / 6) * 0.3), n, 0.03);
+    rubFilter.Q.value = s[1];
+    rubGain.gain.setTargetAtTime(state === S.PLAY ? Math.min(1, speed / 5) * s[2] : 0, n, 0.04);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 磨きの状態 ============
+     字の座標 -1.1〜1.1 を n×n のマスに分け、マスごとに4つの値を持つ。
+       dirt  錆（1→0、ワイヤーブラシで落とす）
+       rough ざらざら（1→0、紙やすりで取る。錆が残っていると効きにくい）
+       shine つや（0→1、コンパウンド。ざらざらが残っていると効かない）
+       fin   拭き上げ（0→1、布。つやが出た所だけ。コンパウンドの曇りを取る）
+     点数は字の中のマスの「4つの進み具合」の平均。 */
+  var N = 128, BOX = 1.1, CELL = 2 * BOX / N;
+  var grid = { n: N, dirt: new Float32Array(N * N), rough: new Float32Array(N * N), shine: new Float32Array(N * N), fin: new Float32Array(N * N), avg: null };
+  var mask = new Uint8Array(N * N), maskCount = 0, rustBase = new Float32Array(N * N);
+  (function makeMask() {
+    var c = document.createElement("canvas"); c.width = c.height = N;
+    var g = c.getContext("2d");
+    g.fillStyle = "#fff";
+    g.setTransform(N / (2 * BOX), 0, 0, -N / (2 * BOX), N / 2, N / 2);
+    (window.OTOKO_STROKES || []).forEach(function (pts) {
+      g.beginPath();
+      pts.forEach(function (p, i) { if (i) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); });
+      g.closePath(); g.fill();
+    });
+    var d = g.getImageData(0, 0, N, N).data;
+    for (var i = 0; i < N * N; i++) if (d[i * 4 + 3] > 90) { mask[i] = 1; maskCount++; }
+    var seed = 7;
+    function r() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+    for (i = 0; i < N * N; i++) rustBase[i] = 0.82 + r() * 0.18;
+  })();
+  function resetGrid() {
+    for (var i = 0; i < N * N; i++) { grid.dirt[i] = rustBase[i]; grid.rough[i] = 1; grid.shine[i] = 0; grid.fin[i] = 0; }
+    measure();
+    painted = true;
+  }
+  var painted = true;
+  function measure() {
+    var a = { dirt: 0, rough: 0, shine: 0, fin: 0 }, sum = 0;
+    for (var i = 0; i < N * N; i++) {
+      if (!mask[i]) continue;
+      var d = grid.dirt[i], r = grid.rough[i], s = grid.shine[i], f = grid.fin[i];
+      a.dirt += d; a.rough += r; a.shine += s; a.fin += f;
+      sum += (1 - d) + (1 - r) + s + f;
+    }
+    if (!maskCount) { grid.avg = a; score = 0; return; }
+    a.dirt /= maskCount; a.rough /= maskCount; a.shine /= maskCount; a.fin /= maskCount;
+    grid.avg = a;
+    score = Math.floor(sum / (maskCount * 4) * 1000) / 10;
+    if (score > 99.4) score = 100;
+  }
+
+  /* 1回の押し当て。(x, y) は字の座標 */
+  var RAD = 0.17;
+  function stamp(x, y) {
+    var ci = Math.round((x + BOX) / CELL - 0.5), cj = Math.round((BOX - y) / CELL - 0.5), rc = Math.ceil(RAD / CELL);
+    for (var j = cj - rc; j <= cj + rc; j++) {
+      if (j < 0 || j >= N) continue;
+      for (var i = ci - rc; i <= ci + rc; i++) {
+        if (i < 0 || i >= N) continue;
+        var cx = -BOX + (i + 0.5) * CELL, cy = BOX - (j + 0.5) * CELL;
+        var q = ((cx - x) * (cx - x) + (cy - y) * (cy - y)) / (RAD * RAD);
+        if (q >= 1) continue;
+        var w = 1 - q, k = j * N + i;
+        var d = grid.dirt[k], r = grid.rough[k], s = grid.shine[k], f = grid.fin[k];
+        if (tool === 0) {                          /* ワイヤーブラシ: 錆を落とす。きれいな所は傷がつく */
+          d -= 0.075 * w;
+          if (d < 0.25) { r += 0.01 * w; s -= 0.06 * w; f -= 0.06 * w; }
+        } else if (tool === 1) {                   /* 紙やすり: ざらざらを取る。錆の上は効きにくい */
+          if (d < 0.35) r -= 0.065 * w; else d -= 0.02 * w;
+          s -= 0.04 * w; f -= 0.04 * w;
+        } else if (tool === 2) {                   /* コンパウンド: つやを出す（曇りも乗る） */
+          if (r < 0.4 && d < 0.35) s += 0.065 * w * (1 - r * 1.8);
+          f -= 0.03 * w;
+        } else {                                   /* 布: つやの出た所を拭き上げる */
+          if (s > 0.35) f += 0.075 * w * s;
+        }
+        grid.dirt[k] = d < 0 ? 0 : d > 1 ? 1 : d;
+        grid.rough[k] = r < 0 ? 0 : r > 1 ? 1 : r;
+        grid.shine[k] = s < 0 ? 0 : s > 1 ? 1 : s;
+        grid.fin[k] = f < 0 ? 0 : f > 1 ? 1 : f;
+      }
+    }
+    painted = true;
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var LIMIT = 30;
+  var state, score = 0, T, held, keyMode = false, tool = 0, last = null, toolAt = null, rubbing = 0, speed = 0, moved = 0;
+  var bits = [], resultT = 0, confetti = null, ended = false;
+
+  var TOOL_Y;
+  function place() { TOOL_Y = H - 118; }
+  function toolButtons() {
+    var size = 104, gap = 18, x0 = (W - size * 4 - gap * 3) / 2, out = [];
+    for (var i = 0; i < 4; i++) out.push({ x: x0 + i * (size + gap), y: TOOL_Y, w: size, h: size });
+    return out;
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    T = 0; held = false; tool = 0; last = null; toolAt = null; rubbing = 0; speed = 0;
+    bits = []; resultT = 0; confetti = null; ended = false;
+    resetGrid();
+  }
+
+  function finish() {
+    if (state !== S.PLAY) return;
+    held = false; last = null; toolAt = null;
+    measure();
+    state = S.RESULT;
+    rubSound(0);
+    if (AC && window.zCelebrate) window.zCelebrate.play(AC, score >= 90 ? "fanfare" : score >= 60 ? "clear" : "chime");
+    if (score >= 80 && window.zCelebrate) { confetti = window.zCelebrate.confetti(); confetti.rain = false; confetti.burst(W, H, 140); }
+  }
+
+  /* ============ 進行 ============ */
+  var paintT = 0;
+  function update(dt) {
+    if (confetti) confetti.step(dt, W, H);
+    for (var i = bits.length - 1; i >= 0; i--) {
+      var b = bits[i];
+      b.t += dt; b.x += b.vx * dt; b.y += b.vy * dt; b.vy += b.g * dt;
+      if (b.t > b.life) bits.splice(i, 1);
+    }
+    if (state === S.RESULT) { resultT += dt; return; }
+    if (state !== S.PLAY) return;
+    T += dt;
+    speed += (moved / dt - speed) * Math.min(1, dt * 14);
+    moved = 0;
+    rubbing = Math.max(0, rubbing - dt);
+    rubSound(held ? speed : 0);
+    paintT += dt;
+    if (paintT > 0.05) { paintT = 0; if (painted) measure(); }
+    if (score >= 100 || T >= LIMIT) finish();
+  }
+
+  /* ============ 入力 ============ */
+  function rubTo(x, y) {
+    var s3 = scene3d();
+    if (!s3) return;
+    var p = s3.toGlyph(x, y, W, H);
+    if (!p) return;
+    toolAt = p;
+    if (!held) return;
+    if (last) {
+      var dx = p.x - last.x, dy = p.y - last.y, len = Math.sqrt(dx * dx + dy * dy);
+      var n = Math.ceil(len / 0.03);
+      for (var i = 1; i <= n; i++) stamp(last.x + dx * i / n, last.y + dy * i / n);
+      moved += len;
+      if (len > 0.004) { rubbing = 0.1; spray(p, len); }
+    } else stamp(p.x, p.y);
+    last = p;
+  }
+  /* こすった所から出る粉・錆・きらめき（画面の上に2Dで描く） */
+  function spray(p, len) {
+    var k = (p.y + BOX) / (2 * BOX);
+    var ci = Math.round((p.x + BOX) / CELL - 0.5), cj = Math.round((BOX - p.y) / CELL - 0.5);
+    if (ci < 0 || cj < 0 || ci >= N || cj >= N) return;
+    var c = cj * N + ci;
+    if (!mask[c] && Math.random() < 0.7) return;
+    var s3 = scene3d(), sp = s3.toScreen(p.x, p.y, W, H), n = Math.min(4, 1 + len * 30) | 0;
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * Math.PI * 2, v = 60 + Math.random() * 160, kind;
+      if (tool === 0) kind = grid.dirt[c] > 0.05 ? "rust" : "spark";
+      else if (tool === 1) kind = "dust";
+      else if (tool === 2) kind = "paste";
+      else kind = grid.shine[c] > 0.35 ? "shine" : null;
+      if (!kind) continue;
+      if (kind === "shine" && Math.random() < 0.7) continue;
+      bits.push({ x: sp.x, y: sp.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, g: kind === "shine" ? 0 : 520, t: 0, life: kind === "shine" ? 0.5 : 0.45 + Math.random() * 0.3, kind: kind, r: 2 + Math.random() * 3 });
+    }
+    if (tool === 3 && grid.fin[c] > 0.85 && Math.random() < 0.06) tone(1800, 0.09, 0.05, "sine", 2700);
+  }
+
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (x == null) return;
+    var tb = toolButtons();
+    for (var i = 0; i < tb.length; i++) {
+      var b = tb[i];
+      if (x >= b.x - 6 && x <= b.x + b.w + 6 && y >= b.y - 6 && y <= b.y + b.h + 6) { pickTool(i); return; }
+    }
+    held = true; last = null;
+    rubTo(x, y);
+  }
+  function pickTool(i) {
+    if (tool === i) return;
+    tool = i;
+    tone(520 + i * 90, 0.07, 0.1, "triangle", 760 + i * 90);
+  }
+  function move(x, y) {
+    if (state !== S.PLAY) return;
+    if (!held && keyMode) return;
+    rubTo(x, y);
+  }
+  function up() {
+    if (!held) return;
+    held = false; last = null;
+    if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) toolAt = null;
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  wrap.addEventListener("pointerleave", function () { if (!held) toolAt = null; });
+  window.addEventListener("blur", function () { up(); });
+
+  /* 本番以外だけ、数字キーで場面を飛ばせる。
+     1: 道具を1つ進め、その道具の前までを全部済ませる（次にこすると次の段階）
+     2: ほぼ磨き終わり（左上の一か所だけ拭き残し） 3: 残り2秒 */
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    if (state !== S.PLAY) return;
+    var i, k;
+    if (n === 1) {
+      var t = Math.min(3, tool + 1);
+      for (i = 0; i < N * N; i++) {
+        if (t >= 1) grid.dirt[i] = 0;
+        if (t >= 2) grid.rough[i] = 0;
+        if (t >= 3) grid.shine[i] = 1;
+      }
+      tool = t; painted = true; measure();
+    } else if (n === 2) {
+      for (i = 0; i < N * N; i++) { grid.dirt[i] = 0; grid.rough[i] = 0; grid.shine[i] = 1; grid.fin[i] = 1; }
+      for (var j = 0; j < 14; j++) for (i = 0; i < 14; i++) { k = (7 + j) * N + 26 + i; grid.fin[k] = 0; grid.shine[k] = 0.3; }
+      tool = 3; painted = true; measure();
+    } else if (n === 3) {
+      T = Math.max(T, LIMIT - 2);
+    }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (!esc && !go && !left && !right) return;
+    e.preventDefault();
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (left || right) {
+      if (state !== S.PLAY) return;
+      pickTool((tool + (right ? 1 : 3)) % 4);
+      return;
+    }
+    if (e.repeat) return;
+    if (state === S.RESULT) down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); }
+  });
+
+  /* ============ 称号 ============ */
+  var RANKS = [
+    [95, ["光り輝く漢", "Radiant Man", "눈부신 사나이", "光芒万丈的汉子", "光芒萬丈的漢子"]],
+    [80, ["輝く男", "Shining Man", "빛나는 남자", "闪亮的男人", "閃亮的男人"]],
+    [60, ["磨かれた男", "Polished Man", "갈고닦은 남자", "打磨过的男人", "打磨過的男人"]],
+    [40, ["そこそこの男", "Decent Man", "그럭저럭 남자", "还行的男人", "還行的男人"]],
+    [20, ["くすんだ男", "Dull Man", "칙칙한 남자", "暗淡的男人", "黯淡的男人"]],
+    [-1, ["錆びた男", "Rusty Man", "녹슨 남자", "生锈的男人", "生鏽的男人"]]
+  ];
+  function rank() {
+    for (var i = 0; i < RANKS.length; i++) if (score >= RANKS[i][0]) return zT.apply(null, RANKS[i][1]);
+    return "";
+  }
+  function pct() { return (score >= 100 ? "100" : score.toFixed(1)) + "%"; }
+
+  function doShare() {
+    /* 英語などのときのハッシュタグはその言語のゲーム名にする */
+    window.zResultActions.x({ text:
+      zT("「男」を" + pct() + "まで磨いて「" + rank() + "」になりました",
+         "I polished my 男 to " + pct() + " and became a " + rank(),
+         "「男」을 " + pct() + "까지 갈고닦아 「" + rank() + "」가 되었습니다",
+         "把「男」打磨到" + pct() + "，成为了「" + rank() + "」",
+         "把「男」打磨到" + pct() + "，成為了「" + rank() + "」") +
+      zT(" #男磨き", " #ManPolishing", " #남자갈고닦기", " #男人打磨", " #男人打磨") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene(); }) : function () { return null; };
+  var hideUI = false;
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+
+    var s3 = scene3d(), drew = false;
+    if (s3) {
+      try {
+        if (painted) { s3.paint(grid); painted = false; }
+        s3.sync({ t: state === S.RESULT ? resultT : (T || 0), state: state, tool: tool, toolAt: toolAt, rubbing: rubbing > 0 });
+        drew = s3.draw(ctx, W, H);
+      } catch (e) { scene3d.drop(); painted = true; }
+    }
+    if (!drew) { ctx.fillStyle = "#1c1a19"; ctx.fillRect(0, 0, W, H); }
+
+    drawBits();
+    if (state === S.PLAY && !hideUI) drawHud();
+    if (state === S.RESULT) drawResult();
+    if (confetti) confetti.draw(ctx);
+  }
+
+  function drawBits() {
+    bits.forEach(function (b) {
+      var a = 1 - b.t / b.life;
+      if (b.kind === "shine") {
+        ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = "#fffbe8";
+        ctx.translate(b.x, b.y); var s = 3 + 6 * a;
+        ctx.beginPath(); ctx.moveTo(0, -s * 2); ctx.lineTo(s * 0.35, -s * 0.35); ctx.lineTo(s * 2, 0); ctx.lineTo(s * 0.35, s * 0.35);
+        ctx.lineTo(0, s * 2); ctx.lineTo(-s * 0.35, s * 0.35); ctx.lineTo(-s * 2, 0); ctx.lineTo(-s * 0.35, -s * 0.35); ctx.closePath(); ctx.fill();
+        ctx.restore(); return;
+      }
+      ctx.globalAlpha = a;
+      ctx.fillStyle = b.kind === "rust" ? "#8a4418" : b.kind === "spark" ? "#ffd27a" : b.kind === "dust" ? "#d8c2a0" : "#f2efe6";
+      ctx.fillRect(b.x - b.r / 2, b.y - b.r / 2, b.r, b.r);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  function drawHud() {
+    /* 残り時間の帯と、磨けた割合 */
+    var left = Math.max(0, 1 - T / LIMIT);
+    ctx.fillStyle = "rgba(0,0,0,.4)"; roundRect(30, 22, W - 60, 12, 6); ctx.fill();
+    ctx.fillStyle = left < 0.2 ? "#ff6a4a" : "#f2ede4"; roundRect(30, 22, (W - 60) * left, 12, 6); ctx.fill();
+    ctx.save();
+    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 8;
+    ctx.font = "800 56px sans-serif";
+    ctx.fillText(pct(), W / 2, 46);
+    ctx.restore();
+    /* 道具の棚 */
+    toolButtons().forEach(function (b, i) {
+      ctx.save();
+      ctx.fillStyle = i === tool ? "#fff" : "rgba(255,255,255,.72)";
+      ctx.strokeStyle = i === tool ? "#f7b733" : "#16202e"; ctx.lineWidth = i === tool ? 6 : 3;
+      roundRect(b.x, b.y, b.w, b.h, 22); ctx.fill(); ctx.stroke();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      drawToolIcon(i);
+      ctx.restore();
+    });
+  }
+
+  function drawToolIcon(i) {
+    ctx.lineJoin = ctx.lineCap = "round";
+    if (i === 0) {               /* ワイヤーブラシ */
+      ctx.rotate(-0.6);
+      ctx.fillStyle = "#a0683a"; roundRect(-9, 4, 18, 36, 6); ctx.fill();
+      ctx.fillStyle = "#8a5530"; roundRect(-22, -14, 44, 20, 5); ctx.fill();
+      ctx.strokeStyle = "#6b7078"; ctx.lineWidth = 2.4;
+      for (var k = -18; k <= 18; k += 5) { ctx.beginPath(); ctx.moveTo(k, -14); ctx.lineTo(k, -30); ctx.stroke(); }
+    } else if (i === 1) {        /* 紙やすり */
+      ctx.rotate(-0.2);
+      ctx.fillStyle = "#3d6fb0"; roundRect(-30, -18, 60, 26, 6); ctx.fill();
+      ctx.fillStyle = "#c79a5a"; roundRect(-33, 6, 66, 12, 3); ctx.fill();
+      ctx.fillStyle = "#8a6232";
+      for (var m = 0; m < 22; m++) ctx.fillRect(-30 + (m * 37 % 60), 8 + (m * 13 % 8), 2, 2);
+    } else if (i === 2) {        /* コンパウンド（バフ） */
+      ctx.fillStyle = "#d23a2a"; roundRect(-8, -34, 16, 22, 6); ctx.fill();
+      ctx.fillStyle = "#2a2c30"; roundRect(-26, -14, 52, 10, 4); ctx.fill();
+      ctx.fillStyle = "#f2c230"; roundRect(-30, -4, 60, 26, 10); ctx.fill();
+      ctx.fillStyle = "#f6f2e8";
+      ctx.beginPath(); ctx.arc(-8, 26, 6, 0, Math.PI * 2); ctx.arc(6, 28, 5, 0, Math.PI * 2); ctx.fill();
+    } else {                     /* 布 */
+      ctx.fillStyle = "#3b8fd6";
+      ctx.beginPath(); ctx.moveTo(-30, -6); ctx.quadraticCurveTo(-24, -30, 0, -24); ctx.quadraticCurveTo(26, -32, 30, -4);
+      ctx.quadraticCurveTo(34, 22, 8, 26); ctx.quadraticCurveTo(-20, 32, -30, 14); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "#2a6aa6"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-16, -8); ctx.quadraticCurveTo(0, 0, 18, -10); ctx.moveTo(-14, 10); ctx.quadraticCurveTo(4, 16, 20, 8); ctx.stroke();
+    }
+  }
+
+  /* 結果画面は「作品を見せる形」：上に割合と称号、真ん中に字、下にボタン */
+  function layoutResult() { return window.zResultActions.showcase(W, H, { sizes: [96, 40] }); }
+  function resultButtons() { return layoutResult().buttons; }
+  function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
+  function drawResult() {
+    var L = layoutResult();
+    ctx.save();
+    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.shadowColor = "rgba(0,0,0,.7)"; ctx.shadowBlur = 12;
+    ctx.font = "800 " + L.lines[0].size + "px sans-serif";
+    ctx.fillText(pct(), W / 2, L.lines[0].y);
+    ctx.fillStyle = score >= 80 ? "#ffe08a" : "#f2ede4";
+    ctx.font = "800 " + L.lines[1].size + "px sans-serif";
+    ctx.fillText(rank(), W / 2, L.lines[1].y);
+    ctx.restore();
+    window.zResultActions.drawButtons(ctx, resultButtons());
+    window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
+  }
+
+  /* ============ 覗き穴 ============ */
+  window.__probe = {
+    now: function () { return { state: state, score: score, tool: tool, T: T, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); },
+    hideUI: function (v) { hideUI = v !== false; }
+  };
+
+  /* ============ 手元用の動画撮影 ============ */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      r.key();
+      await r.wait(31000);
+      if (!await r.until(function () { return state === S.RESULT; }, 5)) throw Error("結果が出ない");
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton = document.getElementById('start');
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener('click', function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  layout();
+  var lastT = performance.now();
+  var stepAcc = 0;
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - lastT) / 1000));
+    lastT = now;
+    if (!window.__recordManual) {
+      stepAcc += dt;
+      while (stepAcc >= 1 / 60) { update(1 / 60); stepAcc -= 1 / 60; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
