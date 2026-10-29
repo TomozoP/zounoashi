@@ -70,7 +70,8 @@
       c.lineJoin = "round"; c.lineWidth = 14; c.strokeStyle = "#16202e"; c.strokeText(name, w / 2, h / 2 + 4);
       c.fillStyle = "#fff"; c.fillText(name, w / 2, h / 2 + 4);
     });
-    var label = new T.Mesh(new T.PlaneGeometry(size * 2, size), new T.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+    var label = new T.Mesh(new T.PlaneGeometry(size * 2, size), new T.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }));
+    label.renderOrder = 10;
     label.rotation.x = -Math.PI / 2; label.position.y = thick / 2 + 0.01;
     g.add(label);
     g.userData = { mat: mat, label: label };
@@ -105,7 +106,7 @@
 
     /* カメラ: 北海道をななめ上から見下ろす。北海道が画面の上のほうに入るよう、見る先を手前にずらす */
     var cam = this.camera, aspect = cam.aspect || 0.5625, fov = cam.fov * Math.PI / 180;
-    var tilt = 58 * Math.PI / 180, w = s.cam.w;
+    var tilt = 72 * Math.PI / 180, w = s.cam.w;
     var dist = (w / 2) / (Math.tan(fov / 2) * aspect);
     var tx = s.cam.x, tz = s.cam.z;
     cam.position.set(tx + s.cam.sx, Math.sin(tilt) * dist, tz + Math.cos(tilt) * dist + s.cam.sy);
