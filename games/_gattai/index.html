@@ -210,7 +210,7 @@
   }
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", SPIN: "spin", PLACE: "place", SETTLE: "settle", END: "end", RESULT: "result" };
+  var S = { INTRO: "intro", MODE: "mode", SPIN: "spin", PLACE: "place", SETTLE: "settle", END: "end", RESULT: "result" };
   var state, T, won, shake, board, deck, cur, turn, count, spin, cpuMove, endT, forceOut, loserPiece;
   var conf = window.zCelebrate ? window.zCelebrate.confetti() : null;
   if (conf) conf.rain = false;
@@ -224,6 +224,15 @@
     for (var i = 0; i < SHAPES.length; i++) if (i !== HK) deck.push(i);
     if (conf) conf.clear();
     startSpin();
+  }
+  /* 遊び方: "cpu"（あいてはCPU）か "2p"（ふたりで交互） */
+  var mode = "cpu";
+  function cpuTurn() { return mode === "cpu" && turn === 1; }
+  function humanTurn() { return !cpuTurn(); }
+  var PCOL = ["#ff7a45", "#8a5cff"];             /* プレイヤーの色（1P / 2P・CPU） */
+  function modeButtons() {
+    var w = Math.min(220, (W - 60) / 2), h = 170, y = H * 0.66;
+    return [{ m: "cpu", x: W / 2 - w - 10, y: y, w: w, h: h }, { m: "2p", x: W / 2 + 10, y: y, w: w, h: h }];
   }
   function trayPos() { return { x: W / 2, y: (HKB.y1 + ctrlY()) / 2 + 10 }; }
 
@@ -251,7 +260,7 @@
   function updateSpin(dt) {
     if (!spin.on) {
       spin.wait += dt;
-      if (turn === 1 && spin.wait > 0.7) spinNow();
+      if (cpuTurn() && spin.wait > 0.7) spinNow();
       return;
     }
     spin.t += dt;
@@ -271,7 +280,7 @@
     cur = { i: i, x: tp.x, y: tp.y, a: 0, ta: 0 };
     state = S.PLACE;
     cpuMove = null;
-    if (turn === 1) {
+    if (cpuTurn()) {
       var best = solve(i);
       if (!best) best = outsideSpot(i);
       cpuMove = { t: 0, fx: cur.x, fy: cur.y, x: best.x, y: best.y, a: best.a };
@@ -445,8 +454,8 @@
       settleT += dt;
       if (settleT > 1.2) { count++; turn = 1 - turn; startSpin(); }
     } else if (state === S.SPIN) updateSpin(dt);
-    else if (state === S.PLACE && turn === 1) updateCPU(dt);
-    else if (state === S.PLACE && turn === 0) {
+    else if (state === S.PLACE && cpuTurn()) updateCPU(dt);
+    else if (state === S.PLACE) {
       var mx = (keys.r ? 1 : 0) - (keys.l ? 1 : 0), my = (keys.d ? 1 : 0) - (keys.u ? 1 : 0);
       if (mx || my) moveCur(mx * 260 * dt, my * 260 * dt);
     } else if (state === S.END) {
@@ -459,7 +468,7 @@
     cur.x = Math.max(0, Math.min(W, cur.x + dx));
     cur.y = Math.max(110, Math.min(ctrlY() - 40, cur.y + dy));
   }
-  function rotateCur(dir) { if (cur && state === S.PLACE && turn === 0) { cur.ta += (dir || 1) * Math.PI / 12; tone(660, 0.04, 0.07, "square"); } }
+  function rotateCur(dir) { if (cur && state === S.PLACE && humanTurn()) { cur.ta += (dir || 1) * Math.PI / 12; tone(660, 0.04, 0.07, "square"); } }
 
   /* ============ 入力 ============ */
   var keys = { l: false, r: false, u: false, d: false };
@@ -472,13 +481,19 @@
   function down(x, y, id) {
     if (state === S.INTRO) return;
     audioOn();
+    if (state === S.MODE) {
+      var pick = "cpu";
+      if (x != null) { pick = null; modeButtons().forEach(function (b) { if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) pick = b.m; }); }
+      if (pick) { mode = pick; tone(780, 0.1, 0.12, "square"); newRound(); }
+      return;
+    }
     if (state === S.RESULT) {
       var hit = x == null ? "retry" : hitButton(x, y);
       if (hit === "retry") newRound();
       return;
     }
-    if (state === S.SPIN && turn === 0) { spinNow(); return; }   /* タップで回す */
-    if (state !== S.PLACE || turn !== 0) return;
+    if (state === S.SPIN && humanTurn()) { spinNow(); return; }   /* タップで回す */
+    if (state !== S.PLACE || !humanTurn()) return;
     if (x == null) { confirm(); return; }
     var bs = ctrlButtons();
     for (var i = 0; i < bs.length; i++) if (Math.hypot(x - bs[i].x, y - bs[i].y) < bs[i].r + 10) {
@@ -488,7 +503,7 @@
     drag = { id: id, x: x, y: y };
   }
   function move(x, y, id) {
-    if (!drag || drag.id !== id || !cur || turn !== 0 || state !== S.PLACE) return;
+    if (!drag || drag.id !== id || !cur || !humanTurn() || state !== S.PLACE) return;
     moveCur(x - drag.x, y - drag.y);
     drag.x = x; drag.y = y;
   }
@@ -502,8 +517,8 @@
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    if (state === S.SPIN && turn === 0) { spinNow(); return; }
-    if (state !== S.PLACE || turn !== 0) return;
+    if (state === S.SPIN && humanTurn()) { spinNow(); return; }
+    if (state !== S.PLACE || !humanTurn()) return;
     if (n === 1 || n === 2) {                     /* 1 自分の県をおまかせで置く  2 そのうえ次の相手は入らない（勝ち） */
       var b = solve(cur.i) || outsideSpot(cur.i);
       cur.x = b.x; cur.y = b.y; cur.a = cur.ta = b.a;
@@ -539,7 +554,9 @@
 
   /* ============ シェア ============ */
   function doShare() {
-    var text = won
+    var text = mode === "2p"
+      ? zT("北海道に" + count + "県詰めて、" + (won ? "1P" : "2P") + "の勝ち", "Packed " + count + " prefectures into Hokkaido. " + (won ? "1P" : "2P") + " wins", "홋카이도에 " + count + "개 현을 채우고 " + (won ? "1P" : "2P") + " 승리", "在北海道塞进" + count + "个县，" + (won ? "1P" : "2P") + "胜", "在北海道塞進" + count + "個縣，" + (won ? "1P" : "2P") + "勝")
+      : won
       ? zT("北海道に" + count + "県詰めて勝った", "Packed " + count + " prefectures into Hokkaido and won", "홋카이도에 " + count + "개 현을 채워 넣고 이겼다", "在北海道塞进" + count + "个县，赢了", "在北海道塞進" + count + "個縣，贏了")
       : zT("北海道に" + count + "県詰めたところで、はみ出して負けた", "Stuck out of Hokkaido after " + count + " prefectures", "홋카이도에 " + count + "개 현을 채우고 삐져나와서 졌다", "北海道塞进" + count + "个县后出界，输了", "北海道塞進" + count + "個縣後出界，輸了");
     window.zResultActions.x({ text: text + zT(" #北海道詰め", " #HokkaidoPacking") });
@@ -552,9 +569,9 @@
     P.forEach(function (q, n) { if (n) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
     ctx.closePath();
   }
-  function drawPiece(i, P, x, y, a, look) {
+  function drawPiece(i, P, x, y, a, look, by) {
     path(P);
-    ctx.fillStyle = look === "bad" ? "#ff4a3a" : prefColor(i);
+    ctx.fillStyle = look === "bad" ? "#ff2a1a" : PCOL[by];
     ctx.globalAlpha = look === "hit" ? 0.55 : 1;
     ctx.fill();
     ctx.globalAlpha = 1;
@@ -566,14 +583,15 @@
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
-    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    drawSea();
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
     /* 器（北海道）。かかる力が強いほど線が赤く太くなる */
     var load = Math.min(1, stress / LIMIT);
     if (!broken) {
-      path(HKP); ctx.fillStyle = "#33465a"; ctx.fill();
-      ctx.strokeStyle = lineColor(load); ctx.lineWidth = 4 + load * 4; ctx.lineJoin = "round"; ctx.stroke();
+      path(HKP); ctx.fillStyle = "#e6efd2"; ctx.fill();
+      ctx.strokeStyle = "rgba(10,40,70,.55)"; ctx.lineWidth = 8 + load * 4; ctx.lineJoin = "round"; ctx.stroke();
+      ctx.strokeStyle = lineColor(load); ctx.lineWidth = 4 + load * 4; ctx.stroke();
     } else {
       ctx.strokeStyle = "#ff5a3a"; ctx.lineWidth = 6; ctx.lineCap = "round";
       broken.segs.forEach(function (g) {
@@ -584,11 +602,11 @@
     }
     board.forEach(function (b) {
       var flash = b === loserPiece && Math.floor(T * 5) % 2 === 0;
-      drawPiece(b.i, b.poly, b.x, b.y, b.a, flash ? "bad" : null);
+      drawPiece(b.i, b.poly, b.x, b.y, b.a, flash ? "bad" : null, b.by);
     });
     if (cur && state !== S.INTRO && !broken) {
       var st = curState();
-      drawPiece(cur.i, st.P, cur.x, cur.y, cur.a, st.hit ? "hit" : null);
+      drawPiece(cur.i, st.P, cur.x, cur.y, cur.a, st.hit ? "hit" : null, turn);
       if (st.out && cur.y < HKB.y1 + 40) {        /* 線からはみ出している所を見せる */
         ctx.save(); path(st.P); ctx.clip();
         ctx.fillStyle = "rgba(255,60,40,.35)"; ctx.fillRect(st.bb.x0, st.bb.y0, st.bb.x1 - st.bb.x0, st.bb.y1 - st.bb.y0);
@@ -598,11 +616,49 @@
     }
     ctx.restore();
     if (hideUI) return;
-    if (state !== S.INTRO && state !== S.RESULT) drawHUD();
+    if (state !== S.INTRO && state !== S.MODE && state !== S.RESULT) drawHUD();
     if (state === S.SPIN) drawSpin();
-    if (state === S.PLACE && turn === 0) drawCtrls();
+    if (state === S.PLACE && humanTurn()) drawCtrls();
+    if (state === S.MODE) drawMode();
     if (state === S.RESULT) drawResult();
     if (conf) conf.draw(ctx);
+  }
+  /* 海（ゆっくり動く波の線） */
+  function drawSea() {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#2f86c8"); g.addColorStop(1, "#1d5f9e");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(255,255,255,.16)"; ctx.lineWidth = 3; ctx.lineCap = "round";
+    for (var row = 0; row < 14; row++) {
+      var y = 40 + row * (H / 13), off = (T * 14 + row * 57) % 120;
+      for (var x = -120 + off + (row % 2) * 60; x < W + 40; x += 120) {
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + 12, y - 7, x + 24, y); ctx.quadraticCurveTo(x + 36, y + 7, x + 48, y); ctx.stroke();
+      }
+    }
+  }
+  function drawMode() {
+    modeButtons().forEach(function (b) {
+      ctx.fillStyle = "rgba(255,255,255,.95)"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 4;
+      roundRect(b.x, b.y, b.w, b.h, 22); ctx.fill(); ctx.stroke();
+      var cx = b.x + b.w / 2, cy = b.y + b.h * 0.42;
+      if (b.m === "cpu") { person(cx - 34, cy, PCOL[0]); robot(cx + 34, cy, PCOL[1]); }
+      else { person(cx - 34, cy, PCOL[0]); person(cx + 34, cy, PCOL[1]); }
+      ctx.fillStyle = "#16202e"; ctx.font = "900 30px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(b.m === "cpu" ? "VS CPU" : "2P", cx, b.y + b.h * 0.82);
+    });
+  }
+  function person(x, y, c) {
+    ctx.fillStyle = c; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y - 18, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - 24, y + 30); ctx.quadraticCurveTo(x - 24, y, x, y); ctx.quadraticCurveTo(x + 24, y, x + 24, y + 30); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  function robot(x, y, c) {
+    ctx.fillStyle = c; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x, y - 40); ctx.lineTo(x, y - 32); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y - 42, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    roundRect(x - 18, y - 32, 36, 28, 6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#fff"; ctx.fillRect(x - 10, y - 23, 7, 7); ctx.fillRect(x + 3, y - 23, 7, 7);
+    ctx.fillStyle = c; roundRect(x - 22, y, 44, 30, 8); ctx.fill(); ctx.stroke();
   }
   function lineColor(k) {                       /* 黄 → 赤 */
     return "rgb(255," + Math.round(211 - 150 * k) + "," + Math.round(74 - 30 * k) + ")";
@@ -616,8 +672,8 @@
     ctx.font = "900 60px sans-serif"; ctx.fillStyle = "#fff";
     ctx.fillText(count, W / 2, 18);
     if (state !== S.END) {
-      var who = turn === 0 ? zT("あなた", "YOU", "당신", "你", "你") : zT("あいて", "CPU", "상대", "对手", "對手");
-      ctx.font = "800 22px sans-serif"; ctx.fillStyle = turn === 0 ? "#7fd0ff" : "#ffb07f";
+      var who = mode === "2p" ? (turn === 0 ? "1P" : "2P") : turn === 0 ? zT("あなた", "YOU", "당신", "你", "你") : "CPU";
+      ctx.font = "900 26px sans-serif"; ctx.fillStyle = PCOL[turn]; ctx.lineWidth = 6; ctx.strokeStyle = "#fff"; ctx.strokeText(who, W / 2, 84);
       ctx.fillText(who, W / 2, 84);
     }
     ctx.restore();
@@ -649,7 +705,7 @@
     ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3; ctx.stroke();
     ctx.restore();
     /* 針（上） */
-    ctx.fillStyle = turn === 0 ? "#7fd0ff" : "#ffb07f"; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
+    ctx.fillStyle = PCOL[turn]; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.moveTo(g.x - 16, g.y - g.r - 22); ctx.lineTo(g.x + 16, g.y - g.r - 22); ctx.lineTo(g.x, g.y - g.r + 14); ctx.closePath(); ctx.fill(); ctx.stroke();
     /* 決まった県を大きく */
     if (done) {
@@ -684,7 +740,8 @@
     ctx.fillStyle = "rgba(10,8,6,.55)"; ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.fillStyle = "#fff"; ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10; ctx.textAlign = "center";
-    ctx.font = "800 96px sans-serif"; ctx.fillText(won ? "WIN" : "LOSE", W / 2, H * 0.36);
+    if (mode === "2p") { ctx.fillStyle = PCOL[won ? 0 : 1]; ctx.font = "900 96px sans-serif"; ctx.fillText((won ? "1P" : "2P") + " WIN", W / 2, H * 0.36); ctx.fillStyle = "#fff"; }
+    else { ctx.font = "800 96px sans-serif"; ctx.fillText(won ? "WIN" : "LOSE", W / 2, H * 0.36); }
     ctx.font = "800 110px sans-serif"; ctx.fillText(count, W / 2, H * 0.36 + 120);
     ctx.font = "800 36px sans-serif"; ctx.fillText(zT("県", "prefectures", "현", "县", "縣"), W / 2, H * 0.36 + 166);
     ctx.restore();
@@ -719,7 +776,7 @@
   var startButton = document.getElementById("start");
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
   ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); startButton.hidden = true; state = S.MODE; });
   layout();
   board = []; count = 0; turn = 0; T = 0; shake = 0; state = S.INTRO; startButton.hidden = false;
   var last = performance.now(), stepAcc = 0;
