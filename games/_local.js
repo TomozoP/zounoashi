@@ -355,6 +355,5 @@ window.DRAFT_GAMES = [
     "play": "games/_taiyaki/index.html",
     "full": true,
     "catch": "好きな画像の形でたい焼きを焼く"
-  },
-  {"type":"lab","tags":[],"id":"gattai","title":"北海道詰め","year":2026,"date":"2026-10-28","plays":null,"url":"","img":"games/_gattai/img/thumb.webp","play":"games/_gattai/index.html","full":true,"catch":"北海道に交互に県を詰め込む、あふれたら負け"},
+  }
 ];

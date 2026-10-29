@@ -1,4 +1,4 @@
-/* 北海道詰め: 交互に県を置いて、勝ち・負けの結果まで行けるか */
+/* 広すぎ北海道ゲーム: 交互に県を置いて、勝ち・負けの結果まで行けるか */
 var fs = require("fs"), path = require("path");
 var load = require("../harness");
 var dir = fs.existsSync(path.join(__dirname, "../../gattai")) ? "../../gattai" : "../../_gattai";
