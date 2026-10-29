@@ -111,6 +111,20 @@
   /* ============ 何人目か ============
      開始のたびに共通のカウンターを1つ進めて、その番号をもらう。1000の倍数の人だけが抜ける。 */
   var COUNTER = "https://api.counterapi.dev/v1/zounoashi/kabu/up";
+  var PEEK = "https://api.counterapi.dev/v1/zounoashi/kabu";   /* 進めずに今の数だけ見る */
+  var curCount = 0;
+  /* かぶに書くキリ番。この番号の人のときだけ抜ける */
+  function kiriban() {
+    if (ready && myNo) return Math.ceil(myNo / NEED) * NEED;
+    return Math.max(NEED, Math.ceil((curCount + 1) / NEED) * NEED);
+  }
+  function peekCount() {
+    var fixed = DEBUG && /[?&]no=(\d+)/.exec(location.search);
+    if (fixed) { curCount = Number(fixed[1]) - 1; return; }
+    fetch(PEEK, { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
+      curCount = Number(j.count != null ? j.count : j.value) || 0;
+    }).catch(function () {});
+  }
   var myNo = 0, nextNo = 0;      /* nextNo はデバッグで次の番号を決めるとき */
   function takeNumber(done) {
     var fixed = DEBUG && /[?&]no=(\d+)/.exec(location.search);
@@ -133,7 +147,7 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", WAIT: "wait", LINE: "line", PLAY: "play", OUT: "out", RESULT: "result" };
   var state, T, held, keyMode = false;
-  var crowd = [], lift = 0, shake = 0, outT = 0, holdT = 0, won = false, creakT = 0, camX = 0, lineT = 0, playT = 0;
+  var crowd = [], lift = 0, shake = 0, outT = 0, holdT = 0, won = false, creakT = 0, camX = 0, lineT = 0;
   var lastTone = -1, ready = false, shownN = 0, popAcc = 0, appearAt = [], seed = "";
   var confetti = window.zCelebrate.confetti();
 
@@ -152,17 +166,16 @@
     /* 押したらすぐ並び始める。番号が届くまでは先頭の1人だけ */
     state = S.LINE; lineT = 0; lastTone = -1; ready = false; shownN = 0; appearAt = []; popAcc = 1;
     seed = Math.random().toString(36).slice(2, 7);
+    if (myNo) curCount = myNo;
     takeNumber(function (n) { myNo = n; ready = true; });
   }
 
-  var PULLS = [[0, 0.45], [0.8, 1.25], [1.6, 3.2]];   /* 引っぱる時間（秒、始め・終わり） */
-  var autoT = -1;                              /* タップしてからの時間。-1 はまだ */
+  var DROP = 1.0;                              /* 抜けてから、かぶが落ち始めるまで（秒） */
+  function meX() { return KX + 200 + (placeNo() - 1) * GAP; }
   function pullOut() {
-    state = S.OUT; outT = 0; won = true;
-    held = false;
+    state = S.OUT; outT = 0; won = true; shake = 0;
     noiseHit(0.5, 300, 0.5, 0.6);
     tone(220, 0.35, 0.25, "triangle", 880);
-    window.zCelebrate.play(AC, "fanfare", { delay: 0.35 });
   }
 
   /* ============ 進行 ============ */
@@ -181,37 +194,31 @@
       if (shownN >= limit) popAcc = Math.min(popAcc, perT());
       var cg = Math.max(0, KX + 200 + (shownN - 1) * GAP - W * 0.62);
       camX += (cg - camX) * Math.min(1, dt * 8);
-      if (ready && shownN >= placeNo() && lineT - appearAt[shownN - 1] > 0.45) { state = S.PLAY; camX = camEnd(); playT = 0; autoT = -1; held = false; }
+      shake = 0.6;
+      creakT -= dt;
+      if (creakT <= 0) { creakT = 0.35; noiseHit(0.22, 220, 0.16, 3); }
+      /* 自分まで来たら終わり。キリ番なら抜ける */
+      if (ready && shownN >= placeNo() && lineT - appearAt[shownN - 1] > 0.4) {
+        camX = camEnd();
+        if (lucky) pullOut();
+        else { state = S.OUT; outT = 0; shake = 0; tone(196, 0.4, 0.18, "triangle", 98); }
+      }
     }
 
-    if (state === S.PLAY) {
-      playT += dt;
-      /* 1回タップすると、自動で3回引っぱる：グーッ、グーッ、グーーーッ */
-      var k = -1;
-      if (autoT >= 0) {
-        autoT += dt;
-        for (var j = 0; j < PULLS.length; j++) if (autoT >= PULLS[j][0] && autoT < PULLS[j][1]) k = j;
-      }
-      if (k >= 0 && !held) { creakT = 0; holdT = 0; }
-      held = k >= 0;
-      if (held) holdT += dt;
-      var dur = k >= 0 ? PULLS[k][1] - PULLS[k][0] : 1, u = Math.min(1, holdT / dur);
-      var goal = !held ? 0 : lucky && k === 2 ? u : (lucky ? 0.25 : Math.min(0.3, 0.05 + placeNo() / NEED * 0.3)) * Math.min(1, holdT / 0.3);
-      lift += (goal - lift) * Math.min(1, dt * (held ? 5 : 8));
-      shake = held ? 0.3 + goal : 0;
-      if (held) {
-        creakT -= dt;
-        if (creakT <= 0) { creakT = 0.3; noiseHit(0.22, 160 + goal * 300, 0.14 + goal * 0.2, 3); }
-      }
-      if (lucky && k === 2 && u > 0.8) { pullOut(); camX = 0; }   /* 抜けた瞬間にかぶへ切り替える */
-      else if (autoT > PULLS[2][1] + 0.3) { state = S.OUT; outT = 0; held = false; tone(196, 0.4, 0.18, "triangle", 98); }
-    } else if (state === S.OUT) {
+    if (state === S.OUT) {
       outT += dt;
-      lift += (0 - lift) * Math.min(1, dt * 4);
-      if (outT > (won ? 2.8 : 1.0)) state = S.RESULT;
+      if (won) {
+        /* みんなで倒れたあと、かぶが自分の後ろに落ちてくる */
+        camX += (meX() - W * 0.35 - camX) * Math.min(1, dt * 3);
+        if (outT >= DROP + 0.5 && outT - dt < DROP + 0.5) {
+          noiseHit(0.5, 120, 0.7, 0.7); tone(90, 0.3, 0.3, "sine", 50);
+          window.zCelebrate.play(AC, "fanfare", { delay: 0.15 });
+          confetti.burst(W, H, 180);
+        }
+      }
+      if (outT > (won ? 4.2 : 1.0)) state = S.RESULT;
     }
     confetti.step(dt, W, H);
-    if (state === S.OUT && won && outT > 0.35 && outT - dt <= 0.35) confetti.burst(W, H, 180);
   }
 
   /* ============ 入力 ============ */
@@ -223,7 +230,6 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (state === S.PLAY && autoT < 0) autoT = 0;
   }
   function move() {}
   function up() {}
@@ -309,7 +315,7 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
 
   function kindOf(p) { return KINDS[(Math.imul(hash(p.id), 2654435761) >>> 0) % KINDS.length]; }
   function scaleOf(k) { return k === "nezumi" ? 0.45 : k === "neko" ? 0.6 : k === "inu" ? 0.72 : k === "mago" ? 0.82 : 1; }
-  function leanOf(i, pulling, fallen) { return fallen ? 1.25 : pulling ? 0.42 + Math.sin(T * 9 + i) * 0.05 : 0.06; }
+  function leanOf(i, pulling, fallen) { return fallen ? 0.42 + 0.83 * Math.min(1, outT / 0.4) : pulling ? 0.42 + Math.sin(T * 9 + i) * 0.05 : 0.06; }
   /* 手（動物は口）の位置。drawPerson と同じ置き方で計算する */
   function handOf(p, sl, i, pulling, fallen, pop) {
     var k = kindOf(p), a = leanOf(i, pulling, fallen), f = pop * scaleOf(k) * sl.s / 100;
@@ -419,11 +425,13 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
 
   function kabuPos() {
     var out = won && (state === S.OUT || state === S.RESULT);
-    var u = out ? Math.min(1, outT / 0.6) : 0;
-    var up = lift * 48 + (out ? (1 - Math.pow(1 - u, 3)) * 80 : 0);
-    var sx = state === S.PLAY ? Math.sin(T * 40) * shake * 3 : 0;
-    var rot = out ? u * 0.5 : Math.sin(T * 23) * shake * 0.03;
-    return { x: KX + sx, y: KY + 60 - up, rot: rot };
+    if (out) {
+      var t = outT - DROP, land = KY + 110 - 126, y0 = land - H * 1.2;
+      var y = t < 0 ? y0 - 500 : Math.min(land, y0 + 0.5 * 9000 * t * t);
+      return { x: meX() + 150, y: y, rot: 0.12 };
+    }
+    var sx = state === S.LINE ? Math.sin(T * 40) * shake * 3 : 0;
+    return { x: KX + sx, y: KY + 60 - lift * 48, rot: Math.sin(T * 23) * shake * 0.03 };
   }
   function drawKabu() {
     var k = kabuPos(), r = 120;
@@ -450,6 +458,11 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
     ctx.fill();
     ctx.strokeStyle = "#d9d2c2"; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.moveTo(0, r * 1.05); ctx.quadraticCurveTo(6, r * 1.4, -4, r * 1.7); ctx.stroke();
+    /* キリ番 */
+    ctx.fillStyle = "#e0302a"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = "900 " + (String(kiriban()).length > 4 ? 44 : 54) + "px sans-serif";
+    ctx.fillText(String(kiriban()), 0, -r * 0.62);
+    ctx.textBaseline = "alphabetic";
     ctx.restore();
     return k;
   }
@@ -479,12 +492,12 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
     if (out) { ctx.save(); drawKabu(); ctx.restore(); }
 
     var hands = [];
-    for (var i = 0; i < shown; i++) hands[i] = handOf(crowd[i], sl[i], i, crowd[i].pull && state === S.PLAY || out, out, popOf(i));
+    for (var i = 0; i < shown; i++) hands[i] = handOf(crowd[i], sl[i], i, crowd[i].pull || out, out, popOf(i));
     if (state !== S.WAIT && state !== S.INTRO) for (i = 0; i < n; i++) {
       if (sl[i].x < cam - 80 || sl[i].x > cam + W + 80) continue;
       var pop = popOf(i);
       if (pop <= 0) continue;
-      drawPerson(crowd[i], sl[i], i, crowd[i].pull && state === S.PLAY || out, out, pop);
+      drawPerson(crowd[i], sl[i], i, crowd[i].pull || out, out, pop);
     }
     /* 綱：かぶの葉の根元から、1人ずつの手を通る */
     if (!out && shown > 0 && state !== S.WAIT && state !== S.INTRO) {
@@ -575,8 +588,6 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
     run: async function (r) {
       await r.wait(800);
       debugKey(1); r.key();
-      if (!await r.until(function () { return state === S.PLAY; }, 15)) throw Error("並ばない");
-      await r.wait(500); down(W / 2, H / 2);
       if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("抜けない");
       await r.wait(1500);
     }
@@ -590,6 +601,7 @@ won ? myNo + "人目で、おおきなかぶを抜いた" : myNo + "人目だっ
     newRound();
   });
   state = S.INTRO; T = 0; held = false; startButton.hidden = false;
+  peekCount();
   layout();
   var last = performance.now();
   var stepAcc = 0;
