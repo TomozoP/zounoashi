@@ -95,7 +95,9 @@
       else { g.quaternion.identity(); g.rotation.y = -p.yaw; }
       var m = g.userData.mat;
       m.transparent = !!p.ghost; m.opacity = p.ghost ? 0.8 : 1;
-      m.emissive.setHex(p.bad ? (p.ghost ? 0xcc1100 : 0x661100) : 0x000000);
+      /* 置けない所にあるときは灰色にする */
+      if (p.ghost && p.bad) { m.color.setHex(0x8a8f99); m.emissive.setHex(0x000000); }
+      else { m.color.set(p.color); m.emissive.setHex(p.bad ? 0x661100 : 0x000000); }
       /* 県名はいつも上向き・正面向き（県が回っても読める） */
     });
     Object.keys(this.items).forEach(function (id) { if (!seen[id]) { sc.remove(self.items[id]); delete self.items[id]; } });
@@ -103,9 +105,14 @@
 
     /* カメラ: 北海道をななめ上から見下ろす。北海道が画面の上のほうに入るよう、見る先を手前にずらす */
     var cam = this.camera, aspect = cam.aspect || 0.5625, fov = cam.fov * Math.PI / 180;
-    var tilt = 72 * Math.PI / 180, w = s.cam.w;
+    /* 置くときは真上から。切り替えはなめらかに */
+    var dt = this.lastT == null ? 1 : Math.min(0.1, Math.max(0, s.t - this.lastT)); this.lastT = s.t;
+    var k = 1 - Math.exp(-dt * 7);
+    if (this.ctilt == null || dt >= 1) { this.ctilt = s.cam.tilt; this.cz = s.cam.z; }
+    this.ctilt += (s.cam.tilt - this.ctilt) * k; this.cz += (s.cam.z - this.cz) * k;
+    var tilt = this.ctilt * Math.PI / 180, w = s.cam.w;
     var dist = (w / 2) / (Math.tan(fov / 2) * aspect);
-    var tx = s.cam.x, tz = s.cam.z;
+    var tx = s.cam.x, tz = this.cz;
     cam.position.set(tx + s.cam.sx, Math.sin(tilt) * dist, tz + Math.cos(tilt) * dist + s.cam.sy);
     cam.lookAt(tx, 0, tz);
     cam.updateMatrixWorld();
