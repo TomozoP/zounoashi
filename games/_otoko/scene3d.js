@@ -125,7 +125,7 @@
     glyph.position.set(0, this.baseY, 0);
     this.scene.add(glyph);
 
-    this.tools = [makeBrush(), makeSand(), makePad(), makeCloth()];
+    this.tools = [makeChisel(), makeBrush(), makeSand(), makePad(), makeCloth()];
     this.tools.forEach(function (t) { t.visible = false; self.scene.add(t); });
     this.ray = new T.Raycaster();
     this.noise = makeNoise();
@@ -133,6 +133,17 @@
   }
 
   /* ---- 道具の形（磨く面が -z を向く） ---- */
+  function makeChisel() {
+    var g = new T.Group();
+    var steel = Z3.std(0x9aa0a8, { metalness: 0.9, roughness: 0.3 });
+    var rod = new T.Mesh(new T.CylinderGeometry(0.07, 0.07, 0.8, 6), steel);
+    rod.rotation.x = Math.PI / 2; rod.position.z = 0.55; g.add(rod);
+    var tip = new T.Mesh(new T.CylinderGeometry(0.07, 0.01, 0.18, 6), steel);
+    tip.rotation.x = -Math.PI / 2; tip.position.z = 0.07; g.add(tip);
+    var grip = new T.Mesh(new T.CylinderGeometry(0.1, 0.1, 0.3, 8), Z3.std(0xd23a2a, { roughness: 0.5 }));
+    grip.rotation.x = Math.PI / 2; grip.position.z = 0.75; g.add(grip);
+    return g;
+  }
   function makeBrush() {
     var g = new T.Group();
     var handle = new T.Mesh(new T.BoxGeometry(0.22, 0.95, 0.14), Z3.std(0xa0683a, { roughness: 0.6 }));
@@ -297,11 +308,112 @@
     return { x: (v.x + 1) / 2 * W, y: (1 - v.y) / 2 * H };
   };
 
-  GameScene.prototype.reset = function () {};
+  GameScene.prototype.reset = function () {
+    if (this.shards) this.shards.forEach(function (m) { m.visible = false; m.userData.life = 0; });
+  };
+
+  /* ---- 岩 ----
+     字の座標の格子（rn×rn の頂点）の高さ grid.rockH（0〜1）で、角ばった岩の表面を作る。
+     高さ0の頂点だけでできた三角は描かない（削り切った穴）。字は岩の奥から出てくる。 */
+  var ROCK_BASE = -0.25, ROCK_TOP = 0.55;
+  GameScene.prototype.rockZ = function (h) { return ROCK_BASE + h * (ROCK_TOP - ROCK_BASE); };
+  GameScene.prototype.paintRock = function (grid) {
+    var rn = grid.rn, H = grid.rockH, H0 = grid.rockInit, i, j;
+    if (!this.rock) {
+      var geo = new T.BufferGeometry(), pos = new Float32Array(rn * rn * 3), col = new Float32Array(rn * rn * 3);
+      var r = Z3.rng(33);
+      this.rockJit = new Float32Array(rn * rn * 2);
+      for (j = 0; j < rn; j++) for (i = 0; i < rn; i++) {
+        var k = j * rn + i;
+        /* 頂点を少しずらして、格子に見えないようにする */
+        var edge = i === 0 || j === 0 || i === rn - 1 || j === rn - 1;
+        this.rockJit[k * 2] = edge ? 0 : (r() - 0.5) * 0.35;
+        this.rockJit[k * 2 + 1] = edge ? 0 : (r() - 0.5) * 0.35;
+        this.rockShade = this.rockShade || new Float32Array(rn * rn);
+        this.rockShade[k] = 0.8 + r() * 0.35;
+      }
+      geo.setAttribute("position", new T.BufferAttribute(pos, 3));
+      geo.setAttribute("color", new T.BufferAttribute(col, 3));
+      geo.setIndex(new T.BufferAttribute(new Uint32Array((rn - 1) * (rn - 1) * 6), 1));
+      var tex = Z3.canvasTex(128, 128, function (g, w, h) {
+        g.fillStyle = "#8a8580"; g.fillRect(0, 0, w, h);
+        var q = Z3.rng(8);
+        for (var n = 0; n < 1400; n++) { var v = 90 + q() * 90 | 0; g.fillStyle = "rgb(" + v + "," + (v - 4) + "," + (v - 10) + ")"; g.fillRect(q() * w, q() * h, 1 + q() * 2, 1 + q() * 2); }
+      }, 1);
+      tex.repeat.set(3, 3);
+      this.rockUvTex = tex;
+      var uv = new Float32Array(rn * rn * 2);
+      for (k = 0; k < rn * rn; k++) { uv[k * 2] = (k % rn) / (rn - 1); uv[k * 2 + 1] = 1 - Math.floor(k / rn) / (rn - 1); }
+      geo.setAttribute("uv", new T.BufferAttribute(uv, 2));
+      this.rock = new T.Mesh(geo, new T.MeshStandardMaterial({ map: tex, vertexColors: true, flatShading: true, roughness: 0.92, metalness: 0, side: T.DoubleSide }));
+      this.rock.castShadow = true; this.rock.receiveShadow = true;
+      this.glyph.add(this.rock);
+    }
+    var g2 = this.rock.geometry, P = g2.attributes.position.array, Cc = g2.attributes.color.array, step = 2 * BOX / (rn - 1);
+    for (j = 0; j < rn; j++) for (i = 0; i < rn; i++) {
+      var k = j * rn + i, h = H[k];
+      P[k * 3] = -BOX + (i + this.rockJit[k * 2]) * step;
+      P[k * 3 + 1] = BOX - (j + this.rockJit[k * 2 + 1]) * step;
+      P[k * 3 + 2] = this.rockZ(h);
+      /* 削った新しい面は白っぽく */
+      var fresh = Math.min(1, Math.max(0, (H0[k] - h) * 3)), sh = this.rockShade[k];
+      Cc[k * 3] = sh * (1 + fresh * 0.25); Cc[k * 3 + 1] = sh * (1 + fresh * 0.22); Cc[k * 3 + 2] = sh * (1 + fresh * 0.18);
+    }
+    var idx = g2.index.array, n = 0;
+    for (j = 0; j < rn - 1; j++) for (i = 0; i < rn - 1; i++) {
+      var a = j * rn + i, b = a + 1, c = a + rn, d = c + 1, e = 0.004;
+      if (H[a] > e || H[b] > e || H[c] > e) { idx[n++] = a; idx[n++] = c; idx[n++] = b; }
+      if (H[b] > e || H[c] > e || H[d] > e) { idx[n++] = b; idx[n++] = c; idx[n++] = d; }
+    }
+    g2.setDrawRange(0, n);
+    g2.index.needsUpdate = true; g2.attributes.position.needsUpdate = true; g2.attributes.color.needsUpdate = true;
+    g2.computeBoundingSphere();
+    this.rock.visible = n > 0;
+  };
+
+  /* 削った破片（角ばったかけら）を飛ばす。x, y は字の座標、z は岩の表面 */
+  GameScene.prototype.chip = function (x, y, z, n) {
+    if (!this.shards) return;
+    for (var i = 0; i < n; i++) {
+      var m = this.shards[this.shardNext++ % this.shards.length];
+      this.v.set(x, y, z); this.glyph.localToWorld(this.v);
+      m.position.copy(this.v);
+      var sc = 0.5 + Math.random() * 1.2;
+      m.scale.set(sc, sc * (0.5 + Math.random() * 0.6), sc * (0.6 + Math.random() * 0.5));
+      m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+      m.userData.vel = new T.Vector3((Math.random() - 0.5) * 3.2, 1.2 + Math.random() * 2.6, 1.5 + Math.random() * 2.5);
+      m.userData.spin = new T.Vector3((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14, 0);
+      m.userData.life = 2.5;
+      m.visible = true;
+    }
+  };
+  GameScene.prototype.stepShards = function (dt) {
+    if (!this.shards) {
+      var geo = new T.IcosahedronGeometry(0.07, 0), mat = new T.MeshStandardMaterial({ color: 0xa8a29a, flatShading: true, roughness: 0.9 });
+      this.shards = []; this.shardNext = 0;
+      for (var i = 0; i < 48; i++) { var m = new T.Mesh(geo, mat); m.visible = false; m.castShadow = true; m.userData.life = 0; this.scene.add(m); this.shards.push(m); }
+    }
+    this.shards.forEach(function (m) {
+      var u = m.userData;
+      if (!m.visible) return;
+      u.life -= dt;
+      if (u.life <= 0) { m.visible = false; return; }
+      u.vel.y -= 9.8 * dt;
+      m.position.addScaledVector(u.vel, dt);
+      m.rotation.x += u.spin.x * dt; m.rotation.y += u.spin.y * dt;
+      if (m.position.y < 0.04 && m.position.z > -1.4 && m.position.z < 2) {   /* 作業台の上で跳ねて止まる */
+        m.position.y = 0.04; u.vel.y *= -0.3; u.vel.x *= 0.6; u.vel.z *= 0.6; u.spin.multiplyScalar(0.5);
+      }
+      if (u.life < 0.4) m.scale.multiplyScalar(0.92);
+    });
+  };
 
   /* s: { t, state, tool, toolAt: {x,y}|null, rubbing, sway, spin } */
   GameScene.prototype.sync = function (s) {
     var g = this.glyph;
+    var dt = this.lastT == null ? 0 : Math.max(0, Math.min(0.1, s.t - this.lastT));
+    this.lastT = s.t;
+    this.stepShards(dt);
     g.rotation.y = s.state === "result" ? Math.sin(s.t * 0.9) * 0.55 : Math.sin(s.t * 0.7) * 0.1;
     g.rotation.x = 0;
     for (var i = 0; i < this.tools.length; i++) {
@@ -309,14 +421,15 @@
       tl.visible = !!s.toolAt && s.tool === i && s.state === "play";
       if (!tl.visible) continue;
       var j = s.rubbing ? Math.sin(s.t * 60) * 0.02 : 0;
-      this.v.set(s.toolAt.x + j, s.toolAt.y + j * 0.5, this.FRONT + 0.02);
+      this.v.set(s.toolAt.x + j, s.toolAt.y + j * 0.5, Math.max(this.FRONT, s.toolZ == null ? -9 : s.toolZ) + 0.02);
       g.localToWorld(this.v);
       tl.position.copy(this.v);
       tl.quaternion.copy(g.quaternion);
-      tl.rotateZ(i === 0 ? -0.5 : i === 1 ? -0.2 + j * 3 : 0);
+      tl.rotateZ(i === 1 ? -0.5 : i === 2 ? -0.2 + j * 3 : 0);
+      if (i === 0) { tl.rotateX(-0.35); tl.rotateY(0.3); tl.translateZ(s.hit * 0.25); }
       tl.rotateY(0.15); tl.rotateX(-0.1);
       if (tl.userData.spin) tl.userData.spin.rotation.y = s.t * (s.rubbing ? 30 : 3);
-      if (i === 3) tl.rotation.z += Math.sin(s.t * 20) * (s.rubbing ? 0.15 : 0.02);
+      if (i === 4) tl.rotation.z += Math.sin(s.t * 20) * (s.rubbing ? 0.15 : 0.02);
     }
   };
 
