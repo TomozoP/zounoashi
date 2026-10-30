@@ -355,6 +355,5 @@ window.DRAFT_GAMES = [
     "play": "games/_taiyaki/index.html",
     "full": true,
     "catch": "好きな画像の形でたい焼きを焼く"
-  },
-  {"type":"lab","tags":[],"id":"kabu","title":"インターネットおおきなかぶ","year":2026,"date":"2026-10-29","plays":null,"url":"","img":"games/_kabu/img/thumb.webp","play":"games/_kabu/index.html","full":true,"catch":"1000人集まると1回抜ける"},
+  }
 ];
