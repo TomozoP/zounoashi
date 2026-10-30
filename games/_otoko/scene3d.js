@@ -57,7 +57,7 @@
     var L = Z3.lights(this.scene, { shadows: true, shadowSize: 4, scale: 0.8 });
     L.key.position.set(-6, 6, 3);
     this.camera.position.set(1.3, 3.0, 11.6);
-    this.camera.lookAt(0, 1.45, 0);
+    this.camera.lookAt(0, 1.15, 0);
 
     /* 背景の壁（ぼんやり照らす） */
     var wall = new T.Mesh(new T.PlaneGeometry(14, 10), new T.MeshBasicMaterial({
@@ -125,7 +125,7 @@
     glyph.position.set(0, this.baseY, 0);
     this.scene.add(glyph);
 
-    this.tools = [makeChisel(), makeBrush(), makeSand(), makePad(), makeCloth()];
+    this.tools = [makeChisel(), makeHake(), makeBrush(), makeSand(), makeSpray(), makePad(), makeCloth()];
     this.tools.forEach(function (t) { t.visible = false; self.scene.add(t); });
     this.ray = new T.Raycaster();
     this.noise = makeNoise();
@@ -142,6 +142,28 @@
     tip.rotation.x = -Math.PI / 2; tip.position.z = 0.07; g.add(tip);
     var grip = new T.Mesh(new T.CylinderGeometry(0.1, 0.1, 0.3, 8), Z3.std(0xd23a2a, { roughness: 0.5 }));
     grip.rotation.x = Math.PI / 2; grip.position.z = 0.75; g.add(grip);
+    return g;
+  }
+  function makeHake() {
+    var g = new T.Group();
+    var handle = new T.Mesh(new T.BoxGeometry(0.1, 0.8, 0.07), Z3.std(0xc08a50, { roughness: 0.6 }));
+    handle.position.set(0, -0.62, 0.2); g.add(handle);
+    var ferrule = new T.Mesh(new T.BoxGeometry(0.46, 0.12, 0.1), Z3.std(0xb8bcc2, { metalness: 0.9, roughness: 0.3 }));
+    ferrule.position.set(0, -0.18, 0.16); g.add(ferrule);
+    var hair = new T.Mesh(new T.BoxGeometry(0.44, 0.34, 0.08), Z3.std(0xe8d4a8, { roughness: 1 }));
+    hair.position.set(0, 0.04, 0.08); hair.rotation.x = 0.5; g.add(hair);
+    return g;
+  }
+  function makeSpray() {
+    var g = new T.Group();
+    var bottle = new T.Mesh(new T.CylinderGeometry(0.2, 0.22, 0.6, 16), new T.MeshStandardMaterial({ color: 0xeef4f8, roughness: 0.2, transparent: true, opacity: 0.75 }));
+    bottle.position.set(0, -0.35, 0.55); g.add(bottle);
+    var water = new T.Mesh(new T.CylinderGeometry(0.17, 0.19, 0.35, 16), new T.MeshStandardMaterial({ color: 0x7cc4f4, roughness: 0.1, transparent: true, opacity: 0.6 }));
+    water.position.set(0, -0.47, 0.55); g.add(water);
+    var head = new T.Mesh(new T.BoxGeometry(0.2, 0.2, 0.4), Z3.std(0x3b8fd6, { roughness: 0.4 }));
+    head.position.set(0, 0.04, 0.45); g.add(head);
+    var trig = new T.Mesh(new T.BoxGeometry(0.06, 0.24, 0.06), Z3.std(0x2a6aa6, { roughness: 0.4 }));
+    trig.position.set(0, -0.12, 0.3); trig.rotation.x = 0.3; g.add(trig);
     return g;
   }
   function makeBrush() {
@@ -241,7 +263,7 @@
       y0p = Math.max(0, Math.floor((R0.j0 - 1) / k)); y1p = Math.min(N, Math.ceil((R0.j1 + 2) / k));
     }
     var C = this.img[0].data, M = this.img[1].data, B = this.img[2].data, nz = this.noise;
-    var D = grid.dirt, RO = grid.rough, S = grid.shine, F = grid.fin;
+    var D = grid.dirt, RO = grid.rough, S = grid.shine, F = grid.fin, DU = grid.dust, GR = grid.grit;
     for (var y = y0p; y < y1p; y++) {
       var gy = Math.min(n - 1.001, Math.max(0, (y + 0.5) * k - 0.5)), yy = gy | 0, ty = gy - yy;
       for (var x = x0p; x < x1p; x++) {
@@ -252,6 +274,8 @@
         var ro = RO[i00] * w00 + RO[i10] * w10 + RO[i01] * w01 + RO[i11] * w11;
         var s = S[i00] * w00 + S[i10] * w10 + S[i01] * w01 + S[i11] * w11;
         var f = F[i00] * w00 + F[i10] * w10 + F[i01] * w01 + F[i11] * w11;
+        var du = DU[i00] * w00 + DU[i10] * w10 + DU[i01] * w01 + DU[i11] * w11;
+        var gr = GR[i00] * w00 + GR[i10] * w10 + GR[i01] * w01 + GR[i11] * w11;
         var p = y * N + x, fb = nz.fbm[p], pt = nz.pit[p], st = nz.streak[p], h = nz.hi[p];
         /* 錆は穴の中ほど遅くまで残る */
         var dd = clamp((d - 0.3 * (1 - pt) - 0.1 * fb + 0.12) * 1.6);
@@ -279,6 +303,15 @@
         rough = mix(rough, 0.92 + h * 0.08, dd);
         metal = mix(metal, 0.05, dd);
         hgt = mix(hgt, 0.55 + fb * 0.3 + (h - 0.5) * 0.12 - spot * 0.2, dd);
+        /* 削りかす: 黒っぽい泥が削り跡に沿ってたまる */
+        var gv = clamp(gr * 1.4 + st * 0.4 * gr - 0.05);
+        cr = mix(cr, 0.17, gv); cg = mix(cg, 0.165, gv); cb = mix(cb, 0.16, gv);
+        rough = mix(rough, 0.75, gv); metal = mix(metal, 0.2, gv); hgt = mix(hgt, 0.53 + h * 0.05, gv);
+        /* 岩の粉: 白っぽい粉が全体にかぶる（払うとむらに減る） */
+        var uv2 = clamp(du * 1.3 - h * 0.25 - fb * 0.15);
+        var pc = 0.66 + h * 0.1;
+        cr = mix(cr, pc, uv2); cg = mix(cg, pc * 0.97, uv2); cb = mix(cb, pc * 0.92, uv2);
+        rough = mix(rough, 1, uv2); metal = mix(metal, 0, uv2); hgt = mix(hgt, 0.58 + h * 0.12, uv2);
         var q = p * 4;
         C[q] = cr * 255; C[q + 1] = cg * 255; C[q + 2] = cb * 255; C[q + 3] = 255;
         M[q] = 0; M[q + 1] = rough * 255; M[q + 2] = clamp(metal) * 255; M[q + 3] = 255;
@@ -425,11 +458,11 @@
       g.localToWorld(this.v);
       tl.position.copy(this.v);
       tl.quaternion.copy(g.quaternion);
-      tl.rotateZ(i === 1 ? -0.5 : i === 2 ? -0.2 + j * 3 : 0);
+      tl.rotateZ(i === 1 ? -0.3 + j * 4 : i === 2 ? -0.5 : i === 3 ? -0.2 + j * 3 : 0);
       if (i === 0) { tl.rotateX(-0.35); tl.rotateY(0.3); tl.translateZ(s.hit * 0.25); }
       tl.rotateY(0.15); tl.rotateX(-0.1);
       if (tl.userData.spin) tl.userData.spin.rotation.y = s.t * (s.rubbing ? 30 : 3);
-      if (i === 4) tl.rotation.z += Math.sin(s.t * 20) * (s.rubbing ? 0.15 : 0.02);
+      if (i === 6) tl.rotation.z += Math.sin(s.t * 20) * (s.rubbing ? 0.15 : 0.02);
     }
   };
 
