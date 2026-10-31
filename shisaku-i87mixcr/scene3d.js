@@ -113,7 +113,6 @@
       geo.clearGroups();
       var m = new T.Mesh(geo, self.face);
       m.castShadow = true; m.receiveShadow = true;
-      m.visible = false;                     /* 字の板は使わない（塊を自分で削って形を作る） */
       glyph.add(m);
     });
     this.FRONT = DEPTH / 2 + 0.045;
@@ -379,19 +378,19 @@
       var uv = new Float32Array(rn * rn * 2);
       for (k = 0; k < rn * rn; k++) { uv[k * 2] = (k % rn) / (rn - 1); uv[k * 2 + 1] = 1 - Math.floor(k / rn) / (rn - 1); }
       geo.setAttribute("uv", new T.BufferAttribute(uv, 2));
-      /* 塊そのものに磨きの貼り絵を貼る（角ばった面のまま磨ける） */
-      var mat = this.face.clone(); mat.flatShading = true; mat.side = T.DoubleSide;
-      this.rock = new T.Mesh(geo, mat);
+      this.rock = new T.Mesh(geo, new T.MeshStandardMaterial({ map: tex, vertexColors: true, flatShading: true, roughness: 0.92, metalness: 0, side: T.DoubleSide }));
       this.rock.castShadow = true; this.rock.receiveShadow = true;
       this.glyph.add(this.rock);
     }
-    var g2 = this.rock.geometry, P = g2.attributes.position.array, UV = g2.attributes.uv.array, step = 2 * BOX / (rn - 1);
+    var g2 = this.rock.geometry, P = g2.attributes.position.array, Cc = g2.attributes.color.array, step = 2 * BOX / (rn - 1);
     for (j = 0; j < rn; j++) for (i = 0; i < rn; i++) {
       var k = j * rn + i, h = H[k];
       P[k * 3] = -BOX + (i + this.rockJit[k * 2]) * step;
       P[k * 3 + 1] = BOX - (j + this.rockJit[k * 2 + 1]) * step;
       P[k * 3 + 2] = this.rockZ(h);
-      UV[k * 2] = P[k * 3]; UV[k * 2 + 1] = P[k * 3 + 1];
+      /* 削った新しい面は白っぽく */
+      var fresh = Math.min(1, Math.max(0, (H0[k] - h) * 3)), sh = this.rockShade[k];
+      Cc[k * 3] = sh * (1 + fresh * 0.25); Cc[k * 3 + 1] = sh * (1 + fresh * 0.22); Cc[k * 3 + 2] = sh * (1 + fresh * 0.18);
     }
     var idx = g2.index.array, n = 0;
     for (j = 0; j < rn - 1; j++) for (i = 0; i < rn - 1; i++) {
@@ -400,7 +399,7 @@
       if (H[b] > e || H[c] > e || H[d] > e) { idx[n++] = b; idx[n++] = c; idx[n++] = d; }
     }
     g2.setDrawRange(0, n);
-    g2.index.needsUpdate = true; g2.attributes.position.needsUpdate = true; g2.attributes.uv.needsUpdate = true;
+    g2.index.needsUpdate = true; g2.attributes.position.needsUpdate = true; g2.attributes.color.needsUpdate = true;
     g2.computeBoundingSphere();
     this.rock.visible = n > 0;
   };
@@ -455,7 +454,7 @@
       tl.visible = !!s.toolAt && s.tool === i && s.state === "play";
       if (!tl.visible) continue;
       var j = s.rubbing ? Math.sin(s.t * 60) * 0.02 : 0;
-      this.v.set(s.toolAt.x + j, s.toolAt.y + j * 0.5, (s.toolZ == null ? this.FRONT : Math.max(-0.2, s.toolZ)) + 0.02);
+      this.v.set(s.toolAt.x + j, s.toolAt.y + j * 0.5, Math.max(this.FRONT, s.toolZ == null ? -9 : s.toolZ) + 0.02);
       g.localToWorld(this.v);
       tl.position.copy(this.v);
       tl.quaternion.copy(g.quaternion);

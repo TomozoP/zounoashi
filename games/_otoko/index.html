@@ -39,7 +39,7 @@
 <script src="scene3d.js"></script>
 <script>
 /* 男磨き
-   錆びた鉄の塊（「男」をひと回り太らせた形）をノミで削って自分の「男」の形を作り、
+   岩の塊をノミで削って錆びた「男」の字を掘り出し、
    刷毛（岩の粉）→ ワイヤーブラシ（錆）→ 紙やすり（ざらざら）→ 霧吹き（削りかす）→ コンパウンド（つや）→ 布（拭き上げ）で磨く。
    時間は無制限。100%になっても続き、右下の「完成」でおしまいにして、どこまで磨けたかを「%」で出す。 */
 (function () {
@@ -144,7 +144,7 @@
     for (i = 0; i < N * N; i++) rustBase[i] = 0.82 + r() * 0.18;
   })();
   /* 岩: rn×rn の頂点の高さ（0〜1）。字の表面は高さ EXPOSE あたり。これより低く削ると字が出る */
-  var RN = Z3mobile() ? 41 : 49, RSTEP = 2 * BOX / (RN - 1), EXPOSE = 0.5;
+  var RN = Z3mobile() ? 33 : 39, RSTEP = 2 * BOX / (RN - 1), EXPOSE = 0.5;
   function Z3mobile() { return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches); }
   grid.rn = RN; grid.rockH = new Float32Array(RN * RN); grid.rockInit = new Float32Array(RN * RN);
   var rockOnGlyph = new Uint8Array(RN * RN), rockCount = 0;
@@ -195,19 +195,25 @@
     painted = true; grid.rect = null;
   }
   var painted = true, rockDirty = true;
-  /* 仕上がり: 残っている塊の表面（岩が残るマス）の磨きの進み具合の平均 */
   function measure() {
-    var a = { dirt: 0, rough: 0, shine: 0, fin: 0 }, sum = 0, cnt = 0;
-    for (var i = 0; i < N * N; i++) {
-      if (cellRock[i] < 0.02) continue;
-      var d = grid.dirt[i], r = grid.rough[i], s = grid.shine[i], f = grid.fin[i], gr = grid.grit[i];
-      a.dirt += d; a.rough += r; a.shine += s; a.fin += f; cnt++;
-      sum += Math.max(0, (1 - d) + (1 - r) + s + f - gr * 0.5);
+    var a = { dirt: 0, rough: 0, shine: 0, fin: 0 }, sum = 0, rs = 0;
+    for (var m = 0; m < RN * RN; m++) {
+      var h0 = grid.rockInit[m];
+      if (!h0) continue;
+      var h = grid.rockH[m];
+      rs += rockOnGlyph[m] ? Math.min(1, Math.max(0, (h0 - h) / Math.max(0.05, h0 - EXPOSE + 0.04))) : 1 - h / h0;
     }
-    if (!cnt) { grid.avg = { dirt: 1, rough: 1, shine: 0, fin: 0 }; score = 0; return; }
-    a.dirt /= cnt; a.rough /= cnt; a.shine /= cnt; a.fin /= cnt;
+    rs = rockCount ? rs / rockCount : 1;
+    for (var i = 0; i < N * N; i++) {
+      if (!mask[i]) continue;
+      var d = grid.dirt[i], r = grid.rough[i], s = grid.shine[i], f = grid.fin[i], du = grid.dust[i], gr = grid.grit[i];
+      a.dirt += d; a.rough += r; a.shine += s; a.fin += f;
+      sum += Math.max(0, (1 - du) + (1 - d) + (1 - r) + s + f - gr * 0.5);
+    }
+    if (!maskCount) { grid.avg = a; score = 0; return; }
+    a.dirt /= maskCount; a.rough /= maskCount; a.shine /= maskCount; a.fin /= maskCount;
     grid.avg = a;
-    score = Math.floor(sum / cnt / 4 * 1000) / 10;
+    score = Math.floor((rs + sum / maskCount) / 6 * 1000) / 10;
     if (score > 99.4) score = 100;
   }
 
@@ -229,39 +235,11 @@
       if (nh < 0.06) nh = 0;
       took += h - nh; grid.rockH[k] = nh;
     }
-    if (took > 0) { rockDirty = true; updateCellRock(); freshen(x, y, CHIP_R); measure(); }
+    if (took > 0) { rockDirty = true; updateCellRock(); measure(); }
     return { took: took, top: top };
-  }
-  /* 削った所は錆が取れた荒い地肌になる（磨いてあっても荒れる） */
-  function freshen(x, y, rad) {
-    var ci = Math.round((x + BOX) / CELL - 0.5), cj = Math.round((BOX - y) / CELL - 0.5), rc = Math.ceil(rad / CELL);
-    for (var j = Math.max(0, cj - rc); j <= Math.min(N - 1, cj + rc); j++) for (var i = Math.max(0, ci - rc); i <= Math.min(N - 1, ci + rc); i++) {
-      var cx = -BOX + (i + 0.5) * CELL, cy = BOX - (j + 0.5) * CELL;
-      if ((cx - x) * (cx - x) + (cy - y) * (cy - y) > rad * rad) continue;
-      var k = j * N + i;
-      grid.dirt[k] *= 0.3; grid.rough[k] = 1; grid.shine[k] = 0; grid.fin[k] = 0; grid.grit[k] = 0;
-    }
-    painted = true; grid.rect = null;
-  }
-  /* 紙やすりは塊の角ばった面もならす（頂点の高さを周りの平均に寄せる）。ふちは下げない */
-  function smoothRock(x, y, rad, k0) {
-    var ci = Math.round((x + BOX) / RSTEP), cj = Math.round((BOX - y) / RSTEP), rc = Math.ceil(rad / RSTEP), H = grid.rockH, did = false;
-    for (var j = Math.max(1, cj - rc); j <= Math.min(RN - 2, cj + rc); j++) for (var i = Math.max(1, ci - rc); i <= Math.min(RN - 2, ci + rc); i++) {
-      var vx = -BOX + i * RSTEP, vy = BOX - j * RSTEP, q = ((vx - x) * (vx - x) + (vy - y) * (vy - y)) / (rad * rad);
-      if (q >= 1) continue;
-      var k = j * RN + i, h = H[k];
-      if (h <= 0) continue;
-      var nb = [H[k - 1], H[k + 1], H[k - RN], H[k + RN]], sum = 0, n = 0;
-      for (var m = 0; m < 4; m++) if (nb[m] > 0) { sum += nb[m]; n++; }
-      if (n < 4) continue;
-      H[k] = h + (sum / n - h) * k0 * (1 - q);
-      did = true;
-    }
-    if (did) rockDirty = true;
   }
   function stamp(x, y) {
     if (tool === CHISEL) return;
-    if (tool === SAND) smoothRock(x, y, RAD * 1.6, 0.2);
     var rad = tool === WATER ? RAD * 1.5 : RAD;
     var ci = Math.round((x + BOX) / CELL - 0.5), cj = Math.round((BOX - y) / CELL - 0.5), rc = Math.ceil(rad / CELL);
     /* 描き直す範囲を広げる */
@@ -275,7 +253,7 @@
         var q = ((cx - x) * (cx - x) + (cy - y) * (cy - y)) / (rad * rad);
         if (q >= 1) continue;
         var w = 1 - q, k = j * N + i;
-        if (cellRock[k] < 0.02) continue;              /* 削り落とした所 */
+        if (cellRock[k] > EXPOSE - 0.04) continue;     /* まだ岩の中 */
         var d = grid.dirt[k], r = grid.rough[k], s = grid.shine[k], f = grid.fin[k], du = grid.dust[k], gr = grid.grit[k];
         if (tool === HAKE) {                       /* 刷毛: 岩の粉を払う */
           du -= 0.05 * w;
@@ -423,11 +401,12 @@
     var ci = Math.round((p.x + BOX) / CELL - 0.5), cj = Math.round((BOX - p.y) / CELL - 0.5);
     if (ci < 0 || cj < 0 || ci >= N || cj >= N) return;
     var c = cj * N + ci;
-    if (cellRock[c] < 0.02) return;
+    if (!mask[c] && Math.random() < 0.7) return;
     var s3 = scene3d(), sp = s3.toScreen(p.x, p.y, W, H), n = Math.min(4, 1 + len * 30) | 0;
     for (var i = 0; i < n; i++) {
       var a = Math.random() * Math.PI * 2, v = 60 + Math.random() * 160, kind;
-      if (tool === HAKE) kind = grid.dust[c] > 0.05 ? "powder" : null;
+      if (cellRock[c] > EXPOSE - 0.04) kind = null;
+      else if (tool === HAKE) kind = grid.dust[c] > 0.05 ? "powder" : null;
       else if (tool === WIRE) kind = grid.dust[c] > 0.4 ? "powder" : grid.dirt[c] > 0.05 ? "rust" : "spark";
       else if (tool === SAND) kind = "dust";
       else if (tool === WATER) kind = "water";
@@ -496,8 +475,7 @@
     if (n < 1 || n > 7) return;
     resetGrid();
     var phase = [CHISEL, WIRE, SAND, WATER, COMP, CLOTH, CLOTH][n - 1], i, k;
-    if (phase >= COMP) for (var p = 0; p < 8; p++) for (var yy = -1; yy <= 1; yy += 0.1) for (var xx = -1; xx <= 1; xx += 0.1) smoothRock(xx, yy, 0.12, 0.5);
-    rockDirty = true; updateCellRock();
+    if (phase !== CHISEL) { grid.rockH.fill(0); rockDirty = true; updateCellRock(); }
     for (i = 0; i < N * N; i++) {
       grid.dust[i] = 0;
       if (phase >= SAND) grid.dirt[i] = 0;
@@ -613,7 +591,7 @@
       /* 拭き上げの済んだマスを数回探す */
       for (var k = 0; k < 12; k++) {
         var c = (Math.random() * N * N) | 0;
-        if (grid.fin[c] < 0.8 || cellRock[c] < 0.02) continue;
+        if (!mask[c] || grid.fin[c] < 0.8 || cellRock[c] > EXPOSE - 0.04) continue;
         var x = -BOX + ((c % N) + 0.5) * CELL, y = BOX - (((c / N) | 0) + 0.5) * CELL;
         var sp = s3.toScreen(x, y, W, H);
         twinkles.push({ x: sp.x, y: sp.y, t: 0, life: 0.8 + Math.random() * 0.6, size: 7 + Math.random() * 10, rot: Math.random() * 0.6 });
