@@ -27,11 +27,11 @@
 
   /* 金属の映り込みに使う撮影所の景色（横長の絵を周りに貼る） */
   function paintStudio(g, w, h) {
-    /* 磨いた面には地平線の少し下が映る。上は白、真ん中にくっきりした暗い線を入れてクロームらしく */
+    /* 磨いた面には地平線の少し下が映る */
     var gr = g.createLinearGradient(0, 0, 0, h);
-    gr.addColorStop(0, "#9aa0aa"); gr.addColorStop(0.36, "#b4b9c4"); gr.addColorStop(0.5, "#eef0f4");
-    gr.addColorStop(0.535, "#e8ecf2"); gr.addColorStop(0.545, "#30323a"); gr.addColorStop(0.6, "#4a4c54");
-    gr.addColorStop(0.7, "#8a8c94"); gr.addColorStop(1, "#3a2a1e");
+    /* 字の上から下まで同じ明るさで映るよう、地平線のまわりはなだらかに */
+    gr.addColorStop(0, "#9aa0aa"); gr.addColorStop(0.36, "#b4b9c4"); gr.addColorStop(0.48, "#d4d8e0");
+    gr.addColorStop(0.6, "#c4c8d0"); gr.addColorStop(0.75, "#9a9ca4"); gr.addColorStop(1, "#5a4a3e");
     g.fillStyle = gr; g.fillRect(0, 0, w, h);
     function box(x, y, bw, bh, c) {
       var r = g.createRadialGradient(x + bw / 2, y + bh / 2, 0, x + bw / 2, y + bh / 2, Math.max(bw, bh) * 0.7);
