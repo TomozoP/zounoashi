@@ -36,9 +36,16 @@ async function fill(p) {
     const add = await wait(() => { const b = document.querySelector('[data-testid="addButton"]'); return b && !b.disabled && b.getAttribute('aria-disabled') !== 'true' ? b : null; }, 180000);
     add.click();
     await write(1, second);
-    // 入れ終わったらカーソルを1つ目のポストに戻す
-    await sleep(300);
-    const top = box(0); if (top) { top.focus(); top.click(); }
+  }
+  // 入れ終わったらカーソルを1つ目のポストの頭（#gamedev の前）に置く
+  await sleep(300);
+  const top = box(0);
+  if (top) {
+    top.focus();
+    const w = document.createTreeWalker(top, NodeFilter.SHOW_TEXT), t = w.nextNode(), r = document.createRange();
+    if (t) r.setStart(t, 0); else r.setStart(top, 0);
+    r.collapse(true);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
   }
 }
 if (location.pathname.startsWith('/compose/post')) {
