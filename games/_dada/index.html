@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>ガチ駄々</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="../random-bowling/vendor/cannon.js"></script>
+<script src="physics.js"></script>
+<script src="../voice.js"></script>
+<script src="../celebrate.js"></script>
+<script src="../three-base.js"></script>
+<script src="scene3d.js"></script>
+<script>
+/* ガチ駄々
+
+   おもちゃ屋で子供になって駄々をこねる。子供は関節でつないだ剛体（physics.js）。
+     押した瞬間   … 跳ね上がって大暴れ
+     押してなぞる … なぞった向きへ転がる（押している間は手足のバタバタが強い）
+   30秒で壊したおもちゃの値段の合計が点数。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+  var followLink = window.zResultActions.follow.link(shareButton.parentNode);
+
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    s.playbackRate.value = 0.8 + Math.random() * 0.4;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n, Math.random() * 1.5); s.stop(n + dur + 0.05);
+  }
+  var lastSfx = 0;
+  function crash(kind, v) {
+    if (!AC) return;
+    var n = AC.currentTime;
+    if (n - lastSfx < 0.03) return;
+    lastSfx = n;
+    if (kind === "ball") { tone(180 + Math.random() * 80, 0.12, 0.18, "sine", 90); return; }
+    if (kind === "bear") { noiseHit(0.08, 500, 0.25, 0.8); return; }
+    noiseHit(0.12 + v * 0.02, 900 + Math.random() * 900, Math.min(0.5, 0.15 + v * 0.06), 0.9);
+    tone(260 + Math.random() * 200, 0.07, 0.08, "triangle", 120);
+  }
+  /* 泣き叫ぶ声（合成） */
+  var CRIES = ["やだー", "かってー", "ぎゃー", "やだやだやだ", "かってかって", "うわーん"];
+  var cryAt = 0;
+  function cry() {
+    if (!AC || !window.zVoice) return;
+    var y = CRIES[Math.floor(Math.random() * CRIES.length)];
+    var r = window.zVoice.speak(AC, AC.currentTime + 0.02, 430 + Math.random() * 80, window.zVoice.kana(y, 0.13), { volume: 0.3, swing: 1.6 });
+    cryAt = (r && r.end ? r.end - AC.currentTime : 1) + 0.5 + Math.random() * 0.8;
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 状態 ============ */
+  var TIME = 30;
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, score, T, held, keyMode = false, broken;
+  var phys = new window.ZDadaPhysics.Game();
+  var stick = null, kick = false, keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    phys.reset();
+    state = S.PLAY;
+    score = 0; broken = 0;
+    T = 0; held = false; stick = null; kick = true; pops = []; snap = true;
+    cryAt = 0.3;
+  }
+  function finish() {
+    state = S.RESULT; held = false; stick = null;
+    if (AC) window.zCelebrate.play(AC, score >= 100000 ? "fanfare" : "chime");
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    shake = Math.max(0, shake - dt * 1.5);
+    for (var i = pops.length - 1; i >= 0; i--) { pops[i].t += dt; if (pops[i].t > 0.9) pops.splice(i, 1); }
+    var dx = 0, dz = 0;
+    if (state === S.PLAY) {
+      T += dt;
+      if (stick) { dx = stick.dx; dz = stick.dz; }
+      else { dx = keyDir.r - keyDir.l; dz = keyDir.d - keyDir.u; }
+      cryAt -= dt;
+      if (cryAt <= 0) cry();
+    }
+    var ev = phys.step(dt, { dx: dx, dz: dz, hold: state === S.PLAY && (held || dx || dz), kick: kick && state === S.PLAY }, Math.random);
+    kick = false;
+    ev.forEach(function (e) {
+      if (e.kind === "break" && state === S.PLAY) {
+        score += e.toy.d.price; broken++;
+        pops.push({ t: 0, p: e.toy.d.price, b: e.toy.body });
+        shake = Math.min(0.12, shake + 0.03);
+      }
+      crash(e.toy.d.kind, e.v || 2);
+    });
+    if (state === S.PLAY && T >= TIME) finish();
+  }
+
+  /* ============ 入力 ============ */
+  function down(x, y) {
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    held = true; kick = true;
+    if (x != null) stick = { ox: x, oy: y, x: x, y: y, dx: 0, dz: 0 };
+  }
+  function move(x, y) {
+    if (state !== S.PLAY || !held || !stick) return;
+    var vx = x - stick.ox, vy = y - stick.oy, l = Math.sqrt(vx * vx + vy * vy), R = 80;
+    if (l > R) { stick.ox = x - vx / l * R; stick.oy = y - vy / l * R; vx = x - stick.ox; vy = y - stick.oy; l = R; }
+    stick.x = x; stick.y = y;
+    var m = l < 12 ? 0 : (l - 12) / (R - 12);
+    stick.dx = l ? vx / l * m : 0; stick.dz = l ? vy / l * m : 0;
+  }
+  function up() {
+    if (!held) return;
+    held = false; stick = null;
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) { var p = atCanvas(e); move(p.x, p.y); });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); keyDir = { l: 0, r: 0, u: 0, d: 0 }; });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  /* 1=始め 2=残り3秒 3=結果 */
+  function debugKey(n) {
+    audioOn();
+    if (n === 1) newRound();
+    else if (n === 2) { if (state !== S.PLAY) newRound(); T = TIME - 3; }
+    else if (n === 3) { if (state !== S.PLAY) newRound(); finish(); }
+  }
+
+  var DIRKEYS = { ArrowLeft: "l", a: "l", A: "l", ArrowRight: "r", d: "r", D: "r", ArrowUp: "u", w: "u", W: "u", ArrowDown: "d", s: "d", S: "d" };
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var dir = DIRKEYS[e.key];
+    if (!esc && !go && !dir) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
+    if (dir) { keyDir[dir] = 1; return; }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    var dir = DIRKEYS[e.key];
+    if (dir) keyDir[dir] = 0;
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function yen(n) { return "¥" + n.toLocaleString("ja-JP"); }
+  function doShare() {
+    var n = score.toLocaleString("ja-JP");
+    window.zResultActions.x({ text: zT(
+      "おもちゃ屋で駄々をこねて" + n + "円ぶん壊しました",
+      "I threw a tantrum in a toy store and wrecked ¥" + n + " worth of toys",
+      "장난감 가게에서 떼를 써서 " + n + "엔어치 부쉈습니다",
+      "在玩具店撒泼打滚，砸坏了" + n + "日元的玩具",
+      "在玩具店撒潑打滾，砸壞了" + n + "日圓的玩具"
+    ) + zT(" #ガチ駄々", " #RealTantrum", " #진짜떼쓰기", " #硬核撒泼", " #硬核撒潑") });
+  }
+
+  /* ============ 描画 ============ */
+  var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene(phys); }) : function () { return null; };
+  var camChoice = null;                         /* カメラ案の撮り比べ用 */
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
+    var s3 = scene3d(), drew = false;
+    if (s3) { try { s3.sync({ dt: 1 / 60, shake: shake, snap: snap, cam: camChoice }); snap = false; drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (!drew) { ctx.fillStyle = "#f3efe6"; ctx.fillRect(0, 0, W, H); }
+    if (hideUI) return;
+
+    /* 壊したときの値段（おもちゃの上に浮かぶ） */
+    if (s3 && pops.length) {
+      var cam = s3.camera, v = new window.THREE.Vector3();
+      ctx.save(); ctx.textAlign = "center"; ctx.font = "800 26px sans-serif"; ctx.lineWidth = 5; ctx.lineJoin = "round";
+      pops.forEach(function (p) {
+        v.set(p.b.position.x, p.b.position.y + 0.2, p.b.position.z).project(cam);
+        var x = (v.x + 1) / 2 * W, y = (1 - v.y) / 2 * H - p.t * 50;
+        ctx.globalAlpha = Math.min(1, (0.9 - p.t) * 3);
+        ctx.strokeStyle = "#fff"; ctx.strokeText(yen(p.p), x, y);
+        ctx.fillStyle = "#e0262a"; ctx.fillText(yen(p.p), x, y);
+      });
+      ctx.restore();
+    }
+    if (state === S.PLAY) {
+      /* 合計と残り時間 */
+      ctx.save();
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.font = "900 52px sans-serif"; ctx.lineWidth = 8; ctx.lineJoin = "round";
+      ctx.strokeStyle = "#fff"; ctx.strokeText(yen(score), W / 2, 34);
+      ctx.fillStyle = "#16202e"; ctx.fillText(yen(score), W / 2, 34);
+      var k = Math.max(0, 1 - T / TIME);
+      ctx.fillStyle = "rgba(22,32,46,.25)"; ctx.fillRect(W / 2 - 150, 100, 300, 10);
+      ctx.fillStyle = k < 0.2 ? "#e0262a" : "#16202e"; ctx.fillRect(W / 2 - 150, 100, 300 * k, 10);
+      ctx.restore();
+      if (stick) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(22,32,46,.35)"; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(stick.ox, stick.oy, 80, 0, 7); ctx.stroke();
+        ctx.fillStyle = "rgba(22,32,46,.35)";
+        ctx.beginPath(); ctx.arc(stick.ox + stick.dx * 68, stick.oy + stick.dz * 68, 28, 0, 7); ctx.fill();
+        ctx.restore();
+      }
+    }
+    if (state === S.RESULT) drawResult();
+  }
+
+  function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
+  function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.textAlign = "center";
+    var txt = yen(score), fs = 108;
+    ctx.font = "800 " + fs + "px sans-serif";
+    while (fs > 40 && ctx.measureText(txt).width > W - 40) { fs -= 4; ctx.font = "800 " + fs + "px sans-serif"; }
+    ctx.fillText(txt, W / 2, H * 0.45);
+    ctx.restore();
+    window.zResultActions.drawButtons(ctx, resultButtons());
+    window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
+  }
+
+  var hideUI = false;
+  window.__probe = {
+    now: function () { return { state: state, score: score, broken: broken, T: T, W: W, H: H, kid: phys.center(), buttons: state === S.RESULT ? resultButtons() : null }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); },
+    hideUI: function () { hideUI = true; },
+    cam: function (c) { camChoice = c; snap = true; },
+    input: function (dx, dz, hold) { stick = hold ? { ox: 270, oy: 600, x: 270, y: 600, dx: dx, dz: dz } : null; held = !!hold; },
+    kick: function () { kick = true; }
+  };
+
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(800);
+      r.key();
+      if (!await r.until(function () { return state === S.RESULT; }, 40)) throw Error("結果が出ない");
+      await r.wait(1500);
+    }
+  };
+
+  var startButton = document.getElementById("start");
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ["pointerdown", "pointerup"].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener("click", function (e) { e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  state = S.INTRO; score = 0; broken = 0; T = 0; held = false;
+  startButton.hidden = false;
+  layout();
+  var last = performance.now();
+  var stepAcc = 0;
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      stepAcc += dt;
+      while (stepAcc >= 1 / 60) { update(1 / 60); stepAcc -= 1 / 60; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>

@@ -357,4 +357,5 @@ window.DRAFT_GAMES = [
     "catch": "好きな画像の形でたい焼きを焼く"
   },
   {"type":"lab","tags":[],"id":"semi","title":"ガチセミの鳴き声シミュレーター","year":2026,"date":"2026-10-31","plays":null,"url":"","img":"games/_semi/img/thumb.webp","play":"games/_semi/index.html","full":true,"catch":"セミの発音器官を動かして鳴く"},
+  {"type":"lab","tags":[],"id":"dada","title":"ガチ駄々","year":2026,"date":"2026-10-31","plays":null,"url":"","img":"games/_dada/img/thumb.webp","play":"games/_dada/index.html","full":true,"catch":"おもちゃ屋で駄々をこねまくる"},
 ];
