@@ -355,5 +355,6 @@ window.DRAFT_GAMES = [
     "play": "games/_taiyaki/index.html",
     "full": true,
     "catch": "好きな画像の形でたい焼きを焼く"
-  }
+  },
+  {"type":"lab","tags":[],"id":"semi","title":"ガチセミの鳴き声シミュレーター","year":2026,"date":"2026-10-31","plays":null,"url":"","img":"games/_semi/img/thumb.webp","play":"games/_semi/index.html","full":true,"catch":"セミの発音器官を動かして鳴く"},
 ];
