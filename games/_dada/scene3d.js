@@ -139,7 +139,10 @@
     var k = Math.min(1, (s.dt || 1 / 60) * 4);
     this.camPos.x += (tx - this.camPos.x) * k; this.camPos.z += (tz - this.camPos.z) * k;
     var shake = s.shake || 0;
-    this.camera.position.set(this.camPos.x + cam.x + (Math.random() - 0.5) * shake, cam.y + (Math.random() - 0.5) * shake, this.camPos.z + cam.z);
+    /* スローのときは寄る（zoom<1） */
+    this.zoom = this.zoom == null ? 1 : this.zoom + ((s.zoom || 1) - this.zoom) * Math.min(1, (s.dt || 1 / 60) * 7);
+    var zm = this.zoom;
+    this.camera.position.set(this.camPos.x + cam.x * zm + (Math.random() - 0.5) * shake, cam.y * zm + (Math.random() - 0.5) * shake, this.camPos.z + cam.z * zm);
     this.camera.lookAt(this.camPos.x, 0.35, this.camPos.z);
   };
 

@@ -134,11 +134,11 @@
   });
 
   /* ============ 状態 ============ */
-  var TIME = 30;
+  var TIME = 30, SLOW_TIME = 0.9;
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false, broken;
   var phys = new window.ZDadaPhysics.Game();
-  var rage = 0, tap = false, toPt = null, rings = [], keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
+  var rage = 0, slow = 0, slowCool = 0, tap = false, toPt = null, rings = [], keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
 
   function newRound() {
     shareButton.hidden = true;
@@ -146,7 +146,7 @@
     phys.reset();
     state = S.PLAY;
     score = 0; broken = 0;
-    T = 0; held = false; rage = 0; tap = false; toPt = null; rings = []; pops = []; snap = true;
+    T = 0; held = false; rage = 0; slow = 0; slowCool = 0; tap = false; toPt = null; rings = []; pops = []; snap = true;
     cryAt = 0.3;
   }
   function finish() {
@@ -155,7 +155,12 @@
   }
 
   /* ============ 進行 ============ */
-  function update(dt) {
+  function update(realDt) {
+    /* ぶつかったときのスロー：slow は残りの実時間。始めは 0.2 倍、終わりにかけて元の速さへ */
+    slowCool = Math.max(0, slowCool - realDt);
+    var scale = 1;
+    if (slow > 0) { slow = Math.max(0, slow - realDt); var u = slow / SLOW_TIME; scale = 0.2 + 0.8 * (1 - Math.min(1, u * 1.6)); }
+    var dt = realDt * scale;
     shake = Math.max(0, shake - dt * 1.5);
     for (var ri = rings.length - 1; ri >= 0; ri--) { rings[ri].t += dt; if (rings[ri].t > 0.35) rings.splice(ri, 1); }
     rage = Math.max(0, rage - dt * 0.6);
@@ -169,6 +174,13 @@
     var ev = phys.step(dt, { rage: on ? rage : 0, to: on ? toPt : null, tap: on && tap }, Math.random);
     if (tap && on) { noiseHit(0.06, 300, 0.12 + rage * 0.15, 1); if (rage > 0.85) shake = Math.max(shake, 0.05); }
     tap = false;
+    if (phys.shook) {
+      if (on && phys.shook > 2.2 && slowCool <= 0) {
+        slow = SLOW_TIME; slowCool = SLOW_TIME + 1.2; shake = 0.12;
+        tone(70, 0.6, 0.35, "sine", 35); noiseHit(0.5, 180, 0.4, 0.7);
+      }
+      phys.shook = 0;
+    }
     ev.forEach(function (e) {
       if (e.kind === "break" && state === S.PLAY) {
         score += e.toy.d.price; broken++;
@@ -274,7 +286,7 @@
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
     var s3 = scene3d(), drew = false;
-    if (s3) { try { s3.sync({ dt: 1 / 60, shake: shake, snap: snap, cam: camChoice }); snap = false; drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (s3) { try { s3.sync({ dt: 1 / 60, shake: shake, snap: snap, cam: camChoice, zoom: slow > 0 ? 0.68 : 1 }); snap = false; drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
     if (!drew) { ctx.fillStyle = "#f3efe6"; ctx.fillRect(0, 0, W, H); }
     if (hideUI) return;
 
