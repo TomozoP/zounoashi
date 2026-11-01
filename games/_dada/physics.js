@@ -127,6 +127,7 @@ var ZDadaPhysics = (function (C) {
     this.kidHit = 0;
     this.bumps = [];
     this.twist = null;
+    this.spinVis = 0;
   };
 
   Game.prototype.makeKid = function () {
@@ -173,7 +174,7 @@ var ZDadaPhysics = (function (C) {
       /* タップ：その場で高く跳ねる。スワイプ：その向きへ、速いスワイプほど強く飛んで転がる。
          どちらも全身をおもいきり捻ってから回す。全身に同じだけ足す（関節がちぎれないよう） */
       var spin = 32 + rage * 34, tx, tz, sp, upv, low = k.torso.position.y < 0.8;
-      if (sw) { tx = sw.dx; tz = sw.dz; sp = 3 + sw.p * 10; upv = low ? 1.2 + sw.p * 1.3 : 0; }
+      if (sw) { tx = sw.dx; tz = sw.dz; sp = 2 + sw.p * 6; upv = low ? 1.2 + sw.p * 1.3 : 0; }
       else { var ra = rand() * Math.PI * 2; tx = Math.cos(ra); tz = Math.sin(ra); sp = 0.6; upv = low ? 3.6 + rage * 1.4 : 1.5; }
       all.forEach(function (b) {
         /* 足し続けると速さが際限なく増えるので、混ぜて上限を作る */
@@ -184,7 +185,7 @@ var ZDadaPhysics = (function (C) {
          スワイプは、体の軸まわりに転がるとその向きへ進む側に回す。タップは向きはでたらめ */
       var ax = k.torso.quaternion.vmult(new C.Vec3(0, 1, 0)), rx = tz, rz = -tx;
       var sg = sw ? (ax.x * rx + ax.z * rz >= 0 ? 1 : -1) : (rand() < 0.5 ? 1 : -1);
-      this.twist = { t: 0, end: 0.5 + rage * 0.35, sg: sg, w: spin, tx: tx, tz: tz, roll: sw ? spin * 0.4 : 0, u: { x: rand() - 0.5, y: rand() - 0.5, z: rand() - 0.5 } };
+      this.twist = { t: 0, end: 0.5 + rage * 0.35, vis: 55 + rage * 45, sg: sg, w: spin, tx: tx, tz: tz, roll: sw ? spin * 0.4 : 0, u: { x: rand() - 0.5, y: rand() - 0.5, z: rand() - 0.5 } };
       LIMBS.forEach(function (id) { var b = k[id]; b.velocity.x += (rand() - 0.5) * (2 + rage * 3); b.velocity.y += rand() * (0.8 + rage * 1.2); b.velocity.z += (rand() - 0.5) * (2 + rage * 3); });
     }
     var tw = this.twist;
@@ -214,6 +215,8 @@ var ZDadaPhysics = (function (C) {
           lv.set(lv.x + (vx + wy * rz - wz * ry - lv.x) * m, lv.y + (vy + wz * rx - wx * rz - lv.y) * m, lv.z + (vz + wx * ry - wy * rx - lv.z) * m);
         });
       } else this.twist = null;
+      /* 見た目だけの上乗せの回転（物理では回せない速さ）。scene3d.js が体の軸まわりに描き足す */
+      this.spinVis = this.twist && tw.t >= 0.1 ? tw.sg * tw.vis : 0;
     }
     /* 手足をバタバタ（激しいほど細かく強く） */
     this.flail -= dt;

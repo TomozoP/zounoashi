@@ -131,6 +131,28 @@
     phys.toys.forEach(function (t, i) { var m = this.toyMeshes[i], b = t.body; m.position.copy(b.position); m.quaternion.copy(b.quaternion); }, this);
     var km = this.kidMeshes;
     Object.keys(km).forEach(function (id) { var b = phys.kid.map[id]; km[id].position.copy(b.position); km[id].quaternion.copy(b.quaternion); });
+    /* 見た目だけの上乗せの回転：体の長い軸まわりに、重心を中心に全身を回して描く。
+       回し終わりは次のちょうど1回転まで回してから 0 に戻す（物理の姿勢とずれたまま止まらないよう） */
+    var dt = s.dt || 1 / 60, rate = phys.spinVis || 0;
+    if (this.vis == null) this.vis = { a: 0, rate: 0 };
+    var vs = this.vis;
+    if (rate) vs.rate = rate;
+    else if (vs.rate) {
+      var full = Math.PI * 2, next = (vs.rate > 0 ? Math.ceil(vs.a / full) : Math.floor(vs.a / full)) * full;
+      if (Math.abs(next - vs.a) < Math.abs(vs.rate) * dt) { vs.a = 0; vs.rate = 0; }
+    }
+    if (vs.rate) {
+      vs.a += vs.rate * dt;
+      var tq = phys.kid.map.torso.quaternion, ax = new T.Vector3(0, 1, 0).applyQuaternion(new T.Quaternion(tq.x, tq.y, tq.z, tq.w)).normalize();
+      var q = new T.Quaternion().setFromAxisAngle(ax, vs.a), com = new T.Vector3(), M = 0;
+      phys.kid.list.forEach(function (b) { com.x += b.position.x * b.mass; com.y += b.position.y * b.mass; com.z += b.position.z * b.mass; M += b.mass; });
+      com.multiplyScalar(1 / M);
+      Object.keys(km).forEach(function (id) {
+        var m = km[id];
+        m.position.sub(com).applyQuaternion(q).add(com);
+        m.quaternion.premultiply(q);
+      });
+    }
     /* カメラは子供を追う（少し遅れて） */
     var c = phys.center(), cam = s.cam ? CAMS[s.cam] : this.cam;
     if (this.camera.fov !== cam.fov) { this.camera.fov = cam.fov; this.camera.updateProjectionMatrix(); }
