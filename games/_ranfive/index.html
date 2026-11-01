@@ -211,6 +211,69 @@ window.RF_COLORS = [
     s.start(n); s.stop(n + dur + 0.05);
   }
   var talking = null;
+  /* 色ごとの声色：明るい色ほど高い声、色ごとに速さ・抑揚も変える */
+  function voiceOf(idx) {
+    var l = lum(cHex(idx)), s = (idx * 7919) % 97;
+    return { pitch: 105 + l * 200 + (s % 40), mora: 0.08 + (s % 6) * 0.012, swing: 0.5 + (s % 8) * 0.22 };
+  }
+  function sayAs(yomi, idx, delay, vol) {
+    if (!AC || !window.zVoice) return null;
+    var v = voiceOf(idx);
+    return window.zVoice.speak(AC, AC.currentTime + 0.02 + (delay || 0), v.pitch, window.zVoice.kana(yomi, v.mora), { noise: NOISE, volume: vol || 0.4, swing: v.swing });
+  }
+
+  /* ============ BGM（自作の節。既存曲はなぞらない） ============
+     イ短調の Am-F-G-E を16分で刻む。ベースは8分のオクターブ、上は自作の短い動機 */
+  var BGM = { on: false, next: 0, step: 0, gain: null };
+  var STEP = 60 / 152 / 4;
+  var CH = [[0, 3, 7], [-4, 0, 3], [-2, 2, 5], [-5, -1, 2]];   /* A4 からの半音：Am F G E */
+  var MEL = [
+    [0, null, 3, null, 7, null, 3, 5, 7, null, null, 10, 7, null, 5, null],
+    [8, null, 7, null, 5, null, 3, null, 5, null, 3, 0, 3, null, null, null],
+    [7, null, 10, null, 12, null, 10, 7, 5, null, 7, null, 10, null, null, null],
+    [11, null, 8, null, 7, null, 4, null, 2, null, 4, null, -1, null, null, null]
+  ];
+  function nf(semi) { return 440 * Math.pow(2, semi / 12); }
+  function note(f, t, dur, vol, type, dest) {
+    var o = AC.createOscillator(), g = AC.createGain();
+    o.type = type; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(dest); o.start(t); o.stop(t + dur + 0.05);
+  }
+  function bgmStart() {
+    if (!AC || BGM.on) return;
+    BGM.gain = AC.createGain(); BGM.gain.gain.value = 0.32; BGM.gain.connect(AC.destination);
+    BGM.on = true; BGM.next = AC.currentTime + 0.08; BGM.step = 0;
+  }
+  function bgmStop() {
+    if (!BGM.on) return;
+    BGM.on = false;
+    try { BGM.gain.gain.setTargetAtTime(0.0001, AC.currentTime, 0.15); } catch (e) {}
+  }
+  function bgmTick() {
+    if (!BGM.on || !AC) return;
+    if (BGM.next < AC.currentTime - 0.5) BGM.next = AC.currentTime + 0.05;   /* 止まっていたら追いつかせない */
+    while (BGM.next < AC.currentTime + 0.2) {
+      var s = BGM.step % 64, bar = s >> 4, i = s & 15, t = BGM.next, d = BGM.gain, ch = CH[bar];
+      if (i % 2 === 0) note(nf(ch[0] - 24 + (i % 4 ? 12 : 0)), t, STEP * 1.8, 0.22, "triangle", d);
+      if (i === 0 || i === 6 || i === 10) ch.forEach(function (c) { note(nf(c - 12), t, STEP * 1.6, 0.05, "sawtooth", d); });
+      var m = MEL[bar][i];
+      if (m != null) note(nf(m), t, STEP * 1.7, 0.07, "square", d);
+      if (i % 4 === 0 && NOISE) {        /* キック */
+        note(110, t, 0.12, 0.35, "sine", d);
+      }
+      if (i % 2 === 1 && NOISE) {        /* ハイハット */
+        var sb = AC.createBufferSource(); sb.buffer = NOISE;
+        var hp = AC.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 7000;
+        var g = AC.createGain(); g.gain.setValueAtTime(0.06, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+        sb.connect(hp); hp.connect(g); g.connect(d); sb.start(t, Math.random()); sb.stop(t + 0.06);
+      }
+      BGM.step++; BGM.next += STEP;
+    }
+  }
+
   function say(yomi, pitch, mora) {
     if (!AC || !window.zVoice) return;
     try { if (talking) talking.stop(); } catch (e) {}
@@ -270,6 +333,7 @@ window.RF_COLORS = [
     cur = 0; total = 0; win = false; shake = 0; parts = []; leaving = [];
     T = 0;
     if (confetti) confetti.clear();
+    bgmStop(); bgmStart();
     startHero();
   }
   function setSub(s) { sub = s; pt = 0; }
@@ -317,6 +381,7 @@ window.RF_COLORS = [
     }
     if (state !== S.PLAY) return;
     T += dt; pt += dt;
+    bgmTick();
     var h = heroes[cur];
 
     if (sub === "enter") {
@@ -364,7 +429,7 @@ window.RF_COLORS = [
       for (var i = 0; i < 10; i++) parts.push({ x: W / 2 + (Math.random() - 0.5) * 120, y: H * 0.74, vx: (Math.random() - 0.5) * 120, vy: -40 - Math.random() * 60, t: 0, life: 1.0, r: 18 + Math.random() * 16, col: "rgba(150,145,135,", kind: "puff" });
     }
     var c = COLORS[h.g.idx];
-    if (zLang === "ja") say("らんだむ" + yomiOf(h.g.idx), r === "SR" ? 200 : r === "R" ? 185 : 160);
+    if (zLang === "ja") { try { if (talking) talking.stop(); } catch (e) {} talking = sayAs("らんだむ" + yomiOf(h.g.idx), h.g.idx); }
   }
   /* 列へ下がるのと同時に次の人を出す（最後の人だけは下がってから名乗りへ） */
   var leaving = [];
@@ -375,7 +440,14 @@ window.RF_COLORS = [
   function startGroup() {
     setSub("group");
     noiseHit(0.8, 200, 0.5, 0.5, 0.45);
-    setTimeout(function () { if (zLang === "ja") say("うんまかせせんし らんだむふぁいぶ", 180, 0.105); }, 1400);
+    /* 5人同時に名乗る（それぞれの声色で、そろえて読む） */
+    setTimeout(function () {
+      if (zLang !== "ja") return;
+      for (var i = 0; i < 5; i++) {
+        var v = voiceOf(heroes[i].g.idx);
+        window.zVoice && AC && window.zVoice.speak(AC, AC.currentTime + 0.02 + i * 0.012, v.pitch, window.zVoice.kana("うんまかせせんし らんだむふぁいぶ", 0.105), { noise: NOISE, volume: 0.2, swing: v.swing });
+      }
+    }, 1400);
   }
   function boom(x, y, idx, big) {
     var col = cHex(idx);
@@ -390,6 +462,7 @@ window.RF_COLORS = [
     tone(110, 0.6, 0.18, "sawtooth", 70);
   }
   function hitBoss() {
+    bgmStop();
     fightHit = true;
     shake = 1;
     noiseHit(1.0, 140, 0.6, 0.5);
