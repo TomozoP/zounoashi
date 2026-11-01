@@ -120,12 +120,13 @@
   }
   /* 泣き叫ぶ声（合成） */
   var CRIES = ["やだー", "かってー", "ぎゃー", "やだやだやだ", "かってかって", "うわーん"];
-  var cryAt = 0;
+  var cryEnd = 0;
+  /* 声は動いたとき（タップ・スワイプ）だけ。しゃべっている途中なら重ねない */
   function cry() {
-    if (!AC || !window.zVoice) return;
+    if (!AC || !window.zVoice || AC.currentTime < cryEnd) return;
     var y = CRIES[Math.floor(Math.random() * CRIES.length)];
     var r = window.zVoice.speak(AC, AC.currentTime + 0.02, 430 + Math.random() * 80, window.zVoice.kana(y, 0.13), { volume: 0.3, swing: 1.6 });
-    cryAt = (r && r.end ? r.end - AC.currentTime : 1) + 0.5 + Math.random() * 0.8;
+    cryEnd = (r && r.end ? r.end : AC.currentTime + 1) + 0.15;
   }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
@@ -138,7 +139,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false, broken;
   var phys = new window.ZDadaPhysics.Game();
-  var rage = 0, slow = 0, slowCool = 0, tap = false, toPt = null, rings = [], keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
+  var rage = 0, slow = 0, slowCool = 0, tap = false, swipe = null, press = null, rings = [], streaks = [], keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
 
   function newRound() {
     shareButton.hidden = true;
@@ -146,11 +147,11 @@
     phys.reset();
     state = S.PLAY;
     score = 0; broken = 0;
-    T = 0; held = false; rage = 0; slow = 0; slowCool = 0; tap = false; toPt = null; rings = []; pops = []; snap = true;
-    cryAt = 0.3;
+    T = 0; held = false; rage = 0; slow = 0; slowCool = 0; tap = false; swipe = null; press = null; rings = []; streaks = []; pops = []; snap = true;
+    cryEnd = 0;
   }
   function finish() {
-    state = S.RESULT; held = false; toPt = null;
+    state = S.RESULT; held = false; press = null;
     if (AC) window.zCelebrate.play(AC, score >= 100000 ? "fanfare" : "chime");
   }
 
@@ -162,16 +163,17 @@
     if (slow > 0) { slow = Math.max(0, slow - realDt); var u = slow / SLOW_TIME; scale = 0.2 + 0.8 * (1 - Math.min(1, u * 1.6)); }
     var dt = realDt * scale;
     shake = Math.max(0, shake - dt * 1.5);
-    for (var ri = rings.length - 1; ri >= 0; ri--) { rings[ri].t += dt; if (rings[ri].t > 0.35) rings.splice(ri, 1); }
+    for (var ri = rings.length - 1; ri >= 0; ri--) { rings[ri].t += realDt; if (rings[ri].t > 0.35) rings.splice(ri, 1); }
+    for (var si = streaks.length - 1; si >= 0; si--) { streaks[si].t += realDt; if (streaks[si].t > 0.35) streaks.splice(si, 1); }
     rage = Math.max(0, rage - dt * 0.6);
     for (var i = pops.length - 1; i >= 0; i--) { pops[i].t += dt; if (pops[i].t > 0.9) pops.splice(i, 1); }
     if (state === S.PLAY) {
       T += dt;
-      cryAt -= dt;
-      if (cryAt <= 0) cry();
     }
     var on = state === S.PLAY;
-    var ev = phys.step(dt, { rage: on ? rage : 0, to: on ? toPt : null, tap: on && tap }, Math.random);
+    if (on && (tap || swipe)) cry();
+    var ev = phys.step(dt, { rage: on ? rage : 0, tap: on && tap, swipe: on ? swipe : null }, Math.random);
+    swipe = null;
     if (tap && on) { noiseHit(0.06, 300, 0.12 + rage * 0.15, 1); if (rage > 0.85) shake = Math.max(shake, 0.05); }
     tap = false;
     if (phys.shook) {
@@ -201,30 +203,39 @@
       return;
     }
     held = true;
-    /* 連打：たたくたびに激しさが上がる */
+    if (x != null) press = { x0: x, y0: y, pts: [{ x: x, y: y, t: performance.now() }], fired: false };
+    else act(null);
+  }
+  /* タップで跳ねる、スワイプでその向きへ飛ぶ。どちらも激しさ rage が上がる */
+  function act(sw) {
     rage = Math.min(1, rage + 0.11);
-    tap = true;
-    if (x != null) { toPt = floorAt(x, y) || toPt; rings.push({ x: x, y: y, t: 0 }); }
-    else {
-      var kx = keyDir.r - keyDir.l, kz = keyDir.d - keyDir.u, c = phys.center();
-      toPt = (kx || kz) ? { x: c.x + kx * 3, z: c.z + kz * 3 } : null;
-    }
+    if (sw) swipe = sw; else tap = true;
+  }
+  var SWIPE_GO = 46, SWIPE_MIN = 300, SWIPE_MAX = 2200;
+  function swipeOf(P) {
+    var a = P[0], b = P[P.length - 1];
+    var dt = Math.max(16, b.t - a.t) / 1000, vx = b.x - a.x, vy = b.y - a.y, l = Math.sqrt(vx * vx + vy * vy);
+    if (l < 1) return null;
+    return { dx: vx / l, dz: vy / l, p: Math.max(0.15, Math.min(1, (l / dt - SWIPE_MIN) / (SWIPE_MAX - SWIPE_MIN))) };
   }
   function move(x, y) {
-    if (state === S.PLAY && held && x != null) toPt = floorAt(x, y) || toPt;
+    if (state !== S.PLAY || !held || !press || press.fired) return;
+    var now = performance.now();
+    press.pts.push({ x: x, y: y, t: now });
+    while (press.pts.length > 2 && now - press.pts[1].t > 100) press.pts.shift();
+    /* ある程度なぞったら、離すのを待たずにその場で飛ぶ（1回押すごとに1回） */
+    if (Math.hypot(x - press.x0, y - press.y0) > SWIPE_GO) {
+      var sw = swipeOf(press.pts);
+      if (sw) { press.fired = true; act(sw); streaks.push({ x0: press.x0, y0: press.y0, x1: x, y1: y, t: 0 }); }
+    }
   }
   function up() {
-    held = false;
-  }
-  /* 画面の点から床（y=0）の点へ */
-  function floorAt(x, y) {
-    var s3 = scene3d();
-    if (!s3) return null;
-    var v = new window.THREE.Vector3(x / W * 2 - 1, -(y / H * 2 - 1), 0.5).unproject(s3.camera);
-    var o = s3.camera.position, dy = v.y - o.y;
-    if (dy >= -1e-6) return null;
-    var k = -o.y / dy;
-    return { x: o.x + (v.x - o.x) * k, z: o.z + (v.z - o.z) * k };
+    if (held && state === S.PLAY && press && !press.fired) {
+      var l = press.pts[press.pts.length - 1];
+      if (Math.hypot(l.x - press.x0, l.y - press.y0) < 20) { act(null); rings.push({ x: press.x0, y: press.y0, t: 0 }); }
+      else { var sw = swipeOf(press.pts); if (sw) act(sw); }
+    }
+    held = false; press = null;
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -256,7 +267,14 @@
     e.preventDefault();
     if (!esc) keyMode = true;
     if (esc) { if (!e.repeat && state !== S.INTRO) newRound(); return; }
-    if (dir) { keyDir[dir] = 1; return; }
+    if (dir) {
+      keyDir[dir] = 1;
+      if (!e.repeat && state === S.PLAY) {
+        var kx = keyDir.r - keyDir.l, kz = keyDir.d - keyDir.u, kl = Math.sqrt(kx * kx + kz * kz) || 1;
+        act({ dx: kx / kl, dz: kz / kl, p: 0.7 });
+      }
+      return;
+    }
     if (e.repeat) return;
     down();
   });
@@ -314,6 +332,11 @@
       ctx.fillStyle = "rgba(22,32,46,.25)"; ctx.fillRect(W / 2 - 150, 100, 300, 10);
       ctx.fillStyle = k < 0.2 ? "#e0262a" : "#16202e"; ctx.fillRect(W / 2 - 150, 100, 300 * k, 10);
       ctx.restore();
+      streaks.forEach(function (r) {
+        var k = r.t / 0.35;
+        ctx.strokeStyle = "rgba(255,255,255," + (1 - k) * 0.9 + ")"; ctx.lineWidth = 14 * (1 - k) + 2; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(r.x0, r.y0); ctx.lineTo(r.x1, r.y1); ctx.stroke();
+      });
       rings.forEach(function (r) {
         var k = r.t / 0.35;
         ctx.strokeStyle = "rgba(255,255,255," + (1 - k) * 0.9 + ")"; ctx.lineWidth = 6;
@@ -349,7 +372,8 @@
     reset: function () { newRound(); },
     hideUI: function () { hideUI = true; },
     cam: function (c) { camChoice = c; snap = true; },
-    tapAt: function (x, y) { down(x, y); up(); }
+    tapAt: function (x, y) { down(x, y); up(); },
+    swipe: function (dx, dz, p) { act({ dx: dx, dz: dz, p: p }); }
   };
 
   window.__recording = {

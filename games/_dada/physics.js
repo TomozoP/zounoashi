@@ -164,30 +164,28 @@ var ZDadaPhysics = (function (C) {
   /* 子供の中心（胴） */
   Game.prototype.center = function () { var p = this.kid.map.torso.position; return { x: p.x, y: p.y, z: p.z }; };
 
-  /* 1コマ進める。input: { rage（激しさ 0〜1）, to（触った床の点 {x,z}）, tap（今たたいた） } */
+  /* 1コマ進める。input: { rage（激しさ 0〜1）, tap（今たたいた）, swipe（今スワイプした {dx,dz,p}） } */
   Game.prototype.step = function (dt, input, rand) {
     var k = this.kid.map, self = this;
     var all = this.kid.list;
-    var rage = input.rage || 0, to = input.to;
-    var dir = null;
-    if (to) {
-      var c = k.torso.position, ddx = to.x - c.x, ddz = to.z - c.z, dl = Math.sqrt(ddx * ddx + ddz * ddz);
-      if (dl > 0.3) dir = { x: ddx / dl, z: ddz / dl };
-    }
-    if (input.tap) {
-      /* 1回たたくごとに、触った方へ跳ねて転がる（激しさ rage が高いほど強い）。全身に同じだけ足す（関節がちぎれないよう） */
-      var sp = 3.5 + rage * 8, upv = k.torso.position.y < 0.7 ? 0.8 + rage * 1.2 : 0, spin = 14 + rage * 20;
-      var tx = dir ? dir.x : (rand() - 0.5), tz = dir ? dir.z : (rand() - 0.5);
+    var rage = input.rage || 0, sw = input.swipe;
+    if (input.tap || sw) {
+      /* タップ：その場で高く跳ねる。スワイプ：その向きへ、速いスワイプほど強く飛んで転がる。
+         どちらも全身をおもいきり捻ってから回す。全身に同じだけ足す（関節がちぎれないよう） */
+      var spin = 22 + rage * 26, tx, tz, sp, upv, low = k.torso.position.y < 0.8;
+      if (sw) { tx = sw.dx; tz = sw.dz; sp = 3 + sw.p * 10; upv = low ? 1.2 + sw.p * 1.3 : 0; }
+      else { var ra = rand() * Math.PI * 2; tx = Math.cos(ra); tz = Math.sin(ra); sp = 0.6; upv = low ? 3.6 + rage * 1.4 : 1.5; }
       all.forEach(function (b) {
-        /* 足し続けると連打で速さが際限なく増えるので、混ぜて上限を作る */
-        b.velocity.x = b.velocity.x * 0.5 + tx * sp; b.velocity.z = b.velocity.z * 0.5 + tz * sp; b.velocity.y = Math.max(b.velocity.y, upv);
+        /* 足し続けると速さが際限なく増えるので、混ぜて上限を作る */
+        var keep = sw ? 0.3 : 0.6;
+        b.velocity.x = b.velocity.x * keep + tx * sp; b.velocity.z = b.velocity.z * keep + tz * sp; b.velocity.y = Math.max(b.velocity.y, upv);
       });
-      /* 全身をおもいきり捻って回る：まず上半身を逆へ捻り（ため）、0.1秒後に全身で体の長い軸まわりに一気に回す。
-         回る向きは、体の軸まわりに転がると触った方へ進む向き */
+      /* まず上半身を逆へ捻り（ため）、0.1秒後に全身で体の長い軸まわりに一気に回す。
+         スワイプは、体の軸まわりに転がるとその向きへ進む側に回す。タップは向きはでたらめ */
       var ax = k.torso.quaternion.vmult(new C.Vec3(0, 1, 0)), rx = tz, rz = -tx;
-      var sg = ax.x * rx + ax.z * rz >= 0 ? 1 : -1;
-      this.twist = { t: 0, sg: sg, w: spin * 1.7, tx: tx, tz: tz, roll: spin * 0.4 };
-      LIMBS.forEach(function (id) { var b = k[id]; b.velocity.x += (rand() - 0.5) * (1 + rage * 3); b.velocity.y += rand() * (0.6 + rage * 1.2); b.velocity.z += (rand() - 0.5) * (1 + rage * 3); });
+      var sg = sw ? (ax.x * rx + ax.z * rz >= 0 ? 1 : -1) : (rand() < 0.5 ? 1 : -1);
+      this.twist = { t: 0, sg: sg, w: spin, tx: tx, tz: tz, roll: sw ? spin * 0.5 : 0, flip: sw ? 0 : (rand() - 0.5) * spin * 0.8 };
+      LIMBS.forEach(function (id) { var b = k[id]; b.velocity.x += (rand() - 0.5) * (2 + rage * 3); b.velocity.y += rand() * (0.8 + rage * 1.2); b.velocity.z += (rand() - 0.5) * (2 + rage * 3); });
     }
     var tw = this.twist;
     if (tw) {
@@ -200,16 +198,11 @@ var ZDadaPhysics = (function (C) {
       } else {
         /* 解放：全身で体の軸まわりに回る＋進む向きへ転がる */
         all.forEach(function (b) {
-          b.angularVelocity.set(a.x * tw.sg * tw.w + tw.tz * tw.roll, a.y * tw.sg * tw.w, a.z * tw.sg * tw.w - tw.tx * tw.roll);
+          /* flip はタップのときの宙返りの回転（横向きの軸） */
+          b.angularVelocity.set(a.x * tw.sg * tw.w + tw.tz * tw.roll + tw.flip, a.y * tw.sg * tw.w, a.z * tw.sg * tw.w - tw.tx * tw.roll + tw.flip * 0.5);
         });
         this.twist = null;
       }
-    }
-    if (dir && rage > 0.05) {
-      /* 激しいあいだは触った方へ転がり続ける */
-      var vx = k.torso.velocity.x * dir.x + k.torso.velocity.z * dir.z, acc = (vx < 4 + rage * 7 ? 24 : 0) * (0.4 + rage) * dt;
-      var w = (k.torso.angularVelocity.x * dir.z - k.torso.angularVelocity.z * dir.x) < 12 + rage * 14 ? 50 * (0.4 + rage) * dt : 0;
-      all.forEach(function (b) { b.velocity.x += dir.x * acc; b.velocity.z += dir.z * acc; b.angularVelocity.x += dir.z * w; b.angularVelocity.z -= dir.x * w; });
     }
     /* 手足をバタバタ（激しいほど細かく強く） */
     this.flail -= dt;
@@ -225,7 +218,7 @@ var ZDadaPhysics = (function (C) {
     all.forEach(function (b) {
       var v = b.velocity, h = Math.sqrt(v.x * v.x + v.z * v.z);
       if (h > 12) { v.x *= 12 / h; v.z *= 12 / h; }
-      if (v.y > 3) v.y = 3;
+      if (v.y > 5) v.y = 5;
     });
     this.acc += dt;
     while (this.acc >= 1 / 120) { this.world.step(1 / 120); this.acc -= 1 / 120; }
