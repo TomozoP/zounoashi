@@ -28,13 +28,14 @@ var ZDadaPhysics = (function (C) {
     { id: "legLR", p: [0.07, 0.11, 0], h: [0.05, 0.11, 0.05], m: 1.6 }
   ];
   var JOINTS = [
-    ["pelvis", "torso", [0, 0.6, 0], 0.5], ["torso", "head", [0, 0.94, 0], 0.6],
+    ["pelvis", "torso", [0, 0.6, 0], 0.5, 1.3], ["torso", "head", [0, 0.94, 0], 0.6],
     ["torso", "armUL", [-0.2, 0.9, 0], 2.2], ["armUL", "armLL", [-0.22, 0.675, 0], 1.6],
     ["torso", "armUR", [0.2, 0.9, 0], 2.2], ["armUR", "armLR", [0.22, 0.675, 0], 1.6],
     ["pelvis", "legUL", [-0.07, 0.44, 0], 1.4], ["legUL", "legLL", [-0.07, 0.22, 0], 1.3],
     ["pelvis", "legUR", [0.07, 0.44, 0], 1.4], ["legUR", "legLR", [0.07, 0.22, 0], 1.3]
   ];
   var LIMBS = ["armLL", "armLR", "legLL", "legLR", "armUL", "armUR"];
+  var UPPER = ["torso", "head", "armUL", "armLL", "armUR", "armLR"], LOWER = ["pelvis", "legUL", "legLL", "legUR", "legLR"];
 
   function rng(seed) { var a = seed | 0; return function () { a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
@@ -125,6 +126,7 @@ var ZDadaPhysics = (function (C) {
     this.flail = 0;
     this.kidHit = 0;
     this.bumps = [];
+    this.twist = null;
   };
 
   Game.prototype.makeKid = function () {
@@ -151,7 +153,7 @@ var ZDadaPhysics = (function (C) {
       var piv = new C.Vec3(j[2][0], j[2][1], j[2][2]);
       var c = new C.ConeTwistConstraint(map[j[0]], map[j[1]], {
         pivotA: piv.vsub(new C.Vec3(a.p[0], a.p[1], a.p[2])), pivotB: piv.vsub(new C.Vec3(b.p[0], b.p[1], b.p[2])),
-        axisA: new C.Vec3(0, 1, 0), axisB: new C.Vec3(0, 1, 0), angle: j[3], twistAngle: 0.5, maxForce: 1e7, collideConnected: false });
+        axisA: new C.Vec3(0, 1, 0), axisB: new C.Vec3(0, 1, 0), angle: j[3], twistAngle: j[4] || 0.5, maxForce: 1e7, collideConnected: false });
       w.addConstraint(c);
       return c;
     });
@@ -179,10 +181,29 @@ var ZDadaPhysics = (function (C) {
       all.forEach(function (b) {
         /* 足し続けると連打で速さが際限なく増えるので、混ぜて上限を作る */
         b.velocity.x = b.velocity.x * 0.5 + tx * sp; b.velocity.z = b.velocity.z * 0.5 + tz * sp; b.velocity.y = Math.max(b.velocity.y, upv);
-        /* 進む向きに丸太のように転がる回転（向きをそろえて、ほかの回転は弱める） */
-        b.angularVelocity.x = b.angularVelocity.x * 0.3 + tz * spin; b.angularVelocity.z = b.angularVelocity.z * 0.3 - tx * spin; b.angularVelocity.y *= 0.5;
       });
+      /* 全身をおもいきり捻って回る：まず上半身を逆へ捻り（ため）、0.1秒後に全身で体の長い軸まわりに一気に回す。
+         回る向きは、体の軸まわりに転がると触った方へ進む向き */
+      var ax = k.torso.quaternion.vmult(new C.Vec3(0, 1, 0)), rx = tz, rz = -tx;
+      var sg = ax.x * rx + ax.z * rz >= 0 ? 1 : -1;
+      this.twist = { t: 0, sg: sg, w: spin * 1.7, tx: tx, tz: tz, roll: spin * 0.4 };
       LIMBS.forEach(function (id) { var b = k[id]; b.velocity.x += (rand() - 0.5) * (1 + rage * 3); b.velocity.y += rand() * (0.6 + rage * 1.2); b.velocity.z += (rand() - 0.5) * (1 + rage * 3); });
+    }
+    var tw = this.twist;
+    if (tw) {
+      var a = k.torso.quaternion.vmult(new C.Vec3(0, 1, 0));
+      tw.t += dt;
+      if (tw.t < 0.1) {
+        /* ため：上半身と下半身を逆に捻る */
+        UPPER.forEach(function (id) { var b = k[id]; b.angularVelocity.set(a.x * -tw.sg * tw.w * 0.7, a.y * -tw.sg * tw.w * 0.7, a.z * -tw.sg * tw.w * 0.7); });
+        LOWER.forEach(function (id) { var b = k[id]; b.angularVelocity.set(a.x * tw.sg * tw.w * 0.4, a.y * tw.sg * tw.w * 0.4, a.z * tw.sg * tw.w * 0.4); });
+      } else {
+        /* 解放：全身で体の軸まわりに回る＋進む向きへ転がる */
+        all.forEach(function (b) {
+          b.angularVelocity.set(a.x * tw.sg * tw.w + tw.tz * tw.roll, a.y * tw.sg * tw.w, a.z * tw.sg * tw.w - tw.tx * tw.roll);
+        });
+        this.twist = null;
+      }
     }
     if (dir && rage > 0.05) {
       /* 激しいあいだは触った方へ転がり続ける */
