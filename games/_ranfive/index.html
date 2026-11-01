@@ -231,14 +231,15 @@ window.RF_COLORS = [
   var POWER = { SR: [1500, 2500], R: [300, 700], C: [30, 150] };
   var BOSS = 2000;                                  /* 怪人の戦闘力 */
   var forceRare = null;                             /* デバッグ: 次に引くレア度 */
-  function rollRarity() {
-    if (forceRare) { var f = forceRare; forceRare = null; return f; }
+  function rollRarity(noForce) {
+    if (forceRare && !noForce) { var f = forceRare; forceRare = null; return f; }
     var r = Math.random();
     return r < RATE.SR ? "SR" : r < RATE.SR + RATE.R ? "R" : "C";
   }
-  function pull() {
-    var rare = rollRarity(), list = POOL[rare];
-    var idx = list[Math.floor(Math.random() * list.length)];
+  function pull(idx) {
+    if (forceRare) { var fl = POOL[rollRarity()]; idx = fl[Math.floor(Math.random() * fl.length)]; }
+    if (idx == null) { var list = POOL[rollRarity()]; idx = list[Math.floor(Math.random() * list.length)]; }
+    var rare = COLORS[idx][0];
     var p = POWER[rare];
     var power = Math.round((p[0] + Math.random() * (p[1] - p[0])) / 10) * 10;
     if (COLORS[idx][4] === "rainbow") power = 3000;
@@ -263,7 +264,7 @@ window.RF_COLORS = [
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     heroes = [];
-    cur = 0; total = 0; win = false; shake = 0; parts = [];
+    cur = 0; total = 0; win = false; shake = 0; parts = []; leaving = [];
     T = 0;
     if (confetti) confetti.clear();
     startHero();
@@ -279,13 +280,18 @@ window.RF_COLORS = [
   var CHIP = 104;
   function startReel() {
     var seq = [];
-    for (var i = 0; i < 600; i++) seq.push(Math.floor(Math.random() * COLORS.length));
-    reel = { seq: seq, pos: 0, cur: seq[0], t: 0 };
+    /* 並ぶ色はレア度の確率どおりに引いておく。止めたときまん中にある色がそのまま当たり */
+    for (var i = 0; i < 600; i++) { var l = POOL[rollRarity(true)]; seq.push(l[Math.floor(Math.random() * l.length)]); }
+    reel = { seq: seq, pos: 0, speed: 14, stopping: false, lastTick: 0 };
   }
   function stopReel() {
     if (!reel || reel.stopping) return;
     var h = heroes[cur];
-    h.g = pull();
+    /* 滑りなし：押した時点でまん中にある色で確定 */
+    var k = Math.round(reel.pos);
+    reel.pos = k;
+    h.g = pull(reel.seq[k]);
+    reel.seq[k] = h.g.idx;
     reel.stopping = true;
     tone(520, 0.06, 0.12, "square");
     reveal();
@@ -302,6 +308,10 @@ window.RF_COLORS = [
       if (p.t > p.life) parts.splice(i, 1);
     }
     shake = Math.max(0, shake - dt * 2.5);
+    for (var li = leaving.length - 1; li >= 0; li--) {
+      leaving[li].t += dt;
+      if (leaving[li].t >= 0.3) { heroes[leaving[li].i].done = true; leaving.splice(li, 1); }
+    }
     if (state !== S.PLAY) return;
     T += dt; pt += dt;
     var h = heroes[cur];
@@ -310,13 +320,9 @@ window.RF_COLORS = [
       h.x = W + 120 + (W / 2 - W - 120) * easeOut(pt / 0.3);
       if (pt >= 0.3) { h.x = W / 2; startReel(); setSub("spin"); }
     } else if (sub === "spin") {
-      /* 本人の色が切り替わり続ける（止めたらその時点で確定） */
-      reel.t += dt;
-      if (reel.t >= 0.09) {
-        reel.t -= 0.09; reel.pos++;
-        reel.cur = reel.seq[reel.pos % reel.seq.length];
-        tone(1400, 0.025, 0.05, "square");
-      }
+      reel.pos += reel.speed * dt;
+      var k = Math.floor(reel.pos + 0.5);
+      if (k !== reel.lastTick) { reel.lastTick = k; tone(1400, 0.025, 0.05, "square"); }
       if (pt > 2.4) stopReel();
     } else if (sub === "paint") {
       h.paint = 1;
@@ -358,7 +364,12 @@ window.RF_COLORS = [
     var c = COLORS[h.g.idx];
     if (zLang === "ja") say("らんだむ" + c[2], r === "SR" ? 200 : r === "R" ? 185 : 160);
   }
-  function toLineup() { setSub("line"); }
+  /* 列へ下がるのと同時に次の人を出す（最後の人だけは下がってから名乗りへ） */
+  var leaving = [];
+  function toLineup() {
+    if (cur < 4) { leaving.push({ i: cur, t: 0 }); cur++; startHero(); }
+    else setSub("line");
+  }
   function startGroup() {
     setSub("group");
     noiseHit(0.8, 200, 0.5, 0.5, 0.45);
@@ -702,8 +713,12 @@ window.RF_COLORS = [
         ctx.beginPath(); ctx.ellipse(slotX(i), lineY() - 4, 26, 8, 0, 0, Math.PI * 2); ctx.fill();
       }
     }
-    var h = heroes[cur]; if (!h) return;
     var bs = BIG(), fy = H * 0.76;
+    leaving.forEach(function (L) {
+      var t = ease(L.t / 0.3), g = heroes[L.i];
+      drawHero(lerp(W / 2, slotX(L.i), t), lerp(fy, lineY(), t), lerp(bs, bs * SMALL, t), g.g.idx, 1, 1, 0, L.i < 2);
+    });
+    var h = heroes[cur]; if (!h) return;
     if (sub === "line") {
       var t = ease(pt / 0.25);
       drawHero(lerp(W / 2, slotX(cur), t), lerp(fy, lineY(), t), lerp(bs, bs * SMALL, t), h.g.idx, 1, 1, 0, cur < 2);
@@ -717,8 +732,8 @@ window.RF_COLORS = [
     var hop = sub === "enter" ? -Math.sin(Math.min(1, pt / 0.3) * Math.PI) * 60 : 0;
     ctx.fillStyle = "rgba(60,45,30,.25)";
     ctx.beginPath(); ctx.ellipse(h.x, fy - 2, 60 * bs, 12 * bs, 0, 0, Math.PI * 2); ctx.fill();
-    if (sub === "spin") drawHero(h.x, fy + hop, bs, reel.cur, 0, 1, 0, false);
-    else drawHero(h.x, fy + hop, bs, h.g ? h.g.idx : null, h.pose, h.g ? h.paint : 0, 0, false);
+    drawHero(h.x, fy + hop, bs, h.g ? h.g.idx : null, h.pose, h.g && sub !== "spin" ? h.paint : 0, 0, false);
+    if (sub === "spin") drawReel();
     if ((sub === "paint" || sub === "show") && h.g) {
       var k = easeOut((sub === "show" ? pt + 0.2 : pt) / 0.2);
       ctx.save();
