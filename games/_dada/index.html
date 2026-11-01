@@ -116,7 +116,47 @@
     if (kind === "ball") { tone(180 + Math.random() * 80, 0.12, 0.18, "sine", 90); return; }
     if (kind === "bear") { noiseHit(0.08, 500, 0.25, 0.8); return; }
     noiseHit(0.12 + v * 0.02, 900 + Math.random() * 900, Math.min(0.5, 0.15 + v * 0.06), 0.9);
+    /* バキッ：割れる・つぶれる音を重ねる */
+    noiseHit(0.05, 3500 + Math.random() * 2500, 0.22, 2);
+    noiseHit(0.09, 380 + Math.random() * 200, 0.3, 0.6);
     tone(260 + Math.random() * 200, 0.07, 0.08, "triangle", 120);
+  }
+  /* スローの効果音：ドンという重い低音、時間が伸びるような下がる唸り、風切りが低くなっていく音。
+     終わりぎわに逆回しのように吸い上がる音で元の速さへ戻る */
+  function sweep(f0, f1, dur, vol, delay, q) {
+    if (!AC || !NOISE) return;
+    var n = AC.currentTime + (delay || 0), s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter(); f.type = "bandpass"; f.Q.value = q || 2;
+    f.frequency.setValueAtTime(f0, n); f.frequency.exponentialRampToValueAtTime(f1, n + dur);
+    var g = AC.createGain();
+    g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(vol, n + dur * 0.3); g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination); s.start(n, Math.random()); s.stop(n + dur + 0.05);
+  }
+  function slowFx() {
+    if (!AC) return;
+    var n = AC.currentTime;
+    tone(95, 1.3, 0.45, "sine", 32);                       /* ドーン */
+    noiseHit(0.35, 160, 0.45, 0.8);
+    var o = AC.createOscillator(), lp = AC.createBiquadFilter(), g = AC.createGain();
+    o.type = "sawtooth"; o.frequency.setValueAtTime(260, n); o.frequency.exponentialRampToValueAtTime(55, n + 0.8);   /* 唸りが下がる */
+    lp.type = "lowpass"; lp.frequency.value = 700;
+    g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.12, n + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.85);
+    o.connect(lp); lp.connect(g); g.connect(AC.destination); o.start(n); o.stop(n + 0.9);
+    sweep(2400, 220, 0.8, 0.35, 0, 1.5);                     /* 風切りが低くなる */
+    sweep(250, 2600, 0.3, 0.3, SLOW_TIME - 0.25, 1.5);     /* 戻るときの吸い上げ */
+    /* 破壊：ガシャーンと砕ける破片の音をばらばらに重ねる */
+    for (var i = 0; i < 10; i++) shard(0.02 + Math.random() * 0.5, 2500 + Math.random() * 5000, 0.12 + Math.random() * 0.12);
+    var crack = AC.createBufferSource(), cf = AC.createBiquadFilter(), cg = AC.createGain();
+    crack.buffer = NOISE; cf.type = "lowpass"; cf.frequency.value = 1400;
+    cg.gain.setValueAtTime(0.6, n); cg.gain.exponentialRampToValueAtTime(0.0001, n + 0.45);
+    crack.connect(cf); cf.connect(cg); cg.connect(AC.destination); crack.start(n, Math.random()); crack.stop(n + 0.5);
+  }
+  function shard(delay, freq, vol) {
+    if (!AC || !NOISE) return;
+    var n = AC.currentTime + delay, s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = 6;
+    var g = AC.createGain(); g.gain.setValueAtTime(vol, n); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.06 + Math.random() * 0.08);
+    s.connect(f); f.connect(g); g.connect(AC.destination); s.start(n, Math.random()); s.stop(n + 0.2);
   }
   /* 泣き叫ぶ声（合成） */
   var CRIES = ["やだー", "かってー", "ぎゃー", "やだやだやだ", "かってかって", "うわーん"];
@@ -179,7 +219,7 @@
     if (phys.shook) {
       if (on && phys.shook > 2.2 && slowCool <= 0) {
         slow = SLOW_TIME; slowCool = SLOW_TIME + 1.2; shake = 0.12;
-        tone(70, 0.6, 0.35, "sine", 35); noiseHit(0.5, 180, 0.4, 0.7);
+        slowFx();
       }
       phys.shook = 0;
     }
@@ -188,6 +228,7 @@
         score += e.toy.d.price; broken++;
         pops.push({ t: 0, p: e.toy.d.price, b: e.toy.body });
         shake = Math.min(0.12, shake + 0.03);
+        var s3b = scene3d(); if (s3b) s3b.burst(e.toy);
       }
       crash(e.toy.d.kind, e.v || 2);
     });

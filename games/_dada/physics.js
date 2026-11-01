@@ -9,7 +9,8 @@ var ZDadaPhysics = (function (C) {
   var SHELVES = [
     { x: -2.6, z: -3.2, len: 3.2 }, { x: 2.6, z: -3.2, len: 3.2 },
     { x: -2.6, z: 1.4, len: 3.2 }, { x: 2.6, z: 1.4, len: 3.2 },
-    { x: 0, z: -6.4, len: 8.5 }
+    { x: 0, z: -6.4, len: 8.5 },
+    { x: -2.6, z: 5.0, len: 3.2 }, { x: 2.6, z: 5.0, len: 3.2 }
   ];
   var LEVELS = [0.1, 0.6, 1.1], SHELF_D = 0.6, SHELF_H = 1.45;
 

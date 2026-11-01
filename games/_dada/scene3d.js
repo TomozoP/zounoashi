@@ -126,7 +126,43 @@
     });
   }
 
+  /* 壊れたおもちゃから飛び散る破片（見た目だけ。数を決めて使い回す） */
+  GameScene.prototype.burst = function (toy) {
+    if (!this.debris) {
+      var geo = new T.BoxGeometry(0.05, 0.05, 0.05), sc = this.scene;
+      this.debris = [];
+      for (var i = 0; i < 70; i++) {
+        var m = new T.Mesh(geo, new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }));
+        m.visible = false; sc.add(m);
+        this.debris.push({ m: m, t: 0, v: new T.Vector3(), w: new T.Vector3() });
+      }
+      this.debrisAt = 0;
+    }
+    var p = toy.body.position, col = toy.d.kind === "bear" ? hsl(0.08, 0.5, 0.5) : hsl(toy.d.hue, 0.75, 0.55);
+    for (var k = 0; k < 6; k++) {
+      var d = this.debris[this.debrisAt++ % this.debris.length];
+      d.m.visible = true; d.t = 1.4;
+      d.m.position.set(p.x, p.y, p.z);
+      d.m.material.color.copy(k % 2 ? col : new T.Color(0xffffff));
+      d.m.scale.setScalar(0.6 + Math.random() * 1.2);
+      d.v.set((Math.random() - 0.5) * 5, 2 + Math.random() * 3, (Math.random() - 0.5) * 5);
+      d.w.set(Math.random() * 20, Math.random() * 20, Math.random() * 20);
+    }
+  };
+
   GameScene.prototype.sync = function (s) {
+    if (this.debris) {
+      var dt0 = s.dt || 1 / 60;
+      this.debris.forEach(function (d) {
+        if (d.t <= 0) return;
+        d.t -= dt0; d.v.y -= 9.8 * dt0;
+        d.m.position.addScaledVector(d.v, dt0);
+        if (d.m.position.y < 0.03) { d.m.position.y = 0.03; d.v.y *= -0.3; d.v.x *= 0.6; d.v.z *= 0.6; d.w.multiplyScalar(0.6); }
+        d.m.rotation.x += d.w.x * dt0; d.m.rotation.y += d.w.y * dt0; d.m.rotation.z += d.w.z * dt0;
+        if (d.t < 0.4) d.m.scale.multiplyScalar(0.9);
+        if (d.t <= 0) d.m.visible = false;
+      });
+    }
     var phys = this.phys;
     phys.toys.forEach(function (t, i) { var m = this.toyMeshes[i], b = t.body; m.position.copy(b.position); m.quaternion.copy(b.quaternion); }, this);
     var km = this.kidMeshes;
