@@ -48,7 +48,7 @@ var ZDadaPhysics = (function (C) {
     w.addContactMaterial(new C.ContactMaterial(this.fixedMat, this.toyMat, { friction: 0.4, restitution: 0.15 }));
     w.addContactMaterial(new C.ContactMaterial(this.toyMat, this.toyMat, { friction: 0.4, restitution: 0.12 }));
     w.addContactMaterial(new C.ContactMaterial(this.fixedMat, this.kidMat, { friction: 0.5, restitution: 0.1 }));
-    w.addContactMaterial(new C.ContactMaterial(this.toyMat, this.kidMat, { friction: 0.3, restitution: 0.25 }));
+    w.addContactMaterial(new C.ContactMaterial(this.toyMat, this.kidMat, { friction: 0.3, restitution: 0.6 }));
     this.statics = [];
     var self = this;
     function fixed(x, y, z, hx, hy, hz, kind) {
@@ -57,14 +57,14 @@ var ZDadaPhysics = (function (C) {
       return b;
     }
     fixed(0, -0.2, 0, STORE.w / 2 + 0.5, 0.2, STORE.d / 2 + 0.5, "floor");
-    fixed(-STORE.w / 2 - 0.1, STORE.wall / 2, 0, 0.1, STORE.wall / 2, STORE.d / 2, "wall");
-    fixed(STORE.w / 2 + 0.1, STORE.wall / 2, 0, 0.1, STORE.wall / 2, STORE.d / 2, "wall");
-    fixed(0, STORE.wall / 2, -STORE.d / 2 - 0.1, STORE.w / 2, STORE.wall / 2, 0.1, "wall");
-    fixed(0, STORE.wall / 2, STORE.d / 2 + 0.1, STORE.w / 2, STORE.wall / 2, 0.1, "front");
+    fixed(-STORE.w / 2 - 0.5, STORE.wall / 2, 0, 0.5, STORE.wall / 2, STORE.d / 2 + 1, "wall");
+    fixed(STORE.w / 2 + 0.5, STORE.wall / 2, 0, 0.5, STORE.wall / 2, STORE.d / 2 + 1, "wall");
+    fixed(0, STORE.wall / 2, -STORE.d / 2 - 0.5, STORE.w / 2, STORE.wall / 2, 0.5, "wall");
+    fixed(0, STORE.wall / 2, STORE.d / 2 + 0.5, STORE.w / 2, STORE.wall / 2, 0.5, "front");
     SHELVES.forEach(function (s) {
       var hx = s.len / 2, parts = [];
       LEVELS.forEach(function (y) { parts.push(fixed(s.x, y - 0.02, s.z, hx, 0.02, SHELF_D / 2, "board")); });
-      parts.push(fixed(s.x, SHELF_H / 2, s.z - SHELF_D / 2 + 0.02, hx, SHELF_H / 2, 0.02, "back"));
+      parts.push(fixed(s.x, SHELF_H / 2, s.z - SHELF_D / 2 + 0.06, hx, SHELF_H / 2, 0.06, "back"));
       parts.push(fixed(s.x - hx, SHELF_H / 2, s.z, 0.03, SHELF_H / 2, SHELF_D / 2, "side"));
       parts.push(fixed(s.x + hx, SHELF_H / 2, s.z, 0.03, SHELF_H / 2, SHELF_D / 2, "side"));
       parts.forEach(function (b) { b.isShelf = true; });
@@ -88,7 +88,7 @@ var ZDadaPhysics = (function (C) {
           else size = [0.12 + r() * 0.1, 0.12 + r() * 0.1, 0.1 + r() * 0.1];
           if (x + size[0] * 2 > s.x + s.len / 2 - 0.06) break;
           var hue = r();
-          list.push({ kind: kind, h: size, x: x + size[0], y: y + size[1] + 0.005, z: s.z + 0.02 + (r() - 0.5) * 0.08,
+          list.push({ kind: kind, h: size, x: x + size[0], y: y + size[1] + 0.005, z: s.z + 0.08 + (r() - 0.5) * 0.04,
             hue: hue, pat: Math.floor(r() * 4), price: Math.round((800 + r() * r() * 9000) / 100) * 100 * (kind === "bear" ? 2 : 1) });
           x += size[0] * 2 + 0.04 + r() * 0.06;
         }
@@ -174,7 +174,7 @@ var ZDadaPhysics = (function (C) {
     }
     if (input.tap) {
       /* 1回たたくごとに、触った方へ跳ねて転がる（激しさ rage が高いほど強い）。全身に同じだけ足す（関節がちぎれないよう） */
-      var sp = 1.8 + rage * 4.5, upv = k.torso.position.y < 0.7 ? 0.5 + rage * 0.9 : 0, spin = 7 + rage * 12;
+      var sp = 3.5 + rage * 8, upv = k.torso.position.y < 0.7 ? 0.8 + rage * 1.2 : 0, spin = 14 + rage * 20;
       var tx = dir ? dir.x : (rand() - 0.5), tz = dir ? dir.z : (rand() - 0.5);
       all.forEach(function (b) {
         /* 足し続けると連打で速さが際限なく増えるので、混ぜて上限を作る */
@@ -186,8 +186,8 @@ var ZDadaPhysics = (function (C) {
     }
     if (dir && rage > 0.05) {
       /* 激しいあいだは触った方へ転がり続ける */
-      var vx = k.torso.velocity.x * dir.x + k.torso.velocity.z * dir.z, acc = (vx < 2 + rage * 4 ? 14 : 0) * (0.4 + rage) * dt;
-      var w = (k.torso.angularVelocity.x * dir.z - k.torso.angularVelocity.z * dir.x) < 6 + rage * 8 ? 30 * (0.4 + rage) * dt : 0;
+      var vx = k.torso.velocity.x * dir.x + k.torso.velocity.z * dir.z, acc = (vx < 4 + rage * 7 ? 24 : 0) * (0.4 + rage) * dt;
+      var w = (k.torso.angularVelocity.x * dir.z - k.torso.angularVelocity.z * dir.x) < 12 + rage * 14 ? 50 * (0.4 + rage) * dt : 0;
       all.forEach(function (b) { b.velocity.x += dir.x * acc; b.velocity.z += dir.z * acc; b.angularVelocity.x += dir.z * w; b.angularVelocity.z -= dir.x * w; });
     }
     /* 手足をバタバタ（激しいほど細かく強く） */
@@ -203,7 +203,7 @@ var ZDadaPhysics = (function (C) {
     /* 速すぎ・高すぎを抑える（店の外へ飛ばない） */
     all.forEach(function (b) {
       var v = b.velocity, h = Math.sqrt(v.x * v.x + v.z * v.z);
-      if (h > 7) { v.x *= 7 / h; v.z *= 7 / h; }
+      if (h > 12) { v.x *= 12 / h; v.z *= 12 / h; }
       if (v.y > 3) v.y = 3;
     });
     this.acc += dt;
@@ -214,9 +214,9 @@ var ZDadaPhysics = (function (C) {
       var bp = bumps.reduce(function (a, c) { return c.v > a.v ? c : a; });
       this.toys.forEach(function (t) {
         var p = t.body.position;
-        if (Math.abs(p.x - bp.x) > 1.0 || Math.abs(p.z - bp.z) > 1.0 || rand() < 0.4) return;
+        if (Math.abs(p.x - bp.x) > 1.3 || Math.abs(p.z - bp.z) > 1.2 || rand() < 0.3) return;
         t.body.wakeUp();
-        var f = Math.min(3, bp.v) * (0.3 + rand() * 0.5);
+        var f = Math.min(6, bp.v) * (0.4 + rand() * 0.6);
         t.body.velocity.x += (rand() - 0.5) * f; t.body.velocity.y += f * 0.6; t.body.velocity.z += f * (0.4 + rand() * 0.6) * Math.sign(p.z - bp.z || 1) * -1 + f * 0.5;
       });
       this.shook = bp.v;
