@@ -369,5 +369,6 @@ window.DRAFT_GAMES = [
     "play": "games/_semi/index.html",
     "full": true,
     "catch": "セミの発音器官を動かして鳴く"
-  }
+  },
+  {"type":"lab","tags":[],"id":"ranfive","title":"運任戦士ランダムファイブ","year":2026,"date":"2026-11-01","plays":null,"url":"","img":"games/_ranfive/img/thumb.webp","play":"games/_ranfive/index.html","full":true,"catch":"5人の色はガチャで決まる"},
 ];
