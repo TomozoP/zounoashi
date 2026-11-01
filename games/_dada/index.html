@@ -44,8 +44,8 @@
 /* ガチ駄々
 
    おもちゃ屋で子供になって駄々をこねる。子供は関節でつないだ剛体（physics.js）。
-     押した瞬間   … 跳ね上がって大暴れ
-     押してなぞる … なぞった向きへ転がる（押している間は手足のバタバタが強い）
+     引っ張る … 反対向きに矢印が出て、引くほど伸びてゲージがたまる
+     離す     … 矢印の向きへぶっとぶ（MAXで離すとおもいきり）
    30秒で壊したおもちゃの値段の合計が点数。 */
 (function () {
   "use strict";
@@ -139,7 +139,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false, broken;
   var phys = new window.ZDadaPhysics.Game();
-  var stick = null, kick = false, keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
+  var stick = null, launch = null, PULL = 170, keyCharge = -1, keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
 
   function newRound() {
     shareButton.hidden = true;
@@ -147,7 +147,7 @@
     phys.reset();
     state = S.PLAY;
     score = 0; broken = 0;
-    T = 0; held = false; stick = null; kick = true; pops = []; snap = true;
+    T = 0; held = false; stick = null; launch = null; keyCharge = -1; pops = []; snap = true;
     cryAt = 0.3;
   }
   function finish() {
@@ -159,16 +159,15 @@
   function update(dt) {
     shake = Math.max(0, shake - dt * 1.5);
     for (var i = pops.length - 1; i >= 0; i--) { pops[i].t += dt; if (pops[i].t > 0.9) pops.splice(i, 1); }
-    var dx = 0, dz = 0;
     if (state === S.PLAY) {
       T += dt;
-      if (stick) { dx = stick.dx; dz = stick.dz; }
-      else { dx = keyDir.r - keyDir.l; dz = keyDir.d - keyDir.u; }
+      if (keyCharge >= 0) keyCharge = Math.min(1, keyCharge + dt / 0.9);
       cryAt -= dt;
       if (cryAt <= 0) cry();
     }
-    var ev = phys.step(dt, { dx: dx, dz: dz, hold: state === S.PLAY && (held || dx || dz), kick: kick && state === S.PLAY }, Math.random);
-    kick = false;
+    var ev = phys.step(dt, { hold: state === S.PLAY && held, launch: state === S.PLAY ? launch : null }, Math.random);
+    if (launch) { if (launch.p >= 1) shake = 0.1; tone(220 + launch.p * 300, 0.25, 0.15, "sawtooth", 80); }
+    launch = null;
     ev.forEach(function (e) {
       if (e.kind === "break" && state === S.PLAY) {
         score += e.toy.d.price; broken++;
@@ -188,20 +187,29 @@
       if (hit === "retry") newRound();
       return;
     }
-    held = true; kick = true;
-    if (x != null) stick = { ox: x, oy: y, x: x, y: y, dx: 0, dz: 0 };
+    held = true;
+    if (x != null) stick = { ox: x, oy: y, dx: 0, dz: 0, p: 0 };
+    else keyCharge = 0;
   }
+  /* 引っ張り：引いた向きの反対へ飛ぶ。PULL px でMAX */
   function move(x, y) {
     if (state !== S.PLAY || !held || !stick) return;
-    var vx = x - stick.ox, vy = y - stick.oy, l = Math.sqrt(vx * vx + vy * vy), R = 80;
-    if (l > R) { stick.ox = x - vx / l * R; stick.oy = y - vy / l * R; vx = x - stick.ox; vy = y - stick.oy; l = R; }
-    stick.x = x; stick.y = y;
-    var m = l < 12 ? 0 : (l - 12) / (R - 12);
-    stick.dx = l ? vx / l * m : 0; stick.dz = l ? vy / l * m : 0;
+    var vx = stick.ox - x, vy = stick.oy - y, l = Math.sqrt(vx * vx + vy * vy);
+    stick.p = l < 14 ? 0 : Math.min(1, (l - 14) / (PULL - 14));
+    stick.dx = l ? vx / l : 0; stick.dz = l ? vy / l : 0;
   }
   function up() {
     if (!held) return;
-    held = false; stick = null;
+    held = false;
+    if (state === S.PLAY) {
+      if (stick && stick.p > 0) launch = { dx: stick.dx, dz: stick.dz, p: stick.p };
+      else if (!stick && keyCharge >= 0) {
+        var kx = keyDir.r - keyDir.l, kz = keyDir.d - keyDir.u, kl = Math.sqrt(kx * kx + kz * kz);
+        if (!kl) { kz = -1; kl = 1; }
+        launch = { dx: kx / kl, dz: kz / kl, p: Math.max(0.1, keyCharge) };
+      }
+    }
+    stick = null; keyCharge = -1;
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -291,18 +299,41 @@
       ctx.fillStyle = "rgba(22,32,46,.25)"; ctx.fillRect(W / 2 - 150, 100, 300, 10);
       ctx.fillStyle = k < 0.2 ? "#e0262a" : "#16202e"; ctx.fillRect(W / 2 - 150, 100, 300 * k, 10);
       ctx.restore();
-      if (stick) {
-        ctx.save();
-        ctx.strokeStyle = "rgba(22,32,46,.35)"; ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.arc(stick.ox, stick.oy, 80, 0, 7); ctx.stroke();
-        ctx.fillStyle = "rgba(22,32,46,.35)";
-        ctx.beginPath(); ctx.arc(stick.ox + stick.dx * 68, stick.oy + stick.dz * 68, 28, 0, 7); ctx.fill();
-        ctx.restore();
-      }
+      var aim = stick ? stick : (keyCharge >= 0 ? keyAim() : null);
+      if (aim && aim.p > 0 && s3) drawArrow(s3, aim);
     }
     if (state === S.RESULT) drawResult();
   }
 
+  function keyAim() {
+    var kx = keyDir.r - keyDir.l, kz = keyDir.d - keyDir.u, kl = Math.sqrt(kx * kx + kz * kz);
+    if (!kl) { kz = -1; kl = 1; }
+    return { dx: kx / kl, dz: kz / kl, p: Math.max(0.1, keyCharge) };
+  }
+  /* 子供から飛ぶ向きへ伸びる矢印。中がゲージで、MAXは赤く点滅 */
+  function drawArrow(s3, a) {
+    var c = phys.center(), v = new window.THREE.Vector3(c.x, c.y, c.z).project(s3.camera);
+    var x = (v.x + 1) / 2 * W, y = (1 - v.y) / 2 * H;
+    var len = 90 + 170 * a.p, full = 260, ang = Math.atan2(a.dz, a.dx), max = a.p >= 1;
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(ang);
+    function shape(L) {
+      ctx.beginPath();
+      ctx.moveTo(30, -14); ctx.lineTo(L - 34, -14); ctx.lineTo(L - 34, -30); ctx.lineTo(L, 0);
+      ctx.lineTo(L - 34, 30); ctx.lineTo(L - 34, 14); ctx.lineTo(30, 14); ctx.closePath();
+    }
+    shape(len);
+    ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.fill();
+    ctx.save(); ctx.clip();
+    var g = ctx.createLinearGradient(30, 0, full, 0);
+    g.addColorStop(0, "#ffd84a"); g.addColorStop(0.6, "#ff8a1e"); g.addColorStop(1, "#ff2a2a");
+    ctx.fillStyle = max && Math.floor(performance.now() / 90) % 2 ? "#ff2a2a" : g;
+    ctx.fillRect(30, -32, (len - 30) * a.p + 4, 64);
+    ctx.restore();
+    shape(len);
+    ctx.lineWidth = max ? 6 : 4; ctx.strokeStyle = "#16202e"; ctx.lineJoin = "round"; ctx.stroke();
+    ctx.restore();
+  }
   function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
   function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
   function drawResult() {
@@ -329,8 +360,8 @@
     reset: function () { newRound(); },
     hideUI: function () { hideUI = true; },
     cam: function (c) { camChoice = c; snap = true; },
-    input: function (dx, dz, hold) { stick = hold ? { ox: 270, oy: 600, x: 270, y: 600, dx: dx, dz: dz } : null; held = !!hold; },
-    kick: function () { kick = true; }
+    pull: function (dx, dz, p) { held = true; stick = { ox: 270, oy: 600, dx: dx, dz: dz, p: p }; },
+    release: function () { up(); }
   };
 
   window.__recording = {

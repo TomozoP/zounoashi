@@ -34,23 +34,6 @@
     return tex;
   }
 
-  /* 泣き顔 */
-  function faceTex() {
-    return Z3.canvasTex(256, 128, function (g, w, h) {
-      g.fillStyle = "#ffd9bd"; g.fillRect(0, 0, w, h);
-      /* 顔は u=0.75 あたり（+z を向く側） */
-      var cx = w * 0.75, cy = h * 0.55;
-      g.strokeStyle = "#2a1a12"; g.lineWidth = 5; g.lineCap = "round";
-      g.beginPath(); g.moveTo(cx - 26, cy - 14); g.lineTo(cx - 12, cy - 8); g.lineTo(cx - 26, cy - 2); g.stroke();
-      g.beginPath(); g.moveTo(cx + 26, cy - 14); g.lineTo(cx + 12, cy - 8); g.lineTo(cx + 26, cy - 2); g.stroke();
-      g.fillStyle = "#7a1a1a"; g.beginPath(); g.ellipse(cx, cy + 20, 14, 11, 0, 0, 7); g.fill();
-      g.fillStyle = "#e05a5a"; g.beginPath(); g.ellipse(cx, cy + 25, 8, 4, 0, 0, 7); g.fill();
-      g.fillStyle = "rgba(120,190,255,.9)";
-      g.fillRect(cx - 24, cy - 2, 5, 22); g.fillRect(cx + 19, cy - 2, 5, 22);
-      g.fillStyle = "rgba(255,120,120,.35)"; g.beginPath(); g.arc(cx - 32, cy + 10, 9, 0, 7); g.arc(cx + 32, cy + 10, 9, 0, 7); g.fill();
-    });
-  }
-
   function GameScene(phys) {
     T = global.THREE;
     var P = global.ZDadaPhysics;
@@ -118,17 +101,18 @@
 
     /* 子供 */
     var skin = Z3.std(0xffd2b0, { roughness: 0.7 }), shirt = Z3.std(0xff5a4a, { roughness: 0.75 }), shorts = Z3.std(0x2f5fb8, { roughness: 0.8 }), shoe = Z3.std(0xffffff, { roughness: 0.6 });
-    var face = new T.MeshStandardMaterial({ map: faceTex(), roughness: 0.7 });
     var hair = Z3.std(0x2a1a12, { roughness: 0.9 });
     this.kidMeshes = {};
     P.PARTS.forEach(function (p) {
       var g = new T.Group(), mesh;
       if (p.id === "head") {
-        mesh = new T.Mesh(new T.SphereGeometry(p.r, 24, 16), face);
-        mesh.rotation.y = -Math.PI / 2;            /* 絵の u=0.75 を +z（前）に */
+        /* 四角い頭（顔は描かない） */
+        mesh = new T.Mesh(new T.BoxGeometry(p.h[0] * 2, p.h[1] * 2, p.h[2] * 2), skin);
         g.add(mesh);
-        var cap = new T.Mesh(new T.SphereGeometry(p.r * 1.04, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.45), hair);
-        cap.rotation.x = -0.35; g.add(cap);
+        var top = new T.Mesh(new T.BoxGeometry(p.h[0] * 2.08, p.h[1] * 0.6, p.h[2] * 2.08), hair);
+        top.position.y = p.h[1] * 0.74; g.add(top);
+        var backHair = new T.Mesh(new T.BoxGeometry(p.h[0] * 2.08, p.h[1] * 1.3, p.h[2] * 0.3), hair);
+        backHair.position.set(0, p.h[1] * 0.3, -p.h[2] * 0.9); g.add(backHair);
       } else {
         var mat = p.id === "torso" ? shirt : p.id === "pelvis" ? shorts : /legU/.test(p.id) ? shorts : /armU/.test(p.id) ? shirt : skin;
         mesh = new T.Mesh(new T.BoxGeometry(p.h[0] * 2, p.h[1] * 2, p.h[2] * 2), mat);
@@ -150,7 +134,7 @@
     /* カメラは子供を追う（少し遅れて） */
     var c = phys.center(), cam = s.cam ? CAMS[s.cam] : this.cam;
     if (this.camera.fov !== cam.fov) { this.camera.fov = cam.fov; this.camera.updateProjectionMatrix(); }
-    var tx = Math.max(-3.2, Math.min(3.2, c.x)), tz = Math.max(-5.5, Math.min(5.5, c.z));
+    var tx = Math.max(-3.2, Math.min(3.2, c.x)), tz = Math.max(-6.2, Math.min(5.5, c.z));
     if (!this.camPos || s.snap) this.camPos = { x: tx, z: tz };
     var k = Math.min(1, (s.dt || 1 / 60) * 4);
     this.camPos.x += (tx - this.camPos.x) * k; this.camPos.z += (tz - this.camPos.z) * k;

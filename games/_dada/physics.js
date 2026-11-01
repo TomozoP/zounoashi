@@ -17,7 +17,7 @@ var ZDadaPhysics = (function (C) {
   var PARTS = [
     { id: "pelvis", p: [0, 0.52, 0], h: [0.13, 0.08, 0.09], m: 4 },
     { id: "torso", p: [0, 0.76, 0], h: [0.15, 0.16, 0.10], m: 6 },
-    { id: "head", p: [0, 1.11, 0], r: 0.17, m: 3 },
+    { id: "head", p: [0, 1.1, 0], h: [0.15, 0.15, 0.15], m: 3 },
     { id: "armUL", p: [-0.22, 0.79, 0], h: [0.045, 0.11, 0.045], m: 1.6 },
     { id: "armLL", p: [-0.22, 0.56, 0], h: [0.04, 0.11, 0.04], m: 1.3 },
     { id: "armUR", p: [0.22, 0.79, 0], h: [0.045, 0.11, 0.045], m: 1.6 },
@@ -162,22 +162,19 @@ var ZDadaPhysics = (function (C) {
   /* 子供の中心（胴） */
   Game.prototype.center = function () { var p = this.kid.map.torso.position; return { x: p.x, y: p.y, z: p.z }; };
 
-  /* 1コマ進める。input: { dx, dz（-1〜1、転がる向きと強さ）, hold（押している）, kick（今押した） } */
+  /* 1コマ進める。input: { hold（引っ張っている）, launch（離した: {dx,dz,p}） } */
   Game.prototype.step = function (dt, input, rand) {
     var k = this.kid.map, self = this;
-    var dx = input.dx || 0, dz = input.dz || 0, mag = Math.min(1, Math.sqrt(dx * dx + dz * dz));
     var all = this.kid.list;
-    if (mag > 0.05) {
-      var nx = dx / mag, nz = dz / mag;
-      /* 転がる：全身を同じだけ進む向きへ押し、進む向きに転がる回転を足す（関節がちぎれないよう全身に同じだけ） */
-      var vx = k.torso.velocity.x, vz = k.torso.velocity.z, sp = vx * nx + vz * nz;
-      var acc = (sp < 3 ? 10 : 1) * mag * dt;
-      var wx = k.torso.angularVelocity.x * nz - k.torso.angularVelocity.z * nx;
-      var spin = (wx < 9 ? 26 : 0) * mag * dt;
+    if (input.launch) {
+      /* 引っ張って離した：向き (dx,dz) へ、強さ p（0〜1、1でMAX）でぶっとぶ。全身に同じだけ足す（関節がちぎれないよう） */
+      var L = input.launch, pw = L.p, max = pw >= 1;
+      var sp = 2 + pw * 6 + (max ? 3.5 : 0), upv = 1 + pw * 1.6 + (max ? 0.8 : 0), spin = 4 + pw * 10;
       all.forEach(function (b) {
-        b.velocity.x += nx * acc; b.velocity.z += nz * acc;
-        b.angularVelocity.x += nz * spin; b.angularVelocity.z += -nx * spin;
+        b.velocity.x = b.velocity.x * 0.3 + L.dx * sp; b.velocity.z = b.velocity.z * 0.3 + L.dz * sp; b.velocity.y += upv;
+        b.angularVelocity.x += L.dz * spin; b.angularVelocity.z += -L.dx * spin;
       });
+      this.flying = max ? 1.2 : 0.6;
     }
     /* 手足をバタバタ（押している間は強く） */
     this.flail -= dt;
@@ -188,11 +185,6 @@ var ZDadaPhysics = (function (C) {
         var b = k[id];
         if (rand() < 0.6) { b.velocity.x += (rand() - 0.5) * 2.2 * s; b.velocity.y += (0.3 + rand() * 1.2) * s; b.velocity.z += (rand() - 0.5) * 2.2 * s; }
       });
-    }
-    if (input.kick) {
-      /* 跳ね上がって大暴れ */
-      all.forEach(function (b) { b.velocity.x += dx * 2.5; b.velocity.y += 3.2; b.velocity.z += dz * 2.5; });
-      LIMBS.forEach(function (id) { var b = k[id]; b.velocity.x += (rand() - 0.5) * 3; b.velocity.z += (rand() - 0.5) * 3; });
     }
     /* 起き上がらない程度に、胴が床から離れすぎないよう */
     this.acc += dt;
