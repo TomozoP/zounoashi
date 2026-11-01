@@ -15,7 +15,8 @@
   #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
   #start[hidden] { display:none; }
   #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
-  #share-button[hidden] { display:none; }
+  #share-button[hidden], #save-button[hidden] { display:none; }
+  #save-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
   #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
 </style>
 </head>
@@ -24,6 +25,7 @@
   <canvas id="c"></canvas>
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+  <button id="save-button" type="button" aria-label="画像を保存" hidden></button>
 </div></div>
 <script src="../start.js"></script>
 <script src="../view.js"></script>
@@ -157,6 +159,30 @@ window.RF_COLORS = [
   var ctx = canvas.getContext("2d");
   var wrap = document.getElementById("wrap");
   var shareButton = document.getElementById("share-button");
+  var saveButton = document.getElementById("save-button");
+  /* 名乗りの場面を画像で残す（怪人戦に入る直前に写しておく） */
+  var snapshot = null;
+  function takeSnapshot() {
+    try {
+      snapshot = document.createElement("canvas");
+      snapshot.width = canvas.width; snapshot.height = canvas.height;
+      snapshot.getContext("2d").drawImage(canvas, 0, 0);
+    } catch (e) { snapshot = null; }
+  }
+  /* Claude の確認用ページの中ではファイルを直接落とせないので、ページの保存の仕組みを使う */
+  var pageSaver = null;
+  if (window.claude && window.claude.use) window.claude.use("downloads").then(function (d) { pageSaver = d; }, function () {});
+  function fileName() {
+    var d = new Date();
+    function p2(n) { return (n < 10 ? "0" : "") + n; }
+    return zT("ランダムファイブ", "RandomFive", "랜덤파이브", "随机五人组", "隨機五人組") + "_" + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + "-" + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + ".png";
+  }
+  window.zResultActions.bind(saveButton, function () {
+    if (!snapshot) return;
+    var name = fileName();
+    if (pageSaver) { snapshot.toBlob(function (b) { if (b) pageSaver.save({ filename: name, data: b }).catch(function () {}); }, "image/png"); return; }
+    window.zResultActions.saveImage({ canvas: snapshot, name: name });
+  });
   window.zResultActions.bind(shareButton, doShare);
   var followLink = window.zResultActions.follow.link(shareButton.parentNode);
 
@@ -327,7 +353,7 @@ window.RF_COLORS = [
   if (confetti) confetti.rain = false;
 
   function newRound() {
-    shareButton.hidden = true;
+    shareButton.hidden = true; saveButton.hidden = true; snapshot = null;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     heroes = [];
@@ -348,8 +374,11 @@ window.RF_COLORS = [
   var CHIP = 104;
   function startReel() {
     var seq = [];
-    /* 並ぶ色はレア度の確率どおりに引いておく。止めたときまん中にある色がそのまま当たり */
-    for (var i = 0; i < 600; i++) { var l = POOL[rollRarity(true)]; seq.push(l[Math.floor(Math.random() * l.length)]); }
+    /* 流れる色は全色から毎回ばらばらに（同じ色が続かないように）。当たりは止めたときに確率どおり引く */
+    for (var i = 0; i < 600; i++) {
+      var c; do { c = Math.floor(Math.random() * COLORS.length); } while (i && c === seq[i - 1]);
+      seq.push(c);
+    }
     reel = { seq: seq, pos: 0, speed: 14, stopping: false, lastTick: 0 };
   }
   function stopReel() {
@@ -358,7 +387,7 @@ window.RF_COLORS = [
     /* 滑りなし：押した時点でまん中にある色で確定 */
     var k = Math.round(reel.pos);
     reel.pos = k;
-    h.g = pull(reel.seq[k % reel.seq.length]);
+    h.g = pull();
     reel.seq[k % reel.seq.length] = h.g.idx;
     reel.stopping = true;
     tone(520, 0.06, 0.12, "square");
@@ -460,6 +489,7 @@ window.RF_COLORS = [
     noiseHit(0.6, 160 + Math.random() * 80, 0.35, 0.6);
   }
   function startFight() {
+    if (sub === "group") takeSnapshot();
     setSub("fight");
     fightHit = false;
     win = total >= BOSS;
@@ -483,7 +513,7 @@ window.RF_COLORS = [
   }
   function finish() {
     state = S.RESULT;
-    shareButton.hidden = false;
+    shareButton.hidden = false; saveButton.hidden = !snapshot;
   }
 
   /* ============ 入力 ============ */
@@ -780,6 +810,7 @@ window.RF_COLORS = [
 
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(saveButton, resultButtons()[2], W, H, state === S.RESULT);
     window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
     ctx.save();
@@ -935,7 +966,12 @@ window.RF_COLORS = [
     }
   }
 
-  function resultButtons() { return window.zResultActions.row(W, H * 0.44); }
+  /* 左から もう一度・Xでシェア・画像を保存（最後） */
+  function resultButtons() {
+    var bs = window.zResultActions.row(W, H * 0.44, ["retry", "share", "save"]);
+    bs[2].label = "画像を保存";
+    return bs;
+  }
   function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
   function drawResult() {
     /* 暗くせず、場面の上に縁取り文字で出す */
@@ -950,7 +986,7 @@ window.RF_COLORS = [
     now: function () { return { state: state, sub: sub, score: total, win: win, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null, names: heroes ? heroes.map(function (h) { return h && h.g ? cName(h.g.idx) : null; }) : [] }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
-    hideUI: function () { shareButton.hidden = true; }
+    hideUI: function () { shareButton.hidden = true; saveButton.hidden = true; }
   };
 
   window.__recording = {
