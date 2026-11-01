@@ -44,7 +44,7 @@
 /* ガチ駄々
 
    おもちゃ屋で子供になって駄々をこねる。子供は関節でつないだ剛体（physics.js）。
-     スワイプ … その向きへぶっとぶ。速いほど強く、SWIPE_MAX 以上の速さでおもいきり
+     連打 … たたくたびに触った方へ跳ねて転がる。速く連打するほど激しさ(rage)が上がり、手足のバタバタも転がりも強くなる
    30秒で壊したおもちゃの値段の合計が点数。 */
 (function () {
   "use strict";
@@ -138,7 +138,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false, broken;
   var phys = new window.ZDadaPhysics.Game();
-  var stick = null, launch = null, SWIPE_MIN = 250, SWIPE_MAX = 2000, trail = [], keyCharge = -1, keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
+  var rage = 0, tap = false, toPt = null, rings = [], keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
 
   function newRound() {
     shareButton.hidden = true;
@@ -146,28 +146,29 @@
     phys.reset();
     state = S.PLAY;
     score = 0; broken = 0;
-    T = 0; held = false; stick = null; launch = null; keyCharge = -1; pops = []; snap = true;
+    T = 0; held = false; rage = 0; tap = false; toPt = null; rings = []; pops = []; snap = true;
     cryAt = 0.3;
   }
   function finish() {
-    state = S.RESULT; held = false; stick = null;
+    state = S.RESULT; held = false; toPt = null;
     if (AC) window.zCelebrate.play(AC, score >= 100000 ? "fanfare" : "chime");
   }
 
   /* ============ 進行 ============ */
   function update(dt) {
     shake = Math.max(0, shake - dt * 1.5);
-    for (var ti = trail.length - 1; ti >= 0; ti--) { trail[ti].a -= dt * 4; if (trail[ti].a <= 0) trail.splice(ti, 1); }
+    for (var ri = rings.length - 1; ri >= 0; ri--) { rings[ri].t += dt; if (rings[ri].t > 0.35) rings.splice(ri, 1); }
+    rage = Math.max(0, rage - dt * 0.6);
     for (var i = pops.length - 1; i >= 0; i--) { pops[i].t += dt; if (pops[i].t > 0.9) pops.splice(i, 1); }
     if (state === S.PLAY) {
       T += dt;
-      if (keyCharge >= 0) keyCharge = Math.min(1, keyCharge + dt / 0.9);
       cryAt -= dt;
       if (cryAt <= 0) cry();
     }
-    var ev = phys.step(dt, { hold: state === S.PLAY && held, launch: state === S.PLAY ? launch : null }, Math.random);
-    if (launch) { if (launch.p >= 1) shake = 0.1; tone(220 + launch.p * 300, 0.25, 0.15, "sawtooth", 80); }
-    launch = null;
+    var on = state === S.PLAY;
+    var ev = phys.step(dt, { rage: on ? rage : 0, to: on ? toPt : null, tap: on && tap }, Math.random);
+    if (tap && on) { noiseHit(0.06, 300, 0.12 + rage * 0.15, 1); if (rage > 0.85) shake = Math.max(shake, 0.05); }
+    tap = false;
     ev.forEach(function (e) {
       if (e.kind === "break" && state === S.PLAY) {
         score += e.toy.d.price; broken++;
@@ -188,36 +189,30 @@
       return;
     }
     held = true;
-    if (x != null) { stick = { pts: [{ x: x, y: y, t: performance.now() }] }; trail = [{ x: x, y: y, a: 1 }]; }
-    else keyCharge = 0;
+    /* 連打：たたくたびに激しさが上がる */
+    rage = Math.min(1, rage + 0.11);
+    tap = true;
+    if (x != null) { toPt = floorAt(x, y) || toPt; rings.push({ x: x, y: y, t: 0 }); }
+    else {
+      var kx = keyDir.r - keyDir.l, kz = keyDir.d - keyDir.u, c = phys.center();
+      toPt = (kx || kz) ? { x: c.x + kx * 3, z: c.z + kz * 3 } : null;
+    }
   }
-  /* スワイプ：離す直前の動き（約0.1秒）の向きと速さで飛ぶ */
   function move(x, y) {
-    if (state !== S.PLAY || !held || !stick) return;
-    var now = performance.now();
-    stick.pts.push({ x: x, y: y, t: now });
-    while (stick.pts.length > 2 && now - stick.pts[1].t > 100) stick.pts.shift();
-    trail.push({ x: x, y: y, a: 1 });
-  }
-  function swipe() {
-    var P = stick.pts, a = P[0], b = P[P.length - 1];
-    var dt = Math.max(16, b.t - a.t) / 1000, vx = b.x - a.x, vy = b.y - a.y, l = Math.sqrt(vx * vx + vy * vy);
-    if (l < 20 || performance.now() - b.t > 150) return null;
-    var v = l / dt;
-    return { dx: vx / l, dz: vy / l, p: Math.max(0.1, Math.min(1, (v - SWIPE_MIN) / (SWIPE_MAX - SWIPE_MIN))) };
+    if (state === S.PLAY && held && x != null) toPt = floorAt(x, y) || toPt;
   }
   function up() {
-    if (!held) return;
     held = false;
-    if (state === S.PLAY) {
-      if (stick) launch = swipe();
-      else if (!stick && keyCharge >= 0) {
-        var kx = keyDir.r - keyDir.l, kz = keyDir.d - keyDir.u, kl = Math.sqrt(kx * kx + kz * kz);
-        if (!kl) { kz = -1; kl = 1; }
-        launch = { dx: kx / kl, dz: kz / kl, p: Math.max(0.1, keyCharge) };
-      }
-    }
-    stick = null; keyCharge = -1;
+  }
+  /* 画面の点から床（y=0）の点へ */
+  function floorAt(x, y) {
+    var s3 = scene3d();
+    if (!s3) return null;
+    var v = new window.THREE.Vector3(x / W * 2 - 1, -(y / H * 2 - 1), 0.5).unproject(s3.camera);
+    var o = s3.camera.position, dy = v.y - o.y;
+    if (dy >= -1e-6) return null;
+    var k = -o.y / dy;
+    return { x: o.x + (v.x - o.x) * k, z: o.z + (v.z - o.z) * k };
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -307,49 +302,15 @@
       ctx.fillStyle = "rgba(22,32,46,.25)"; ctx.fillRect(W / 2 - 150, 100, 300, 10);
       ctx.fillStyle = k < 0.2 ? "#e0262a" : "#16202e"; ctx.fillRect(W / 2 - 150, 100, 300 * k, 10);
       ctx.restore();
-      if (keyCharge >= 0 && s3) drawArrow(s3, keyAim());
-      if (trail.length > 1) {
-        /* スワイプの跡 */
-        ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
-        for (var ti = 1; ti < trail.length; ti++) {
-          ctx.strokeStyle = "rgba(255,255,255," + (trail[ti].a * 0.8) + ")"; ctx.lineWidth = 6 + 10 * trail[ti].a;
-          ctx.beginPath(); ctx.moveTo(trail[ti - 1].x, trail[ti - 1].y); ctx.lineTo(trail[ti].x, trail[ti].y); ctx.stroke();
-        }
-        ctx.restore();
-      }
+      rings.forEach(function (r) {
+        var k = r.t / 0.35;
+        ctx.strokeStyle = "rgba(255,255,255," + (1 - k) * 0.9 + ")"; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.arc(r.x, r.y, 16 + k * 40, 0, 7); ctx.stroke();
+      });
     }
     if (state === S.RESULT) drawResult();
   }
 
-  function keyAim() {
-    var kx = keyDir.r - keyDir.l, kz = keyDir.d - keyDir.u, kl = Math.sqrt(kx * kx + kz * kz);
-    if (!kl) { kz = -1; kl = 1; }
-    return { dx: kx / kl, dz: kz / kl, p: Math.max(0.1, keyCharge) };
-  }
-  /* 子供から飛ぶ向きへ伸びる矢印。中がゲージで、MAXは赤く点滅 */
-  function drawArrow(s3, a) {
-    var c = phys.center(), v = new window.THREE.Vector3(c.x, c.y, c.z).project(s3.camera);
-    var x = (v.x + 1) / 2 * W, y = (1 - v.y) / 2 * H;
-    var len = 90 + 170 * a.p, full = 260, ang = Math.atan2(a.dz, a.dx), max = a.p >= 1;
-    ctx.save();
-    ctx.translate(x, y); ctx.rotate(ang);
-    function shape(L) {
-      ctx.beginPath();
-      ctx.moveTo(30, -14); ctx.lineTo(L - 34, -14); ctx.lineTo(L - 34, -30); ctx.lineTo(L, 0);
-      ctx.lineTo(L - 34, 30); ctx.lineTo(L - 34, 14); ctx.lineTo(30, 14); ctx.closePath();
-    }
-    shape(len);
-    ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.fill();
-    ctx.save(); ctx.clip();
-    var g = ctx.createLinearGradient(30, 0, full, 0);
-    g.addColorStop(0, "#ffd84a"); g.addColorStop(0.6, "#ff8a1e"); g.addColorStop(1, "#ff2a2a");
-    ctx.fillStyle = max && Math.floor(performance.now() / 90) % 2 ? "#ff2a2a" : g;
-    ctx.fillRect(30, -32, (len - 30) * a.p + 4, 64);
-    ctx.restore();
-    shape(len);
-    ctx.lineWidth = max ? 6 : 4; ctx.strokeStyle = "#16202e"; ctx.lineJoin = "round"; ctx.stroke();
-    ctx.restore();
-  }
   function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
   function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
   function drawResult() {
@@ -376,7 +337,7 @@
     reset: function () { newRound(); },
     hideUI: function () { hideUI = true; },
     cam: function (c) { camChoice = c; snap = true; },
-    swipe: function (dx, dz, p) { launch = { dx: dx, dz: dz, p: p }; }
+    tapAt: function (x, y) { down(x, y); up(); }
   };
 
   window.__recording = {
