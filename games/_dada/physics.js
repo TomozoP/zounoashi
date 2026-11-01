@@ -174,7 +174,7 @@ var ZDadaPhysics = (function (C) {
       /* タップ：その場で高く跳ねる。スワイプ：その向きへ、速いスワイプほど強く飛んで転がる。
          どちらも全身をおもいきり捻ってから回す。全身に同じだけ足す（関節がちぎれないよう） */
       var spin = 32 + rage * 34, tx, tz, sp, upv, low = k.torso.position.y < 0.8;
-      if (sw) { tx = sw.dx; tz = sw.dz; sp = 2 + sw.p * 6; upv = low ? 1.2 + sw.p * 1.3 : 0; }
+      if (sw) { tx = sw.dx; tz = sw.dz; sp = 3 + sw.p * 8.5; upv = low ? 1.2 + sw.p * 1.3 : 0; }
       else { var ra = rand() * Math.PI * 2; tx = Math.cos(ra); tz = Math.sin(ra); sp = 0.6; upv = low ? 3.6 + rage * 1.4 : 1.5; }
       all.forEach(function (b) {
         /* 足し続けると速さが際限なく増えるので、混ぜて上限を作る */
