@@ -37,6 +37,9 @@
 <script src="../pad.js"></script>
 <script src="../voice.js"></script>
 <script src="../celebrate.js"></script>
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="../three-base.js"></script>
+<script src="hero3d.js"></script>
 <script>
 /* 運任戦士ランダムファイブの色。 [レア度, 名前(ランダム○○の○○), 読み, 英語, 色]
    SR = 強そう・メジャー、R = そこそこ、C = すごく地味 */
@@ -623,7 +626,16 @@ window.RF_COLORS = [
 
   /* 戦士。足元(x,y)、大きさ s（1 で高さ約250）。pose 0=立ち 1=名乗りポーズ。paint 0〜1 で下から色が付く */
   var GRAY = "#d6d8dd";
+  /* 戦士と怪人は立体（hero3d.js）。立体が使えないときは下の2Dで描く */
+  var make3d = window.Z3 && window.RF3D ? window.Z3.lazy(function () { return new window.RF3D(); }) : null;
+  var R3 = null;
+  function flush3D() { if (R3 && !R3.flush(ctx, W, H)) { make3d.drop(); R3 = null; } }
   function drawHero(x, y, s, idx, pose, paint, rot, flip, both) {
+    if (R3) {
+      var on = idx != null && paint > 0;
+      R3.hero(x, y, s * (isBig(idx) ? 1.3 : 1), on ? cHex(idx) : GRAY, on ? accentOf(idx) : "#ffffff", pose, rot, flip, both);
+      return;
+    }
     ctx.save();
     ctx.translate(x, y);
     if (rot) ctx.rotate(rot);
@@ -783,6 +795,7 @@ window.RF_COLORS = [
   }
 
   function drawMonster(x, y, s, hurt) {
+    if (R3) { R3.monster(x, y, s, hurt, ctx.globalAlpha, T); return; }
     ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
     var OL = "#16202e";
     ctx.lineWidth = 6; ctx.strokeStyle = OL; ctx.lineJoin = "round";
@@ -817,6 +830,8 @@ window.RF_COLORS = [
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 18 * shake, (Math.random() - 0.5) * 18 * shake);
     drawBG();
     drawParts("boom");
+    R3 = make3d ? make3d() : null;
+    if (R3) R3.begin();
 
     if (state === S.INTRO) drawIntro();
     else if (sub === "group") drawGroup();
@@ -835,15 +850,18 @@ window.RF_COLORS = [
       var x = W * (0.14 + 0.18 * i), y = H * (i === 2 ? 0.8 : 0.77);
       drawHero(x, y, s * (i === 2 ? 1.08 : 1), null, 1, 0, 0, i < 2, i === 2);
     }
+    flush3D();
     outlined(zT("運任戦士", "RANDOM", "운명전사", "运任战士", "運任戰士"), W / 2, H * 0.22, 78, "#ffd400");
     outlined(zT("ランダムファイブ", "FIVE", "랜덤파이브", "随机五人组", "隨機五人組"), W / 2, H * 0.33, 70, "#fff");
   }
 
+  function drawTags() { tags.forEach(function (t) { nameTag(t[0], t[1], t[2], t[3]); }); tags = []; }
+  var tags = [];
   function drawPulls() {
-    /* 並んだ人 */
+    /* 並んだ人（色名は立体を描いたあとに重ねる） */
     for (var i = 0; i < 5; i++) {
       var h = heroes[i];
-      if (h && h.done) { drawHero(slotX(i), lineY(), BIG() * SMALL, h.g.idx, 1, 1, 0, SLOT[i] < 2, i === 0); nameTag(slotX(i), lineY() + 3, h.g.idx, 20); }
+      if (h && h.done) { drawHero(slotX(i), lineY(), BIG() * SMALL, h.g.idx, 1, 1, 0, SLOT[i] < 2, i === 0); tags.push([slotX(i), lineY() + 3, h.g.idx, 20]); }
       else if (!h || i > cur) {
         ctx.fillStyle = "rgba(22,32,46,.18)";
         ctx.beginPath(); ctx.ellipse(slotX(i), lineY() - 4, 26, 8, 0, 0, Math.PI * 2); ctx.fill();
@@ -854,10 +872,11 @@ window.RF_COLORS = [
       var t = ease(L.t / 0.3), g = heroes[L.i];
       drawHero(lerp(W / 2, slotX(L.i), t), lerp(fy, lineY(), t), lerp(bs, bs * SMALL, t), g.g.idx, 1, 1, 0, SLOT[L.i] < 2, L.i === 0);
     });
-    var h = heroes[cur]; if (!h) return;
+    var h = heroes[cur]; if (!h) { flush3D(); drawTags(); return; }
     if (sub === "line") {
       var t = ease(pt / 0.25);
       drawHero(lerp(W / 2, slotX(cur), t), lerp(fy, lineY(), t), lerp(bs, bs * SMALL, t), h.g.idx, 1, 1, 0, SLOT[cur] < 2, cur === 0);
+      flush3D(); drawTags();
       return;
     }
     if ((sub === "paint" || sub === "show") && h.g) {
@@ -873,6 +892,7 @@ window.RF_COLORS = [
     ctx.fillStyle = "rgba(60,45,30,.25)";
     ctx.beginPath(); ctx.ellipse(h.x, fy - 2, 60 * bs, 12 * bs, 0, 0, Math.PI * 2); ctx.fill();
     drawHero(h.x, fy + hop, bs, h.g ? h.g.idx : null, h.pose, h.g && sub !== "spin" ? h.paint : 0, 0, false, cur === 0);
+    flush3D(); drawTags();
     if (sub === "spin") drawReel();
     if ((sub === "paint" || sub === "show") && h.g) {
       var k = easeOut((sub === "show" ? pt + 0.2 : pt) / 0.2);
@@ -900,8 +920,9 @@ window.RF_COLORS = [
       var g = groupPos(i), h = heroes[i];
       var gx = lerp(slotX(i), g.x, k), gy = lerp(lineY(), g.y, k);
       drawHero(gx, gy, lerp(BIG() * SMALL, g.s, k), h.g.idx, 1, 1, 0, SLOT[i] < 2, i === 0);
-      nameTag(gx, gy + 3, h.g.idx, lerp(20, 22, k));
+      tags.push([gx, gy + 3, h.g.idx, lerp(20, 22, k)]);
     }
+    flush3D(); drawTags();
     if (pt > 1.2) {
       var a = easeOut((pt - 1.2) / 0.4);
       ctx.save(); ctx.globalAlpha = a;
@@ -943,6 +964,7 @@ window.RF_COLORS = [
       /* 負けたら内側へ倒れる（画面からはみ出さない） */
       drawHero(x, y - knocked * 26, s, heroes[i].g.idx, 1, 1, (q > 2 ? -1 : 1) * knocked * 1.35, q < 2, i === 0);
     }
+    flush3D();
     /* 色名は倒れた体に隠れないよう最後に重ねる */
     for (var n = 0; n < 5; n++) nameTag(posX(n), H * 0.84 + 4, heroes[n].g.idx, 22);
     if (state !== S.RESULT) outlined(zT("戦闘力 ", "Power ", "전투력 ", "战斗力 ", "戰鬥力 ") + total, W / 2, H * 0.6, 44, "#fff", 800);
