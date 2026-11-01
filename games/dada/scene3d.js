@@ -1,4 +1,4 @@
-/* ガチ駄々の立体（three.js）。games/three-base.js の Z3 を土台にする。
+/* エクストリーム駄々の立体（three.js）。games/three-base.js の Z3 を土台にする。
    形と位置は physics.js（ZDadaPhysics）の剛体から写す。ここは見た目だけ。 */
 (function (global) {
   "use strict";

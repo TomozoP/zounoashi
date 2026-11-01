@@ -1,0 +1,269 @@
+/* エクストリーム駄々の剛体計算（cannon-es）。おもちゃ屋の床・壁・棚・おもちゃと、関節でつないだ子供。
+   単位はメートル。床は y=0、店は x -5〜5、z -7〜7。カメラは +z 側から見下ろす。
+   見た目は scene3d.js。ここは形と動きだけ。 */
+var ZDadaPhysics = (function (C) {
+  "use strict";
+
+  var STORE = { w: 10, d: 14, wall: 2.2 };
+  /* 棚（ゴンドラ）: 中心 x,z、長さ（x方向）、段の高さ */
+  var SHELVES = [
+    { x: -2.6, z: -3.2, len: 3.2 }, { x: 2.6, z: -3.2, len: 3.2 },
+    { x: -2.6, z: 1.4, len: 3.2 }, { x: 2.6, z: 1.4, len: 3.2 },
+    { x: 0, z: -6.4, len: 8.5 },
+    { x: -2.6, z: 5.0, len: 3.2 }, { x: 2.6, z: 5.0, len: 3.2 }
+  ];
+  var LEVELS = [0.1, 0.6, 1.1], SHELF_D = 0.6, SHELF_H = 1.45;
+
+  /* 子供の部品（立った姿勢での中心と大きさ。大きさは半分の長さ） */
+  var PARTS = [
+    { id: "pelvis", p: [0, 0.52, 0], h: [0.13, 0.08, 0.09], m: 4 },
+    { id: "torso", p: [0, 0.76, 0], h: [0.15, 0.16, 0.10], m: 6 },
+    { id: "head", p: [0, 1.1, 0], h: [0.15, 0.15, 0.15], m: 3 },
+    { id: "armUL", p: [-0.22, 0.79, 0], h: [0.045, 0.11, 0.045], m: 1.6 },
+    { id: "armLL", p: [-0.22, 0.56, 0], h: [0.04, 0.11, 0.04], m: 1.3 },
+    { id: "armUR", p: [0.22, 0.79, 0], h: [0.045, 0.11, 0.045], m: 1.6 },
+    { id: "armLR", p: [0.22, 0.56, 0], h: [0.04, 0.11, 0.04], m: 1.3 },
+    { id: "legUL", p: [-0.07, 0.33, 0], h: [0.055, 0.11, 0.055], m: 2 },
+    { id: "legLL", p: [-0.07, 0.11, 0], h: [0.05, 0.11, 0.05], m: 1.6 },
+    { id: "legUR", p: [0.07, 0.33, 0], h: [0.055, 0.11, 0.055], m: 2 },
+    { id: "legLR", p: [0.07, 0.11, 0], h: [0.05, 0.11, 0.05], m: 1.6 }
+  ];
+  var JOINTS = [
+    ["pelvis", "torso", [0, 0.6, 0], 0.5, 1.3], ["torso", "head", [0, 0.94, 0], 0.6],
+    ["torso", "armUL", [-0.2, 0.9, 0], 2.2], ["armUL", "armLL", [-0.22, 0.675, 0], 1.6],
+    ["torso", "armUR", [0.2, 0.9, 0], 2.2], ["armUR", "armLR", [0.22, 0.675, 0], 1.6],
+    ["pelvis", "legUL", [-0.07, 0.44, 0], 1.4], ["legUL", "legLL", [-0.07, 0.22, 0], 1.3],
+    ["pelvis", "legUR", [0.07, 0.44, 0], 1.4], ["legUR", "legLR", [0.07, 0.22, 0], 1.3]
+  ];
+  var LIMBS = ["armLL", "armLR", "legLL", "legLR", "armUL", "armUR"];
+  var UPPER = ["torso", "head", "armUL", "armLL", "armUR", "armLR"], LOWER = ["pelvis", "legUL", "legLL", "legUR", "legLR"];
+
+  function rng(seed) { var a = seed | 0; return function () { a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  function Game() {
+    var w = this.world = new C.World({ gravity: new C.Vec3(0, -9.81, 0), allowSleep: true });
+    w.solver.iterations = 16;
+    w.broadphase = new C.SAPBroadphase(w);
+    this.fixedMat = new C.Material("店");
+    this.toyMat = new C.Material("おもちゃ");
+    this.kidMat = new C.Material("子供");
+    w.addContactMaterial(new C.ContactMaterial(this.fixedMat, this.toyMat, { friction: 0.4, restitution: 0.15 }));
+    w.addContactMaterial(new C.ContactMaterial(this.toyMat, this.toyMat, { friction: 0.4, restitution: 0.12 }));
+    w.addContactMaterial(new C.ContactMaterial(this.fixedMat, this.kidMat, { friction: 0.3, restitution: 0.15 }));
+    w.addContactMaterial(new C.ContactMaterial(this.toyMat, this.kidMat, { friction: 0.3, restitution: 0.6 }));
+    this.statics = [];
+    var self = this;
+    function fixed(x, y, z, hx, hy, hz, kind) {
+      var b = new C.Body({ mass: 0, material: self.fixedMat, shape: new C.Box(new C.Vec3(hx, hy, hz)), position: new C.Vec3(x, y, z) });
+      w.addBody(b); self.statics.push({ x: x, y: y, z: z, hx: hx, hy: hy, hz: hz, kind: kind });
+      return b;
+    }
+    fixed(0, -0.2, 0, STORE.w / 2 + 0.5, 0.2, STORE.d / 2 + 0.5, "floor");
+    fixed(-STORE.w / 2 - 0.5, STORE.wall / 2, 0, 0.5, STORE.wall / 2, STORE.d / 2 + 1, "wall");
+    fixed(STORE.w / 2 + 0.5, STORE.wall / 2, 0, 0.5, STORE.wall / 2, STORE.d / 2 + 1, "wall");
+    fixed(0, STORE.wall / 2, -STORE.d / 2 - 0.5, STORE.w / 2, STORE.wall / 2, 0.5, "wall");
+    fixed(0, STORE.wall / 2, STORE.d / 2 + 0.5, STORE.w / 2, STORE.wall / 2, 0.5, "front");
+    SHELVES.forEach(function (s) {
+      var hx = s.len / 2, parts = [];
+      LEVELS.forEach(function (y) { parts.push(fixed(s.x, y - 0.02, s.z, hx, 0.02, SHELF_D / 2, "board")); });
+      parts.push(fixed(s.x, SHELF_H / 2, s.z - SHELF_D / 2 + 0.06, hx, SHELF_H / 2, 0.06, "back"));
+      parts.push(fixed(s.x - hx, SHELF_H / 2, s.z, 0.03, SHELF_H / 2, SHELF_D / 2, "side"));
+      parts.push(fixed(s.x + hx, SHELF_H / 2, s.z, 0.03, SHELF_H / 2, SHELF_D / 2, "side"));
+      parts.forEach(function (b) { b.isShelf = true; });
+    });
+    this.toys = [];
+    this.kid = null;
+    this.reset();
+  }
+
+  /* おもちゃの並び（毎回同じ） */
+  function toyPlan() {
+    var r = rng(11), list = [];
+    SHELVES.forEach(function (s, si) {
+      LEVELS.forEach(function (y, li) {
+        var x = s.x - s.len / 2 + 0.12;
+        while (true) {
+          var kind = r() < 0.2 ? "ball" : (r() < 0.22 ? "bear" : "box");
+          var size;
+          if (kind === "ball") { var rr = 0.12 + r() * 0.06; size = [rr, rr, rr]; }
+          else if (kind === "bear") size = [0.15, 0.2, 0.13];
+          else size = [0.12 + r() * 0.1, 0.12 + r() * 0.1, 0.1 + r() * 0.1];
+          if (x + size[0] * 2 > s.x + s.len / 2 - 0.06) break;
+          var hue = r();
+          list.push({ kind: kind, h: size, x: x + size[0], y: y + size[1] + 0.005, z: s.z + 0.08 + (r() - 0.5) * 0.04,
+            hue: hue, pat: Math.floor(r() * 4), price: Math.round((800 + r() * r() * 9000) / 100) * 100 * (kind === "bear" ? 2 : 1) });
+          x += size[0] * 2 + 0.04 + r() * 0.06;
+        }
+      });
+    });
+    /* 真ん中の積み木の山（平台） */
+    for (var lv = 0; lv < 4; lv++) {
+      for (var i = 0; i < 4 - lv; i++) for (var j = 0; j < 4 - lv; j++) {
+        list.push({ kind: "box", h: [0.13, 0.13, 0.13], x: -0.42 + (i + lv / 2) * 0.28, y: 0.13 + lv * 0.26 + 0.002, z: -1.0 + (j + lv / 2) * 0.28,
+          hue: r(), pat: 4, price: 1500 });
+      }
+    }
+    return list;
+  }
+
+  Game.prototype.reset = function () {
+    var w = this.world, self = this;
+    this.toys.forEach(function (t) { w.removeBody(t.body); });
+    if (this.kid) { this.kid.joints.forEach(function (j) { w.removeConstraint(j); }); this.kid.list.forEach(function (b) { w.removeBody(b); }); }
+    this.toys = toyPlan().map(function (d) {
+      var shape = d.kind === "ball" ? new C.Sphere(d.h[0]) : new C.Box(new C.Vec3(d.h[0], d.h[1], d.h[2]));
+      var vol = d.h[0] * d.h[1] * d.h[2] * 8;
+      var b = new C.Body({ mass: Math.max(0.15, vol * 250), material: self.toyMat, shape: shape, position: new C.Vec3(d.x, d.y, d.z), linearDamping: 0.05, angularDamping: d.kind === "ball" ? 0.3 : 0.1 });
+      b.sleepSpeedLimit = 0.15; b.sleepTimeLimit = 0.4;
+      w.addBody(b);
+      b.sleep();
+      var t = { d: d, body: b, home: { x: d.x, y: d.y, z: d.z }, broken: false, hit: 0 };
+      b.addEventListener("collide", function (e) { var v = Math.abs(e.contact.getImpactVelocityAlongNormal()); if (v > t.hit) t.hit = v; });
+      return t;
+    });
+    this.makeKid();
+    this.time = 0;
+    this.acc = 0;
+    this.flail = 0;
+    this.kidHit = 0;
+    this.bumps = [];
+    this.twist = null;
+    this.spinVis = 0;
+  };
+
+  Game.prototype.makeKid = function () {
+    var w = this.world, self = this, map = {}, list = [];
+    /* 立った姿勢から少し後ろへ傾けて置き、始まるとひっくり返る */
+    var q = new C.Quaternion(); q.setFromEuler(-0.25, 0, 0);
+    var base = new C.Vec3(0, 0.02, 2.6);
+    PARTS.forEach(function (p) {
+      var shape = p.r ? new C.Sphere(p.r) : new C.Box(new C.Vec3(p.h[0], p.h[1], p.h[2]));
+      var b = new C.Body({ mass: p.m, material: self.kidMat, shape: shape, linearDamping: 0.08, angularDamping: 0.08, collisionFilterGroup: 2, collisionFilterMask: 1 });
+      var pos = q.vmult(new C.Vec3(p.p[0], p.p[1], p.p[2])).vadd(base);
+      b.position.copy(pos); b.quaternion.copy(q);
+      b.allowSleep = false;
+      w.addBody(b); map[p.id] = b; list.push(b);
+      /* 棚にぶつかったら、その辺りの棚が揺れておもちゃが落ちる */
+      b.addEventListener("collide", function (e) {
+        if (!e.body.isShelf) return;
+        var v = Math.abs(e.contact.getImpactVelocityAlongNormal());
+        if (v > 1) self.bumps.push({ x: b.position.x, z: b.position.z, v: v });
+      });
+    });
+    var joints = JOINTS.map(function (j) {
+      var a = PARTS.find(function (p) { return p.id === j[0]; }), b = PARTS.find(function (p) { return p.id === j[1]; });
+      var piv = new C.Vec3(j[2][0], j[2][1], j[2][2]);
+      var c = new C.ConeTwistConstraint(map[j[0]], map[j[1]], {
+        pivotA: piv.vsub(new C.Vec3(a.p[0], a.p[1], a.p[2])), pivotB: piv.vsub(new C.Vec3(b.p[0], b.p[1], b.p[2])),
+        axisA: new C.Vec3(0, 1, 0), axisB: new C.Vec3(0, 1, 0), angle: j[3], twistAngle: j[4] || 0.5, maxForce: 1e7, collideConnected: false });
+      w.addConstraint(c);
+      return c;
+    });
+    this.kid = { map: map, list: list, joints: joints };
+    /* 店のもの（グループ1）にも当たるように。おもちゃの mask は既定（全部）なので子供(2)とも当たる */
+  };
+
+  /* 子供の中心（胴） */
+  Game.prototype.center = function () { var p = this.kid.map.torso.position; return { x: p.x, y: p.y, z: p.z }; };
+
+  /* 1コマ進める。input: { rage（激しさ 0〜1）, tap（今たたいた）, swipe（今スワイプした {dx,dz,p}） } */
+  Game.prototype.step = function (dt, input, rand) {
+    var k = this.kid.map, self = this;
+    var all = this.kid.list;
+    var rage = input.rage || 0, sw = input.swipe;
+    if (input.tap || sw) {
+      /* タップ：その場で高く跳ねる。スワイプ：その向きへ、速いスワイプほど強く飛んで転がる。
+         どちらも全身をおもいきり捻ってから回す。全身に同じだけ足す（関節がちぎれないよう） */
+      var spin = 32 + rage * 34, tx, tz, sp, upv, low = k.torso.position.y < 0.8;
+      if (sw) { tx = sw.dx; tz = sw.dz; sp = 3 + sw.p * 8.5; upv = low ? 1.2 + sw.p * 1.3 : 0; }
+      else { var ra = rand() * Math.PI * 2; tx = Math.cos(ra); tz = Math.sin(ra); sp = 0.6; upv = low ? 3.6 + rage * 1.4 : 1.5; }
+      all.forEach(function (b) {
+        /* 足し続けると速さが際限なく増えるので、混ぜて上限を作る */
+        var keep = sw ? 0.3 : 0.6;
+        b.velocity.x = b.velocity.x * keep + tx * sp; b.velocity.z = b.velocity.z * keep + tz * sp; b.velocity.y = Math.max(b.velocity.y, upv);
+      });
+      /* まず上半身を逆へ捻り（ため）、0.1秒後に全身で体の長い軸まわりに一気に回す。
+         スワイプは、体の軸まわりに転がるとその向きへ進む側に回す。タップは向きはでたらめ */
+      var ax = k.torso.quaternion.vmult(new C.Vec3(0, 1, 0)), rx = tz, rz = -tx;
+      var sg = sw ? (ax.x * rx + ax.z * rz >= 0 ? 1 : -1) : (rand() < 0.5 ? 1 : -1);
+      this.twist = { t: 0, end: 0.5 + rage * 0.35, vis: 55 + rage * 45, sg: sg, w: spin, tx: tx, tz: tz, roll: sw ? spin * 0.4 : 0, u: { x: rand() - 0.5, y: rand() - 0.5, z: rand() - 0.5 } };
+      LIMBS.forEach(function (id) { var b = k[id]; b.velocity.x += (rand() - 0.5) * (2 + rage * 3); b.velocity.y += rand() * (0.8 + rage * 1.2); b.velocity.z += (rand() - 0.5) * (2 + rage * 3); });
+    }
+    var tw = this.twist;
+    if (tw) {
+      var a = k.torso.quaternion.vmult(new C.Vec3(0, 1, 0));
+      tw.t += dt;
+      if (tw.t < 0.1) {
+        /* ため：上半身と下半身を逆に捻る */
+        UPPER.forEach(function (id) { var b = k[id]; b.angularVelocity.set(a.x * -tw.sg * tw.w * 0.7, a.y * -tw.sg * tw.w * 0.7, a.z * -tw.sg * tw.w * 0.7); });
+        LOWER.forEach(function (id) { var b = k[id]; b.angularVelocity.set(a.x * tw.sg * tw.w * 0.4, a.y * tw.sg * tw.w * 0.4, a.z * tw.sg * tw.w * 0.4); });
+      } else if (tw.t < tw.end) {
+        /* 解放：しばらくのあいだ回し続ける。体の軸まわりのスピン＋向きがふらふら変わる宙返り＋進む向きへの転がり。
+           宙返りの軸 u は毎コマ少しずつでたらめに傾けて、むちゃくちゃに回る */
+        var u = tw.u;
+        u.x += (rand() - 0.5) * 0.5; u.y += (rand() - 0.5) * 0.5; u.z += (rand() - 0.5) * 0.5;
+        var ul = Math.sqrt(u.x * u.x + u.y * u.y + u.z * u.z) || 1; u.x /= ul; u.y /= ul; u.z /= ul;
+        var fade = 1 - (tw.t - 0.1) / (tw.end - 0.1) * 0.5, sw2 = tw.w * fade, tu = tw.w * 0.75 * fade;
+        var wx = a.x * tw.sg * sw2 + u.x * tu + tw.tz * tw.roll, wy = a.y * tw.sg * sw2 + u.y * tu, wz = a.z * tw.sg * sw2 + u.z * tu - tw.tx * tw.roll;
+        /* 全身を1つの塊として回す（重心のまわりの回転に合わせて各部の速さも決める。関節と喧嘩して浮き上がらないよう） */
+        var M = 0, cx = 0, cy = 0, cz = 0, vx = 0, vy = 0, vz = 0;
+        all.forEach(function (b) { M += b.mass; cx += b.position.x * b.mass; cy += b.position.y * b.mass; cz += b.position.z * b.mass; vx += b.velocity.x * b.mass; vy += b.velocity.y * b.mass; vz += b.velocity.z * b.mass; });
+        cx /= M; cy /= M; cz /= M; vx /= M; vy /= M; vz /= M;
+        all.forEach(function (b) {
+          var rx = b.position.x - cx, ry = b.position.y - cy, rz = b.position.z - cz;
+          var av = b.angularVelocity, lv = b.velocity, m = 0.35;
+          av.set(av.x + (wx - av.x) * m, av.y + (wy - av.y) * m, av.z + (wz - av.z) * m);
+          lv.set(lv.x + (vx + wy * rz - wz * ry - lv.x) * m, lv.y + (vy + wz * rx - wx * rz - lv.y) * m, lv.z + (vz + wx * ry - wy * rx - lv.z) * m);
+        });
+      } else this.twist = null;
+      /* 見た目だけの上乗せの回転（物理では回せない速さ）。scene3d.js が体の軸まわりに描き足す */
+      this.spinVis = this.twist && tw.t >= 0.1 ? tw.sg * tw.vis : 0;
+    }
+    /* 手足をバタバタ（激しいほど細かく強く） */
+    this.flail -= dt;
+    if (this.flail <= 0) {
+      this.flail = 0.18 - rage * 0.11;
+      var s = 0.45 + rage * 1.1;
+      LIMBS.forEach(function (id) {
+        var b = k[id];
+        if (rand() < 0.6) { b.velocity.x += (rand() - 0.5) * 2.2 * s; b.velocity.y += (0.3 + rand() * 1.2) * s; b.velocity.z += (rand() - 0.5) * 2.2 * s; }
+      });
+    }
+    /* 速すぎ・高すぎを抑える（店の外へ飛ばない） */
+    all.forEach(function (b) {
+      var v = b.velocity, h = Math.sqrt(v.x * v.x + v.z * v.z);
+      if (h > 12) { v.x *= 12 / h; v.z *= 12 / h; }
+      if (v.y > 5) v.y = 5;
+      if (b.position.y > 2.0 && v.y > 0) v.y *= 0.5;   /* 高く上がりすぎない（店の外や画面の外へ） */
+    });
+    this.acc += dt;
+    while (this.acc >= 1 / 120) { this.world.step(1 / 120); this.acc -= 1 / 120; }
+    this.time += dt;
+    var bumps = this.bumps; this.bumps = [];
+    if (bumps.length) {
+      var bp = bumps.reduce(function (a, c) { return c.v > a.v ? c : a; });
+      this.toys.forEach(function (t) {
+        var p = t.body.position;
+        if (Math.abs(p.x - bp.x) > 1.3 || Math.abs(p.z - bp.z) > 1.2 || rand() < 0.3) return;
+        t.body.wakeUp();
+        var f = Math.min(6, bp.v) * (0.4 + rand() * 0.6);
+        t.body.velocity.x += (rand() - 0.5) * f; t.body.velocity.y += f * 0.6; t.body.velocity.z += f * (0.4 + rand() * 0.6) * Math.sign(p.z - bp.z || 1) * -1 + f * 0.5;
+      });
+      this.shook = bp.v;
+    }
+    /* 壊れた（元の場所から落ちた・動いた）おもちゃ */
+    var events = [];
+    this.toys.forEach(function (t) {
+      var p = t.body.position, hm = t.home;
+      if (!t.broken) {
+        var moved = Math.abs(p.x - hm.x) + Math.abs(p.z - hm.z) > 0.25 || p.y < hm.y - 0.15;
+        if (moved) { t.broken = true; events.push({ toy: t, kind: "break" }); }
+      }
+      if (t.hit > 1.2) events.push({ toy: t, kind: "hit", v: t.hit });
+      t.hit = 0;
+    });
+    return events;
+  };
+
+  return { Game: Game, PARTS: PARTS, SHELVES: SHELVES, LEVELS: LEVELS, SHELF_D: SHELF_D, SHELF_H: SHELF_H, STORE: STORE };
+})(CANNON);
