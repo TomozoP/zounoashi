@@ -149,7 +149,9 @@
     h.g.position.set(x, -y, 400 + y * 0.6);
     h.g.scale.set(s * (flip ? -1 : 1), s, s);
     /* 少しだけ斜めにして立体に見せる */
-    h.g.rotation.set(0.12, (x / 540 - 0.5) * -0.5 + (rot ? 0 : sw * 0.08), -(rot || 0));
+    /* 色が決まる前（灰色）は斜めを向き、決まったら正面を向く */
+    var undecided = col === "#d6d8dd";
+    h.g.rotation.set(0.12, undecided ? 0.75 + sw * 0.08 : 0, -(rot || 0));
   };
 
   RF3D.prototype.makeMonster = function () {
