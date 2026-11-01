@@ -87,10 +87,11 @@
     h.belt = this.part(g, new T.CylinderGeometry(33, 33, 12, 18), acc, 2.5);
     h.belt.scale.set(1.05, 1, 0.74); h.belt.position.set(0, 98, 0);
     var bk = new T.Mesh(new T.BoxGeometry(18, 15, 8), gold); bk.position.set(0, 98, 25); g.add(bk);
+    h.deco = [[bk, 98, 0.5]];
     /* 胸のV */
     [-1, 1].forEach(function (d) {
       var vb = new T.Mesh(new T.BoxGeometry(34, 7, 6), acc);
-      vb.position.set(d * 13, 154, 22); vb.rotation.z = d * 0.85; g.add(vb);
+      vb.position.set(d * 13, 154, 22); vb.rotation.z = d * 0.85; g.add(vb); h.deco.push([vb, 154, 1]);
     });
     for (var j = 0; j < 2; j++) {
       var hd = this.part(g, new T.SphereGeometry(13, 12, 10), acc, 2.5); h.hands.push(hd);
@@ -122,12 +123,20 @@
     else { if (h.body.map) { h.body.map = null; h.body.needsUpdate = true; } h.body.color.set(col); }
     h.acc.color.set(acc);
     /* 関節（2Dの heroBody と同じ。上向きをプラスにする） */
+    /* 待機モーション：呼吸で上下、手は少し揺れる。立ち位置ごとに位相をずらす */
+    var now = (global.performance ? performance.now() : Date.now()) / 1000, ph = x * 0.05;
+    var br = Math.sin(now * 3.2 + ph), sw = Math.sin(now * 1.7 + ph);
     var sh = [[-30, 162], [30, 162]];
     var hand = [[lerp(-42, both ? -74 : -10, p), lerp(98, both ? 236 : 150, p)], [lerp(42, 74, p), lerp(98, 236, p)]];
     var elbow = [[lerp(-44, both ? -56 : -46, p), lerp(130, both ? 196 : 140, p)], [lerp(44, 56, p), lerp(130, 196, p)]];
     var hip = [[-15, 100], [15, 100]];
     var knee = [[lerp(-19, -30, p), 50], [lerp(19, 30, p), 50]];
     var foot = [[lerp(-21, -44, p), 14], [lerp(21, 44, p), 14]];
+    var by = rot ? 0 : br * 4;
+    [sh, hand, elbow].forEach(function (L) { L[0][1] += by; L[1][1] += by; });
+    if (!rot) { hand[0][0] += sw * 4; hand[1][0] += sw * 4; hand[0][1] += br * 3; hand[1][1] -= br * 3; }
+    h.torso.position.y = 133 + by; h.head.position.y = 205 + by * 1.2; h.belt.position.y = 98 + by * 0.5;
+    h.deco.forEach(function (d) { d[0].position.y = d[1] + by * d[2]; });
     for (var i = 0; i < 2; i++) {
       place(h.segs[i * 2], sh[i], elbow[i]); place(h.segs[i * 2 + 1], elbow[i], hand[i]);
       place(h.segs[4 + i * 2], hip[i], knee[i]); place(h.segs[4 + i * 2 + 1], knee[i], foot[i]);
@@ -140,7 +149,7 @@
     h.g.position.set(x, -y, 400 + y * 0.6);
     h.g.scale.set(s * (flip ? -1 : 1), s, s);
     /* 少しだけ斜めにして立体に見せる */
-    h.g.rotation.set(0.12, (x / 540 - 0.5) * -0.5, -(rot || 0));
+    h.g.rotation.set(0.12, (x / 540 - 0.5) * -0.5 + (rot ? 0 : sw * 0.08), -(rot || 0));
   };
 
   RF3D.prototype.makeMonster = function () {
