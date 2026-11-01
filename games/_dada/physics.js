@@ -48,7 +48,7 @@ var ZDadaPhysics = (function (C) {
     this.kidMat = new C.Material("子供");
     w.addContactMaterial(new C.ContactMaterial(this.fixedMat, this.toyMat, { friction: 0.4, restitution: 0.15 }));
     w.addContactMaterial(new C.ContactMaterial(this.toyMat, this.toyMat, { friction: 0.4, restitution: 0.12 }));
-    w.addContactMaterial(new C.ContactMaterial(this.fixedMat, this.kidMat, { friction: 0.5, restitution: 0.1 }));
+    w.addContactMaterial(new C.ContactMaterial(this.fixedMat, this.kidMat, { friction: 0.3, restitution: 0.15 }));
     w.addContactMaterial(new C.ContactMaterial(this.toyMat, this.kidMat, { friction: 0.3, restitution: 0.6 }));
     this.statics = [];
     var self = this;
@@ -136,7 +136,7 @@ var ZDadaPhysics = (function (C) {
     var base = new C.Vec3(0, 0.02, 2.6);
     PARTS.forEach(function (p) {
       var shape = p.r ? new C.Sphere(p.r) : new C.Box(new C.Vec3(p.h[0], p.h[1], p.h[2]));
-      var b = new C.Body({ mass: p.m, material: self.kidMat, shape: shape, linearDamping: 0.08, angularDamping: 0.25, collisionFilterGroup: 2, collisionFilterMask: 1 });
+      var b = new C.Body({ mass: p.m, material: self.kidMat, shape: shape, linearDamping: 0.08, angularDamping: 0.08, collisionFilterGroup: 2, collisionFilterMask: 1 });
       var pos = q.vmult(new C.Vec3(p.p[0], p.p[1], p.p[2])).vadd(base);
       b.position.copy(pos); b.quaternion.copy(q);
       b.allowSleep = false;
@@ -172,7 +172,7 @@ var ZDadaPhysics = (function (C) {
     if (input.tap || sw) {
       /* タップ：その場で高く跳ねる。スワイプ：その向きへ、速いスワイプほど強く飛んで転がる。
          どちらも全身をおもいきり捻ってから回す。全身に同じだけ足す（関節がちぎれないよう） */
-      var spin = 22 + rage * 26, tx, tz, sp, upv, low = k.torso.position.y < 0.8;
+      var spin = 32 + rage * 34, tx, tz, sp, upv, low = k.torso.position.y < 0.8;
       if (sw) { tx = sw.dx; tz = sw.dz; sp = 3 + sw.p * 10; upv = low ? 1.2 + sw.p * 1.3 : 0; }
       else { var ra = rand() * Math.PI * 2; tx = Math.cos(ra); tz = Math.sin(ra); sp = 0.6; upv = low ? 3.6 + rage * 1.4 : 1.5; }
       all.forEach(function (b) {
@@ -184,7 +184,7 @@ var ZDadaPhysics = (function (C) {
          スワイプは、体の軸まわりに転がるとその向きへ進む側に回す。タップは向きはでたらめ */
       var ax = k.torso.quaternion.vmult(new C.Vec3(0, 1, 0)), rx = tz, rz = -tx;
       var sg = sw ? (ax.x * rx + ax.z * rz >= 0 ? 1 : -1) : (rand() < 0.5 ? 1 : -1);
-      this.twist = { t: 0, sg: sg, w: spin, tx: tx, tz: tz, roll: sw ? spin * 0.5 : 0, flip: sw ? 0 : (rand() - 0.5) * spin * 0.8 };
+      this.twist = { t: 0, end: 0.5 + rage * 0.35, sg: sg, w: spin, tx: tx, tz: tz, roll: sw ? spin * 0.4 : 0, u: { x: rand() - 0.5, y: rand() - 0.5, z: rand() - 0.5 } };
       LIMBS.forEach(function (id) { var b = k[id]; b.velocity.x += (rand() - 0.5) * (2 + rage * 3); b.velocity.y += rand() * (0.8 + rage * 1.2); b.velocity.z += (rand() - 0.5) * (2 + rage * 3); });
     }
     var tw = this.twist;
@@ -195,14 +195,25 @@ var ZDadaPhysics = (function (C) {
         /* ため：上半身と下半身を逆に捻る */
         UPPER.forEach(function (id) { var b = k[id]; b.angularVelocity.set(a.x * -tw.sg * tw.w * 0.7, a.y * -tw.sg * tw.w * 0.7, a.z * -tw.sg * tw.w * 0.7); });
         LOWER.forEach(function (id) { var b = k[id]; b.angularVelocity.set(a.x * tw.sg * tw.w * 0.4, a.y * tw.sg * tw.w * 0.4, a.z * tw.sg * tw.w * 0.4); });
-      } else {
-        /* 解放：全身で体の軸まわりに回る＋進む向きへ転がる */
+      } else if (tw.t < tw.end) {
+        /* 解放：しばらくのあいだ回し続ける。体の軸まわりのスピン＋向きがふらふら変わる宙返り＋進む向きへの転がり。
+           宙返りの軸 u は毎コマ少しずつでたらめに傾けて、むちゃくちゃに回る */
+        var u = tw.u;
+        u.x += (rand() - 0.5) * 0.5; u.y += (rand() - 0.5) * 0.5; u.z += (rand() - 0.5) * 0.5;
+        var ul = Math.sqrt(u.x * u.x + u.y * u.y + u.z * u.z) || 1; u.x /= ul; u.y /= ul; u.z /= ul;
+        var fade = 1 - (tw.t - 0.1) / (tw.end - 0.1) * 0.5, sw2 = tw.w * fade, tu = tw.w * 0.75 * fade;
+        var wx = a.x * tw.sg * sw2 + u.x * tu + tw.tz * tw.roll, wy = a.y * tw.sg * sw2 + u.y * tu, wz = a.z * tw.sg * sw2 + u.z * tu - tw.tx * tw.roll;
+        /* 全身を1つの塊として回す（重心のまわりの回転に合わせて各部の速さも決める。関節と喧嘩して浮き上がらないよう） */
+        var M = 0, cx = 0, cy = 0, cz = 0, vx = 0, vy = 0, vz = 0;
+        all.forEach(function (b) { M += b.mass; cx += b.position.x * b.mass; cy += b.position.y * b.mass; cz += b.position.z * b.mass; vx += b.velocity.x * b.mass; vy += b.velocity.y * b.mass; vz += b.velocity.z * b.mass; });
+        cx /= M; cy /= M; cz /= M; vx /= M; vy /= M; vz /= M;
         all.forEach(function (b) {
-          /* flip はタップのときの宙返りの回転（横向きの軸） */
-          b.angularVelocity.set(a.x * tw.sg * tw.w + tw.tz * tw.roll + tw.flip, a.y * tw.sg * tw.w, a.z * tw.sg * tw.w - tw.tx * tw.roll + tw.flip * 0.5);
+          var rx = b.position.x - cx, ry = b.position.y - cy, rz = b.position.z - cz;
+          var av = b.angularVelocity, lv = b.velocity, m = 0.35;
+          av.set(av.x + (wx - av.x) * m, av.y + (wy - av.y) * m, av.z + (wz - av.z) * m);
+          lv.set(lv.x + (vx + wy * rz - wz * ry - lv.x) * m, lv.y + (vy + wz * rx - wx * rz - lv.y) * m, lv.z + (vz + wx * ry - wy * rx - lv.z) * m);
         });
-        this.twist = null;
-      }
+      } else this.twist = null;
     }
     /* 手足をバタバタ（激しいほど細かく強く） */
     this.flail -= dt;
@@ -219,6 +230,7 @@ var ZDadaPhysics = (function (C) {
       var v = b.velocity, h = Math.sqrt(v.x * v.x + v.z * v.z);
       if (h > 12) { v.x *= 12 / h; v.z *= 12 / h; }
       if (v.y > 5) v.y = 5;
+      if (b.position.y > 2.0 && v.y > 0) v.y *= 0.5;   /* 高く上がりすぎない（店の外や画面の外へ） */
     });
     this.acc += dt;
     while (this.acc >= 1 / 120) { this.world.step(1 / 120); this.acc -= 1 / 120; }
