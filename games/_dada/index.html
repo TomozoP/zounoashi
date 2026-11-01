@@ -44,8 +44,7 @@
 /* ガチ駄々
 
    おもちゃ屋で子供になって駄々をこねる。子供は関節でつないだ剛体（physics.js）。
-     引っ張る … 反対向きに矢印が出て、引くほど伸びてゲージがたまる
-     離す     … 矢印の向きへぶっとぶ（MAXで離すとおもいきり）
+     スワイプ … その向きへぶっとぶ。速いほど強く、SWIPE_MAX 以上の速さでおもいきり
    30秒で壊したおもちゃの値段の合計が点数。 */
 (function () {
   "use strict";
@@ -139,7 +138,7 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false, broken;
   var phys = new window.ZDadaPhysics.Game();
-  var stick = null, launch = null, PULL = 170, keyCharge = -1, keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
+  var stick = null, launch = null, SWIPE_MIN = 250, SWIPE_MAX = 2000, trail = [], keyCharge = -1, keyDir = { l: 0, r: 0, u: 0, d: 0 }, shake = 0, pops = [], snap = true;
 
   function newRound() {
     shareButton.hidden = true;
@@ -158,6 +157,7 @@
   /* ============ 進行 ============ */
   function update(dt) {
     shake = Math.max(0, shake - dt * 1.5);
+    for (var ti = trail.length - 1; ti >= 0; ti--) { trail[ti].a -= dt * 4; if (trail[ti].a <= 0) trail.splice(ti, 1); }
     for (var i = pops.length - 1; i >= 0; i--) { pops[i].t += dt; if (pops[i].t > 0.9) pops.splice(i, 1); }
     if (state === S.PLAY) {
       T += dt;
@@ -188,21 +188,29 @@
       return;
     }
     held = true;
-    if (x != null) stick = { ox: x, oy: y, dx: 0, dz: 0, p: 0 };
+    if (x != null) { stick = { pts: [{ x: x, y: y, t: performance.now() }] }; trail = [{ x: x, y: y, a: 1 }]; }
     else keyCharge = 0;
   }
-  /* 引っ張り：引いた向きの反対へ飛ぶ。PULL px でMAX */
+  /* スワイプ：離す直前の動き（約0.1秒）の向きと速さで飛ぶ */
   function move(x, y) {
     if (state !== S.PLAY || !held || !stick) return;
-    var vx = stick.ox - x, vy = stick.oy - y, l = Math.sqrt(vx * vx + vy * vy);
-    stick.p = l < 14 ? 0 : Math.min(1, (l - 14) / (PULL - 14));
-    stick.dx = l ? vx / l : 0; stick.dz = l ? vy / l : 0;
+    var now = performance.now();
+    stick.pts.push({ x: x, y: y, t: now });
+    while (stick.pts.length > 2 && now - stick.pts[1].t > 100) stick.pts.shift();
+    trail.push({ x: x, y: y, a: 1 });
+  }
+  function swipe() {
+    var P = stick.pts, a = P[0], b = P[P.length - 1];
+    var dt = Math.max(16, b.t - a.t) / 1000, vx = b.x - a.x, vy = b.y - a.y, l = Math.sqrt(vx * vx + vy * vy);
+    if (l < 20 || performance.now() - b.t > 150) return null;
+    var v = l / dt;
+    return { dx: vx / l, dz: vy / l, p: Math.max(0.1, Math.min(1, (v - SWIPE_MIN) / (SWIPE_MAX - SWIPE_MIN))) };
   }
   function up() {
     if (!held) return;
     held = false;
     if (state === S.PLAY) {
-      if (stick && stick.p > 0) launch = { dx: stick.dx, dz: stick.dz, p: stick.p };
+      if (stick) launch = swipe();
       else if (!stick && keyCharge >= 0) {
         var kx = keyDir.r - keyDir.l, kz = keyDir.d - keyDir.u, kl = Math.sqrt(kx * kx + kz * kz);
         if (!kl) { kz = -1; kl = 1; }
@@ -299,8 +307,16 @@
       ctx.fillStyle = "rgba(22,32,46,.25)"; ctx.fillRect(W / 2 - 150, 100, 300, 10);
       ctx.fillStyle = k < 0.2 ? "#e0262a" : "#16202e"; ctx.fillRect(W / 2 - 150, 100, 300 * k, 10);
       ctx.restore();
-      var aim = stick ? stick : (keyCharge >= 0 ? keyAim() : null);
-      if (aim && aim.p > 0 && s3) drawArrow(s3, aim);
+      if (keyCharge >= 0 && s3) drawArrow(s3, keyAim());
+      if (trail.length > 1) {
+        /* スワイプの跡 */
+        ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
+        for (var ti = 1; ti < trail.length; ti++) {
+          ctx.strokeStyle = "rgba(255,255,255," + (trail[ti].a * 0.8) + ")"; ctx.lineWidth = 6 + 10 * trail[ti].a;
+          ctx.beginPath(); ctx.moveTo(trail[ti - 1].x, trail[ti - 1].y); ctx.lineTo(trail[ti].x, trail[ti].y); ctx.stroke();
+        }
+        ctx.restore();
+      }
     }
     if (state === S.RESULT) drawResult();
   }
@@ -360,8 +376,7 @@
     reset: function () { newRound(); },
     hideUI: function () { hideUI = true; },
     cam: function (c) { camChoice = c; snap = true; },
-    pull: function (dx, dz, p) { held = true; stick = { ox: 270, oy: 600, dx: dx, dz: dz, p: p }; },
-    release: function () { up(); }
+    swipe: function (dx, dz, p) { launch = { dx: dx, dz: dz, p: p }; }
   };
 
   window.__recording = {
