@@ -31,6 +31,8 @@
       if (/^(ja|en|ko|zh|tw)$/.test(saved)) return saved;
     } catch (e) {}
     var n = global.navigator || {};
+    /* 検索エンジンのロボットは英語設定で来るので、日本語で読ませる（検索結果が英語にならないように） */
+    if (/bot|crawl|spider|slurp|Google-InspectionTool|Lighthouse/i.test(n.userAgent || "")) return "ja";
     var first = (n.languages && n.languages[0]) || n.language || "ja";
     return /^ja\b/i.test(first) ? "ja" : /^ko\b/i.test(first) ? "ko" : /^zh\b/i.test(first) ? (/^zh-(tw|hk|mo|hant)\b/i.test(first) ? "tw" : "zh") : "en";
   }
