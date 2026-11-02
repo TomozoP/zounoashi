@@ -1,0 +1,291 @@
+/* 巨大プリンの見た目（three.js）。形は pudding.js の格子から、表面を網にして作る。
+   ゲーム側が sync(状態) で、形の版・目の位置・揺れ・スプーン・崩れの進み具合を渡す。 */
+(function (global) {
+  "use strict";
+  var T, Z3 = global.Z3;
+
+  var CUSTARD = [0.93, 0.62, 0.17], CUSTARD_IN = [0.97, 0.74, 0.30];
+  var CARAMEL = [0.20, 0.06, 0.01], CARAMEL_HI = [0.42, 0.15, 0.02];
+
+  /* カラメルの深さ（向きによって垂れる） */
+  function caramelDepth(x, z) {
+    var a = Math.atan2(z, x);
+    var d = 0.42 + 0.08 * Math.sin(a * 5 + 1.3);
+    var drip = Math.pow(Math.max(0, Math.sin(a * 9 + 0.7)), 10) * 1.3 + Math.pow(Math.max(0, Math.sin(a * 13 + 2.1)), 16) * 0.8;
+    return d + drip;
+  }
+
+  /* 表面の網を作る（naive surface nets）。keep(i,j,k) が false の点は空とみなす */
+  function buildGeometry(F, keep) {
+    var NX = F.NX, NY = F.NY, NZ = F.NZ, h = F.h, f = F.f;
+    function val(i, j, k) { var v = f[i + NX * (j + NY * k)]; return keep && !keep(i, j, k) ? Math.max(v, h * 0.5) : v; }
+    var cellV = new Int32Array((NX - 1) * (NY - 1) * (NZ - 1)).fill(-1);
+    var pos = [], idx = [];
+    var cv = new Float32Array(8);
+    var E = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+    function cid(i, j, k) { return i + (NX - 1) * (j + (NY - 1) * k); }
+    for (var k = 0; k < NZ - 1; k++) for (var j = 0; j < NY - 1; j++) for (var i = 0; i < NX - 1; i++) {
+      var mask = 0;
+      for (var c = 0; c < 8; c++) { var v = val(i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1)); cv[c] = v; if (v < 0) mask |= 1 << c; }
+      if (mask === 0 || mask === 255) continue;
+      var sx = 0, sy = 0, sz = 0, cnt = 0;
+      for (var e = 0; e < 12; e++) {
+        var a = E[e][0], b = E[e][1], va = cv[a], vb = cv[b];
+        if ((va < 0) === (vb < 0)) continue;
+        var t = va / (va - vb);
+        sx += (a & 1) + (((b & 1) - (a & 1)) * t);
+        sy += ((a >> 1) & 1) + ((((b >> 1) & 1) - ((a >> 1) & 1)) * t);
+        sz += ((a >> 2) & 1) + ((((b >> 2) & 1) - ((a >> 2) & 1)) * t);
+        cnt++;
+      }
+      cellV[cid(i, j, k)] = pos.length / 3;
+      pos.push(F.X0 + (i + sx / cnt) * h, F.Y0 + (j + sy / cnt) * h, F.Z0 + (k + sz / cnt) * h);
+    }
+    /* 符号が変わる辺ごとに、まわりの4つの箱の点で四角を張る */
+    for (k = 1; k < NZ - 1; k++) for (j = 1; j < NY - 1; j++) for (i = 1; i < NX - 1; i++) {
+      var v0 = val(i, j, k), in0 = v0 < 0;
+      for (var ax = 0; ax < 3; ax++) {
+        var i2 = i + (ax === 0), j2 = j + (ax === 1), k2 = k + (ax === 2);
+        if (i2 >= NX || j2 >= NY || k2 >= NZ) continue;
+        if (in0 === (val(i2, j2, k2) < 0)) continue;
+        var q;
+        if (ax === 0) q = [cid(i, j - 1, k - 1), cid(i, j, k - 1), cid(i, j, k), cid(i, j - 1, k)];
+        else if (ax === 1) q = [cid(i - 1, j, k - 1), cid(i - 1, j, k), cid(i, j, k), cid(i, j, k - 1)];
+        else q = [cid(i - 1, j - 1, k), cid(i, j - 1, k), cid(i, j, k), cid(i - 1, j, k)];
+        var A = cellV[q[0]], B = cellV[q[1]], C = cellV[q[2]], D = cellV[q[3]];
+        if (A < 0 || B < 0 || C < 0 || D < 0) continue;
+        if (in0) idx.push(A, B, C, A, C, D); else idx.push(A, C, B, A, D, C);
+      }
+    }
+    /* 向き（形の傾きから）と色 */
+    var n = pos.length / 3, nor = new Float32Array(n * 3), col = new Float32Array(n * 3);
+    for (var p = 0; p < n; p++) {
+      var x = pos[p * 3], y = pos[p * 3 + 1], z = pos[p * 3 + 2];
+      var g = F.grad(x, y, z), L = Math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]) || 1;
+      nor[p * 3] = g[0] / L; nor[p * 3 + 1] = g[1] / L; nor[p * 3 + 2] = g[2] / L;
+      var o = F.orig(x, y, z), cd = caramelDepth(x, z), rc;
+      var onSkin = o > -0.13;
+      var depth = F.HT - y;
+      if (onSkin && depth < cd) {
+        var t2 = Math.max(0, Math.min(1, depth / cd));
+        rc = [CARAMEL[0] + (CARAMEL_HI[0] - CARAMEL[0]) * t2, CARAMEL[1] + (CARAMEL_HI[1] - CARAMEL[1]) * t2, CARAMEL[2] + (CARAMEL_HI[2] - CARAMEL[2]) * t2];
+        if (depth > cd - 0.06) { var m = (depth - (cd - 0.06)) / 0.06; rc = [rc[0] + (CUSTARD[0] - rc[0]) * m * 0.6, rc[1] + (CUSTARD[1] - rc[1]) * m * 0.6, rc[2] + (CUSTARD[2] - rc[2]) * m * 0.6]; }
+      } else if (onSkin) rc = CUSTARD;
+      else {
+        /* 中の切り口は少し明るく、すこしだけ泡のむら */
+        var sp = 0.03 * Math.sin(x * 31 + y * 17) * Math.sin(z * 23 - y * 11);
+        rc = [CUSTARD_IN[0] + sp, CUSTARD_IN[1] + sp, CUSTARD_IN[2] + sp * 0.5];
+      }
+      col[p * 3] = rc[0]; col[p * 3 + 1] = rc[1]; col[p * 3 + 2] = rc[2];
+    }
+    var geo = new T.BufferGeometry();
+    geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new T.BufferAttribute(nor, 3));
+    geo.setAttribute("color", new T.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeBoundingSphere();
+    return geo;
+  }
+
+  /* ぷるぷる揺れる材質（揺れは頂点の高さに比例して横にずらす） */
+  function puddingMaterial(env) {
+    var m = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.22, metalness: 0, envMap: env, envMapIntensity: 0.7, emissive: new T.Color(0x3a1800), emissiveIntensity: 0.25 });
+    var u = { uWob: { value: new T.Vector2() }, uH: { value: 3.6 }, uSquash: { value: 0 }, uBase: { value: 0 } };
+    m.userData.u = u;
+    m.onBeforeCompile = function (sh) {
+      for (var key in u) sh.uniforms[key] = u[key];
+      sh.vertexShader = "uniform vec2 uWob; uniform float uH; uniform float uSquash; uniform float uBase;\n" + sh.vertexShader.replace("#include <begin_vertex>",
+        "#include <begin_vertex>\n float hh = clamp((transformed.y - uBase) / uH, 0.0, 1.6);\n float ww = pow(hh, 1.5);\n transformed.xz += uWob * ww * uH;\n transformed.y = uBase + (transformed.y - uBase) * (1.0 - uSquash * hh * 0.5);\n transformed.xz *= 1.0 + uSquash * 0.18 * (1.0 - hh * 0.5);");
+    };
+    return m;
+  }
+
+  function GameScene(F) {
+    T = global.THREE;
+    this.F = F;
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 0.85 }, camera: { fov: 68, near: 0.05, far: 80 } });
+    this.scene = st.scene;
+    this.camera = st.camera;
+    this.scene.background = new T.Color(0xe9dccb);
+    this.scene.fog = new T.Fog(0xe9dccb, 14, 34);
+    var L = Z3.lights(this.scene, { shadows: true, shadowSize: 6, scale: 1.0 });
+    L.key.position.set(-5, 11, 6);
+
+    /* 映り込み用の明るい部屋（窓の光） */
+    var pm = new T.PMREMGenerator(st.renderer);
+    var envScene = new T.Scene();
+    envScene.background = new T.Color(0xcdbca6);
+    var room = new T.Mesh(new T.SphereGeometry(10, 16, 8), new T.MeshBasicMaterial({ color: 0xa89480, side: T.BackSide }));
+    envScene.add(room);
+    var win = new T.Mesh(new T.PlaneGeometry(6, 4), new T.MeshBasicMaterial({ color: 0xffffff, side: T.DoubleSide }));
+    win.position.set(-5, 6, 4); win.lookAt(0, 0, 0); envScene.add(win);
+    var win2 = new T.Mesh(new T.PlaneGeometry(8, 1.2), new T.MeshBasicMaterial({ color: 0xfff1dc, side: T.DoubleSide }));
+    win2.position.set(4, 7, -3); win2.lookAt(0, 0, 0); envScene.add(win2);
+    var flr = new T.Mesh(new T.PlaneGeometry(20, 20), new T.MeshBasicMaterial({ color: 0x6a4c34 }));
+    flr.rotation.x = -Math.PI / 2; flr.position.y = -3; envScene.add(flr);
+    this.env = pm.fromScene(envScene, 0.02).texture;
+
+    /* 机（木目） */
+    var wood = Z3.canvasTex(512, 512, function (g, w, hh) {
+      g.fillStyle = "#9b6a43"; g.fillRect(0, 0, w, hh);
+      var r = Z3.rng(5);
+      for (var i = 0; i < 140; i++) {
+        var y = r() * hh; g.strokeStyle = "rgba(" + (60 + r() * 40 | 0) + "," + (35 + r() * 20 | 0) + ",15," + (0.08 + r() * 0.15) + ")";
+        g.lineWidth = 1 + r() * 4; g.beginPath(); g.moveTo(0, y);
+        for (var x = 0; x <= w; x += 32) g.lineTo(x, y + Math.sin(x * 0.02 + i) * 4);
+        g.stroke();
+      }
+    }, 6);
+    var table = new T.Mesh(new T.CircleGeometry(30, 48), new T.MeshStandardMaterial({ map: wood, roughness: 0.6 }));
+    table.rotation.x = -Math.PI / 2; table.position.y = -0.09; table.receiveShadow = true;
+    this.scene.add(table);
+
+    /* 皿 */
+    var plateM = new T.MeshStandardMaterial({ color: 0xf8f6f2, roughness: 0.12, envMap: this.env, envMapIntensity: 1.0 });
+    var plate = new T.Mesh(new T.CylinderGeometry(4.7, 4.3, 0.09, 64), plateM);
+    plate.position.y = -0.045; plate.receiveShadow = true; this.scene.add(plate);
+    var rim = new T.Mesh(new T.TorusGeometry(4.75, 0.12, 10, 64), plateM);
+    rim.rotation.x = Math.PI / 2; rim.position.y = 0.03; rim.receiveShadow = true; this.scene.add(rim);
+    var rimLine = new T.Mesh(new T.TorusGeometry(4.55, 0.025, 6, 64), new T.MeshStandardMaterial({ color: 0x3f6fb5, roughness: 0.3 }));
+    rimLine.rotation.x = Math.PI / 2; rimLine.position.y = 0.01; this.scene.add(rimLine);
+
+    /* プリン */
+    this.mat = puddingMaterial(this.env);
+    this.mesh = new T.Mesh(new T.BufferGeometry(), this.mat);
+    this.mesh.castShadow = true; this.mesh.receiveShadow = true;
+    this.scene.add(this.mesh);
+    this.ver = -1;
+    this.parts = null;
+
+    /* スプーン（目の右下）。大きい銀のスプーン */
+    this.scene.add(this.camera);
+    var metal = new T.MeshStandardMaterial({ color: 0xdfe3e8, metalness: 1, roughness: 0.18, envMap: this.env, envMapIntensity: 1.4 });
+    var spoon = this.spoon = new T.Group();
+    var bowlG = new T.SphereGeometry(1, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+    var bowl = new T.Mesh(bowlG, metal); bowl.material.side = T.DoubleSide;
+    bowl.scale.set(0.085, 0.035, 0.12);
+    spoon.add(bowl);
+    var handle = new T.Mesh(new T.BoxGeometry(0.032, 0.012, 0.34), metal);
+    handle.position.set(0, 0.02, 0.27); handle.rotation.x = -0.18;
+    spoon.add(handle);
+    var neck = new T.Mesh(new T.BoxGeometry(0.02, 0.01, 0.08), metal);
+    neck.position.set(0, 0.006, 0.13); spoon.add(neck);
+    this.blob = new T.Mesh(new T.SphereGeometry(1, 16, 10), new T.MeshStandardMaterial({ color: 0xf7cd63, roughness: 0.2, envMap: this.env, emissive: 0x3a2200, emissiveIntensity: 0.3 }));
+    this.blob.scale.set(0.07, 0.045, 0.09); this.blob.position.y = 0.0;
+    this.blob.visible = false;
+    spoon.add(this.blob);
+    this.blobTop = new T.Mesh(new T.SphereGeometry(1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.4), new T.MeshStandardMaterial({ color: 0x5e2a08, roughness: 0.2, envMap: this.env }));
+    this.blobTop.scale.set(0.071, 0.046, 0.091); this.blob.add(this.blobTop); this.blobTop.scale.set(1.01, 1.01, 1.01); this.blobTop.visible = false;
+    this.camera.add(spoon);
+  }
+
+  GameScene.prototype.rebuild = function () {
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = buildGeometry(this.F, null);
+    this.ver = this.F.ver;
+  };
+
+  /* 崩れ始めたら、上と下に分ける */
+  GameScene.prototype.split = function (c) {
+    var F = this.F, L = c.layer;
+    var upKeep, lowKeep;
+    if (c.mode === "loose") {
+      upKeep = function (i, j, k) { return !c.keep[F.idx(i, j, k)]; };
+      lowKeep = function (i, j, k) { return !!c.keep[F.idx(i, j, k)]; };
+    } else {
+      upKeep = function (i, j, k) { return j > L; };
+      lowKeep = function (i, j, k) { return j <= L; };
+    }
+    var upMat = puddingMaterial(this.env);
+    var up = new T.Mesh(buildGeometry(F, upKeep), upMat);
+    var low = new T.Mesh(buildGeometry(F, lowKeep), this.mat);
+    up.castShadow = up.receiveShadow = low.castShadow = low.receiveShadow = true;
+    /* 上のかたまりは、倒れる支点を原点にした入れ物に入れる */
+    var piv = c.pivot || [0, 0, 0];
+    var g = new T.Group(); g.position.set(piv[0], piv[1], piv[2]);
+    up.position.set(-piv[0], -piv[1], -piv[2]);
+    g.add(up);
+    this.scene.remove(this.mesh);
+    this.scene.add(g); this.scene.add(low);
+    up.geometry.computeBoundingBox();
+    this.parts = { up: up, g: g, low: low, c: c, bottom: up.geometry.boundingBox.min.y, top: up.geometry.boundingBox.max.y };
+  };
+
+  GameScene.prototype.reset = function () {
+    if (this.parts) {
+      this.scene.remove(this.parts.g); this.scene.remove(this.parts.low);
+      this.parts.up.geometry.dispose(); this.parts.low.geometry.dispose(); this.parts.up.material.dispose();
+      this.parts = null;
+      this.scene.add(this.mesh);
+    }
+    this.ver = -1;
+  };
+
+  /* s: { eye:[x,y,z], yaw, pitch, wob:[x,z], squash, spoon:{ t, phase, blob }, collapse:{ c, t }, shake } */
+  GameScene.prototype.sync = function (s) {
+    if (s.collapse && !this.parts) this.split(s.collapse.c);
+    if (!s.collapse && this.parts) this.reset();
+    if (!this.parts && this.ver !== this.F.ver) this.rebuild();
+    var u = this.mat.userData.u;
+    u.uWob.value.set(s.wob[0], s.wob[1]);
+    u.uSquash.value = s.squash || 0;
+    u.uBase.value = 0;
+
+    var cam = this.camera;
+    var sh = s.shake || 0;
+    cam.position.set(s.eye[0] + (Math.random() - 0.5) * sh, s.eye[1] + (Math.random() - 0.5) * sh, s.eye[2] + (Math.random() - 0.5) * sh);
+    cam.rotation.order = "YXZ";
+    cam.rotation.set(s.pitch, s.yaw, 0);
+
+    /* スプーン：構え→すくう→口へ */
+    var sp = this.spoon, k = s.spoon || { phase: 0 };
+    var bx = 0.08, by = -0.17, bz = -0.42;
+    var rx = -0.35, ry = 0.25, rz = 0.05;
+    var bob = Math.sin((s.walk || 0) * 9) * 0.008;
+    if (k.phase === 1) {           /* 前へ突き出す */
+      var a = k.t;
+      bx = 0.08 - 0.06 * a; by = -0.17 + 0.07 * a; bz = -0.42 - 0.38 * a; rx = -0.35 - 0.5 * a;
+    } else if (k.phase === 2) {    /* すくって起こしながら戻す */
+      var b2 = k.t;
+      bx = 0.02 + 0.06 * b2; by = -0.10 - 0.07 * b2; bz = -0.8 + 0.42 * b2; rx = -0.85 + 0.75 * b2;
+    } else if (k.phase === 3) {    /* 口へ */
+      var c3 = Math.sin(k.t * Math.PI);
+      bx = 0.08 - 0.08 * c3; by = -0.17 + 0.02 * c3; bz = -0.38 + 0.18 * c3; rx = -0.1 + 0.1 * c3; ry = 0.25 * (1 - c3);
+    }
+    sp.position.set(bx, by + bob, bz);
+    sp.rotation.set(rx, ry, rz);
+    this.blob.visible = !!k.blob;
+    this.blobTop.visible = !!k.blob && !!k.caramel;
+
+    /* 崩れ */
+    if (this.parts) {
+      var P = this.parts, c = P.c, t = s.collapse.t, g = P.g, up = P.up;
+      var um = up.material.userData.u;
+      um.uWob.value.set(s.wob[0], s.wob[1]);
+      um.uBase.value = P.bottom; um.uH.value = Math.max(0.5, P.top - P.bottom);
+      if (c.mode === "tip") {
+        var ax = new T.Vector3(c.dir[1], 0, -c.dir[0]);
+        var ang = Math.min(1.5, 0.15 * t + 1.2 * t * t);
+        g.quaternion.setFromAxisAngle(ax, ang);
+        var land = Math.max(0, t - 0.8);
+        g.position.y = Math.max(0.2, c.pivot[1] - 4.9 * land * land);
+        var hit = ang >= 1.5 ? Math.min(1, (t - 1.05) * 2.5) : 0;
+        um.uSquash.value = Math.max(0, hit) * (0.9 + 0.15 * Math.sin(t * 18) * Math.exp(-(t - 1.1) * 2));
+      } else if (c.mode === "loose") {
+        var dropY = Math.min(P.bottom, 4.9 * t * t);
+        g.position.y = -dropY;
+        um.uSquash.value = dropY >= P.bottom ? Math.min(1, (t - Math.sqrt(P.bottom / 4.9)) * 3) : 0;
+      } else {
+        /* その場で沈んでつぶれる（上が落ちる） */
+        var fall = Math.min(1, t * t * 1.6);
+        g.position.y = c.pivot[1] - (c.pivot[1] - 0.0) * 0.5 * fall;
+        um.uSquash.value = Math.min(1.2, fall * 1.2) * (1 + 0.12 * Math.sin(t * 16) * Math.exp(-t * 2));
+        u.uSquash.value = 0.25 * fall;
+      }
+    }
+  };
+
+  GameScene.prototype.draw = function (ctx, W, H) { return this.stage.draw(ctx, W, H); };
+
+  global.GameScene = GameScene;
+})(window);
