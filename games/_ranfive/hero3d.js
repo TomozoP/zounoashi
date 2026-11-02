@@ -169,10 +169,15 @@
       a.scale.set(34, 70, 34); a.position.set(d * 122, 10, -10); a.rotation.z = -d * 0.5; a.userData.outline.scale.setScalar(1.08);
       var horn = this.part(g, new T.ConeGeometry(18, 90, 12), bone, 3);
       horn.position.set(d * 70, 160, 0); horn.rotation.z = -d * 0.45; fitOutline(horn);
-      var e = new T.Mesh(new T.CircleGeometry(20, 3), eye);
-      e.position.set(d * 38, 62, 86); e.rotation.z = d > 0 ? Math.PI / 2 + 0.3 : -Math.PI / 2 - 0.3; e.scale.set(1.4, 0.8, 1);
-      g.add(e);
     }, this);
+    /* 一つ目：大きな目玉（白目・黄色い虹彩・縦長の瞳）と、への字の眉 */
+    var ball = this.part(g, new T.SphereGeometry(50, 24, 18), white, 3); fitOutline(ball);
+    ball.position.set(0, 52, 58);
+    var iris = new T.Mesh(new T.SphereGeometry(1, 20, 14), eye); iris.scale.set(25, 25, 10); iris.position.set(0, 0, 44); ball.add(iris);
+    var pup = new T.Mesh(new T.SphereGeometry(1, 14, 10), new T.MeshBasicMaterial({ color: 0x15061c })); pup.scale.set(7, 18, 5); pup.position.set(0, 0, 52); ball.add(pup);
+    var brow = this.part(g, new T.BoxGeometry(96, 14, 16), new T.MeshToonMaterial({ color: 0x3a1450 }), 3); fitOutline(brow);
+    brow.position.set(0, 116, 74);
+    g.userData.eye = ball;
     var m = new T.Mesh(new T.SphereGeometry(1, 20, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), mouth);
     m.scale.set(58, 40, 20); m.position.set(0, -10, 80); g.add(m);
     for (var i = -3; i <= 3; i++) {
@@ -191,6 +196,8 @@
     g.scale.setScalar(s);
     g.rotation.set(0.1, Math.sin(t * 1.3) * 0.25, 0);
     g.userData.mouth.scale.y = hurt ? 22 : 40;
+    /* 目玉がぎょろぎょろ動く */
+    g.userData.eye.rotation.set(Math.sin(t * 1.1) * 0.15, Math.sin(t * 0.9) * 0.45, 0);
     var op = alpha == null ? 1 : alpha;
     g.traverse(function (o) {
       if (!o.material) return;
