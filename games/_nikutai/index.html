@@ -66,7 +66,7 @@
   window.addEventListener("orientationchange", layout);
 
   /* ============ 音 ============ */
-  var AC = null;
+  var AC = null, NOISE = null;
   function resumeAudio() { window.zAudioResume(AC); }
   wrap.addEventListener("touchstart", audioOn, { passive: true });
   wrap.addEventListener("touchend", resumeAudio, { passive: true });
@@ -77,6 +77,33 @@
     if (!C) return;
     try { AC = new C(); } catch (e) { return; }
     resumeAudio();
+    var len = Math.floor(AC.sampleRate * 1.5);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  /* ポーズが決まったときの「じゃーん」：金管っぽい和音とシンバル（自作の響き） */
+  var JAAN = [[0, 4, 7, 12], [2, 5, 9, 14], [-1, 2, 7, 11], [0, 5, 9, 12], [-3, 4, 7, 12]];
+  function jaan(i) {
+    if (!AC) return;
+    var n = AC.currentTime, ch = JAAN[i % JAAN.length], base = 196;
+    var lp = AC.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.setValueAtTime(600, n); lp.frequency.exponentialRampToValueAtTime(3200, n + 0.06); lp.frequency.exponentialRampToValueAtTime(900, n + 1.1);
+    var g = AC.createGain(); g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.16, n + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, n + 1.2);
+    lp.connect(g); g.connect(AC.destination);
+    ch.forEach(function (st) {
+      [-6, 6].forEach(function (det) {
+        var o = AC.createOscillator(); o.type = "sawtooth";
+        o.frequency.value = base * Math.pow(2, st / 12); o.detune.value = det;
+        o.connect(lp); o.start(n); o.stop(n + 1.25);
+      });
+    });
+    if (NOISE) {
+      var s = AC.createBufferSource(); s.buffer = NOISE;
+      var hp = AC.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 5000;
+      var cg = AC.createGain(); cg.gain.setValueAtTime(0.22, n); cg.gain.exponentialRampToValueAtTime(0.0001, n + 1.0);
+      s.connect(hp); hp.connect(cg); cg.connect(AC.destination); s.start(n); s.stop(n + 1.05);
+    }
+    tone(70, 0.25, 0.25, "sine", 45);
   }
   function tone(freq, dur, vol, type, to, delay) {
     if (!AC) return;
@@ -165,7 +192,8 @@
 
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
-  var state, T, penalty, words, wi, ci, cur, target, flex, wordDone, flash, gallery, misses;
+  var state, T, penalty, words, wi, ci, cur, flex, wordDone, flash, gallery, misses, pt, hitIdx, impact = 0;
+  var STEP = 1.15;                             /* 1文字ぶんのポーズ（移る＋止める）の秒数 */
   var NW = 5, PEN = 3;
   var CAM = Number((location.search.match(/[?&]cam=(\d)/) || [])[1] || 0);
 
@@ -190,15 +218,31 @@
     T = 0; penalty = 0; misses = 0; wi = 0; ci = 0; flex = 0; wordDone = 0; flash = null; gallery = -1;
     words = pickWords();
     cur = cur || REST.slice();
-    setTarget();
+    pt = -1;
   }
-  function setTarget() { target = KANA[words[wi][ci]].pose.slice(); }
+  /* 再生中なら今ポーズしている文字の番号、止まっていれば -1 */
+  function playIdx() {
+    if (pt < 0 || state !== S.PLAY || !words || wi >= NW) return -1;
+    var i = Math.floor(pt / STEP);
+    return i < words[wi].length ? i : -1;
+  }
+  function play() {
+    if (state !== S.PLAY || wordDone > 0) return;
+    pt = 0; hitIdx = -1;
+    tone(440, 0.08, 0.1, "triangle"); tone(660, 0.1, 0.08, "triangle", null, 0.07);
+  }
+  function playBtn() { return { x: 44, y: AY + (TY - AY - 4) / 2, r: 27 }; }
   function score() { return T + penalty; }
 
   /* ============ 進行 ============ */
   function update(dt) {
     var k = 1 - Math.exp(-dt * 11);
-    var goal = state === S.PLAY ? target : REST;
+    if (pt >= 0) { pt += dt; if (state !== S.PLAY || playIdx() < 0) pt = -1; }
+    var pi = playIdx();
+    /* ポーズに移り終わるころに「じゃーん」 */
+    if (pi >= 0 && pi !== hitIdx && pt - pi * STEP > 0.3) { hitIdx = pi; jaan(pi); flex = 1; impact = 1; }
+    impact = Math.max(0, impact - dt * 1.8);
+    var goal = pi >= 0 ? KANA[words[wi][pi]].pose : REST;
     if (gallery >= 0) {
       gallery += dt;
       var keys = Object.keys(KANA);
@@ -215,7 +259,7 @@
       if (wordDone <= 0) {
         wordDone = 0; wi++; ci = 0;
         if (wi >= NW) { finish(); return; }
-        setTarget();
+        pt = -1;
       }
     }
   }
@@ -243,9 +287,9 @@
       tone(520 + ci * 70, 0.1, 0.12, "triangle"); tone(780 + ci * 70, 0.12, 0.08, "sine", null, 0.05);
       ci++;
       if (ci >= words[wi].length) {
-        wordDone = 1.1;
+        wordDone = 1.1; pt = -1;
         if (AC && window.zCelebrate) window.zCelebrate.play(AC, "chime");
-      } else setTarget();
+      }
     } else {
       flash = { k: k, ok: false, t: 0 };
       penalty += PEN; misses++;
@@ -260,7 +304,9 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (x == null) return;
+    if (x == null) { play(); return; }
+    var pb = playBtn();
+    if ((x - pb.x) * (x - pb.x) + (y - pb.y) * (y - pb.y) < (pb.r + 12) * (pb.r + 12) || y < SH) { play(); return; }
     var k = cellAt(x, y);
     if (k) choose(k);
   }
@@ -273,11 +319,12 @@
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    /* 1: 1語目の始め  2: 最後の言葉の最後の1文字（正しくタップでクリア）  3: 全ポーズを順に見る */
+    /* 1: 1語目の始め  2: 最後の言葉の最後の1文字（正しくタップでクリア）  3: 全ポーズを順に見る  4: 3をやめる  5: 再生（すぐ1つ目のじゃーん） */
     if (n === 1) newRound();
-    if (n === 2) { if (state !== S.PLAY) newRound(); wi = NW - 1; ci = words[wi].length - 1; wordDone = 0; setTarget(); }
+    if (n === 2) { if (state !== S.PLAY) newRound(); wi = NW - 1; ci = words[wi].length - 1; wordDone = 0; pt = -1; }
     if (n === 3) { if (state !== S.PLAY) newRound(); gallery = 0; }
     if (n === 4) { gallery = -1; }
+    if (n === 5) { if (state !== S.PLAY) newRound(); play(); pt = 0.35; }
   }
 
   window.addEventListener("keydown", function (e) {
@@ -347,26 +394,30 @@
     ctx.fillStyle = "#1c1512"; ctx.fillRect(0, AY, W, TY - AY - 4);
     if (!words || state === S.INTRO) return;
     var w = words[wi < NW ? wi : NW - 1], n = w.length;
-    var bs = Math.min(52, (W - 60) / n - 6), x0 = W / 2 - (n * (bs + 6) - 6) / 2, y = AY + (TY - AY - 4 - bs) / 2;
+    var bs = Math.min(52, (W - 170) / n - 6), x0 = W / 2 + 8 - (n * (bs + 6) - 6) / 2, y = AY + (TY - AY - 4 - bs) / 2;
     for (var i = 0; i < n; i++) {
       var open = state !== S.PLAY || i < ci || wordDone > 0;
       ctx.fillStyle = open ? "#fff7e6" : (i === ci ? "#5a4636" : "#3a2c24");
       roundRect(x0 + i * (bs + 6), y, bs, bs, 8); ctx.fill();
-      if (i === ci && state === S.PLAY && !wordDone) { ctx.strokeStyle = "#f3c34a"; ctx.lineWidth = 3; ctx.stroke(); }
+      if (i === playIdx()) { ctx.strokeStyle = "#f3c34a"; ctx.lineWidth = 4; ctx.stroke(); }
+      else if (i === ci && state === S.PLAY && !wordDone) { ctx.strokeStyle = "#8a7a6a"; ctx.lineWidth = 2; ctx.stroke(); }
       if (open) {
         ctx.fillStyle = "#16202e"; ctx.font = "900 " + Math.round(bs * 0.72) + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText(w[i], x0 + i * (bs + 6) + bs / 2, y + bs / 2 + 2);
       }
     }
     ctx.fillStyle = "#b8a898"; ctx.font = "800 18px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-    ctx.fillText((Math.min(wi, NW - 1) + 1) + "/" + NW, 12, AY + (TY - AY) / 2);
-    ctx.textAlign = "right";
+    /* 再生ボタン */
+    var pb = playBtn(), on = pt >= 0;
+    ctx.fillStyle = on ? "#f3c34a" : "#fff"; ctx.beginPath(); ctx.arc(pb.x, pb.y, pb.r, 0, 6.3); ctx.fill();
+    ctx.fillStyle = "#16202e"; ctx.beginPath(); ctx.moveTo(pb.x - 8, pb.y - 12); ctx.lineTo(pb.x + 13, pb.y); ctx.lineTo(pb.x - 8, pb.y + 12); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#b8a898"; ctx.textAlign = "right";
     ctx.fillText(score().toFixed(1), W - 12, AY + (TY - AY) / 2);
   }
 
   function camFor() {
     var k = 215 / SH, d = 620, vh = H * k;
-    var fov = 2 * Math.atan(vh / 2 / d) * 180 / Math.PI;
+    var fov = 2 * Math.atan(vh / 2 / d) * 180 / Math.PI * (1 - impact * impact * 0.06);
     var ty = 100 - (H / 2 - SH / 2) * k;
     if (CAM === 0) return { fov: fov, x: 0, y: ty, z: d, tx: 0, ty: ty };
     if (CAM === 2) return { fov: fov, x: d * Math.sin(0.25), y: ty - 70, z: d * Math.cos(0.25), tx: 0, ty: ty - 18 };
@@ -384,6 +435,24 @@
     g.addColorStop(0, "#5a4a5e"); g.addColorStop(1, "#16121a");
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, SH);
     ctx.fillStyle = "#2a2026"; ctx.fillRect(0, SH * 0.82, W, SH * 0.18);
+    if (impact > 0) {
+      /* 決めポーズの集中線と後光 */
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, W, SH); ctx.clip();
+      var cx = W / 2, cy = SH * 0.42, a = impact;
+      var hg = ctx.createRadialGradient(cx, cy, 10, cx, cy, SH * 0.6);
+      hg.addColorStop(0, "rgba(255,226,140," + (0.55 * a) + ")"); hg.addColorStop(1, "rgba(255,200,90,0)");
+      ctx.fillStyle = hg; ctx.fillRect(0, 0, W, SH);
+      ctx.fillStyle = "rgba(255,240,200," + (0.35 * a) + ")";
+      for (var ri = 0; ri < 28; ri++) {
+        var an = ri / 28 * Math.PI * 2 + (hitIdx || 0) * 0.37, w2 = 0.045;
+        ctx.beginPath(); ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(an - w2) * W, cy + Math.sin(an - w2) * W);
+        ctx.lineTo(cx + Math.cos(an + w2) * W, cy + Math.sin(an + w2) * W);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    }
     var s3 = scene3d();
     if (s3 && cur) {
       try {
@@ -391,6 +460,7 @@
         s3.sync({ j: joints(cur, br), cam: camFor(), flex: flex, tilt: 0 });
         ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, SH); ctx.clip();
         s3.draw(ctx, W, H);
+        if (impact > 0.75) { ctx.fillStyle = "rgba(255,255,255," + ((impact - 0.75) * 1.6) + ")"; ctx.fillRect(0, 0, W, SH); }
         ctx.restore();
       } catch (e) { scene3d.drop(); }
     }
@@ -434,8 +504,10 @@
       await r.wait(800);
       startButton.click();
       while (state === S.PLAY) {
-        await r.wait(wordDone > 0 ? 300 : 900);
-        if (state === S.PLAY && !wordDone) choose(words[wi][ci]);
+        await r.wait(300);
+        if (state !== S.PLAY || wordDone) continue;
+        if (ci === 0 && pt < 0) { play(); await r.wait(words[wi].length * STEP * 1000 + 300); }
+        for (var q = ci; q < words[wi].length && state === S.PLAY; q++) { choose(words[wi][q]); await r.wait(450); }
       }
       await r.wait(1800);
     }
