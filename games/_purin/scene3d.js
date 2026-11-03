@@ -325,9 +325,10 @@
     else if (ea > 0.05) this.chew += dt * 7;
     hero.position.set(s.me[0], s.me[1], s.me[2]); hero.scale.setScalar(0.25 * (s.size || 1));
     hero.rotation.set(-s.pitch * 0.6, s.face, 0, "YXZ");
-    var sw = Math.sin(wk * 9) * 0.7 * mv;
+    /* 足：食べている間は、かきこむ手と同じリズムで1かき1歩（右手が前のとき左足が前） */
+    var sw = Math.sin(wk * 9) * 0.7 * mv * (1 - ea) + Math.sin(this.chew) * 0.6 * ea;
     this.legL.rotation.x = sw; this.legR.rotation.x = -sw;
-    hero.position.y = s.me[1] + Math.abs(Math.cos(wk * 9)) * 0.012 * mv;
+    hero.position.y = s.me[1] + (Math.abs(Math.cos(wk * 9)) * (1 - ea) + Math.abs(Math.cos(this.chew)) * ea) * 0.012 * mv;
     /* 両手のスプーンで交互にかきこむ：前へ突っこむ→口へ */
     var cyc = this.chew, aR = 0.5 + 0.5 * Math.sin(cyc), aL = 0.5 + 0.5 * Math.sin(cyc + Math.PI);
     /* 腕はいつも前へまっすぐ伸ばす。食べるときは交互に突っこんで口へかきこむ */
@@ -386,8 +387,8 @@
 
     /* カメラ：人の後ろの低い所から、いつも同じ距離。間に挟まるプリンはくり抜いて見せる */
     var cam = this.camera, sh = (s.shake || 0) + 0.015 * this.eatAmt;
-    var tx = s.me[0], ty = s.me[1] + 0.3, tz = s.me[2];
-    var el = Math.max(-0.2, Math.min(1.2, 0.3 - s.pitch * 0.5)), d = 4.0, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
+    var sz = s.size || 1, tx = s.me[0], ty = s.me[1] + 0.3 * sz, tz = s.me[2];   /* 人が大きくなったら、そのぶん引く */
+    var el = Math.max(-0.2, Math.min(1.2, 0.3 - s.pitch * 0.5)), d = 4.0 * (1 + 0.35 * (sz - 1)), dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
     var cx0 = tx + dx * d, cy0 = Math.max(0.12, ty + dy * d), cz0 = tz + dz * d;
     var lx0 = tx - Math.sin(s.yaw) * 2, ly0 = ty + 0.45 + Math.sin(s.pitch) * 1.2, lz0 = tz - Math.cos(s.yaw) * 2;
     /* 倒れる間は引きのカメラ（プリンの中心から、人のいる側へ離れて少し上から） */
