@@ -166,6 +166,8 @@
     part(new T.SphereGeometry(0.026, 8, 6), black, 0.07, 0.01, 0.185, head);
     this.mouth = part(new T.SphereGeometry(0.03, 8, 6), new T.MeshBasicMaterial({ color: 0x7a2a22 }), 0, -0.08, 0.18, head);
     this.mouth.scale.set(1.3, 0.5, 0.5);
+    this.cheekL = part(new T.SphereGeometry(0.075, 10, 8), skin, -0.11, -0.06, 0.12, head);
+    this.cheekR = part(new T.SphereGeometry(0.075, 10, 8), skin, 0.11, -0.06, 0.12, head);
     /* 脚と腕は付け根で回す */
     var self = this;
     function limb(x, y, len, rad, mat, footMat) {
@@ -199,6 +201,20 @@
     spoon.position.set(0, -0.56, 0.02);
     spoon.rotation.x = Math.PI / 2;
     this.armR.add(spoon);
+    var spoon2 = this.spoon2 = spoon.clone();
+    this.blob2 = spoon2.children[2]; this.blobTop2 = this.blob2.children[0];
+    this.armL.add(spoon2);
+
+    /* 飛び散るかけら */
+    var crumbG = new T.SphereGeometry(1, 8, 6);
+    this.crumbM = [new T.MeshStandardMaterial({ color: 0xf2c25a, roughness: 0.25, envMap: this.env, emissive: 0x3a2200, emissiveIntensity: 0.3 }),
+                   new T.MeshStandardMaterial({ color: 0x5a2507, roughness: 0.2, envMap: this.env })];
+    this.crumbs = [];
+    for (var ci = 0; ci < 70; ci++) {
+      var cm = new T.Mesh(crumbG, this.crumbM[0]); cm.visible = false; this.scene.add(cm);
+      this.crumbs.push({ m: cm, life: 0, v: [0, 0, 0] });
+    }
+    this.biteN = 0; this.lastT = 0; this.eatAmt = 0; this.chew = 0;
   }
 
   GameScene.prototype.rebuild = function () {
@@ -255,26 +271,61 @@
     u.uBase.value = 0;
 
     /* 人 */
+    var now = performance.now() / 1000, dt = Math.min(0.05, this.lastT ? now - this.lastT : 0.016); this.lastT = now;
     var hero = this.hero, k = s.spoon || { phase: 0 }, wk = s.walk || 0, mv = s.moving || 0;
+    this.eatAmt += ((s.eating ? 1 : 0) - this.eatAmt) * Math.min(1, dt * 10);
+    var ea = this.eatAmt;
+    if (ea > 0.05) this.chew += dt * 11;
     hero.position.set(s.me[0], 0, s.me[2]);
     hero.rotation.y = s.face;
     var sw = Math.sin(wk * 9) * 0.7 * mv;
     this.legL.rotation.x = sw; this.legR.rotation.x = -sw;
-    this.armL.rotation.x = -sw * 0.8;
     hero.position.y = Math.abs(Math.cos(wk * 9)) * 0.05 * mv;
-    /* 右腕：ふだんは前に構える。食べるときは口へ運ぶ */
-    var lift = k.phase === 3 ? Math.sin(k.t * Math.PI) : 0;
-    this.armR.rotation.set(-0.9 - 1.3 * lift + sw * 0.2 * (1 - lift), 0, 0.15 * lift);
-    this.armR.position.x = -0.29 + 0.08 * lift;
-    this.mouth.scale.set(1.3, 0.5 + 1.4 * lift, 0.5);
-    this.head.rotation.x = -0.1 * lift;
-    this.blob.visible = !!k.blob;
-    this.blobTop.visible = !!k.blob && !!k.caramel;
+    /* 両手のスプーンで交互にかきこむ：前へ突っこむ→口へ */
+    var cyc = this.chew, aR = 0.5 + 0.5 * Math.sin(cyc), aL = 0.5 + 0.5 * Math.sin(cyc + Math.PI);
+    var walkR = -0.9 + sw * 0.2, walkL = -0.9 - sw * 0.2;
+    this.armR.rotation.set(walkR * (1 - ea) + (-1.35 - 1.0 * aR) * ea, 0, 0.25 * aR * ea);
+    this.armL.rotation.set(walkL * (1 - ea) + (-1.35 - 1.0 * aL) * ea, 0, -0.25 * aL * ea);
+    /* もぐもぐ：口・ほっぺ・頭 */
+    var ch = Math.abs(Math.sin(cyc * 1.3));
+    this.mouth.scale.set(1.3 + 0.3 * ea, 0.5 + 1.2 * ch * ea, 0.5);
+    var ck = 1 + 0.55 * ea * (0.7 + 0.3 * ch);
+    this.cheekL.scale.set(ck, ck, ck); this.cheekR.scale.set(ck, ck, ck);
+    this.head.rotation.x = (-0.12 + 0.12 * ch) * ea;
+    this.head.position.y = 1.55 - 0.03 * ch * ea;
+    var full = ea > 0.3;
+    this.blob.visible = full && aR > 0.4; this.blob2.visible = full && aL > 0.4;
+    this.blobTop.visible = this.blob.visible && !!k.caramel; this.blobTop2.visible = this.blob2.visible && !!k.caramel;
+    /* かけら */
+    var b = s.bites;
+    if (b && b.n !== this.biteN) {
+      this.biteN = b.n;
+      var cnt = 5;
+      for (var i2 = 0, made = 0; i2 < this.crumbs.length && made < cnt; i2++) {
+        var c = this.crumbs[i2]; if (c.life > 0) continue;
+        made++;
+        c.life = 0.7 + Math.random() * 0.5;
+        c.m.material = b.caramel && Math.random() < 0.5 ? this.crumbM[1] : this.crumbM[0];
+        c.m.position.set(b.p[0] + (Math.random() - 0.5) * 0.5, b.p[1] + (Math.random() - 0.5) * 0.5, b.p[2] + (Math.random() - 0.5) * 0.5);
+        var sp2 = 1.2 + Math.random() * 2;
+        c.v = [-b.dir[0] * sp2 * 0.5 + (Math.random() - 0.5) * 2.4, 1.2 + Math.random() * 2.4, -b.dir[1] * sp2 * 0.5 + (Math.random() - 0.5) * 2.4];
+        var sz = 0.03 + Math.random() * 0.05; c.m.scale.set(sz, sz * 0.8, sz);
+        c.m.visible = true;
+      }
+    }
+    for (var i3 = 0; i3 < this.crumbs.length; i3++) {
+      var cc = this.crumbs[i3]; if (cc.life <= 0) continue;
+      cc.life -= dt; cc.v[1] -= 9 * dt;
+      var P = cc.m.position; P.x += cc.v[0] * dt; P.y += cc.v[1] * dt; P.z += cc.v[2] * dt;
+      if (P.y < 0.03) { P.y = 0.03; cc.v[1] *= -0.25; cc.v[0] *= 0.6; cc.v[2] *= 0.6; }
+      if (cc.life <= 0) cc.m.visible = false;
+    }
 
     /* カメラ：人の後ろ上から。プリンに埋まらないよう手前に寄せる */
     var cam = this.camera, sh = s.shake || 0;
     var tx = s.me[0], ty = 1.5, tz = s.me[2];
     var el = Math.max(-0.35, Math.min(1.25, 0.32 - s.pitch));
+    sh += 0.015 * this.eatAmt;
     var dist = 3.4, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
     var d = 0.4;
     while (d < dist) {
