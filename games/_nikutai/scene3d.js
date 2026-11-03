@@ -1,4 +1,4 @@
-/* 肉体言語の立体（マッチョ）。games/three-base.js の Z3 を土台にする。
+/* 肉体ピングの立体（マッチョ）。games/three-base.js の Z3 を土台にする。
    関節の位置はゲーム側（index.html の joints()）で計算して sync で渡す。ここは見た目だけ。
    単位はだいたい cm（身長 180 くらい）。x は画面の右がプラス、y は上、z は手前。 */
 (function (global) {
