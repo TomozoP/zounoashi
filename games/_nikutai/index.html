@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>肉体言語</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../celebrate.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="../three-base.js"></script>
+<script src="scene3d.js"></script>
+<script>
+/* 肉体言語
+
+   マッチョがポーズで1文字ずつしゃべる。下の翻訳表（ポーズ⇔五十音）と見比べて、同じポーズの文字をタップ。
+   腕の形が行（あかさたな…）、脚の形が段（あいうえお）に対応している。5つの言葉を訳すまでの時間が記録。
+   まちがえたら +3秒。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+  var followLink = window.zResultActions.follow.link(shareButton.parentNode);
+
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ ポーズ ============
+     腕は [上腕の向き, 前腕の向き, 前腕の手前への出方]。向きは真下が0°、体の外側へ回すとプラス（180°で真上）。
+     脚は [太ももの向き, すねの向き]。左右は画面の左・右。 */
+  var ARM = {
+    down: [12, 8, 0], bic: [92, 192, 0.1], up: [165, 170, 0], T: [90, 90, 0],
+    hip: [38, -48, 0.15], head: [150, 260, -0.5], cross: [5, -85, 0.75], ring: [165, 245, 0.1]
+  };
+  var LEG = [
+    [[4, 2], [4, 2]],        /* あ段：直立 */
+    [[62, -4], [62, -4]],    /* い段：がに股 */
+    [[4, 2], [85, 6]],       /* う段：画面右のひざを上げる */
+    [[85, 6], [4, 2]],       /* え段：画面左のひざを上げる */
+    [[24, 24], [24, 24]]     /* お段：大股で立つ */
+  ];
+  var ROWS = [
+    ["あいうえお", "down", "down"], ["かきくけこ", "bic", "bic"], ["さしすせそ", "up", "up"],
+    ["たちつてと", "T", "T"], ["なにぬねの", "hip", "hip"], ["はひふへほ", "bic", "down"],
+    ["まみむめも", "down", "bic"], ["や ゆ よ", "up", "hip"], ["らりるれろ", "cross", "cross"],
+    ["わ   を", "head", "head"], ["ん    ", "ring", "ring"]
+  ];
+  var KANA = {};
+  ROWS.forEach(function (r, ci) {
+    for (var v = 0; v < 5; v++) {
+      var k = r[0][v];
+      if (!k || k === " ") continue;
+      var a0 = ARM[r[1]], a1 = ARM[r[2]], lg = LEG[v];
+      KANA[k] = { k: k, col: ci, row: v, pose: [a0[0], a0[1], a0[2], a1[0], a1[1], a1[2], lg[0][0], lg[0][1], lg[1][0], lg[1][1]] };
+    }
+  });
+  var REST = KANA["か"].pose.slice();          /* 開始前の立ち姿（ダブルバイセップス） */
+
+  function rad(d) { return d * Math.PI / 180; }
+  function dir(th, s, z) {
+    var x = s * Math.sin(rad(th)), y = -Math.cos(rad(th)), n = Math.sqrt(x * x + y * y + (z || 0) * (z || 0));
+    return [x / n, y / n, (z || 0) / n];
+  }
+  function add(a, d, l) { return [a[0] + d[0] * l, a[1] + d[1] * l, a[2] + d[2] * l]; }
+  /* ポーズの数字から関節の位置（cm、床が y=0） */
+  function joints(v, breath) {
+    var legs = [], lowest = 0;
+    for (var i = 0; i < 2; i++) {
+      var s = i === 0 ? -1 : 1;
+      var hip = [s * 9, -4, 0];
+      var knee = add(hip, dir(v[6 + i * 2], s, 0), 44);
+      var ankle = add(knee, dir(v[7 + i * 2], s, 0), 42);
+      legs.push([hip, knee, ankle]);
+      lowest = Math.min(lowest, ankle[1]);
+    }
+    var py = 4 - lowest, pel = [0, py, 0];
+    var j = { pelvis: pel, side: [] };
+    for (var k = 0; k < 2; k++) {
+      var sd = k === 0 ? -1 : 1, b = k * 3;
+      var sh = [sd * 24, py + 55 + (breath || 0), 0];
+      var el = add(sh, dir(v[b], sd, 0), 30);
+      var hd = add(el, dir(v[b + 1], sd, v[b + 2]), 27);
+      var L = legs[k];
+      j.side.push({ shoulder: sh, elbow: el, hand: hd, hip: [L[0][0], L[0][1] + py, 0], knee: [L[1][0], L[1][1] + py, 0], ankle: [L[2][0], L[2][1] + py, 0] });
+    }
+    return j;
+  }
+
+  /* ============ 言葉 ============ 番号つきの一覧は確認用に別ファイルでも渡す */
+  var WORDS = ["きんにく", "ささみ", "むね", "せなか", "あいしてる", "おなかすいた", "ねむい", "きれてる", "なにみてんの", "ひるね",
+    "おやすみ", "ありえない", "こころ", "しあわせ", "にくをくう", "ちから", "さむい", "はやくかえりたい", "ふともも", "なかよくしよう",
+    "いのちをかけろ", "ゆうやけ", "もうむり", "あしたもくる", "わすれない"];
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
+  var state, T, penalty, words, wi, ci, cur, target, flex, wordDone, flash, gallery, misses;
+  var NW = 5, PEN = 3;
+  var CAM = Number((location.search.match(/[?&]cam=(\d)/) || [])[1] || 1);
+
+  var SH, AY, TY, CW, CH;
+  function place() {
+    SH = Math.round(H * 0.5);                  /* マッチョの場面 */
+    AY = SH;                                   /* 答えの欄 */
+    TY = SH + 78;                              /* 翻訳表 */
+    CW = W / 11;
+    CH = (H - TY - 10) / 5;
+  }
+
+  function pickWords() {
+    var pool = WORDS.slice(), out = [];
+    while (out.length < NW) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    return out.sort(function (a, b) { return a.length - b.length; });
+  }
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    T = 0; penalty = 0; misses = 0; wi = 0; ci = 0; flex = 0; wordDone = 0; flash = null; gallery = -1;
+    words = pickWords();
+    cur = cur || REST.slice();
+    setTarget();
+  }
+  function setTarget() { target = KANA[words[wi][ci]].pose.slice(); }
+  function score() { return T + penalty; }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    var k = 1 - Math.exp(-dt * 11);
+    var goal = state === S.PLAY ? target : REST;
+    if (gallery >= 0) {
+      gallery += dt;
+      var keys = Object.keys(KANA);
+      goal = KANA[keys[Math.floor(gallery / 1.1) % keys.length]].pose;
+    }
+    if (!cur) cur = REST.slice();
+    for (var i = 0; i < cur.length; i++) cur[i] += (goal[i] - cur[i]) * k;
+    flex = Math.max(0, flex - dt * 2.5);
+    if (flash) { flash.t += dt; if (flash.t > 0.4) flash = null; }
+    if (state !== S.PLAY) return;
+    T += dt;
+    if (wordDone > 0) {
+      wordDone -= dt;
+      if (wordDone <= 0) {
+        wordDone = 0; wi++; ci = 0;
+        if (wi >= NW) { finish(); return; }
+        setTarget();
+      }
+    }
+  }
+  function finish() {
+    state = S.RESULT;
+    if (AC && window.zCelebrate) window.zCelebrate.play(AC, "fanfare");
+    if (confetti) confetti.burst(W, H, 160);
+  }
+
+  function cellAt(x, y) {
+    if (y < TY) return null;
+    var c = Math.floor(x / CW), r = Math.floor((y - TY) / CH);
+    if (c < 0 || c > 10 || r < 0 || r > 4) return null;
+    var k = ROWS[c][0][r];
+    return k && k !== " " ? k : null;
+  }
+
+  /* ============ 入力 ============ */
+  function choose(k) {
+    if (state !== S.PLAY || wordDone > 0) return;
+    var want = words[wi][ci];
+    if (k === want) {
+      flash = { k: k, ok: true, t: 0 };
+      flex = 1;
+      tone(520 + ci * 70, 0.1, 0.12, "triangle"); tone(780 + ci * 70, 0.12, 0.08, "sine", null, 0.05);
+      ci++;
+      if (ci >= words[wi].length) {
+        wordDone = 1.1;
+        if (AC && window.zCelebrate) window.zCelebrate.play(AC, "chime");
+      } else setTarget();
+    } else {
+      flash = { k: k, ok: false, t: 0 };
+      penalty += PEN; misses++;
+      tone(150, 0.22, 0.16, "square", 90);
+    }
+  }
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (x == null) return;
+    var k = cellAt(x, y);
+    if (k) choose(k);
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    /* 1: 1語目の始め  2: 最後の言葉の最後の1文字（正しくタップでクリア）  3: 全ポーズを順に見る */
+    if (n === 1) newRound();
+    if (n === 2) { if (state !== S.PLAY) newRound(); wi = NW - 1; ci = words[wi].length - 1; wordDone = 0; setTarget(); }
+    if (n === 3) { if (state !== S.PLAY) newRound(); gallery = 0; }
+    if (n === 4) { gallery = -1; }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;
+    if (state === S.INTRO) startButton.click(); else down();
+  });
+
+  function doShare() {
+    var t = score().toFixed(1);
+    window.zResultActions.x({ text: "マッチョが「" + words.join("」「") + "」と言っていたのを" + t + "秒で翻訳した #肉体言語" });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  /* 翻訳表の小さな絵（正面の棒人間） */
+  function drawPict(pose, cx, by, s, col) {
+    var j = joints(pose, 0);
+    function P(p) { return [cx + p[0] * s, by - p[1] * s]; }
+    ctx.save();
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    var pel = P(j.pelvis), neck = P([0, j.pelvis[1] + 60, 0]);
+    ctx.lineWidth = 34 * s;
+    ctx.beginPath(); ctx.moveTo(pel[0], pel[1] - 10 * s); ctx.lineTo(neck[0], neck[1] + 6 * s); ctx.stroke();
+    ctx.beginPath(); ctx.arc(neck[0], neck[1] - 16 * s, 11 * s, 0, 6.3); ctx.fill();
+    j.side.forEach(function (q) {
+      ctx.lineWidth = 12 * s;
+      ctx.beginPath(); var a = P(q.shoulder), b = P(q.elbow), c = P(q.hand); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.stroke();
+      ctx.lineWidth = 15 * s;
+      ctx.beginPath(); a = P(q.hip); b = P(q.knee); c = P(q.ankle); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  function drawTable() {
+    ctx.fillStyle = "#efe6d6"; ctx.fillRect(0, TY - 4, W, H - TY + 4);
+    var s = Math.min((CW - 4) / 180, (CH - 18) / 210);
+    for (var c = 0; c < 11; c++) for (var r = 0; r < 5; r++) {
+      var k = ROWS[c][0][r];
+      if (!k || k === " ") continue;
+      var x = c * CW, y = TY + r * CH;
+      var fl = flash && flash.k === k;
+      ctx.fillStyle = fl ? (flash.ok ? "#bfe8b0" : "#f5b3a8") : "#fffaf1";
+      roundRect(x + 1.5, y + 1.5, CW - 3, CH - 3, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(60,40,20,.25)"; ctx.lineWidth = 1; ctx.stroke();
+      drawPict(KANA[k].pose, x + CW / 2, y + CH - 4, s, "#3a2a20");
+      ctx.fillStyle = "#c0392b"; ctx.font = "900 17px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+      ctx.fillText(k, x + 4, y + 3);
+    }
+  }
+
+  function drawAnswer() {
+    ctx.fillStyle = "#1c1512"; ctx.fillRect(0, AY, W, TY - AY - 4);
+    if (!words) return;
+    var w = words[wi < NW ? wi : NW - 1], n = w.length;
+    var bs = Math.min(52, (W - 60) / n - 6), x0 = W / 2 - (n * (bs + 6) - 6) / 2, y = AY + (TY - AY - 4 - bs) / 2;
+    for (var i = 0; i < n; i++) {
+      var open = state !== S.PLAY || i < ci || wordDone > 0;
+      ctx.fillStyle = open ? "#fff7e6" : (i === ci ? "#5a4636" : "#3a2c24");
+      roundRect(x0 + i * (bs + 6), y, bs, bs, 8); ctx.fill();
+      if (i === ci && state === S.PLAY && !wordDone) { ctx.strokeStyle = "#f3c34a"; ctx.lineWidth = 3; ctx.stroke(); }
+      if (open) {
+        ctx.fillStyle = "#16202e"; ctx.font = "900 " + Math.round(bs * 0.72) + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(w[i], x0 + i * (bs + 6) + bs / 2, y + bs / 2 + 2);
+      }
+    }
+    ctx.fillStyle = "#b8a898"; ctx.font = "800 18px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText((Math.min(wi, NW - 1) + 1) + "/" + NW, 12, AY + (TY - AY) / 2);
+    ctx.textAlign = "right";
+    ctx.fillText(score().toFixed(1), W - 12, AY + (TY - AY) / 2);
+  }
+
+  function camFor() {
+    var k = 215 / SH, d = 620, vh = H * k;
+    var fov = 2 * Math.atan(vh / 2 / d) * 180 / Math.PI;
+    var ty = 100 - (H / 2 - SH / 2) * k;
+    if (CAM === 0) return { fov: fov, x: 0, y: ty, z: d, tx: 0, ty: ty };
+    if (CAM === 2) return { fov: fov, x: d * Math.sin(0.25), y: ty - 70, z: d * Math.cos(0.25), tx: 0, ty: ty - 18 };
+    return { fov: fov, x: d * Math.sin(0.38), y: ty + 10, z: d * Math.cos(0.38), tx: 0, ty: ty };
+  }
+
+  var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene(); }) : function () { return null; };
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
+    var t = performance.now() / 1000;
+    /* 舞台 */
+    var g = ctx.createRadialGradient(W / 2, SH * 0.45, 20, W / 2, SH * 0.5, SH * 0.8);
+    g.addColorStop(0, "#5a4a5e"); g.addColorStop(1, "#16121a");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, SH);
+    ctx.fillStyle = "#2a2026"; ctx.fillRect(0, SH * 0.82, W, SH * 0.18);
+    var s3 = scene3d();
+    if (s3 && cur) {
+      try {
+        var br = Math.sin(t * 2.4) * 0.8;
+        s3.sync({ j: joints(cur, br), cam: camFor(), flex: flex, tilt: 0 });
+        ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, SH); ctx.clip();
+        s3.draw(ctx, W, H);
+        ctx.restore();
+      } catch (e) { scene3d.drop(); }
+    }
+    drawAnswer();
+    drawTable();
+    if (state === S.RESULT) drawResult();
+    if (confetti && state === S.RESULT) confetti.draw(ctx);
+  }
+
+  function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
+  function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff"; ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10;
+    ctx.textBaseline = "alphabetic";
+    ctx.font = "800 108px sans-serif";
+    var num = score().toFixed(1), nw = ctx.measureText(num).width;
+    ctx.font = "800 44px sans-serif";
+    var uw = ctx.measureText("秒").width, x0 = W / 2 - (nw + uw + 6) / 2;
+    ctx.textAlign = "left"; ctx.font = "800 108px sans-serif";
+    ctx.fillText(num, x0, H * 0.45);
+    ctx.font = "800 44px sans-serif";
+    ctx.fillText("秒", x0 + nw + 6, H * 0.45);
+    ctx.restore();
+    window.zResultActions.drawButtons(ctx, resultButtons());
+    window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
+  }
+
+  window.__probe = {
+    now: function () { return { state: state, score: score(), W: W, H: H, word: words && words[wi], ci: ci, buttons: state === S.RESULT ? resultButtons() : null }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); if (confetti && state === S.RESULT) confetti.step(1 / 60, W, H); draw(); } },
+    reset: function () { newRound(); },
+    hideUI: function () { }
+  };
+
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(800);
+      startButton.click();
+      while (state === S.PLAY) {
+        await r.wait(wordDone > 0 ? 300 : 900);
+        if (state === S.PLAY && !wordDone) choose(words[wi][ci]);
+      }
+      await r.wait(1800);
+    }
+  };
+
+  var confetti = window.zCelebrate ? window.zCelebrate.confetti() : null;
+  var startButton = document.getElementById('start');
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener('click', function (e) { if (e) e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  layout();
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  var last = performance.now();
+  var stepAcc = 0;
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      stepAcc += dt;
+      while (stepAcc >= 1 / 60) { update(1 / 60); if (confetti && state === S.RESULT) confetti.step(1 / 60, W, H); stepAcc -= 1 / 60; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>

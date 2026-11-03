@@ -371,4 +371,5 @@ window.DRAFT_GAMES = [
     "catch": "セミの発音器官を動かして鳴く"
   },
   {"type":"lab","tags":[],"id":"hannin100","title":"犯人はこの中にいる！","year":2026,"date":"2026-11-03","plays":null,"url":"","img":"games/_hannin100/img/thumb.webp","play":"games/_hannin100/index.html","full":true,"catch":"が、100人いた場合"},
+  {"type":"lab","tags":[],"id":"nikutai","title":"肉体言語","year":2026,"date":"2026-11-03","plays":null,"url":"","img":"games/_nikutai/img/thumb.webp","play":"games/_nikutai/index.html","full":true,"catch":"マッチョのポーズを翻訳する"},
 ];
