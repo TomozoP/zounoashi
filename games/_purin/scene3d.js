@@ -276,11 +276,11 @@
     this.eatAmt += ((s.eating ? 1 : 0) - this.eatAmt) * Math.min(1, dt * 10);
     var ea = this.eatAmt;
     if (ea > 0.05) this.chew += dt * 11;
-    hero.position.set(s.me[0], 0, s.me[2]);
+    hero.position.set(s.me[0], 0, s.me[2]); hero.scale.setScalar(0.5);
     hero.rotation.y = s.face;
     var sw = Math.sin(wk * 9) * 0.7 * mv;
     this.legL.rotation.x = sw; this.legR.rotation.x = -sw;
-    hero.position.y = Math.abs(Math.cos(wk * 9)) * 0.05 * mv;
+    hero.position.y = Math.abs(Math.cos(wk * 9)) * 0.025 * mv;
     /* 両手のスプーンで交互にかきこむ：前へ突っこむ→口へ */
     var cyc = this.chew, aR = 0.5 + 0.5 * Math.sin(cyc), aL = 0.5 + 0.5 * Math.sin(cyc + Math.PI);
     var walkR = -0.9 + sw * 0.2, walkL = -0.9 - sw * 0.2;
@@ -309,7 +309,7 @@
         c.m.position.set(b.p[0] + (Math.random() - 0.5) * 0.5, b.p[1] + (Math.random() - 0.5) * 0.5, b.p[2] + (Math.random() - 0.5) * 0.5);
         var sp2 = 1.2 + Math.random() * 2;
         c.v = [-b.dir[0] * sp2 * 0.5 + (Math.random() - 0.5) * 2.4, 1.2 + Math.random() * 2.4, -b.dir[1] * sp2 * 0.5 + (Math.random() - 0.5) * 2.4];
-        var sz = 0.03 + Math.random() * 0.05; c.m.scale.set(sz, sz * 0.8, sz);
+        var sz = 0.015 + Math.random() * 0.03; c.m.scale.set(sz, sz * 0.8, sz);
         c.m.visible = true;
       }
     }
@@ -323,19 +323,19 @@
 
     /* カメラ：人の後ろ上から。プリンに埋まらないよう手前に寄せる */
     var cam = this.camera, sh = s.shake || 0;
-    var tx = s.me[0], ty = 1.5, tz = s.me[2];
-    var el = Math.max(-0.35, Math.min(1.25, 0.32 - s.pitch));
+    var tx = s.me[0], ty = 0.6, tz = s.me[2];
+    var el = Math.max(-0.2, Math.min(1.25, -0.02 - s.pitch * 0.3));
     sh += 0.015 * this.eatAmt;
-    var dist = 3.4, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
+    var dist = 2.2, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
     var d = 0.4;
     while (d < dist) {
       var px = tx + dx * (d + 0.15), py = ty + dy * (d + 0.15), pz = tz + dz * (d + 0.15);
-      if (py < 0.25 || this.F.sample(px, py, pz) < 0.12) break;
+      if (py < 0.12 || this.F.sample(px, py, pz) < 0.1) break;
       d += 0.1;
     }
-    cam.position.set(tx + dx * d + (Math.random() - 0.5) * sh, Math.max(0.25, ty + dy * d) + (Math.random() - 0.5) * sh, tz + dz * d + (Math.random() - 0.5) * sh);
-    cam.lookAt(tx, ty + 0.15, tz);
-    hero.visible = d > 0.7;
+    cam.position.set(tx + dx * d + (Math.random() - 0.5) * sh, Math.max(0.12, ty + dy * d) + (Math.random() - 0.5) * sh, tz + dz * d + (Math.random() - 0.5) * sh);
+    cam.lookAt(tx - Math.sin(s.yaw) * 2, ty + 1.3, tz - Math.cos(s.yaw) * 2);
+    hero.visible = d > 0.5;
 
     /* 崩れ */
     if (this.parts) {
