@@ -105,7 +105,7 @@
   function GameScene(F) {
     T = global.THREE;
     this.F = F;
-    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 0.85 }, camera: { fov: 68, near: 0.05, far: 80 } });
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: true, tone: "aces", exposure: 0.85 }, camera: { fov: 80, near: 0.03, far: 80 } });
     this.scene = st.scene;
     this.camera = st.camera;
     this.scene.background = new T.Color(0xe9dccb);
@@ -212,6 +212,18 @@
     this.blob2 = spoon2.children[2]; this.blobTop2 = this.blob2.children[0];
     this.armL.add(spoon2);
 
+    /* 一人称の腕（画面の下から前へ伸ばす。両手にスプーン） */
+    this.scene.add(this.camera);
+    this.fp = [];
+    for (var sd = -1; sd <= 1; sd += 2) {
+      var g = new T.Group();
+      var sleeve = new T.Mesh(new T.CapsuleGeometry(0.026, 0.32, 4, 10), shirt); sleeve.rotation.x = Math.PI / 2; sleeve.position.z = -0.12; g.add(sleeve);
+      var hand = new T.Mesh(new T.SphereGeometry(0.032, 12, 10), skin); hand.position.z = -0.32; g.add(hand);
+      var sp3 = spoon.clone(); sp3.rotation.set(-0.15, Math.PI, 0); sp3.position.set(0, 0.006, -0.32); sp3.scale.setScalar(0.5); g.add(sp3);
+      this.camera.add(g);
+      this.fp.push({ g: g, side: sd, blob: sp3.children[2] });
+    }
+
     /* 飛び散るかけら */
     var crumbG = new T.SphereGeometry(1, 8, 6);
     this.crumbM = [new T.MeshStandardMaterial({ color: 0xf2c25a, roughness: 0.25, envMap: this.env, emissive: 0x3a2200, emissiveIntensity: 0.3 }),
@@ -315,7 +327,7 @@
         c.m.material = b.caramel && Math.random() < 0.5 ? this.crumbM[1] : this.crumbM[0];
         c.m.position.set(b.p[0] + (Math.random() - 0.5) * 0.5, b.p[1] + (Math.random() - 0.5) * 0.5, b.p[2] + (Math.random() - 0.5) * 0.5);
         var sp2 = 1.2 + Math.random() * 2;
-        c.v = [-b.dir[0] * sp2 * 0.5 + (Math.random() - 0.5) * 2.4, 1.2 + Math.random() * 2.4, -b.dir[1] * sp2 * 0.5 + (Math.random() - 0.5) * 2.4];
+        c.v = [b.dir[0] * sp2 * 0.3 + (Math.random() - 0.5) * 2.0, 1.0 + Math.random() * 2.0, b.dir[1] * sp2 * 0.3 + (Math.random() - 0.5) * 2.0];
         var sz = 0.015 + Math.random() * 0.03; c.m.scale.set(sz, sz * 0.8, sz);
         c.m.visible = true;
       }
@@ -328,16 +340,22 @@
       if (cc.life <= 0) cc.m.visible = false;
     }
 
-    /* カメラ：人の後ろの低い所から、いつも同じ距離。間に挟まるプリンはくり抜いて見せる */
-    var cam = this.camera, sh = s.shake || 0;
-    var tx = s.me[0], ty = 0.6, tz = s.me[2];
-    var el = Math.max(-0.2, Math.min(1.25, -0.02 - s.pitch * 0.3));
-    sh += 0.015 * this.eatAmt;
-    var d = 2.2, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
-    cam.position.set(tx + dx * d + (Math.random() - 0.5) * sh, Math.max(0.12, ty + dy * d) + (Math.random() - 0.5) * sh, tz + dz * d + (Math.random() - 0.5) * sh);
-    cam.lookAt(tx - Math.sin(s.yaw) * 2, ty + 1.3, tz - Math.cos(s.yaw) * 2);
-    CUT.uCam.value.copy(cam.position);
-    CUT.uHero.value.set(tx, 0.45, tz);
+    /* カメラ：小さい人の目の高さから、少し見上げる一人称 */
+    var cam = this.camera, sh = (s.shake || 0) + 0.012 * this.eatAmt;
+    var tx = s.me[0], tz = s.me[2], eye = 0.75 + Math.abs(Math.cos(wk * 9)) * 0.02 * mv;
+    cam.position.set(tx + (Math.random() - 0.5) * sh, eye + (Math.random() - 0.5) * sh, tz + (Math.random() - 0.5) * sh);
+    cam.lookAt(tx - Math.sin(s.yaw) * 2, eye + 0.45, tz - Math.cos(s.yaw) * 2);
+    CUT.uCam.value.copy(cam.position); CUT.uHero.value.copy(cam.position);
+    hero.visible = false;
+    /* 腕：ふだんは前に伸ばして歩きに合わせて揺れる。食べるときは交互に突っこんで手前へかきこむ */
+    for (var fi = 0; fi < this.fp.length; fi++) {
+      var A = this.fp[fi], ph = A.side > 0 ? 0 : Math.PI;
+      var thr = 0.5 + 0.5 * Math.sin(this.chew + ph);
+      var bobA = Math.sin(wk * 9 + ph) * 0.015 * mv;
+      A.g.position.set(A.side * (0.085 - 0.03 * (1 - thr) * ea), -0.17 + bobA + 0.04 * (1 - thr) * ea, -0.1 - 0.12 * thr * ea);
+      A.g.rotation.set(0.1 + 0.35 * (1 - thr) * ea, -A.side * (0.12 + 0.2 * (1 - thr) * ea), 0);
+      A.blob.visible = ea > 0.3 && thr < 0.55;
+    }
 
     /* 崩れ */
     if (this.parts) {
