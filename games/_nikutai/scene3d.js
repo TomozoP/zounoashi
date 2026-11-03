@@ -134,6 +134,7 @@
     Object.keys(B).forEach(function (k) { B[k].quaternion.copy(M.rest[k]); });
     /* 骨盤の高さ：立ち姿（92cm）からの下がりぶん */
     B.Hips.position.copy(M.hipsPos);
+    B.Hips.quaternion.premultiply(new T.Quaternion().setFromAxisAngle(UP, j.yaw || 0));
     B.Hips.position.y = M.hipsY + (j.pelvis[1] - 92) / 100 / (B.Hips.parent && B.Hips.parent.isBone ? 1 : 1) * this.hipScale();
     M.root.updateMatrixWorld(true);
     for (var i = 0; i < 2; i++) {
@@ -173,6 +174,7 @@
   GameScene.prototype.sync = function (s) {
     var j = s.j;
     this.torso.position.set(j.pelvis[0], j.pelvis[1], j.pelvis[2]);
+    this.torso.rotation.y = j.yaw || 0;
     var fl = 1 + (s.flex || 0) * 0.06;
     this.torso.scale.set(fl, 1, fl);
     this.head.rotation.set(-0.05, 0, (s.tilt || 0));
