@@ -384,12 +384,30 @@
     s.connect(f); f.connect(g); g.connect(AC.destination);
     s.start(n, Math.random()); s.stop(n + dur + 0.05);
   }
-  function sScoop() { noiseHit(0.14, 1100, 0.22, 1.5); tone(420, 0.14, 0.12, "sine", 160); }
-  function sPurun(k) { tone(150 + 30 * Math.random(), 0.32, 0.06 * k, "sine", 95); tone(230, 0.2, 0.03 * k, "triangle", 140, 0.04); }
-  function sMunch() { noiseHit(0.07, 600, 0.14, 1.2); noiseHit(0.07, 520, 0.11, 1.2, 0.12); }
+  /* ぷよーん：ふるえながら高さが上がって戻る、やわらかい音 */
+  function puyon(f0, dur, vol, delay) {
+    if (!AC) return;
+    var n = AC.currentTime + (delay || 0);
+    var o = AC.createOscillator(), g = AC.createGain(), lfo = AC.createOscillator(), lg = AC.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(f0, n);
+    o.frequency.exponentialRampToValueAtTime(f0 * 2.1, n + dur * 0.35);
+    o.frequency.exponentialRampToValueAtTime(f0 * 1.3, n + dur);
+    lfo.frequency.setValueAtTime(11, n); lfo.frequency.linearRampToValueAtTime(6, n + dur);
+    lg.gain.setValueAtTime(f0 * 0.18, n); lg.gain.exponentialRampToValueAtTime(f0 * 0.02, n + dur);
+    lfo.connect(lg); lg.connect(o.frequency);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); lfo.start(n); o.stop(n + dur + 0.05); lfo.stop(n + dur + 0.05);
+  }
+  function sScoop() { tone(700 + Math.random() * 200, 0.07, 0.07, "sine", 1300); }
+  function sPurun(k) { puyon(300 + 60 * Math.random(), 0.28, 0.05 * k); }
+  function sMunch() { tone(500 + Math.random() * 150, 0.05, 0.06, "sine", 260); }
   function sWhiff() { noiseHit(0.12, 2400, 0.06, 0.8); }
-  function sCreak() { tone(70, 0.6, 0.1, "sawtooth", 52); }
-  function sCrash() { noiseHit(1.1, 260, 0.7, 0.6); noiseHit(0.6, 120, 0.6, 0.8, 0.05); tone(95, 0.9, 0.3, "sine", 38); }
+  function sCreak() { puyon(240, 0.4, 0.07); }
+  function sCrash() { puyon(170, 0.75, 0.32); puyon(260, 0.5, 0.14, 0.12); }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -403,7 +421,7 @@
   var me = { y: 0, vy: 0, x: 0, z: 7, yaw: 0, pitch: 0.12, walk: 0, face: Math.PI, moving: 0 };
   var wob = [0, 0], wobV = [0, 0], risk = 1, lean = [0, 0];
   var spoon = { phase: 0, t: 0, blob: false, caramel: false, hit: null };
-  var col = null, crashed = false, creaked = 0;
+  var col = null, crashed = false, creaked = 0, land = { n: 0, p: [0, 0, 0] };
   var EYE = 1.6, REACH = 2.1, BITE = 0.42;
 
   /* 30秒ずつ潜って食べ、食べた分（トン）で強化して、完食を目指す。プリンは潜りをまたいでそのまま */
@@ -491,7 +509,7 @@
     F.carveCapsule(cx, cz, cy + 0.08, cy + 0.45 * mk, 0.36 * mk);
     kg = F.eatenKg();
     munchN++;
-    sMunch(); if (munchN % 2) sScoop(); else noiseHit(0.09, 380, 0.12, 2, 0.05);
+    sMunch(); if (munchN % 2) sScoop();
     if (spoon.phase === 0) spoon = { phase: 3, t: 0, blob: true, caramel: top };
     eatGlow = 0.45;
     bites.n++; bites.p = [me.x + d[0] * 0.5, me.y + 0.15 + Math.random() * 0.3 + d[1] * 0.4, me.z + d[2] * 0.5]; bites.caramel = top; bites.dir = [ux, uz];
@@ -563,7 +581,7 @@
     if (state === S.COLLAPSE) {
       col.t += dt;
       col.pose = F.pose(col.plan, col.t);
-      if (!crashed && col.t > col.plan.tLand) { crashed = true; sCrash(); var dl = col.c.dir || [0, 0]; wobV[0] += dl[0] * 0.09; wobV[1] += dl[1] * 0.09; }
+      if (!crashed && col.t > col.plan.tLand) { crashed = true; sCrash(); land = { n: land.n + 1, p: [col.plan.cx, col.plan.base, col.plan.cz] }; var dl = col.c.dir || [0, 0]; wobV[0] += dl[0] * 0.09; wobV[1] += dl[1] * 0.09; }
       if (col.t > col.plan.tEnd) endCollapse();
     }
 
@@ -760,7 +778,7 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ me: [me.x, me.y, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: 0, intro: state === S.INTRO || state === S.SHOP ? 1 : 0, size: mouthK(), cherries: cherries, boost: boost > 0 ? Math.min(1, boost) : 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
+        s3.sync({ me: [me.x, me.y, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: 0, intro: state === S.INTRO || state === S.SHOP ? 1 : 0, size: mouthK(), land: land, cherries: cherries, boost: boost > 0 ? Math.min(1, boost) : 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
           wob: [wob[0] + lx, wob[1] + lz], spoon: spoon, collapse: state === S.COLLAPSE ? col : null, shake: shake });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); if (window.console) console.error(e); }

@@ -86,7 +86,7 @@
   /* カメラと人の間にあるプリンは、筒の形にくり抜いて見えなくする（全部の材質で共有） */
   var CUT = null;
   function puddingMaterial(env) {
-    if (!CUT) CUT = { uCam: { value: new T.Vector3() }, uHero: { value: new T.Vector3() }, uCutR: { value: 0.75 }, uFeet: { value: 0 },
+    if (!CUT) CUT = { uCam: { value: new T.Vector3() }, uHero: { value: new T.Vector3() }, uCutR: { value: 0.75 }, uFeet: { value: 0 }, uBig: { value: new T.Vector4(0, -50, 0, 99) },
       uBite: { value: [0, 1, 2, 3, 4, 5].map(function () { return new T.Vector4(0, -50, 0, 99); }) } };
     var m = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.22, metalness: 0, envMap: env, envMapIntensity: 0.7, emissive: new T.Color(0x3a1800), emissiveIntensity: 0.25 });
     var u = { uWob: { value: new T.Vector2() }, uH: { value: 3.6 }, uSquash: { value: 0 }, uBase: { value: 0 } };
@@ -99,8 +99,8 @@
       sh.vertexShader = "varying vec3 vCutP;\n" + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\n vCutP = (modelMatrix * vec4(transformed, 1.0)).xyz;");
       sh.fragmentShader = "uniform vec3 uCam; uniform vec3 uHero; uniform float uCutR; uniform float uFeet; varying vec3 vCutP;\n" + sh.fragmentShader.replace("void main() {",
         "void main() {\n vec3 cutD = uHero - uCam; float cutL = length(cutD); vec3 cutN = cutD / max(cutL, 1e-4);\n float cutT = dot(vCutP - uCam, cutN);\n if (cutT > 0.0 && cutT < cutL - 0.15 && vCutP.y > uFeet + 0.06) {\n  float cutR = length(vCutP - uCam - cutN * cutT);\n  float rr = uCutR * (0.3 + 0.7 * cutT / cutL);\n  float dith = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);\n  if (cutR < rr - 0.06 * dith) discard;\n }");
-      sh.vertexShader = "uniform vec2 uWob; uniform float uH; uniform float uSquash; uniform float uBase; uniform vec4 uBite[6];\n" + sh.vertexShader.replace("#include <begin_vertex>",
-        "#include <begin_vertex>\n float hh = clamp((transformed.y - uBase) / uH, 0.0, 1.6);\n float ww = pow(hh, 1.5);\n transformed.xz += uWob * ww * uH;\n transformed.y = uBase + (transformed.y - uBase) * (1.0 - uSquash * hh * 0.5);\n transformed.xz *= 1.0 + uSquash * 0.18 * (1.0 - hh * 0.5);\n for (int bi = 0; bi < 6; bi++) {\n  vec3 bd = transformed - uBite[bi].xyz; float bl = length(bd); float ba = uBite[bi].w;\n  float bk = 0.07 * exp(-ba * 2.2) * sin(ba * 20.0 - bl * 7.0) * exp(-bl * bl * 1.6);\n  transformed += (bd / max(bl, 0.05)) * bk + vec3(0.0, bk * 0.6, 0.0);\n }");
+      sh.vertexShader = "uniform vec2 uWob; uniform float uH; uniform float uSquash; uniform float uBase; uniform vec4 uBite[6]; uniform vec4 uBig;\n" + sh.vertexShader.replace("#include <begin_vertex>",
+        "#include <begin_vertex>\n float hh = clamp((transformed.y - uBase) / uH, 0.0, 1.6);\n float ww = pow(hh, 1.5);\n transformed.xz += uWob * ww * uH;\n transformed.y = uBase + (transformed.y - uBase) * (1.0 - uSquash * hh * 0.5);\n transformed.xz *= 1.0 + uSquash * 0.18 * (1.0 - hh * 0.5);\n { vec3 gd = transformed - uBig.xyz; float gl = length(gd); float ga = uBig.w;\n  float gk = 0.16 * exp(-ga * 1.5) * sin(ga * 13.0 - gl * 2.6) * exp(-gl * gl * 0.12);\n  transformed += vec3(gd.x / max(gl, 0.1) * gk * 0.5, gk, gd.z / max(gl, 0.1) * gk * 0.5); }\n for (int bi = 0; bi < 6; bi++) {\n  vec3 bd = transformed - uBite[bi].xyz; float bl = length(bd); float ba = uBite[bi].w;\n  float bk = 0.07 * exp(-ba * 2.2) * sin(ba * 20.0 - bl * 7.0) * exp(-bl * bl * 1.6);\n  transformed += (bd / max(bl, 0.05)) * bk + vec3(0.0, bk * 0.6, 0.0);\n }");
     };
     return m;
   }
@@ -349,6 +349,9 @@
     /* 食べた周りがしばらくぷるぷる揺れる */
     if (b && b.n !== this.biteN && b.n % 2 === 0) { this.biteK = ((this.biteK || 0) + 1) % 6; CUT.uBite.value[this.biteK].set(b.p[0], b.p[1], b.p[2], 0); }
     for (var bq = 0; bq < 6; bq++) CUT.uBite.value[bq].w += dt;
+    /* 落ちて着地したら、着いた所を中心に大きく波打つ */
+    if (s.land && s.land.n !== this.landN) { this.landN = s.land.n; CUT.uBig.value.set(s.land.p[0], s.land.p[1], s.land.p[2], 0); }
+    CUT.uBig.value.w += dt;
     if (b && b.n !== this.biteN) {
       this.biteN = b.n;
       var cnt = 5;
