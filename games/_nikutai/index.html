@@ -279,7 +279,8 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var galleryK = null, showK = null;   /* showK: 確認用（覗き穴から1つのポーズを出す） */
   var state, T, penalty, words, wi, ci, cur, flex, wordDone, flash, gallery, misses, pt, pEnd = 1e9, hold = -1, pop = null, hitIdx, impact = 0;
-  var STEP = 0.58;                             /* 連続ポーズの1文字ぶんの秒数（tomozo「テンポは倍くらい」で 1.15→0.58） */
+  var STEP = 1.15, FAST = 0.58;                /* 連続ポーズの1文字ぶんの秒数。そろった後の結果発表だけ倍のテンポ */
+  var step = STEP, doneT = -1;
   var NW = WORDS.length, PEN = 3;
   var CAM = Number((location.search.match(/[?&]cam=(\d)/) || [])[1] || 0);
 
@@ -307,18 +308,19 @@
   /* 再生中なら今ポーズしている文字の番号、止まっていれば -1 */
   function playIdx() {
     if (pt < 0 || state !== S.PLAY || !words || wi >= NW) return -1;
-    var i = Math.floor(pt / STEP);
+    var i = Math.floor(pt / step);
     return i < words[wi].length && pt < pEnd ? i : -1;
   }
   /* 全部続けて（from を渡すとその1文字だけ） */
   function play(from) {
     if (state !== S.PLAY || wordDone > 0) return;
+    step = STEP;
     if (from == null) { pt = 0; pEnd = 1e9; hold = -1; } else { pt = from * STEP; pEnd = (from + 1) * STEP; hold = from; }
     hitIdx = -1;
     tone(440, 0.08, 0.1, "triangle"); tone(660, 0.1, 0.08, "triangle", null, 0.07);
   }
   /* 言葉の始め：一連のポーズを見せてから1文字目のポーズで止まる */
-  function intro() { pt = 0; pEnd = 1e9; hitIdx = -1; hold = 0; }
+  function intro() { step = STEP; doneT = -1; pt = 0; pEnd = 1e9; hitIdx = -1; hold = 0; }
   function slotRects() {
     var w = words[wi < NW ? wi : NW - 1], n = w.length;
     var bs = Math.min(52, (W - 170) / n - 6), x0 = W / 2 - 30 - (n * (bs + 6) - 6) / 2, y = AY + (TY - AY - 4 - bs) / 2, out = [];
@@ -333,7 +335,15 @@
     if (pt >= 0) { pt += dt; if (state !== S.PLAY || playIdx() < 0) pt = -1; }
     var pi = playIdx();
     /* ポーズに移り終わるころに「じゃーん」 */
-    if (pi >= 0 && pi !== hitIdx && pt - pi * STEP >= 0) { hitIdx = pi; jaan(pi); flex = 1; impact = 1; }
+    if (state === S.PLAY && wordDone > 0 && pi < 0 && doneT < 0) {
+      /* 結果発表のポーズが終わったら「完成」と小さく紙吹雪 */
+      doneT = 0;
+      if (mini) mini.burst(W, H, 40, { x: W / 2, y: SH * 0.3 });
+      if (AC && window.zCelebrate) window.zCelebrate.play(AC, "clear");
+    }
+    if (doneT >= 0) doneT += dt;
+    if (mini) mini.step(dt, W, H);
+    if (pi >= 0 && pi !== hitIdx && pt - pi * step >= 0) { hitIdx = pi; jaan(pi); flex = 1; impact = 1; }
     impact = Math.max(0, impact - dt * 1.8);
     var goal = pi >= 0 ? KANA[words[wi][pi]].pose : (hold >= 0 && state === S.PLAY && wi < NW ? KANA[words[wi][hold]].pose : REST);
     if (showK) goal = KANA[showK].pose;
@@ -389,7 +399,8 @@
       if (ci < words[wi].length) play(ci);
       if (ci >= words[wi].length) {
         /* そろったら改めて一連のポーズ */
-        wordDone = words[wi].length * STEP + 0.6; pt = 0; pEnd = 1e9; hitIdx = -1; hold = -1;
+        step = FAST; doneT = -1;
+        wordDone = words[wi].length * FAST + 1.6; pt = 0; pEnd = 1e9; hitIdx = -1; hold = -1;
         if (AC && window.zCelebrate) window.zCelebrate.play(AC, "chime");
       }
     } else {
@@ -629,6 +640,17 @@
       }
       ctx.restore();
     }
+    if (state === S.PLAY && wordDone > 0 && doneT >= 0) {
+      var ka = Math.min(1, doneT * 5), ks = 1 + Math.max(0, 0.3 - doneT) * 1.5;
+      ctx.save();
+      ctx.globalAlpha = ka; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+      ctx.font = "900 " + Math.round(54 * ks) + "px sans-serif";
+      ctx.lineWidth = 10; ctx.strokeStyle = "#16202e"; ctx.fillStyle = "#ffd84a";
+      var kt = zT("完成", "COMPLETE", "완성", "完成", "完成");
+      ctx.strokeText(kt, W / 2, SH * 0.2); ctx.fillText(kt, W / 2, SH * 0.2);
+      ctx.restore();
+    }
+    if (mini) mini.draw(ctx);
     drawAnswer();
     drawTable();
     if (state === S.RESULT) drawResult();
@@ -680,6 +702,8 @@
   };
 
   var confetti = window.zCelebrate ? window.zCelebrate.confetti() : null;
+  var mini = window.zCelebrate ? window.zCelebrate.confetti() : null;
+  if (mini) mini.rain = false;
   var startButton = document.getElementById('start');
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
   ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
