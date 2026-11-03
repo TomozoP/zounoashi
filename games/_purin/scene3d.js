@@ -344,10 +344,23 @@
     var cam = this.camera, sh = (s.shake || 0) + 0.015 * this.eatAmt;
     var tx = s.me[0], ty = 0.6, tz = s.me[2];
     var el = -0.02, d = 2.2, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
-    cam.position.set(tx + dx * d + (Math.random() - 0.5) * sh, Math.max(0.12, ty + dy * d) + (Math.random() - 0.5) * sh, tz + dz * d + (Math.random() - 0.5) * sh);
-    cam.lookAt(tx - Math.sin(s.yaw) * 2, ty + 1.3, tz - Math.cos(s.yaw) * 2);
+    var cx0 = tx + dx * d, cy0 = Math.max(0.12, ty + dy * d), cz0 = tz + dz * d;
+    var lx0 = tx - Math.sin(s.yaw) * 2, ly0 = ty + 1.3, lz0 = tz - Math.cos(s.yaw) * 2;
+    /* 倒れる間は引きのカメラ（プリンの中心から、人のいる側へ離れて少し上から） */
+    var w = s.wide || 0;
+    if (w > 0) {
+      w = w * w * (3 - 2 * w);
+      var ox = tx, oz = tz, ol = Math.sqrt(ox * ox + oz * oz);
+      if (ol < 0.5) { ox = Math.sin(s.yaw); oz = Math.cos(s.yaw); ol = 1; }
+      var wx = ox / ol * 11, wz = oz / ol * 11;
+      cx0 += (wx - cx0) * w; cy0 += (4.2 - cy0) * w; cz0 += (wz - cz0) * w;
+      lx0 += (0 - lx0) * w; ly0 += (1.4 - ly0) * w; lz0 += (0 - lz0) * w;
+    }
+    cam.position.set(cx0 + (Math.random() - 0.5) * sh, cy0 + (Math.random() - 0.5) * sh, cz0 + (Math.random() - 0.5) * sh);
+    cam.lookAt(lx0, ly0, lz0);
     CUT.uCam.value.copy(cam.position);
     CUT.uHero.value.set(tx, 0.45, tz);
+    if (w > 0.5) CUT.uHero.value.copy(cam.position);   /* 引きのときはくり抜かない */
     for (var fi = 0; fi < this.fp.length; fi++) this.fp[fi].g.visible = false;
 
     /* 崩れ */
