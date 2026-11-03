@@ -369,6 +369,5 @@ window.DRAFT_GAMES = [
     "play": "games/_semi/index.html",
     "full": true,
     "catch": "セミの発音器官を動かして鳴く"
-  },
-  {"type":"lab","tags":[],"id":"purin","title":"巨大プリンを食い尽くせ","year":2026,"date":"2026-11-02","plays":null,"url":"","img":"games/_purin/img/thumb.webp","play":"games/_purin/index.html","full":true,"catch":""},
+  }
 ];
