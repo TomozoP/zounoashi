@@ -105,7 +105,10 @@
     if (!T.GLTFLoader || /[?&]model=0/.test(global.location.search)) return;
     var self = this;
     try {
-      new T.GLTFLoader().load("macho.glb?v=" + (global.NIKUTAI_MODEL_VER || "1"), function (gltf) {
+      if (!global.MACHO_GLB) return;
+      var bin = atob(global.MACHO_GLB), buf = new Uint8Array(bin.length);
+      for (var bi = 0; bi < bin.length; bi++) buf[bi] = bin.charCodeAt(bi);
+      new T.GLTFLoader().parse(buf.buffer, "", function (gltf) {
         var root = gltf.scene;
         root.scale.setScalar(100);                 /* メートル → cm */
         var bones = {};
@@ -121,7 +124,7 @@
         self.glb = { root: root, bones: bones, rest: rest, hipsY: bones.Hips.position.y, hipsPos: bones.Hips.position.clone() };
         self.torso.visible = false;
         self.limbs.forEach(function (L) { [L.upper, L.fore, L.hand, L.thigh, L.shin, L.foot].forEach(function (m) { m.visible = false; }); });
-      }, null, function () {});
+      }, function () {});
     } catch (e) {}
   };
   var _a = null, _b = null, _q = null, _pq = null, _d = null;
