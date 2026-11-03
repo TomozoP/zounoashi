@@ -400,7 +400,7 @@
   var S = { INTRO: "intro", PLAY: "play", COLLAPSE: "collapse", RESULT: "result" };
   var F = new window.Pudding.Field();
   var state, kg, T;
-  var me = { x: 0, z: 7, yaw: 0, pitch: 0.12, walk: 0, face: Math.PI, moving: 0 };
+  var me = { y: 0, vy: 0, x: 0, z: 7, yaw: 0, pitch: 0.12, walk: 0, face: Math.PI, moving: 0 };
   var wob = [0, 0], wobV = [0, 0], risk = 1, lean = [0, 0];
   var spoon = { phase: 0, t: 0, blob: false, caramel: false, hit: null };
   var col = null, crashed = false, creaked = 0;
@@ -413,7 +413,7 @@
     T = 0;
     F.reset();
     kg = 0;
-    me.x = 0; me.z = 8.5; me.yaw = 0; me.pitch = -0.08; me.face = Math.PI; me.moving = 0; eatGlow = 0;
+    me.x = 0; me.z = 0.8; me.y = F.HT; me.vy = 0; me.yaw = 0; me.pitch = -0.35; me.face = Math.PI; me.moving = 0; eatGlow = 0;
     wob = [0, 0]; wobV = [0, 0]; risk = F.last.risk; lean = [0, 0];
     spoon = { phase: 0, t: 0, blob: false };
     col = null; crashed = false; creaked = 0; munchT = 0; munchN = 0; calm = 0; wide = 0;
@@ -428,18 +428,19 @@
 
   /* 体で食べる：進む向きの、足元から頭の上までをくり抜く */
   var calm = 0, wide = 0;   /* 倒れた直後しばらくは崩れない / 引きのカメラの度合い */
-  var BODY = [0.1, 0.3, 0.5], munchT = 0, munchN = 0, eatGlow = 0, bites = { n: 0, p: [0, 0, 0] };
-  function bodyBite(ux, uz) {
-    var cx = me.x + ux * 0.15, cz = me.z + uz * 0.15;
-    var top = false;
-    BODY.forEach(function (y) { if (y > F.HT - 0.5 && F.orig(cx, y, cz) > -0.25) top = true; });
-    F.carveCapsule(cx, cz, 0.08, 0.5, 0.36);
+  var BODY = [0.1, 0.3, 0.45], munchT = 0, munchN = 0, eatGlow = 0, bites = { n: 0, p: [0, 0, 0] };
+  function bodyBite(d) {
+    var ux = d[0], uz = d[2];
+    var cx = me.x + d[0] * 0.15, cy = me.y + d[1] * 0.15, cz = me.z + d[2] * 0.15;
+    var top = cy + 0.3 > F.HT - 0.5 && F.orig(cx, cy + 0.3, cz) > -0.25;
+    /* 体のまわり（足もと〜頭の少し上）をくり抜く */
+    F.carveCapsule(cx, cz, cy + 0.08, cy + 0.45, 0.36);
     kg = F.eatenKg();
     munchN++;
     sMunch(); if (munchN % 2) sScoop(); else noiseHit(0.09, 380, 0.12, 2, 0.05);
     if (spoon.phase === 0) spoon = { phase: 3, t: 0, blob: true, caramel: top };
     eatGlow = 0.45;
-    bites.n++; bites.p = [me.x + ux * 0.6, 0.15 + Math.random() * 0.35, me.z + uz * 0.5]; bites.caramel = top; bites.dir = [ux, uz];
+    bites.n++; bites.p = [me.x + d[0] * 0.5, me.y + 0.15 + Math.random() * 0.3 + d[1] * 0.4, me.z + d[2] * 0.5]; bites.caramel = top; bites.dir = [ux, uz];
     wobV[0] += ux * 0.006; wobV[1] += uz * 0.006;
     afterEat(ux, uz);
   }
@@ -474,7 +475,7 @@
     col = null;
     state = S.PLAY;
     /* 埋もれたら、まわりを食べて出てくる */
-    if (F.sample(me.x, 0.3, me.z) < 0.15) F.carveCapsule(me.x, me.z, 0.08, 0.5, 0.4);
+    if (F.sample(me.x, me.y + 0.3, me.z) < 0.15) F.carveCapsule(me.x, me.z, me.y + 0.08, me.y + 0.5, 0.4);
     afterEat(0, 0);
   }
   function startCollapse(c) {
@@ -510,25 +511,45 @@
       if (col.t > col.plan.tEnd) endCollapse();
     }
 
-    /* いつも前へ進む。操作は左右に曲がるだけ */
-    var turn = 0;
+    /* いつも前へ進む。左右で向き、上下で掘る角度。プリンの中は向いた方へ掘り進み、外では重力で落ちる */
+    var turn = 0, tilt = 0;
     if (keys.l || keys.tl) turn += 1;
     if (keys.r || keys.tr) turn -= 1;
-    turn = Math.max(-1, Math.min(1, turn));
+    if (keys.f) tilt += 1;
+    if (keys.b) tilt -= 1;
     me.yaw += turn * 2.1 * dt;
+    me.pitch = Math.max(-1.3, Math.min(1.1, me.pitch + tilt * 1.6 * dt));
     me.face = me.yaw + Math.PI;
     me.moving = 1;
-    var sp = (munchT > -0.25 ? 0.9 : 1.8) * dt, ux = -Math.sin(me.yaw), uz = -Math.cos(me.yaw);
-    me.x += ux * sp; me.z += uz * sp; me.walk += dt * (munchT > -0.25 ? 0.6 : 1);
+    var cp = Math.cos(me.pitch), dir = [-Math.sin(me.yaw) * cp, Math.sin(me.pitch), -Math.cos(me.yaw) * cp];
+    var ux = -Math.sin(me.yaw), uz = -Math.cos(me.yaw);
+    var ahead = F.sample(me.x + dir[0] * 0.3, me.y + 0.25 + dir[1] * 0.3, me.z + dir[2] * 0.3) < 0;
+    var digging = ahead || munchT > -0.2;
+    if (digging) {
+      /* 掘っている間は、向いた方へまっすぐ（ゆっくり）。床より下へは行かない */
+      var dsp = 0.9 * dt;
+      me.x += dir[0] * dsp; me.z += dir[2] * dsp; me.y = Math.max(0, me.y + dir[1] * dsp);
+      me.vy = 0;
+    } else {
+      me.x += ux * 1.8 * dt; me.z += uz * 1.8 * dt;
+    }
+    /* 足もとに支え（床かプリン）がなければ落ちる */
+    var support = me.y <= 0.001 || F.sample(me.x, me.y - 0.04, me.z) < 0.02;
+    if (!digging) {
+      if (support) { me.vy = Math.max(0, me.vy || 0); if (me.pitch > 0.2 && !ahead) me.vy = 0; }
+      else { me.vy = (me.vy || 0) - 9.8 * dt; }
+      me.y = Math.max(0, me.y + (me.vy || 0) * dt);
+      if (me.y <= 0) me.vy = 0;
+    }
+    me.walk += dt * (digging ? 0.6 : 1);
     eatGlow = Math.max(0, eatGlow - dt);
-    /* 進む先が体に触れていたら、そこを食べる（少しずつ） */
+    /* 進む先や体に触れていたら、そこを食べる（少しずつ） */
     munchT -= dt;
     if (munchT <= 0) {
-      var touch = false;
-      BODY.forEach(function (y) { if (F.sample(me.x + ux * 0.3, y, me.z + uz * 0.3) < 0 || F.sample(me.x, y, me.z) < 0.15) touch = true; });
-      if (touch) { munchT = 0.14; bodyBite(ux, uz); }
+      var touch = ahead;
+      BODY.forEach(function (y) { if (F.sample(me.x, me.y + y, me.z) < 0.1) touch = true; });
+      if (touch) { munchT = 0.14; bodyBite(dir); }
     }
-    /* 押し返しはしない（引っかからないように）。体が重なった所は次のひとくちで食べる */
     var r = Math.sqrt(me.x * me.x + me.z * me.z);
     if (r > 11) { me.x *= 11 / r; me.z *= 11 / r; }
 
@@ -548,7 +569,7 @@
   }
 
   /* ============ 入力 ============
-     いつも前へ進み、触れた所を食べる。横にドラッグして曲がる（キーは ←→ / A D） */
+     いつも前へ進み、触れた所を食べる。横にドラッグで向き、縦にドラッグで掘る角度（上へドラッグで上向き。キーは ←→↑↓ / WASD） */
   var pointers = {};
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
@@ -562,7 +583,7 @@
     }
     if (state !== S.PLAY && state !== S.COLLAPSE) return;
     try { wrap.setPointerCapture(e.pointerId); } catch (er) {}
-    pointers[e.pointerId] = { x: p.x };
+    pointers[e.pointerId] = { x: p.x, y: p.y };
   });
   /* 横にドラッグした分だけ向きを変える */
   wrap.addEventListener("pointermove", function (e) {
@@ -570,7 +591,8 @@
     if (!q || (state !== S.PLAY && state !== S.COLLAPSE)) return;
     var p = atCanvas(e);
     me.yaw -= (p.x - q.x) * 0.009;
-    q.x = p.x;
+    me.pitch = Math.max(-1.3, Math.min(1.1, me.pitch - (p.y - q.y) * 0.007));
+    q.x = p.x; q.y = p.y;
   });
   function release(e) { delete pointers[e.pointerId]; }
   wrap.addEventListener("pointerup", function (e) { e.preventDefault(); release(e); });
@@ -582,7 +604,7 @@
     /* 1: 食べ始め（プリンの前）  6: あとひとかけら  4: 正面を何口か食べた状態  2: 根元をぐるりと食べた状態（あとひとくちで崩れる）  3: いま崩れる */
     if (n === 1 || n === 2) {
       newRound();
-      me.z = 4.3; me.pitch = -0.1;
+      me.y = 0; me.z = 4.3; me.pitch = 0;
       if (n === 2) {
         for (var rr = 3.0; rr > 0.5; rr -= 0.25) {
           for (var a = 0; a < Math.PI * 2; a += 0.12) {
@@ -596,13 +618,13 @@
     }
     if (n === 4) {
       /* 正面を何口か食べた状態 */
-      newRound(); me.z = 4.6; me.pitch = 0.05;
+      newRound(); me.y = 0; me.z = 4.6; me.pitch = 0;
       for (var b = 0; b < 14; b++) F.carve(-0.6 + (b % 4) * 0.4, 0.9 + Math.floor(b / 4) * 0.45, 3.0 - (b % 3) * 0.25, BITE);
       var a4 = F.analyze(); F.last = a4; risk = a4.risk; lean = a4.lean; kg = F.eatenKg();
     }
     if (n === 6) {
       /* あとひとかけら（触れたら完食） */
-      newRound(); me.z = 4.6; me.pitch = -0.2;
+      newRound(); me.y = 0; me.z = 4.6; me.pitch = 0;
       for (var q6 = 0; q6 < F.f.length; q6++) F.f[q6] = Math.max(F.f[q6], 0.2);
       F.carve(0, -10, 0, 0.1);
       var g6 = F;
@@ -612,7 +634,7 @@
       }
       kg = F.eatenKg();
     }
-    if (n === 5) { debugKey(1); keys.f = true; }   /* 5: プリンへ歩いて食べ進む */
+    if (n === 5) { debugKey(1); }   /* 5: プリンの前（地面）から */
     if (n === 3 && state === S.PLAY) startCollapse(F.forceCollapse([-Math.sin(me.yaw), -Math.cos(me.yaw)]));
   }
 
@@ -666,7 +688,7 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ me: [me.x, 0, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
+        s3.sync({ me: [me.x, me.y, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
           wob: [wob[0] + lx, wob[1] + lz], spoon: spoon, collapse: state === S.COLLAPSE ? col : null, shake: shake });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); if (window.console) console.error(e); }
@@ -729,7 +751,6 @@
       await r.wait(800);
       debugKey(2);
       await r.wait(800);
-      keys.f = true;
       if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("終わらない");
       await r.wait(1500);
     }

@@ -86,16 +86,18 @@
   /* カメラと人の間にあるプリンは、筒の形にくり抜いて見えなくする（全部の材質で共有） */
   var CUT = null;
   function puddingMaterial(env) {
-    if (!CUT) CUT = { uCam: { value: new T.Vector3() }, uHero: { value: new T.Vector3() }, uCutR: { value: 0.9 } };
+    if (!CUT) CUT = { uCam: { value: new T.Vector3() }, uHero: { value: new T.Vector3() }, uCutR: { value: 0.75 }, uFeet: { value: 0 } };
     var m = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.22, metalness: 0, envMap: env, envMapIntensity: 0.7, emissive: new T.Color(0x3a1800), emissiveIntensity: 0.25 });
     var u = { uWob: { value: new T.Vector2() }, uH: { value: 3.6 }, uSquash: { value: 0 }, uBase: { value: 0 } };
     m.userData.u = u;
+    m.side = T.DoubleSide;   /* くり抜いた穴から、プリンの内側の面が見えるように */
     m.onBeforeCompile = function (sh) {
       for (var key in u) sh.uniforms[key] = u[key];
       for (var key2 in CUT) sh.uniforms[key2] = CUT[key2];
+      sh.fragmentShader = sh.fragmentShader.replace("#include <color_fragment>", "#include <color_fragment>\n if (!gl_FrontFacing) diffuseColor.rgb *= vec3(0.86, 0.8, 0.7);");
       sh.vertexShader = "varying vec3 vCutP;\n" + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\n vCutP = (modelMatrix * vec4(transformed, 1.0)).xyz;");
-      sh.fragmentShader = "uniform vec3 uCam; uniform vec3 uHero; uniform float uCutR; varying vec3 vCutP;\n" + sh.fragmentShader.replace("void main() {",
-        "void main() {\n vec3 cutD = uHero - uCam; float cutL = length(cutD); vec3 cutN = cutD / max(cutL, 1e-4);\n float cutT = dot(vCutP - uCam, cutN);\n if (cutT > 0.0 && cutT < cutL - 0.15) {\n  float cutR = length(vCutP - uCam - cutN * cutT);\n  float rr = uCutR * (0.55 + 0.45 * cutT / cutL);\n  float dith = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);\n  if (cutR < rr - 0.06 * dith) discard;\n }");
+      sh.fragmentShader = "uniform vec3 uCam; uniform vec3 uHero; uniform float uCutR; uniform float uFeet; varying vec3 vCutP;\n" + sh.fragmentShader.replace("void main() {",
+        "void main() {\n vec3 cutD = uHero - uCam; float cutL = length(cutD); vec3 cutN = cutD / max(cutL, 1e-4);\n float cutT = dot(vCutP - uCam, cutN);\n if (cutT > 0.0 && cutT < cutL - 0.15 && vCutP.y > uFeet + 0.06) {\n  float cutR = length(vCutP - uCam - cutN * cutT);\n  float rr = uCutR * (0.3 + 0.7 * cutT / cutL);\n  float dith = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);\n  if (cutR < rr - 0.06 * dith) discard;\n }");
       sh.vertexShader = "uniform vec2 uWob; uniform float uH; uniform float uSquash; uniform float uBase;\n" + sh.vertexShader.replace("#include <begin_vertex>",
         "#include <begin_vertex>\n float hh = clamp((transformed.y - uBase) / uH, 0.0, 1.6);\n float ww = pow(hh, 1.5);\n transformed.xz += uWob * ww * uH;\n transformed.y = uBase + (transformed.y - uBase) * (1.0 - uSquash * hh * 0.5);\n transformed.xz *= 1.0 + uSquash * 0.18 * (1.0 - hh * 0.5);");
     };
@@ -208,6 +210,9 @@
     spoon.scale.setScalar(1.4);
     spoon.position.set(0, -0.56, 0.02);
     spoon.rotation.x = Math.PI / 2;
+    /* スプーンは使わず手で食べる：さじ部分を隠し、つかんだプリンを手の中に */
+    bowl.visible = false; handle.visible = false;
+    this.blob.position.set(0, 0.02, 0.07); this.blob.scale.set(0.07, 0.05, 0.08);
     this.armR.add(spoon);
     var spoon2 = this.spoon2 = spoon.clone();
     this.blob2 = spoon2.children[2]; this.blobTop2 = this.blob2.children[0];
@@ -305,11 +310,11 @@
     this.eatAmt += ((s.eating ? 1 : 0) - this.eatAmt) * Math.min(1, dt * 10);
     var ea = this.eatAmt;
     if (ea > 0.05) this.chew += dt * 7;
-    hero.position.set(s.me[0], 0, s.me[2]); hero.scale.setScalar(0.25);
-    hero.rotation.y = s.face;
+    hero.position.set(s.me[0], s.me[1], s.me[2]); hero.scale.setScalar(0.25);
+    hero.rotation.set(-s.pitch * 0.6, s.face, 0, "YXZ");
     var sw = Math.sin(wk * 9) * 0.7 * mv;
     this.legL.rotation.x = sw; this.legR.rotation.x = -sw;
-    hero.position.y = Math.abs(Math.cos(wk * 9)) * 0.012 * mv;
+    hero.position.y = s.me[1] + Math.abs(Math.cos(wk * 9)) * 0.012 * mv;
     /* 両手のスプーンで交互にかきこむ：前へ突っこむ→口へ */
     var cyc = this.chew, aR = 0.5 + 0.5 * Math.sin(cyc), aL = 0.5 + 0.5 * Math.sin(cyc + Math.PI);
     /* 腕はいつも前へまっすぐ伸ばす。食べるときは交互に突っこんで口へかきこむ */
@@ -354,10 +359,10 @@
 
     /* カメラ：人の後ろの低い所から、いつも同じ距離。間に挟まるプリンはくり抜いて見せる */
     var cam = this.camera, sh = (s.shake || 0) + 0.015 * this.eatAmt;
-    var tx = s.me[0], ty = 0.3, tz = s.me[2];
-    var el = 0.3, d = 4.0, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
+    var tx = s.me[0], ty = s.me[1] + 0.3, tz = s.me[2];
+    var el = Math.max(-0.2, Math.min(1.2, 0.3 - s.pitch * 0.5)), d = 4.0, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
     var cx0 = tx + dx * d, cy0 = Math.max(0.12, ty + dy * d), cz0 = tz + dz * d;
-    var lx0 = tx - Math.sin(s.yaw) * 2, ly0 = ty + 0.75, lz0 = tz - Math.cos(s.yaw) * 2;
+    var lx0 = tx - Math.sin(s.yaw) * 2, ly0 = ty + 0.45 + Math.sin(s.pitch) * 1.2, lz0 = tz - Math.cos(s.yaw) * 2;
     /* 倒れる間は引きのカメラ（プリンの中心から、人のいる側へ離れて少し上から） */
     var w = s.wide || 0;
     if (w > 0) {
@@ -371,7 +376,8 @@
     cam.position.set(cx0 + (Math.random() - 0.5) * sh, cy0 + (Math.random() - 0.5) * sh, cz0 + (Math.random() - 0.5) * sh);
     cam.lookAt(lx0, ly0, lz0);
     CUT.uCam.value.copy(cam.position);
-    CUT.uHero.value.set(tx, 0.25, tz);
+    CUT.uHero.value.set(tx, s.me[1] + 0.25, tz);
+    CUT.uFeet.value = s.me[1];   /* 足もとより下（立っている面）はくり抜かない */
     if (w > 0.5) CUT.uHero.value.copy(cam.position);   /* 引きのときはくり抜かない */
     for (var fi = 0; fi < this.fp.length; fi++) this.fp[fi].g.visible = false;
 
