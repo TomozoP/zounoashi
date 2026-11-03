@@ -417,7 +417,15 @@
     CUT.uCam.value.copy(cam.position);
     CUT.uHero.value.set(tx, s.me[1] + 0.25, tz);
     CUT.uFeet.value = s.me[1];   /* 足もとより下（立っている面）はくり抜かない */
-    if (w > 0.5 || ik > 0.5) CUT.uHero.value.copy(cam.position);   /* 引きのときはくり抜かない */
+    /* 人がプリンに隠れているときだけ透かす（見えているうちは透かさない） */
+    var occ = false, F3 = this.F, hx = tx, hy = s.me[1] + 0.25 * sz, hz = tz, cp3 = cam.position;
+    for (var oi = 1; oi <= 12 && !occ; oi++) {
+      var ot = oi / 13 * 0.9;
+      if (F3.sample(cp3.x + (hx - cp3.x) * ot, cp3.y + (hy - cp3.y) * ot, cp3.z + (hz - cp3.z) * ot) < 0) occ = true;
+    }
+    this.cutK = (this.cutK || 0) + ((occ ? 1 : 0) - (this.cutK || 0)) * Math.min(1, dt * 8);
+    CUT.uCutR.value = 0.75 * this.cutK;
+    if (w > 0.5 || ik > 0.5 || this.cutK < 0.02) CUT.uHero.value.copy(cam.position);   /* 引きのときはくり抜かない */
     for (var fi = 0; fi < this.fp.length; fi++) this.fp[fi].g.visible = false;
 
     /* 崩れ */
