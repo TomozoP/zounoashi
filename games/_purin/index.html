@@ -397,7 +397,7 @@
   });
 
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", COLLAPSE: "collapse", RESULT: "result" };
+  var S = { INTRO: "intro", PLAY: "play", COLLAPSE: "collapse", SHOP: "shop", RESULT: "result" };
   var F = new window.Pudding.Field();
   var state, kg, T;
   var me = { y: 0, vy: 0, x: 0, z: 7, yaw: 0, pitch: 0.12, walk: 0, face: Math.PI, moving: 0 };
@@ -406,20 +406,47 @@
   var col = null, crashed = false, creaked = 0;
   var EYE = 1.6, REACH = 2.1, BITE = 0.42;
 
+  /* 30秒ずつ潜って食べ、食べた分（トン）で強化して、完食を目指す。プリンは潜りをまたいでそのまま */
+  var UPS = [{ id: "spd", icon: "⚡", cost: [3, 6, 10, 15, 22] }, { id: "mouth", icon: "😮", cost: [3, 6, 10, 15, 22] }, { id: "time", icon: "⏱", cost: [4, 8, 13, 19, 26] }];
+  var lv = { spd: 0, mouth: 0, time: 0 }, money = 0, dives = 0, timeLeft = 30, kgDive0 = 0, gained = 0, shopT = 0;
+  function diveTime() { return 30 + 5 * lv.time; }
+  function mouthK() { return 1 + 0.22 * lv.mouth; }
   function newRound() {
+    F.reset();
+    kg = 0; T = 0; dives = 0; money = 0; lv = { spd: 0, mouth: 0, time: 0 };
+    if (confetti) confetti.clear();
+    startDive();
+  }
+  function startDive() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    T = 0;
-    F.reset();
-    kg = 0;
+    dives++;
+    timeLeft = diveTime(); kgDive0 = kg;
+    /* てっぺんから。上が食べられて無ければ、その下の面へ降りる */
     me.x = 0; me.z = 0.8; me.y = F.HT; me.vy = 0; me.yaw = 0; me.pitch = -0.35; me.face = Math.PI; me.moving = 0; eatGlow = 0;
-    wob = [0, 0]; wobV = [0, 0]; risk = F.last.risk; lean = [0, 0];
+    var yTop = -1;
+    for (var yy = F.HT + 0.4; yy > 0.1; yy -= 0.1) if (F.sample(0, yy, 0.8) < 0) { yTop = yy; break; }
+    if (yTop > 0) me.y = yTop + 0.05;
+    else { me.y = 0; me.z = 4.6; me.pitch = 0; }
+    wob = [0, 0]; wobV = [0, 0]; var a0 = F.analyze(); F.last = a0; risk = a0.risk; lean = a0.lean;
     spoon = { phase: 0, t: 0, blob: false };
-    col = null; crashed = false; creaked = 0; munchT = 0; munchN = 0; calm = 0; wide = 0;
+    col = null; crashed = false; creaked = 0; munchT = 0; munchN = 0; calm = 2; wide = 0;
     boost = 0; placeCherries();
-    if (confetti) confetti.clear();
     pointers = {}; keys = {};
+  }
+  function toShop() {
+    state = S.SHOP; shopT = 0;
+    gained = Math.max(0, (kg - kgDive0) / 1000);
+    money += gained;
+    tone(660, 0.12, 0.25, "square"); tone(440, 0.3, 0.25, "square", null, 0.13);
+  }
+  function upCost(u) { var n = lv[u.id]; return n < u.cost.length ? u.cost[n] : null; }
+  function buy(i) {
+    var u = UPS[i], c = upCost(u);
+    if (c === null || money < c) { noiseHit(0.08, 200, 0.15, 2); return; }
+    money -= c; lv[u.id]++;
+    if (AC && window.zCelebrate) window.zCelebrate.play(AC, "levelup");
   }
 
   /* サクランボ：プリンの中のランダムな所に2個。取ると一定時間はやくなる */
@@ -428,7 +455,7 @@
     cherries = [];
     for (var tries = 0; cherries.length < 2 && tries < 500; tries++) {
       var x = (Math.random() * 2 - 1) * 2.6, z = (Math.random() * 2 - 1) * 2.6, y = 0.3 + Math.random() * 2.9;
-      if (F.orig(x, y, z) > -0.35) continue;
+      if (F.sample(x, y, z) > -0.35) continue;
       if (cherries.some(function (c) { var dx = c.p[0] - x, dy = c.p[1] - y, dz = c.p[2] - z; return dx * dx + dy * dy + dz * dz < 2.5; })) continue;
       cherries.push({ p: [x, y, z], got: false });
     }
@@ -459,7 +486,8 @@
     var cx = me.x + d[0] * 0.15, cy = me.y + d[1] * 0.15, cz = me.z + d[2] * 0.15;
     var top = cy + 0.3 > F.HT - 0.5 && F.orig(cx, cy + 0.3, cz) > -0.25;
     /* 体のまわり（足もと〜頭の少し上）をくり抜く */
-    F.carveCapsule(cx, cz, cy + 0.08, cy + 0.45, 0.36);
+    var mk = mouthK();
+    F.carveCapsule(cx, cz, cy + 0.08, cy + 0.45 * mk, 0.36 * mk);
     kg = F.eatenKg();
     munchN++;
     sMunch(); if (munchN % 2) sScoop(); else noiseHit(0.09, 380, 0.12, 2, 0.05);
@@ -519,6 +547,8 @@
   function update(dt) {
     if (state !== S.PLAY && state !== S.COLLAPSE) return;
     T += dt;
+    timeLeft -= dt;
+    if (timeLeft <= 0 && state === S.PLAY) { toShop(); return; }
     calm = Math.max(0, calm - dt);
     wide = state === S.COLLAPSE ? Math.min(1, wide + dt / 0.45) : Math.max(0, wide - dt / 0.6);
 
@@ -549,7 +579,7 @@
     var cp = Math.cos(me.pitch), dir = [-Math.sin(me.yaw) * cp, Math.sin(me.pitch), -Math.cos(me.yaw) * cp];
     var ux = -Math.sin(me.yaw), uz = -Math.cos(me.yaw);
     boost = Math.max(0, boost - dt);
-    var spd = boost > 0 ? 2 : 1;
+    var spd = (boost > 0 ? 2 : 1) * (1 + 0.25 * lv.spd);
     var ahead = F.sample(me.x + dir[0] * 0.3, me.y + 0.25 + dir[1] * 0.3, me.z + dir[2] * 0.3) < 0;
     var digging = ahead || munchT > -0.2;
     if (digging) {
@@ -607,6 +637,13 @@
     var p = atCanvas(e);
     if (state === S.RESULT) {
       if (window.zResultActions.hit(resultButtons(), p.x, p.y) === "retry") newRound();
+      return;
+    }
+    if (state === S.SHOP) {
+      if (shopT < 0.4) return;
+      var L = shopLayout();
+      L.cards.forEach(function (c, i) { if (p.x > c.x && p.x < c.x + c.w && p.y > c.y && p.y < c.y + c.h) buy(i); });
+      var g = L.go; if ((p.x - g.x) * (p.x - g.x) + (p.y - g.y) * (p.y - g.y) < g.r * g.r) startDive();
       return;
     }
     if (state !== S.PLAY && state !== S.COLLAPSE) return;
@@ -667,6 +704,7 @@
       var c7 = cherries.find(function (c) { return !c.got; });
       if (c7) { me.x = c7.p[0]; me.y = c7.p[1] - 0.25; me.z = c7.p[2] + 1.0; me.yaw = 0; me.pitch = 0; }
     }
+    if (n === 8 && state === S.PLAY) { kg += 9000; toShop(); }   /* 8: いま時間切れ（9トン食べたことに） */
     if (n === 5) { debugKey(1); }   /* 5: プリンの前（地面）から */
     if (n === 3 && state === S.PLAY) startCollapse(F.forceCollapse([-Math.sin(me.yaw), -Math.cos(me.yaw)]));
   }
@@ -686,19 +724,18 @@
   window.addEventListener("keyup", function (e) {
     if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = false; return; }
     if ((e.code === "Space" || e.key === " " || e.key === "Enter") && state === S.INTRO) startButton.click();
+    if ((e.code === "Space" || e.key === "Enter") && state === S.SHOP && shopT > 0.4) startDive();
   });
 
   function fmt(n) { return Math.round(n).toLocaleString("en-US"); }
   function doShare() {
     var ton = Math.round(F.vol0 * window.Pudding.KG / 1000), cups = fmt(F.vol0 * window.Pudding.KG * 10);
-    var m = Math.floor(T / 60), sec = Math.floor(T - m * 60);
-    var ja = (m ? m + "分" : "") + sec + "秒", en = (m ? m + " min " : "") + sec + " sec";
     window.zResultActions.x({ text: zT(
-      ton + "トンの巨大プリン（ふつうのプリン" + cups + "個分）を" + ja + "で完食しました",
-      "Finished a " + ton + "-ton giant pudding (" + cups + " regular puddings) in " + en,
-      ton + "톤 거대 푸딩(보통 푸딩 " + cups + "개분)을 " + (m ? m + "분 " : "") + sec + "초 만에 다 먹었습니다",
-      "用" + (m ? m + "分" : "") + sec + "秒吃完了" + ton + "吨的巨型布丁（相当于" + cups + "个普通布丁）",
-      "用" + (m ? m + "分" : "") + sec + "秒吃完了" + ton + "噸的巨型布丁（相當於" + cups + "個普通布丁）"
+      ton + "トンの巨大プリン（ふつうのプリン" + cups + "個分）を" + dives + "回目で完食しました",
+      "Finished a " + ton + "-ton giant pudding (" + cups + " regular puddings) on dive " + dives,
+      ton + "톤 거대 푸딩(보통 푸딩 " + cups + "개분)을 " + dives + "번째에 다 먹었습니다",
+      "第" + dives + "次吃完了" + ton + "吨的巨型布丁（相当于" + cups + "个普通布丁）",
+      "第" + dives + "次吃完了" + ton + "噸的巨型布丁（相當於" + cups + "個普通布丁）"
     ) + zT(" #巨大プリン", " #GiantPudding", " #거대푸딩", " #巨型布丁", " #巨型布丁") });
   }
 
@@ -721,7 +758,7 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ me: [me.x, me.y, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: 0, intro: state === S.INTRO ? 1 : 0, cherries: cherries, boost: boost > 0 ? Math.min(1, boost) : 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
+        s3.sync({ me: [me.x, me.y, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: 0, intro: state === S.INTRO || state === S.SHOP ? 1 : 0, size: mouthK(), cherries: cherries, boost: boost > 0 ? Math.min(1, boost) : 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
           wob: [wob[0] + lx, wob[1] + lz], spoon: spoon, collapse: state === S.COLLAPSE ? col : null, shake: shake });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); if (window.console) console.error(e); }
@@ -730,8 +767,51 @@
 
     if (!hideUI && (state === S.PLAY || state === S.COLLAPSE)) drawHud();
     if (state === S.RESULT) drawResult();
+    if (state === S.SHOP && !hideUI) drawShop();
   }
-  function drawHud() {}
+  /* 残り時間（上に小さく） */
+  function drawHud() {
+    var t = Math.max(0, Math.ceil(timeLeft));
+    ctx.save();
+    ctx.textAlign = "center"; ctx.font = "800 44px sans-serif";
+    ctx.lineWidth = 7; ctx.strokeStyle = "rgba(40,20,5,.55)"; ctx.lineJoin = "round";
+    ctx.strokeText(t, W / 2, 70);
+    ctx.fillStyle = t <= 5 ? "#ff6a5a" : "#fff"; ctx.fillText(t, W / 2, 70);
+    ctx.restore();
+  }
+  function shopLayout() {
+    var cw = 440, ch = 104, x = (W - cw) / 2, y0 = H * 0.3, cards = [];
+    for (var i = 0; i < UPS.length; i++) cards.push({ x: x, y: y0 + i * (ch + 18), w: cw, h: ch });
+    return { cards: cards, go: { x: W / 2, y: Math.min(H - 90, y0 + 3 * (ch + 18) + 90), r: 54 } };
+  }
+  function drawShop() {
+    shopT += 1 / 60;
+    var L = shopLayout();
+    ctx.save();
+    ctx.fillStyle = "rgba(10,8,6,.45)"; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#f6c453"; ctx.font = "800 40px sans-serif";
+    ctx.fillText("+" + gained.toFixed(1) + "t", W / 2, H * 0.13);
+    ctx.fillStyle = "#fff"; ctx.font = "800 56px sans-serif";
+    ctx.fillText("🍮 " + money.toFixed(1) + "t", W / 2, H * 0.2);
+    L.cards.forEach(function (c, i) {
+      var u = UPS[i], cost = upCost(u), ok = cost !== null && money >= cost;
+      ctx.fillStyle = ok ? "rgba(255,248,230,.95)" : "rgba(255,248,230,.45)";
+      roundRect(c.x, c.y, c.w, c.h, 22); ctx.fill();
+      ctx.font = "56px sans-serif"; ctx.fillStyle = "#000"; ctx.fillText(u.icon, c.x + 60, c.y + c.h / 2 + 2);
+      for (var d = 0; d < u.cost.length; d++) {
+        ctx.beginPath(); ctx.arc(c.x + 130 + d * 30, c.y + c.h / 2, 10, 0, Math.PI * 2);
+        ctx.fillStyle = d < lv[u.id] ? "#e0453a" : "rgba(60,40,20,.2)"; ctx.fill();
+      }
+      ctx.fillStyle = ok ? "#3a2410" : "rgba(58,36,16,.55)"; ctx.font = "800 38px sans-serif";
+      ctx.fillText(cost === null ? "MAX" : cost + "t", c.x + c.w - 70, c.y + c.h / 2 + 2);
+    });
+    var g = L.go;
+    ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.fillStyle = "#e0453a"; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(g.x - 16, g.y - 24); ctx.lineTo(g.x + 26, g.y); ctx.lineTo(g.x - 16, g.y + 24); ctx.closePath();
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.restore();
+  }
   function roundRect(x, y, w, h, r) {
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
     ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
@@ -747,7 +827,7 @@
     ctx.shadowBlur = 10;
     ctx.textAlign = "center";
     ctx.font = "800 104px sans-serif";
-    ctx.fillText(clock(T), W / 2, H * 0.45);
+    ctx.fillText(zT(dives + "回目", "Dive " + dives, dives + "회차", "第" + dives + "次", "第" + dives + "次"), W / 2, H * 0.45);
     ctx.restore();
     if (confetti) confetti.draw(ctx);
     window.zResultActions.drawButtons(ctx, resultButtons());

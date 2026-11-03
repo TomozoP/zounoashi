@@ -321,7 +321,7 @@
     this.eatAmt += ((s.eating ? 1 : 0) - this.eatAmt) * Math.min(1, dt * 10);
     var ea = this.eatAmt;
     if (ea > 0.05) this.chew += dt * 7;
-    hero.position.set(s.me[0], s.me[1], s.me[2]); hero.scale.setScalar(0.25);
+    hero.position.set(s.me[0], s.me[1], s.me[2]); hero.scale.setScalar(0.25 * (s.size || 1));
     hero.rotation.set(-s.pitch * 0.6, s.face, 0, "YXZ");
     var sw = Math.sin(wk * 9) * 0.7 * mv;
     this.legL.rotation.x = sw; this.legR.rotation.x = -sw;
