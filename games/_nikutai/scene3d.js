@@ -96,6 +96,66 @@
     var sh = new T.Mesh(new T.CircleGeometry(1, 32), new T.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }));
     sh.rotation.x = -Math.PI / 2; sh.scale.set(55, 26, 1); sh.position.y = 0.2; sc.add(sh); this.shadow = sh;
     this.tmp = new T.Vector3();
+    this.loadModel();
+  }
+
+  /* Blender で作った骨入りのマッチョ（macho.glb）があれば、組み立てのマッチョと入れ替える */
+  var CHAIN = [["UpperArm", "LowerArm", "shoulder", "elbow"], ["LowerArm", "Hand", "elbow", "hand"], ["UpperLeg", "LowerLeg", "hip", "knee"], ["LowerLeg", "Foot", "knee", "ankle"]];
+  GameScene.prototype.loadModel = function () {
+    if (!T.GLTFLoader || /[?&]model=0/.test(global.location.search)) return;
+    var self = this;
+    try {
+      new T.GLTFLoader().load("macho.glb?v=" + (global.NIKUTAI_MODEL_VER || "1"), function (gltf) {
+        var root = gltf.scene;
+        root.scale.setScalar(100);                 /* メートル → cm */
+        var bones = {};
+        root.traverse(function (o) {
+          if (o.isBone) bones[o.name.replace(/[._ ]?([LR])$/, ".$1").replace(/^mixamorig:?/, "")] = o;
+          if (o.isMesh) { o.frustumCulled = false; if (o.material) { o.material.roughness = Math.min(o.material.roughness == null ? 0.5 : o.material.roughness, 0.55); } }
+        });
+        if (!bones.Hips || !bones["UpperArm.L"]) return;
+        self.scene.add(root);
+        root.updateMatrixWorld(true);
+        var rest = {};
+        Object.keys(bones).forEach(function (k) { rest[k] = bones[k].quaternion.clone(); });
+        self.glb = { root: root, bones: bones, rest: rest, hipsY: bones.Hips.position.y, hipsPos: bones.Hips.position.clone() };
+        self.torso.visible = false;
+        self.limbs.forEach(function (L) { [L.upper, L.fore, L.hand, L.thigh, L.shin, L.foot].forEach(function (m) { m.visible = false; }); });
+      }, null, function () {});
+    } catch (e) {}
+  };
+  var _a = null, _b = null, _q = null, _pq = null, _d = null;
+  GameScene.prototype.poseModel = function (j) {
+    var M = this.glb, B = M.bones;
+    if (!_a) { _a = new T.Vector3(); _b = new T.Vector3(); _q = new T.Quaternion(); _pq = new T.Quaternion(); _d = new T.Vector3(); }
+    Object.keys(B).forEach(function (k) { B[k].quaternion.copy(M.rest[k]); });
+    /* 骨盤の高さ：立ち姿（92cm）からの下がりぶん */
+    B.Hips.position.copy(M.hipsPos);
+    B.Hips.position.y = M.hipsY + (j.pelvis[1] - 92) / 100 / (B.Hips.parent && B.Hips.parent.isBone ? 1 : 1) * this.hipScale();
+    M.root.updateMatrixWorld(true);
+    for (var i = 0; i < 2; i++) {
+      var side = i === 0 ? ".R" : ".L", q = j.side[i];       /* 画面の左＝本人の右 */
+      for (var c = 0; c < CHAIN.length; c++) {
+        var ch = CHAIN[c], bone = B[ch[0] + side], next = B[ch[1] + side];
+        if (!bone || !next) continue;
+        bone.getWorldPosition(_a); next.getWorldPosition(_b);
+        var cur = _b.sub(_a).normalize();
+        var a = q[ch[2]], b = q[ch[3]];
+        _d.set(b[0] - a[0], b[1] - a[1], b[2] - a[2]).normalize();
+        _q.setFromUnitVectors(cur, _d);
+        var wq = bone.getWorldQuaternion(new T.Quaternion());
+        bone.parent.getWorldQuaternion(_pq);
+        wq.premultiply(_q);
+        bone.quaternion.copy(_pq.invert().multiply(wq));
+        bone.updateMatrixWorld(true);
+      }
+    }
+  };
+  /* Hips の位置の単位（親の拡大）を合わせる */
+  GameScene.prototype.hipScale = function () {
+    var p = this.glb.bones.Hips.parent, s = 1;
+    while (p && p !== this.glb.root) { s /= (p.scale.y || 1); p = p.parent; }
+    return s;
   }
 
   function aim(g, a, b) {
@@ -122,6 +182,7 @@
       aim(L.shin, q.knee, q.ankle);
       L.foot.position.set(q.ankle[0], q.ankle[1] - 1, q.ankle[2] + 6);
     }
+    if (this.glb) this.poseModel(j);
     this.shadow.position.x = j.pelvis[0];
     var c = s.cam, cam = this.camera;
     cam.fov = c.fov; cam.updateProjectionMatrix();
