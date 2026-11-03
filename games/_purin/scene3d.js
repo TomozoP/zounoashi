@@ -63,18 +63,13 @@
       var x = pos[p * 3], y = pos[p * 3 + 1], z = pos[p * 3 + 2];
       var g = F.grad(x, y, z), L = Math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]) || 1;
       nor[p * 3] = g[0] / L; nor[p * 3 + 1] = g[1] / L; nor[p * 3 + 2] = g[2] / L;
-      var o = F.orig(x, y, z), cd = caramelDepth(x, z), rc;
-      var onSkin = o > -0.13;
-      var depth = F.HT - y;
-      if (onSkin && depth < cd) {
-        var t2 = Math.max(0, Math.min(1, depth / cd));
-        rc = [CARAMEL[0] + (CARAMEL_HI[0] - CARAMEL[0]) * t2, CARAMEL[1] + (CARAMEL_HI[1] - CARAMEL[1]) * t2, CARAMEL[2] + (CARAMEL_HI[2] - CARAMEL[2]) * t2];
-        if (depth > cd - 0.06) { var m = (depth - (cd - 0.06)) / 0.06; rc = [rc[0] + (CUSTARD[0] - rc[0]) * m * 0.6, rc[1] + (CUSTARD[1] - rc[1]) * m * 0.6, rc[2] + (CUSTARD[2] - rc[2]) * m * 0.6]; }
-      } else if (onSkin) rc = CUSTARD;
-      else {
-        /* 中の切り口は少し明るく、すこしだけ泡のむら */
-        var sp = 0.03 * Math.sin(x * 31 + y * 17) * Math.sin(z * 23 - y * 11);
-        rc = [CUSTARD_IN[0] + sp, CUSTARD_IN[1] + sp, CUSTARD_IN[2] + sp * 0.5];
+      var cr = Math.max(0, Math.min(1, F.sample(x, y, z, F.car))), sk = Math.max(0, Math.min(1, F.sample(x, y, z, F.skin))), rc = [0, 0, 0];
+      var sp = 0.03 * Math.sin(x * 31 + y * 17) * Math.sin(z * 23 - y * 11) * (1 - sk);
+      for (var ci = 0; ci < 3; ci++) {
+        var cu = CUSTARD_IN[ci] + (CUSTARD[ci] - CUSTARD_IN[ci]) * sk + sp;
+        var ca = CARAMEL[ci] + (CARAMEL_HI[ci] - CARAMEL[ci]) * (1 - cr) * 1.5;
+        var w = Math.min(1, cr * 2.2);
+        rc[ci] = cu + (ca - cu) * w;
       }
       col[p * 3] = rc[0]; col[p * 3 + 1] = rc[1]; col[p * 3 + 2] = rc[2];
     }
@@ -108,7 +103,7 @@
     this.camera = st.camera;
     this.scene.background = new T.Color(0xe9dccb);
     this.scene.fog = new T.Fog(0xe9dccb, 14, 34);
-    var L = Z3.lights(this.scene, { shadows: true, shadowSize: 6, scale: 1.0 });
+    var L = Z3.lights(this.scene, { shadows: true, shadowSize: 8, scale: 1.0 });
     L.key.position.set(-5, 11, 6);
 
     /* 映り込み用の明るい部屋（窓の光） */
@@ -186,34 +181,35 @@
   };
 
   /* 崩れ始めたら、上と下に分ける */
-  GameScene.prototype.split = function (c) {
-    var F = this.F, L = c.layer;
-    var upKeep, lowKeep;
-    if (c.mode === "loose") {
-      upKeep = function (i, j, k) { return !c.keep[F.idx(i, j, k)]; };
-      lowKeep = function (i, j, k) { return !!c.keep[F.idx(i, j, k)]; };
-    } else {
-      upKeep = function (i, j, k) { return j > L; };
-      lowKeep = function (i, j, k) { return j <= L; };
-    }
+  GameScene.prototype.split = function (col) {
+    var F = this.F, up = col.plan.up;
     var upMat = puddingMaterial(this.env);
-    var up = new T.Mesh(buildGeometry(F, upKeep), upMat);
-    var low = new T.Mesh(buildGeometry(F, lowKeep), this.mat);
-    up.castShadow = up.receiveShadow = low.castShadow = low.receiveShadow = true;
-    /* 上のかたまりは、倒れる支点を原点にした入れ物に入れる */
-    var piv = c.pivot || [0, 0, 0];
-    var g = new T.Group(); g.position.set(piv[0], piv[1], piv[2]);
-    up.position.set(-piv[0], -piv[1], -piv[2]);
-    g.add(up);
+    var upM = new T.Mesh(buildGeometry(F, function (i, j, k) { return !!up[F.idx(i, j, k)]; }), upMat);
+    var low = new T.Mesh(buildGeometry(F, function (i, j, k) { return !up[F.idx(i, j, k)]; }), this.mat);
+    upM.castShadow = upM.receiveShadow = low.castShadow = low.receiveShadow = true;
+    upM.matrixAutoUpdate = false;
     this.scene.remove(this.mesh);
-    this.scene.add(g); this.scene.add(low);
-    up.geometry.computeBoundingBox();
-    this.parts = { up: up, g: g, low: low, c: c, bottom: up.geometry.boundingBox.min.y, top: up.geometry.boundingBox.max.y };
+    this.scene.add(upM); this.scene.add(low);
+    this.parts = { up: upM, low: low, col: col };
   };
+
+  /* 倒れる・落ちる・つぶれるを1つの行列に（pudding の bake と同じ順） */
+  var _m = null;
+  function poseMatrix(pl, po, out) {
+    var M = new T.Matrix4(), A = new T.Matrix4();
+    var pv = pl.pivot;
+    M.makeTranslation(-pv[0], -pv[1], -pv[2]);
+    A.makeRotationAxis(new T.Vector3(pl.ax[0], pl.ax[1], pl.ax[2]), po.ang); M.premultiply(A);
+    A.makeTranslation(pv[0], pv[1] - po.drop, pv[2]); M.premultiply(A);
+    A.makeTranslation(-pl.cx, -pl.base, -pl.cz); M.premultiply(A);
+    A.makeScale(po.sxz, po.sy, po.sxz); M.premultiply(A);
+    A.makeTranslation(pl.cx, pl.base, pl.cz); M.premultiply(A);
+    out.copy(M);
+  }
 
   GameScene.prototype.reset = function () {
     if (this.parts) {
-      this.scene.remove(this.parts.g); this.scene.remove(this.parts.low);
+      this.scene.remove(this.parts.up); this.scene.remove(this.parts.low);
       this.parts.up.geometry.dispose(); this.parts.low.geometry.dispose(); this.parts.up.material.dispose();
       this.parts = null;
       this.scene.add(this.mesh);
@@ -223,7 +219,7 @@
 
   /* s: { eye:[x,y,z], yaw, pitch, wob:[x,z], squash, spoon:{ t, phase, blob }, collapse:{ c, t }, shake } */
   GameScene.prototype.sync = function (s) {
-    if (s.collapse && !this.parts) this.split(s.collapse.c);
+    if (s.collapse && (!this.parts || this.parts.col !== s.collapse)) { if (this.parts) this.reset(); this.split(s.collapse); }
     if (!s.collapse && this.parts) this.reset();
     if (!this.parts && this.ver !== this.F.ver) this.rebuild();
     var u = this.mat.userData.u;
@@ -259,29 +255,9 @@
 
     /* 崩れ */
     if (this.parts) {
-      var P = this.parts, c = P.c, t = s.collapse.t, g = P.g, up = P.up;
-      var um = up.material.userData.u;
-      um.uWob.value.set(s.wob[0], s.wob[1]);
-      um.uBase.value = P.bottom; um.uH.value = Math.max(0.5, P.top - P.bottom);
-      if (c.mode === "tip") {
-        var ax = new T.Vector3(c.dir[1], 0, -c.dir[0]);
-        var ang = Math.min(1.5, 0.15 * t + 1.2 * t * t);
-        g.quaternion.setFromAxisAngle(ax, ang);
-        var land = Math.max(0, t - 0.8);
-        g.position.y = Math.max(0.2, c.pivot[1] - 4.9 * land * land);
-        var hit = ang >= 1.5 ? Math.min(1, (t - 1.05) * 2.5) : 0;
-        um.uSquash.value = Math.max(0, hit) * (0.9 + 0.15 * Math.sin(t * 18) * Math.exp(-(t - 1.1) * 2));
-      } else if (c.mode === "loose") {
-        var dropY = Math.min(P.bottom, 4.9 * t * t);
-        g.position.y = -dropY;
-        um.uSquash.value = dropY >= P.bottom ? Math.min(1, (t - Math.sqrt(P.bottom / 4.9)) * 3) : 0;
-      } else {
-        /* その場で沈んでつぶれる（上が落ちる） */
-        var fall = Math.min(1, t * t * 1.6);
-        g.position.y = c.pivot[1] - (c.pivot[1] - 0.0) * 0.5 * fall;
-        um.uSquash.value = Math.min(1.2, fall * 1.2) * (1 + 0.12 * Math.sin(t * 16) * Math.exp(-t * 2));
-        u.uSquash.value = 0.25 * fall;
-      }
+      poseMatrix(s.collapse.plan, s.collapse.pose, this.parts.up.matrix);
+      this.parts.up.matrixWorldNeedsUpdate = true;
+      this.parts.up.material.userData.u.uWob.value.set(0, 0);
     }
   };
 

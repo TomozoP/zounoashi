@@ -32,6 +32,7 @@
 <script src="../share.js"></script>
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
+<script src="../celebrate.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script src="../random-bowling/vendor/three.min.js"></script>
 <script src="../three-base.js"></script>
@@ -44,7 +45,7 @@
   "use strict";
   var h = 0.2;                       /* 格子の間隔(m) */
   var RB = 3.0, RT = 2.15, HT = 3.6; /* 底の半径・上の半径・高さ */
-  var NX = 39, NY = 22, NZ = 39;     /* 点の数。y の 0 番は床の下（いつも空）、1 番が皿の高さ */
+  var NX = 61, NY = 22, NZ = 61;     /* 点の数。y の 0 番は床の下（いつも空）、1 番が皿の高さ */
   var X0 = -(NX - 1) / 2 * h, Y0 = -h, Z0 = X0;
   var KG = 1050;                     /* 1m³ の重さ(kg) */
   var LIMIT = 2.0;                   /* これを超えたら崩れる */
@@ -58,8 +59,17 @@
     return smax(side, y - HT, 0.5);
   }
 
+  /* カラメルの深さ（向きによって垂れる） */
+  function caramelDepth(x, z) {
+    var a = Math.atan2(z, x);
+    var d = 0.42 + 0.08 * Math.sin(a * 5 + 1.3);
+    var drip = Math.pow(Math.max(0, Math.sin(a * 9 + 0.7)), 10) * 1.3 + Math.pow(Math.max(0, Math.sin(a * 13 + 2.1)), 16) * 0.8;
+    return d + drip;
+  }
   function Field() {
     this.f = new Float32Array(NX * NY * NZ);
+    this.car = new Float32Array(NX * NY * NZ);   /* カラメル(0〜1) */
+    this.skin = new Float32Array(NX * NY * NZ);  /* 元の表面(1)か中(0)か */
     this.reset();
   }
   var P = Field.prototype;
@@ -70,8 +80,12 @@
     var f = this.f;
     for (var k = 0; k < NZ; k++) for (var j = 0; j < NY; j++) for (var i = 0; i < NX; i++) {
       var v = orig(X0 + i * h, Y0 + j * h, Z0 + k * h);
-      if (j === 0 || i === 0 || k === 0 || i === NX - 1 || k === NX - 1 || j === NY - 1) v = Math.max(v, h);
-      f[this.idx(i, j, k)] = v;
+      if (j === 0 || i === 0 || k === 0 || i === NX - 1 || k === NZ - 1 || j === NY - 1) v = Math.max(v, h);
+      var n0 = this.idx(i, j, k), x = X0 + i * h, y = Y0 + j * h, z = Z0 + k * h, o = orig(x, y, z);
+      f[n0] = v;
+      this.skin[n0] = o > -0.13 ? 1 : 0;
+      var cd = caramelDepth(x, z), dep = HT - y;
+      this.car[n0] = o > -0.13 && dep < cd ? 1 - Math.max(0, Math.min(1, dep / cd)) * 0.6 : 0;
     }
     this.ver = (this.ver || 0) + 1;
     this.vol0 = this.volume();
@@ -90,12 +104,12 @@
   P.eatenKg = function () { return Math.max(0, (this.vol0 - this.volume()) * KG); };
 
   /* 好きな場所の f（格子の間はなめらかにつなぐ。外は遠い） */
-  P.sample = function (x, y, z) {
+  P.sample = function (x, y, z, arr) {
     var gx = (x - X0) / h, gy = (y - Y0) / h, gz = (z - Z0) / h;
     if (gx < 0 || gy < 0 || gz < 0 || gx >= NX - 1 || gy >= NY - 1 || gz >= NZ - 1) {
-      return Math.max(1, Math.max(Math.abs(x) - 3.7, y - 4, Math.abs(z) - 3.7));
+      return Math.max(1, Math.max(Math.abs(x) + X0, y - 4, Math.abs(z) + X0));
     }
-    var i = gx | 0, j = gy | 0, k = gz | 0, u = gx - i, v = gy - j, w = gz - k, f = this.f;
+    var i = gx | 0, j = gy | 0, k = gz | 0, u = gx - i, v = gy - j, w = gz - k, f = arr || this.f;
     var a = this.idx(i, j, k), sx = 1, sy = NX, sz = NX * NY;
     var c00 = f[a] * (1 - u) + f[a + sx] * u, c10 = f[a + sy] * (1 - u) + f[a + sy + sx] * u;
     var c01 = f[a + sz] * (1 - u) + f[a + sz + sx] * u, c11 = f[a + sz + sy] * (1 - u) + f[a + sz + sy + sx] * u;
@@ -205,9 +219,81 @@
     return out;
   };
 
+  /* 崩れの段取り。上のかたまり（up[n]=1）が、倒れて・落ちて・つぶれた最後の形まで決める */
+  P.plan = function (c) {
+    var f = this.f, self = this, up = new Uint8Array(f.length), n, i, j, k;
+    for (k = 0; k < NZ; k++) for (j = 0; j < NY; j++) for (i = 0; i < NX; i++) {
+      n = this.idx(i, j, k);
+      up[n] = c.mode === "loose" ? (c.keep[n] ? 0 : 1) : (j > c.layer ? 1 : 0);
+    }
+    var pl = { mode: c.mode, up: up, pivot: c.pivot || [0, 0, 0], ax: c.dir ? [c.dir[1], 0, -c.dir[0]] : [1, 0, 0], ang: c.mode === "tip" ? 1.45 : 0, drop: 0, cx: 0, cz: 0, sy: c.mode === "tip" ? 0.72 : 0.62 };
+    if (c.mode === "loose") pl.sy = 0.8;
+    /* 回したあとの一番下と重心 */
+    var minY = 1e9, sx = 0, sz = 0, cnt = 0;
+    for (k = 0; k < NZ; k++) for (j = 0; j < NY; j++) for (i = 0; i < NX; i++) {
+      n = this.idx(i, j, k);
+      if (!up[n] || f[n] >= 0) continue;
+      var q = this.rot(pl, [X0 + i * h, Y0 + j * h, Z0 + k * h], pl.ang);
+      if (q[1] < minY) minY = q[1];
+      sx += q[0]; sz += q[2]; cnt++;
+    }
+    if (!cnt) minY = 0;
+    pl.drop = c.mode === "squash" ? Math.max(0, minY * 0.45) : Math.max(0, minY);
+    pl.cx = cnt ? sx / cnt : 0; pl.cz = cnt ? sz / cnt : 0;
+    pl.base = minY - pl.drop;                /* つぶれるときの床（下のかたまりの上にのる高さ） */
+    if (c.mode !== "squash") pl.base = 0;
+    pl.tLand = c.mode === "tip" ? 1.05 : c.mode === "loose" ? Math.sqrt(Math.max(0.05, pl.drop) / 4.9) : 0.6;
+    pl.tEnd = pl.tLand + 1.4;
+    return pl;
+  };
+  /* 支点のまわりに回す */
+  P.rot = function (pl, p, a) {
+    if (!a) return p.slice();
+    var ax = pl.ax, c = Math.cos(a), s = Math.sin(a), x = p[0] - pl.pivot[0], y = p[1] - pl.pivot[1], z = p[2] - pl.pivot[2];
+    var d = ax[0] * x + ax[1] * y + ax[2] * z;
+    var cx = ax[1] * z - ax[2] * y, cy = ax[2] * x - ax[0] * z, cz = ax[0] * y - ax[1] * x;
+    return [pl.pivot[0] + x * c + cx * s + ax[0] * d * (1 - c), pl.pivot[1] + y * c + cy * s + ax[1] * d * (1 - c), pl.pivot[2] + z * c + cz * s + ax[2] * d * (1 - c)];
+  };
+  /* t 秒目の姿（角度・落ちた量・つぶれ） */
+  P.pose = function (pl, t) {
+    var g, ang = 0, drop = 0, sy = 1;
+    if (pl.mode === "tip") {
+      ang = Math.min(pl.ang, 0.15 * t + 1.25 * t * t);
+      g = ang / pl.ang; drop = pl.drop * g * g;
+    } else {
+      g = Math.min(1, t / pl.tLand); drop = pl.drop * g * g;
+    }
+    if (t > pl.tLand) {
+      var e = t - pl.tLand, k = Math.min(1, e / 0.25);
+      sy = pl.sy + (1 - pl.sy) * (1 - k) + (1 - pl.sy) * 0.35 * Math.exp(-e * 3.5) * Math.sin(e * 16);
+      if (t >= pl.tEnd) sy = pl.sy;
+    }
+    return { ang: ang, drop: drop, sy: sy, sxz: 1 / Math.sqrt(sy) };
+  };
+  /* 最後の形を格子に焼きこむ（倒れたプリンもそのまま食べられる） */
+  P.bake = function (pl) {
+    var f = this.f, upF = new Float32Array(f.length), n, i, j, k;
+    for (n = 0; n < f.length; n++) { upF[n] = pl.up[n] ? f[n] : Math.max(f[n], h); if (pl.up[n]) f[n] = Math.max(f[n], h); }
+    var po = this.pose(pl, pl.tEnd + 1), ia = -po.ang, car0 = this.car.slice(), skin0 = this.skin.slice();
+    for (k = 1; k < NZ - 1; k++) for (j = 1; j < NY - 1; j++) for (i = 1; i < NX - 1; i++) {
+      var x = X0 + i * h, y = Y0 + j * h, z = Z0 + k * h;
+      /* つぶれ・落下・回転を逆にたどって、元の場所の値を読む */
+      var ox = pl.cx + (x - pl.cx) / po.sxz, oz = pl.cz + (z - pl.cz) / po.sxz, oy = pl.base + (y - pl.base) / po.sy + po.drop;
+      var q = this.rot(pl, [ox, oy, oz], ia);
+      var v = this.sample(q[0], q[1], q[2], upF) * Math.min(po.sy, 1);
+      n = this.idx(i, j, k);
+      if (v < f[n]) {
+        f[n] = v;
+        this.car[n] = Math.max(0, Math.min(1, this.sample(q[0], q[1], q[2], car0)));
+        this.skin[n] = Math.max(0, Math.min(1, this.sample(q[0], q[1], q[2], skin0)));
+      }
+    }
+    this.ver++;
+  };
+
   /* 崩れを起こす（デバッグ） */
   P.forceCollapse = function (dir) {
-    var y = Y0 + 6 * h, a = this.analyze();
+    var y = Y0 + 6 * h;
     return { mode: "tip", layer: 6, dir: dir, pivot: [dir[0] * 2.6, y, dir[1] * 2.6] };
   };
 
@@ -312,6 +398,7 @@
     wob = [0, 0]; wobV = [0, 0]; risk = F.last.risk; lean = [0, 0];
     spoon = { phase: 0, t: 0, blob: false };
     col = null; crashed = false; creaked = 0; munchT = 0; munchN = 0;
+    if (confetti) confetti.clear();
     pointers = {}; keys = {};
   }
 
@@ -331,6 +418,10 @@
     munchN++;
     if (munchN % 2) sMunch(); else sScoop();
     if (spoon.phase === 0) spoon = { phase: 3, t: 0, blob: true, caramel: top };
+    afterEat(ux, uz);
+  }
+  function afterEat(ux, uz) {
+    kg = F.eatenKg();
     var a = F.analyze();
     F.last = a;
     risk = a.risk; lean = a.lean;
@@ -338,10 +429,30 @@
     wobV[0] += ux * k; wobV[1] += uz * k;
     if (munchN % 4 === 0) sPurun(0.6 + 0.4 * Math.min(2, risk));
     if (a.collapse) startCollapse(a.collapse);
+    else if (F.volume() < F.vol0 * 0.02) finish();
+  }
+  function finish() {
+    kg = F.vol0 * window.Pudding.KG;
+    state = S.RESULT;
+    if (AC && window.zCelebrate) window.zCelebrate.play(AC, "fanfare");
+    if (confetti) confetti.burst(W, H, 160);
+  }
+  /* 倒れ終わったら、その形のまま食べ続ける */
+  function endCollapse() {
+    F.bake(col.plan);
+    /* 寝ころんだ形は接地が細いので、倒れた直後にまた崩れないよう基準を合わせ直す */
+    var a0 = F.analyze();
+    if (a0.risk > 1.2) F.S0 *= a0.risk / 1.2;
+    col = null;
+    state = S.PLAY;
+    /* 埋もれたら、まわりを食べて出てくる */
+    if (F.sample(me.x, 1, me.z) < 0.28) F.carveCapsule(me.x, me.z, 0.2, 1.75, 0.6);
+    afterEat(0, 0);
   }
   function startCollapse(c) {
     state = S.COLLAPSE;
-    col = { c: c, t: 0 };
+    col = { c: c, t: 0, plan: F.plan(c) };
+    col.pose = F.pose(col.plan, 0);
     crashed = false;
     sCreak();
   }
@@ -361,8 +472,9 @@
 
     if (state === S.COLLAPSE) {
       col.t += dt;
-      if (!crashed && col.t > (col.c.mode === "tip" ? 1.0 : 0.55)) { crashed = true; sCrash(); }
-      if (col.t > 3.2) { state = S.RESULT; }
+      col.pose = F.pose(col.plan, col.t);
+      if (!crashed && col.t > col.plan.tLand) { crashed = true; sCrash(); }
+      if (col.t > col.plan.tEnd) endCollapse();
       return;
     }
 
@@ -462,7 +574,7 @@
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    /* 1: 食べ始め（プリンの前）  4: 正面を何口か食べた状態  2: 根元をぐるりと食べた状態（あとひとくちで崩れる）  3: いま崩れる */
+    /* 1: 食べ始め（プリンの前）  6: あとひとかけら  4: 正面を何口か食べた状態  2: 根元をぐるりと食べた状態（あとひとくちで崩れる）  3: いま崩れる */
     if (n === 1 || n === 2) {
       newRound();
       me.z = 4.3; me.pitch = -0.1;
@@ -483,8 +595,20 @@
       for (var b = 0; b < 14; b++) F.carve(-0.6 + (b % 4) * 0.4, 0.9 + Math.floor(b / 4) * 0.45, 3.0 - (b % 3) * 0.25, BITE);
       var a4 = F.analyze(); F.last = a4; risk = a4.risk; lean = a4.lean; kg = F.eatenKg();
     }
+    if (n === 6) {
+      /* あとひとかけら（触れたら完食） */
+      newRound(); me.z = 4.6; me.pitch = -0.2;
+      for (var q6 = 0; q6 < F.f.length; q6++) F.f[q6] = Math.max(F.f[q6], 0.2);
+      F.carve(0, -10, 0, 0.1);
+      var g6 = F;
+      for (var k6 = 0; k6 < g6.NZ; k6++) for (var j6 = 1; j6 < g6.NY - 1; j6++) for (var i6 = 0; i6 < g6.NX; i6++) {
+        var x6 = g6.X0 + i6 * g6.h, y6 = g6.Y0 + j6 * g6.h, z6 = g6.Z0 + k6 * g6.h, d6 = Math.sqrt(x6 * x6 + (y6 - 0.2) * (y6 - 0.2) + (z6 - 3) * (z6 - 3)) - 0.6;
+        g6.f[g6.idx(i6, j6, k6)] = Math.min(g6.f[g6.idx(i6, j6, k6)], d6);
+      }
+      kg = F.eatenKg();
+    }
     if (n === 5) { debugKey(1); keys.f = true; }   /* 5: プリンへ歩いて食べ進む */
-    if (n === 3 && state === S.PLAY) startCollapse(F.forceCollapse([Math.sin(me.yaw), Math.cos(me.yaw)]));
+    if (n === 3 && state === S.PLAY) startCollapse(F.forceCollapse([-Math.sin(me.yaw), -Math.cos(me.yaw)]));
   }
 
   var KEYMAP = { KeyW: "f", ArrowUp: "f", KeyS: "b", ArrowDown: "b", KeyA: "l", KeyD: "r", ArrowLeft: "tl", ArrowRight: "tr", KeyQ: "tl", KeyE: "tr" };
@@ -506,17 +630,20 @@
 
   function fmt(n) { return Math.round(n).toLocaleString("en-US"); }
   function doShare() {
-    var n = fmt(kg), cups = fmt(kg * 10);
+    var ton = Math.round(F.vol0 * window.Pudding.KG / 1000), cups = fmt(F.vol0 * window.Pudding.KG * 10);
+    var m = Math.floor(T / 60), sec = Math.floor(T - m * 60);
+    var ja = (m ? m + "分" : "") + sec + "秒", en = (m ? m + " min " : "") + sec + " sec";
     window.zResultActions.x({ text: zT(
-      "巨大プリンを" + n + "kg（ふつうのプリン" + cups + "個分）食べたところで崩壊させました",
-      "Ate " + n + " kg of a giant pudding (" + cups + " regular puddings) before it collapsed",
-      "거대 푸딩을 " + n + "kg(보통 푸딩 " + cups + "개분) 먹다가 무너뜨렸습니다",
-      "吃了" + n + "kg巨型布丁（相当于" + cups + "个普通布丁）之后把它吃塌了",
-      "吃了" + n + "kg巨型布丁（相當於" + cups + "個普通布丁）之後把它吃塌了"
+      ton + "トンの巨大プリン（ふつうのプリン" + cups + "個分）を" + ja + "で完食しました",
+      "Finished a " + ton + "-ton giant pudding (" + cups + " regular puddings) in " + en,
+      ton + "톤 거대 푸딩(보통 푸딩 " + cups + "개분)을 " + (m ? m + "분 " : "") + sec + "초 만에 다 먹었습니다",
+      "用" + (m ? m + "分" : "") + sec + "秒吃完了" + ton + "吨的巨型布丁（相当于" + cups + "个普通布丁）",
+      "用" + (m ? m + "分" : "") + sec + "秒吃完了" + ton + "噸的巨型布丁（相當於" + cups + "個普通布丁）"
     ) + zT(" #巨大プリン", " #GiantPudding", " #거대푸딩", " #巨型布丁", " #巨型布丁") });
   }
 
   /* ============ 描画 ============ */
+  var confetti = window.zCelebrate ? window.zCelebrate.confetti() : null;
   var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene(F); }) : function () { return null; };
   var hideUI = false;
 
@@ -529,12 +656,13 @@
     var over = Math.max(0, risk - 1);
     var sway = Math.sin(T * 2.1) * 0.006 * over * over;
     var lx = lean[0] * 0.02 * over * over + sway, lz = lean[1] * 0.02 * over * over;
-    var shake = state === S.COLLAPSE && crashed ? Math.max(0, 0.12 * (1 - (col.t - 1) / 1.2)) : 0;
+    var shake = state === S.COLLAPSE && crashed ? Math.max(0, 0.12 * (1 - (col.t - col.plan.tLand) / 1.2)) : 0;
+    if (confetti && state === S.RESULT) confetti.step(1 / 60, W, H);
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
         s3.sync({ eye: [me.x, EYE + Math.sin(me.walk * 9) * 0.03, me.z], yaw: me.yaw, pitch: me.pitch, walk: me.walk,
-          wob: [wob[0] + lx, wob[1] + lz], spoon: spoon, collapse: state === S.COLLAPSE || state === S.RESULT ? col : null, shake: shake });
+          wob: [wob[0] + lx, wob[1] + lz], spoon: spoon, collapse: state === S.COLLAPSE ? col : null, shake: shake });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); if (window.console) console.error(e); }
     }
@@ -548,9 +676,13 @@
     ctx.textAlign = "center";
     ctx.font = "800 44px sans-serif";
     ctx.lineWidth = 7; ctx.strokeStyle = "rgba(40,20,5,.55)"; ctx.lineJoin = "round";
-    var txt = fmt(kg) + " kg";
+    var txt = clock(T);
     ctx.strokeText(txt, W / 2, 70);
     ctx.fillStyle = "#fff"; ctx.fillText(txt, W / 2, 70);
+    /* 残りの量（細い帯） */
+    var left = Math.max(0, 1 - kg / (F.vol0 * window.Pudding.KG));
+    ctx.fillStyle = "rgba(40,20,5,.35)"; roundRect(W / 2 - 110, 88, 220, 12, 6); ctx.fill();
+    ctx.fillStyle = "#f6c453"; roundRect(W / 2 - 110, 88, Math.max(12, 220 * left), 12, 6); ctx.fill();
     if (state === S.PLAY) {
       for (var id in pointers) {
         var p = pointers[id];
@@ -562,6 +694,11 @@
     ctx.restore();
   }
 
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function clock(t) { var m = Math.floor(t / 60), sec = t - m * 60; return m + ":" + (sec < 10 ? "0" : "") + sec.toFixed(1); }
   function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
   function drawResult() {
     ctx.fillStyle = "rgba(10,8,6,.55)";
@@ -571,16 +708,10 @@
     ctx.shadowColor = "rgba(0,0,0,.6)";
     ctx.shadowBlur = 10;
     ctx.textAlign = "center";
-    var num = fmt(kg);
-    ctx.font = "800 96px sans-serif";
-    var wn = ctx.measureText(num).width;
-    ctx.font = "800 44px sans-serif";
-    var wu = ctx.measureText(" kg").width;
-    var x0 = W / 2 - (wn + wu) / 2;
-    ctx.textAlign = "left";
-    ctx.font = "800 96px sans-serif"; ctx.fillText(num, x0, H * 0.45);
-    ctx.font = "800 44px sans-serif"; ctx.fillText(" kg", x0 + wn, H * 0.45);
+    ctx.font = "800 104px sans-serif";
+    ctx.fillText(clock(T), W / 2, H * 0.45);
     ctx.restore();
+    if (confetti) confetti.draw(ctx);
     window.zResultActions.drawButtons(ctx, resultButtons());
     window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
   }
@@ -600,7 +731,7 @@
       debugKey(2);
       await r.wait(800);
       keys.f = true;
-      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("崩れない");
+      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("終わらない");
       await r.wait(1500);
     }
   };
