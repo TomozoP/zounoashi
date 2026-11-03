@@ -245,7 +245,7 @@
   /* ============ 状態 ============ */
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var galleryK = null, showK = null;   /* showK: 確認用（覗き穴から1つのポーズを出す） */
-  var state, T, penalty, words, wi, ci, cur, flex, wordDone, flash, gallery, misses, pt, hitIdx, impact = 0;
+  var state, T, penalty, words, wi, ci, cur, flex, wordDone, flash, gallery, misses, pt, pEnd = 1e9, hitIdx, impact = 0;
   var STEP = 1.15;                             /* 1文字ぶんのポーズ（移る＋止める）の秒数 */
   var NW = 5, PEN = 3;
   var CAM = Number((location.search.match(/[?&]cam=(\d)/) || [])[1] || 0);
@@ -277,12 +277,20 @@
   function playIdx() {
     if (pt < 0 || state !== S.PLAY || !words || wi >= NW) return -1;
     var i = Math.floor(pt / STEP);
-    return i < words[wi].length ? i : -1;
+    return i < words[wi].length && pt < pEnd ? i : -1;
   }
-  function play() {
+  /* 全部続けて（from を渡すとその1文字だけ） */
+  function play(from) {
     if (state !== S.PLAY || wordDone > 0) return;
-    pt = 0; hitIdx = -1;
+    if (from == null) { pt = 0; pEnd = 1e9; } else { pt = from * STEP; pEnd = (from + 1) * STEP; }
+    hitIdx = -1;
     tone(440, 0.08, 0.1, "triangle"); tone(660, 0.1, 0.08, "triangle", null, 0.07);
+  }
+  function slotRects() {
+    var w = words[wi < NW ? wi : NW - 1], n = w.length;
+    var bs = Math.min(52, (W - 170) / n - 6), x0 = W / 2 + 8 - (n * (bs + 6) - 6) / 2, y = AY + (TY - AY - 4 - bs) / 2, out = [];
+    for (var i = 0; i < n; i++) out.push({ x: x0 + i * (bs + 6), y: y, s: bs });
+    return out;
   }
   function playBtn() { return { x: 44, y: AY + (TY - AY - 4) / 2, r: 27 }; }
   function score() { return T + penalty; }
@@ -307,7 +315,7 @@
     flex = Math.max(0, flex - dt * 2.5);
     if (flash) { flash.t += dt; if (flash.t > 0.4) flash = null; }
     if (state !== S.PLAY) return;
-    T += dt;
+    if (!wordDone) T += dt;
     if (wordDone > 0) {
       wordDone -= dt;
       if (wordDone <= 0) {
@@ -341,7 +349,8 @@
       tone(520 + ci * 70, 0.1, 0.12, "triangle"); tone(780 + ci * 70, 0.12, 0.08, "sine", null, 0.05);
       ci++;
       if (ci >= words[wi].length) {
-        wordDone = 1.1; pt = -1;
+        /* そろったら改めて一連のポーズ */
+        wordDone = words[wi].length * STEP + 0.6; pt = 0; pEnd = 1e9; hitIdx = -1;
         if (AC && window.zCelebrate) window.zCelebrate.play(AC, "chime");
       }
     } else {
@@ -361,6 +370,11 @@
     if (x == null) { play(); return; }
     var pb = playBtn();
     if ((x - pb.x) * (x - pb.x) + (y - pb.y) * (y - pb.y) < (pb.r + 12) * (pb.r + 12) || y < SH) { play(); return; }
+    if (y < TY) {
+      var sr = slotRects();
+      for (var si = 0; si < sr.length; si++) if (x >= sr[si].x - 3 && x <= sr[si].x + sr[si].s + 3) { play(si); return; }
+      return;
+    }
     var k = cellAt(x, y);
     if (k) choose(k);
   }
