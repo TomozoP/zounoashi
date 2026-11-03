@@ -429,7 +429,7 @@
   var UPS = [{ id: "spd", icon: "⚡", cost: [3, 6, 10, 15, 22] }, { id: "mouth", icon: "😮", cost: [3, 6, 10, 15, 22] }, { id: "cherry", icon: "🍒", cost: [4, 8, 13, 19, 26] }];
   var lv = { spd: 0, mouth: 0, cherry: 0 }, money = 0, dives = 0, timeLeft = 30, kgDive0 = 0, gained = 0, shopT = 0;
   function diveTime() { return 30; }
-  function mouthK() { return 1 + 0.3 * lv.mouth; }
+  function mouthK() { return 1 + 0.4 * lv.mouth; }
   function newRound() {
     F.reset();
     kg = 0; T = 0; dives = 0; money = 0; lv = { spd: 0, mouth: 0, cherry: 0 };
@@ -447,11 +447,11 @@
     me.x = 0; me.z = 0.8; me.y = F.HT; me.vy = 0; me.yaw = 0; me.pitch = -0.35; me.face = Math.PI; me.moving = 0; eatGlow = 0;
     var yTop = -1;
     for (var yy = F.HT + 0.4; yy > 0.1; yy -= 0.1) if (F.sample(0, yy, 0.8) < 0) { yTop = yy; break; }
-    if (yTop > 0) me.y = yTop + 0.05;
+    if (yTop > 0) me.y = Math.max(0, yTop - 0.05);
     else { me.y = 0; me.z = 4.3; me.pitch = 0; }
     wob = [0, 0]; wobV = [0, 0]; var a0 = F.analyze(); F.last = a0; risk = a0.risk; lean = a0.lean;
     spoon = { phase: 0, t: 0, blob: false };
-    col = null; crashed = false; creaked = 0; munchT = 0; munchN = 0; calm = 2; wide = 0;
+    col = null; crashed = false; creaked = 0; munchT = 0; munchN = 0; eatPh = 0; calm = 2; wide = 0;
     boost = 0; placeCherries();
     pointers = {}; keys = {};
   }
@@ -500,7 +500,8 @@
 
   /* 体で食べる：進む向きの、足元から頭の上までをくり抜く */
   var calm = 0, wide = 0;   /* 倒れた直後しばらくは崩れない / 引きのカメラの度合い */
-  var BODY = [0.1, 0.3, 0.45], munchT = 0, munchN = 0, eatGlow = 0, bites = { n: 0, p: [0, 0, 0] };
+  var BODY = [0.1, 0.3, 0.45], eatPh = 0, munchT = 0, munchN = 0, eatGlow = 0, bites = { n: 0, p: [0, 0, 0] };
+  function biteReach() { return 0.3 * Math.sqrt(1 + 0.25 * lv.spd) * (boost > 0 ? 1.2 : 1); }
   function bodyBite(d) {
     var ux = d[0], uz = d[2];
     var cx = me.x + d[0] * 0.15, cy = me.y + d[1] * 0.15, cz = me.z + d[2] * 0.15;
@@ -508,6 +509,9 @@
     /* 体のまわり（足もと〜頭の少し上）をくり抜く */
     var mk = mouthK();
     F.carveCapsule(cx, cz, cy + 0.08, cy + 0.38 * mk, 0.27 * mk);
+    /* ひとかきで少し先まで（次のかきこみまでに進む分） */
+    var c2 = biteReach();
+    F.carveCapsule(me.x + d[0] * c2, me.z + d[2] * c2, me.y + d[1] * c2 + 0.08, me.y + d[1] * c2 + 0.38 * mk, 0.27 * mk);
     kg = F.eatenKg();
     munchN++;
     sMunch(); if (munchN % 2) sScoop();
@@ -599,12 +603,17 @@
     var cp = Math.cos(me.pitch), dir = [-Math.sin(me.yaw) * cp, Math.sin(me.pitch), -Math.cos(me.yaw) * cp];
     var ux = -Math.sin(me.yaw), uz = -Math.cos(me.yaw);
     boost = Math.max(0, boost - dt);
-    var spd = (boost > 0 ? 2 : 1) * (1 + 0.25 * lv.spd);
-    var ahead = F.sample(me.x + dir[0] * 0.3, me.y + 0.25 + dir[1] * 0.3, me.z + dir[2] * 0.3) < 0;
+    var spd = (boost > 0 ? 2 : 1) * 0.8 * (1 + 0.18 * lv.spd);
+    var ar = biteReach() + 0.27 * mouthK() + 0.08;   /* かきこんだ先のさらに少し先にプリンがあるか */
+    var ahead = F.sample(me.x + dir[0] * ar, me.y + 0.25 + dir[1] * ar, me.z + dir[2] * ar) < 0 ||
+                F.sample(me.x + dir[0] * 0.3, me.y + 0.25 + dir[1] * 0.3, me.z + dir[2] * 0.3) < 0;
     var digging = ahead || munchT > -0.2;
+    /* かきこみ1回の長さ（左右の手が交互に1回ずつ）。速さの強化・サクランボで短くなる */
+    var STR = 0.24 / Math.sqrt(spd);
     if (digging) {
-      /* 掘っている間は、向いた方へまっすぐ（ゆっくり）。床より下へは行かない */
-      var dsp = 0.9 * spd * dt;
+      /* 掘っている間は、向いた方へまっすぐ。かきこんだ直後にぐっと進み、次のかきこみの前はゆっくり。床より下へは行かない */
+      var fr = (((eatPh - Math.PI / 2) % Math.PI) + Math.PI) % Math.PI / Math.PI;
+      var dsp = 0.9 * spd * dt * (1 + 0.85 * Math.cos(fr * Math.PI * 2));
       me.x += dir[0] * dsp; me.z += dir[2] * dsp; me.y = Math.max(0, me.y + dir[1] * dsp);
       me.vy = 0;
     } else {
@@ -621,11 +630,14 @@
     me.walk += dt * (digging ? 0.6 : 1);
     eatGlow = Math.max(0, eatGlow - dt);
     /* 進む先や体に触れていたら、そこを食べる（少しずつ） */
+    /* 進む先や体に触れていたら、手の動きに合わせて食べる：手が前へ突っこみきった瞬間にひと口 */
     munchT -= dt;
-    if (munchT <= 0) {
-      var touch = ahead;
-      BODY.forEach(function (y) { if (F.sample(me.x, me.y + y, me.z) < 0.1) touch = true; });
-      if (touch) { munchT = boost > 0 ? 0.08 : 0.14; bodyBite(dir); }
+    var touch = ahead;
+    BODY.forEach(function (y) { if (F.sample(me.x, me.y + y, me.z) < 0.1) touch = true; });
+    if (touch || eatGlow > 0) {
+      var k0 = Math.floor((eatPh - Math.PI / 2) / Math.PI);
+      eatPh += dt * Math.PI / STR;
+      if (Math.floor((eatPh - Math.PI / 2) / Math.PI) > k0 && touch) { munchT = STR; bodyBite(dir); }
     }
     stepCherries(dt);
     var r = Math.sqrt(me.x * me.x + me.z * me.z);
@@ -779,7 +791,7 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ me: [me.x, me.y, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: 0, intro: state === S.INTRO || state === S.SHOP || state === S.RESULT ? 1 : 0, size: mouthK(), land: land, cherries: cherries, boost: boost > 0 ? Math.min(1, boost) : 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
+        s3.sync({ me: [me.x, me.y, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, chew: eatPh, bites: bites, wide: 0, intro: state === S.INTRO || state === S.SHOP || state === S.RESULT ? 1 : 0, size: mouthK(), land: land, cherries: cherries, boost: boost > 0 ? Math.min(1, boost) : 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
           wob: [wob[0] + lx, wob[1] + lz], spoon: spoon, collapse: state === S.COLLAPSE ? col : null, shake: shake });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); if (window.console) console.error(e); }
@@ -857,7 +869,7 @@
 
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: Math.round(kg), kg: kg, risk: risk, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { me: [me.x, me.y, me.z, me.pitch], ph: eatPh, mt: munchT, state: state, score: Math.round(kg), kg: kg, risk: risk, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     hideUI: function () { hideUI = true; shareButton.hidden = true; }
