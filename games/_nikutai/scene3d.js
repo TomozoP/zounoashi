@@ -122,6 +122,8 @@
         var rest = {};
         Object.keys(bones).forEach(function (k) { rest[k] = bones[k].quaternion.clone(); });
         self.glb = { root: root, bones: bones, rest: rest, hipsY: bones.Hips.position.y, hipsPos: bones.Hips.position.clone() };
+        var fa = new T.Vector3(); (bones["Foot.L"] || bones.Hips).getWorldPosition(fa);
+        self.glb.ankleH = bones["Foot.L"] ? fa.y : 0;          /* 立ち姿での足首の高さ（cm） */
         self.torso.visible = false;
         self.limbs.forEach(function (L) { [L.upper, L.fore, L.hand, L.thigh, L.shin, L.foot].forEach(function (m) { m.visible = false; }); });
       }, function () {});
@@ -133,6 +135,7 @@
     if (!_a) { _a = new T.Vector3(); _b = new T.Vector3(); _q = new T.Quaternion(); _pq = new T.Quaternion(); _d = new T.Vector3(); }
     Object.keys(B).forEach(function (k) { B[k].quaternion.copy(M.rest[k]); });
     /* 骨盤の高さ：立ち姿（92cm）からの下がりぶん */
+    M.root.position.y = 0;
     B.Hips.position.copy(M.hipsPos);
     B.Hips.quaternion.premultiply(new T.Quaternion().setFromAxisAngle(UP, j.yaw || 0));
     B.Hips.position.y = M.hipsY + (j.pelvis[1] - 92) / 100 / (B.Hips.parent && B.Hips.parent.isBone ? 1 : 1) * this.hipScale();
@@ -154,6 +157,11 @@
         bone.updateMatrixWorld(true);
       }
     }
+    /* 接地：いちばん低い足首（とひざ）が床に着くよう全体を上下させる。跳んでいるポーズは jy ぶん浮かせる */
+    var low = 1e9;
+    ["Foot.L", "Foot.R"].forEach(function (k) { if (B[k]) { B[k].getWorldPosition(_a); low = Math.min(low, _a.y - M.ankleH); } });
+    ["LowerLeg.L", "LowerLeg.R"].forEach(function (k) { if (B[k]) { B[k].getWorldPosition(_a); low = Math.min(low, _a.y - 7); } });
+    if (low < 1e8) { M.root.position.y += (j.jy || 0) - low; M.root.updateMatrixWorld(true); }
   };
   /* Hips の位置の単位（親の拡大）を合わせる */
   GameScene.prototype.hipScale = function () {
