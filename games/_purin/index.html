@@ -417,8 +417,33 @@
     wob = [0, 0]; wobV = [0, 0]; risk = F.last.risk; lean = [0, 0];
     spoon = { phase: 0, t: 0, blob: false };
     col = null; crashed = false; creaked = 0; munchT = 0; munchN = 0; calm = 0; wide = 0;
+    boost = 0; placeCherries();
     if (confetti) confetti.clear();
     pointers = {}; keys = {};
+  }
+
+  /* サクランボ：プリンの中のランダムな所に2個。取ると一定時間はやくなる */
+  var cherries = [], boost = 0, BOOST_T = 6;
+  function placeCherries() {
+    cherries = [];
+    for (var tries = 0; cherries.length < 2 && tries < 500; tries++) {
+      var x = (Math.random() * 2 - 1) * 2.6, z = (Math.random() * 2 - 1) * 2.6, y = 0.3 + Math.random() * 2.9;
+      if (F.orig(x, y, z) > -0.35) continue;
+      if (cherries.some(function (c) { var dx = c.p[0] - x, dy = c.p[1] - y, dz = c.p[2] - z; return dx * dx + dy * dy + dz * dz < 2.5; })) continue;
+      cherries.push({ p: [x, y, z], got: false });
+    }
+  }
+  function stepCherries(dt) {
+    cherries.forEach(function (c) {
+      if (c.got) return;
+      /* まわりが食べられて宙に浮いたら、下の支えまで落ちる */
+      if (c.p[1] > 0.06 && F.sample(c.p[0], c.p[1] - 0.08, c.p[2]) > 0.02) c.p[1] = Math.max(0.06, c.p[1] - 2.5 * dt);
+      var dx = c.p[0] - me.x, dy = c.p[1] - (me.y + 0.25), dz = c.p[2] - me.z;
+      if (dx * dx + dy * dy + dz * dz < 0.45 * 0.45) {
+        c.got = true; boost = BOOST_T;
+        if (AC && window.zCelebrate) window.zCelebrate.play(AC, "chime");
+      }
+    });
   }
 
   function lookDir() {
@@ -523,15 +548,17 @@
     me.moving = 1;
     var cp = Math.cos(me.pitch), dir = [-Math.sin(me.yaw) * cp, Math.sin(me.pitch), -Math.cos(me.yaw) * cp];
     var ux = -Math.sin(me.yaw), uz = -Math.cos(me.yaw);
+    boost = Math.max(0, boost - dt);
+    var spd = boost > 0 ? 2 : 1;
     var ahead = F.sample(me.x + dir[0] * 0.3, me.y + 0.25 + dir[1] * 0.3, me.z + dir[2] * 0.3) < 0;
     var digging = ahead || munchT > -0.2;
     if (digging) {
       /* 掘っている間は、向いた方へまっすぐ（ゆっくり）。床より下へは行かない */
-      var dsp = 0.9 * dt;
+      var dsp = 0.9 * spd * dt;
       me.x += dir[0] * dsp; me.z += dir[2] * dsp; me.y = Math.max(0, me.y + dir[1] * dsp);
       me.vy = 0;
     } else {
-      me.x += ux * 1.8 * dt; me.z += uz * 1.8 * dt;
+      me.x += ux * 1.8 * spd * dt; me.z += uz * 1.8 * spd * dt;
     }
     /* 足もとに支え（床かプリン）がなければ落ちる */
     var support = me.y <= 0.001 || F.sample(me.x, me.y - 0.04, me.z) < 0.02;
@@ -548,8 +575,9 @@
     if (munchT <= 0) {
       var touch = ahead;
       BODY.forEach(function (y) { if (F.sample(me.x, me.y + y, me.z) < 0.1) touch = true; });
-      if (touch) { munchT = 0.14; bodyBite(dir); }
+      if (touch) { munchT = boost > 0 ? 0.08 : 0.14; bodyBite(dir); }
     }
+    stepCherries(dt);
     var r = Math.sqrt(me.x * me.x + me.z * me.z);
     if (r > 11) { me.x *= 11 / r; me.z *= 11 / r; }
 
@@ -634,6 +662,11 @@
       }
       kg = F.eatenKg();
     }
+    if (n === 7 && cherries.length) {
+      /* 7: サクランボの目の前へ */
+      var c7 = cherries.find(function (c) { return !c.got; });
+      if (c7) { me.x = c7.p[0]; me.y = c7.p[1] - 0.25; me.z = c7.p[2] + 1.0; me.yaw = 0; me.pitch = 0; }
+    }
     if (n === 5) { debugKey(1); }   /* 5: プリンの前（地面）から */
     if (n === 3 && state === S.PLAY) startCollapse(F.forceCollapse([-Math.sin(me.yaw), -Math.cos(me.yaw)]));
   }
@@ -688,7 +721,7 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ me: [me.x, me.y, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
+        s3.sync({ me: [me.x, me.y, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: 0, intro: state === S.INTRO ? 1 : 0, cherries: cherries, boost: boost > 0 ? Math.min(1, boost) : 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
           wob: [wob[0] + lx, wob[1] + lz], spoon: spoon, collapse: state === S.COLLAPSE ? col : null, shake: shake });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); if (window.console) console.error(e); }
@@ -698,23 +731,7 @@
     if (!hideUI && (state === S.PLAY || state === S.COLLAPSE)) drawHud();
     if (state === S.RESULT) drawResult();
   }
-  function drawHud() {
-    ctx.save();
-    ctx.textAlign = "center";
-    ctx.font = "800 44px sans-serif";
-    ctx.lineWidth = 7; ctx.strokeStyle = "rgba(40,20,5,.55)"; ctx.lineJoin = "round";
-    var txt = clock(T);
-    ctx.strokeText(txt, W / 2, 70);
-    ctx.fillStyle = "#fff"; ctx.fillText(txt, W / 2, 70);
-    /* 残りの量（細い帯） */
-    var left = Math.max(0, 1 - kg / (F.vol0 * window.Pudding.KG));
-    ctx.fillStyle = "rgba(40,20,5,.35)"; roundRect(W / 2 - 110, 88, 220, 12, 6); ctx.fill();
-    ctx.fillStyle = "#f6c453"; roundRect(W / 2 - 110, 88, Math.max(12, 220 * left), 12, 6); ctx.fill();
-    if (state === S.PLAY) {
-    }
-    ctx.restore();
-  }
-
+  function drawHud() {}
   function roundRect(x, y, w, h, r) {
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
     ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();

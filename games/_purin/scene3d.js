@@ -239,7 +239,18 @@
       var cm = new T.Mesh(crumbG, this.crumbM[0]); cm.visible = false; this.scene.add(cm);
       this.crumbs.push({ m: cm, life: 0, v: [0, 0, 0] });
     }
-    this.biteN = 0; this.lastT = 0; this.eatAmt = 0; this.chew = 0;
+    this.biteN = 0; this.lastT = 0; this.eatAmt = 0; this.chew = 0; this.introK = 1; this.fov0 = this.camera.fov;
+
+    /* サクランボ（プリンの中に埋まっている） */
+    var cherM = new T.MeshStandardMaterial({ color: 0xd0101e, roughness: 0.15, envMap: this.env, envMapIntensity: 1.2, emissive: 0x400005, emissiveIntensity: 0.5 });
+    var stemM = Z3.std(0x4f7a1f, { roughness: 0.7 });
+    this.cherries = [];
+    for (var ch = 0; ch < 2; ch++) {
+      var cg = new T.Group();
+      var ball = new T.Mesh(new T.SphereGeometry(0.11, 20, 14), cherM); ball.scale.set(1, 0.92, 1); ball.castShadow = true; cg.add(ball);
+      var stem = new T.Mesh(new T.CylinderGeometry(0.008, 0.01, 0.2, 6), stemM); stem.position.set(0.03, 0.17, 0); stem.rotation.z = -0.3; cg.add(stem);
+      cg.visible = false; this.scene.add(cg); this.cherries.push(cg);
+    }
   }
 
   GameScene.prototype.rebuild = function () {
@@ -357,6 +368,14 @@
       if (cc.life <= 0) cc.m.visible = false;
     }
 
+    /* サクランボ */
+    var chs = s.cherries || [];
+    for (var cq = 0; cq < this.cherries.length; cq++) {
+      var cmq = this.cherries[cq], cd = chs[cq];
+      cmq.visible = !!(cd && !cd.got);
+      if (cmq.visible) { cmq.position.set(cd.p[0], cd.p[1] + Math.sin(now * 3 + cq) * 0.02, cd.p[2]); cmq.rotation.y = now * 1.2 + cq; }
+    }
+
     /* カメラ：人の後ろの低い所から、いつも同じ距離。間に挟まるプリンはくり抜いて見せる */
     var cam = this.camera, sh = (s.shake || 0) + 0.015 * this.eatAmt;
     var tx = s.me[0], ty = s.me[1] + 0.3, tz = s.me[2];
@@ -373,12 +392,23 @@
       cx0 += (wx - cx0) * w; cy0 += (4.2 - cy0) * w; cz0 += (wz - cz0) * w;
       lx0 += (0 - lx0) * w; ly0 += (1.4 - ly0) * w; lz0 += (0 - lz0) * w;
     }
+    /* 開始前は、プリン全体が入るように引いて見せる。スタートで人の後ろへ寄る */
+    this.introK += ((s.intro ? 1 : 0) - this.introK) * Math.min(1, dt * 2.2);
+    var ik = this.introK; ik = ik * ik * (3 - 2 * ik);
+    if (ik > 0.001) {
+      cx0 += (0 - cx0) * ik; cy0 += (4.6 - cy0) * ik; cz0 += (8.6 - cz0) * ik;
+      lx0 += (0 - lx0) * ik; ly0 += (1.5 - ly0) * ik; lz0 += (0 - lz0) * ik;
+      sh *= 1 - ik;
+    }
+    /* スピードアップ中は少し広角に */
+    var fv = this.fov0 + 10 * (s.boost || 0) * (1 - ik);
+    if (Math.abs(cam.fov - fv) > 0.05) { cam.fov += (fv - cam.fov) * Math.min(1, dt * 6); cam.updateProjectionMatrix(); }
     cam.position.set(cx0 + (Math.random() - 0.5) * sh, cy0 + (Math.random() - 0.5) * sh, cz0 + (Math.random() - 0.5) * sh);
     cam.lookAt(lx0, ly0, lz0);
     CUT.uCam.value.copy(cam.position);
     CUT.uHero.value.set(tx, s.me[1] + 0.25, tz);
     CUT.uFeet.value = s.me[1];   /* 足もとより下（立っている面）はくり抜かない */
-    if (w > 0.5) CUT.uHero.value.copy(cam.position);   /* 引きのときはくり抜かない */
+    if (w > 0.5 || ik > 0.5) CUT.uHero.value.copy(cam.position);   /* 引きのときはくり抜かない */
     for (var fi = 0; fi < this.fp.length; fi++) this.fp[fi].g.visible = false;
 
     /* 崩れ */
