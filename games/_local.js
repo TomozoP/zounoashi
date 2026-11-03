@@ -369,5 +369,6 @@ window.DRAFT_GAMES = [
     "play": "games/_semi/index.html",
     "full": true,
     "catch": "セミの発音器官を動かして鳴く"
-  }
+  },
+  {"type":"lab","tags":[],"id":"hannin100","title":"犯人はこの中にいる！","year":2026,"date":"2026-11-03","plays":null,"url":"","img":"games/_hannin100/img/thumb.webp","play":"games/_hannin100/index.html","full":true,"catch":"が、100人いた場合"},
 ];

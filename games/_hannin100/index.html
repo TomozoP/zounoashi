@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>犯人はこの中にいる！</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../celebrate.js"></script>
+<script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 犯人はこの中にいる！ — が、100人いた場合
+
+   探偵の手がかりが少しずつ増える。100人の容疑者から犯人を見つけてタップ。
+   まちがえたら +5秒。見つけるまでの時間が記録。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+  var followLink = window.zResultActions.follow.link(shareButton.parentNode);
+
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+    place();
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ */
+  var AC = null, NOISE = null;
+  function resumeAudio() { window.zAudioResume(AC); }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 容疑者の特徴 ============ */
+  var HAIR = ["#1e1a18", "#7a4a24", "#f0c445", "#ecebe6"];
+  var SHIRT = ["#e04444", "#3b6fe2", "#36a857", "#f3cf36", "#9b55cc"];
+  var SKIN = ["#f6d3ad", "#ebbc8e", "#cf9564"];
+  var NP = 100, COLS = 10, ROWS = 10;
+
+  function C(f, ja, en, ko, zh, tw) { return { f: f, t: [ja, en, ko, zh, tw] }; }
+  var HN = [["黒髪", "black", "검은", "黑", "黑"], ["茶髪", "brown", "갈색", "棕", "棕"], ["金髪", "blond", "금발", "金", "金"], ["白髪", "white", "흰", "白", "白"]];
+  var SN = [["赤い服", "red", "빨간", "红", "紅"], ["青い服", "blue", "파란", "蓝", "藍"], ["緑の服", "green", "초록", "绿", "綠"], ["黄色い服", "yellow", "노란", "黄", "黃"], ["紫の服", "purple", "보라", "紫", "紫"]];
+  var CLUES = [
+    C(function (p) { return p.hat === 0; }, "帽子をかぶっていない", "isn't wearing a hat", "모자를 쓰지 않았다", "没戴帽子", "沒戴帽子"),
+    C(function (p) { return p.hat !== 0; }, "帽子をかぶっている", "is wearing a hat", "모자를 썼다", "戴着帽子", "戴著帽子"),
+    C(function (p) { return p.hat === 1; }, "キャップをかぶっている", "is wearing a cap", "캡 모자를 썼다", "戴着鸭舌帽", "戴著鴨舌帽"),
+    C(function (p) { return p.hat === 2; }, "シルクハットをかぶっている", "is wearing a top hat", "실크해트를 썼다", "戴着礼帽", "戴著禮帽"),
+    C(function (p) { return p.gls === 0; }, "メガネもサングラスもかけていない", "wears no glasses at all", "안경도 선글라스도 안 썼다", "没戴任何眼镜", "沒戴任何眼鏡"),
+    C(function (p) { return p.gls !== 0; }, "メガネかサングラスをかけている", "wears glasses or sunglasses", "안경이나 선글라스를 썼다", "戴着眼镜或墨镜", "戴著眼鏡或墨鏡"),
+    C(function (p) { return p.gls === 1; }, "メガネをかけている", "wears glasses", "안경을 썼다", "戴着眼镜", "戴著眼鏡"),
+    C(function (p) { return p.gls === 2; }, "サングラスをかけている", "wears sunglasses", "선글라스를 썼다", "戴着墨镜", "戴著墨鏡"),
+    C(function (p) { return p.mus === 1; }, "ヒゲがある", "has a mustache", "콧수염이 있다", "有胡子", "有鬍子"),
+    C(function (p) { return p.mus === 0; }, "ヒゲがない", "has no mustache", "콧수염이 없다", "没有胡子", "沒有鬍子")
+  ];
+  HN.forEach(function (n, k) {
+    CLUES.push(C(function (p) { return p.hair === k; }, n[0] + "だ", "has " + n[1] + " hair", n[2] + " 머리다", "是" + n[3] + "发", "是" + n[4] + "髮"));
+    CLUES.push(C(function (p) { return p.hair !== k; }, n[0] + "ではない", "doesn't have " + n[1] + " hair", n[2] + " 머리가 아니다", "不是" + n[3] + "发", "不是" + n[4] + "髮"));
+  });
+  SN.forEach(function (n, k) {
+    CLUES.push(C(function (p) { return p.shirt === k; }, n[0] + "を着ている", "is wearing " + n[1], n[2] + " 옷을 입었다", "穿着" + n[3] + "衣服", "穿著" + n[4] + "衣服"));
+    CLUES.push(C(function (p) { return p.shirt !== k; }, n[0] + "ではない", "isn't wearing " + n[1], n[2] + " 옷이 아니다", "没穿" + n[3] + "衣服", "沒穿" + n[4] + "衣服"));
+  });
+  function clueText(c) { return zT(c.t[0], c.t[1], c.t[2], c.t[3], c.t[4]); }
+
+  function ri(n) { return Math.floor(Math.random() * n); }
+  function rollPerson(p) {
+    p.hat = [0, 0, 1, 2][ri(4)];
+    p.gls = [0, 0, 1, 2][ri(4)];
+    p.hair = ri(4);
+    p.mus = Math.random() < 0.35 ? 1 : 0;
+    p.shirt = ri(5);
+    p.skin = ri(3);
+  }
+  function same(a, b) { return a.hat === b.hat && a.gls === b.gls && a.hair === b.hair && a.mus === b.mus && a.shirt === b.shirt; }
+
+  var people = [], culprit = 0, clues = [];
+  function makeCase() {
+    people = [];
+    for (var i = 0; i < NP; i++) {
+      var p = { i: i, r: Math.floor(i / COLS), c: i % COLS, ph: Math.random() * 6.28, innocent: false, miss: 0 };
+      rollPerson(p);
+      people.push(p);
+    }
+    culprit = ri(NP);
+    var cp = people[culprit];
+    people.forEach(function (p) { while (p !== cp && same(p, cp)) rollPerson(p); });
+    /* 手がかり：犯人に当てはまるものから、残りが半分くらいになるものを選んでいく */
+    clues = [];
+    var rest = people.slice();
+    var cand = CLUES.filter(function (c) { return c.f(cp); });
+    while (rest.length > 1) {
+      var best = null, bs = 1e9;
+      cand.forEach(function (c) {
+        if (clues.indexOf(c) >= 0) return;
+        var keep = rest.filter(function (p) { return c.f(p); }).length;
+        if (keep === rest.length) return;
+        var s = Math.abs(keep / rest.length - 0.5) + Math.random() * 0.2;
+        if (s < bs) { bs = s; best = c; }
+      });
+      clues.push(best);
+      rest = rest.filter(function (p) { return best.f(p); });
+    }
+  }
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", CAUGHT: "caught", RESULT: "result" };
+  var state, T, penalty, misses, shown, nextClue, caughtT, hint, floats;
+  var CLUE_GAP = 3.5;
+
+  var TOP, Y0, RH, XS, FS;
+  function place() {
+    TOP = Math.round(Math.min(300, H * 0.31));
+    Y0 = TOP + 34;
+    RH = (H - Y0 - 40) / (ROWS - 0.3);
+    FS = Math.min(1, RH / 62);
+    XS = 49;
+  }
+  function px(p) { return 26 + p.c * XS + (p.r % 2) * 22; }
+  function py(p) { return Y0 + p.r * RH; }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    T = 0; penalty = 0; misses = 0; shown = 0; nextClue = 0.6; caughtT = 0; hint = false; floats = [];
+    makeCase();
+  }
+  function score() { return T + penalty; }
+  function fmt(t) { return t.toFixed(1); }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    floats.forEach(function (f) { f.t += dt; });
+    floats = floats.filter(function (f) { return f.t < 1; });
+    if (confetti && (state === S.CAUGHT || state === S.RESULT)) confetti.step(dt, W, H);
+    if (state === S.CAUGHT) {
+      caughtT += dt;
+      if (caughtT > 2.2) state = S.RESULT;
+      return;
+    }
+    if (state !== S.PLAY) return;
+    T += dt;
+    if (shown < clues.length && T >= nextClue) {
+      shown++;
+      nextClue = T + CLUE_GAP;
+      tone(880, 0.09, 0.1, "triangle"); tone(1320, 0.12, 0.08, "triangle", null, 0.08);
+    }
+  }
+
+  function pick(x, y) {
+    for (var i = NP - 1; i >= 0; i--) {
+      var p = people[i], cx = px(p), cy = py(p);
+      if (Math.abs(x - cx) < 22 && y > cy - 26 * FS && y < cy + 44 * FS) return p;
+    }
+    return null;
+  }
+
+  /* ============ 入力 ============ */
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (state !== S.PLAY || x == null) return;
+    var p = pick(x, y);
+    if (!p || p.innocent) return;
+    if (p.i === culprit) {
+      state = S.CAUGHT; caughtT = 0;
+      tone(220, 0.2, 0.2, "sawtooth", 110);
+      if (AC && window.zCelebrate) window.zCelebrate.play(AC, "fanfare");
+      if (confetti) confetti.burst(W, H, 160);
+    } else {
+      p.innocent = true; p.miss = T;
+      misses++; penalty += 5;
+      floats.push({ x: px(p), y: py(p) - 30, t: 0 });
+      tone(140, 0.25, 0.18, "square", 90);
+    }
+  }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  function debugKey(n) {
+    /* 1: 捜査の始め  2: 手がかりが全部出た状態  3: 2 に加えて犯人に印（次のタップで逮捕） */
+    if (n === 1) newRound();
+    if (n === 2 || n === 3) {
+      if (state !== S.PLAY) newRound();
+      shown = clues.length; T = Math.max(T, (clues.length - 1) * CLUE_GAP + 0.6);
+      hint = n === 3;
+    }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    if (!esc && !go) return;
+    e.preventDefault();
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (e.repeat) return;
+    if (state === S.INTRO) startButton.click(); else down();
+  });
+
+  function doShare() {
+    var t = fmt(score());
+    var miss = misses ? zT("（誤認逮捕" + misses + "人）", " (wrongly accused " + misses + ")", " (오인 체포 " + misses + "명)", "（误抓" + misses + "人）", "（誤抓" + misses + "人）") : "";
+    window.zResultActions.x({ text:
+      zT("100人の容疑者から犯人を" + t + "秒で見つけ出した", "Found the culprit among 100 suspects in " + t + "s", "용의자 100명 중에서 범인을 " + t + "초 만에 찾아냈다", "从100名嫌疑人中用" + t + "秒找出了犯人", "從100名嫌疑人中用" + t + "秒找出了犯人") + miss +
+      zT(" #犯人はこの中にいる", " #TheCulpritIsInThisRoom", " #범인은이안에있다", " #犯人就在这里面", " #犯人就在這裡面") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  var LINE = "#2a1f1a";
+  function drawPerson(p, t) {
+    var x = px(p), y = py(p), s = FS;
+    var bob = state === S.CAUGHT && p.i === culprit ? -Math.abs(Math.sin(caughtT * 9)) * 8 : Math.sin(t * 1.3 + p.ph) * 1.2;
+    ctx.save();
+    ctx.translate(x, y + bob);
+    ctx.scale(s, s);
+    ctx.lineWidth = 2; ctx.strokeStyle = LINE; ctx.lineJoin = "round";
+    /* 服 */
+    ctx.fillStyle = SHIRT[p.shirt];
+    roundRect(-19, 13, 38, 36, 12); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = SKIN[p.skin];
+    ctx.beginPath(); ctx.moveTo(-5, 13); ctx.lineTo(0, 20); ctx.lineTo(5, 13); ctx.closePath(); ctx.fill();
+    /* 頭 */
+    ctx.fillStyle = SKIN[p.skin];
+    ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    /* 髪 */
+    ctx.fillStyle = HAIR[p.hair];
+    if (p.hat === 0) {
+      ctx.beginPath(); ctx.arc(0, -2, 15.5, Math.PI * 1.02, Math.PI * 1.98); ctx.quadraticCurveTo(8, -9, -2, -7); ctx.quadraticCurveTo(-10, -6, -15.4, -1); ctx.closePath(); ctx.fill(); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.ellipse(-13, -2, 4, 7, 0.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(13, -2, 4, 7, -0.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
+    /* 目 */
+    var blink = ((t + p.ph * 3) % 4) < 0.12;
+    if (p.gls === 2) {
+      ctx.fillStyle = "#151515";
+      roundRect(-12, -3, 10, 7, 3); ctx.fill();
+      roundRect(2, -3, 10, 7, 3); ctx.fill();
+      ctx.fillRect(-2, -1, 4, 1.6);
+    } else {
+      ctx.fillStyle = LINE;
+      if (blink) { ctx.fillRect(-8, 0, 5, 1.6); ctx.fillRect(3, 0, 5, 1.6); }
+      else { ctx.beginPath(); ctx.arc(-5.5, 0.5, 1.9, 0, 6.3); ctx.arc(5.5, 0.5, 1.9, 0, 6.3); ctx.fill(); }
+      if (p.gls === 1) {
+        ctx.lineWidth = 1.6; ctx.strokeStyle = "#2b2b2b";
+        ctx.beginPath(); ctx.arc(-5.5, 0.5, 4.6, 0, 6.3); ctx.moveTo(10.1, 0.5); ctx.arc(5.5, 0.5, 4.6, 0, 6.3); ctx.moveTo(-0.9, 0.2); ctx.lineTo(0.9, 0.2); ctx.stroke();
+        ctx.lineWidth = 2; ctx.strokeStyle = LINE;
+      }
+    }
+    /* ヒゲ / 口 */
+    if (p.mus) {
+      ctx.fillStyle = p.hair === 3 ? "#e6e4de" : (p.hair === 2 ? "#c9952c" : "#3a2616");
+      ctx.beginPath(); ctx.moveTo(0, 6); ctx.quadraticCurveTo(-6, 4, -10, 9); ctx.quadraticCurveTo(-4, 8.5, 0, 8); ctx.quadraticCurveTo(4, 8.5, 10, 9); ctx.quadraticCurveTo(6, 4, 0, 6); ctx.fill();
+    } else {
+      ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(-3, 8); ctx.quadraticCurveTo(0, 9.5, 3, 8); ctx.stroke(); ctx.lineWidth = 2;
+    }
+    /* 帽子 */
+    if (p.hat === 1) {
+      ctx.fillStyle = "#24365e";
+      ctx.beginPath(); ctx.arc(0, -4, 15.5, Math.PI, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+      roundRect(-3, -6, 22, 5, 2.5); ctx.fill(); ctx.stroke();
+    } else if (p.hat === 2) {
+      ctx.fillStyle = "#1a1a1e";
+      roundRect(-19, -10, 38, 5, 2.5); ctx.fill(); ctx.stroke();
+      roundRect(-11, -33, 22, 24, 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#b8343a"; ctx.fillRect(-10, -15, 20, 4);
+    }
+    ctx.restore();
+    if (p.innocent) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.fillStyle = "rgba(30,30,40,.55)";
+      ctx.beginPath(); ctx.arc(0, 8 * s, 26 * s, 0, 6.3); ctx.fill();
+      ctx.strokeStyle = "#ff4a4a"; ctx.lineWidth = 5 * s; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(-14 * s, -6 * s); ctx.lineTo(14 * s, 22 * s); ctx.moveTo(14 * s, -6 * s); ctx.lineTo(-14 * s, 22 * s); ctx.stroke();
+      ctx.restore();
+    }
+    if (hint && p.i === culprit && state === S.PLAY) {
+      ctx.strokeStyle = "#ffe14a"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y + 8 * s, 28 * s, 0, 6.3); ctx.stroke();
+    }
+  }
+
+  function drawDetective(x, y, t) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(1.55, 1.55);
+    ctx.lineWidth = 2; ctx.strokeStyle = LINE; ctx.lineJoin = "round";
+    /* コート */
+    ctx.fillStyle = "#b98a4e";
+    ctx.beginPath(); ctx.moveTo(-20, 64); ctx.lineTo(-17, 18); ctx.quadraticCurveTo(0, 10, 17, 18); ctx.lineTo(20, 64); ctx.closePath(); ctx.fill(); ctx.stroke();
+    /* 指さす腕 */
+    var a = Math.sin(t * 3) * 0.05;
+    ctx.save(); ctx.translate(12, 24); ctx.rotate(-0.25 + a);
+    ctx.fillStyle = "#b98a4e"; roundRect(0, -5, 30, 11, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#f6d3ad"; ctx.beginPath(); ctx.arc(33, 0, 5, 0, 6.3); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(36, -2); ctx.lineTo(45, -3); ctx.stroke();
+    ctx.restore();
+    /* 頭 */
+    ctx.fillStyle = "#f6d3ad"; ctx.beginPath(); ctx.arc(0, 0, 15, 0, 6.3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = LINE; ctx.beginPath(); ctx.arc(-5, 1, 1.9, 0, 6.3); ctx.arc(6, 1, 1.9, 0, 6.3); ctx.fill();
+    ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(-8, -5); ctx.lineTo(-2, -3.5); ctx.moveTo(9, -5); ctx.lineTo(3, -3.5); ctx.stroke(); ctx.lineWidth = 2;
+    /* パイプ */
+    ctx.strokeStyle = "#4a2a14"; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(2, 8); ctx.lineTo(13, 11); ctx.stroke();
+    ctx.fillStyle = "#4a2a14"; roundRect(11, 7, 7, 8, 2); ctx.fill();
+    ctx.strokeStyle = LINE; ctx.lineWidth = 2;
+    /* 鹿撃ち帽 */
+    ctx.fillStyle = "#8c6a3c";
+    ctx.beginPath(); ctx.arc(0, -4, 16, Math.PI, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-16, -4); ctx.lineTo(-24, 0); ctx.lineTo(-14, 1); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(16, -4); ctx.lineTo(24, 0); ctx.lineTo(14, 1); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#6f522c"; ctx.beginPath(); ctx.arc(0, -20, 2.5, 0, 6.3); ctx.fill();
+    ctx.restore();
+  }
+
+  function wrapText(text, maxW) {
+    var out = [], line = "";
+    var parts = /[ ]/.test(text) && !/[぀-ヿ一-鿿]/.test(text) ? text.split(" ") : text.split("");
+    var sep = parts.length && text.indexOf(" ") >= 0 && !/[぀-ヿ一-鿿]/.test(text) ? " " : "";
+    parts.forEach(function (w) {
+      var tryL = line ? line + sep + w : w;
+      if (ctx.measureText(tryL).width > maxW && line) { out.push(line); line = w; } else line = tryL;
+    });
+    if (line) out.push(line);
+    return out;
+  }
+
+  function drawBubble(t) {
+    var bx = 132, by = 14, bw = W - bx - 12, bh = TOP - 26;
+    ctx.save();
+    ctx.fillStyle = "#fffdf6"; ctx.strokeStyle = LINE; ctx.lineWidth = 3;
+    roundRect(bx, by, bw, bh, 18); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(bx + 2, by + bh * 0.42); ctx.lineTo(bx - 20, by + bh * 0.52); ctx.lineTo(bx + 2, by + bh * 0.58); ctx.fill();
+    roundRect(bx, by, bw, bh, 18); ctx.stroke();
+    ctx.fillStyle = "#fffdf6"; ctx.fillRect(bx - 1, by + bh * 0.42 + 3, 5, bh * 0.16 - 6);
+    ctx.strokeStyle = LINE; ctx.beginPath(); ctx.moveTo(bx + 1, by + bh * 0.42 + 2); ctx.lineTo(bx - 20, by + bh * 0.52); ctx.lineTo(bx + 1, by + bh * 0.58 - 2); ctx.stroke();
+    var head = zT("犯人はこの中にいる！", "The culprit is in this room!", "범인은 이 안에 있다!", "犯人就在这里面！", "犯人就在這裡面！");
+    ctx.fillStyle = "#16202e"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+    if (state === S.INTRO) {
+      ctx.font = "900 34px sans-serif";
+      var ls = wrapText(head, bw - 36);
+      var yy = by + bh / 2 - ls.length * 21;
+      ls.forEach(function (l, i) { ctx.fillText(l, bx + 18, yy + i * 42); });
+      ctx.restore();
+      return;
+    }
+    ctx.font = "900 22px sans-serif";
+    ctx.fillText(head, bx + 16, by + 14);
+    var n = Math.max(clues.length, 1), avail = bh - 56;
+    var fs = Math.max(13, Math.min(25, Math.floor(avail / n / 1.25)));
+    var lh = Math.floor(fs * 1.3);
+    ctx.font = "700 " + fs + "px sans-serif";
+    for (var i = 0; i < shown; i++) {
+      var age = T - (0.6 + i * CLUE_GAP);
+      ctx.globalAlpha = Math.min(1, Math.max(0, age * 4));
+      ctx.fillStyle = i === shown - 1 && state === S.PLAY ? "#c0392b" : "#16202e";
+      var txt = "・" + clueText(clues[i]);
+      while (ctx.measureText(txt).width > bw - 30 && fs > 11) { fs--; ctx.font = "700 " + fs + "px sans-serif"; }
+      ctx.fillText(txt, bx + 16, by + 48 + i * lh);
+      ctx.font = "700 " + Math.max(13, Math.min(25, Math.floor(avail / n / 1.25))) + "px sans-serif";
+      fs = Math.max(13, Math.min(25, Math.floor(avail / n / 1.25)));
+    }
+    ctx.globalAlpha = 1;
+    /* 時間 */
+    ctx.textAlign = "right"; ctx.font = "800 20px sans-serif"; ctx.fillStyle = "#7a6a5a";
+    ctx.fillText(fmt(score()), bx + bw - 14, by + bh - 28);
+    ctx.restore();
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
+    var t = performance.now() / 1000;
+    /* 部屋 */
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#5b3a2a"); g.addColorStop(0.3, "#6e4733"); g.addColorStop(1, "#3a2620");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(0,0,0,.12)";
+    for (var k = 0; k < W; k += 36) ctx.fillRect(k, 0, 2, TOP);
+    ctx.fillStyle = "#2c1c16"; ctx.fillRect(0, TOP, W, 8);
+    ctx.fillStyle = "#8a5a3a"; ctx.fillRect(0, TOP + 8, W, H - TOP - 8);
+    ctx.fillStyle = "rgba(0,0,0,.08)";
+    for (var r = 0; r < ROWS; r++) ctx.fillRect(0, Y0 + r * RH + 44 * FS, W, 6);
+
+    if (people.length) for (var i = 0; i < NP; i++) drawPerson(people[i], t);
+
+    drawDetective(62, TOP - 120, t);
+    drawBubble(t);
+
+    floats.forEach(function (f) {
+      ctx.save(); ctx.globalAlpha = 1 - f.t; ctx.fillStyle = "#ff4a4a"; ctx.font = "900 30px sans-serif"; ctx.textAlign = "center";
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 5; ctx.strokeText("+5", f.x, f.y - f.t * 30); ctx.fillText("+5", f.x, f.y - f.t * 30); ctx.restore();
+    });
+
+    if (state === S.CAUGHT || state === S.RESULT) {
+      var cp = people[culprit], cx = px(cp), cy = py(cp) + 8 * FS;
+      var k2 = Math.min(1, caughtT * 2.5);
+      ctx.save();
+      ctx.fillStyle = "rgba(8,6,10," + (0.72 * k2) + ")";
+      ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.arc(cx, cy, 300 - 250 * k2, 0, 6.3, true); ctx.fill();
+      ctx.strokeStyle = "rgba(255,230,120," + k2 + ")"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(cx, cy, 300 - 250 * k2, 0, 6.3); ctx.stroke();
+      ctx.restore();
+    }
+    if (state === S.RESULT) drawResult();
+    if (confetti && (state === S.CAUGHT || state === S.RESULT)) confetti.draw(ctx);
+  }
+
+  function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
+  function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.55)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff"; ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10;
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.font = "800 108px sans-serif";
+    var num = fmt(score()), unit = zT("秒", "s", "초", "秒", "秒");
+    var nw = ctx.measureText(num).width;
+    ctx.font = "800 44px sans-serif";
+    var uw = ctx.measureText(unit).width;
+    ctx.font = "800 108px sans-serif"; ctx.textAlign = "left";
+    ctx.fillText(num, W / 2 - (nw + uw + 6) / 2, H * 0.45);
+    ctx.font = "800 44px sans-serif";
+    ctx.fillText(unit, W / 2 - (nw + uw + 6) / 2 + nw + 6, H * 0.45);
+    ctx.restore();
+    window.zResultActions.drawButtons(ctx, resultButtons());
+    window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
+  }
+
+  window.__probe = {
+    now: function () { return { state: state, score: score(), W: W, H: H, clues: clues.length, shown: shown, culprit: culprit, buttons: state === S.RESULT ? resultButtons() : null }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); },
+    hideUI: function () { }
+  };
+
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(800);
+      startButton.click();
+      if (!await r.until(function () { return shown >= clues.length; }, 60)) throw Error("手がかりが出ない");
+      await r.wait(1200);
+      var cp = people[culprit]; down(px(cp), py(cp));
+      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("結果が出ない");
+      await r.wait(1500);
+    }
+  };
+
+  var confetti = window.zCelebrate ? window.zCelebrate.confetti() : null;
+  var startButton = document.getElementById('start');
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+  ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
+  startButton.addEventListener('click', function (e) { if (e) e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+  layout();
+  newRound(); state = S.INTRO; startButton.hidden = false;
+  var last = performance.now();
+  var stepAcc = 0;
+  function loop(now) {
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      stepAcc += dt;
+      while (stepAcc >= 1 / 60) { update(1 / 60); stepAcc -= 1 / 60; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
