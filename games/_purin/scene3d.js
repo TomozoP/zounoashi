@@ -302,9 +302,9 @@
     hero.position.y = Math.abs(Math.cos(wk * 9)) * 0.025 * mv;
     /* 両手のスプーンで交互にかきこむ：前へ突っこむ→口へ */
     var cyc = this.chew, aR = 0.5 + 0.5 * Math.sin(cyc), aL = 0.5 + 0.5 * Math.sin(cyc + Math.PI);
-    var walkR = -0.9 + sw * 0.2, walkL = -0.9 - sw * 0.2;
-    this.armR.rotation.set(walkR * (1 - ea) + (-1.35 - 1.0 * aR) * ea, 0, 0.25 * aR * ea);
-    this.armL.rotation.set(walkL * (1 - ea) + (-1.35 - 1.0 * aL) * ea, 0, -0.25 * aL * ea);
+    /* 腕はいつも前へまっすぐ伸ばす。食べるときは交互に突っこんで口へかきこむ */
+    this.armR.rotation.set(-1.5 + sw * 0.08 + (-0.15 * aR - 0.9 * (1 - aR)) * ea, 0, 0.3 * (1 - aR) * ea);
+    this.armL.rotation.set(-1.5 - sw * 0.08 + (-0.15 * aL - 0.9 * (1 - aL)) * ea, 0, -0.3 * (1 - aL) * ea);
     /* もぐもぐ：口・ほっぺ・頭 */
     var ch = Math.abs(Math.sin(cyc * 1.3));
     this.mouth.scale.set(1.3 + 0.3 * ea, 0.5 + 1.2 * ch * ea, 0.5);
@@ -313,7 +313,7 @@
     this.head.rotation.x = (-0.12 + 0.12 * ch) * ea;
     this.head.position.y = 1.55 - 0.03 * ch * ea;
     var full = ea > 0.3;
-    this.blob.visible = full && aR > 0.4; this.blob2.visible = full && aL > 0.4;
+    this.blob.visible = full && aR < 0.6; this.blob2.visible = full && aL < 0.6;
     this.blobTop.visible = this.blob.visible && !!k.caramel; this.blobTop2.visible = this.blob2.visible && !!k.caramel;
     /* かけら */
     var b = s.bites;
@@ -340,22 +340,15 @@
       if (cc.life <= 0) cc.m.visible = false;
     }
 
-    /* カメラ：小さい人の目の高さから、少し見上げる一人称 */
-    var cam = this.camera, sh = (s.shake || 0) + 0.012 * this.eatAmt;
-    var tx = s.me[0], tz = s.me[2], eye = 0.75 + Math.abs(Math.cos(wk * 9)) * 0.02 * mv;
-    cam.position.set(tx + (Math.random() - 0.5) * sh, eye + (Math.random() - 0.5) * sh, tz + (Math.random() - 0.5) * sh);
-    cam.lookAt(tx - Math.sin(s.yaw) * 2, eye + 0.45, tz - Math.cos(s.yaw) * 2);
-    CUT.uCam.value.copy(cam.position); CUT.uHero.value.copy(cam.position);
-    hero.visible = false;
-    /* 腕：ふだんは前に伸ばして歩きに合わせて揺れる。食べるときは交互に突っこんで手前へかきこむ */
-    for (var fi = 0; fi < this.fp.length; fi++) {
-      var A = this.fp[fi], ph = A.side > 0 ? 0 : Math.PI;
-      var thr = 0.5 + 0.5 * Math.sin(this.chew + ph);
-      var bobA = Math.sin(wk * 9 + ph) * 0.015 * mv;
-      A.g.position.set(A.side * (0.085 - 0.03 * (1 - thr) * ea), -0.17 + bobA + 0.04 * (1 - thr) * ea, -0.1 - 0.12 * thr * ea);
-      A.g.rotation.set(0.1 + 0.35 * (1 - thr) * ea, -A.side * (0.12 + 0.2 * (1 - thr) * ea), 0);
-      A.blob.visible = ea > 0.3 && thr < 0.55;
-    }
+    /* カメラ：人の後ろの低い所から、いつも同じ距離。間に挟まるプリンはくり抜いて見せる */
+    var cam = this.camera, sh = (s.shake || 0) + 0.015 * this.eatAmt;
+    var tx = s.me[0], ty = 0.6, tz = s.me[2];
+    var el = -0.02, d = 2.2, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
+    cam.position.set(tx + dx * d + (Math.random() - 0.5) * sh, Math.max(0.12, ty + dy * d) + (Math.random() - 0.5) * sh, tz + dz * d + (Math.random() - 0.5) * sh);
+    cam.lookAt(tx - Math.sin(s.yaw) * 2, ty + 1.3, tz - Math.cos(s.yaw) * 2);
+    CUT.uCam.value.copy(cam.position);
+    CUT.uHero.value.set(tx, 0.45, tz);
+    for (var fi = 0; fi < this.fp.length; fi++) this.fp[fi].g.visible = false;
 
     /* 崩れ */
     if (this.parts) {
