@@ -200,10 +200,12 @@
       M += A[j]; MX += CX[j]; MZ += CZ[j];
     }
     var out = { risk: best.risk, s0: s0, lean: best.dir ? [best.dir[0] * Math.min(1, best.off / best.e * 3), best.dir[1] * Math.min(1, best.off / best.e * 3)] : [0, 0], loose: loose * h * h * h };
-    if (!init && (best.risk > LIMIT || loose * h * h * h > 0.6)) {
-      if (best.risk <= LIMIT) {
-        out.collapse = { mode: "loose", layer: 0, keep: seen };
-      } else {
+    var looseV = loose * h * h * h;
+    if (!init && looseV > 0.05) {
+      /* 宙に浮いたかたまりは、下にあるものの上まで落とす */
+      out.collapse = { mode: "loose", layer: 0, keep: seen };
+    } else if (!init && best.risk > LIMIT) {
+      {
         var tip = best.off > 0.12 && best.risk < 50;
         var y = Y0 + best.layer * h;
         out.collapse = {
@@ -227,7 +229,7 @@
       up[n] = c.mode === "loose" ? (c.keep[n] ? 0 : 1) : (j > c.layer ? 1 : 0);
     }
     var pl = { mode: c.mode, up: up, f0: f.slice(), pivot: c.pivot || [0, 0, 0], ax: c.dir ? [c.dir[1], 0, -c.dir[0]] : [1, 0, 0], ang: c.mode === "tip" ? 1.45 : 0, drop: 0, cx: 0, cz: 0, sy: c.mode === "tip" ? 0.72 : 0.62 };
-    if (c.mode === "loose") pl.sy = 0.8;
+    if (c.mode === "loose") pl.sy = 0.92;
     /* 回したあとの一番下と重心 */
     var minY = 1e9, sx = 0, sz = 0, cnt = 0;
     for (k = 0; k < NZ; k++) for (j = 0; j < NY; j++) for (i = 0; i < NX; i++) {
@@ -239,11 +241,28 @@
     }
     if (!cnt) minY = 0;
     pl.drop = c.mode === "squash" ? Math.max(0, minY * 0.45) : Math.max(0, minY);
+    if (c.mode === "loose") {
+      /* 列ごとに、浮いたかたまりの一番下と、その下の支え（床か残る側）とのすき間。いちばん小さいすき間だけ落とす */
+      var gap = 1e9;
+      for (k = 1; k < NZ - 1; k++) for (i = 1; i < NX - 1; i++) {
+        for (j = 1; j < NY - 1; j++) {
+          n = this.idx(i, j, k);
+          if (up[n] && f[n] < 0) {
+            var js = 0;
+            for (var jb = j - 1; jb >= 1; jb--) { var nb = this.idx(i, jb, k); if (!up[nb] && f[nb] < 0) { js = jb; break; } }
+            var g2 = js ? (j - js - 1) * h : (j - 1) * h;
+            if (g2 < gap) gap = g2;
+            break;
+          }
+        }
+      }
+      pl.drop = gap < 1e8 ? Math.max(h * 0.5, gap + h * 0.5) : 0;
+    }
     pl.cx = cnt ? sx / cnt : 0; pl.cz = cnt ? sz / cnt : 0;
     pl.base = minY - pl.drop;                /* つぶれるときの床（下のかたまりの上にのる高さ） */
-    if (c.mode !== "squash") pl.base = 0;
+    if (c.mode === "tip") pl.base = 0;
     pl.tLand = c.mode === "tip" ? 1.05 : c.mode === "loose" ? Math.sqrt(Math.max(0.05, pl.drop) / 4.9) : 0.6;
-    pl.tEnd = pl.tLand + 1.4;
+    pl.tEnd = pl.tLand + (c.mode === "loose" ? 0.6 : 1.4);
     return pl;
   };
   /* 支点のまわりに回す */
@@ -433,7 +452,7 @@
     var k = 0.012 * (0.7 + 0.5 * Math.min(2, risk));
     wobV[0] += ux * k; wobV[1] += uz * k;
     if (munchN % 4 === 0) sPurun(0.6 + 0.4 * Math.min(2, risk));
-    if (a.collapse && calm <= 0) startCollapse(a.collapse);
+    if (a.collapse && (calm <= 0 || a.collapse.mode === "loose")) startCollapse(a.collapse);
     else if (F.volume() < F.vol0 * 0.02) finish();
   }
   function finish() {

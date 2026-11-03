@@ -205,6 +205,7 @@
     this.blobTop = new T.Mesh(new T.SphereGeometry(1.02, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.4), new T.MeshStandardMaterial({ color: 0x5e2a08, roughness: 0.2, envMap: this.env }));
     this.blob.add(this.blobTop); this.blobTop.visible = false;
     /* 手の先（腕の下端）に持たせる */
+    spoon.scale.setScalar(1.4);
     spoon.position.set(0, -0.56, 0.02);
     spoon.rotation.x = Math.PI / 2;
     this.armR.add(spoon);
@@ -303,7 +304,7 @@
     var hero = this.hero, k = s.spoon || { phase: 0 }, wk = s.walk || 0, mv = s.moving || 0;
     this.eatAmt += ((s.eating ? 1 : 0) - this.eatAmt) * Math.min(1, dt * 10);
     var ea = this.eatAmt;
-    if (ea > 0.05) this.chew += dt * 11;
+    if (ea > 0.05) this.chew += dt * 7;
     hero.position.set(s.me[0], 0, s.me[2]); hero.scale.setScalar(0.25);
     hero.rotation.y = s.face;
     var sw = Math.sin(wk * 9) * 0.7 * mv;
@@ -312,14 +313,16 @@
     /* 両手のスプーンで交互にかきこむ：前へ突っこむ→口へ */
     var cyc = this.chew, aR = 0.5 + 0.5 * Math.sin(cyc), aL = 0.5 + 0.5 * Math.sin(cyc + Math.PI);
     /* 腕はいつも前へまっすぐ伸ばす。食べるときは交互に突っこんで口へかきこむ */
-    this.armR.rotation.set(-1.5 + sw * 0.08 + (-0.15 * aR - 0.9 * (1 - aR)) * ea, 0, 0.3 * (1 - aR) * ea);
-    this.armL.rotation.set(-1.5 - sw * 0.08 + (-0.15 * aL - 0.9 * (1 - aL)) * ea, 0, -0.3 * (1 - aL) * ea);
+    /* a=1 で前へ突っこみ、a=0 でスプーンを頭の高さまで持ち上げて口へ（後ろからも見えるよう大きく） */
+    var mR = Math.pow(1 - aR, 1.6), mL = Math.pow(1 - aL, 1.6);
+    this.armR.rotation.set(-1.5 + sw * 0.08 + (-0.2 * aR - 1.0 * mR) * ea, 0, 0.55 * mR * ea);
+    this.armL.rotation.set(-1.5 - sw * 0.08 + (-0.2 * aL - 1.0 * mL) * ea, 0, -0.55 * mL * ea);
     /* もぐもぐ：口・ほっぺ・頭 */
     var ch = Math.abs(Math.sin(cyc * 1.3));
     this.mouth.scale.set(1.3 + 0.3 * ea, 0.5 + 1.2 * ch * ea, 0.5);
     var ck = 1 + 0.55 * ea * (0.7 + 0.3 * ch);
     this.cheekL.scale.set(ck, ck, ck); this.cheekR.scale.set(ck, ck, ck);
-    this.head.rotation.x = (-0.12 + 0.12 * ch) * ea;
+    this.head.rotation.x = (-0.1 - 0.3 * Math.max(mR, mL) + 0.1 * ch) * ea;
     this.head.position.y = 1.55 - 0.03 * ch * ea;
     var full = ea > 0.3;
     this.blob.visible = full && aR < 0.6; this.blob2.visible = full && aL < 0.6;
