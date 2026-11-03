@@ -388,7 +388,7 @@
     /* カメラ：人の後ろの低い所から、いつも同じ距離。間に挟まるプリンはくり抜いて見せる */
     var cam = this.camera, sh = (s.shake || 0) + 0.015 * this.eatAmt;
     var sz = s.size || 1, tx = s.me[0], ty = s.me[1] + 0.3 * sz, tz = s.me[2];   /* 人が大きくなったら、そのぶん引く */
-    var el = Math.max(-0.2, Math.min(1.2, 0.3 - s.pitch * 0.5)), d = 4.0 * (1 + 0.35 * (sz - 1)), dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
+    var el = Math.max(-0.2, Math.min(1.2, 0.36 - s.pitch * 0.5)), d = 6.0 * (1 + 0.3 * (sz - 1)), dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
     var cx0 = tx + dx * d, cy0 = Math.max(0.12, ty + dy * d), cz0 = tz + dz * d;
     var lx0 = tx - Math.sin(s.yaw) * 2, ly0 = ty + 0.45 + Math.sin(s.pitch) * 1.2, lz0 = tz - Math.cos(s.yaw) * 2;
     /* 倒れる間は引きのカメラ（プリンの中心から、人のいる側へ離れて少し上から） */
