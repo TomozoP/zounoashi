@@ -304,11 +304,11 @@
     this.eatAmt += ((s.eating ? 1 : 0) - this.eatAmt) * Math.min(1, dt * 10);
     var ea = this.eatAmt;
     if (ea > 0.05) this.chew += dt * 11;
-    hero.position.set(s.me[0], 0, s.me[2]); hero.scale.setScalar(0.5);
+    hero.position.set(s.me[0], 0, s.me[2]); hero.scale.setScalar(0.25);
     hero.rotation.y = s.face;
     var sw = Math.sin(wk * 9) * 0.7 * mv;
     this.legL.rotation.x = sw; this.legR.rotation.x = -sw;
-    hero.position.y = Math.abs(Math.cos(wk * 9)) * 0.025 * mv;
+    hero.position.y = Math.abs(Math.cos(wk * 9)) * 0.012 * mv;
     /* 両手のスプーンで交互にかきこむ：前へ突っこむ→口へ */
     var cyc = this.chew, aR = 0.5 + 0.5 * Math.sin(cyc), aL = 0.5 + 0.5 * Math.sin(cyc + Math.PI);
     /* 腕はいつも前へまっすぐ伸ばす。食べるときは交互に突っこんで口へかきこむ */
@@ -337,7 +337,7 @@
         c.m.position.set(b.p[0] + (Math.random() - 0.5) * 0.5, b.p[1] + (Math.random() - 0.5) * 0.5, b.p[2] + (Math.random() - 0.5) * 0.5);
         var sp2 = 1.2 + Math.random() * 2;
         c.v = [b.dir[0] * sp2 * 0.3 + (Math.random() - 0.5) * 2.0, 1.0 + Math.random() * 2.0, b.dir[1] * sp2 * 0.3 + (Math.random() - 0.5) * 2.0];
-        var sz = 0.015 + Math.random() * 0.03; c.m.scale.set(sz, sz * 0.8, sz);
+        var sz = 0.012 + Math.random() * 0.022; c.m.scale.set(sz, sz * 0.8, sz);
         c.m.visible = true;
       }
     }
@@ -351,8 +351,8 @@
 
     /* カメラ：人の後ろの低い所から、いつも同じ距離。間に挟まるプリンはくり抜いて見せる */
     var cam = this.camera, sh = (s.shake || 0) + 0.015 * this.eatAmt;
-    var tx = s.me[0], ty = 0.6, tz = s.me[2];
-    var el = 0.28, d = 2.3, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
+    var tx = s.me[0], ty = 0.3, tz = s.me[2];
+    var el = 0.3, d = 4.0, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
     var cx0 = tx + dx * d, cy0 = Math.max(0.12, ty + dy * d), cz0 = tz + dz * d;
     var lx0 = tx - Math.sin(s.yaw) * 2, ly0 = ty + 0.75, lz0 = tz - Math.cos(s.yaw) * 2;
     /* 倒れる間は引きのカメラ（プリンの中心から、人のいる側へ離れて少し上から） */
@@ -368,7 +368,7 @@
     cam.position.set(cx0 + (Math.random() - 0.5) * sh, cy0 + (Math.random() - 0.5) * sh, cz0 + (Math.random() - 0.5) * sh);
     cam.lookAt(lx0, ly0, lz0);
     CUT.uCam.value.copy(cam.position);
-    CUT.uHero.value.set(tx, 0.45, tz);
+    CUT.uHero.value.set(tx, 0.25, tz);
     if (w > 0.5) CUT.uHero.value.copy(cam.position);   /* 引きのときはくり抜かない */
     for (var fi = 0; fi < this.fp.length; fi++) this.fp[fi].g.visible = false;
 
