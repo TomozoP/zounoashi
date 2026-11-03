@@ -152,26 +152,53 @@
     this.ver = -1;
     this.parts = null;
 
-    /* スプーン（目の右下）。大きい銀のスプーン */
-    this.scene.add(this.camera);
+    /* 食べる人（三人称で後ろから見る）。前は +z 向き */
+    var skin = Z3.std(0xf2c39b, { roughness: 0.6 }), shirt = Z3.std(0xe0453a, { roughness: 0.6 }), pants = Z3.std(0x2f4f86, { roughness: 0.7 });
+    var hair = Z3.std(0x2a1d16, { roughness: 0.8 }), shoe = Z3.std(0x3a2a22, { roughness: 0.7 }), black = new T.MeshBasicMaterial({ color: 0x1a1210 });
+    var hero = this.hero = new T.Group();
+    function part(geo, mat, x, y, z, parent) { var m = new T.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; (parent || hero).add(m); return m; }
+    var torso = part(new T.CapsuleGeometry(0.22, 0.38, 6, 12), shirt, 0, 1.08, 0);
+    torso.scale.set(1, 1, 0.78);
+    var head = this.head = new T.Group(); head.position.set(0, 1.55, 0); hero.add(head);
+    part(new T.SphereGeometry(0.2, 18, 14), skin, 0, 0, 0, head);
+    var hr = part(new T.SphereGeometry(0.212, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), hair, 0, 0.02, -0.015, head); hr.rotation.x = -0.25;
+    part(new T.SphereGeometry(0.026, 8, 6), black, -0.07, 0.01, 0.185, head);
+    part(new T.SphereGeometry(0.026, 8, 6), black, 0.07, 0.01, 0.185, head);
+    this.mouth = part(new T.SphereGeometry(0.03, 8, 6), new T.MeshBasicMaterial({ color: 0x7a2a22 }), 0, -0.08, 0.18, head);
+    this.mouth.scale.set(1.3, 0.5, 0.5);
+    /* 脚と腕は付け根で回す */
+    var self = this;
+    function limb(x, y, len, rad, mat, footMat) {
+      var g = new T.Group(); g.position.set(x, y, 0); hero.add(g);
+      part(new T.CapsuleGeometry(rad, len, 4, 8), mat, 0, -len / 2 - rad * 0.5, 0, g);
+      if (footMat) { var f = part(new T.BoxGeometry(0.13, 0.08, 0.22), footMat, 0, -len - rad - 0.02, 0.04, g); }
+      else part(new T.SphereGeometry(rad * 1.25, 8, 6), skin, 0, -len - rad, 0, g);
+      return g;
+    }
+    this.legL = limb(-0.11, 0.72, 0.5, 0.085, pants, shoe);
+    this.legR = limb(0.11, 0.72, 0.5, 0.085, pants, shoe);
+    this.armL = limb(0.29, 1.32, 0.42, 0.065, shirt);
+    this.armR = limb(-0.29, 1.32, 0.42, 0.065, shirt);
+    this.scene.add(hero);
+
+    /* 右手に大きい銀のスプーン */
     var metal = new T.MeshStandardMaterial({ color: 0xdfe3e8, metalness: 1, roughness: 0.18, envMap: this.env, envMapIntensity: 1.4 });
     var spoon = this.spoon = new T.Group();
-    var bowlG = new T.SphereGeometry(1, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
-    var bowl = new T.Mesh(bowlG, metal); bowl.material.side = T.DoubleSide;
-    bowl.scale.set(0.085, 0.035, 0.12);
+    var bowl = new T.Mesh(new T.SphereGeometry(1, 20, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), metal); bowl.material.side = T.DoubleSide;
+    bowl.scale.set(0.12, 0.05, 0.17); bowl.position.set(0, 0, 0.62); bowl.castShadow = true;
     spoon.add(bowl);
-    var handle = new T.Mesh(new T.BoxGeometry(0.032, 0.012, 0.34), metal);
-    handle.position.set(0, 0.02, 0.27); handle.rotation.x = -0.18;
-    spoon.add(handle);
-    var neck = new T.Mesh(new T.BoxGeometry(0.02, 0.01, 0.08), metal);
-    neck.position.set(0, 0.006, 0.13); spoon.add(neck);
+    var handle = new T.Mesh(new T.BoxGeometry(0.045, 0.018, 0.5), metal);
+    handle.position.set(0, 0.02, 0.22); handle.castShadow = true; spoon.add(handle);
     this.blob = new T.Mesh(new T.SphereGeometry(1, 16, 10), new T.MeshStandardMaterial({ color: 0xf7cd63, roughness: 0.2, envMap: this.env, emissive: 0x3a2200, emissiveIntensity: 0.3 }));
-    this.blob.scale.set(0.07, 0.045, 0.09); this.blob.position.y = 0.0;
+    this.blob.scale.set(0.1, 0.065, 0.13); this.blob.position.set(0, 0.01, 0.62);
     this.blob.visible = false;
     spoon.add(this.blob);
-    this.blobTop = new T.Mesh(new T.SphereGeometry(1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.4), new T.MeshStandardMaterial({ color: 0x5e2a08, roughness: 0.2, envMap: this.env }));
-    this.blobTop.scale.set(0.071, 0.046, 0.091); this.blob.add(this.blobTop); this.blobTop.scale.set(1.01, 1.01, 1.01); this.blobTop.visible = false;
-    this.camera.add(spoon);
+    this.blobTop = new T.Mesh(new T.SphereGeometry(1.02, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.4), new T.MeshStandardMaterial({ color: 0x5e2a08, roughness: 0.2, envMap: this.env }));
+    this.blob.add(this.blobTop); this.blobTop.visible = false;
+    /* 手の先（腕の下端）に持たせる */
+    spoon.position.set(0, -0.56, 0.02);
+    spoon.rotation.x = Math.PI / 2;
+    this.armR.add(spoon);
   }
 
   GameScene.prototype.rebuild = function () {
@@ -217,7 +244,7 @@
     this.ver = -1;
   };
 
-  /* s: { eye:[x,y,z], yaw, pitch, wob:[x,z], squash, spoon:{ t, phase, blob }, collapse:{ c, t }, shake } */
+  /* s: { me:[x,y,z], face, moving, yaw, pitch, wob:[x,z], squash, spoon:{ t, phase, blob }, collapse:{ c, t }, shake } */
   GameScene.prototype.sync = function (s) {
     if (s.collapse && (!this.parts || this.parts.col !== s.collapse)) { if (this.parts) this.reset(); this.split(s.collapse); }
     if (!s.collapse && this.parts) this.reset();
@@ -227,31 +254,37 @@
     u.uSquash.value = s.squash || 0;
     u.uBase.value = 0;
 
-    var cam = this.camera;
-    var sh = s.shake || 0;
-    cam.position.set(s.eye[0] + (Math.random() - 0.5) * sh, s.eye[1] + (Math.random() - 0.5) * sh, s.eye[2] + (Math.random() - 0.5) * sh);
-    cam.rotation.order = "YXZ";
-    cam.rotation.set(s.pitch, s.yaw, 0);
-
-    /* スプーン：構え→すくう→口へ */
-    var sp = this.spoon, k = s.spoon || { phase: 0 };
-    var bx = 0.08, by = -0.17, bz = -0.42;
-    var rx = -0.35, ry = 0.25, rz = 0.05;
-    var bob = Math.sin((s.walk || 0) * 9) * 0.008;
-    if (k.phase === 1) {           /* 前へ突き出す */
-      var a = k.t;
-      bx = 0.08 - 0.06 * a; by = -0.17 + 0.07 * a; bz = -0.42 - 0.38 * a; rx = -0.35 - 0.5 * a;
-    } else if (k.phase === 2) {    /* すくって起こしながら戻す */
-      var b2 = k.t;
-      bx = 0.02 + 0.06 * b2; by = -0.10 - 0.07 * b2; bz = -0.8 + 0.42 * b2; rx = -0.85 + 0.75 * b2;
-    } else if (k.phase === 3) {    /* 口へ */
-      var c3 = Math.sin(k.t * Math.PI);
-      bx = 0.08 - 0.08 * c3; by = -0.17 + 0.02 * c3; bz = -0.38 + 0.18 * c3; rx = -0.1 + 0.1 * c3; ry = 0.25 * (1 - c3);
-    }
-    sp.position.set(bx, by + bob, bz);
-    sp.rotation.set(rx, ry, rz);
+    /* 人 */
+    var hero = this.hero, k = s.spoon || { phase: 0 }, wk = s.walk || 0, mv = s.moving || 0;
+    hero.position.set(s.me[0], 0, s.me[2]);
+    hero.rotation.y = s.face;
+    var sw = Math.sin(wk * 9) * 0.7 * mv;
+    this.legL.rotation.x = sw; this.legR.rotation.x = -sw;
+    this.armL.rotation.x = -sw * 0.8;
+    hero.position.y = Math.abs(Math.cos(wk * 9)) * 0.05 * mv;
+    /* 右腕：ふだんは前に構える。食べるときは口へ運ぶ */
+    var lift = k.phase === 3 ? Math.sin(k.t * Math.PI) : 0;
+    this.armR.rotation.set(-0.9 - 1.3 * lift + sw * 0.2 * (1 - lift), 0, 0.15 * lift);
+    this.armR.position.x = -0.29 + 0.08 * lift;
+    this.mouth.scale.set(1.3, 0.5 + 1.4 * lift, 0.5);
+    this.head.rotation.x = -0.1 * lift;
     this.blob.visible = !!k.blob;
     this.blobTop.visible = !!k.blob && !!k.caramel;
+
+    /* カメラ：人の後ろ上から。プリンに埋まらないよう手前に寄せる */
+    var cam = this.camera, sh = s.shake || 0;
+    var tx = s.me[0], ty = 1.5, tz = s.me[2];
+    var el = Math.max(-0.35, Math.min(1.25, 0.32 - s.pitch));
+    var dist = 3.4, dx = Math.sin(s.yaw) * Math.cos(el), dy = Math.sin(el), dz = Math.cos(s.yaw) * Math.cos(el);
+    var d = 0.4;
+    while (d < dist) {
+      var px = tx + dx * (d + 0.15), py = ty + dy * (d + 0.15), pz = tz + dz * (d + 0.15);
+      if (py < 0.25 || this.F.sample(px, py, pz) < 0.12) break;
+      d += 0.1;
+    }
+    cam.position.set(tx + dx * d + (Math.random() - 0.5) * sh, Math.max(0.25, ty + dy * d) + (Math.random() - 0.5) * sh, tz + dz * d + (Math.random() - 0.5) * sh);
+    cam.lookAt(tx, ty + 0.15, tz);
+    hero.visible = d > 0.7;
 
     /* 崩れ */
     if (this.parts) {
