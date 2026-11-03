@@ -252,7 +252,9 @@
     upM.matrixAutoUpdate = false;
     this.scene.remove(this.mesh);
     this.scene.add(upM); this.scene.add(low);
-    this.parts = { up: upM, low: low, col: col };
+    upM.geometry.computeBoundingBox();
+    var bb = upM.geometry.boundingBox, pb = col.plan.mode === "tip" ? col.plan.pivot[1] : bb.min.y;
+    this.parts = { up: upM, low: low, col: col, base: pb, h: Math.max(0.5, bb.max.y - pb) };
   };
 
   /* 倒れる・落ちる・つぶれるを1つの行列に（pudding の bake と同じ順） */
@@ -367,7 +369,15 @@
     if (this.parts) {
       poseMatrix(s.collapse.plan, s.collapse.pose, this.parts.up.matrix);
       this.parts.up.matrixWorldNeedsUpdate = true;
-      this.parts.up.material.userData.u.uWob.value.set(0, 0);
+      /* しなり：倒れ始めは上が遅れて後ろへ反り、着地の直前に前へしなる。着地後もしばらく揺れる */
+      var pl = s.collapse.plan, tt = s.collapse.t, um = this.parts.up.material.userData.u;
+      var dir = [-pl.ax[2], pl.ax[0]];
+      var fall = Math.min(1, tt / pl.tLand), bend;
+      if (pl.mode === "tip") bend = -0.16 * Math.sin(Math.PI * Math.min(1, fall * 1.4)) + 0.22 * Math.pow(fall, 4);
+      else bend = 0;
+      if (tt > pl.tLand) { var e2 = tt - pl.tLand; bend = 0.22 * Math.exp(-e2 * 2.4) * Math.cos(e2 * 9); }
+      um.uWob.value.set(dir[0] * bend, dir[1] * bend);
+      um.uBase.value = this.parts.base; um.uH.value = this.parts.h;
     }
   };
 
