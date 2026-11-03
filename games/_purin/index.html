@@ -226,7 +226,7 @@
       n = this.idx(i, j, k);
       up[n] = c.mode === "loose" ? (c.keep[n] ? 0 : 1) : (j > c.layer ? 1 : 0);
     }
-    var pl = { mode: c.mode, up: up, pivot: c.pivot || [0, 0, 0], ax: c.dir ? [c.dir[1], 0, -c.dir[0]] : [1, 0, 0], ang: c.mode === "tip" ? 1.45 : 0, drop: 0, cx: 0, cz: 0, sy: c.mode === "tip" ? 0.72 : 0.62 };
+    var pl = { mode: c.mode, up: up, f0: f.slice(), pivot: c.pivot || [0, 0, 0], ax: c.dir ? [c.dir[1], 0, -c.dir[0]] : [1, 0, 0], ang: c.mode === "tip" ? 1.45 : 0, drop: 0, cx: 0, cz: 0, sy: c.mode === "tip" ? 0.72 : 0.62 };
     if (c.mode === "loose") pl.sy = 0.8;
     /* 回したあとの一番下と重心 */
     var minY = 1e9, sx = 0, sz = 0, cnt = 0;
@@ -273,7 +273,7 @@
   /* 最後の形を格子に焼きこむ（倒れたプリンもそのまま食べられる） */
   P.bake = function (pl) {
     var f = this.f, upF = new Float32Array(f.length), n, i, j, k;
-    for (n = 0; n < f.length; n++) { upF[n] = pl.up[n] ? f[n] : Math.max(f[n], h); if (pl.up[n]) f[n] = Math.max(f[n], h); }
+    for (n = 0; n < f.length; n++) { upF[n] = pl.up[n] ? pl.f0[n] : Math.max(pl.f0[n], h); if (pl.up[n]) f[n] = Math.max(f[n], h); }
     var po = this.pose(pl, pl.tEnd + 1), ia = -po.ang, car0 = this.car.slice(), skin0 = this.skin.slice();
     for (k = 1; k < NZ - 1; k++) for (j = 1; j < NY - 1; j++) for (i = 1; i < NX - 1; i++) {
       var x = X0 + i * h, y = Y0 + j * h, z = Z0 + k * h;
@@ -426,6 +426,7 @@
   }
   function afterEat(ux, uz) {
     kg = F.eatenKg();
+    if (state === S.COLLAPSE) return;          /* 倒れている間は、食べるだけ（崩れ・完食の判定は倒れ終わってから） */
     var a = F.analyze();
     F.last = a;
     risk = a.risk; lean = a.lean;
@@ -488,7 +489,6 @@
       col.pose = F.pose(col.plan, col.t);
       if (!crashed && col.t > col.plan.tLand) { crashed = true; sCrash(); var dl = col.c.dir || [0, 0]; wobV[0] += dl[0] * 0.09; wobV[1] += dl[1] * 0.09; }
       if (col.t > col.plan.tEnd) endCollapse();
-      return;
     }
 
     /* いつも前へ進む。操作は左右に曲がるだけ */
@@ -541,14 +541,14 @@
       if (window.zResultActions.hit(resultButtons(), p.x, p.y) === "retry") newRound();
       return;
     }
-    if (state !== S.PLAY) return;
+    if (state !== S.PLAY && state !== S.COLLAPSE) return;
     try { wrap.setPointerCapture(e.pointerId); } catch (er) {}
     pointers[e.pointerId] = { x: p.x };
   });
   /* 横にドラッグした分だけ向きを変える */
   wrap.addEventListener("pointermove", function (e) {
     var q = pointers[e.pointerId];
-    if (!q || state !== S.PLAY) return;
+    if (!q || (state !== S.PLAY && state !== S.COLLAPSE)) return;
     var p = atCanvas(e);
     me.yaw -= (p.x - q.x) * 0.009;
     q.x = p.x;
@@ -647,7 +647,7 @@
     var s3 = scene3d(), drew = false;
     if (s3) {
       try {
-        s3.sync({ me: [me.x, 0, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: wide, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
+        s3.sync({ me: [me.x, 0, me.z], face: me.face, moving: me.moving, eating: eatGlow > 0 ? 1 : 0, bites: bites, wide: 0, yaw: me.yaw, pitch: me.pitch, walk: me.walk,
           wob: [wob[0] + lx, wob[1] + lz], spoon: spoon, collapse: state === S.COLLAPSE ? col : null, shake: shake });
         drew = s3.draw(ctx, W, H);
       } catch (e) { scene3d.drop(); if (window.console) console.error(e); }

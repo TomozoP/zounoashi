@@ -254,7 +254,7 @@
     this.scene.add(upM); this.scene.add(low);
     upM.geometry.computeBoundingBox();
     var bb = upM.geometry.boundingBox, pb = col.plan.mode === "tip" ? col.plan.pivot[1] : bb.min.y;
-    this.parts = { up: upM, low: low, col: col, base: pb, h: Math.max(0.5, bb.max.y - pb) };
+    this.parts = { ver: F.ver, up: upM, low: low, col: col, base: pb, h: Math.max(0.5, bb.max.y - pb) };
   };
 
   /* 倒れる・落ちる・つぶれるを1つの行列に（pudding の bake と同じ順） */
@@ -286,6 +286,13 @@
     if (s.collapse && (!this.parts || this.parts.col !== s.collapse)) { if (this.parts) this.reset(); this.split(s.collapse); }
     if (!s.collapse && this.parts) this.reset();
     if (!this.parts && this.ver !== this.F.ver) this.rebuild();
+    /* 倒れている間に食べたら、残る側だけ作り直す */
+    if (this.parts && this.parts.ver !== this.F.ver) {
+      var F2 = this.F, up2 = this.parts.col.plan.up;
+      this.parts.low.geometry.dispose();
+      this.parts.low.geometry = buildGeometry(F2, function (i, j, k) { return !up2[F2.idx(i, j, k)]; });
+      this.parts.ver = F2.ver;
+    }
     var u = this.mat.userData.u;
     u.uWob.value.set(s.wob[0], s.wob[1]);
     u.uSquash.value = s.squash || 0;
