@@ -11,65 +11,113 @@
 
   function GameScene() {
     T = global.THREE;
-    var st = this.stage = new Z3.Stage({ renderer: { shadows: !Z3.mobile, tone: "aces", exposure: 1.35 }, camera: { fov: 30, near: 0.5, far: 80 }, dpr: 1.5 });
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: !Z3.mobile, tone: "aces", exposure: 1.25 }, camera: { fov: 30, near: 0.5, far: 80 }, dpr: 1.5, finish: { vignette: 0.28, contrast: 0.12, grain: 0.012 } });
     var sc = this.scene = st.scene;
     this.camera = st.camera;
-    sc.background = new T.Color("#4a4252");
+    var BW = 5;
 
-    /* 映り込み用の部屋（やわらかい照明の箱）。ゼリーのつやはこの映り込みで出す */
-    var env = new T.Scene();
-    var room = new T.Mesh(new T.SphereGeometry(30, 32, 16), new T.MeshBasicMaterial({ side: T.BackSide, map: Z3.canvasTex(256, 128, function (g, w, h) {
+    /* 背景：深い藍から紫へ。箱の後ろだけ、ほんのり明るい */
+    sc.background = Z3.canvasTex(64, 512, function (g, w, h) {
       var gr = g.createLinearGradient(0, 0, 0, h);
-      gr.addColorStop(0, "#ffffff"); gr.addColorStop(0.45, "#8a7f90"); gr.addColorStop(1, "#3a3340");
+      gr.addColorStop(0, "#14122a"); gr.addColorStop(0.55, "#3a2550"); gr.addColorStop(1, "#5a2f52");
       g.fillStyle = gr; g.fillRect(0, 0, w, h);
-    }) }));
-    env.add(room);
+    });
+    var glowTex = Z3.canvasTex(256, 256, function (g, w, h) {
+      var gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+      gr.addColorStop(0, "rgba(255,220,250,.55)"); gr.addColorStop(0.5, "rgba(190,140,255,.18)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    });
+    this.glowTex = glowTex;
+    var glow = new T.Mesh(new T.PlaneGeometry(16, 18), new T.MeshBasicMaterial({ map: glowTex, transparent: true, depthWrite: false, blending: T.AdditiveBlending }));
+    glow.position.set(BW / 2, 5, -4); sc.add(glow);
+
+    /* 映り込み用の部屋。白い天井の照明と、左にピンク・右に水色のやわらかい光 */
+    var env = new T.Scene();
+    env.add(new T.Mesh(new T.SphereGeometry(30, 32, 16), new T.MeshBasicMaterial({ side: T.BackSide, map: Z3.canvasTex(256, 128, function (g, w, h) {
+      var gr = g.createLinearGradient(0, 0, 0, h);
+      gr.addColorStop(0, "#d9d4ff"); gr.addColorStop(0.5, "#3a2d55"); gr.addColorStop(1, "#120f22");
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    }) })));
     function softbox(x, y, z, w, h, c) {
       var m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshBasicMaterial({ color: c, side: T.DoubleSide }));
       m.position.set(x, y, z); m.lookAt(0, 0, 0); env.add(m);
     }
-    softbox(-8, 10, 12, 10, 6, "#ffffff");
-    softbox(10, 6, 8, 4, 10, "#fff4e6");
-    softbox(0, 14, -10, 14, 4, "#e6f0ff");
+    softbox(-4, 14, 10, 12, 5, "#ffffff");
+    softbox(-14, 4, 4, 3, 12, "#ff7ac8");
+    softbox(14, 4, 4, 3, 12, "#6fe3ff");
+    softbox(0, 3, 16, 14, 2, "#fff0e0");
     var pm = new T.PMREMGenerator(st.renderer);
     sc.environment = pm.fromScene(env, 0.02).texture;
 
-    var key = new T.DirectionalLight("#fff6ee", 1.6);
-    key.position.set(-4, 14, 10);
+    /* 明かり：上からやわらかい白、後ろの左右から色つきの縁の光（ゼリーのふちが光る） */
+    var key = new T.DirectionalLight("#fff4ec", 2.0);
+    key.position.set(-3, 15, 9);
     if (!Z3.mobile) {
       key.castShadow = true;
       key.shadow.mapSize.set(1024, 1024);
       var c = key.shadow.camera; c.left = -6; c.right = 6; c.top = 9; c.bottom = -3; c.near = 1; c.far = 40;
-      key.shadow.radius = 4; key.shadow.bias = -0.002;
+      key.shadow.radius = 6; key.shadow.bias = -0.002;
     }
-    key.target.position.set(3, 4, 0);
+    key.target.position.set(BW / 2, 3, 0);
     sc.add(key); sc.add(key.target);
-    sc.add(new T.HemisphereLight("#ffffff", "#c9b9ad", 0.5));
+    var rimL = new T.DirectionalLight("#ff6ec0", 2.2); rimL.position.set(-6, 4, -6); sc.add(rimL);
+    var rimR = new T.DirectionalLight("#5fd8ff", 2.2); rimR.position.set(12, 4, -6); sc.add(rimR);
+    sc.add(new T.HemisphereLight("#d8d0ff", "#2a1d33", 0.8));
+    var fill = new T.DirectionalLight("#fff8f0", 1.3); fill.position.set(BW / 2, 4, 20); sc.add(fill);   /* 正面からの補助光（色をくすませない） */
 
-    /* 台と壁（乳白のトレー） */
-    var BW = 5;
-    var tray = Z3.std("#e9e1da", { roughness: 0.3 });
-    var floor = new T.Mesh(new T.BoxGeometry(BW + 0.6, 0.4, 2.4), tray);
-    floor.position.set(BW / 2, -0.2, 0); floor.receiveShadow = true; sc.add(floor);
-    var back = new T.Mesh(new T.BoxGeometry(BW + 0.6, 14, 0.2), Z3.std("#5d5366", { roughness: 0.9 }));
-    back.position.set(BW / 2, 6.8, -1.1); back.receiveShadow = true; sc.add(back);
-    /* 左右の透明な壁 */
-    var glass = new T.MeshPhysicalMaterial({ color: "#ffffff", roughness: 0.05, transmission: 0, transparent: true, opacity: 0.18, clearcoat: 1 });
-    [-0.15, BW + 0.15].forEach(function (x) {
-      var w = new T.Mesh(new T.BoxGeometry(0.3, 11.5, 2.2), glass);
-      w.position.set(x, 5.75, 0); sc.add(w);
+    /* 床：つやのある黒いアクリル */
+    var floor = new T.Mesh(new T.BoxGeometry(BW + 0.9, 0.5, 2.6), new T.MeshPhysicalMaterial({ color: "#1b1626", roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.2 }));
+    floor.position.set(BW / 2, -0.25, 0); floor.receiveShadow = true; sc.add(floor);
+    /* 左右の壁：角の丸い透明アクリルの柱。内側の手前の角に、細い光の線 */
+    var acrylic = new T.MeshPhysicalMaterial({ color: "#ffffff", roughness: 0.04, metalness: 0, transmission: 1, thickness: 0.6, ior: 1.5, clearcoat: 1, envMapIntensity: 1.5, attenuationColor: new T.Color("#d8e8ff"), attenuationDistance: 3 });
+    var self = this;
+    [[-0.22, "#ff86cf"], [BW + 0.22, "#7fe4ff"]].forEach(function (o) {
+      var w = new T.Mesh(roundBox(0.36, 11, 2.3, 0.12), acrylic);
+      w.position.set(o[0], 5.5, 0); sc.add(w);
+      var led = new T.Mesh(new T.BoxGeometry(0.04, 10.6, 0.04), new T.MeshBasicMaterial({ color: o[1] }));
+      led.position.set(o[0] + (o[0] < 0 ? 0.17 : -0.17), 5.5, 1.1); sc.add(led);
+      var halo = new T.Mesh(new T.PlaneGeometry(0.9, 11.5), new T.MeshBasicMaterial({ map: glowTex, color: o[1], transparent: true, opacity: 0.55, depthWrite: false, blending: T.AdditiveBlending }));
+      halo.position.set(led.position.x, 5.5, 1.12); sc.add(halo);
     });
+    /* 床の手前のふちの光 */
+    var fled = new T.Mesh(new T.BoxGeometry(BW + 0.8, 0.035, 0.035), new T.MeshBasicMaterial({ color: "#ffd6f2" }));
+    fled.position.set(BW / 2, 0.0, 1.31); sc.add(fled);
+
     /* あふれの線 */
-    this.line = new T.Mesh(new T.BoxGeometry(BW, 0.04, 0.04), new T.MeshBasicMaterial({ color: "#ff6a6a", transparent: true, opacity: 0.5 }));
-    this.line.position.set(BW / 2, 9, 0.9); sc.add(this.line);
+    this.line = new T.Mesh(new T.BoxGeometry(BW, 0.035, 0.035), new T.MeshBasicMaterial({ color: "#ff6a8a", transparent: true, opacity: 0.5 }));
+    this.line.position.set(BW / 2, 9, 1.0); sc.add(this.line);
     /* 落とす位置の目安 */
-    this.guide = new T.Mesh(new T.BoxGeometry(0.03, 10, 0.03), new T.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.45 }));
+    this.guide = new T.Mesh(new T.BoxGeometry(0.025, 10, 0.025), new T.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.3 }));
     sc.add(this.guide);
+
+    /* はじけの粒（しずく・かけら）と波紋とキラキラ。数を決めて使い回す */
+    this.drop = new T.SphereGeometry(1, 12, 8);
+    this.shard = new T.OctahedronGeometry(1, 0);
+    this.parts = [];
+    this.rings = [];
+    this.spark = new T.MeshBasicMaterial({ map: Z3.canvasTex(64, 64, function (g, w, h) {
+      var gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+      gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.25, "rgba(255,255,255,.6)"); gr.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      g.fillStyle = "rgba(255,255,255,.9)"; g.fillRect(w / 2 - 1, 4, 2, h - 8); g.fillRect(4, h / 2 - 1, w - 8, 2);
+    }), transparent: true, depthWrite: false, blending: T.AdditiveBlending });
 
     this.mats = [];
     this.meshes = new Map();
     this.holdMesh = null;
     this.t = 0;
+  }
+
+  /* 角の丸い箱（壁の柱） */
+  function roundBox(w, h, d, r) {
+    var sh = new T.Shape(), x = -w / 2, y = -d / 2;
+    sh.moveTo(x + r, y); sh.lineTo(x + w - r, y); sh.quadraticCurveTo(x + w, y, x + w, y + r);
+    sh.lineTo(x + w, y + d - r); sh.quadraticCurveTo(x + w, y + d, x + w - r, y + d);
+    sh.lineTo(x + r, y + d); sh.quadraticCurveTo(x, y + d, x, y + d - r);
+    sh.lineTo(x, y + r); sh.quadraticCurveTo(x, y, x + r, y);
+    var g = new T.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: 6 });
+    g.rotateX(-Math.PI / 2); g.translate(0, -h / 2, 0);
+    return g;
   }
 
   /* 硬さごとの材質。やわらかいほど透けて、かたいほど詰まったグミ */
@@ -134,6 +182,7 @@
     var self = this;
     this.meshes.forEach(function (m) { self.scene.remove(m); m.geometry.dispose(); });
     this.meshes.clear();
+    if (this.parts) this.reset2();
   };
 
   GameScene.prototype.sync = function (s) {
@@ -149,13 +198,25 @@
       var cx = 0, cy = 0;
       b.pts.forEach(function (p) { cx += p.x; cy += p.y; });
       cx /= b.pts.length; cy /= b.pts.length;
-      /* はじけるときはふくらんで縮む */
-      var sw = 1, k = 1;
-      if (b.pop) { var u = b.pop / 0.45; k = u < 0.4 ? 1 + u * 0.5 : Math.max(0.01, 1.2 * (1 - (u - 0.4) / 0.6)); }
-      var pts = k === 1 ? b.pts : b.pts.map(function (p) { return { x: cx + (p.x - cx) * k, y: cy + (p.y - cy) * k }; });
-      self.shape(m.geometry, pts, cx, cy, sw * k);
+      m.userData.c = { x: cx, y: cy, lv: b.lv };
+      /* はじける前：ぶるぶる震えながらふくらむ */
+      var k = 1, kx = 1, ky = 1;
+      if (b.pop) {
+        var u = Math.min(1, b.pop / 0.32);
+        k = 1 + u * u * 0.32;
+        var w = Math.sin(b.pop * 70) * 0.09 * u;
+        kx = k * (1 + w); ky = k * (1 - w);
+      }
+      var pts = k === 1 ? b.pts : b.pts.map(function (p) { return { x: cx + (p.x - cx) * kx, y: cy + (p.y - cy) * ky }; });
+      self.shape(m.geometry, pts, cx, cy, k);
     });
-    this.meshes.forEach(function (m, b) { if (!used.has(b)) { self.scene.remove(m); m.geometry.dispose(); self.meshes.delete(b); } });
+    this.meshes.forEach(function (m, b) {
+      if (used.has(b)) return;
+      if (b.pop && m.userData.c) self.burst(m.userData.c, s.LV);
+      self.scene.remove(m); m.geometry.dispose(); self.meshes.delete(b);
+    });
+    var dt = Math.max(0, Math.min(0.05, s.t - this.t)); this.t = s.t;
+    this.stepFx(dt);
 
     /* 持っているブロック */
     if (s.hold) {
@@ -173,8 +234,96 @@
     this.line.material.opacity = 0.35 + s.danger * 0.5;
 
     /* カメラ：正面やや上から箱全体 */
-    this.camera.position.set(s.BW / 2, 6.6, 21);
-    this.camera.lookAt(s.BW / 2, 5.3, 0);
+    var kk = s.kick || 0, sh = Math.sin(s.t * 60) * kk * 0.12;
+    this.camera.position.set(s.BW / 2 + sh, 6.6 - kk * 0.25, 23.5 - kk * 0.6);
+    this.camera.lookAt(s.BW / 2 + sh * 0.5, 5.3 - kk * 0.25, 0);
+    this.camera.updateMatrixWorld();
+  };
+
+  /* はじけ：しずく（スライム）かかけら（宝石）が飛び散り、波紋が広がって、キラキラが残る */
+  GameScene.prototype.burst = function (c, LV) {
+    var lv = c.lv, gem = lv >= 3, mat = this.mat(lv, LV), col = new T.Color(LV[lv].color);
+    var n = Z3.mobile ? 10 : 16;
+    for (var i = 0; i < n; i++) {
+      var m = new T.Mesh(gem ? this.shard : this.drop, mat);
+      var a = Math.random() * Math.PI * 2, sp = 3 + Math.random() * 5;
+      var r = gem ? 0.08 + Math.random() * 0.12 : 0.06 + Math.random() * 0.16;
+      m.position.set(c.x, c.y, (Math.random() - 0.5) * 0.4);
+      m.scale.setScalar(r);
+      this.scene.add(m);
+      this.parts.push({ m: m, r: r, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 3, vz: (Math.random() - 0.2) * 4, life: 0.9 + Math.random() * 0.5, t: 0, gem: gem,
+        spin: new T.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(14) });
+    }
+    /* 波紋 */
+    var ring = new T.Mesh(new T.RingGeometry(0.85, 1, 48), new T.MeshBasicMaterial({ color: col.clone().lerp(new T.Color("#ffffff"), 0.4), transparent: true, opacity: 0.9, depthWrite: false, blending: T.AdditiveBlending, side: T.DoubleSide }));
+    ring.position.set(c.x, c.y, 0.6); this.scene.add(ring);
+    this.rings.push({ m: ring, t: 0 });
+    /* やわらかい光の玉（その場で一度ふくらんで消える） */
+    var bloom = new T.Mesh(new T.PlaneGeometry(1, 1), new T.MeshBasicMaterial({ map: this.glowTex, color: col, transparent: true, depthWrite: false, blending: T.AdditiveBlending }));
+    bloom.position.set(c.x, c.y, 0.7); this.scene.add(bloom);
+    this.rings.push({ m: bloom, t: 0, bloom: true });
+    /* キラキラ */
+    for (i = 0; i < (gem ? 8 : 4); i++) {
+      var sp2 = new T.Mesh(new T.PlaneGeometry(1, 1), this.spark.clone());
+      sp2.material.color = col.clone().lerp(new T.Color("#ffffff"), 0.6);
+      sp2.position.set(c.x + (Math.random() - 0.5) * 1.4, c.y + (Math.random() - 0.5) * 1.4, 0.8);
+      this.scene.add(sp2);
+      this.rings.push({ m: sp2, t: -Math.random() * 0.25, spark: true, s: 0.4 + Math.random() * 0.5 });
+    }
+  };
+  GameScene.prototype.stepFx = function (dt) {
+    var self = this;
+    this.parts = this.parts.filter(function (p) {
+      p.t += dt;
+      p.vy -= 18 * dt; p.vx *= 0.99;
+      var m = p.m;
+      m.position.x += p.vx * dt; m.position.y += p.vy * dt; m.position.z += p.vz * dt;
+      if (m.position.y < p.r * 0.5) { m.position.y = p.r * 0.5; p.vy *= -0.35; p.vx *= 0.6; p.vz *= 0.6; }
+      var u = p.t / p.life, k = u < 0.7 ? 1 : Math.max(0.001, 1 - (u - 0.7) / 0.3);
+      if (p.gem) { m.rotation.x += p.spin.x * dt; m.rotation.y += p.spin.y * dt; m.scale.setScalar(p.r * k); }
+      else {
+        /* しずくは飛ぶ向きに少し伸びる */
+        var v = Math.hypot(p.vx, p.vy), st = 1 + Math.min(0.8, v * 0.06);
+        m.rotation.z = Math.atan2(p.vy, p.vx);
+        m.scale.set(p.r * k * st, p.r * k / Math.sqrt(st), p.r * k);
+      }
+      if (p.t >= p.life) { self.scene.remove(m); return false; }
+      return true;
+    });
+    this.rings = this.rings.filter(function (r) {
+      r.t += dt;
+      var m = r.m;
+      if (r.t < 0) { m.visible = false; return true; }
+      m.visible = true;
+      if (r.spark) {
+        var u = r.t / 0.5, sc = r.s * Math.sin(Math.min(1, u) * Math.PI);
+        m.scale.setScalar(Math.max(0.001, sc)); m.rotation.z += dt * 3;
+        if (u >= 1) { self.scene.remove(m); m.material.dispose(); return false; }
+        return true;
+      }
+      if (r.bloom) {
+        var ub = r.t / 0.35;
+        m.scale.setScalar(1.5 + ub * 2.5); m.material.opacity = Math.max(0, 0.9 * (1 - ub));
+        if (ub >= 1) { self.scene.remove(m); m.material.dispose(); return false; }
+        return true;
+      }
+      var uu = r.t / 0.45;
+      m.scale.setScalar(0.4 + uu * 1.8); m.material.opacity = Math.max(0, 0.9 * (1 - uu));
+      if (uu >= 1) { self.scene.remove(m); m.geometry.dispose(); m.material.dispose(); return false; }
+      return true;
+    });
+  };
+  GameScene.prototype.reset2 = function () {
+    var self = this;
+    this.parts.forEach(function (p) { self.scene.remove(p.m); });
+    this.rings.forEach(function (r) { self.scene.remove(r.m); });
+    this.parts = []; this.rings = [];
+  };
+
+  /* 場面の点（手前の面 z=0）を画面の座標へ */
+  GameScene.prototype.project = function (x, y) {
+    var v = new T.Vector3(x, y, 0.5).project(this.camera);
+    return { x: (v.x + 1) / 2 * this.W0, y: (1 - v.y) / 2 * this.H0 };
   };
 
   /* 画面の x を、高さ y の手前の面の x へ */
@@ -185,7 +334,7 @@
     return o.x + d.x * t;
   };
 
-  GameScene.prototype.draw = function (ctx, W, H) { return this.stage.draw(ctx, W, H); };
+  GameScene.prototype.draw = function (ctx, W, H) { this.W0 = W; this.H0 = H; return this.stage.draw(ctx, W, H); };
 
   global.GameScene = GameScene;
 })(window);

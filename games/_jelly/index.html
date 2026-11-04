@@ -139,7 +139,7 @@
   ];
   var SUB = 4;
   function place() {}
-  var bodies, cur, next, aimX, dropCool, overT, popped, combo, sounds;
+  var bodies, cur, next, aimX, dropCool, overT, popped, combo, sounds, popups = [], kick = 0;
 
   /* 角の丸い四角の外周（反時計回り、中心から） */
   var ROUND = [0.48, 0.4, 0.3, 0.2, 0.1];     /* 角の丸み：やわらかいほど丸い */
@@ -294,12 +294,33 @@
       if (group.length >= 3) {
         got++;
         group.forEach(function (g) { g.pop = 0.001; });
-        score += group.length * 10 * (1 + combo);
+        var add = group.length * 10 * (1 + combo), gc = { x: 0, y: 0 };
+        group.forEach(function (g) { var c = center(g); gc.x += c.x / group.length; gc.y += c.y / group.length; });
+        score += add;
+        popups.push({ x: gc.x, y: gc.y, txt: "+" + add, t: 0, lv: b.lv, combo: combo });
+        popSound(b.lv, group.length, combo);
         combo++;
-        popSound(b.lv, group.length);
       }
     });
     return got;
+  }
+
+  /* はじけた：まわりのブロックを外へぷるんと押し、画面を少し揺らす */
+  var POP_T = 0.32;
+  function burst(b) {
+    var c = center(b);
+    bodies.forEach(function (o) {
+      if (o.pop) return;
+      var oc = center(o), dx = oc.x - c.x, dy = oc.y - c.y, d = Math.hypot(dx, dy);
+      if (d > 2.4 || d < 0.01) return;
+      var f = (2.4 - d) / 2.4 * 0.05;
+      o.pts.forEach(function (p) {
+        /* 近い側の点ほど強く押す（ぷるんと波打つ） */
+        var pd = Math.hypot(p.x - c.x, p.y - c.y), k = Math.max(0.3, 1.6 - pd / 2);
+        p.px -= dx / d * f * k; p.py -= (dy / d * f + 0.01) * k;
+      });
+    });
+    kick = Math.min(0.5, kick + 0.18);
   }
 
   function newRound() {
@@ -307,7 +328,7 @@
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     score = 0; T = 0; held = false;
-    bodies = []; popped = 0; combo = 0; overT = 0;
+    bodies = []; popped = 0; combo = 0; overT = 0; popups = []; kick = 0;
     aimX = BW / 2; dropCool = 0;
     cur = randLv(); next = randLv();
     var s3 = scene3d(); if (s3) s3.reset();
@@ -330,12 +351,17 @@
       T += dt;
       dropCool = Math.max(0, dropCool - dt);
       physics(dt);
+      kick = Math.max(0, kick - dt * 1.5);
+      for (var pi = popups.length - 1; pi >= 0; pi--) { popups[pi].t += dt; if (popups[pi].t > 1.1) popups.splice(pi, 1); }
       for (var i = bodies.length - 1; i >= 0; i--) {
         var b = bodies[i];
         b.age += dt;
-        if (b.hit > 0.04 && b.age > 0.1) squish(b.lv, b.hit);
+        if (b.hit > 0.04 && b.age > 0.1) { squish(b.lv, b.hit); if (b.hit > 0.09) kick = Math.min(0.5, kick + b.hit * 0.6); }
         b.hit = 0;
-        if (b.pop) { b.pop += dt; if (b.pop > 0.45) { bodies.splice(i, 1); popped++; } }
+        if (b.pop) {
+          b.pop += dt;
+          if (b.pop > POP_T) { bodies.splice(i, 1); popped++; burst(b); }
+        }
       }
       if (state === S.PLAY) {
         findPops();
@@ -368,14 +394,33 @@
     s.connect(fl); fl.connect(g2); g2.connect(AC.destination);
     s.start(n, Math.random()); s.stop(n + len);
   }
-  function popSound(lv, cnt) {
+  /* はじける音：最初に溜めの「ぷるる」、はじけて「ぽんっ」＋しぶき（スライム）か「キィン」（宝石）。連鎖で音が上がる */
+  function popSound(lv, cnt, combo) {
     if (!AC) return;
+    var up = Math.pow(1.122, Math.min(combo, 8)), d0 = POP_T - 0.02;
+    /* 溜め：ふるえ */
+    for (var w = 0; w < 4; w++) tone((140 + lv * 30) * up * (1 + w * 0.06), 0.06, 0.06, "sine", null, w * 0.07);
     for (var i = 0; i < Math.min(cnt, 6); i++) {
-      var f = 500 + lv * 90 + i * 70;
-      tone(f, 0.12, 0.13, "sine", f * 2.4, i * 0.06);
-      tone(f * 0.5, 0.18, 0.08, "triangle", f * 0.25, i * 0.06);
+      var dl = d0 + i * 0.045, f = (360 + lv * 60) * up * (1 + i * 0.09);
+      tone(f, 0.16, 0.2, "sine", f * 3.2, dl);                    /* ぽんっ */
+      tone(f * 0.5, 0.22, 0.14, "sine", f * 0.18, dl);            /* 低い胴鳴り */
+      if (lv >= 3) {                                               /* 宝石：澄んだ倍音 */
+        tone(f * 4, 0.6, 0.05, "sine", null, dl + 0.02);
+        tone(f * 6.03, 0.45, 0.035, "sine", null, dl + 0.03);
+      }
     }
-    noiseHit(0.18, 2400, 0.12, 2);
+    if (NOISE) {                                                   /* しぶき・しゅわっ */
+      var n = AC.currentTime + d0, s = AC.createBufferSource(); s.buffer = NOISE;
+      var fl = AC.createBiquadFilter(); fl.type = "bandpass"; fl.Q.value = 0.8;
+      fl.frequency.setValueAtTime(lv >= 3 ? 6000 : 2500, n); fl.frequency.exponentialRampToValueAtTime(lv >= 3 ? 9000 : 700, n + 0.35);
+      var g = AC.createGain(); g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.22, n + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.4);
+      s.connect(fl); fl.connect(g); g.connect(AC.destination); s.start(n, Math.random()); s.stop(n + 0.45);
+      for (var k = 0; k < 6; k++) {                                /* ぷちぷち */
+        var ff = 900 + Math.random() * 1800;
+        tone(ff * up, 0.04, 0.05, "sine", ff * 1.8 * up, d0 + 0.08 + Math.random() * 0.35);
+      }
+    }
+    if (combo >= 2 && window.zCelebrate) window.zCelebrate.play(AC, "chime", { delay: d0 + 0.1, volume: 0.6 });
   }
 
   /* ============ 入力 ============ */
@@ -486,7 +531,7 @@
     window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
     var s3 = scene3d(), drew = false;
-    var view = { t: T || 0, bodies: bodies || [], hold: state === S.PLAY && dropCool <= 0 && bodies ? { lv: cur, x: holdX(), y: DROP_Y } : null, next: next, LV: LV, BW: BW, LINE: LINE, RESTS: RESTS, danger: Math.min(1, (overT || 0) / 1.6), over: state === S.OVER || state === S.RESULT };
+    var view = { t: T || 0, bodies: bodies || [], hold: state === S.PLAY && dropCool <= 0 && bodies ? { lv: cur, x: holdX(), y: DROP_Y } : null, next: next, LV: LV, BW: BW, LINE: LINE, RESTS: RESTS, danger: Math.min(1, (overT || 0) / 1.6), kick: kick || 0, over: state === S.OVER || state === S.RESULT };
     if (s3) { try { s3.sync(view); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
     if (!drew) draw2d(view);
     if (state === S.PLAY || state === S.OVER) {
@@ -494,11 +539,26 @@
       ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = 8;
       ctx.fillText(String(score), 24, 58);
       ctx.shadowBlur = 0;
+      drawPopups(s3, drew);
       /* 次のブロック */
       ctx.fillStyle = LV[next].color; ctx.globalAlpha = 0.95;
       roundRect(W - 70, 22, 44, 44, 12); ctx.fill(); ctx.globalAlpha = 1;
     }
     if (state === S.RESULT) drawResult();
+  }
+  /* はじけた所に浮かぶ点数 */
+  function drawPopups(s3, drew) {
+    popups.forEach(function (p) {
+      var at = drew && s3.project ? s3.project(p.x, p.y + p.t * 1.2) : { x: p.x / BW * W, y: H - 60 - (p.y + p.t * 1.2) * W / (BW + 1) };
+      var u = p.t / 1.1, sc = p.t < 0.15 ? 0.6 + p.t / 0.15 * 0.6 : 1.2 - Math.min(0.2, (p.t - 0.15));
+      ctx.save();
+      ctx.globalAlpha = u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3;
+      ctx.translate(at.x, at.y); ctx.scale(sc, sc);
+      ctx.font = "900 " + (60 + Math.min(p.combo, 5) * 8) + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.lineWidth = 8; ctx.strokeStyle = "rgba(30,20,40,.55)"; ctx.strokeText(p.txt, 0, 0);
+      ctx.fillStyle = "#fff"; ctx.fillText(p.txt, 0, 0);
+      ctx.restore();
+    });
   }
   function draw2d(v) {
     ctx.fillStyle = "#2a2f3a"; ctx.fillRect(0, 0, W, H);
