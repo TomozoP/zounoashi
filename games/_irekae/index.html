@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>入れ替え行列</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; }
+  #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; }
+  #wrap { position: relative; touch-action: none; }
+  canvas { display: block; background: #1d1714; }
+  /* 長押し中にゲームの絵が選択されないようにする。 */
+  #stage, #wrap, canvas { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #start { position:absolute; left:50%; bottom:3%; transform:translateX(-50%); width:240px; height:68px; border:0; border-radius:34px; background:#fff; color:#16202e; font:bold 28px sans-serif; touch-action:manipulation; }
+  #start[hidden] { display:none; }
+  #share-button { position:absolute; padding:0; border:0; border-radius:999px; background:transparent; cursor:pointer; touch-action:manipulation; }
+  #share-button[hidden] { display:none; }
+  #share-button:focus-visible { outline:3px solid #f7cc71; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="wrap">
+  <canvas id="c"></canvas>
+  <button id="start" type="button">START</button>
+  <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
+</div></div>
+<script src="../start.js"></script>
+<script src="../view.js"></script>
+<script src="../audio.js"></script>
+<script src="../lang.js"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../share.js"></script>
+<script src="../result-actions.js"></script>
+<script src="../action-icons.js"></script>
+<script src="../pad.js"></script>
+<script src="../celebrate.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script>
+/* 入れ替え行列
+
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var wrap = document.getElementById("wrap");
+  var shareButton = document.getElementById("share-button");
+  window.zResultActions.bind(shareButton, doShare);
+  /* 結果画面の「作者をフォロー」（共通。ボタン列の下に控えめに出す） */
+  var followLink = window.zResultActions.follow.link(shareButton.parentNode);
+
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
+  var W = 540, H = 960;
+  function layout() {
+    var view = window.zGameView.measure(wrap, W);
+    H = view.gameHeight;
+
+    place();                                   /* 高さが決まってから置き直す */
+
+    window.zGameView.fit(canvas, wrap, ctx, W, H, view);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
+  var AC = null, NOISE = null;
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
+  wrap.addEventListener("touchstart", audioOn, { passive: true });
+  wrap.addEventListener("touchend", resumeAudio, { passive: true });
+  wrap.addEventListener("pointerup", resumeAudio, true);
+  function audioOn() {
+    if (AC) { resumeAudio(); return; }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    try { AC = new C(); } catch (e) { return; }
+    resumeAudio();
+    var len = Math.floor(AC.sampleRate * 2);
+    NOISE = AC.createBuffer(1, len, AC.sampleRate);
+    var d = NOISE.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function tone(freq, dur, vol, type, to, delay) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    var n = AC.currentTime + (delay || 0);
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, n);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, n + dur);
+    g.gain.setValueAtTime(0.0001, n);
+    g.gain.exponentialRampToValueAtTime(vol, n + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(n); o.stop(n + dur + 0.05);
+  }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!AC) return;
+    if (document.hidden) { try { AC.suspend(); } catch (e) {} }
+    else { try { AC.resume(); } catch (e) {} }
+  });
+
+  /* ============ 状態 ============ */
+  var S = { INTRO: "intro", PLAY: "play", CLEAR: "clear", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
+
+  /* 行列。q[0] が先頭（店の入口）。プレイヤーは q の中の1人 */
+  var N = 30;                 /* 自分の前に並んでいる人数 */
+  var RANGE = 3;              /* 何人前まで入れ替えられるか */
+  var GAP = 124;
+  var SC = 1.4;               /* 人の大きさ */               /* 1人ぶんの間隔 */
+  var WARN = 0.6, LOOK = 1.3; /* 振り向きかけ・見ている時間 */
+  var SEE = 2;                /* 振り向いた人が見える後ろの人数 */
+  var q, me, cam, stun, cool, pick, fx, flash, shake, clearT, confetti;
+  var SHIRTS = ["#3f7fd1", "#d8524a", "#4aa86b", "#8b5cc7", "#e08a2e", "#2f9c9c", "#c75b8c", "#6b7a8f", "#a0703f"];
+  var HAIRS = ["#2a1d17", "#3b2a20", "#151515", "#6b4a2b", "#8a8a8a", "#b8862f"];
+
+  confetti = window.zCelebrate ? window.zCelebrate.confetti() : null;
+  var BY;
+  function place() { BY = Math.round(H * 0.74); }
+
+  function person(i) {
+    return {
+      shirt: SHIRTS[(Math.random() * SHIRTS.length) | 0],
+      hair: HAIRS[(Math.random() * HAIRS.length) | 0],
+      x: (Math.random() - 0.5) * 40, wide: 0.9 + Math.random() * 0.25,
+      look: 0, lt: 2 + Math.random() * 7, y: i, q: 0
+    };
+  }
+
+  function newRound() {
+    shareButton.hidden = true;
+    document.getElementById("start").hidden = true;
+    state = S.PLAY;
+    score = 0; T = 0; held = false;
+    q = [];
+    for (var i = 0; i < N; i++) q.push(person(i));
+    me = { me: true, shirt: "#ffd23a", hair: "#2a1d17", x: 0, wide: 1, look: 0, lt: 1e9, y: N, q: 0 };
+    q.push(me);
+    for (i = 0; i < 3; i++) q.push(person(N + 1 + i));     /* 後ろにも少し */
+    cam = N; stun = 0; cool = 0; pick = 1; fx = []; flash = 0; shake = 0; clearT = 0;
+    if (confetti) confetti.clear();
+  }
+  function myPos() { return q.indexOf(me); }
+
+  /* 見張り: look 0=前, 1=振り向きかけ, 2=見ている */
+  function seen(pos) {
+    for (var k = 1; k <= SEE; k++) {
+      var w = q[pos - k];
+      if (w && !w.me && w.look === 2) return w;
+    }
+    return null;
+  }
+
+  function swapWith(t) {
+    var p = myPos();
+    if (state !== S.PLAY || stun > 0 || cool > 0) return;
+    if (t < 0 || t >= p || p - t > RANGE) return;
+    var other = q[t];
+    var w = seen(t) || seen(p);
+    puff(t); puff(p);
+    q[t] = me; q[p] = other;
+    me.y = t; other.y = p;             /* 一瞬で入れ替わる */
+    other.q = 1.2;
+    cool = 0.12;
+    if (w) { caught(w); return; }
+    tone(880, 0.06, 0.12, "sine", 1760); tone(1320, 0.08, 0.06, "triangle", 2200, 0.03);
+    if (t === 0) { state = S.CLEAR; clearT = 0; }
+  }
+
+  function caught(w) {
+    w.q = -1.5;                        /* 怒り */
+    var p = myPos(), back = Math.min(q.length - 1, p + 4);
+    q.splice(p, 1); q.splice(back, 0, me);
+    stun = 0.9; flash = 0.5; shake = 0.4;
+    noiseHit(0.25, 300, 0.4, 0.8); tone(220, 0.3, 0.2, "square", 110);
+  }
+
+  function puff(pos) {
+    for (var i = 0; i < 10; i++) {
+      var a = Math.random() * Math.PI * 2, v = 60 + Math.random() * 120;
+      fx.push({ pos: pos, x: Math.cos(a) * 10, y: -40 + Math.sin(a) * 10, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0.45 });
+    }
+  }
+
+  /* ============ 進行 ============ */
+  function update(dt) {
+    if (state === S.INTRO) return;
+    if (confetti && state === S.RESULT) confetti.step(dt, W, H);
+    for (var i = fx.length - 1; i >= 0; i--) {
+      var f = fx[i]; f.t -= dt; f.x += f.vx * dt; f.y += f.vy * dt; f.vx *= 0.9; f.vy *= 0.9;
+      if (f.t <= 0) fx.splice(i, 1);
+    }
+    for (i = 0; i < q.length; i++) {
+      var o = q[i];
+      o.y += (i - o.y) * Math.min(1, dt * 10);
+      if (o.q > 0) o.q = Math.max(0, o.q - dt); else if (o.q < 0) o.q = Math.min(0, o.q + dt);
+      if (o.me) continue;
+      o.lt -= dt;
+      if (o.lt <= 0) {
+        if (o.look === 0) { o.look = 1; o.lt = WARN; }
+        else if (o.look === 1) { o.look = 2; o.lt = LOOK; }
+        else { o.look = 0; o.lt = 2.5 + Math.random() * 6; }
+      }
+    }
+    cam += (me.y - cam) * Math.min(1, dt * 6);
+    flash = Math.max(0, flash - dt); shake = Math.max(0, shake - dt);
+    if (state === S.PLAY) {
+      T += dt; score = T;
+      stun = Math.max(0, stun - dt); cool = Math.max(0, cool - dt);
+    } else if (state === S.CLEAR) {
+      clearT += dt;
+      if (clearT > 0.9 && clearT - dt <= 0.9) {
+        if (AC && window.zCelebrate) window.zCelebrate.play(AC, "fanfare");
+        if (confetti) confetti.burst(W, H, 160);
+      }
+      if (clearT > 1.0) state = S.RESULT;
+    }
+  }
+
+  /* ============ 入力 ============ */
+  function slotY(i) { return BY - (cam - i) * GAP; }
+  function down(x, y) {
+    if (state === S.INTRO) return;
+    audioOn();
+    if (state === S.RESULT) {
+      var hit = x == null ? "retry" : hitButton(x, y);
+      if (hit === "retry") newRound();
+      return;
+    }
+    if (state !== S.PLAY) return;
+    held = true;
+    var p = myPos();
+    if (x == null) { swapWith(p - pick); return; }
+    /* 触った所にいちばん近い前の人（体の真ん中で判定） */
+    var best = -1, bd = 1e9;
+    for (var k = 1; k <= RANGE; k++) {
+      var t = p - k; if (t < 0) break;
+      var d = Math.abs(slotY(t) - 60 - y);
+      if (d < bd) { bd = d; best = t; }
+    }
+    if (best >= 0 && bd < GAP * 0.7) swapWith(best);
+  }
+  function move(x, y) {}
+  function up() { held = false; }
+
+  function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  wrap.addEventListener("pointerdown", function (e) {
+    e.preventDefault(); keyMode = false;
+    var p = atCanvas(e); down(p.x, p.y);
+  });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { up(); });
+  window.addEventListener("blur", function () { up(); });
+
+  var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  /* 1=最初から  2=先頭まであと1回  3=すぐ前の人が振り向く */
+  function debugKey(n) {
+    if (n === 1) { newRound(); return; }
+    if (state !== S.PLAY) newRound();
+    if (n === 2) {
+      var p = myPos(); q.splice(p, 1); q.splice(2, 0, me);
+      for (var i = 0; i < q.length; i++) { q[i].y = i; if (!q[i].me) { q[i].look = 0; q[i].lt = 5; } }
+      cam = 2;
+    }
+    if (n === 3) { var w = q[myPos() - 1]; if (w) { w.look = 1; w.lt = WARN; } }
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
+    var esc = e.key === "Escape";
+    var go = e.code === "Space" || e.key === " " || e.key === "Enter";
+    var upK = e.key === "ArrowUp" || e.key === "w" || e.key === "W";
+    var dnK = e.key === "ArrowDown" || e.key === "s" || e.key === "S";
+    if (!esc && !go && !upK && !dnK) return;
+    e.preventDefault();
+    if (!esc) keyMode = true;
+    if (esc) { if (!e.repeat) newRound(); return; }
+    if (upK || dnK) {
+      if (state !== S.PLAY) return;
+      pick = Math.max(1, Math.min(RANGE, pick + (upK ? 1 : -1)));
+      return;
+    }
+    if (e.repeat) return;
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); else up(); }
+  });
+
+  function fmt(t) { return t.toFixed(1); }
+  function doShare() {
+    window.zResultActions.x({ text: zT(
+      "行列を" + fmt(score) + "秒で抜けた #入れ替え行列",
+      "Cut the line in " + fmt(score) + "s #SwapTheLine",
+      "줄을 " + fmt(score) + "초 만에 통과 #SwapTheLine",
+      "用 " + fmt(score) + " 秒穿过队伍 #SwapTheLine",
+      "用 " + fmt(score) + " 秒穿過隊伍 #SwapTheLine") });
+  }
+
+  /* ============ 描画 ============ */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawShop() {
+    var y = slotY(-1) + 10;                  /* 店の入口の下端 */
+    if (y < -20) return;
+    ctx.fillStyle = "#3a2a22"; ctx.fillRect(0, y - 400, W, 400);
+    ctx.fillStyle = "#1c1410"; ctx.fillRect(W / 2 - 80, y - 150, 160, 150);   /* 入口 */
+    ctx.fillStyle = "#ffe9a8"; ctx.globalAlpha = 0.35; ctx.fillRect(W / 2 - 70, y - 140, 140, 140); ctx.globalAlpha = 1;
+    /* のれん */
+    for (var i = 0; i < 4; i++) {
+      ctx.fillStyle = i % 2 ? "#b8322b" : "#c9413a";
+      ctx.fillRect(W / 2 - 92 + i * 46, y - 160, 44, 70);
+    }
+    ctx.fillStyle = "#7a5a40"; ctx.fillRect(W / 2 - 100, y - 166, 200, 8);
+    /* ちょうちん */
+    [W / 2 - 150, W / 2 + 150].forEach(function (x) {
+      ctx.fillStyle = "#e85b3a"; ctx.beginPath(); ctx.ellipse(x, y - 120, 24, 32, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#2a1d17"; ctx.fillRect(x - 16, y - 154, 32, 6); ctx.fillRect(x - 16, y - 92, 32, 6);
+    });
+  }
+
+  function drawCone(o, i) {
+    var y = slotY(i), x = W / 2 + o.x;
+    var y2 = slotY(i + SEE) + 8;
+    ctx.save();
+    ctx.globalAlpha = o.look === 2 ? 0.38 : 0.16 + 0.1 * Math.sin(T * 30);
+    ctx.fillStyle = o.look === 2 ? "#ff3030" : "#ffd23a";
+    ctx.beginPath();
+    ctx.moveTo(x - 12, y - 86 * SC); ctx.lineTo(x + 12, y - 86 * SC);
+    ctx.lineTo(W / 2 + 130, y2); ctx.lineTo(W / 2 - 130, y2); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawPerson(o, i, target) {
+    var y = BY - (cam - o.y) * GAP, x = W / 2 + o.x;
+    if (y < -120 || y > H + 120) return;
+    ctx.save(); ctx.translate(x, y); ctx.scale(SC, SC); ctx.translate(-x, -y);
+    var w = 46 * o.wide;
+    ctx.fillStyle = "rgba(0,0,0,.25)";
+    ctx.beginPath(); ctx.ellipse(x, y, w * 0.6, 10, 0, 0, Math.PI * 2); ctx.fill();
+    if (target) {
+      ctx.strokeStyle = "#5ff0ff"; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.ellipse(x, y, w * 0.75, 15, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    /* 脚 */
+    ctx.fillStyle = "#2b2f3a";
+    ctx.fillRect(x - 14, y - 22, 11, 22); ctx.fillRect(x + 3, y - 22, 11, 22);
+    /* 体 */
+    ctx.fillStyle = o.shirt;
+    roundRect(x - w / 2, y - 70, w, 52, 14); ctx.fill();
+    if (o.me) { ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3; ctx.stroke(); }
+    /* 頭 */
+    var hy = y - 86, r = 18;
+    var turn = o.look === 2 ? 1 : o.look === 1 ? 0.45 : 0;
+    ctx.fillStyle = "#f2c9a0";
+    ctx.beginPath(); ctx.arc(x, hy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = o.hair;
+    if (turn === 0) { ctx.beginPath(); ctx.arc(x, hy, r, 0, Math.PI * 2); ctx.fill(); }
+    else {
+      ctx.beginPath(); ctx.arc(x, hy, r, Math.PI * 0.95, Math.PI * 2.05); ctx.fill();
+      if (turn < 1) { ctx.beginPath(); ctx.arc(x - 6, hy, r * 0.95, Math.PI * 0.5, Math.PI * 1.5); ctx.fill(); }
+      var ex = turn < 1 ? 7 : 0;
+      ctx.fillStyle = "#16202e";
+      if (turn < 1) { ctx.beginPath(); ctx.arc(x + ex + 3, hy + 2, 2.6, 0, Math.PI * 2); ctx.fill(); }
+      else {
+        ctx.beginPath(); ctx.arc(x - 7, hy + 2, 3, 0, Math.PI * 2); ctx.arc(x + 7, hy + 2, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#16202e"; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(x - 11, hy - 6); ctx.lineTo(x - 3, hy - 3); ctx.moveTo(x + 11, hy - 6); ctx.lineTo(x + 3, hy - 3); ctx.stroke();
+      }
+    }
+    /* 吹き出しの記号 */
+    if (o.q > 0) bubble(x + 26, hy - 26, "?", "#fff", "#16202e");
+    else if (o.q < 0) bubble(x + 26, hy - 26, "!", "#ff3b3b", "#fff");
+    else if (o.look === 1) bubble(x + 24, hy - 24, "!", "#ffd23a", "#16202e", 0.7);
+    ctx.restore();
+  }
+  function bubble(x, y, c, bg, fg, s) {
+    s = s || 1;
+    ctx.fillStyle = bg; ctx.strokeStyle = "#16202e"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, 16 * s, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = fg; ctx.font = "900 " + Math.round(24 * s) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(c, x, y + 1);
+    ctx.textBaseline = "alphabetic";
+  }
+
+  function draw() {
+    window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
+    window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * 16 * shake / 0.4, 0);
+    /* 歩道 */
+    ctx.fillStyle = "#b9b2a6"; ctx.fillRect(-20, 0, W + 40, H);
+    ctx.strokeStyle = "rgba(0,0,0,.08)"; ctx.lineWidth = 2;
+    var off = ((cam * GAP) % 60 + 60) % 60;
+    for (var yy = -60 + off; yy < H + 60; yy += 60) { ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(W, yy); ctx.stroke(); }
+    ctx.fillStyle = "#8f877b"; ctx.fillRect(0, 0, 40, H); ctx.fillRect(W - 40, 0, 40, H);
+    drawShop();
+    var p = state === S.INTRO ? -1 : myPos();
+    if (q) {
+      for (var i = 0; i < q.length; i++) if (!q[i].me && q[i].look > 0) drawCone(q[i], i);
+      for (i = 0; i < q.length; i++) {
+        var tg = state === S.PLAY && stun <= 0 && i < p && p - i <= RANGE && (!keyMode || p - i === pick);
+        drawPerson(q[i], i, tg);
+      }
+    }
+    for (i = 0; i < fx.length; i++) {
+      var f = fx[i], fy = slotY(f.pos) + f.y;
+      ctx.globalAlpha = Math.max(0, f.t / 0.45);
+      ctx.fillStyle = "#c9f6ff";
+      ctx.beginPath(); ctx.arc(W / 2 + f.x, fy, 7, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    if (flash > 0) { ctx.fillStyle = "rgba(255,40,40," + (flash * 0.6) + ")"; ctx.fillRect(0, 0, W, H); }
+
+    if (state === S.PLAY || state === S.CLEAR) {
+      /* 上に残り人数とタイム */
+      ctx.fillStyle = "rgba(22,32,46,.75)"; roundRect(16, 16, W - 32, 64, 18); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "800 40px sans-serif"; ctx.textAlign = "left";
+      ctx.fillText(String(myPos()), 40, 62);
+      ctx.textAlign = "right"; ctx.fillText(fmt(T), W - 40, 62);
+    }
+    if (state === S.RESULT) drawResult();
+    if (confetti) confetti.draw(ctx);
+  }
+
+  function resultButtons() {
+    return window.zResultActions.row(W, H * 0.62);
+  }
+  function hitButton(x, y) {
+    return window.zResultActions.hit(resultButtons(), x, y);
+  }
+  function drawResult() {
+    ctx.fillStyle = "rgba(10,8,6,.66)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
+    ctx.font = "800 108px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(fmt(score) + zT("秒", "s", "초", "秒", "秒"), W / 2, H * 0.45);
+    ctx.restore();
+    window.zResultActions.drawButtons(ctx, resultButtons());
+    window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
+  }
+
+  /* ============ 覗き穴 ============
+     テスト（games/_tools）から中を見るためのもの。読むのと進めるだけ。
+     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
+  window.__probe = {
+    now: function () { return { state: state, score: score, pos: q ? myPos() : null, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
+  };
+
+  /* ============ 手元用の動画撮影 ============
+     record.js が呼ぶ自動操作。ゲームに合わせて run の中だけ書き換える。 */
+  window.__recording = {
+    sound: function () { audioOn(); return AC; },
+    run: async function (r) {
+      await r.wait(1000);
+      debugKey(2);
+      r.key();
+      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("勝敗が出ない");
+      await r.wait(1500);
+    }
+  };
+
+  /* ============ ループ ============ */
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
+  window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  newRound();state=S.INTRO;startButton.hidden=false;
+  layout();
+  var last = performance.now();
+  var stepAcc = 0;
+  function loop(now) {
+    /* 端末の速さや画面のコマ数（60Hz/120Hz）で挙動が変わらないように、描画が遅れても
+       ゲームの時間は実際の時間どおり進め、update はいつもちょうど 1/60 秒ずつ呼ぶ（余りは次へ持ち越す）。
+       タブから戻ってきたときの大きな空白だけは切り捨てる */
+    var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
+    last = now;
+    if (!window.__recordManual) {
+      stepAcc += dt;
+      while (stepAcc >= 1 / 60) { update(1 / 60); stepAcc -= 1 / 60; }
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+<script>
+if (document.head && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
+  var recorderScript = document.createElement("script");
+  recorderScript.src = "../_tools/recorder-ui.js";
+  document.head.appendChild(recorderScript);
+}
+</script>
+</body>
+</html>
