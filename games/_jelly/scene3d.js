@@ -6,12 +6,12 @@
   var T, Z3 = global.Z3;
   var DEPTH = 0.42;              /* 厚みの半分 */
   /* 硬さごとの縁：やわらかいほど丸く（スライム）、かたいほど段が少なく角ばる（宝石のカット面） */
-  var EDGES = [0.32, 0.26, 0.2, 0.14, 0.16];
+  var EDGES = [0.24, 0.22, 0.18, 0.14, 0.16];
   var KLS = [11, 9, 7, 5, 3];
 
   function GameScene() {
     T = global.THREE;
-    var st = this.stage = new Z3.Stage({ renderer: { shadows: !Z3.mobile, tone: "aces", exposure: 1.25 }, camera: { fov: 30, near: 0.5, far: 80 }, dpr: 1.5, finish: { vignette: 0.28, contrast: 0.12, grain: 0.012 } });
+    var st = this.stage = new Z3.Stage({ renderer: { shadows: !Z3.mobile, tone: "aces", exposure: 1.25 }, camera: { fov: 30, near: 0.5, far: 80 }, dpr: 1.5 });   /* 仕上げ(Finish)は使わない：半精度の描画先でつやの強い所が溢れて黒い点になる */
     var sc = this.scene = st.scene;
     this.camera = st.camera;
     var BW = 5;
@@ -63,7 +63,7 @@
     var rimL = new T.DirectionalLight("#ff6ec0", 2.2); rimL.position.set(-6, 4, -6); sc.add(rimL);
     var rimR = new T.DirectionalLight("#5fd8ff", 2.2); rimR.position.set(12, 4, -6); sc.add(rimR);
     sc.add(new T.HemisphereLight("#d8d0ff", "#2a1d33", 0.8));
-    var fill = new T.DirectionalLight("#fff8f0", 1.3); fill.position.set(BW / 2, 4, 20); sc.add(fill);   /* 正面からの補助光（色をくすませない） */
+    sc.add(new T.AmbientLight("#fff8f0", 0.9));   /* 正面の補助は向きのない光で（正面からの光だと真ん中のつやが強すぎて黒い点になる） */
 
     /* 床：つやのある黒いアクリル */
     var floor = new T.Mesh(new T.BoxGeometry(BW + 0.9, 0.5, 2.6), new T.MeshPhysicalMaterial({ color: "#1b1626", roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.2 }));
@@ -126,10 +126,10 @@
       var col = new T.Color(LV[lv].color);
       var u = lv / 4;                                 /* 0=スライム 1=宝石 */
       this.mats[lv] = new T.MeshPhysicalMaterial({
-        color: col, roughness: 0.14 * (1 - u), metalness: 0,
+        color: col, roughness: 0.16 - u * 0.08, metalness: 0,   /* つるつるにしすぎると光が強すぎて黒い点になる */
         transmission: 0.3 + u * 0.45, thickness: 0.6 + u * 1.2, ior: 1.3 + u * 0.45,
         attenuationColor: col, attenuationDistance: 0.15 + u * 0.2,
-        clearcoat: 1, clearcoatRoughness: 0.04 * (1 - u),
+        clearcoat: 1, clearcoatRoughness: 0.12,
         sheen: 0.5 * (1 - u), sheenColor: new T.Color("#ffffff"), sheenRoughness: 0.3,
         iridescence: u > 0.7 ? 0.35 : 0, iridescenceIOR: 1.6,
         specularIntensity: 1, envMapIntensity: 1.0 + u * 0.6,
@@ -140,39 +140,80 @@
   };
 
   /* 外周 n 点の輪から、厚みと丸い縁のある塊の形を作る（点の数は毎回同じ、位置だけ書き換える） */
+  /* ふたの内側の輪の数。やわらかいものは輪を重ねてなめらかな丸いふくらみに（中心1点だと×のしわが出る）。宝石は1点でカット面に */
+  var CAPR = [5, 5, 4, 0, 0];
   GameScene.prototype.blob = function (n, lv) {
-    var g = new T.BufferGeometry(), KL = KLS[lv];
-    var vcount = n * KL + 2;
+    var g = new T.BufferGeometry(), KL = KLS[lv], R = CAPR[lv];
+    var vcount = n * KL + 2 * n * R + 2;
     g.setAttribute("position", new T.BufferAttribute(new Float32Array(vcount * 3), 3));
     var idx = [];
-    for (var k = 0; k < KL - 1; k++) for (var i = 0; i < n; i++) {
-      var a = k * n + i, b = k * n + (i + 1) % n, c = (k + 1) * n + i, d = (k + 1) * n + (i + 1) % n;
-      idx.push(a, b, d, a, d, c);
-    }
-    var front = n * KL, backC = n * KL + 1;
-    for (i = 0; i < n; i++) {
-      idx.push(front, (KL - 1) * n + i, (KL - 1) * n + (i + 1) % n);   /* 手前のふた */
-      idx.push(backC, (i + 1) % n, i);                                  /* 奥のふた */
-    }
-    g.setIndex(idx);
-    g.userData.n = n; g.userData.lv = lv;
-    return g;
-  };
-  GameScene.prototype.shape = function (g, pts, cx, cy, swell) {
-    var n = g.userData.n, pos = g.attributes.position.array, KL = KLS[g.userData.lv], EDGE = EDGES[g.userData.lv];
-    for (var k = 0; k < KL; k++) {
-      var a = -Math.PI / 2 + Math.PI * k / (KL - 1);           /* 奥 → 手前 */
-      var z = Math.sin(a) * DEPTH * swell, inset = EDGE * (1 - Math.cos(a));
+    function band(r0, r1, flip) {               /* 2つの輪のあいだを帯でつなぐ */
       for (var i = 0; i < n; i++) {
-        var p = pts[i], q0 = pts[(i + n - 1) % n], q1 = pts[(i + 1) % n];
-        var nx = q1.y - q0.y, ny = -(q1.x - q0.x), l = Math.hypot(nx, ny) || 1;
-        var o = (k * n + i) * 3;
-        pos[o] = p.x - nx / l * inset; pos[o + 1] = p.y - ny / l * inset; pos[o + 2] = z;
+        var a = r0 + i, b = r0 + (i + 1) % n, c = r1 + i, d = r1 + (i + 1) % n;
+        if (flip) idx.push(a, d, b, a, c, d); else idx.push(a, b, d, a, d, c);
       }
     }
-    var f = n * KL * 3;
-    pos[f] = cx; pos[f + 1] = cy; pos[f + 2] = DEPTH * swell * 1.08;
-    pos[f + 3] = cx; pos[f + 4] = cy; pos[f + 5] = -DEPTH * swell * 1.08;
+    for (var k = 0; k < KL - 1; k++) band(k * n, (k + 1) * n, false);
+    var base = n * KL, front = base + 2 * n * R, backC = front + 1;
+    /* 手前：外の輪 → 内の輪… → 中心 */
+    var prev = (KL - 1) * n;
+    for (var j = 0; j < R; j++) { band(prev, base + j * n, false); prev = base + j * n; }
+    for (var i = 0; i < n; i++) idx.push(front, prev + i, prev + (i + 1) % n);
+    /* 奥 */
+    prev = 0;
+    for (j = 0; j < R; j++) { band(prev, base + (R + j) * n, true); prev = base + (R + j) * n; }
+    for (i = 0; i < n; i++) idx.push(backC, prev + (i + 1) % n, prev + i);
+    g.setIndex(idx);
+    g.userData.n = n; g.userData.lv = lv; g.userData.R = R;
+    g.userData.sm = [];
+    return g;
+  };
+  GameScene.prototype.shape = function (g, raw, cx, cy, swell) {
+    var n = g.userData.n, lv = g.userData.lv, pos = g.attributes.position.array, KL = KLS[lv], EDGE = EDGES[lv], R = g.userData.R;
+    /* 表示用に外周をならす（物理の細かいガタつきで面が折れて、黒い点やしわが出ないように） */
+    var pts = g.userData.sm, it, i;
+    for (i = 0; i < n; i++) pts[i] = { x: raw[i].x, y: raw[i].y };
+    var pass = lv >= 3 ? 0 : 3;
+    for (it = 0; it < pass; it++) {
+      var cp = pts.map(function (p) { return { x: p.x, y: p.y }; });
+      for (i = 0; i < n; i++) {
+        var a0 = cp[(i + n - 1) % n], a1 = cp[(i + 1) % n];
+        pts[i].x = cp[i].x * 0.5 + (a0.x + a1.x) * 0.25; pts[i].y = cp[i].y * 0.5 + (a0.y + a1.y) * 0.25;
+      }
+    }
+    /* 外向きの向き（ならした点から） */
+    var nrm = [];
+    for (i = 0; i < n; i++) {
+      var q0 = pts[(i + n - 1) % n], q1 = pts[(i + 1) % n];
+      var nx = q1.y - q0.y, ny = -(q1.x - q0.x), l = Math.hypot(nx, ny) || 1;
+      nrm.push(nx / l, ny / l);
+    }
+    var D = DEPTH * swell;
+    for (var k = 0; k < KL; k++) {
+      var ang = -Math.PI / 2 + Math.PI * k / (KL - 1);           /* 奥 → 手前 */
+      var z = Math.sin(ang) * D, inset = EDGE * (1 - Math.cos(ang));
+      for (i = 0; i < n; i++) {
+        var o = (k * n + i) * 3;
+        pos[o] = pts[i].x - nrm[i * 2] * inset; pos[o + 1] = pts[i].y - nrm[i * 2 + 1] * inset; pos[o + 2] = z;
+      }
+    }
+    /* ふた：外の縁（内側へ EDGE 入った輪）から中心へ、なだらかにふくらむ */
+    var base = n * KL;
+    for (var side = 0; side < 2; side++) {
+      var sg = side === 0 ? 1 : -1;
+      for (var j = 0; j < R; j++) {
+        var f = 1 - (j + 1) / (R + 1);                            /* 1=縁 0=中心 */
+        var zz = sg * D * (1 + 0.09 * (1 - f * f));
+        for (i = 0; i < n; i++) {
+          var ex = pts[i].x - nrm[i * 2] * EDGE, ey = pts[i].y - nrm[i * 2 + 1] * EDGE;
+          var oo = (base + (side * R + j) * n + i) * 3;
+          pos[oo] = cx + (ex - cx) * f; pos[oo + 1] = cy + (ey - cy) * f; pos[oo + 2] = zz;
+        }
+      }
+    }
+    var fi = (base + 2 * n * R) * 3, dome = R ? 1.09 : 1.08;
+    pos[fi] = cx; pos[fi + 1] = cy; pos[fi + 2] = D * dome;
+    pos[fi + 3] = cx; pos[fi + 4] = cy; pos[fi + 5] = -D * dome;
     g.attributes.position.needsUpdate = true;
     g.computeVertexNormals();
     g.computeBoundingSphere();
