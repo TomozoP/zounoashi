@@ -33,7 +33,10 @@
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
 <script src="../pad.js"></script>
-<script src="../celebrate.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../celebrate.js"></script>
+<script src="../random-bowling/vendor/three.min.js"></script>
+<script src="../three-base.js"></script>
+<script src="scene3d.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script>
 /* 入れ替え行列
 
@@ -137,12 +140,20 @@
   var BY;
   function place() { BY = Math.round(H * 0.74); }
 
+  var SKINS = ["#f1c7a1", "#eab993", "#d9a77f", "#c58c62", "#f5d3b5"];
+  var PANTS = ["#2e3442", "#3a3530", "#4a4f57", "#6b5a45", "#24324a", "#7a7f88"];
+  function rnd(a) { return a[(Math.random() * a.length) | 0]; }
+  function look3d(me) {
+    if (me) return { shirt: "#ffd23a", pants: "#2e3442", skin: "#f1c7a1", hair: "#2a1d17", h: 1, wide: 1, phone: false };
+    return { shirt: rnd(SHIRTS), pants: rnd(PANTS), skin: rnd(SKINS), hair: rnd(HAIRS), h: 0.9 + Math.random() * 0.18, wide: 0.9 + Math.random() * 0.25, phone: Math.random() < 0.45 };
+  }
   function person(i) {
     return {
       shirt: SHIRTS[(Math.random() * SHIRTS.length) | 0],
       hair: HAIRS[(Math.random() * HAIRS.length) | 0],
       x: (Math.random() - 0.5) * 40, wide: 0.9 + Math.random() * 0.25,
-      look: 0, lt: 2 + Math.random() * 7, y: i, q: 0
+      look: 0, lt: 2 + Math.random() * 7, y: i, q: 0,
+      x3d: (Math.random() - 0.5) * 0.2, look3d: look3d(false)
     };
   }
 
@@ -153,7 +164,7 @@
     score = 0; T = 0; held = false;
     q = [];
     for (var i = 0; i < N; i++) q.push(person(i));
-    me = { me: true, shirt: "#ffd23a", hair: "#2a1d17", x: 0, wide: 1, look: 0, lt: 1e9, y: N, q: 0 };
+    me = { me: true, shirt: "#ffd23a", hair: "#2a1d17", x: 0, wide: 1, look: 0, lt: 1e9, y: N, q: 0, x3d: 0, look3d: look3d(true) };
     q.push(me);
     for (i = 0; i < 3; i++) q.push(person(N + 1 + i));     /* 後ろにも少し */
     cam = N; stun = 0; cool = 0; pick = 1; fx = []; flash = 0; shake = 0; clearT = 0;
@@ -190,7 +201,7 @@
     w.q = -1.5;                        /* 怒り */
     var p = myPos(), back = Math.min(q.length - 1, p + 4);
     q.splice(p, 1); q.splice(back, 0, me);
-    stun = 0.9; flash = 0.5; shake = 0.4;
+    stun = 0.9; shake = 0.4;
     noiseHit(0.25, 300, 0.4, 0.8); tone(220, 0.3, 0.2, "square", 110);
   }
 
@@ -251,13 +262,19 @@
     var p = myPos();
     if (x == null) { swapWith(p - pick); return; }
     /* 触った所にいちばん近い前の人（体の真ん中で判定） */
-    var best = -1, bd = 1e9;
+    var best = -1, bd = 1e9, s3 = scene3d(), lim = GAP * 0.7;
     for (var k = 1; k <= RANGE; k++) {
       var t = p - k; if (t < 0) break;
-      var d = Math.abs(slotY(t) - 60 - y);
+      var d;
+      if (s3) {                        /* 立体のときは胸の位置を画面へ写して近さを見る */
+        var a = s3.screen(q[t].x3d, t, 0.6, W, H), b = s3.screen(q[t].x3d, t, 1.7, W, H);
+        var cy = Math.max(b.y, Math.min(a.y, y));
+        d = Math.hypot(x - a.x, y - cy);
+        lim = 90;
+      } else d = Math.abs(slotY(t) - 60 - y);
       if (d < bd) { bd = d; best = t; }
     }
-    if (best >= 0 && bd < GAP * 0.7) swapWith(best);
+    if (best >= 0 && bd < lim) swapWith(best);
   }
   function move(x, y) {}
   function up() { held = false; }
@@ -353,7 +370,7 @@
     var y = slotY(i), x = W / 2 + o.x;
     var y2 = slotY(i + SEE) + 8;
     ctx.save();
-    ctx.globalAlpha = o.look === 2 ? 0.38 : 0.16 + 0.1 * Math.sin(T * 30);
+    ctx.globalAlpha = o.look === 2 ? 0.38 : 0.2;
     ctx.fillStyle = o.look === 2 ? "#ff3030" : "#ffd23a";
     ctx.beginPath();
     ctx.moveTo(x - 12, y - 86 * SC); ctx.lineTo(x + 12, y - 86 * SC);
@@ -413,12 +430,43 @@
     ctx.textBaseline = "alphabetic";
   }
 
+  var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.Scene3D(); }) : function () { return null; };
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
     ctx.clearRect(0, 0, W, H);
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 16 * shake / 0.4, 0);
+    var s3 = q ? scene3d() : null, drew = false;
+    if (s3) {
+      try {
+        var pp = state === S.INTRO ? -1 : myPos(), tg = [];
+        if (state === S.PLAY && stun <= 0) for (var k = 1; k <= RANGE && pp - k >= 0; k++) if (!keyMode || k === pick) tg.push(pp - k);
+        s3.sync({ t: T + clearT + (state === S.INTRO ? performance.now() / 1000 : 0), q: q, cam: cam, targets: tg });
+        drew = s3.draw(ctx, W, H);
+      } catch (e) { scene3d.drop(); }
+    }
+    if (drew) draw3dOver(s3); else draw2d();
+    ctx.restore();
+    drawHud();
+  }
+  function draw3dOver(s3) {
+    for (var i = 0; i < q.length; i++) {
+      var o = q[i], c = s3.screen(o.x3d, o.y, 2.05, W, H);
+      if (c.y < -40 || c.y > H + 40 || c.s > 1) continue;
+      if (o.q > 0) bubble(c.x + 20, c.y, "?", "#fff", "#16202e");
+      else if (o.q < 0) bubble(c.x + 20, c.y, "!", "#ff3b3b", "#fff");
+      else if (o.look === 1) bubble(c.x + 18, c.y, "!", "#ffd23a", "#16202e", 0.7);
+    }
+    for (i = 0; i < fx.length; i++) {
+      var f = fx[i], at = s3.screen(q[f.pos] ? q[f.pos].x3d : 0, f.pos, 1.1, W, H);
+      ctx.globalAlpha = Math.max(0, f.t / 0.45);
+      ctx.fillStyle = "#c9f6ff";
+      ctx.beginPath(); ctx.arc(at.x + f.x, at.y + f.y + 40, 9, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  function draw2d() {
     /* 歩道 */
     ctx.fillStyle = "#b9b2a6"; ctx.fillRect(-20, 0, W + 40, H);
     ctx.strokeStyle = "rgba(0,0,0,.08)"; ctx.lineWidth = 2;
@@ -441,8 +489,8 @@
       ctx.beginPath(); ctx.arc(W / 2 + f.x, fy, 7, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
-    ctx.restore();
-    if (flash > 0) { ctx.fillStyle = "rgba(255,40,40," + (flash * 0.6) + ")"; ctx.fillRect(0, 0, W, H); }
+  }
+  function drawHud() {
 
     if (state === S.PLAY || state === S.CLEAR) {
       /* 上に残り人数とタイム */
