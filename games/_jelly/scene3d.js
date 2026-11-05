@@ -161,7 +161,7 @@
     g.userData.sm = [];
     return g;
   };
-  GameScene.prototype.shape = function (g, raw, cx, cy, swell) {
+  GameScene.prototype.shape = function (g, raw, cx, cy, swell, flat) {
     var n = g.userData.n, lv = g.userData.lv, pos = g.attributes.position.array, KL = KLS[lv], EDGE = EDGES[lv], R = g.userData.R;
     /* 表示用に外周をならす（物理の細かいガタつきで面が折れて、黒い点やしわが出ないように） */
     var pts = g.userData.sm, it, i;
@@ -196,7 +196,7 @@
       var sg = side === 0 ? 1 : -1;
       for (var j = 0; j < R; j++) {
         var f = 1 - (j + 1) / (R + 1);                            /* 1=縁 0=中心 */
-        var zz = sg * D * (1 + 0.09 * (1 - f * f));
+        var zz = sg * D * (1 + (flat ? 0 : 0.09) * (1 - f * f));   /* くっついた塊は平らなふた（くびれで折れ目が出ないように） */
         for (i = 0; i < n; i++) {
           var ex = pts[i].x - nrm[i * 2] * EDGE, ey = pts[i].y - nrm[i * 2 + 1] * EDGE;
           var oo = (base + (side * R + j) * n + i) * 3;
@@ -204,7 +204,7 @@
         }
       }
     }
-    var fi = (base + 2 * n * R) * 3, dome = R ? 1.09 : 1.08;
+    var fi = (base + 2 * n * R) * 3, dome = flat ? 1 : R ? 1.09 : 1.08;
     pos[fi] = cx; pos[fi + 1] = cy; pos[fi + 2] = D * dome;
     pos[fi + 3] = cx; pos[fi + 4] = cy; pos[fi + 5] = -D * dome;
     g.attributes.position.needsUpdate = true;
@@ -294,7 +294,7 @@
         var w2 = Math.sin(ripe * 22) * 0.025 * Math.min(1, ripe * 3); kx = 1 + w2; ky = 1 - w2;   /* つながった、のぷるん */
       }
       var pts = (kx === 1 && ky === 1) ? o.pts : o.pts.map(function (p) { return { x: o.cx + (p.x - o.cx) * kx, y: o.cy + (p.y - o.cy) * ky }; });
-      self.shape(m.geometry, pts, o.cx, o.cy, k);
+      self.shape(m.geometry, pts, o.cx, o.cy, k, true);
       g.forEach(function (b) { merged.add(b); });
     });
     this.gmeshes.forEach(function (m, key) { if (!gUsed.has(key)) { self.scene.remove(m); m.geometry.dispose(); self.gmeshes.delete(key); } });
