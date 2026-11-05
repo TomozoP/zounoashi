@@ -65,23 +65,16 @@
     sc.add(new T.HemisphereLight("#d8d0ff", "#2a1d33", 0.8));
     sc.add(new T.AmbientLight("#fff8f0", 0.9));   /* 正面の補助は向きのない光で（正面からの光だと真ん中のつやが強すぎて黒い点になる） */
 
-    /* 床：つやのある黒いアクリル */
-    var floor = new T.Mesh(new T.BoxGeometry(BW + 0.9, 0.5, 2.6), new T.MeshPhysicalMaterial({ color: "#1b1626", roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.2 }));
-    floor.position.set(BW / 2, -0.25, 0); floor.receiveShadow = true; sc.add(floor);
-    /* 左右の壁：角の丸い透明アクリルの柱。内側の手前の角に、細い光の線 */
-    var acrylic = new T.MeshPhysicalMaterial({ color: "#ffffff", roughness: 0.04, metalness: 0, transmission: 1, thickness: 0.6, ior: 1.5, clearcoat: 1, envMapIntensity: 1.5, attenuationColor: new T.Color("#d8e8ff"), attenuationDistance: 3 });
+    /* 壁と床は描かない（シンプルに）。床には影と、ぼんやりした接地の暗がりだけ */
     var self = this;
-    [[-0.22, "#ff86cf"], [BW + 0.22, "#7fe4ff"]].forEach(function (o) {
-      var w = new T.Mesh(roundBox(0.36, 11, 2.3, 0.12), acrylic);
-      w.position.set(o[0], 5.5, 0); sc.add(w);
-      var led = new T.Mesh(new T.BoxGeometry(0.04, 10.6, 0.04), new T.MeshBasicMaterial({ color: o[1] }));
-      led.position.set(o[0] + (o[0] < 0 ? 0.17 : -0.17), 5.5, 1.1); sc.add(led);
-      var halo = new T.Mesh(new T.PlaneGeometry(0.9, 11.5), new T.MeshBasicMaterial({ map: glowTex, color: o[1], transparent: true, opacity: 0.55, depthWrite: false, blending: T.AdditiveBlending }));
-      halo.position.set(led.position.x, 5.5, 1.12); sc.add(halo);
-    });
-    /* 床の手前のふちの光 */
-    var fled = new T.Mesh(new T.BoxGeometry(BW + 0.8, 0.035, 0.035), new T.MeshBasicMaterial({ color: "#ffd6f2" }));
-    fled.position.set(BW / 2, 0.0, 1.31); sc.add(fled);
+    var shadowFloor = new T.Mesh(new T.PlaneGeometry(BW + 6, 6), new T.ShadowMaterial({ opacity: 0.35 }));
+    shadowFloor.rotation.x = -Math.PI / 2; shadowFloor.position.set(BW / 2, 0, 0); shadowFloor.receiveShadow = true; sc.add(shadowFloor);
+    var dark = new T.Mesh(new T.PlaneGeometry(BW + 3, 1.6), new T.MeshBasicMaterial({ map: Z3.canvasTex(128, 32, function (g, w, h) {
+      var gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+      gr.addColorStop(0, "rgba(10,6,20,.55)"); gr.addColorStop(1, "rgba(10,6,20,0)");
+      g.setTransform(1, 0, 0, h / w, 0, h / 2 - h / 2 * h / w); g.fillStyle = gr; g.fillRect(0, 0, w, w);
+    }), transparent: true, depthWrite: false }));
+    dark.rotation.x = -Math.PI / 2; dark.position.set(BW / 2, 0.002, 0); sc.add(dark);
 
     /* あふれの線 */
     this.line = new T.Mesh(new T.BoxGeometry(BW, 0.035, 0.035), new T.MeshBasicMaterial({ color: "#ff6a8a", transparent: true, opacity: 0.5 }));
