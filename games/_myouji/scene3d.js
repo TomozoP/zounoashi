@@ -249,13 +249,9 @@
     var self = this;
     all.forEach(function (o, i) { o.i = i; self.byName[o.f.name] = o; o.pos = new T.Vector3(); o.dir = 1; });
 
-    /* 体（色つきの魚の形）を1つの InstancedMesh で */
+    /* 魚の形はなし。名字の文字そのものが泳ぐ（文字に色をつける） */
     var n = all.length;
-    var body = this.body = new T.InstancedMesh(fishShape(), new T.MeshBasicMaterial({ side: T.DoubleSide }), n);
     var col = new T.Color();
-    all.forEach(function (o, i) { col.setHex(COLORS[(o.f.rank * 7 + 3) % COLORS.length]); body.setColorAt(i, col); });
-    body.frustumCulled = false;
-    this.scene.add(body);
 
     /* 名前の文字は、何枚かの大きな絵にまとめて貼る */
     this.texts = [];
@@ -270,7 +266,7 @@
           var tw = g.measureText(o.f.name).width;
           g.save(); g.translate(cx, cy + 2);
           if (tw > CELL_W - 22) g.scale((CELL_W - 22) / tw, 1);
-          g.lineWidth = 7; g.strokeStyle = "rgba(20,24,40,.85)"; g.strokeText(o.f.name, 0, 0);
+          g.lineWidth = 8; g.strokeStyle = "rgba(10,20,40,.9)"; g.strokeText(o.f.name, 0, 0);
           g.fillStyle = "#fff"; g.fillText(o.f.name, 0, 0);
           g.restore();
         });
@@ -289,6 +285,7 @@
         };
       })(mat);
       var im = new T.InstancedMesh(geo, mat, chunk.length);
+      chunk.forEach(function (o, k) { col.setHex(COLORS[(o.f.rank * 7 + 3) % COLORS.length]); im.setColorAt(k, col); });
       im.frustumCulled = false;
       im.base = a * PER_ATLAS;
       this.scene.add(im);
@@ -304,7 +301,7 @@
     var t = s.t, c = s.cam, cam = this.camera, d = this.dummy;
     cam.position.set(c.x, 1.55, c.z);
     cam.rotation.set(c.pitch || 0, c.yaw, 0);
-    var all = this.fish, body = this.body;
+    var all = this.fish;
     for (var i = 0; i < all.length; i++) {
       var o = all[i];
       var a = o.ph + t * o.w, sv = Math.sin(a), cv = Math.cos(a);
@@ -312,21 +309,15 @@
       var dir = cv >= 0 ? 1 : -1;
       if (o.giant) o.pos.set(o.xc + sv * o.amp, y, o.z);
       else o.pos.set(o.x, y, o.zc + sv * o.amp * (o.tank.side > 0 ? 1 : -1));
-      /* 体：進む向きに頭を向ける（裏返す）。少しくねらせる */
+      /* 文字：裏返さない。泳ぐ向きに少し傾けて、ゆらゆらさせる */
       d.position.copy(o.pos);
-      d.rotation.set(0, o.rotY, Math.sin(t * 5 + o.bob) * 0.05);
-      d.scale.set(o.s * 1.7 * dir, o.s * 1.25, 1);
-      d.updateMatrix();
-      body.setMatrixAt(i, d.matrix);
-      /* 文字：裏返さない。体の少し手前（通路側） */
-      d.rotation.set(0, o.rotY, 0);
-      d.scale.set(o.s * 1.45, o.s * 1.45 * CELL_H / CELL_W, 1);
-      d.translateZ(0.02);
+      d.rotation.set(0, o.rotY, Math.sin(t * 3 + o.bob) * 0.07 + (o.giant ? 0 : 0));
+      var sw = 1 + Math.sin(t * 4 + o.bob) * 0.04;
+      d.scale.set(o.s * 1.9 * sw, o.s * 1.9 / sw * CELL_H / CELL_W, 1);
       d.updateMatrix();
       var im = this.texts[Math.floor(i / PER_ATLAS)];
       im.setMatrixAt(i - im.base, d.matrix);
     }
-    body.instanceMatrix.needsUpdate = true;
     this.texts.forEach(function (im) { im.instanceMatrix.needsUpdate = true; });
   };
 
