@@ -8,6 +8,9 @@
   /* 硬さごとの縁：やわらかいほど丸く（スライム）、かたいほど段が少なく角ばる（宝石のカット面） */
   var EDGES = [0.24, 0.22, 0.18, 0.14, 0.16];
   var KLS = [11, 9, 7, 5, 3];
+  /* スマホは面を減らして軽く（見た目の丸さは少し粗くなる） */
+  var MOBILE = !!(global.Z3 && global.Z3.mobile);
+  if (MOBILE) KLS = [7, 6, 5, 4, 3];
 
   function GameScene() {
     T = global.THREE;
@@ -134,7 +137,7 @@
 
   /* 外周 n 点の輪から、厚みと丸い縁のある塊の形を作る（点の数は毎回同じ、位置だけ書き換える） */
   /* ふたの内側の輪の数。やわらかいものは輪を重ねてなめらかな丸いふくらみに（中心1点だと×のしわが出る）。宝石は1点でカット面に */
-  var CAPR = [5, 5, 4, 0, 0];
+  var CAPR = MOBILE ? [3, 3, 2, 0, 0] : [5, 5, 4, 0, 0];
   GameScene.prototype.blob = function (n, lv) {
     var g = new T.BufferGeometry(), KL = KLS[lv], R = CAPR[lv];
     var vcount = n * KL + 2 * n * R + 2;
@@ -320,7 +323,13 @@
       }
       var pts = k === 1 ? b.pts : b.pts.map(function (p) { return { x: cx + (p.x - cx) * kx, y: cy + (p.y - cy) * ky }; });
       m.visible = !merged.has(b);                   /* くっついている間は、まとまりの塊のほうを見せる */
-      if (m.visible) self.shape(m.geometry, pts, cx, cy, k, (b.count || 1) > 1);
+      /* ほとんど動いていないものは形を作り直さない（積み上がって止まった山の分を省く） */
+      var moved = !!b.pop || !m.userData.last || m.userData.last.length !== b.pts.length;
+      if (!moved) for (var q = 0; q < b.pts.length; q += 3) { var lp = m.userData.last[q]; if (Math.abs(lp.x - b.pts[q].x) + Math.abs(lp.y - b.pts[q].y) > 0.002) { moved = true; break; } }
+      if (m.visible && moved) {
+        self.shape(m.geometry, pts, cx, cy, k, (b.count || 1) > 1);
+        m.userData.last = b.pts.map(function (p) { return { x: p.x, y: p.y }; });
+      }
     });
     this.meshes.forEach(function (m, b) {
       if (used.has(b)) return;
