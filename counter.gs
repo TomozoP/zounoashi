@@ -164,7 +164,11 @@ function dailyUpdate() {
     dateRanges: [{ startDate: GA_START, endDate: "today" }],
     dimensions: [{ name: "eventName" }],
     metrics: [{ name: "eventCount" }],
-    dimensionFilter: { filter: { fieldName: "eventName", stringFilter: { matchType: "BEGINS_WITH", value: "play_" } } },
+    /* 本家で遊ばれた分だけ数える（丸コピーされたサイトから計測IDごと送られてくる分を混ぜない） */
+    dimensionFilter: { andGroup: { expressions: [
+      { filter: { fieldName: "eventName", stringFilter: { matchType: "BEGINS_WITH", value: "play_" } } },
+      { filter: { fieldName: "hostName", inListFilter: { values: ["www.zounoashi.com", "zounoashi.com"] } } }
+    ] } },
     limit: 1000
   }, "properties/" + GA_PROPERTY_ID);
 
