@@ -3,10 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex,nofollow">
-<meta name="preview-version" content="nikutai-1793749585680">
+<meta name="preview-version" content="jelly-1793877920012">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>【プレビュー】肉体ピング</title>
-<script src="../games/guard.js"></script>
+<title>【プレビュー】ヤワラカタ</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   * { -webkit-tap-highlight-color: transparent; }
@@ -33,26 +32,26 @@
   <button id="start" type="button">START</button>
   <button id="share-button" type="button" aria-label="Xでシェア" hidden></button>
 </div></div>
-<script src="../games/start.js?v=nikutai-1793749585680"></script>
-<script src="../games/view.js?v=nikutai-1793749585680"></script>
-<script src="../games/audio.js?v=nikutai-1793749585680"></script>
-<script src="../games/lang.js?v=nikutai-1793749585680"></script>   <!-- 日本語以外のブラウザでは英語 -->
-<script src="../games/share.js?v=nikutai-1793749585680"></script>
-<script src="../games/result-actions.js?v=nikutai-1793749585680"></script>
-<script src="../games/action-icons.js?v=nikutai-1793749585680"></script>
-<script src="../games/celebrate.js?v=nikutai-1793749585680"></script>
-<script src="../games/pad.js?v=nikutai-1793749585680"></script>   <!-- ジョイパッドと、絵の外のタップ -->
-<script src="../games/random-bowling/vendor/three.min.js?v=nikutai-1793749585680"></script>
-<script src="../games/three-base.js?v=nikutai-1793749585680"></script>
-<script src="gltf-loader.js?v=nikutai-1793749585680"></script>
-<script src="macho-glb.js?v=nikutai-1793749585680"></script>
-<script src="scene3d.js?v=nikutai-1793749585680"></script>
+<script src="../games/start.js?v=jelly-1793877920012"></script>
+<script src="../games/view.js?v=jelly-1793877920012"></script>
+<script src="../games/audio.js?v=jelly-1793877920012"></script>
+<script src="../games/lang.js?v=jelly-1793877920012"></script>   <!-- 日本語以外のブラウザでは英語 -->
+<script src="../games/share.js?v=jelly-1793877920012"></script>
+<script src="../games/result-actions.js?v=jelly-1793877920012"></script>
+<script src="../games/action-icons.js?v=jelly-1793877920012"></script>
+<script src="../games/pad.js?v=jelly-1793877920012"></script>
+<script src="../games/celebrate.js?v=jelly-1793877920012"></script>   <!-- ジョイパッドと、絵の外のタップ -->
+<script src="../games/random-bowling/vendor/three.min.js?v=jelly-1793877920012"></script>
+<script src="../games/three-base.js?v=jelly-1793877920012"></script>
+<script src="scene3d.js?v=jelly-1793877920012"></script>
 <script>
-/* 肉体ピング
+/* ヤワラカタ
 
-   マッチョがポーズで1文字ずつしゃべる。下の翻訳表（ポーズ⇔五十音）と見比べて、同じポーズの文字をタップ。
-   腕の形が行（あかさたな…）、脚の形が段（あいうえお）に対応している。5つの言葉を訳すまでの時間が記録。
-   まちがえたら +3秒。 */
+   書き換えるところの目印は3つ。
+     ▼UPDATE … 進行と入力
+     ▼DRAW   … 絵
+     ▼SHARE  … シェアの文
+   用意ずみ: タテ画面の座標・入力(タップ/スペース/Esc)・結果画面・シェア・音・覗き穴。 */
 (function () {
   "use strict";
 
@@ -61,21 +60,30 @@
   var wrap = document.getElementById("wrap");
   var shareButton = document.getElementById("share-button");
   window.zResultActions.bind(shareButton, doShare);
+  /* 結果画面の「作者をフォロー」（共通。ボタン列の下に控えめに出す） */
   var followLink = window.zResultActions.follow.link(shareButton.parentNode);
 
+  /* ============ 画面 ============
+     タテ画面。横幅は540で固定、高さは開いた画面の形に合わせて伸び縮みする。
+     どの端末でも「横540」の座標で描けばよい（解像度はここで吸収する）。 */
   var W = 540, H = 960;
   function layout() {
     var view = window.zGameView.measure(wrap, W);
     H = view.gameHeight;
-    place();
+
+    place();                                   /* 高さが決まってから置き直す */
+
     window.zGameView.fit(canvas, wrap, ctx, W, H, view);
   }
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", layout);
 
-  /* ============ 音 ============ */
+  /* ============ 音 ============ 最初の操作より後でしか鳴らせない */
   var AC = null, NOISE = null;
-  function resumeAudio() { window.zAudioResume(AC); }
+  // 最初の長押しの中で短い無音を再生し、音声出力を起動する。
+  function resumeAudio() {
+    window.zAudioResume(AC);
+  }
   wrap.addEventListener("touchstart", audioOn, { passive: true });
   wrap.addEventListener("touchend", resumeAudio, { passive: true });
   wrap.addEventListener("pointerup", resumeAudio, true);
@@ -90,64 +98,6 @@
     var d = NOISE.getChannelData(0);
     for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
   }
-  /* 拍手と歓声（ノイズから作る）。power 0〜1、dur 秒 */
-  function applause(power, dur) {
-    if (!AC || !NOISE) return;
-    var n = AC.currentTime, out = AC.createGain();
-    out.gain.value = 0.5 + power * 0.7; out.connect(AC.destination);
-    /* 拍手：短いノイズのはじける音を大勢ぶん */
-    var claps = Math.round(dur * (25 + power * 70));
-    for (var i = 0; i < claps; i++) {
-      var t0 = n + Math.random() * dur * Math.random() * 1.2, src = AC.createBufferSource(); src.buffer = NOISE;
-      var bp = AC.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 900 + Math.random() * 1800; bp.Q.value = 1.2;
-      var g = AC.createGain(), v = (0.05 + Math.random() * 0.06) * Math.max(0.15, 1 - (t0 - n) / (dur * 1.2));
-      g.gain.setValueAtTime(v, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.05);
-      src.connect(bp); bp.connect(g); g.connect(out);
-      src.start(t0, Math.random() * 1.2, 0.06);
-    }
-    /* 歓声：ざわめき＋「うおー」 */
-    var crowd = AC.createBufferSource(); crowd.buffer = NOISE; crowd.loop = true;
-    var cf = AC.createBiquadFilter(); cf.type = "bandpass"; cf.frequency.value = 700; cf.Q.value = 0.8;
-    var cg = AC.createGain();
-    cg.gain.setValueAtTime(0.0001, n); cg.gain.exponentialRampToValueAtTime(0.05 + power * 0.12, n + 0.15); cg.gain.exponentialRampToValueAtTime(0.0001, n + dur);
-    crowd.connect(cf); cf.connect(cg); cg.connect(out); crowd.start(n); crowd.stop(n + dur + 0.1);
-    var voices = Math.round(3 + power * 9);
-    for (var k = 0; k < voices; k++) {
-      var o = AC.createOscillator(), vt = n + Math.random() * 0.25, f0 = 180 + Math.random() * 260;
-      o.type = "sawtooth";
-      o.frequency.setValueAtTime(f0 * 0.8, vt); o.frequency.exponentialRampToValueAtTime(f0 * 1.25, vt + 0.25); o.frequency.exponentialRampToValueAtTime(f0, vt + dur * 0.8);
-      var lfo = AC.createOscillator(), lg = AC.createGain(); lfo.frequency.value = 5 + Math.random() * 2; lg.gain.value = f0 * 0.03;
-      lfo.connect(lg); lg.connect(o.frequency);
-      var vf = AC.createBiquadFilter(); vf.type = "bandpass"; vf.frequency.value = 650 + Math.random() * 300; vf.Q.value = 3;
-      var vg = AC.createGain();
-      vg.gain.setValueAtTime(0.0001, vt); vg.gain.exponentialRampToValueAtTime(0.015 + power * 0.02, vt + 0.12); vg.gain.exponentialRampToValueAtTime(0.0001, vt + dur * 0.85);
-      o.connect(vf); vf.connect(vg); vg.connect(out);
-      o.start(vt); lfo.start(vt); o.stop(vt + dur); lfo.stop(vt + dur);
-    }
-  }
-  /* ポーズが決まったときの「じゃーん」：金管っぽい和音とシンバル（自作の響き） */
-  var JAAN = [[0, 4, 7, 12], [2, 5, 9, 14], [-1, 2, 7, 11], [0, 5, 9, 12], [-3, 4, 7, 12]];
-  function jaan(i) {
-    if (!AC) return;
-    var n = AC.currentTime, ch = JAAN[i % JAAN.length], base = 196;
-    var lp = AC.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.setValueAtTime(600, n); lp.frequency.exponentialRampToValueAtTime(3200, n + 0.06); lp.frequency.exponentialRampToValueAtTime(900, n + 1.1);
-    var g = AC.createGain(); g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.16, n + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, n + 1.2);
-    lp.connect(g); g.connect(AC.destination);
-    ch.forEach(function (st) {
-      [-6, 6].forEach(function (det) {
-        var o = AC.createOscillator(); o.type = "sawtooth";
-        o.frequency.value = base * Math.pow(2, st / 12); o.detune.value = det;
-        o.connect(lp); o.start(n); o.stop(n + 1.25);
-      });
-    });
-    if (NOISE) {
-      var s = AC.createBufferSource(); s.buffer = NOISE;
-      var hp = AC.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 5000;
-      var cg = AC.createGain(); cg.gain.setValueAtTime(0.22, n); cg.gain.exponentialRampToValueAtTime(0.0001, n + 1.0);
-      s.connect(hp); hp.connect(cg); cg.connect(AC.destination); s.start(n); s.stop(n + 1.05);
-    }
-    tone(70, 0.25, 0.25, "sine", 45);
-  }
   function tone(freq, dur, vol, type, to, delay) {
     if (!AC) return;
     var o = AC.createOscillator(), g = AC.createGain();
@@ -161,262 +111,398 @@
     o.connect(g); g.connect(AC.destination);
     o.start(n); o.stop(n + dur + 0.05);
   }
+  function noiseHit(dur, freq, vol, q) {
+    if (!AC || !NOISE) return;
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var f = AC.createBiquadFilter();
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1;
+    var g = AC.createGain(), n = AC.currentTime;
+    g.gain.setValueAtTime(vol, n);
+    g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+    s.connect(f); f.connect(g); g.connect(AC.destination);
+    s.start(n); s.stop(n + dur + 0.05);
+  }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
     else { try { AC.resume(); } catch (e) {} }
   });
 
-  /* ============ ポーズ ============
-     1文字ごとに別々のポーズ（ボディビルの規定ポーズを中心に）。
-     腕は U（上腕）・F（前腕）、脚は T（太もも）・S（すね）の向き。[外側, 上, 前] で書く（左右は自動で反転）。
-     yaw は体の向き（0 正面、180 後ろ向き、90 横向き）、jy は跳んでいる高さ。 */
-  var A = {
-    down: [[0.2, -1, 0], [0.1, -1, 0.05]], bic: [[1, 0.05, 0], [-0.15, 1, 0.1]], lat: [[0.6, -0.8, 0.25], [-0.8, -0.3, 0.4]],
-    crab: [[0.4, -0.9, 0.35], [-0.9, -0.1, 0.6]], up: [[0.25, 1, 0], [0.2, 1, 0]], V: [[0.7, 0.7, 0], [0.7, 0.7, 0]],
-    T: [[1, 0, 0], [1, 0, 0]], head: [[0.6, 0.8, -0.1], [-0.9, 0.3, -0.5]], hip: [[0.6, -0.8, -0.1], [-0.7, -0.6, 0.1]],
-    point: [[0.1, 0, 1], [0, 0, 1]], chin: [[0.2, -0.8, 0.5], [-0.4, 0.9, 0.4]], salute: [[0.9, 0.4, 0.2], [-0.8, 0.5, 0.3]],
-    wave: [[0.9, 0.3, 0], [0.2, 1, 0]], fbic: [[0.2, 0, 1], [0, 1, 0.2]], low: [[0.4, -0.9, 0.3], [-1, -0.1, 0.4]],
-    back: [[0.3, -0.9, -0.4], [-0.6, -0.2, -0.8]], clasp: [[0.35, -0.85, 0.45], [-1, 0.1, 0.5]], tri: [[0.05, -1, -0.1], [0.05, -1, 0.05]],
-    knee: [[0.5, -0.85, 0.2], [0.15, -1, 0.3]], guard: [[0.4, -0.6, 0.5], [-0.2, 1, 0.3]], fist: [[0.4, -0.8, -0.3], [0, 0.2, 1]],
-    fold: [[0.3, -0.8, 0.4], [-1, 0.2, 0.3]], fly: [[0.1, 0.5, 0.9], [0.1, 0.5, 0.9]], cheek: [[0.2, -0.6, 0.6], [-0.4, 1, 0]],
-    ring: [[0.3, 1, 0], [-0.9, 0.5, 0]], runF: [[0.1, -0.5, 0.85], [0, 0.9, 0.4]], runB: [[0.1, -0.7, -0.7], [0, -0.3, 0.95]],
-    Hpar: [[0.12, 1, 0], [0, 1, 0]], Itog: [[-0.3, 1, 0], [-0.2, 1, 0]], Yn: [[0.35, 1, 0], [0.35, 1, 0]],
-    Ww: [[1, 0.3, 0], [0.5, 1, 0]], Cup: [[0, 0.7, 0.7], [0, -0.3, 1]], fwdLo: [[0.1, -0.8, 0.6], [0, 0, 1]],
-    shee: [[0.3, 1, 0], [-1, 0, 0]], sheeB: [[0.9, -0.3, 0], [-0.3, -0.9, 0.3]], drum: [[0.6, -0.6, 0.5], [-0.9, 0.3, 0.3]]
-  };
-  var L = {
-    st: [[0.05, -1, 0], [0.03, -1, 0]], wide: [[0.35, -1, 0], [0.3, -1, 0]], bend: [[0.35, -1, 0.12], [0.1, -1, 0]],
-    fwdK: [[0, -0.9, 0.4], [0, -1, -0.1]], calf: [[0.1, -1, -0.15], [0.05, -1, -0.3]], fwd: [[0.15, -0.9, 0.45], [0.15, -0.9, 0.45]],
-    kneelF: [[0.1, -0.2, 1], [0, -1, 0]], kneelB: [[0.05, -1, 0], [0.05, 0, -1]], sumo: [[0.8, -0.6, 0.2], [0.05, -1, 0]],
-    shiko: [[1, 0.3, 0], [1, -0.3, 0]], kneeUp: [[0, 0, 1], [0, -1, 0]], lungeF: [[0, -0.6, 0.8], [0, -1, 0]],
-    lungeB: [[0, -0.8, -0.6], [0, -0.6, -0.8]], kick: [[0, 0, 1], [0, 0, 1]], tuck: [[0.3, -0.3, 0.8], [0, -1, 0]],
-    squat: [[0.3, -0.2, 1], [0, -1, 0]], inK: [[-0.15, -1, 0.1], [0.15, -1, 0]], tree: [[0.8, -0.5, 0.1], [-0.9, -0.4, 0]],
-    runK: [[0, -0.2, 1], [0, -1, 0]], runL: [[0, -0.9, -0.4], [0, -0.5, -0.85]], shee: [[-0.3, -0.4, 0.6], [0.6, -0.8, 0]],
-    X: [[0.6, -0.8, 0], [0.6, -0.8, 0]], Lam: [[0.45, -1, 0], [0.45, -1, 0]], tog: [[0, -1, 0], [0, -1, 0]],
-    side: [[1, 0, 0], [1, 0, 0]], diag: [[0.6, -0.8, 0], [0.6, -0.8, 0]], bowed: [[0.45, -1, 0.1], [-0.2, -1, 0]],
-    cBend: [[0, -0.7, 0.7], [0, -1, -0.3]]
-  };
-  /* [文字, 腕0, 腕1, 脚0, 脚1, 向き, 跳び] */
-  /* マッスルポーズを土台に、正面から見た形をアルファベットに少し寄せる */
-  var POSES = [
-    ["A", "ring", "ring", "Lam", "Lam"],              /* 頭上で手を合わせて大股 */
-    ["B", "down", "bic", "st", "tree"],               /* 片腕の力こぶ＋片ひざ */
-    ["C", "Cup", "Cup", "cBend", "cBend", 90],        /* 横向きで丸まる */
-    ["D", "down", "hip", "st", "st"],                 /* 片手を腰 */
-    ["E", "point", "fwdLo", "kick", "st", 90],        /* 横向き：上・中・下に突き出す */
-    ["F", "point", "fwdLo", "st", "st", 90],          /* 横向き：上・中に突き出す */
-    ["G", "clasp", "clasp", "fwdK", "st", -70],       /* サイドチェスト */
-    ["H", "Hpar", "Hpar", "wide", "wide"],            /* 両腕まっすぐ上・大股 */
-    ["I", "Itog", "Itog", "tog", "tog"],              /* 頭上で腕を閉じて直立 */
-    ["J", "Itog", "Itog", "tree", "st"],              /* I＋片ひざで曲がり */
-    ["K", "down", "V", "st", "diag"],                 /* 片腕と片脚を斜めに */
-    ["L", "down", "down", "st", "side"],              /* 片脚を真横に */
-    ["M", "head", "head", "wide", "wide"],            /* 手を頭の後ろ（アブドミナル） */
-    ["N", "up", "down", "st", "st"],                  /* 片腕を上 */
-    ["O", "crab", "crab", "bowed", "bowed"],          /* モストマスキュラー＋がに股 */
-    ["P", "down", "bic", "tog", "tog"],               /* ワンアーム・バイセップス */
-    ["Q", "crab", "crab", "st", "diag"],              /* モストマスキュラー＋片脚を斜め */
-    ["R", "down", "bic", "st", "diag"],               /* 片腕の力こぶ＋片脚を斜め */
-    ["S", "bic", "low", "fwdK", "st", 25],            /* アーノルドポーズ */
-    ["T", "T", "T", "tog", "tog"],                    /* 両腕を真横 */
-    ["U", "bic", "bic", "wide", "wide"],              /* フロント・ダブルバイセップス */
-    ["V", "V", "V", "tog", "tog"],                    /* ヴィクトリー */
-    ["W", "Ww", "Ww", "sumo", "sumo"],                /* 腕を広げて四股 */
-    ["X", "V", "V", "X", "X", 0, 25],                 /* 大の字ジャンプ */
-    ["Y", "Yn", "Yn", "tog", "tog"],                  /* 細いY */
-    ["Z", "down", "T", "side", "st"]                  /* 片腕を真横・逆の脚を真横 */
-  ];
-  /* 翻訳表の並び：キーボード（既定）と ABC 順を切り替える */
-  var LAYOUTS = {
-    key: { rows: ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"], off: [0, 0.5, 1.5], cols: 10 },
-    abc: { rows: ["ABCDEFG", "HIJKLMN", "OPQRSTU", "VWXYZ"], off: [0, 0, 0, 0], cols: 7 }
-  };
-  var lay = "key";
-  try { if (localStorage.getItem("nikutai-layout") === "abc") lay = "abc"; } catch (e) {}
-  function LY() { return LAYOUTS[lay]; }
-  var KANA = {};
-  function nv(v) { var n = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) || 1; return [v[0] / n, v[1] / n, v[2] / n]; }
-  POSES.forEach(function (q) {
-    var v = [q[5] || 0, q[6] || 0];
-    [A[q[1]], A[q[2]], L[q[3]], L[q[4]]].forEach(function (lim) { v.push.apply(v, nv(lim[0])); v.push.apply(v, nv(lim[1])); });
-    KANA[q[0]] = { k: q[0], pose: v };
-  });
-  var REST = KANA["U"].pose.slice();          /* 開始前の立ち姿（ダブルバイセップス） */
-
-  function add(a, d, l) { return [a[0] + d[0] * l, a[1] + d[1] * l, a[2] + d[2] * l]; }
-  function sd(v, o, s) { return nv([v[o] * s, v[o + 1], v[o + 2]]); }
-  /* ポーズの数字から関節の位置（cm、床が y=0） */
-  function joints(v, breath) {
-    var yaw = v[0] * Math.PI / 180, cy = Math.cos(yaw), sy = Math.sin(yaw);
-    var legs = [], lowest = 0;
-    for (var i = 0; i < 2; i++) {
-      var s = i === 0 ? -1 : 1, o = 14 + i * 6;
-      var hip = [s * 9, -4, 0];
-      var knee = add(hip, sd(v, o, s), 44);
-      var ankle = add(knee, sd(v, o + 3, s), 42);
-      legs.push([hip, knee, ankle]);
-      lowest = Math.min(lowest, knee[1] - 6, ankle[1] - 4);
-    }
-    var py = -lowest + (v[1] || 0);
-    function R(p) { return [p[0] * cy + p[2] * sy, p[1] + py, -p[0] * sy + p[2] * cy]; }
-    var j = { pelvis: [0, py, 0], yaw: yaw, jy: v[1] || 0, side: [] };
-    for (var k = 0; k < 2; k++) {
-      var sg = k === 0 ? -1 : 1, b = 2 + k * 6;
-      var sh = [sg * 24, 55 + (breath || 0), 0];
-      var el = add(sh, sd(v, b, sg), 30);
-      var hd = add(el, sd(v, b + 3, sg), 27);
-      var Lg = legs[k];
-      j.side.push({ shoulder: R(sh), elbow: R(el), hand: R(hd), hip: R(Lg[0]), knee: R(Lg[1]), ankle: R(Lg[2]) });
-    }
-    return j;
-  }
-
-  /* ============ 言葉 ============ 番号つきの一覧は確認用に別ファイルでも渡す */
-  /* 3文字・4文字…と1文字ずつ長くして、8文字でクリア */
-  var WORDS = [
-    ["GYM", "ABS", "BIG", "WOW", "YES", "RUN", "HOT", "TOP", "WIN", "MAX", "EGG", "LEG", "ARM", "FIT", "SUN"],
-    ["FLEX", "BULK", "BEEF", "LIFT", "PUMP", "CORE", "TONE", "HUGE", "OILY", "TANK", "GRIP", "BODY", "POSE", "REPS", "MEAT"],
-    ["MACHO", "POWER", "SQUAT", "CHEST", "GAINS", "STEAK", "BENCH", "TOUGH", "HEAVY", "SWEAT", "QUADS", "TRAIN", "MEATY", "PROUD", "MIGHT"],
-    ["MUSCLE", "BICEPS", "STRONG", "HUNGRY", "LEGDAY", "SHREDS", "PLANKS", "GLUTES", "MIGHTY", "TROPHY", "CHAMPS", "SPRINT", "LUNGES", "PUSHUP", "SHAKER"],
-    ["PROTEIN", "TRICEPS", "WORKOUT", "SIXPACK", "CHICKEN", "STRETCH", "BURPEES", "DIETING", "TRAINER", "SPRINTS", "CHINUPS", "HOTBODY", "BRONZED", "MONSTER", "WARMUPS"],
-    ["DUMBBELL", "DEADLIFT", "HERCULES", "POSEDOWN", "SHOULDER", "BARBELLS", "ABSOLUTE", "EXERCISE", "MUSCULAR", "CHAMPION", "STRENGTH", "MARATHON", "FLEXIBLE", "GORGEOUS", "SUNSHINE"]
-  ];
-
   /* ============ 状態 ============ */
-  var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
-  var galleryK = null, showK = null;   /* showK: 確認用（覗き穴から1つのポーズを出す） */
-  var state, T, penalty, words, wi, ci, cur, flex, wordDone, flash, gallery, misses, pt, pEnd = 1e9, hold = -1, pop = null, hitIdx, impact = 0;
-  var STEP = 1.15, FAST = 0.58;                /* 連続ポーズの1文字ぶんの秒数。そろった後の結果発表だけ倍のテンポ */
-  var step = STEP, doneT = -1;
-  var NW = WORDS.length, PEN = 3;
-  var CAM = Number((location.search.match(/[?&]cam=(\d)/) || [])[1] || 0);
+  var S = { INTRO: "intro", PLAY: "play", OVER: "over", RESULT: "result" };
+  var state, score, T, held, keyMode = false;
 
-  var SH, AY, TY, CW, CH;
-  function place() {
-    SH = Math.round(H * 0.5);                  /* マッチョの場面 */
-    AY = SH;                                   /* 答えの欄 */
-    TY = SH + 78;                              /* 翻訳表 */
-    CW = W / LY().cols;
-    CH = (H - TY - 10) / LY().rows.length;
+  /* ============ ぷるぷるの物理（2Dの断面。立体は scene3d.js が厚みを付けて描く） ============
+     座標は y が上。箱の中は x 0〜BW、床が y=0。1ブロックは約1.1。
+     ブロックは外周の点の輪で、元の形へ戻ろうとする強さ（形の戻り）が硬さ5段階で違う。 */
+  var BW = 5, LINE = 9, DROP_Y = 10.2, NP = 24, SIZE = 1.25, G = 22;
+  /* 硬さ 1(とろとろ)〜5(かため)。色もここで決める */
+  var LV = [
+    { stiff: 0.012, color: "#ff4f9a", name: "1" },
+    { stiff: 0.03, color: "#ff8a2a", name: "2" },
+    { stiff: 0.07, color: "#ffd02a", name: "3" },
+    { stiff: 0.18, color: "#3fd17a", name: "4" },
+    { stiff: 0.85, color: "#2f6bff", name: "5" }
+  ];
+  var SUB = 4;
+  function place() {}
+  var bodies, cur, next, aimX, dropCool, overT, popped, combo, sounds, popups = [], kick = 0;
+
+  /* 角の丸い四角の外周（反時計回り、中心から） */
+  var ROUND = [0.48, 0.4, 0.3, 0.2, 0.1];     /* 角の丸み：やわらかいほど丸い */
+  function restShape(size, lv) {
+    var h = size / 2, r = size * ROUND[lv], pts = [];
+    /* 4つの角の円弧＋辺を周長で均等に割る */
+    var cs = [[h - r, h - r, 0], [-(h - r), h - r, 1], [-(h - r), -(h - r), 2], [h - r, -(h - r), 3]];
+    function at(s) {
+      var side = 2 * (h - r), arc = Math.PI / 2 * r, per = side + arc, k = Math.floor(s / per) % 4, u = s - Math.floor(s / per) * per;
+      var c = cs[k], a0 = k * Math.PI / 2;
+      if (u < arc) { var a = a0 + u / r; return { x: c[0] + Math.cos(a) * r, y: c[1] + Math.sin(a) * r }; }
+      var d = u - arc, a1 = a0 + Math.PI / 2;
+      return { x: c[0] + Math.cos(a1) * r + dirX(k) * d, y: c[1] + Math.sin(a1) * r + dirY(k) * d };
+    }
+    function dirX(k) { return [-1, 0, 1, 0][k]; }
+    function dirY(k) { return [0, -1, 0, 1][k]; }
+    var total = 4 * (2 * (h - r) + Math.PI / 2 * r);
+    for (var i = 0; i < NP; i++) pts.push(at(total * (i + 0.5) / NP));
+    return pts;
+  }
+  var RESTS = [0, 1, 2, 3, 4].map(function (lv) { return restShape(SIZE, lv); });
+
+  var bid = 0;
+  function makeBody(lv, x, y) {
+    var REST = RESTS[lv];
+    var b = { id: ++bid, lv: lv, count: 1, rest: REST, pts: [], age: 0, pop: 0, touch: {}, glue: {}, hit: 0, area0: 0 };
+    for (var i = 0; i < NP; i++) {
+      var r = REST[i];
+      b.pts.push({ x: x + r.x, y: y + r.y, px: x + r.x, py: y + r.y });
+    }
+    b.area0 = area(b);
+    return b;
+  }
+  function area(b) {
+    var a = 0, p = b.pts;
+    var N = p.length;
+    for (var i = 0; i < N; i++) { var q = p[i], n = p[(i + 1) % N]; a += q.x * n.y - n.x * q.y; }
+    return a / 2;
+  }
+  function center(b) {
+    var cx = 0, cy = 0;
+    var N = b.pts.length;
+    for (var i = 0; i < N; i++) { cx += b.pts[i].x; cy += b.pts[i].y; }
+    return { x: cx / N, y: cy / N };
+  }
+  function bbox(b) {
+    var x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+    for (var i = 0; i < b.pts.length; i++) { var p = b.pts[i]; if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
+    b.x0 = x0; b.x1 = x1; b.y0 = y0; b.y1 = y1;
   }
 
-  function pickWords() {
-    return WORDS.map(function (g) { return g[Math.floor(Math.random() * g.length)]; });
+  function physics(dt) {
+    var h = dt / SUB;
+    for (var s = 0; s < SUB; s++) {
+      var i, j, b;
+      for (i = 0; i < bodies.length; i++) {
+        b = bodies[i];
+        var lv = LV[b.lv], damp = 0.996, NB = b.pts.length;
+        for (j = 0; j < NB; j++) {
+          var p = b.pts[j], vx = (p.x - p.px) * damp, vy = (p.y - p.py) * damp;
+          p.px = p.x; p.py = p.y;
+          p.x += vx; p.y += vy - G * h * h;
+        }
+        /* 元の形へ戻る（いちばん合う回し方を求めて、その形へ寄せる） */
+        var c = center(b), sa = 0, sb = 0, REST = b.rest;
+        for (j = 0; j < NB; j++) {
+          var dx = b.pts[j].x - c.x, dy = b.pts[j].y - c.y, r = REST[j];
+          sa += r.x * dy - r.y * dx; sb += r.x * dx + r.y * dy;
+        }
+        var th = Math.atan2(sa, sb), co = Math.cos(th), si = Math.sin(th), k = lv.stiff;
+        for (j = 0; j < NB; j++) {
+          var rr = REST[j], gx = c.x + rr.x * co - rr.y * si, gy = c.y + rr.x * si + rr.y * co;
+          b.pts[j].x += (gx - b.pts[j].x) * k; b.pts[j].y += (gy - b.pts[j].y) * k;
+        }
+        /* 中の体積を保つ（やわらかいものが潰れきらないように） */
+        var A = area(b), per = 0;
+        for (j = 0; j < NB; j++) { var q0 = b.pts[j], q1 = b.pts[(j + 1) % NB]; per += Math.hypot(q1.x - q0.x, q1.y - q0.y); }
+        var push = (b.area0 - A) / per * 0.5;
+        for (j = 0; j < NB; j++) {
+          var a0 = b.pts[(j + NB - 1) % NB], a1 = b.pts[(j + 1) % NB], nx = a1.y - a0.y, ny = -(a1.x - a0.x), nl = Math.hypot(nx, ny) || 1;
+          b.pts[j].x += nx / nl * push; b.pts[j].y += ny / nl * push;
+        }
+        /* 隣どうしをならす（輪がガタガタにならないように） */
+        for (j = 0; j < NB; j++) {
+          var m0 = b.pts[(j + NB - 1) % NB], m1 = b.pts[(j + 1) % NB], pj = b.pts[j];
+          var sm = b.lv < 3 ? 0.12 : 0.04;
+          pj.x += ((m0.x + m1.x) / 2 - pj.x) * sm; pj.y += ((m0.y + m1.y) / 2 - pj.y) * sm;
+        }
+        /* 壁と床 */
+        for (j = 0; j < NB; j++) {
+          p = b.pts[j];
+          if (p.y < 0) { var vy0 = p.y - p.py; if (vy0 < -0.02) b.hit = Math.max(b.hit, -vy0); p.y = 0; p.px = p.x - (p.x - p.px) * 0.6; }
+          if (p.x < 0) { p.x = 0; p.py = p.y - (p.y - p.py) * 0.8; }
+          if (p.x > BW) { p.x = BW; p.py = p.y - (p.y - p.py) * 0.8; }
+        }
+        bbox(b);
+      }
+      /* ブロックどうし：相手の中に入った点を、いちばん近い辺の外へ押し出す */
+      for (i = 0; i < bodies.length; i++) for (j = i + 1; j < bodies.length; j++) {
+        var A1 = bodies[i], B1 = bodies[j];
+        if (A1.x1 < B1.x0 - 0.05 || B1.x1 < A1.x0 - 0.05 || A1.y1 < B1.y0 - 0.05 || B1.y1 < A1.y0 - 0.05) continue;
+        var t1 = collide(A1, B1), t2 = collide(B1, A1);
+        if (t1 || t2) {
+          A1.touch[B1.id] = T; B1.touch[A1.id] = T;
+          if (A1.lv === B1.lv && !A1.pop && !B1.pop && A1.age > 0.1 && B1.age > 0.1) toMerge.push([A1, B1]);
+        }
+      }
+    }
+    /* くっついたものを、1つの物体に作り直す */
+    var done = new Set();
+    toMerge.forEach(function (pr) {
+      if (done.has(pr[0]) || done.has(pr[1]) || bodies.indexOf(pr[0]) < 0 || bodies.indexOf(pr[1]) < 0) return;
+      done.add(pr[0]); done.add(pr[1]);
+      merge(pr[0], pr[1]);
+    });
+    toMerge = [];
   }
+  var toMerge = [];
+
+  /* ============ 合体：2つの輪を、1本の外周の大きな1つの物体にする ============
+     それぞれの「元の形を今の位置・向きに置いたもの」をなめらかに足し合わせ（くびれは少し埋まる）、
+     中心から放射状に境目を探して外周の点を作る。その形が新しい「元の形」になる */
+  function idealPts(b) {
+    var c = center(b), sa = 0, sb = 0, n = b.pts.length;
+    for (var j = 0; j < n; j++) {
+      var dx = b.pts[j].x - c.x, dy = b.pts[j].y - c.y, r = b.rest[j];
+      sa += r.x * dy - r.y * dx; sb += r.x * dx + r.y * dy;
+    }
+    var th = Math.atan2(sa, sb), co = Math.cos(th), si = Math.sin(th);
+    return b.rest.map(function (r) { return { x: c.x + r.x * co - r.y * si, y: c.y + r.x * si + r.y * co }; });
+  }
+  function sdPoly(pts, x, y) {
+    var n = pts.length, best = 1e9, c = false;
+    for (var i = 0, j = n - 1; i < n; j = i++) {
+      var a = pts[j], b = pts[i], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey || 1e-9;
+      var t = Math.max(0, Math.min(1, ((x - a.x) * ex + (y - a.y) * ey) / l2));
+      var dx = a.x + ex * t - x, dy = a.y + ey * t - y, d = dx * dx + dy * dy;
+      if (d < best) best = d;
+      if ((b.y > y) !== (a.y > y) && x < (a.x - b.x) * (y - b.y) / (a.y - b.y) + b.x) c = !c;
+    }
+    best = Math.sqrt(best);
+    return c ? -best : best;
+  }
+  function smin(a, b, k) { var h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; }
+  function merge(A, B) {
+    var PA = idealPts(A), PB = idealPts(B), ca = center(A), cb = center(B);
+    var na = A.count || 1, nb = B.count || 1, cnt = na + nb;
+    var cx = (ca.x * na + cb.x * nb) / cnt, cy = (ca.y * na + cb.y * nb) / cnt;
+    var rmax = 0;
+    PA.concat(PB).forEach(function (p) { rmax = Math.max(rmax, Math.hypot(p.x - cx, p.y - cy)); });
+    rmax += 0.2;
+    function f(x, y) { return smin(sdPoly(PA, x, y), sdPoly(PB, x, y), 0.35); }
+    var M = Math.min(96, NP * cnt), out = [];
+    for (var i = 0; i < M; i++) {
+      var a = i / M * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a), r = rmax, st = 0.05;
+      while (r > 0 && f(cx + dx * r, cy + dy * r) > 0) r -= st;
+      var lo = Math.max(0, r), hi = r + st;
+      for (var k = 0; k < 7; k++) { var mid = (lo + hi) / 2; if (f(cx + dx * mid, cy + dy * mid) > 0) hi = mid; else lo = mid; }
+      r = (lo + hi) / 2;
+      out.push({ x: cx + dx * r, y: cy + dy * r });
+    }
+    /* 速さは2つの平均を引き継ぐ */
+    var vx = 0, vy = 0;
+    A.pts.concat(B.pts).forEach(function (p) { vx += p.x - p.px; vy += p.y - p.py; });
+    vx /= A.pts.length + B.pts.length; vy /= A.pts.length + B.pts.length;
+    var oc = { x: 0, y: 0 };
+    out.forEach(function (p) { oc.x += p.x / M; oc.y += p.y / M; });
+    var C = { id: ++bid, lv: A.lv, count: cnt, rest: out.map(function (p) { return { x: p.x - oc.x, y: p.y - oc.y }; }),
+      pts: out.map(function (p) { return { x: p.x, y: p.y, px: p.x - vx, py: p.y - vy }; }),
+      age: Math.max(A.age, B.age), pop: 0, touch: {}, glue: {}, hit: 0, area0: 0, ripe: 0, wob: 0.5 };
+    C.area0 = area(C);
+    bbox(C);
+    bodies.splice(bodies.indexOf(A), 1); A.dead = true;
+    bodies.splice(bodies.indexOf(B), 1); B.dead = true;
+    bodies.push(C);
+    if (state === S.PLAY) gluSound(C.lv);
+  }
+  function gluSound(lv) {
+    if (!AC) return;
+    var f = [220, 270, 330, 420, 560][lv];
+    tone(f, 0.18, 0.12, "sine", f * 1.5);          /* むにゅっ */
+    tone(f * 2, 0.1, 0.04, "sine", f * 2.6, 0.03);
+  }
+  function inside(b, x, y) {
+    var c = false, p = b.pts;
+    for (var i = 0, n = p.length, j = n - 1; i < n; j = i++) {
+      if ((p[i].y > y) !== (p[j].y > y) && x < (p[j].x - p[i].x) * (y - p[i].y) / (p[j].y - p[i].y) + p[i].x) c = !c;
+    }
+    return c;
+  }
+  function collide(A, B) {
+    var any = false, NA = A.pts.length, NB = B.pts.length;
+    for (var i = 0; i < NA; i++) {
+      var p = A.pts[i];
+      if (p.x < B.x0 || p.x > B.x1 || p.y < B.y0 || p.y > B.y1 || !inside(B, p.x, p.y)) continue;
+      any = true;
+      var best = 1e9, bj = 0, bt = 0, qx = 0, qy = 0;
+      for (var j = 0; j < NB; j++) {
+        var e0 = B.pts[j], e1 = B.pts[(j + 1) % NB], ex = e1.x - e0.x, ey = e1.y - e0.y, l2 = ex * ex + ey * ey || 1e-9;
+        var t = Math.max(0, Math.min(1, ((p.x - e0.x) * ex + (p.y - e0.y) * ey) / l2));
+        var cx = e0.x + ex * t, cy = e0.y + ey * t, d = (cx - p.x) * (cx - p.x) + (cy - p.y) * (cy - p.y);
+        if (d < best) { best = d; bj = j; bt = t; qx = cx; qy = cy; }
+      }
+      var dx = qx - p.x, dy = qy - p.y;
+      var rel = Math.hypot((p.x - p.px), (p.y - p.py));
+      if (rel > 0.03) A.hit = Math.max(A.hit, rel);
+      p.x += dx * 0.5; p.y += dy * 0.5;
+      p.px += (p.x - p.px) * 0.15; p.py += (p.y - p.py) * 0.15;     /* こすれて少し止まる */
+      var a = B.pts[bj], b2 = B.pts[(bj + 1) % NB];
+      a.x -= dx * 0.5 * (1 - bt); a.y -= dy * 0.5 * (1 - bt);
+      b2.x -= dx * 0.5 * bt; b2.y -= dy * 0.5 * bt;
+    }
+    return any;
+  }
+
+  /* 同じ色が3つ以上つながったら、はじけて消える */
+  /* くっつき（glue）でつながった同じ色が POP_N 個以上になったら、1つの塊になったのを少し見せてから（RIPE 秒）はじける */
+  var POP_N = 4, RIPE = 0.6;
+  function findPops(dt) {
+    bodies.forEach(function (b) {
+      if (b.pop) return;
+      if ((b.count || 1) < POP_N) { b.ripe = 0; return; }
+      b.ripe = (b.ripe || 0) + dt;
+      if (b.ripe < RIPE) return;
+      b.pop = 0.001;
+      var n = b.count, add = n * 10 * (1 + combo), c = center(b);
+      score += add;
+      popups.push({ x: c.x, y: c.y, txt: "+" + add, t: 0, lv: b.lv, combo: combo });
+      popSound(b.lv, n, combo);
+      combo++;
+    });
+  }
+
+  /* はじけた：まわりのブロックを外へぷるんと押し、画面を少し揺らす */
+  var POP_T = 0.32;
+  function burst(b) {
+    var c = center(b);
+    bodies.forEach(function (o) {
+      if (o.pop) return;
+      var oc = center(o), dx = oc.x - c.x, dy = oc.y - c.y, d = Math.hypot(dx, dy);
+      if (d > 2.4 || d < 0.01) return;
+      var f = (2.4 - d) / 2.4 * 0.05;
+      o.pts.forEach(function (p) {
+        /* 近い側の点ほど強く押す（ぷるんと波打つ） */
+        var pd = Math.hypot(p.x - c.x, p.y - c.y), k = Math.max(0.3, 1.6 - pd / 2);
+        p.px -= dx / d * f * k; p.py -= (dy / d * f + 0.01) * k;
+      });
+    });
+    kick = Math.min(0.5, kick + 0.18);
+  }
+
   function newRound() {
     shareButton.hidden = true;
     document.getElementById("start").hidden = true;
     state = S.PLAY;
-    T = 0; penalty = 0; misses = 0; wi = 0; ci = 0; flex = 0; wordDone = 0; flash = null; gallery = -1;
-    words = pickWords();
-    cur = cur || REST.slice();
-    intro();
+    score = 0; T = 0; held = false;
+    bodies = []; popped = 0; combo = 0; overT = 0; popups = []; kick = 0;
+    aimX = BW / 2; dropCool = 0;
+    cur = randLv(); next = randLv();
+    var s3 = scene3d(); if (s3) s3.reset();
   }
-  /* 再生中なら今ポーズしている文字の番号、止まっていれば -1 */
-  function playIdx() {
-    if (pt < 0 || state !== S.PLAY || !words || wi >= NW) return -1;
-    var i = Math.floor(pt / step);
-    return i < words[wi].length && pt < pEnd ? i : -1;
+  function randLv() { return (Math.random() * 5) | 0; }
+
+  function drop() {
+    if (state !== S.PLAY || dropCool > 0) return;
+    var b = makeBody(cur, Math.max(SIZE / 2, Math.min(BW - SIZE / 2, aimX)), DROP_Y);
+    bodies.push(b);
+    cur = next; next = randLv();
+    dropCool = 0.55; combo = 0;
+    tone(520 + cur * 40, 0.05, 0.05, "sine", 380);
   }
-  /* 全部続けて（from を渡すとその1文字だけ） */
-  function play(from) {
-    if (state !== S.PLAY || wordDone > 0) return;
-    step = STEP;
-    if (from == null) { pt = 0; pEnd = 1e9; hold = -1; } else { pt = from * STEP; pEnd = (from + 1) * STEP; hold = from; }
-    hitIdx = -1;
-    tone(440, 0.08, 0.1, "triangle"); tone(660, 0.1, 0.08, "triangle", null, 0.07);
-  }
-  /* 言葉の始め：一連のポーズを見せてから1文字目のポーズで止まる */
-  function intro() { step = STEP; doneT = -1; pt = 0; pEnd = 1e9; hitIdx = -1; hold = 0; }
-  function slotRects() {
-    var w = words[wi < NW ? wi : NW - 1], n = w.length;
-    var bs = Math.min(52, (W - 170) / n - 6), x0 = W / 2 - 30 - (n * (bs + 6) - 6) / 2, y = AY + (TY - AY - 4 - bs) / 2, out = [];
-    for (var i = 0; i < n; i++) out.push({ x: x0 + i * (bs + 6), y: y, s: bs });
-    return out;
-  }
-  function score() { return T + penalty; }
 
   /* ============ 進行 ============ */
   function update(dt) {
-    var k = 1;                                 /* 切り替えは一瞬（tomozo「光速に」） */
-    if (pt >= 0) { pt += dt; if (state !== S.PLAY || playIdx() < 0) pt = -1; }
-    var pi = playIdx();
-    /* ポーズに移り終わるころに「じゃーん」 */
-    if (state === S.PLAY && wordDone > 0 && pi < 0 && doneT < 0) {
-      /* 結果発表のポーズが終わったら小さく紙吹雪 */
-      doneT = 0;
-      if (mini) mini.burst(W, H, 40, { x: W / 2, y: SH * 0.3 });
-      if (AC && window.zCelebrate) window.zCelebrate.play(AC, "clear");
-    }
-    if (doneT >= 0) doneT += dt;
-    if (mini) mini.step(dt, W, H);
-    if (pi >= 0 && pi !== hitIdx && pt - pi * step >= 0) { hitIdx = pi; jaan(pi); flex = 1; impact = 1; }
-    impact = Math.max(0, impact - dt * 1.8);
-    if (thumbFx) { impact = 0.7; flex = 1; }   /* サムネは決めの瞬間で止める */
-    var goal = pi >= 0 ? KANA[words[wi][pi]].pose : (hold >= 0 && state === S.PLAY && wi < NW ? KANA[words[wi][hold]].pose : REST);
-    if (showK) goal = KANA[showK].pose;
-    if (gallery >= 0) {
-      gallery += dt;
-      var keys = Object.keys(KANA);
-      galleryK = keys[Math.floor(gallery / 1.1) % keys.length]; goal = KANA[galleryK].pose;
-    }
-    if (!cur) cur = REST.slice();
-    for (var i = 0; i < cur.length; i++) cur[i] += (goal[i] - cur[i]) * k;
-    flex = Math.max(0, flex - dt * 2.5);
-    if (flash) { flash.t += dt; if (flash.t > 0.4) flash = null; }
-    if (pop) { pop.t += dt; if (pop.t > 0.6) pop = null; }
-    if (state !== S.PLAY) return;
-    if (!wordDone) T += dt;
-    if (wordDone > 0) {
-      wordDone -= dt;
-      if (wordDone <= 0) {
-        wordDone = 0; wi++; ci = 0;
-        if (wi >= NW) { finish(); return; }
-        intro();
+    if (state === S.INTRO || !bodies) return;
+    if (state === S.PLAY || state === S.OVER) {
+      T += dt;
+      dropCool = Math.max(0, dropCool - dt);
+      physics(dt);
+      kick = Math.max(0, kick - dt * 1.5);
+      for (var pi = popups.length - 1; pi >= 0; pi--) { popups[pi].t += dt; if (popups[pi].t > 1.1) popups.splice(pi, 1); }
+      for (var i = bodies.length - 1; i >= 0; i--) {
+        var b = bodies[i];
+        b.age += dt;
+        if (b.hit > 0.04 && b.age > 0.1) { squish(b.lv, b.hit); if (b.hit > 0.09) kick = Math.min(0.5, kick + b.hit * 0.6); }
+        b.hit = 0;
+        if (b.pop) {
+          b.pop += dt;
+          if (b.pop > POP_T) { bodies.splice(i, 1); b.dead = true; popped++; burst(b); }
+        }
+      }
+      if (state === S.PLAY) {
+        findPops(dt);
+        /* あふれ：線より上で止まっているブロックがしばらく続いたら終わり */
+        var over = bodies.some(function (b) { return !b.pop && b.age > 1.2 && b.y1 > LINE; });
+        overT = over ? overT + dt : Math.max(0, overT - dt * 2);
+        if (overT > 1.6) { state = S.OVER; overT = 0; tone(300, 0.5, 0.15, "sine", 120); }
+      } else {
+        overT += dt;
+        if (overT > 1.2) state = S.RESULT;
       }
     }
   }
-  function finish() {
-    state = S.RESULT;
-    if (AC && window.zCelebrate) window.zCelebrate.play(AC, "fanfare");
-    if (confetti) confetti.burst(W, H, 160);
-  }
 
-  function cellAt(x, y) {
-    if (y < TY) return null;
-    var L = LY(), r = Math.floor((y - TY) / CH);
-    if (r < 0 || r >= L.rows.length) return null;
-    var c = Math.floor(x / CW - L.off[r]);
-    var k = L.rows[r][c];
-    return c >= 0 && k && k !== " " ? k : null;
+  /* ============ 音（ぷにゅ・ぽよん・はじける） ============ */
+  var lastSquish = 0;
+  function squish(lv, v) {
+    if (!AC || !NOISE || T - lastSquish < 0.05) return;
+    lastSquish = T;
+    var vol = Math.min(0.35, v * 2.2), n = AC.currentTime;
+    /* やわらかいほど低く、長く、湿った音 */
+    var f = [180, 230, 300, 420, 620][lv], len = [0.28, 0.22, 0.17, 0.12, 0.08][lv];
+    var o = AC.createOscillator(), g = AC.createGain();
+    o.type = "sine"; o.frequency.setValueAtTime(f * 1.6, n); o.frequency.exponentialRampToValueAtTime(f * 0.7, n + len);
+    g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(vol, n + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, n + len);
+    o.connect(g); g.connect(AC.destination); o.start(n); o.stop(n + len + 0.05);
+    var s = AC.createBufferSource(); s.buffer = NOISE;
+    var fl = AC.createBiquadFilter(); fl.type = "lowpass"; fl.frequency.setValueAtTime(f * 6, n); fl.frequency.exponentialRampToValueAtTime(f, n + len);
+    var g2 = AC.createGain(); g2.gain.setValueAtTime(vol * 0.5, n); g2.gain.exponentialRampToValueAtTime(0.0001, n + len * 0.8);
+    s.connect(fl); fl.connect(g2); g2.connect(AC.destination);
+    s.start(n, Math.random()); s.stop(n + len);
   }
-  function layBtn() { return { x: W - 70, y: AY + (TY - AY - 4) / 2 - 20, w: 60, h: 40 }; }
+  /* はじける音：最初に溜めの「ぷるる」、はじけて「ぽんっ」＋しぶき（スライム）か「キィン」（宝石）。連鎖で音が上がる */
+  function popSound(lv, cnt, combo) {
+    if (!AC) return;
+    var up = Math.pow(1.122, Math.min(combo, 8)), d0 = POP_T - 0.02;
+    /* 溜め：ふるえ */
+    for (var w = 0; w < 4; w++) tone((140 + lv * 30) * up * (1 + w * 0.06), 0.06, 0.06, "sine", null, w * 0.07);
+    for (var i = 0; i < Math.min(cnt, 6); i++) {
+      var dl = d0 + i * 0.045, f = (360 + lv * 60) * up * (1 + i * 0.09);
+      tone(f, 0.16, 0.2, "sine", f * 3.2, dl);                    /* ぽんっ */
+      tone(f * 0.5, 0.22, 0.14, "sine", f * 0.18, dl);            /* 低い胴鳴り */
+      if (lv >= 3) {                                               /* 宝石：澄んだ倍音 */
+        tone(f * 4, 0.6, 0.05, "sine", null, dl + 0.02);
+        tone(f * 6.03, 0.45, 0.035, "sine", null, dl + 0.03);
+      }
+    }
+    if (NOISE) {                                                   /* しぶき・しゅわっ */
+      var n = AC.currentTime + d0, s = AC.createBufferSource(); s.buffer = NOISE;
+      var fl = AC.createBiquadFilter(); fl.type = "bandpass"; fl.Q.value = 0.8;
+      fl.frequency.setValueAtTime(lv >= 3 ? 6000 : 2500, n); fl.frequency.exponentialRampToValueAtTime(lv >= 3 ? 9000 : 700, n + 0.35);
+      var g = AC.createGain(); g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.22, n + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.4);
+      s.connect(fl); fl.connect(g); g.connect(AC.destination); s.start(n, Math.random()); s.stop(n + 0.45);
+      for (var k = 0; k < 6; k++) {                                /* ぷちぷち */
+        var ff = 900 + Math.random() * 1800;
+        tone(ff * up, 0.04, 0.05, "sine", ff * 1.8 * up, d0 + 0.08 + Math.random() * 0.35);
+      }
+    }
+    if (combo >= 2 && window.zCelebrate) window.zCelebrate.play(AC, "chime", { delay: d0 + 0.1, volume: 0.6 });
+  }
 
   /* ============ 入力 ============ */
-  function choose(k) {
-    if (state !== S.PLAY || wordDone > 0) return;
-    var want = words[wi][ci];
-    if (k === want) {
-      flash = { k: k, ok: true, t: 0 };
-      flex = 1;
-      tone(520 + ci * 70, 0.1, 0.12, "triangle"); tone(780 + ci * 70, 0.12, 0.08, "sine", null, 0.05);
-      applause(ci + 1 >= words[wi].length ? 1 : 0.3, ci + 1 >= words[wi].length ? 3.2 : 1.3);
-      pop = { i: ci, t: 0 };
-      ci++;
-      /* 次の文字へカーソル、マッチョはその文字のポーズを決める */
-      if (ci < words[wi].length) play(ci);
-      if (ci >= words[wi].length) {
-        /* そろったら改めて一連のポーズ */
-        step = FAST; doneT = -1;
-        wordDone = words[wi].length * FAST + 1.6; pt = 0; pEnd = 1e9; hitIdx = -1; hold = -1;
-        if (AC && window.zCelebrate) window.zCelebrate.play(AC, "chime");
-      }
-    } else {
-      flash = { k: k, ok: false, t: 0 };
-      penalty += PEN; misses++;
-      tone(150, 0.22, 0.16, "square", 90);
-    }
+  function worldX(x) {
+    var s3 = scene3d();
+    if (s3 && s3.worldX) return s3.worldX(x, W, H, DROP_Y);
+    return x / W * BW;
   }
   function down(x, y) {
     if (state === S.INTRO) return;
@@ -426,69 +512,79 @@
       if (hit === "retry") newRound();
       return;
     }
-    if (x == null) { play(ci); return; }
-    var lb = layBtn();
-    if (x >= lb.x - 6 && x <= lb.x + lb.w + 6 && y >= lb.y - 6 && y <= lb.y + lb.h + 6) {
-      lay = lay === "key" ? "abc" : "key"; place();
-      try { localStorage.setItem("nikutai-layout", lay); } catch (e) {}
-      tone(700, 0.05, 0.08, "triangle");
-      return;
-    }
-    if (y < TY) {
-      var sr = slotRects();
-      for (var si = 0; si < sr.length; si++) if (x >= sr[si].x - 3 && x <= sr[si].x + sr[si].s + 3) { play(si); return; }
-      return;
-    }
-    var k = cellAt(x, y);
-    if (k) choose(k);
+    if (state !== S.PLAY) return;
+    if (x == null) { drop(); return; }
+    held = true;
+    aimX = worldX(x);
+  }
+  function move(x, y) {
+    if (state !== S.PLAY || !held) return;
+    aimX = worldX(x);
+  }
+  function up() {
+    if (!held) return;
+    held = false;
+    drop();
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
   wrap.addEventListener("pointerdown", function (e) {
-    e.preventDefault();
+    e.preventDefault(); keyMode = false;
     var p = atCanvas(e); down(p.x, p.y);
   });
+  wrap.addEventListener("pointermove", function (e) {
+    var p = atCanvas(e); move(p.x, p.y);
+  });
+  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
+  wrap.addEventListener("pointercancel", function () { held = false; });
+  window.addEventListener("blur", function () { held = false; });
 
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
+  /* 1=最初から  2=次に落とすと4つそろう  3=あふれる直前  4〜8=次のブロックを硬さ1〜5に */
   function debugKey(n) {
-    /* 1: 1語目の始め  2: 最後の言葉の最後の1文字（正しくタップでクリア）  3: 全ポーズを順に見る  4: 3をやめる  5: 1文字目のポーズ  6: 今の単語を全部入力（そろった後の一連）  7: 正解表示 */
-    if (n === 1) newRound();
-    if (n === 2) { if (state !== S.PLAY) newRound(); wi = NW - 1; ci = words[wi].length - 1; wordDone = 0; pt = -1; }
-    if (n === 3) { if (state !== S.PLAY) newRound(); gallery = 0; }
-    if (n === 4) { gallery = -1; }
-    if (n === 6) { if (state !== S.PLAY) newRound(); while (state === S.PLAY && !wordDone) choose(words[wi][ci]); }
-    if (n === 5) { if (state !== S.PLAY) newRound(); play(0); }
-    if (n === 7) ansOn = !ansOn;   /* 7: 正解表示のオンオフ（canvas の外の文字なので録画には映らない） */
-  }
-  var ansOn = false, ansEl = document.createElement("div");
-  ansEl.style.cssText = "position:fixed;left:8px;top:40px;z-index:50;pointer-events:none;font:800 18px sans-serif;letter-spacing:4px;color:#7cff6b;background:rgba(0,0,0,.55);padding:2px 10px;border-radius:6px;display:none";
-  document.body.appendChild(ansEl);
-  function ansTick() {
-    var w = state === S.PLAY && words && words[wi];
-    ansEl.style.display = ansOn && w ? "block" : "none";
-    if (ansOn && w) { var h = w.slice(0, ci) + "[" + (w[ci] || "") + "]" + w.slice(ci + 1); if (ansEl.textContent !== h) ansEl.textContent = h; }
+    if (n === 1 || state !== S.PLAY) newRound();
+    if (n === 2) {
+      bodies = [makeBody(0, 0.8, 0.7), makeBody(0, 2.05, 0.7), makeBody(0, 3.3, 0.7)];
+      bodies.forEach(function (b) { b.age = 1; });
+      cur = 0; aimX = 1.8;
+    }
+    if (n === 3) {
+      bodies = [];
+      for (var k = 0; k < 8; k++) { var b = makeBody(k % 5, 0.7 + (k % 3) * 1.35, 0.7 + k * 0.75); b.age = 1; bodies.push(b); }
+      cur = 4; aimX = 0.8;
+    }
+    if (n >= 4 && n <= 8) cur = n - 4;
   }
 
   window.addEventListener("keydown", function (e) {
     if (DEBUG && /^Digit[0-9]$/.test(e.code)) { e.preventDefault(); debugKey(Number(e.code.slice(5))); return; }
     var esc = e.key === "Escape";
     var go = e.code === "Space" || e.key === " " || e.key === "Enter";
-    if (!esc && !go) return;
+    var left = e.key === "ArrowLeft" || e.key === "a" || e.key === "A";
+    var right = e.key === "ArrowRight" || e.key === "d" || e.key === "D";
+    if (!esc && !go && !left && !right) return;
     e.preventDefault();
+    if (!esc) keyMode = true;
     if (esc) { if (!e.repeat) newRound(); return; }
+    if (left || right) {
+      if (state !== S.PLAY) return;
+      aimX = Math.max(SIZE / 2, Math.min(BW - SIZE / 2, aimX + (left ? -0.35 : 0.35)));
+      return;
+    }
     if (e.repeat) return;
-    if (state === S.INTRO) startButton.click(); else down();
+    down();
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " " || e.key === "Enter") { if (state === S.INTRO) startButton.click(); }
   });
 
   function doShare() {
-    var t = score().toFixed(1);
-    var q = words.join(" ");
     window.zResultActions.x({ text: zT(
-      "マッチョのポーズで「" + q + "」を" + t + "秒で打ちこんだ #肉体ピング",
-      "Typed \"" + q + "\" from a macho's poses in " + t + "s #BodyTyping",
-      "마초의 포즈로 \"" + q + "\"를 " + t + "초 만에 입력했다 #육체타이핑",
-      "用" + t + "秒从肌肉男的姿势打出了“" + q + "” #肉体打字",
-      "用" + t + "秒從肌肉男的姿勢打出了「" + q + "」 #肉體打字") });
+      score + "点 #ヤワラカタ",
+      score + " points #YAWARAKATA",
+      score + "점 #말랑딱딱",
+      score + "分 #软硬方块",
+      score + "分 #軟硬方塊") });
   }
 
   /* ============ 描画 ============ */
@@ -502,261 +598,149 @@
     ctx.closePath();
   }
 
-  /* 翻訳表の小さな絵（正面の棒人間） */
-  function drawPict(pose, cx, by, s, col) {
-    var j = joints(pose, 0);
-    function P(p) { return [cx + p[0] * s, by - p[1] * s]; }
-    var cyw = Math.cos(j.yaw), syw = Math.sin(j.yaw);
-    ctx.save();
-    ctx.lineCap = "round"; ctx.lineJoin = "round";
-    var limbs = [];
-    j.side.forEach(function (q) {
-      limbs.push({ p: [q.shoulder, q.elbow, q.hand], w: 12, z: (q.elbow[2] + q.hand[2]) / 2 });
-      limbs.push({ p: [q.hip, q.knee, q.ankle], w: 15, z: (q.knee[2] + q.ankle[2]) / 2 });
-    });
-    function limb(l, c) {
-      ctx.strokeStyle = c; ctx.lineWidth = l.w * s;
-      var a = P(l.p[0]), b = P(l.p[1]), d = P(l.p[2]);
-      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(d[0], d[1]); ctx.stroke();
-    }
-    /* 体の奥にある手足は薄く先に描く */
-    limbs.forEach(function (l) { if (l.z < -4) limb(l, "#9c8a7c"); });
-    var pel = P(j.pelvis), neck = P([0, j.pelvis[1] + 60, 0]);
-    ctx.strokeStyle = col; ctx.fillStyle = col;
-    ctx.lineWidth = 34 * s * (0.55 + 0.45 * Math.abs(cyw));
-    ctx.beginPath(); ctx.moveTo(pel[0], pel[1] - 10 * s); ctx.lineTo(neck[0], neck[1] + 6 * s); ctx.stroke();
-    var hx = neck[0], hy = neck[1] - 16 * s;
-    ctx.beginPath(); ctx.arc(hx, hy, 11 * s, 0, 6.3); ctx.fill();
-    if (cyw > -0.3) {
-      /* 顔の向き（後ろ向きは顔なし） */
-      ctx.fillStyle = "#fffaf1";
-      ctx.beginPath(); ctx.arc(hx + syw * 6 * s, hy + 1 * s, 3.2 * s, 0, 6.3); ctx.fill();
-    }
-    limbs.forEach(function (l) { if (l.z >= -4) limb(l, col); });
-    ctx.restore();
-  }
-
-  function drawTable() {
-    ctx.fillStyle = "#efe6d6"; ctx.fillRect(0, TY - 4, W, H - TY + 4);
-    var s = Math.min((CW - 8) / 150, (CH - 12) / 200);
-    var LL = LY();
-    for (var r = 0; r < LL.rows.length; r++) for (var c = 0; c < LL.rows[r].length; c++) {
-      var k = LL.rows[r][c];
-      if (!k || k === " ") continue;
-      var x = (c + LL.off[r]) * CW, y = TY + r * CH;
-      var fl = (flash && flash.k === k) || (gallery >= 0 && galleryK === k);
-      ctx.fillStyle = fl ? (!flash || flash.ok ? "#bfe8b0" : "#f5b3a8") : "#fffaf1";
-      roundRect(x + 1.5, y + 1.5, CW - 3, CH - 3, 7); ctx.fill();
-      ctx.strokeStyle = "rgba(60,40,20,.25)"; ctx.lineWidth = 1; ctx.stroke();
-      drawPict(KANA[k].pose, x + CW / 2, y + CH / 2 + 95 * s, s, "#3a2a20");
-    }
-  }
-
-  function drawAnswer() {
-    ctx.fillStyle = "#1c1512"; ctx.fillRect(0, AY, W, TY - AY - 4);
-    if (!words || state === S.INTRO) return;
-    var w = words[wi < NW ? wi : NW - 1], n = w.length;
-    var bs = Math.min(52, (W - 170) / n - 6), x0 = W / 2 - 30 - (n * (bs + 6) - 6) / 2, y = AY + (TY - AY - 4 - bs) / 2;
-    for (var i = 0; i < n; i++) {
-      var open = state !== S.PLAY || i < ci || wordDone > 0;
-      ctx.fillStyle = open ? "#fff7e6" : (i === ci ? "#5a4636" : "#3a2c24");
-      var pk = pop && pop.i === i && wi < NW ? 1 - pop.t / 0.6 : 0, px0 = x0 + i * (bs + 6);
-      ctx.save();
-      if (pk > 0) {
-        /* 正解の文字：はねる・光る */
-        var sc = 1 + 0.35 * Math.sin(pk * Math.PI) * pk;
-        ctx.translate(px0 + bs / 2, y + bs / 2); ctx.scale(sc, sc); ctx.translate(-(px0 + bs / 2), -(y + bs / 2));
-        ctx.shadowColor = "rgba(255,214,90," + pk + ")"; ctx.shadowBlur = 24;
-      }
-      roundRect(px0, y, bs, bs, 8); ctx.fill();
-      ctx.restore();
-      if (pk > 0) {
-        ctx.save(); ctx.strokeStyle = "rgba(255,214,90," + pk + ")"; ctx.lineWidth = 3;
-        for (var sp = 0; sp < 8; sp++) {
-          var an = sp / 8 * Math.PI * 2, r0 = bs * 0.6 + (1 - pk) * 26, r1 = r0 + 10;
-          ctx.beginPath(); ctx.moveTo(px0 + bs / 2 + Math.cos(an) * r0, y + bs / 2 + Math.sin(an) * r0); ctx.lineTo(px0 + bs / 2 + Math.cos(an) * r1, y + bs / 2 + Math.sin(an) * r1); ctx.stroke();
-        }
-        ctx.restore();
-      }
-      roundRect(px0, y, bs, bs, 8);
-      if (i === playIdx() || (playIdx() < 0 && i === hold)) { ctx.strokeStyle = "#f3c34a"; ctx.lineWidth = 4; ctx.stroke(); }
-      else if (i === ci && state === S.PLAY && !wordDone) { ctx.strokeStyle = "#8a7a6a"; ctx.lineWidth = 2; ctx.stroke(); }
-      if (open) {
-        ctx.fillStyle = "#16202e"; ctx.font = "900 " + Math.round(bs * 0.72) + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(w[i], x0 + i * (bs + 6) + bs / 2, y + bs / 2 + 2);
-      }
-    }
-    var lb = layBtn();
-    ctx.fillStyle = "#3a2c24"; roundRect(lb.x, lb.y, lb.w, lb.h, 10); ctx.fill();
-    ctx.strokeStyle = "#b8a898"; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = "#fff7e6"; ctx.font = "900 15px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(lay === "key" ? "ABC" : "QWE", lb.x + lb.w / 2, lb.y + lb.h / 2 + 1);
-
-  }
-
-  function camFor() {
-    var k = 215 / SH, d = 620, vh = H * k;
-    var fov = 2 * Math.atan(vh / 2 / d) * 180 / Math.PI * (1 - impact * impact * 0.06);
-    var ty = 100 - (H / 2 - SH / 2) * k;
-    if (CAM === 0) return { fov: fov, x: 0, y: ty, z: d, tx: 0, ty: ty };
-    if (CAM === 2) return { fov: fov, x: d * Math.sin(0.25), y: ty - 70, z: d * Math.cos(0.25), tx: 0, ty: ty - 18 };
-    return { fov: fov, x: d * Math.sin(0.38), y: ty + 10, z: d * Math.cos(0.38), tx: 0, ty: ty };
-  }
-
   var scene3d = window.Z3 ? window.Z3.lazy(function () { return new window.GameScene(); }) : function () { return null; };
 
+  function holdX() { return Math.max(SIZE / 2, Math.min(BW - SIZE / 2, aimX)); }
   function draw() {
     window.zResultActions.place(shareButton, resultButtons()[1], W, H, state === S.RESULT);
     window.zResultActions.place(followLink, window.zResultActions.follow.box(ctx, resultButtons(), W), W, H, state === S.RESULT);
-    var t = performance.now() / 1000;
-    /* 舞台 */
-    var g = ctx.createRadialGradient(W / 2, SH * 0.45, 20, W / 2, SH * 0.5, SH * 0.8);
-    g.addColorStop(0, "#5a4a5e"); g.addColorStop(1, "#16121a");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, SH);
-    ctx.fillStyle = "#2a2026"; ctx.fillRect(0, SH * 0.82, W, SH * 0.18);
-    if (impact > 0) {
-      /* 決めポーズの集中線と後光 */
-      ctx.save();
-      ctx.beginPath(); ctx.rect(0, 0, W, SH); ctx.clip();
-      var cx = W / 2, cy = SH * 0.42, a = impact;
-      var hg = ctx.createRadialGradient(cx, cy, 10, cx, cy, SH * 0.6);
-      hg.addColorStop(0, "rgba(255,226,140," + (0.55 * a) + ")"); hg.addColorStop(1, "rgba(255,200,90,0)");
-      ctx.fillStyle = hg; ctx.fillRect(0, 0, W, SH);
-      ctx.fillStyle = "rgba(255,240,200," + (0.35 * a) + ")";
-      for (var ri = 0; ri < 28; ri++) {
-        var an = ri / 28 * Math.PI * 2 + (hitIdx || 0) * 0.37, w2 = 0.045;
-        ctx.beginPath(); ctx.moveTo(cx, cy);
-        ctx.lineTo(cx + Math.cos(an - w2) * W, cy + Math.sin(an - w2) * W);
-        ctx.lineTo(cx + Math.cos(an + w2) * W, cy + Math.sin(an + w2) * W);
-        ctx.closePath(); ctx.fill();
-      }
-      ctx.restore();
+    ctx.clearRect(0, 0, W, H);
+    var s3 = scene3d(), drew = false;
+    var view = { t: T || 0, noUI: noUI, bodies: bodies || [], hold: !noUI && state === S.PLAY && dropCool <= 0 && bodies ? { lv: cur, x: holdX(), y: DROP_Y } : null, next: next, LV: LV, BW: BW, LINE: LINE, RESTS: RESTS, danger: Math.min(1, (overT || 0) / 1.6), kick: kick || 0, over: state === S.OVER || state === S.RESULT };
+    if (s3) { try { s3.sync(view); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (!drew) draw2d(view);
+    if (!noUI && (state === S.PLAY || state === S.OVER)) {
+      ctx.fillStyle = "#fff"; ctx.font = "800 44px sans-serif"; ctx.textAlign = "left";
+      ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = 8;
+      ctx.fillText(String(score), 24, 58);
+      ctx.shadowBlur = 0;
+      drawPopups(s3, drew);
+      /* 次のブロック */
+      ctx.fillStyle = LV[next].color; ctx.globalAlpha = 0.95;
+      roundRect(W - 70, 22, 44, 44, Math.max(2, 44 * ROUND[next])); ctx.fill(); ctx.globalAlpha = 1;   /* 角の丸みで硬さがわかる */
     }
-    var s3 = scene3d();
-    if (s3 && cur) {
-      try {
-        var br = Math.sin(t * 2.4) * 0.8;
-        s3.sync({ j: joints(cur, br), cam: camFor(), flex: flex, tilt: 0 });
-        ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, SH); ctx.clip();
-        /* そろったあとの一連のポーズ：マッチョの後ろに大きく文字を並べていく */
-        if ((state === S.PLAY && wordDone > 0 && wi < NW) || thumbFx) {
-          var ww = thumbFx ? "FLEX" : words[wi], pi2 = thumbFx ? -1 : playIdx(), shown2 = pi2 < 0 ? ww.length : pi2 + 1;
-          var fs2 = Math.min(SH * 0.5, ((thumbFx ? W * 0.76 : W) - 16) / ww.length), x02 = W / 2 - fs2 * ww.length / 2;
-          ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
-          for (var li = 0; li < shown2; li++) {
-            var big = li === pi2 ? 1 + impact * 0.25 : 1;
-            ctx.font = "900 " + Math.round(fs2 * 1.05 * big) + "px sans-serif";
-            ctx.fillStyle = li === pi2 ? "#ffd84a" : "rgba(255,247,230,0.85)";
-            ctx.fillText(ww[li], x02 + fs2 * (li + 0.5), SH * 0.42);
-          }
-        }
-        s3.draw(ctx, W, H);
-        if (impact > 0.75) { ctx.fillStyle = "rgba(255,255,255," + ((impact - 0.75) * 1.6) + ")"; ctx.fillRect(0, 0, W, SH); }
-        ctx.restore();
-      } catch (e) { scene3d.drop(); }
-    }
-    if (state === S.PLAY) {
-      /* 進み具合：舞台の上に6区切りのバー。今何問目かまで点灯 */
-      ctx.save();
-      var bw = (W - 24 - (NW - 1) * 4) / NW, by = 10;
-      for (var qi = 0; qi < NW; qi++) {
-        var on = qi <= wi, now = qi === wi && !wordDone;
-        if (on) { ctx.shadowColor = "#ffd84a"; ctx.shadowBlur = 8; ctx.fillStyle = "#ffd84a"; }
-        else { ctx.shadowBlur = 0; ctx.fillStyle = "rgba(255,247,230,0.18)"; }
-        ctx.fillRect(12 + qi * (bw + 4), by, bw, 7);
-      }
-      ctx.restore();
-    }
-    if (mini) mini.draw(ctx);
-    if (!noUI) { drawAnswer(); drawTable(); }
-    else { ctx.fillStyle = "#2a2026"; ctx.fillRect(0, SH, W, H - SH); }
     if (state === S.RESULT) drawResult();
-    if (confetti && state === S.RESULT) confetti.draw(ctx);
+  }
+  /* はじけた所に浮かぶ点数 */
+  function drawPopups(s3, drew) {
+    popups.forEach(function (p) {
+      var at = drew && s3.project ? s3.project(p.x, p.y + p.t * 1.2) : { x: p.x / BW * W, y: H - 60 - (p.y + p.t * 1.2) * W / (BW + 1) };
+      var u = p.t / 1.1, sc = p.t < 0.15 ? 0.6 + p.t / 0.15 * 0.6 : 1.2 - Math.min(0.2, (p.t - 0.15));
+      ctx.save();
+      ctx.globalAlpha = u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3;
+      ctx.translate(at.x, at.y); ctx.scale(sc, sc);
+      ctx.font = "900 " + (60 + Math.min(p.combo, 5) * 8) + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.lineWidth = 8; ctx.strokeStyle = "rgba(30,20,40,.55)"; ctx.strokeText(p.txt, 0, 0);
+      ctx.fillStyle = "#fff"; ctx.fillText(p.txt, 0, 0);
+      ctx.restore();
+    });
+  }
+  function draw2d(v) {
+    ctx.fillStyle = "#2a2f3a"; ctx.fillRect(0, 0, W, H);
+    var sc = W / (BW + 1), ox = sc * 0.5, oy = H - 60;
+    function P(x, y) { return [ox + x * sc, oy - y * sc]; }
+    ctx.strokeStyle = "rgba(255,255,255,.3)"; ctx.beginPath(); var a = P(0, LINE), b = P(BW, LINE); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    v.bodies.forEach(function (bd) {
+      ctx.fillStyle = LV[bd.lv].color; ctx.beginPath();
+      bd.pts.forEach(function (p, i) { var q = P(p.x, p.y); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+      ctx.fill();
+    });
   }
 
-  function resultButtons() { return window.zResultActions.row(W, H * 0.62); }
-  function hitButton(x, y) { return window.zResultActions.hit(resultButtons(), x, y); }
+  /* 結果画面。数字と「もう一度」「Xでシェア」だけ（説明や煽りは足さない）。
+     基本は doji5 の形（暗くして中央に白い大きなスコア）。
+     盆栽・炒飯のように作ったものを見せるゲームは、暗くせず「作品を見せる形」にする：
+       var L = window.zResultActions.showcase(W, H, { sizes: [104, 76, 30] });
+       L.lines[i].y（textBaseline "top"）に上から文字、L.subject の枠の中央に作品を大きく、
+       resultButtons() は L.buttons を返す。文字は上端から積むので画面からはみ出さない。 */
+  function resultButtons() {
+    return window.zResultActions.row(W, H * 0.62);
+  }
+  function hitButton(x, y) {
+    return window.zResultActions.hit(resultButtons(), x, y);
+  }
   function drawResult() {
     ctx.fillStyle = "rgba(10,8,6,.66)";
     ctx.fillRect(0, 0, W, H);
     ctx.save();
-    ctx.fillStyle = "#fff"; ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 10;
-    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowBlur = 10;
     ctx.font = "800 108px sans-serif";
-    var num = score().toFixed(1), nw = ctx.measureText(num).width;
-    ctx.font = "800 44px sans-serif";
-    var unit = zT("秒", "s", "초", "秒", "秒"), uw = ctx.measureText(unit).width, x0 = W / 2 - (nw + uw + 6) / 2;
-    ctx.textAlign = "left"; ctx.font = "800 108px sans-serif";
-    ctx.fillText(num, x0, H * 0.45);
-    ctx.font = "800 44px sans-serif";
-    ctx.fillText(unit, x0 + nw + 6, H * 0.45);
+    ctx.textAlign = "center";
+    ctx.fillText(String(score), W / 2, H * 0.45);
     ctx.restore();
     window.zResultActions.drawButtons(ctx, resultButtons());
     window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
   }
 
+  /* ============ 覗き穴 ============
+     テスト（games/_tools/ の道具）から中を見るためのもの。読むのと進めるだけ。
+     消さなくてよい。遊びを飛ばせるものは足さないこと。 */
+  /* サムネ撮影用：文字や持っているブロックを消し、見栄えのする積み方を置く */
+  var noUI = false;
+  window.__thumbnail = async function () {
+    noUI = true; document.getElementById("start").hidden = true;
+    newRound();
+    var set = [[0, 0.75, 0.7], [0, 2.0, 0.7], [4, 3.25, 0.7], [1, 4.35, 0.7], [3, 1.2, 1.95], [2, 2.6, 1.95], [4, 3.9, 1.95], [1, 1.9, 3.2], [3, 3.2, 3.2]];
+    bodies = set.map(function (a) { var b = makeBody(a[0], a[1], a[2]); b.age = 1; return b; });
+    dropCool = 99;
+  };
   window.__probe = {
-    now: function () { return { state: state, score: score(), W: W, H: H, word: words && words[wi], ci: ci, buttons: state === S.RESULT ? resultButtons() : null }; },
-    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); if (confetti && state === S.RESULT) confetti.step(1 / 60, W, H); draw(); } },
-    reset: function () { newRound(); },
-    show: function (k) { showK = k || null; },
-    hideUI: function () { noUI = true; document.getElementById("start").hidden = true; }
+    now: function () { return { state: state, score: score, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
+    reset: function () { newRound(); }
   };
 
-  /* サムネ撮影用：UIを消してポーズを1つ見せる */
-  window.__thumbnail = async function (o) { window.__probe.hideUI(); showK = o && o.pose || "U"; thumbFx = true; };
-  var noUI = false, thumbFx = false;
-
+  /* ============ 手元用の動画撮影 ============
+     record.js が呼ぶ自動操作。ゲームに合わせて run の中だけ書き換える。 */
   window.__recording = {
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
-      await r.wait(800);
-      startButton.click();
-      while (state === S.PLAY) {
-        await r.wait(300);
-        if (state !== S.PLAY || wordDone) continue;
-        if (pt >= 0) continue;
-        for (var q = ci; q < words[wi].length && state === S.PLAY; q++) { choose(words[wi][q]); await r.wait(450); }
-      }
-      await r.wait(1800);
+      await r.wait(1000);
+      debugKey(3);
+      r.key();
+      if (!await r.until(function () { return state === S.RESULT; }, 20)) throw Error("勝敗が出ない");
+      await r.wait(1500);
     }
   };
 
-  var confetti = window.zCelebrate ? window.zCelebrate.confetti() : null;
-  var mini = window.zCelebrate ? window.zCelebrate.confetti() : null;
-  if (mini) mini.rain = false;
-  var startButton = document.getElementById('start');
+  /* ============ ループ ============ */
+  var startButton=document.getElementById('start');
+  // 開始画面は絵の外の余白も含め、指を離した時点で開始する。
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
-  ['pointerdown', 'pointerup'].forEach(function (name) { startButton.addEventListener(name, function (e) { e.stopPropagation(); }); });
-  startButton.addEventListener('click', function (e) { if (e) e.stopPropagation(); audioOn(); resumeAudio(); newRound(); });
+
+  ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  newRound();state=S.INTRO;startButton.hidden=false;
   layout();
-  newRound(); state = S.INTRO; startButton.hidden = false;
   var last = performance.now();
   var stepAcc = 0;
   function loop(now) {
+    /* 端末の速さや画面のコマ数（60Hz/120Hz）で挙動が変わらないように、描画が遅れても
+       ゲームの時間は実際の時間どおり進め、update はいつもちょうど 1/60 秒ずつ呼ぶ（余りは次へ持ち越す）。
+       タブから戻ってきたときの大きな空白だけは切り捨てる */
     var dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
     last = now;
     if (!window.__recordManual) {
       stepAcc += dt;
-      while (stepAcc >= 1 / 60) { update(1 / 60); if (confetti && state === S.RESULT) confetti.step(1 / 60, W, H); stepAcc -= 1 / 60; }
+      while (stepAcc >= 1 / 60) { update(1 / 60); stepAcc -= 1 / 60; }
       draw();
     }
-    ansTick();
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
 })();
 </script>
-
 <script>
 /* 制作中の固定リンクでは、F9の録画パネルを使えるようにする */
 if (document.head && !/[?&]recorder-cli=1(?:&|$)/.test(location.search)) {
   var recorderScript = document.createElement("script");
-  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=nikutai-1793749585680" : "./recorder-ui.js?v=nikutai-1793749585680";
+  recorderScript.src = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "../games/_tools/recorder-ui.js?v=jelly-1793877920012" : "./recorder-ui.js?v=jelly-1793877920012";
   document.head.appendChild(recorderScript);
 }
 </script>
-<script src="./auto-reload.js?v=nikutai-1793749585680"></script>
-<script src="./preview-header.js?v=nikutai-1793749585680"></script>
+<script src="./auto-reload.js?v=jelly-1793877920012"></script>
+<script src="./preview-header.js?v=jelly-1793877920012"></script>
 </body>
 </html>

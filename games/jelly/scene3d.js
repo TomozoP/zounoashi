@@ -1,4 +1,4 @@
-/* ぷるぷる落ち物の立体（three.js）。土台は games/three-base.js の Z3。
+/* ヤワラカタの立体（three.js）。土台は games/three-base.js の Z3。
    物理は index.html の2D断面。ここは各ブロックの外周の点の輪に厚みと丸い縁を付けて、ゼリーの塊として描く。
    座標は物理と同じ（x 0〜BW、y が上、床 y=0）。手前が +z。 */
 (function (global) {
@@ -353,6 +353,7 @@
       this.guide.visible = false;
     }
     this.line.material.opacity = 0.35 + s.danger * 0.5;
+    this.line.visible = !s.noUI;
 
     /* カメラ：正面やや上から箱全体 */
     var kk = s.kick || 0, sh = Math.sin(s.t * 60) * kk * 0.12;

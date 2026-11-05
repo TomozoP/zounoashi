@@ -384,6 +384,18 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "が、100人いた場合"
   },
-  {"type":"lab","tags":[],"id":"irekae","title":"入れ替え行列","year":2026,"date":"2026-11-04","plays":null,"url":"","img":"games/_irekae/img/thumb.webp","play":"games/_irekae/index.html","full":true,"catch":"位置入れ替え能力で行列を前へ"},
-  {"type":"lab","tags":[],"id":"jelly","title":"ぷるぷる落ち物","year":2026,"date":"2026-11-04","plays":null,"url":"","img":"games/_jelly/img/thumb.webp","play":"games/_jelly/index.html","full":true,"catch":"硬さのちがうブロックの落ち物パズル"},
+  {
+    "type": "lab",
+    "tags": [],
+    "id": "irekae",
+    "title": "入れ替え行列",
+    "year": 2026,
+    "date": "2026-11-04",
+    "plays": null,
+    "url": "",
+    "img": "games/_irekae/img/thumb.webp",
+    "play": "games/_irekae/index.html",
+    "full": true,
+    "catch": "位置入れ替え能力で行列を前へ"
+  }
 ];
