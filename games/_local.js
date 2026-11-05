@@ -397,5 +397,6 @@ window.DRAFT_GAMES = [
     "play": "games/_irekae/index.html",
     "full": true,
     "catch": "位置入れ替え能力で行列を前へ"
-  }
+  },
+  {"type":"lab","tags":[],"id":"adaname","title":"あだ名ルーレット","year":2026,"date":"2026-11-05","plays":null,"url":"","img":"games/_adaname/img/thumb.webp","play":"games/_adaname/index.html","full":true,"catch":"あだ名によく出る文字でルーレット"},
 ];
