@@ -309,7 +309,7 @@
       var cx = 0, cy = 0;
       b.pts.forEach(function (p) { cx += p.x; cy += p.y; });
       cx /= b.pts.length; cy /= b.pts.length;
-      m.userData.c = { x: cx, y: cy, lv: b.lv };
+      m.userData.c = { x: cx, y: cy, lv: b.lv, count: b.count || 1 };
       /* はじける前：ぶるぶる震えながらふくらむ */
       var k = 1, kx = 1, ky = 1;
       if (b.pop) {
@@ -320,7 +320,7 @@
       }
       var pts = k === 1 ? b.pts : b.pts.map(function (p) { return { x: cx + (p.x - cx) * kx, y: cy + (p.y - cy) * ky }; });
       m.visible = !merged.has(b);                   /* くっついている間は、まとまりの塊のほうを見せる */
-      if (m.visible) self.shape(m.geometry, pts, cx, cy, k);
+      if (m.visible) self.shape(m.geometry, pts, cx, cy, k, (b.count || 1) > 1);
     });
     this.meshes.forEach(function (m, b) {
       if (used.has(b)) return;
@@ -355,12 +355,12 @@
   /* はじけ：しずく（スライム）かかけら（宝石）が飛び散り、波紋が広がって、キラキラが残る */
   GameScene.prototype.burst = function (c, LV) {
     var lv = c.lv, gem = lv >= 3, mat = this.mat(lv, LV), col = new T.Color(LV[lv].color);
-    var n = Z3.mobile ? 10 : 16;
+    var big = Math.min(3, Math.sqrt(c.count || 1)), n = Math.round((Z3.mobile ? 10 : 16) * big);
     for (var i = 0; i < n; i++) {
       var m = new T.Mesh(gem ? this.shard : this.drop, mat);
-      var a = Math.random() * Math.PI * 2, sp = 3 + Math.random() * 5;
+      var a = Math.random() * Math.PI * 2, sp = (3 + Math.random() * 5) * Math.sqrt(big);
       var r = gem ? 0.08 + Math.random() * 0.12 : 0.06 + Math.random() * 0.16;
-      m.position.set(c.x, c.y, (Math.random() - 0.5) * 0.4);
+      m.position.set(c.x + (Math.random() - 0.5) * big, c.y + (Math.random() - 0.5) * big * 0.6, (Math.random() - 0.5) * 0.4);
       m.scale.setScalar(r);
       this.scene.add(m);
       this.parts.push({ m: m, r: r, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 3, vz: (Math.random() - 0.2) * 4, life: 0.9 + Math.random() * 0.5, t: 0, gem: gem,
@@ -369,11 +369,11 @@
     /* 波紋 */
     var ring = new T.Mesh(new T.RingGeometry(0.85, 1, 48), new T.MeshBasicMaterial({ color: col.clone().lerp(new T.Color("#ffffff"), 0.4), transparent: true, opacity: 0.9, depthWrite: false, blending: T.AdditiveBlending, side: T.DoubleSide }));
     ring.position.set(c.x, c.y, 0.6); this.scene.add(ring);
-    this.rings.push({ m: ring, t: 0 });
+    ring.scale.setScalar(big); this.rings.push({ m: ring, t: 0, big: big });
     /* やわらかい光の玉（その場で一度ふくらんで消える） */
     var bloom = new T.Mesh(new T.PlaneGeometry(1, 1), new T.MeshBasicMaterial({ map: this.glowTex, color: col, transparent: true, depthWrite: false, blending: T.AdditiveBlending }));
     bloom.position.set(c.x, c.y, 0.7); this.scene.add(bloom);
-    this.rings.push({ m: bloom, t: 0, bloom: true });
+    this.rings.push({ m: bloom, t: 0, bloom: true, big: big });
     /* キラキラ */
     for (i = 0; i < (gem ? 8 : 4); i++) {
       var sp2 = new T.Mesh(new T.PlaneGeometry(1, 1), this.spark.clone());
@@ -415,12 +415,12 @@
       }
       if (r.bloom) {
         var ub = r.t / 0.35;
-        m.scale.setScalar(1.5 + ub * 2.5); m.material.opacity = Math.max(0, 0.9 * (1 - ub));
+        m.scale.setScalar((1.5 + ub * 2.5) * (r.big || 1)); m.material.opacity = Math.max(0, 0.9 * (1 - ub));
         if (ub >= 1) { self.scene.remove(m); m.material.dispose(); return false; }
         return true;
       }
       var uu = r.t / 0.45;
-      m.scale.setScalar(0.4 + uu * 1.8); m.material.opacity = Math.max(0, 0.9 * (1 - uu));
+      m.scale.setScalar((0.4 + uu * 1.8) * (r.big || 1)); m.material.opacity = Math.max(0, 0.9 * (1 - uu));
       if (uu >= 1) { self.scene.remove(m); m.geometry.dispose(); m.material.dispose(); return false; }
       return true;
     });

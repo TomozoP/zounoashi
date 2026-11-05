@@ -165,7 +165,7 @@
   var bid = 0;
   function makeBody(lv, x, y) {
     var REST = RESTS[lv];
-    var b = { id: ++bid, lv: lv, rest: REST, pts: [], age: 0, pop: 0, touch: {}, glue: {}, hit: 0, area0: 0 };
+    var b = { id: ++bid, lv: lv, count: 1, rest: REST, pts: [], age: 0, pop: 0, touch: {}, glue: {}, hit: 0, area0: 0 };
     for (var i = 0; i < NP; i++) {
       var r = REST[i];
       b.pts.push({ x: x + r.x, y: y + r.y, px: x + r.x, py: y + r.y });
@@ -175,17 +175,19 @@
   }
   function area(b) {
     var a = 0, p = b.pts;
-    for (var i = 0; i < NP; i++) { var q = p[i], n = p[(i + 1) % NP]; a += q.x * n.y - n.x * q.y; }
+    var N = p.length;
+    for (var i = 0; i < N; i++) { var q = p[i], n = p[(i + 1) % N]; a += q.x * n.y - n.x * q.y; }
     return a / 2;
   }
   function center(b) {
     var cx = 0, cy = 0;
-    for (var i = 0; i < NP; i++) { cx += b.pts[i].x; cy += b.pts[i].y; }
-    return { x: cx / NP, y: cy / NP };
+    var N = b.pts.length;
+    for (var i = 0; i < N; i++) { cx += b.pts[i].x; cy += b.pts[i].y; }
+    return { x: cx / N, y: cy / N };
   }
   function bbox(b) {
     var x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
-    for (var i = 0; i < NP; i++) { var p = b.pts[i]; if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
+    for (var i = 0; i < b.pts.length; i++) { var p = b.pts[i]; if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
     b.x0 = x0; b.x1 = x1; b.y0 = y0; b.y1 = y1;
   }
 
@@ -195,39 +197,39 @@
       var i, j, b;
       for (i = 0; i < bodies.length; i++) {
         b = bodies[i];
-        var lv = LV[b.lv], damp = 0.996;
-        for (j = 0; j < NP; j++) {
+        var lv = LV[b.lv], damp = 0.996, NB = b.pts.length;
+        for (j = 0; j < NB; j++) {
           var p = b.pts[j], vx = (p.x - p.px) * damp, vy = (p.y - p.py) * damp;
           p.px = p.x; p.py = p.y;
           p.x += vx; p.y += vy - G * h * h;
         }
         /* 元の形へ戻る（いちばん合う回し方を求めて、その形へ寄せる） */
         var c = center(b), sa = 0, sb = 0, REST = b.rest;
-        for (j = 0; j < NP; j++) {
+        for (j = 0; j < NB; j++) {
           var dx = b.pts[j].x - c.x, dy = b.pts[j].y - c.y, r = REST[j];
           sa += r.x * dy - r.y * dx; sb += r.x * dx + r.y * dy;
         }
         var th = Math.atan2(sa, sb), co = Math.cos(th), si = Math.sin(th), k = lv.stiff;
-        for (j = 0; j < NP; j++) {
+        for (j = 0; j < NB; j++) {
           var rr = REST[j], gx = c.x + rr.x * co - rr.y * si, gy = c.y + rr.x * si + rr.y * co;
           b.pts[j].x += (gx - b.pts[j].x) * k; b.pts[j].y += (gy - b.pts[j].y) * k;
         }
         /* 中の体積を保つ（やわらかいものが潰れきらないように） */
         var A = area(b), per = 0;
-        for (j = 0; j < NP; j++) { var q0 = b.pts[j], q1 = b.pts[(j + 1) % NP]; per += Math.hypot(q1.x - q0.x, q1.y - q0.y); }
+        for (j = 0; j < NB; j++) { var q0 = b.pts[j], q1 = b.pts[(j + 1) % NB]; per += Math.hypot(q1.x - q0.x, q1.y - q0.y); }
         var push = (b.area0 - A) / per * 0.5;
-        for (j = 0; j < NP; j++) {
-          var a0 = b.pts[(j + NP - 1) % NP], a1 = b.pts[(j + 1) % NP], nx = a1.y - a0.y, ny = -(a1.x - a0.x), nl = Math.hypot(nx, ny) || 1;
+        for (j = 0; j < NB; j++) {
+          var a0 = b.pts[(j + NB - 1) % NB], a1 = b.pts[(j + 1) % NB], nx = a1.y - a0.y, ny = -(a1.x - a0.x), nl = Math.hypot(nx, ny) || 1;
           b.pts[j].x += nx / nl * push; b.pts[j].y += ny / nl * push;
         }
         /* 隣どうしをならす（輪がガタガタにならないように） */
-        for (j = 0; j < NP; j++) {
-          var m0 = b.pts[(j + NP - 1) % NP], m1 = b.pts[(j + 1) % NP], pj = b.pts[j];
+        for (j = 0; j < NB; j++) {
+          var m0 = b.pts[(j + NB - 1) % NB], m1 = b.pts[(j + 1) % NB], pj = b.pts[j];
           var sm = b.lv < 3 ? 0.12 : 0.04;
           pj.x += ((m0.x + m1.x) / 2 - pj.x) * sm; pj.y += ((m0.y + m1.y) / 2 - pj.y) * sm;
         }
         /* 壁と床 */
-        for (j = 0; j < NP; j++) {
+        for (j = 0; j < NB; j++) {
           p = b.pts[j];
           if (p.y < 0) { var vy0 = p.y - p.py; if (vy0 < -0.02) b.hit = Math.max(b.hit, -vy0); p.y = 0; p.px = p.x - (p.x - p.px) * 0.6; }
           if (p.x < 0) { p.x = 0; p.py = p.y - (p.y - p.py) * 0.8; }
@@ -242,38 +244,78 @@
         var t1 = collide(A1, B1), t2 = collide(B1, A1);
         if (t1 || t2) {
           A1.touch[B1.id] = T; B1.touch[A1.id] = T;
-          if (A1.lv === B1.lv && !A1.glue[B1.id] && !A1.pop && !B1.pop && A1.age > 0.1 && B1.age > 0.1) glue(A1, B1);
+          if (A1.lv === B1.lv && !A1.pop && !B1.pop && A1.age > 0.1 && B1.age > 0.1) toMerge.push([A1, B1]);
         }
       }
-      /* くっついた所：近い点どうしをゴムでつなぐ */
-      for (i = links.length - 1; i >= 0; i--) {
-        var L = links[i];
-        if (L.a.dead || L.b.dead) { links.splice(i, 1); continue; }
-        var pa = L.a.pts[L.i], pb = L.b.pts[L.j], lx = pb.x - pa.x, ly = pb.y - pa.y, ll = Math.hypot(lx, ly) || 1e-6;
-        var corr = (ll - 0.03) / ll * 0.25;
-        if (ll > 0.03) { pa.x += lx * corr; pa.y += ly * corr; pb.x -= lx * corr; pb.y -= ly * corr; }
-      }
     }
+    /* くっついたものを、1つの物体に作り直す */
+    var done = new Set();
+    toMerge.forEach(function (pr) {
+      if (done.has(pr[0]) || done.has(pr[1]) || bodies.indexOf(pr[0]) < 0 || bodies.indexOf(pr[1]) < 0) return;
+      done.add(pr[0]); done.add(pr[1]);
+      merge(pr[0], pr[1]);
+    });
+    toMerge = [];
   }
-  /* 同じ色が触れたら、近い点の組をいくつかつないでくっつける */
-  var links = [];
-  function glue(A, B) {
-    var pairs = [];
-    for (var i = 0; i < NP; i++) for (var j = 0; j < NP; j++) {
-      var d = Math.hypot(A.pts[i].x - B.pts[j].x, A.pts[i].y - B.pts[j].y);
-      if (d < 0.22) pairs.push({ i: i, j: j, d: d });
+  var toMerge = [];
+
+  /* ============ 合体：2つの輪を、1本の外周の大きな1つの物体にする ============
+     それぞれの「元の形を今の位置・向きに置いたもの」をなめらかに足し合わせ（くびれは少し埋まる）、
+     中心から放射状に境目を探して外周の点を作る。その形が新しい「元の形」になる */
+  function idealPts(b) {
+    var c = center(b), sa = 0, sb = 0, n = b.pts.length;
+    for (var j = 0; j < n; j++) {
+      var dx = b.pts[j].x - c.x, dy = b.pts[j].y - c.y, r = b.rest[j];
+      sa += r.x * dy - r.y * dx; sb += r.x * dx + r.y * dy;
     }
-    if (!pairs.length) return;
-    pairs.sort(function (a, b) { return a.d - b.d; });
-    var usedA = {}, usedB = {}, n = 0;
-    for (var k = 0; k < pairs.length && n < 5; k++) {
-      var q = pairs[k];
-      if (usedA[q.i] || usedB[q.j]) continue;
-      usedA[q.i] = usedB[q.j] = 1; n++;
-      links.push({ a: A, i: q.i, b: B, j: q.j });
+    var th = Math.atan2(sa, sb), co = Math.cos(th), si = Math.sin(th);
+    return b.rest.map(function (r) { return { x: c.x + r.x * co - r.y * si, y: c.y + r.x * si + r.y * co }; });
+  }
+  function sdPoly(pts, x, y) {
+    var n = pts.length, best = 1e9, c = false;
+    for (var i = 0, j = n - 1; i < n; j = i++) {
+      var a = pts[j], b = pts[i], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey || 1e-9;
+      var t = Math.max(0, Math.min(1, ((x - a.x) * ex + (y - a.y) * ey) / l2));
+      var dx = a.x + ex * t - x, dy = a.y + ey * t - y, d = dx * dx + dy * dy;
+      if (d < best) best = d;
+      if ((b.y > y) !== (a.y > y) && x < (a.x - b.x) * (y - b.y) / (a.y - b.y) + b.x) c = !c;
     }
-    A.glue[B.id] = B; B.glue[A.id] = A;
-    if (state === S.PLAY) gluSound(A.lv);
+    best = Math.sqrt(best);
+    return c ? -best : best;
+  }
+  function smin(a, b, k) { var h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; }
+  function merge(A, B) {
+    var PA = idealPts(A), PB = idealPts(B), ca = center(A), cb = center(B);
+    var na = A.count || 1, nb = B.count || 1, cnt = na + nb;
+    var cx = (ca.x * na + cb.x * nb) / cnt, cy = (ca.y * na + cb.y * nb) / cnt;
+    var rmax = 0;
+    PA.concat(PB).forEach(function (p) { rmax = Math.max(rmax, Math.hypot(p.x - cx, p.y - cy)); });
+    rmax += 0.2;
+    function f(x, y) { return smin(sdPoly(PA, x, y), sdPoly(PB, x, y), 0.35); }
+    var M = Math.min(96, NP * cnt), out = [];
+    for (var i = 0; i < M; i++) {
+      var a = i / M * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a), r = rmax, st = 0.05;
+      while (r > 0 && f(cx + dx * r, cy + dy * r) > 0) r -= st;
+      var lo = Math.max(0, r), hi = r + st;
+      for (var k = 0; k < 7; k++) { var mid = (lo + hi) / 2; if (f(cx + dx * mid, cy + dy * mid) > 0) hi = mid; else lo = mid; }
+      r = (lo + hi) / 2;
+      out.push({ x: cx + dx * r, y: cy + dy * r });
+    }
+    /* 速さは2つの平均を引き継ぐ */
+    var vx = 0, vy = 0;
+    A.pts.concat(B.pts).forEach(function (p) { vx += p.x - p.px; vy += p.y - p.py; });
+    vx /= A.pts.length + B.pts.length; vy /= A.pts.length + B.pts.length;
+    var oc = { x: 0, y: 0 };
+    out.forEach(function (p) { oc.x += p.x / M; oc.y += p.y / M; });
+    var C = { id: ++bid, lv: A.lv, count: cnt, rest: out.map(function (p) { return { x: p.x - oc.x, y: p.y - oc.y }; }),
+      pts: out.map(function (p) { return { x: p.x, y: p.y, px: p.x - vx, py: p.y - vy }; }),
+      age: Math.max(A.age, B.age), pop: 0, touch: {}, glue: {}, hit: 0, area0: 0, ripe: 0, wob: 0.5 };
+    C.area0 = area(C);
+    bbox(C);
+    bodies.splice(bodies.indexOf(A), 1); A.dead = true;
+    bodies.splice(bodies.indexOf(B), 1); B.dead = true;
+    bodies.push(C);
+    if (state === S.PLAY) gluSound(C.lv);
   }
   function gluSound(lv) {
     if (!AC) return;
@@ -283,20 +325,20 @@
   }
   function inside(b, x, y) {
     var c = false, p = b.pts;
-    for (var i = 0, j = NP - 1; i < NP; j = i++) {
+    for (var i = 0, n = p.length, j = n - 1; i < n; j = i++) {
       if ((p[i].y > y) !== (p[j].y > y) && x < (p[j].x - p[i].x) * (y - p[i].y) / (p[j].y - p[i].y) + p[i].x) c = !c;
     }
     return c;
   }
   function collide(A, B) {
-    var any = false;
-    for (var i = 0; i < NP; i++) {
+    var any = false, NA = A.pts.length, NB = B.pts.length;
+    for (var i = 0; i < NA; i++) {
       var p = A.pts[i];
       if (p.x < B.x0 || p.x > B.x1 || p.y < B.y0 || p.y > B.y1 || !inside(B, p.x, p.y)) continue;
       any = true;
       var best = 1e9, bj = 0, bt = 0, qx = 0, qy = 0;
-      for (var j = 0; j < NP; j++) {
-        var e0 = B.pts[j], e1 = B.pts[(j + 1) % NP], ex = e1.x - e0.x, ey = e1.y - e0.y, l2 = ex * ex + ey * ey || 1e-9;
+      for (var j = 0; j < NB; j++) {
+        var e0 = B.pts[j], e1 = B.pts[(j + 1) % NB], ex = e1.x - e0.x, ey = e1.y - e0.y, l2 = ex * ex + ey * ey || 1e-9;
         var t = Math.max(0, Math.min(1, ((p.x - e0.x) * ex + (p.y - e0.y) * ey) / l2));
         var cx = e0.x + ex * t, cy = e0.y + ey * t, d = (cx - p.x) * (cx - p.x) + (cy - p.y) * (cy - p.y);
         if (d < best) { best = d; bj = j; bt = t; qx = cx; qy = cy; }
@@ -306,7 +348,7 @@
       if (rel > 0.03) A.hit = Math.max(A.hit, rel);
       p.x += dx * 0.5; p.y += dy * 0.5;
       p.px += (p.x - p.px) * 0.15; p.py += (p.y - p.py) * 0.15;     /* こすれて少し止まる */
-      var a = B.pts[bj], b2 = B.pts[(bj + 1) % NP];
+      var a = B.pts[bj], b2 = B.pts[(bj + 1) % NB];
       a.x -= dx * 0.5 * (1 - bt); a.y -= dy * 0.5 * (1 - bt);
       b2.x -= dx * 0.5 * bt; b2.y -= dy * 0.5 * bt;
     }
@@ -317,35 +359,18 @@
   /* くっつき（glue）でつながった同じ色が POP_N 個以上になったら、1つの塊になったのを少し見せてから（RIPE 秒）はじける */
   var POP_N = 4, RIPE = 0.6;
   function findPops(dt) {
-    var seen = {}, byId = {};
-    bodies.forEach(function (b) { byId[b.id] = b; });
-    var got = 0;
     bodies.forEach(function (b) {
-      if (seen[b.id] || b.pop) return;
-      var group = [], stack = [b]; seen[b.id] = 1;
-      while (stack.length) {
-        var x = stack.pop(); group.push(x);
-        for (var id in x.glue) {
-          var o = byId[id];
-          if (!o || seen[o.id] || o.pop) continue;
-          seen[o.id] = 1; stack.push(o);
-        }
-      }
-      if (group.length < POP_N) { group.forEach(function (g) { g.ripe = 0; }); return; }
-      var r = 1e9;
-      group.forEach(function (g) { g.ripe = (g.ripe || 0) + dt; r = Math.min(r, g.ripe); });
-      if (r >= RIPE) {
-        got++;
-        group.forEach(function (g) { g.pop = 0.001; });
-        var add = group.length * 10 * (1 + combo), gc = { x: 0, y: 0 };
-        group.forEach(function (g) { var c = center(g); gc.x += c.x / group.length; gc.y += c.y / group.length; });
-        score += add;
-        popups.push({ x: gc.x, y: gc.y, txt: "+" + add, t: 0, lv: b.lv, combo: combo });
-        popSound(b.lv, group.length, combo);
-        combo++;
-      }
+      if (b.pop) return;
+      if ((b.count || 1) < POP_N) { b.ripe = 0; return; }
+      b.ripe = (b.ripe || 0) + dt;
+      if (b.ripe < RIPE) return;
+      b.pop = 0.001;
+      var n = b.count, add = n * 10 * (1 + combo), c = center(b);
+      score += add;
+      popups.push({ x: c.x, y: c.y, txt: "+" + add, t: 0, lv: b.lv, combo: combo });
+      popSound(b.lv, n, combo);
+      combo++;
     });
-    return got;
   }
 
   /* はじけた：まわりのブロックを外へぷるんと押し、画面を少し揺らす */
@@ -371,7 +396,7 @@
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     score = 0; T = 0; held = false;
-    bodies = []; links = []; popped = 0; combo = 0; overT = 0; popups = []; kick = 0;
+    bodies = []; popped = 0; combo = 0; overT = 0; popups = []; kick = 0;
     aimX = BW / 2; dropCool = 0;
     cur = randLv(); next = randLv();
     var s3 = scene3d(); if (s3) s3.reset();
@@ -512,12 +537,12 @@
   function debugKey(n) {
     if (n === 1 || state !== S.PLAY) newRound();
     if (n === 2) {
-      bodies = [makeBody(0, 0.8, 0.8), makeBody(0, 2.3, 0.8), makeBody(0, 3.8, 0.8)]; links = [];
+      bodies = [makeBody(0, 0.8, 0.8), makeBody(0, 2.3, 0.8), makeBody(0, 3.8, 0.8)];
       bodies.forEach(function (b) { b.age = 1; });
       cur = 0; aimX = 1.8;
     }
     if (n === 3) {
-      bodies = []; links = [];
+      bodies = [];
       for (var k = 0; k < 8; k++) { var b = makeBody(k % 5, 0.8 + (k % 3) * 1.6, 0.8 + k * 0.9); b.age = 1; bodies.push(b); }
       cur = 4; aimX = 0.8;
     }
