@@ -292,6 +292,9 @@
       this.texts.push(im);
     }
     this.dummy = new T.Object3D();
+    this.ring = new T.Mesh(new T.RingGeometry(0.32, 0.42, 40), new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, depthWrite: false }));
+    this.ring.rotation.x = -Math.PI / 2; this.ring.visible = false;
+    this.scene.add(this.ring);
   };
 
   GameScene.prototype.reset = function () {};
@@ -301,6 +304,9 @@
     var t = s.t, c = s.cam, cam = this.camera, d = this.dummy;
     cam.position.set(c.x, 1.55, c.z);
     cam.rotation.set(c.pitch || 0, c.yaw, 0);
+    var g = s.glide;
+    this.ring.visible = !!g;
+    if (g) { this.ring.position.set(g.x1, 0.02, g.z1); this.ring.material.opacity = 0.75 * (1 - Math.min(1, g.t / g.dur) * 0.6); }
     var all = this.fish;
     for (var i = 0; i < all.length; i++) {
       var o = all[i];
@@ -319,6 +325,14 @@
       im.setMatrixAt(i - im.base, d.matrix);
     }
     this.texts.forEach(function (im) { im.instanceMatrix.needsUpdate = true; });
+  };
+
+  /* 画面の (x, y) を通る向き（長さ1） */
+  GameScene.prototype.ray = function (x, y, W, H) {
+    var cam = this.camera;
+    cam.aspect = W / H; cam.updateProjectionMatrix(); cam.updateMatrixWorld();
+    var v = new T.Vector3(x / W * 2 - 1, -(y / H * 2 - 1), 0.5).unproject(cam).sub(cam.position).normalize();
+    return { x: v.x, y: v.y, z: v.z };
   };
 
   /* 画面の (x, y) にいちばん近い魚。いなければ null */

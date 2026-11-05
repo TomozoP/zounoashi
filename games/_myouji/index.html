@@ -128,7 +128,7 @@
   /* 並び（scene3d.js）。読めないときは空の通路 */
   var L = window.MYOUJI_LAYOUT ? window.MYOUJI_LAYOUT() : { list: [], tanks: [], hall: 2, room: 5.2, end: -10, exitZ: -13, giantZ: -17 };
   var TOTAL = L.list.length;
-  var cam, found, foundN, card, drag, keys = {}, hintT, resultT;
+  var cam, found, foundN, card, drag, glide, keys = {}, hintT, resultT;
 
   var CY;
   function place() {
@@ -144,7 +144,7 @@
     held = false;
     cam = { x: 0, z: 1.2, yaw: 0, pitch: 0.04 };
     found = {}; foundN = 0;
-    card = null; drag = null; hintT = 0; resultT = 0;
+    card = null; drag = null; glide = null; hintT = 0; resultT = 0;
   }
 
   /* ============ 進行 ============ */
@@ -160,18 +160,53 @@
     if (keys.down) fwd -= 1;
     if (keys.left) turn += 1;
     if (keys.right) turn -= 1;
-    if (drag && drag.moved) fwd += Math.max(-1, Math.min(1, -(drag.y - drag.y0) / 110));
-    fwd = Math.max(-1, Math.min(1, fwd));
     cam.yaw += turn * TURN * dt;
-    cam.x += -Math.sin(cam.yaw) * fwd * WALK * dt;
-    cam.z += -Math.cos(cam.yaw) * fwd * WALK * dt;
-    /* 通路は狭く、大水槽の部屋は広い */
-    var half = cam.z < L.end - 0.3 ? L.room : L.hall;
-    cam.x = Math.max(-half + 0.35, Math.min(half - 0.35, cam.x));
-    if (Math.abs(cam.x) > L.hall - 0.35 && cam.z > L.end - 0.35) cam.z = Math.max(cam.z, L.end + 0.35);
-    cam.z = Math.max(L.giantZ + 0.7, Math.min(1.6, cam.z));
+    if (fwd) {
+      glide = null;
+      cam.x += -Math.sin(cam.yaw) * fwd * WALK * dt;
+      cam.z += -Math.cos(cam.yaw) * fwd * WALK * dt;
+    }
+    /* タップした場所へ、すっと移動する（グーグルマップのストリートビューの形） */
+    if (glide) {
+      glide.t += dt;
+      var k = Math.min(1, glide.t / glide.dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      cam.x = glide.x0 + (glide.x1 - glide.x0) * e;
+      cam.z = glide.z0 + (glide.z1 - glide.z0) * e;
+      if (k >= 1) glide = null;
+    }
+    clampPos(cam);
     /* 出口に入ったら結果 */
-    if (cam.x > L.room - 0.5 && Math.abs(cam.z - L.exitZ) < 0.75) finish();
+    if (cam.x > L.room - 0.75 && Math.abs(cam.z - L.exitZ) < 0.75) finish();
+  }
+  /* 通路は狭く、大水槽の部屋は広い */
+  function clampPos(p) {
+    var half = p.z < L.end - 0.3 ? L.room : L.hall;
+    p.x = Math.max(-half + 0.6, Math.min(half - 0.6, p.x));
+    if (Math.abs(p.x) > L.hall - 0.6 && p.z > L.end - 0.6) p.z = Math.max(p.z, L.end + 0.6);
+    p.z = Math.max(L.giantZ + 0.7, Math.min(1.6, p.z));
+  }
+  /* 画面の (x, y) の方へ移動する。床を指したらその場所、壁や水槽を指したらその方向へ少し */
+  function goToward(x, y) {
+    var s3 = scene3d();
+    if (!s3) return false;
+    var r = s3.ray(x, y, W, H);
+    var hl = Math.hypot(r.x, r.z);
+    if (hl < 0.05) return false;
+    var dist = r.y < -0.02 ? Math.min(10, 1.55 / -r.y * hl) : 5;
+    var p = { x: cam.x + r.x / hl * dist, z: cam.z + r.z / hl * dist };
+    /* 間の壁を越えないよう、細かく区切って進めるところまで */
+    var q = { x: cam.x, z: cam.z }, n = Math.ceil(dist / 0.2);
+    for (var i = 1; i <= n; i++) {
+      var t = { x: cam.x + (p.x - cam.x) * i / n, z: cam.z + (p.z - cam.z) * i / n };
+      var c = { x: t.x, z: t.z }; clampPos(c);
+      if (Math.hypot(c.x - t.x, c.z - t.z) > 0.01) { q = c; break; }
+      q = t;
+    }
+    var d = Math.hypot(q.x - cam.x, q.z - cam.z);
+    if (d < 0.2) return false;
+    glide = { x0: cam.x, z0: cam.z, x1: q.x, z1: q.z, t: 0, dur: 0.45 + d * 0.09 };
+    noiseHit(0.25, 500, 0.05, 0.7);
+    return true;
   }
   function finish() {
     state = S.RESULT;
@@ -195,13 +230,15 @@
     }
     held = true;
     if (x == null) return;
-    drag = { x0: x, y0: y, x: x, y: y, px: x, t0: T, moved: false };
+    drag = { x0: x, y0: y, x: x, y: y, px: x, py: y, t0: T, moved: false };
   }
   function move(x, y) {
     if (state !== S.PLAY || !drag) return;
     if (Math.hypot(x - drag.x0, y - drag.y0) > 12) drag.moved = true;
+    /* 指につかんだ景色がついてくる向きに回す */
     cam.yaw += (x - drag.px) * 0.0055;
-    drag.px = x; drag.x = x; drag.y = y;
+    cam.pitch = Math.max(-0.55, Math.min(0.55, cam.pitch + (y - drag.py) * 0.0045));
+    drag.px = x; drag.py = y; drag.x = x; drag.y = y;
   }
   function up() {
     held = false;
@@ -211,8 +248,10 @@
   function tapAt(x, y) {
     var s3 = scene3d();
     if (!s3) return;
-    var o = s3.pick(x, y, W, H);
-    if (!o) return;
+    /* 床を指したら移動。上のほう（水槽）を指したら、名字があればよみ、なければその方へ移動 */
+    var r = s3.ray(x, y, W, H);
+    var o = r.y < -0.02 && 1.55 / -r.y < 12 ? null : s3.pick(x, y, W, H);
+    if (!o) { goToward(x, y); return; }
     card = { o: o, t: 0 };
     tone(660, 0.09, 0.12, "sine", 990);
     tone(1200, 0.06, 0.05, "sine", 1700, 0.06);
@@ -239,6 +278,7 @@
     if (n === 1) { cam.x = 0; cam.z = 1.2; cam.yaw = 0; }
     if (n === 2) { cam.x = 0; cam.z = L.end / 2; cam.yaw = 0; }
     if (n === 3) { cam.x = 0; cam.z = L.end - 0.5; cam.yaw = 0; }
+    if (n >= 1) glide = null;
     if (n === 4) { cam.x = L.room - 1.1; cam.z = L.exitZ; cam.yaw = -Math.PI / 2; }
   }
 
@@ -285,7 +325,7 @@
     ctx.clearRect(0, 0, W, H);
 
     var s3 = scene3d(), drew = false;
-    if (s3) { try { s3.sync({ t: T || 0, cam: cam }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (s3) { try { s3.sync({ t: T || 0, cam: cam, glide: glide }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
     if (!drew) { ctx.fillStyle = "#04101e"; ctx.fillRect(0, 0, W, H); }
 
     if (state === S.PLAY) {
@@ -296,7 +336,7 @@
         ctx.fillStyle = "rgba(4,16,30,.6)";
         roundRect(W / 2 - 220, H - 120, 440, 76, 18); ctx.fill();
         ctx.fillStyle = "#e8f6ff";
-        ctx.fillText("上下にドラッグで歩く・左右で向きを変える", W / 2, H - 96);
+        ctx.fillText("ドラッグで見回す・床をタップでそこへ進む", W / 2, H - 96);
         ctx.fillText("名字をタップすると、よみが出ます", W / 2, H - 66);
         ctx.restore();
       }
