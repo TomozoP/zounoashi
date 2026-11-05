@@ -7,11 +7,11 @@
 
   /* ============ 並び ============ */
   var THEMES = "田 藤 山 川 木 野 井 本 村 島 原 中 小 大 上 石 松 谷 岡 森 沢 宮 西 高 崎 部 口 下 内 江 浜 水 池 鳥".split(" ");
-  var HALL = 2.0;                               /* 通路の半分の幅 */
+  var HALL = 4.5;                               /* 通路の半分の幅 */
   var DEPTH = 4.2;                              /* 水槽の奥行き */
   var TOP = 3.9;                                /* 水槽の天井 */
   var GIANT = 10;
-  var ROOM = 5.2;                               /* 大水槽の部屋の半分の幅 */                               /* 大水槽に入る、人数の多い名字の数 */
+  var ROOM = 8.5;                               /* 大水槽の部屋の半分の幅 */                               /* 大水槽に入る、人数の多い名字の数 */
 
   function layout() {
     var seen = {}, list = [];
@@ -88,12 +88,12 @@
 
   function GameScene() {
     T = global.THREE;
-    var st = this.stage = new Z3.Stage({ renderer: { tone: "linear" }, camera: { fov: 62, near: 0.1, far: 80 }, finish: { contrast: 0.1, vignette: 0.45, grain: 0.02 } });
+    var st = this.stage = new Z3.Stage({ renderer: { tone: "linear" }, camera: { fov: 80, near: 0.1, far: 90 }, finish: { contrast: 0.1, vignette: 0.45, grain: 0.02 } });
     this.scene = st.scene;
     this.camera = st.camera;
     this.camera.rotation.order = "YXZ";
     this.scene.background = new T.Color(0x04101e);
-    this.scene.fog = new T.Fog(0x05182c, 5, 30);
+    this.scene.fog = new T.Fog(0x05182c, 9, 42);
     var L = this.L = layout();
     this.buildRoom(L);
     this.buildFish(L);
@@ -175,7 +175,7 @@
           c.fillStyle = "#e8f6ff"; c.font = "800 40px sans-serif"; c.textAlign = "center"; c.textBaseline = "middle";
           c.fillText(label, cw / 2, ch / 2 + 2);
         });
-        var sign = new T.Mesh(new T.PlaneGeometry(2.6, 0.325), new T.MeshBasicMaterial({ map: tex }));
+        var sign = new T.Mesh(new T.PlaneGeometry(3.6, 0.45), new T.MeshBasicMaterial({ map: tex }));
         sign.position.set(0, L.top + 0.1, 0.17); g.add(sign);
       }
       sc.add(g);
@@ -319,7 +319,7 @@
       d.position.copy(o.pos);
       d.rotation.set(0, o.rotY, Math.sin(t * 3 + o.bob) * 0.07 + (o.giant ? 0 : 0));
       var sw = 1 + Math.sin(t * 4 + o.bob) * 0.04;
-      d.scale.set(o.s * 1.9 * sw, o.s * 1.9 / sw * CELL_H / CELL_W, 1);
+      d.scale.set(o.s * 2.4 * sw, o.s * 2.4 / sw * CELL_H / CELL_W, 1);
       d.updateMatrix();
       var im = this.texts[Math.floor(i / PER_ATLAS)];
       im.setMatrixAt(i - im.base, d.matrix);

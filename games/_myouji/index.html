@@ -116,6 +116,78 @@
     s.connect(f); f.connect(g); g.connect(AC.destination);
     s.start(n); s.stop(n + dur + 0.05);
   }
+  /* ============ BGM（自作のアンビエント） ============
+     ゆっくり移り変わる和音の霧と、ときどき鳴る鉄琴のような音、泡の音。 */
+  var BGM = null;
+  var CHORDS = [[50, 57, 62, 66, 69], [47, 54, 59, 62, 66], [43, 50, 55, 59, 64], [45, 52, 57, 61, 64]];
+  var BELL = [74, 76, 78, 81, 83, 86, 88, 90];
+  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function startBGM() {
+    if (!AC || BGM) return;
+    var out = AC.createGain(); out.gain.value = 0.0001;
+    out.gain.setTargetAtTime(0.22, AC.currentTime, 1.5);
+    out.connect(AC.destination);
+    var lp = AC.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 1100; lp.connect(out);
+    /* 響き：短い遅れを重ねる */
+    var dl = AC.createDelay(1.5); dl.delayTime.value = 0.42;
+    var fb = AC.createGain(); fb.gain.value = 0.45;
+    var wet = AC.createGain(); wet.gain.value = 0.5;
+    dl.connect(fb); fb.connect(dl); dl.connect(wet); wet.connect(out);
+    BGM = { out: out, pad: lp, bell: dl, next: AC.currentTime + 0.1, bellAt: AC.currentTime + 2, bubAt: AC.currentTime + 4, i: 0 };
+  }
+  function padNote(f, t0, dur) {
+    for (var k = 0; k < 2; k++) {
+      var o = AC.createOscillator(), g = AC.createGain();
+      o.type = k ? "sine" : "triangle";
+      o.frequency.value = f; o.detune.value = k ? 7 : -7;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.linearRampToValueAtTime(0.05, t0 + dur * 0.35);
+      g.gain.linearRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g); g.connect(BGM.pad);
+      o.start(t0); o.stop(t0 + dur + 0.1);
+    }
+  }
+  function bellNote(f, t0, vol) {
+    var o = AC.createOscillator(), g = AC.createGain();
+    o.type = "sine"; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.4);
+    o.connect(g); g.connect(BGM.out); g.connect(BGM.bell);
+    o.start(t0); o.stop(t0 + 2.5);
+  }
+  function bubble(t0) {
+    var o = AC.createOscillator(), g = AC.createGain(), f = 300 + Math.random() * 300;
+    o.type = "sine";
+    o.frequency.setValueAtTime(f, t0); o.frequency.exponentialRampToValueAtTime(f * 2.6, t0 + 0.08);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.04, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
+    o.connect(g); g.connect(BGM.out);
+    o.start(t0); o.stop(t0 + 0.12);
+  }
+  /* 先の分だけ少しずつ予約する（毎コマ呼ぶ） */
+  function tickBGM() {
+    if (!AC || !BGM || AC.state !== "running") return;
+    var now = AC.currentTime;
+    if (BGM.next < now) BGM.next = now + 0.05;
+    while (BGM.next < now + 1) {
+      var ch = CHORDS[BGM.i % CHORDS.length];
+      ch.forEach(function (m) { padNote(mtof(m), BGM.next, 10); });
+      BGM.next += 8; BGM.i++;
+    }
+    if (BGM.bellAt < now + 0.5) {
+      var ch2 = CHORDS[(BGM.i + CHORDS.length - 1) % CHORDS.length];
+      var pool = BELL.filter(function (m) { return ch2.some(function (c) { return (m - c) % 12 === 0; }); });
+      var n = 1 + Math.floor(Math.random() * 3);
+      for (var i = 0; i < n; i++) bellNote(mtof(pool[Math.floor(Math.random() * pool.length)]), Math.max(now, BGM.bellAt) + i * 0.32, 0.035);
+      BGM.bellAt = Math.max(now, BGM.bellAt) + 1.8 + Math.random() * 3.5;
+    }
+    if (BGM.bubAt < now + 0.2) {
+      var m2 = 1 + Math.floor(Math.random() * 4);
+      for (var j = 0; j < m2; j++) bubble(Math.max(now, BGM.bubAt) + j * (0.06 + Math.random() * 0.1));
+      BGM.bubAt = Math.max(now, BGM.bubAt) + 3 + Math.random() * 6;
+    }
+  }
+
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -148,8 +220,9 @@
   }
 
   /* ============ 進行 ============ */
-  var WALK = 3.4, TURN = 1.8;
+  var WALK = 4.2, TURN = 1.8;
   function update(dt) {
+    tickBGM();
     T += dt;                                   /* 魚は開始前も泳がせる */
     if (state === S.RESULT) { resultT += dt; return; }
     if (state !== S.PLAY) return;
@@ -192,7 +265,7 @@
     var r = s3.ray(x, y, W, H);
     var hl = Math.hypot(r.x, r.z);
     if (hl < 0.05) return false;
-    var dist = r.y < -0.02 ? Math.min(10, 1.55 / -r.y * hl) : 5;
+    var dist = r.y < -0.02 ? Math.min(14, 1.55 / -r.y * hl) : 6;
     var p = { x: cam.x + r.x / hl * dist, z: cam.z + r.z / hl * dist };
     /* 間の壁を越えないよう、細かく区切って進めるところまで */
     var q = { x: cam.x, z: cam.z }, n = Math.ceil(dist / 0.2);
@@ -222,6 +295,7 @@
   function down(x, y) {
     if (state === S.INTRO) return;
     audioOn();
+    startBGM();
     if (state === S.RESULT) {
       if (resultT < 0.5) return;
       var hit = x == null ? "retry" : hitButton(x, y);
@@ -250,7 +324,7 @@
     if (!s3) return;
     /* 床を指したら移動。上のほう（水槽）を指したら、名字があればよみ、なければその方へ移動 */
     var r = s3.ray(x, y, W, H);
-    var o = r.y < -0.02 && 1.55 / -r.y < 12 ? null : s3.pick(x, y, W, H);
+    var o = r.y < -0.02 && 1.55 / -r.y < 16 ? null : s3.pick(x, y, W, H);
     if (!o) { goToward(x, y); return; }
     card = { o: o, t: 0 };
     tone(660, 0.09, 0.12, "sine", 990);
@@ -407,7 +481,7 @@
   window.zStartTap(function () { return state === S.INTRO; }, function () { startButton.click(); });
 
   ['pointerdown','pointerup'].forEach(function(name){startButton.addEventListener(name,function(e){e.stopPropagation();});});
-  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();newRound();});
+  startButton.addEventListener('click',function(e){e.stopPropagation();audioOn();resumeAudio();startBGM();newRound();});
   newRound();state=S.INTRO;startButton.hidden=false;
   layout();
   var last = performance.now();
