@@ -8,8 +8,8 @@
   /* ============ 並び ============ */
   var THEMES = "田 藤 山 川 木 野 井 本 村 島 原 中 小 大 上 石 松 谷 岡 森 沢 宮 西 高 崎 部 口 下 内 江 浜 水 池 鳥".split(" ");
   var HALL = 4.5;                               /* 通路の半分の幅 */
-  var DEPTH = 4.2;                              /* 水槽の奥行き */
-  var TOP = 3.9;                                /* 水槽の天井 */
+  var DEPTH = 7.5;                              /* 水槽の奥行き */
+  var TOP = 6.0;                                /* 水槽の天井 */
   var GIANT = 10;
   var ROOM = 8.5;                               /* 大水槽の部屋の半分の幅 */                               /* 大水槽に入る、人数の多い名字の数 */
 
@@ -48,7 +48,7 @@
     /* 左右に交互に詰める。長さは魚の数に合わせる */
     var zL = -1.5, zR = -1.5, GAP = 0.6;
     tanks.forEach(function (t, i) {
-      var len = Math.max(4.5, Math.min(11, t.fish.length / 7.5));
+      var len = Math.max(7, Math.min(16, t.fish.length / 5));
       t.side = zL >= zR ? -1 : 1;                /* 奥まで進んでいないほうに足す */
       if (t.side < 0) { t.z0 = zL; zL -= len + GAP; } else { t.z0 = zR; zR -= len + GAP; }
       t.z1 = t.z0 - len;
@@ -61,7 +61,7 @@
       tanks.forEach(function (u) { if (u.side === t.side && u.z1 < t.z1) last = false; });
       if (last) { t.z1 = end + 0.4 - GAP; t.len = t.z0 - t.z1; }
     });
-    var exitZ = end - 3, giantZ = end - 7;
+    var exitZ = end - 4, giantZ = end - 9;
     return { list: list, tanks: tanks, giant: giant, end: end, exitZ: exitZ, giantZ: giantZ, hall: HALL, room: ROOM, depth: DEPTH, top: TOP };
   }
   global.MYOUJI_LAYOUT = layout;
@@ -175,7 +175,7 @@
           c.fillStyle = "#e8f6ff"; c.font = "800 40px sans-serif"; c.textAlign = "center"; c.textBaseline = "middle";
           c.fillText(label, cw / 2, ch / 2 + 2);
         });
-        var sign = new T.Mesh(new T.PlaneGeometry(3.6, 0.45), new T.MeshBasicMaterial({ map: tex }));
+        var sign = new T.Mesh(new T.PlaneGeometry(4.8, 0.6), new T.MeshBasicMaterial({ map: tex }));
         sign.position.set(0, L.top + 0.1, 0.17); g.add(sign);
       }
       sc.add(g);
@@ -196,7 +196,7 @@
       f.position.set(s * (L.hall + L.room) / 2, (L.top + 0.3) / 2, L.end);
       sc.add(f);
     });
-    tankBox(0, L.giantZ, L.room * 2, 6, 0, "大水槽");
+    tankBox(0, L.giantZ, L.room * 2, 10, 0, "大水槽");
     /* 出口（大水槽の手前、右の壁） */
     var exitTex = Z3.canvasTex(256, 128, function (c, cw, ch) {
       c.fillStyle = "#1f8f4e"; c.fillRect(0, 0, cw, ch);
@@ -220,34 +220,60 @@
       if (rank < 400) return 0.8;
       return 0.6;
     }
-    L.tanks.forEach(function (t) {
-      t.fish.forEach(function (f) {
-        var s = size(f.rank);
-        all.push({
-          f: f, s: s, tank: t,
-          /* 右の水槽: ガラス x=+hall、奥 +x。左は逆 */
-          x: t.side * (L.hall + 0.5 + rnd() * (L.depth - 1.1)),
-          y: 0.6 + s * 0.3 + rnd() * (L.top - 1.2 - s * 0.5),
-          zc: (t.z0 + t.z1) / 2,
-          amp: Math.max(0.2, t.len / 2 - 0.4 - s * 0.6) * (0.5 + rnd() * 0.5),
-          w: (0.12 + rnd() * 0.18) / Math.sqrt(s), ph: rnd() * Math.PI * 2, bob: rnd() * 6,
-          rotY: t.side > 0 ? -Math.PI / 2 : Math.PI / 2, giant: false
-        });
-      });
-    });
-    L.giant.forEach(function (f, i) {
+    /* 泳ぎ方の種類。cruise: ゆったり回遊 / school: 群れ（先頭について行く）/ dart: 止まってはサッと動く
+       bottom: 底をのんびり / hover: その場でふわふわ */
+    function bounds(s, len, depth) {
+      var m = s * 1.25 + 0.3;
+      return { u0: -len / 2 + m, u1: len / 2 - m, v0: 0.5 + s * 0.2, v1: L.top - 0.4 - s * 0.2, w0: 0.6, w1: depth - 0.6 };
+    }
+    function make(f, kind, b, toWorld, sx, rotY, tank) {
       var s = size(f.rank);
-      all.push({
-        f: f, s: s, giant: true,
-        z: L.giantZ - 1.0 - rnd() * 4.2,
-        y: 0.9 + s * 0.25 + (i % 5) / 5 * (L.top - 1.6 - s * 0.4),
-        xc: 0, amp: L.room - 0.6 - s * 0.9,
-        w: (0.1 + rnd() * 0.08), ph: rnd() * Math.PI * 2, bob: rnd() * 6, rotY: 0
-      });
+      var o = {
+        f: f, s: s, kind: kind, b: b, toWorld: toWorld, sx: sx, rotY: rotY, tank: tank,
+        p: { u: b.u0 + rnd() * (b.u1 - b.u0), v: b.v0 + rnd() * (b.v1 - b.v0), w: b.w0 + rnd() * (b.w1 - b.w0) },
+        vel: { u: 0, v: 0, w: 0 }, tgt: null, timer: 0, burst: 0,
+        spd: (kind === "cruise" ? 0.5 + rnd() * 0.5 : kind === "bottom" ? 0.18 + rnd() * 0.12 : kind === "hover" ? 0.15 : kind === "dart" ? 0.05 : 1.1) / Math.sqrt(s),
+        roll: 0, yaw: 0, ph: rnd() * 10, bob: rnd() * 6
+      };
+      if (kind === "bottom") o.p.v = b.v0 + rnd() * 0.5;
+      all.push(o);
+      return o;
+    }
+    L.tanks.forEach(function (t) {
+      var cz = (t.z0 + t.z1) / 2, side = t.side;
+      var toWorld = function (p, out) { return out.set(side * (L.hall + p.w), p.v, cz + p.u); };
+      var sx = side > 0 ? 1 : -1, rotY = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+      var i = 0;
+      while (i < t.fish.length) {
+        var r = rnd(), f = t.fish[i];
+        var bb = bounds(size(f.rank), t.len, L.depth);
+        if (r < 0.22 && i + 3 < t.fish.length) {
+          /* 群れ：3〜6匹 */
+          var n = 3 + Math.floor(rnd() * 4), lead = make(f, "cruise", bb, toWorld, sx, rotY, t);
+          lead.spd *= 1.4;
+          for (var k = 1; k < n && i + k < t.fish.length; k++) {
+            var fo = make(t.fish[i + k], "school", bounds(size(t.fish[i + k].rank), t.len, L.depth), toWorld, sx, rotY, t);
+            fo.lead = lead; fo.off = { u: -0.9 * k + (rnd() - 0.5) * 0.6, v: (rnd() - 0.5) * 1.4, w: (rnd() - 0.5) * 1.6 };
+            fo.p = { u: lead.p.u + fo.off.u, v: lead.p.v + fo.off.v, w: lead.p.w + fo.off.w };
+          }
+          i += n;
+          continue;
+        }
+        make(f, r < 0.55 ? "cruise" : r < 0.7 ? "dart" : r < 0.85 ? "bottom" : "hover", bb, toWorld, sx, rotY, t);
+        i++;
+      }
+    });
+    L.giant.forEach(function (f) {
+      var gz = L.giantZ;
+      var s = size(f.rank), b = bounds(s, L.room * 2, 10);
+      var o = make(f, "cruise", b, function (p, out) { return out.set(p.u, p.v, gz - p.w); }, 1, 0, null);
+      o.giant = true; o.spd = 0.45 + rnd() * 0.25;
     });
     this.byName = {};
     var self = this;
-    all.forEach(function (o, i) { o.i = i; self.byName[o.f.name] = o; o.pos = new T.Vector3(); o.dir = 1; });
+    all.forEach(function (o, i) { o.i = i; self.byName[o.f.name] = o; o.pos = new T.Vector3(); o.toWorld(o.p, o.pos); });
+    this.rnd = rnd;
+    this.lastT = null;
 
     /* 魚の形はなし。名字の文字そのものが泳ぐ（文字に色をつける） */
     var n = all.length;
@@ -299,6 +325,46 @@
 
   GameScene.prototype.reset = function () {};
 
+  /* 1匹ぶんの泳ぎ。水槽の中の座標（u: ガラスに沿って、v: 高さ、w: 奥行き）で動かす */
+  GameScene.prototype.swim = function (o, dt, rnd) {
+    var b = o.b, p = o.p, v = o.vel, spd = o.spd, turn = 1.2;
+    o.timer -= dt;
+    function pickTarget(nearV) {
+      o.tgt = {
+        u: b.u0 + rnd() * (b.u1 - b.u0),
+        v: nearV ? Math.max(b.v0, Math.min(b.v1, p.v + (rnd() - 0.5) * 2)) : b.v0 + rnd() * (b.v1 - b.v0),
+        w: b.w0 + rnd() * (b.w1 - b.w0)
+      };
+    }
+    if (o.kind === "school") {
+      var L = o.lead.p;
+      o.tgt = { u: L.u + o.off.u * (o.lead.vel.u * o.lead.sx >= 0 ? 1 : -1) * o.sx, v: L.v + o.off.v, w: L.w + o.off.w };
+      spd = o.lead.spd * 1.5; turn = 2.2;
+    } else if (o.kind === "dart") {
+      if (o.burst > 0) { o.burst -= dt; spd = 3.2 / Math.sqrt(o.s); turn = 7; }
+      else { spd = 0.05; turn = 3; if (o.timer < 0) { pickTarget(true); o.burst = 0.35 + rnd() * 0.3; o.timer = 0.8 + rnd() * 2.2; } }
+    } else if (o.kind === "bottom") {
+      if (!o.tgt || o.timer < 0) { pickTarget(false); o.tgt.v = b.v0 + rnd() * 0.5; o.timer = 4 + rnd() * 6; o.rest = rnd() < 0.4 ? 1.5 + rnd() * 2 : 0; }
+      if (o.rest > 0) { o.rest -= dt; spd = 0.02; }
+      turn = 0.6;
+    } else if (o.kind === "hover") {
+      if (!o.tgt || o.timer < 0) { o.tgt = { u: Math.max(b.u0, Math.min(b.u1, p.u + (rnd() - 0.5) * 1.2)), v: Math.max(b.v0, Math.min(b.v1, p.v + (rnd() - 0.5) * 0.8)), w: Math.max(b.w0, Math.min(b.w1, p.w + (rnd() - 0.5) * 1.0)) }; o.timer = 3 + rnd() * 4; }
+      turn = 0.8;
+    } else {
+      if (!o.tgt || o.timer < 0) { pickTarget(true); o.timer = 5 + rnd() * 8; }
+      turn = o.giant ? 0.5 : 1.0;
+    }
+    if (!o.tgt) o.tgt = { u: p.u, v: p.v, w: p.w };
+    var du = o.tgt.u - p.u, dv = o.tgt.v - p.v, dw = o.tgt.w - p.w, dl = Math.hypot(du, dv, dw);
+    if (dl < 0.3 && o.kind !== "school") { o.timer = Math.min(o.timer, o.kind === "dart" ? o.timer : 0); }
+    var f = dl > 0.001 ? Math.min(spd, dl * 1.5) / dl : 0;
+    var k = Math.min(1, turn * dt);
+    v.u += (du * f - v.u) * k; v.v += (dv * f * 0.6 - v.v) * k; v.w += (dw * f * 0.5 - v.w) * k;
+    p.u = Math.max(b.u0, Math.min(b.u1, p.u + v.u * dt));
+    p.v = Math.max(b.v0, Math.min(b.v1, p.v + v.v * dt));
+    p.w = Math.max(b.w0, Math.min(b.w1, p.w + v.w * dt));
+  };
+
   /* s: { t, cam: {x, z, yaw, pitch}, found: {名前:1} } */
   GameScene.prototype.sync = function (s) {
     var t = s.t, c = s.cam, cam = this.camera, d = this.dummy;
@@ -307,18 +373,24 @@
     var g = s.glide;
     this.ring.visible = !!g;
     if (g) { this.ring.position.set(g.x1, 0.02, g.z1); this.ring.material.opacity = 0.75 * (1 - Math.min(1, g.t / g.dur) * 0.6); }
-    var all = this.fish;
+    var all = this.fish, rnd = this.rnd;
+    var dt = this.lastT == null ? 0 : Math.max(0, Math.min(0.1, t - this.lastT));
+    this.lastT = t;
     for (var i = 0; i < all.length; i++) {
       var o = all[i];
-      var a = o.ph + t * o.w, sv = Math.sin(a), cv = Math.cos(a);
-      var y = o.y + Math.sin(t * 0.9 + o.bob) * 0.12;
-      var dir = cv >= 0 ? 1 : -1;
-      if (o.giant) o.pos.set(o.xc + sv * o.amp, y, o.z);
-      else o.pos.set(o.x, y, o.zc + sv * o.amp * (o.tank.side > 0 ? 1 : -1));
-      /* 文字：裏返さない。泳ぐ向きに少し傾けて、ゆらゆらさせる */
+      this.swim(o, dt, rnd);
+      o.toWorld(o.p, o.pos);
+      o.pos.y += Math.sin(t * (o.kind === "hover" ? 1.4 : 0.8) + o.bob) * (o.kind === "hover" ? 0.18 : 0.06);
+      /* 向き：文字は裏返さず、進む向きに頭を上げ下げし、少しひねる */
+      var vx = o.sx * o.vel.u, sp = Math.hypot(o.vel.u, o.vel.v, o.vel.w);
+      var wantRoll = sp > 0.05 ? Math.max(-0.45, Math.min(0.45, Math.atan2(o.vel.v, Math.abs(vx) + 0.15) * (vx >= 0 ? 1 : -1))) : 0;
+      var wantYaw = Math.max(-0.45, Math.min(0.45, -vx * 0.22));
+      var k = Math.min(1, dt * 4);
+      o.roll += (wantRoll - o.roll) * k; o.yaw += (wantYaw - o.yaw) * k;
+      o.ph += dt * (2 + sp * 7);
       d.position.copy(o.pos);
-      d.rotation.set(0, o.rotY, Math.sin(t * 3 + o.bob) * 0.07 + (o.giant ? 0 : 0));
-      var sw = 1 + Math.sin(t * 4 + o.bob) * 0.04;
+      d.rotation.set(0, o.rotY + o.yaw, o.roll + Math.sin(o.ph) * 0.03);
+      var sw = 1 + Math.sin(o.ph) * (0.03 + Math.min(0.06, sp * 0.03));
       d.scale.set(o.s * 2.4 * sw, o.s * 2.4 / sw * CELL_H / CELL_W, 1);
       d.updateMatrix();
       var im = this.texts[Math.floor(i / PER_ATLAS)];
