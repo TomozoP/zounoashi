@@ -258,11 +258,11 @@
   function groupsOf(bodies) {
     var seen = new Set(), res = [];
     bodies.forEach(function (b) {
-      if (seen.has(b) || b.pop) return;
+      if (seen.has(b)) return;
       var g = [], st = [b]; seen.add(b);
       while (st.length) {
         var x = st.pop(); g.push(x);
-        for (var id in x.glue) { var o = x.glue[id]; if (!o.dead && !o.pop && !seen.has(o) && bodies.indexOf(o) >= 0) { seen.add(o); st.push(o); } }
+        for (var id in x.glue) { var o = x.glue[id]; if (!o.dead && !seen.has(o) && bodies.indexOf(o) >= 0) { seen.add(o); st.push(o); } }
       }
       if (g.length > 1) res.push(g);
     });
@@ -283,7 +283,18 @@
       }
       gUsed.add(key);
       var o = mergedOutline(g, M);
-      self.shape(m.geometry, o.pts, o.cx, o.cy, 1);
+      /* そろった塊は、はじける前にまとめてぶるぶるふくらむ */
+      var pop = 0, ripe = 0;
+      g.forEach(function (b) { pop = Math.max(pop, b.pop || 0); ripe = Math.max(ripe, b.ripe || 0); });
+      var k = 1, kx = 1, ky = 1;
+      if (pop) {
+        var u = Math.min(1, pop / 0.32); k = 1 + u * u * 0.25;
+        var w = Math.sin(pop * 70) * 0.07 * u; kx = k * (1 + w); ky = k * (1 - w);
+      } else if (ripe > 0) {
+        var w2 = Math.sin(ripe * 22) * 0.025 * Math.min(1, ripe * 3); kx = 1 + w2; ky = 1 - w2;   /* つながった、のぷるん */
+      }
+      var pts = (kx === 1 && ky === 1) ? o.pts : o.pts.map(function (p) { return { x: o.cx + (p.x - o.cx) * kx, y: o.cy + (p.y - o.cy) * ky }; });
+      self.shape(m.geometry, pts, o.cx, o.cy, k);
       g.forEach(function (b) { merged.add(b); });
     });
     this.gmeshes.forEach(function (m, key) { if (!gUsed.has(key)) { self.scene.remove(m); m.geometry.dispose(); self.gmeshes.delete(key); } });
