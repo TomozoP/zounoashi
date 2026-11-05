@@ -165,7 +165,7 @@
   var bid = 0;
   function makeBody(lv, x, y) {
     var REST = RESTS[lv];
-    var b = { id: ++bid, lv: lv, rest: REST, pts: [], age: 0, pop: 0, touch: {}, hit: 0, area0: 0 };
+    var b = { id: ++bid, lv: lv, rest: REST, pts: [], age: 0, pop: 0, touch: {}, glue: {}, hit: 0, area0: 0 };
     for (var i = 0; i < NP; i++) {
       var r = REST[i];
       b.pts.push({ x: x + r.x, y: y + r.y, px: x + r.x, py: y + r.y });
@@ -240,9 +240,46 @@
         var A1 = bodies[i], B1 = bodies[j];
         if (A1.x1 < B1.x0 - 0.05 || B1.x1 < A1.x0 - 0.05 || A1.y1 < B1.y0 - 0.05 || B1.y1 < A1.y0 - 0.05) continue;
         var t1 = collide(A1, B1), t2 = collide(B1, A1);
-        if (t1 || t2) { A1.touch[B1.id] = T; B1.touch[A1.id] = T; }
+        if (t1 || t2) {
+          A1.touch[B1.id] = T; B1.touch[A1.id] = T;
+          if (A1.lv === B1.lv && !A1.glue[B1.id] && !A1.pop && !B1.pop && A1.age > 0.1 && B1.age > 0.1) glue(A1, B1);
+        }
+      }
+      /* くっついた所：近い点どうしをゴムでつなぐ */
+      for (i = links.length - 1; i >= 0; i--) {
+        var L = links[i];
+        if (L.a.dead || L.b.dead) { links.splice(i, 1); continue; }
+        var pa = L.a.pts[L.i], pb = L.b.pts[L.j], lx = pb.x - pa.x, ly = pb.y - pa.y, ll = Math.hypot(lx, ly) || 1e-6;
+        var corr = (ll - 0.03) / ll * 0.25;
+        if (ll > 0.03) { pa.x += lx * corr; pa.y += ly * corr; pb.x -= lx * corr; pb.y -= ly * corr; }
       }
     }
+  }
+  /* 同じ色が触れたら、近い点の組をいくつかつないでくっつける */
+  var links = [];
+  function glue(A, B) {
+    var pairs = [];
+    for (var i = 0; i < NP; i++) for (var j = 0; j < NP; j++) {
+      var d = Math.hypot(A.pts[i].x - B.pts[j].x, A.pts[i].y - B.pts[j].y);
+      if (d < 0.22) pairs.push({ i: i, j: j, d: d });
+    }
+    if (!pairs.length) return;
+    pairs.sort(function (a, b) { return a.d - b.d; });
+    var usedA = {}, usedB = {}, n = 0;
+    for (var k = 0; k < pairs.length && n < 5; k++) {
+      var q = pairs[k];
+      if (usedA[q.i] || usedB[q.j]) continue;
+      usedA[q.i] = usedB[q.j] = 1; n++;
+      links.push({ a: A, i: q.i, b: B, j: q.j });
+    }
+    A.glue[B.id] = B; B.glue[A.id] = A;
+    if (state === S.PLAY) gluSound(A.lv);
+  }
+  function gluSound(lv) {
+    if (!AC) return;
+    var f = [220, 270, 330, 420, 560][lv];
+    tone(f, 0.18, 0.12, "sine", f * 1.5);          /* むにゅっ */
+    tone(f * 2, 0.1, 0.04, "sine", f * 2.6, 0.03);
   }
   function inside(b, x, y) {
     var c = false, p = b.pts;
@@ -329,7 +366,7 @@
     document.getElementById("start").hidden = true;
     state = S.PLAY;
     score = 0; T = 0; held = false;
-    bodies = []; popped = 0; combo = 0; overT = 0; popups = []; kick = 0;
+    bodies = []; links = []; popped = 0; combo = 0; overT = 0; popups = []; kick = 0;
     aimX = BW / 2; dropCool = 0;
     cur = randLv(); next = randLv();
     var s3 = scene3d(); if (s3) s3.reset();
@@ -361,7 +398,7 @@
         b.hit = 0;
         if (b.pop) {
           b.pop += dt;
-          if (b.pop > POP_T) { bodies.splice(i, 1); popped++; burst(b); }
+          if (b.pop > POP_T) { bodies.splice(i, 1); b.dead = true; popped++; burst(b); }
         }
       }
       if (state === S.PLAY) {
@@ -470,12 +507,12 @@
   function debugKey(n) {
     if (n === 1 || state !== S.PLAY) newRound();
     if (n === 2) {
-      bodies = [makeBody(0, 1.2, 0.6), makeBody(0, 2.4, 0.6)];
+      bodies = [makeBody(0, 1.2, 0.6), makeBody(0, 2.4, 0.6)]; links = [];
       bodies.forEach(function (b) { b.age = 1; });
       cur = 0; aimX = 1.8;
     }
     if (n === 3) {
-      bodies = [];
+      bodies = []; links = [];
       for (var k = 0; k < 8; k++) { var b = makeBody(k % 5, 0.7 + (k % 2) * 0.2 + (k % 3) * 1.4, 0.6 + k * 1.1); b.age = 1; bodies.push(b); }
       cur = 4; aimX = 0.8;
     }

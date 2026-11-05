@@ -223,11 +223,77 @@
     var self = this;
     this.meshes.forEach(function (m) { self.scene.remove(m); m.geometry.dispose(); });
     this.meshes.clear();
+    if (this.gmeshes) { this.gmeshes.forEach(function (m) { self.scene.remove(m); m.geometry.dispose(); }); this.gmeshes.clear(); }
     if (this.parts) this.reset2();
   };
 
+  /* ============ くっついた同じ色を1つの塊として描く ============
+     それぞれの輪の「内側からの距離」をなめらかに合わせ（くびれが埋まる）、
+     まとまりの中心から放射状に境目を探して、1本の外周にする */
+  function sdPoly(pts, x, y) {
+    var n = pts.length, best = 1e9, c = false;
+    for (var i = 0, j = n - 1; i < n; j = i++) {
+      var a = pts[j], b = pts[i], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey || 1e-9;
+      var t = Math.max(0, Math.min(1, ((x - a.x) * ex + (y - a.y) * ey) / l2));
+      var dx = a.x + ex * t - x, dy = a.y + ey * t - y, d = dx * dx + dy * dy;
+      if (d < best) best = d;
+      if ((b.y > y) !== (a.y > y) && x < (a.x - b.x) * (y - b.y) / (a.y - b.y) + b.x) c = !c;
+    }
+    best = Math.sqrt(best);
+    return c ? -best : best;
+  }
+  function smin(a, b, k) { var h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; }
+  function mergedOutline(group, M) {
+    var cx = 0, cy = 0, all = 0, rmax = 0;
+    group.forEach(function (b) { b.pts.forEach(function (p) { cx += p.x; cy += p.y; all++; }); });
+    cx /= all; cy /= all;
+    group.forEach(function (b) { b.pts.forEach(function (p) { rmax = Math.max(rmax, Math.hypot(p.x - cx, p.y - cy)); }); });
+    rmax += 0.15;
+    function f(x, y) { var v = 1e9; for (var i = 0; i < group.length; i++) v = smin(v, sdPoly(group[i].pts, x, y), 0.3); return v; }
+    var out = [];
+    for (var i = 0; i < M; i++) {
+      var a = i / M * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a), r = rmax, st = 0.06;
+      while (r > 0 && f(cx + dx * r, cy + dy * r) > 0) r -= st;
+      var lo = Math.max(0, r), hi = r + st;
+      for (var k = 0; k < 6; k++) { var mid = (lo + hi) / 2; if (f(cx + dx * mid, cy + dy * mid) > 0) hi = mid; else lo = mid; }
+      r = (lo + hi) / 2;
+      out.push({ x: cx + dx * r, y: cy + dy * r });
+    }
+    return { pts: out, cx: cx, cy: cy };
+  }
+  /* くっつきでつながったまとまり（はじけ中のものは外す） */
+  function groupsOf(bodies) {
+    var seen = new Set(), res = [];
+    bodies.forEach(function (b) {
+      if (seen.has(b) || b.pop) return;
+      var g = [], st = [b]; seen.add(b);
+      while (st.length) {
+        var x = st.pop(); g.push(x);
+        for (var id in x.glue) { var o = x.glue[id]; if (!o.dead && !o.pop && !seen.has(o) && bodies.indexOf(o) >= 0) { seen.add(o); st.push(o); } }
+      }
+      if (g.length > 1) res.push(g);
+    });
+    return res;
+  }
+
   GameScene.prototype.sync = function (s) {
-    var self = this, used = new Set();
+    var self = this, used = new Set(), merged = new Set(), gUsed = new Set();
+    if (!this.gmeshes) this.gmeshes = new Map();
+    groupsOf(s.bodies).forEach(function (g) {
+      var key = g.map(function (b) { return b.id; }).sort(function (a, b) { return a - b; }).join(",");
+      var M = Math.min(72, 32 * g.length);
+      var m = self.gmeshes.get(key);
+      if (!m) {
+        m = new T.Mesh(self.blob(M, g[0].lv), self.mat(g[0].lv, s.LV));
+        m.castShadow = true; m.receiveShadow = true;
+        self.scene.add(m); self.gmeshes.set(key, m);
+      }
+      gUsed.add(key);
+      var o = mergedOutline(g, M);
+      self.shape(m.geometry, o.pts, o.cx, o.cy, 1);
+      g.forEach(function (b) { merged.add(b); });
+    });
+    this.gmeshes.forEach(function (m, key) { if (!gUsed.has(key)) { self.scene.remove(m); m.geometry.dispose(); self.gmeshes.delete(key); } });
     s.bodies.forEach(function (b) {
       var m = self.meshes.get(b);
       if (!m) {
@@ -249,7 +315,8 @@
         kx = k * (1 + w); ky = k * (1 - w);
       }
       var pts = k === 1 ? b.pts : b.pts.map(function (p) { return { x: cx + (p.x - cx) * kx, y: cy + (p.y - cy) * ky }; });
-      self.shape(m.geometry, pts, cx, cy, k);
+      m.visible = !merged.has(b);                   /* くっついている間は、まとまりの塊のほうを見せる */
+      if (m.visible) self.shape(m.geometry, pts, cx, cy, k);
     });
     this.meshes.forEach(function (m, b) {
       if (used.has(b)) return;
