@@ -220,6 +220,7 @@
     var t = s.t, c = s.cam, cam = this.camera, d = this.dummy, L = this.L;
     cam.position.set(c.x, 1.55, c.z);
     cam.rotation.set(c.pitch || 0, c.yaw, 0);
+    if (c.fov && Math.abs(cam.fov - c.fov) > 0.01) { cam.fov = c.fov; cam.updateProjectionMatrix(); }
     var gl = s.glide;
     this.ring.visible = !!gl;
     if (gl) { this.ring.position.set(gl.x1, 0.02, gl.z1); this.ring.material.opacity = 0.75 * (1 - Math.min(1, gl.t / gl.dur) * 0.6); }
@@ -284,7 +285,7 @@
       if (dist > 34 || v.dot(fwd) <= 0.3) continue;
       v.copy(o.pos).project(cam);
       var sx = (v.x + 1) / 2 * W, sy = (1 - v.y) / 2 * H;
-      var r = Math.max(26, o.s * 0.9 / dist * H * 0.9);
+      var r = Math.max(26, o.s * 0.9 / dist * H * 0.9 * Math.tan(40 * Math.PI / 180) / Math.tan(cam.fov * Math.PI / 360));
       var dd = Math.hypot(sx - x, sy - y);
       if (dd < r && dd / r + dist * 0.02 < bd) { bd = dd / r + dist * 0.02; best = o; }
     }

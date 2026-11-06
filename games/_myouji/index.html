@@ -217,7 +217,7 @@
     score = 0;
     T = 0;
     held = false;
-    cam = { x: 0, z: 0, yaw: 0, pitch: 0.06 };
+    cam = { x: 0, z: 0, yaw: 0, pitch: 0.06, fov: 80 };
     found = {}; foundN = 0;
     card = null; drag = null; glide = null; hintT = 0; resultT = 0; playT = 0; confetti = null;
     target = POOL.length ? POOL[Math.floor(Math.random() * POOL.length)] : { name: "佐藤", yomi: "さとう" };
@@ -233,56 +233,17 @@
     playT += dt;
     hintT += dt;
     if (card) { card.t += dt; if (card.t > 3) card = null; }
-    var fwd = 0, turn = 0;
-    if (keys.up) fwd += 1;
-    if (keys.down) fwd -= 1;
+    /* その場で見回すだけ（移動はなし）。キーは左右で向き、上下でズーム */
+    var turn = 0, zoom = 0;
     if (keys.left) turn += 1;
     if (keys.right) turn -= 1;
-    cam.yaw += turn * TURN * dt;
-    if (fwd) {
-      glide = null;
-      cam.x += -Math.sin(cam.yaw) * fwd * WALK * dt;
-      cam.z += -Math.cos(cam.yaw) * fwd * WALK * dt;
-    }
-    /* タップした場所へ、すっと移動する（グーグルマップのストリートビューの形） */
-    if (glide) {
-      glide.t += dt;
-      var k = Math.min(1, glide.t / glide.dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
-      cam.x = glide.x0 + (glide.x1 - glide.x0) * e;
-      cam.z = glide.z0 + (glide.z1 - glide.z0) * e;
-      if (k >= 1) glide = null;
-    }
-    clampPos(cam);
+    if (keys.up) zoom -= 1;
+    if (keys.down) zoom += 1;
+    cam.yaw += turn * TURN * dt * cam.fov / FOV_MAX;
+    if (zoom) setFov(cam.fov * Math.pow(1.8, zoom * dt));
   }
-  /* 通路は狭く、大水槽の部屋は広い */
-  function clampPos(p) {
-    var r = Math.hypot(p.x, p.z), m = L.rIn - 0.8;
-    if (r > m) { p.x *= m / r; p.z *= m / r; }
-  }
-
-  /* 画面の (x, y) の方へ移動する。床を指したらその場所、壁や水槽を指したらその方向へ少し */
-  function goToward(x, y) {
-    var s3 = scene3d();
-    if (!s3) return false;
-    var r = s3.ray(x, y, W, H);
-    var hl = Math.hypot(r.x, r.z);
-    if (hl < 0.05) return false;
-    var dist = r.y < -0.02 ? Math.min(18, 1.55 / -r.y * hl) : 8;
-    var p = { x: cam.x + r.x / hl * dist, z: cam.z + r.z / hl * dist };
-    /* 間の壁を越えないよう、細かく区切って進めるところまで */
-    var q = { x: cam.x, z: cam.z }, n = Math.ceil(dist / 0.2);
-    for (var i = 1; i <= n; i++) {
-      var t = { x: cam.x + (p.x - cam.x) * i / n, z: cam.z + (p.z - cam.z) * i / n };
-      var c = { x: t.x, z: t.z }; clampPos(c);
-      if (Math.hypot(c.x - t.x, c.z - t.z) > 0.01) { q = c; break; }
-      q = t;
-    }
-    var d = Math.hypot(q.x - cam.x, q.z - cam.z);
-    if (d < 0.2) return false;
-    glide = { x0: cam.x, z0: cam.z, x1: q.x, z1: q.z, t: 0, dur: 0.45 + d * 0.09 };
-    noiseHit(0.25, 500, 0.05, 0.7);
-    return true;
-  }
+  var FOV_MIN = 18, FOV_MAX = 80;
+  function setFov(f) { cam.fov = Math.max(FOV_MIN, Math.min(FOV_MAX, f)); }
   function finish() {
     state = S.RESULT;
     resultT = 0;
@@ -312,9 +273,10 @@
   function move(x, y) {
     if (state !== S.PLAY || !drag) return;
     if (Math.hypot(x - drag.x0, y - drag.y0) > 12) drag.moved = true;
-    /* 指につかんだ景色がついてくる向きに回す */
-    cam.yaw += (x - drag.px) * 0.0055;
-    cam.pitch = Math.max(-0.55, Math.min(0.55, cam.pitch + (y - drag.py) * 0.0045));
+    /* 指につかんだ景色がついてくる向きに回す（ズーム中はゆっくり） */
+    var k = cam.fov / FOV_MAX;
+    cam.yaw += (x - drag.px) * 0.0055 * k;
+    cam.pitch = Math.max(-0.7, Math.min(0.7, cam.pitch + (y - drag.py) * 0.0045 * k));
     drag.px = x; drag.py = y; drag.x = x; drag.y = y;
   }
   function up() {
@@ -327,7 +289,7 @@
     if (!s3) return;
     /* 名字を指したら、お題ならクリア・ほかはよみ。名字がなければ、その場所（方向）へ移動 */
     var o = s3.pick(x, y, W, H);
-    if (!o) { goToward(x, y); return; }
+    if (!o) return;
     if (o.f.name === target.name) { finish(); return; }
     card = { o: o, t: 0 };
     tone(660, 0.09, 0.12, "sine", 990);
@@ -335,30 +297,63 @@
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
+  /* 指が2本になったらピンチでズーム（そのあいだは見回し・タップはしない） */
+  var touches = {}, pinch = null;
+  function pinchDist() {
+    var ids = Object.keys(touches);
+    if (ids.length < 2) return 0;
+    var a = touches[ids[0]], b = touches[ids[1]];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
   wrap.addEventListener("pointerdown", function (e) {
     e.preventDefault(); keyMode = false;
-    var p = atCanvas(e); down(p.x, p.y);
+    var p = atCanvas(e);
+    touches[e.pointerId] = p;
+    if (Object.keys(touches).length >= 2) {
+      drag = null;
+      if (state === S.PLAY) pinch = { d0: Math.max(10, pinchDist()), f0: cam.fov };
+      return;
+    }
+    down(p.x, p.y);
   });
   wrap.addEventListener("pointermove", function (e) {
-    var p = atCanvas(e); move(p.x, p.y);
+    var p = atCanvas(e);
+    if (touches[e.pointerId]) touches[e.pointerId] = p;
+    if (pinch) { setFov(pinch.f0 * pinch.d0 / Math.max(10, pinchDist())); return; }
+    move(p.x, p.y);
   });
-  wrap.addEventListener("pointerup", function (e) { e.preventDefault(); up(); });
-  wrap.addEventListener("pointercancel", function () { drag = null; held = false; });
+  function release(e) {
+    delete touches[e.pointerId];
+    if (pinch) { if (Object.keys(touches).length < 2) { pinch = null; drag = null; held = false; } return; }
+  }
+  wrap.addEventListener("pointerup", function (e) {
+    e.preventDefault();
+    var wasPinch = !!pinch;
+    release(e);
+    if (!wasPinch) up();
+  });
+  wrap.addEventListener("pointercancel", function (e) { release(e); drag = null; held = false; });
+  /* PC はホイールでズーム */
+  wrap.addEventListener("wheel", function (e) {
+    if (state !== S.PLAY) return;
+    e.preventDefault();
+    setFov(cam.fov * Math.pow(1.0015, e.deltaY));
+  }, { passive: false });
   window.addEventListener("blur", function () { drag = null; held = false; keys = {}; });
 
   /* 本番以外だけ、数字キーで場所を飛ばせる */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    /* 1=まんなか 2=ガラスの前 3=ガラスの前で上を見る 4=お題の名字の前（お題をタップでクリア） */
+    /* 1=最初の向き 2=ズーム 3=上を見る 4=お題の名字の方を向いてズーム（お題をタップでクリア） */
     if (n < 1 || n > 4) return;
     if (state !== S.PLAY) newRound();
-    glide = null; cam.pitch = 0.06;
+    glide = null; cam.pitch = 0.06; cam.fov = FOV_MAX; cam.x = 0; cam.z = 0;
     if (n === 1) { cam.x = 0; cam.z = 0; cam.yaw = 0; }
-    if (n === 2) { cam.x = 0; cam.z = -(L.rIn - 1.2); cam.yaw = 0; }
-    if (n === 3) { cam.x = 0; cam.z = -(L.rIn - 1.2); cam.yaw = 0; cam.pitch = 0.35; }
+    if (n === 2) { cam.fov = 30; }
+    if (n === 3) { cam.pitch = 0.45; }
     if (n === 4) {
       var s3 = scene3d(), o = s3 && s3.byName[target.name];
-      if (o) { var rr = Math.hypot(o.pos.x, o.pos.z); cam.x = o.pos.x / rr * (L.rIn - 2.5); cam.z = o.pos.z / rr * (L.rIn - 2.5); cam.yaw = Math.atan2(-o.pos.x, -o.pos.z); cam.pitch = Math.atan2(o.pos.y - 1.55, rr - (L.rIn - 2.5)); }
+      if (o) { var rr = Math.hypot(o.pos.x, o.pos.z); cam.yaw = Math.atan2(-o.pos.x, -o.pos.z); cam.pitch = Math.atan2(o.pos.y - 1.55, rr); cam.fov = 35; }
     }
   }
 
@@ -508,7 +503,7 @@
     sound: function () { audioOn(); return AC; },
     run: async function (r) {
       await r.wait(1000);
-      keys.up = true; await r.wait(4000); keys.up = false;
+      keys.left = true; await r.wait(3000); keys.left = false;
       tapAt(W / 2, H / 2); await r.wait(2000);
       debugKey(4); await r.wait(1500);
       var pt = targetScreen(); if (pt) tapAt(pt.x, pt.y);
