@@ -198,15 +198,7 @@
     });
     tankBox(0, L.giantZ, L.room * 2, 10, 0, "大水槽");
     /* 出口（大水槽の手前、右の壁） */
-    var exitTex = Z3.canvasTex(256, 128, function (c, cw, ch) {
-      c.fillStyle = "#1f8f4e"; c.fillRect(0, 0, cw, ch);
-      c.fillStyle = "#fff"; c.font = "900 64px sans-serif"; c.textAlign = "center"; c.textBaseline = "middle";
-      c.fillText("出口", cw / 2, ch / 2 + 4);
-    });
-    var door = new T.Mesh(new T.PlaneGeometry(1.4, 2.4), new T.MeshBasicMaterial({ color: 0xf2f5f0 }));
-    door.rotation.y = -Math.PI / 2; door.position.set(L.room - 0.01, 1.2, L.exitZ); sc.add(door);
-    var exitSign = new T.Mesh(new T.PlaneGeometry(1.0, 0.5), new T.MeshBasicMaterial({ map: exitTex, fog: false }));
-    exitSign.rotation.y = -Math.PI / 2; exitSign.position.set(L.room - 0.02, 2.8, L.exitZ); sc.add(exitSign);
+
   };
 
   GameScene.prototype.buildFish = function (L) {
@@ -416,7 +408,7 @@
       var o = this.fish[i];
       v.copy(o.pos).sub(cam.position);
       var dist = v.length();
-      if (dist > 16 || v.dot(fwd) <= 0.3) continue;
+      if (dist > 24 || v.dot(fwd) <= 0.3) continue;
       v.copy(o.pos).project(cam);
       var sx = (v.x + 1) / 2 * W, sy = (1 - v.y) / 2 * H;
       var r = Math.max(26, o.s * 0.75 / dist * H * 0.9);

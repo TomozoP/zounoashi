@@ -33,6 +33,7 @@
 <script src="../share.js"></script>
 <script src="../result-actions.js"></script>
 <script src="../action-icons.js"></script>
+<script src="../celebrate.js"></script>
 <script src="../pad.js"></script>   <!-- ジョイパッドと、絵の外のタップ -->
 <script src="../random-bowling/vendor/three.min.js"></script>
 <script src="../three-base.js"></script>
@@ -200,7 +201,9 @@
   /* 並び（scene3d.js）。読めないときは空の通路 */
   var L = window.MYOUJI_LAYOUT ? window.MYOUJI_LAYOUT() : { list: [], tanks: [], hall: 2, room: 5.2, end: -10, exitZ: -13, giantZ: -17 };
   var TOTAL = L.list.length;
-  var cam, found, foundN, card, drag, glide, keys = {}, hintT, resultT;
+  var cam, found, foundN, card, drag, glide, keys = {}, hintT, resultT, target, playT, confetti = null;
+  /* お題は大水槽（上位10）以外から */
+  var POOL = L.list.filter(function (f) { return f.rank >= 10; });
 
   var CY;
   function place() {
@@ -216,7 +219,8 @@
     held = false;
     cam = { x: 0, z: 1.2, yaw: 0, pitch: 0.04 };
     found = {}; foundN = 0;
-    card = null; drag = null; glide = null; hintT = 0; resultT = 0;
+    card = null; drag = null; glide = null; hintT = 0; resultT = 0; playT = 0; confetti = null;
+    target = POOL.length ? POOL[Math.floor(Math.random() * POOL.length)] : { name: "佐藤", yomi: "さとう" };
   }
 
   /* ============ 進行 ============ */
@@ -224,8 +228,9 @@
   function update(dt) {
     tickBGM();
     T += dt;                                   /* 魚は開始前も泳がせる */
-    if (state === S.RESULT) { resultT += dt; return; }
+    if (state === S.RESULT) { resultT += dt; if (confetti) confetti.step(dt, W, H); return; }
     if (state !== S.PLAY) return;
+    playT += dt;
     hintT += dt;
     if (card) { card.t += dt; if (card.t > 3) card = null; }
     var fwd = 0, turn = 0;
@@ -248,8 +253,6 @@
       if (k >= 1) glide = null;
     }
     clampPos(cam);
-    /* 出口に入ったら結果 */
-    if (cam.x > L.room - 0.75 && Math.abs(cam.z - L.exitZ) < 0.75) finish();
   }
   /* 通路は狭く、大水槽の部屋は広い */
   function clampPos(p) {
@@ -284,9 +287,10 @@
   function finish() {
     state = S.RESULT;
     resultT = 0;
-    score = 0;
-    drag = null; keys = {};
-    tone(523, 0.18, 0.12, "triangle"); tone(784, 0.3, 0.12, "triangle", null, 0.14);
+    score = Math.round(playT * 10) / 10;
+    drag = null; keys = {}; glide = null;
+    if (AC && window.zCelebrate) window.zCelebrate.play(AC, "fanfare");
+    if (window.zCelebrate) { confetti = window.zCelebrate.confetti(); confetti.burst(W, H, 160); }
   }
 
   /* ============ 入力 ============
@@ -322,10 +326,10 @@
   function tapAt(x, y) {
     var s3 = scene3d();
     if (!s3) return;
-    /* 床を指したら移動。上のほう（水槽）を指したら、名字があればよみ、なければその方へ移動 */
-    var r = s3.ray(x, y, W, H);
-    var o = r.y < -0.02 && 1.55 / -r.y < 20 ? null : s3.pick(x, y, W, H);
+    /* 名字を指したら、お題ならクリア・ほかはよみ。名字がなければ、その場所（方向）へ移動 */
+    var o = s3.pick(x, y, W, H);
     if (!o) { goToward(x, y); return; }
+    if (o.f.name === target.name) { finish(); return; }
     card = { o: o, t: 0 };
     tone(660, 0.09, 0.12, "sine", 990);
     tone(1200, 0.06, 0.05, "sine", 1700, 0.06);
@@ -346,14 +350,17 @@
   /* 本番以外だけ、数字キーで場所を飛ばせる */
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
-    /* 1=入口 2=通路のまんなか 3=大水槽の前 4=出口の手前（前へ進むと結果） */
+    /* 1=入口 2=通路のまんなか 3=大水槽の前 4=お題の水槽の前（お題をタップでクリア） */
     if (n < 1 || n > 4) return;
     if (state !== S.PLAY) newRound();
     if (n === 1) { cam.x = 0; cam.z = 1.2; cam.yaw = 0; }
     if (n === 2) { cam.x = 0; cam.z = L.end / 2; cam.yaw = 0; }
     if (n === 3) { cam.x = 0; cam.z = L.end - 0.5; cam.yaw = 0; }
     if (n >= 1) glide = null;
-    if (n === 4) { cam.x = L.room - 1.1; cam.z = L.exitZ; cam.yaw = -Math.PI / 2; }
+    if (n === 4) {
+      var s3 = scene3d(), o = s3 && s3.byName[target.name];
+      if (o) { var sd = o.tank.side; cam.x = -sd * (L.hall - 1.2); cam.z = o.pos.z; cam.yaw = sd > 0 ? -Math.PI / 2 : Math.PI / 2; cam.pitch = 0.15; }
+    }
   }
 
   var KEYMAP = { ArrowUp: "up", w: "up", W: "up", ArrowDown: "down", s: "down", S: "down", ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right" };
@@ -375,7 +382,7 @@
   });
 
   function doShare() {
-    window.zResultActions.x({ text: "#名字の水族館" });
+    window.zResultActions.x({ text: "名字の水族館で「" + target.name + "」を" + fmtTime(score) + "で見つけました #名字の水族館" });
   }
 
   /* ============ 描画 ============ */
@@ -403,6 +410,7 @@
     if (!drew) { ctx.fillStyle = "#04101e"; ctx.fillRect(0, 0, W, H); }
 
     if (state === S.PLAY) {
+      drawTarget();
       if (hintT < 6 && !card) {
         ctx.save();
         ctx.globalAlpha = Math.min(1, (6 - hintT) / 0.8);
@@ -411,12 +419,39 @@
         roundRect(W / 2 - 220, H - 120, 440, 76, 18); ctx.fill();
         ctx.fillStyle = "#e8f6ff";
         ctx.fillText("ドラッグで見回す・床をタップでそこへ進む", W / 2, H - 96);
-        ctx.fillText("名字をタップすると、よみが出ます", W / 2, H - 66);
+        ctx.fillText("さがす名字を見つけてタップ！", W / 2, H - 66);
         ctx.restore();
       }
       if (card) drawCard();
     }
     if (state === S.RESULT) drawResult();
+  }
+
+  function fmtTime(sec) {
+    var m = Math.floor(sec / 60), s2 = Math.floor(sec % 60);
+    return m + ":" + (s2 < 10 ? "0" : "") + s2;
+  }
+  /* お題（上）と時間 */
+  function drawTarget() {
+    ctx.save();
+    roundRect(W / 2 - 170, 18, 340, 118, 22);
+    ctx.fillStyle = "rgba(255,255,255,.92)"; ctx.fill();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#2a6f97"; ctx.font = "700 22px sans-serif";
+    ctx.fillText("さがす名字", W / 2, 40);
+    var size = 50;
+    ctx.font = "900 " + size + "px sans-serif";
+    while (ctx.measureText(target.name).width > 300 && size > 26) { size -= 4; ctx.font = "900 " + size + "px sans-serif"; }
+    ctx.fillStyle = "#10243a";
+    ctx.fillText(target.name, W / 2, 84);
+    ctx.fillStyle = "#5b7a90"; ctx.font = "700 18px sans-serif";
+    ctx.fillText(target.yomi, W / 2, 120);
+    ctx.font = "800 24px sans-serif"; ctx.textAlign = "right";
+    ctx.fillStyle = "rgba(4,16,30,.6)";
+    roundRect(W - 104, 150, 88, 40, 20); ctx.fill();
+    ctx.fillStyle = "#e8f6ff"; ctx.textAlign = "center";
+    ctx.fillText(fmtTime(playT), W - 60, 171);
+    ctx.restore();
   }
 
   function drawCard() {
@@ -444,21 +479,44 @@
     return window.zResultActions.hit(resultButtons(), x, y);
   }
   function drawResult() {
-    ctx.fillStyle = "rgba(4,10,20,.72)";
+    ctx.fillStyle = "rgba(4,10,20,.66)";
     ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#9fd8f5"; ctx.font = "700 28px sans-serif";
+    ctx.fillText(target.yomi, W / 2, H * 0.27);
+    var size = 120;
+    ctx.font = "900 " + size + "px sans-serif";
+    while (ctx.measureText(target.name).width > W - 60 && size > 50) { size -= 6; ctx.font = "900 " + size + "px sans-serif"; }
+    ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 12;
+    ctx.fillStyle = "#fff";
+    ctx.fillText(target.name, W / 2, H * 0.36);
+    ctx.font = "800 64px sans-serif";
+    ctx.fillText(fmtTime(score), W / 2, H * 0.5);
+    ctx.restore();
+    if (confetti) confetti.draw(ctx);
     if (resultT > 0.5) {
       window.zResultActions.drawButtons(ctx, resultButtons());
       window.zResultActions.follow.draw(ctx, window.zResultActions.follow.box(ctx, resultButtons(), W));
     }
   }
 
+  /* お題の名字が画面のどこにあるか（確認・録画用） */
+  function targetScreen() {
+    var s3 = scene3d(), o = s3 && s3.byName[target.name];
+    if (!o) return null;
+    var v = o.pos.clone().project(s3.camera);
+    return { x: (v.x + 1) / 2 * W, y: (1 - v.y) / 2 * H };
+  }
+
   /* ============ 覗き穴 ============ */
   window.__probe = {
-    now: function () { return { state: state, score: score, found: foundN, total: TOTAL, tanks: L.tanks.length, cam: cam, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
+    now: function () { return { state: state, score: score, target: target && target.name, total: TOTAL, tanks: L.tanks.length, cam: cam, W: W, H: H, buttons: state === S.RESULT ? resultButtons() : null }; },
     step: function (n) { for (var i = 0; i < (n || 1); i++) { update(1 / 60); draw(); } },
     reset: function () { newRound(); },
     hideUI: function () { hintT = 99; card = null; },
-    tap: function (x, y) { tapAt(x, y); }
+    tap: function (x, y) { tapAt(x, y); },
+    targetScreen: function () { return targetScreen(); }
   };
 
   /* ============ 手元用の動画撮影 ============ */
@@ -468,9 +526,9 @@
       await r.wait(1000);
       keys.up = true; await r.wait(4000); keys.up = false;
       tapAt(W / 2, H / 2); await r.wait(2000);
-      debugKey(4); keys.up = true;
-      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("出口に着かない");
-      keys = {};
+      debugKey(4); await r.wait(1500);
+      var pt = targetScreen(); if (pt) tapAt(pt.x, pt.y);
+      if (!await r.until(function () { return state === S.RESULT; }, 10)) throw Error("お題をタップできない");
       await r.wait(2000);
     }
   };
