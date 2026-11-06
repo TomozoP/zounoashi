@@ -122,24 +122,47 @@
       groups.push(g);
       return g;
     }
-    /* 名字を混ぜて、5〜16匹の群れに分ける */
+    /* 同じ漢字を持つ名字どうしで群れにする（「田」の群れ、「藤」の群れ…）。大きい群れは16匹ずつに分ける */
+    var THEMES = ("田 藤 山 川 木 野 井 本 村 島 原 中 小 大 上 石 松 谷 岡 森 沢 澤 宮 西 高 崎 部 口 下 内 江 浜 水 池 鳥 " +
+      "子 金 長 横 平 北 東 南 新 古 吉 福 久 安 竹 岩 坂 林 永 前 渡 尾 杉 桜 星 海 浅 白 黒 青 赤 菅 有 荒 片 若 根 塚 " +
+      "越 瀬 河 津 岸 橋 屋 戸 城 寺 熊 鶴 亀 鷹 鯉 鮫 鯨 鮎 貝 磯 浦 湊 船 舟 網 滝 沼 泉 雪 雨 風 霧 梅 菊 堀 関 秋 柴 " +
+      "今 和 増 近 遠 後 佐 加 伊 斎 清 鈴 武 早 三 二 一 千 八 五 九 十 百 万 日 月 春 夏 冬 花 葉 柳 桑 栗 室 野 間 地 " +
+      "生 田 美 光 正 元 天 神 仁 国 宇 角 志 曽 丸 玉 細 広 進 二").split(" ");
     var rest = L.list.filter(function (f) { return f.rank >= GIANT; });
-    for (var i = rest.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)); var tmp = rest[i]; rest[i] = rest[j]; rest[j] = tmp; }
-    var k = 0;
-    while (k < rest.length) {
-      var n = Math.min(rest.length - k, 5 + Math.floor(rnd() * 12));
-      var g = group(n, false), spread = 1.2 + n * 0.22;
-      for (var m = 0; m < n; m++) {
-        var f = rest[k + m];
-        all.push({ f: f, s: size(f.rank), g: g,
-          ot: (rnd() - 0.5) * spread * 2, or: (rnd() - 0.5) * 2.4, ou: (rnd() - 0.5) * 2,
-          wF: 0.4 + rnd() * 0.6, wA: 0.15 + rnd() * 0.3, ph: rnd() * 10, roll: 0, yaw: 0, sw: rnd() * 10 });
+    var buckets = {}, order = [], left = [];
+    rest.forEach(function (f) {
+      for (var q = 0; q < THEMES.length; q++) {
+        if (THEMES[q] && f.name.indexOf(THEMES[q]) >= 0) {
+          if (!buckets[THEMES[q]]) { buckets[THEMES[q]] = []; order.push(THEMES[q]); }
+          buckets[THEMES[q]].push(f); return;
+        }
       }
-      k += n;
-    }
+      left.push(f);
+    });
+    /* どれにも入らなかったものは、最初の字が同じものどうし */
+    left.forEach(function (f) {
+      var key = "*" + f.name[0];
+      if (!buckets[key]) { buckets[key] = []; order.push(key); }
+      buckets[key].push(f);
+    });
+    var ci = 0;
+    order.forEach(function (key) {
+      var list = buckets[key], parts = Math.ceil(list.length / 16);
+      for (var pi = 0; pi < parts; pi++) {
+        var sub = list.slice(Math.floor(list.length * pi / parts), Math.floor(list.length * (pi + 1) / parts));
+        var n = sub.length, g = group(n, false), spread = 0.7 + n * 0.17;
+        g.color = COLORS[ci++ % COLORS.length];
+        sub.forEach(function (f) {
+          all.push({ f: f, s: size(f.rank), g: g,
+            ot: (rnd() - 0.5) * spread * 2, or: (rnd() - 0.5) * 1.4, ou: (rnd() - 0.5) * 1.2,
+            wF: 0.4 + rnd() * 0.6, wA: 0.1 + rnd() * 0.2, ph: rnd() * 10, roll: 0, yaw: 0, sw: rnd() * 10 });
+        });
+      }
+    });
     /* 上位の名字は一匹で大きく、ゆったり */
     L.list.slice(0, GIANT).forEach(function (f) {
       var g = group(1, true);
+      g.color = COLORS[(f.rank * 5 + 1) % COLORS.length];
       g.hc = 2.2 + rnd() * (L.top - 4.4); g.rAmp = span * 0.3;
       all.push({ f: f, s: size(f.rank), g: g, ot: 0, or: 0, ou: 0, wF: 0.3, wA: 0.1, ph: rnd() * 10, roll: 0, yaw: 0, sw: rnd() * 10, giant: true });
     });
@@ -178,7 +201,7 @@
           .replace("#include <uv_vertex>", "#include <uv_vertex>\nvMapUv = cell + uv * vec2(" + (CELL_W / ATLAS).toFixed(6) + ", " + (CELL_H / ATLAS).toFixed(6) + ");");
       };
       var im = new T.InstancedMesh(geo, mat, chunk.length);
-      chunk.forEach(function (o, q) { col.setHex(COLORS[(o.f.rank * 7 + 3) % COLORS.length]); im.setColorAt(q, col); });
+      chunk.forEach(function (o, q) { col.setHex(o.g.color); im.setColorAt(q, col); });
       im.frustumCulled = false;
       im.base = a * PER_ATLAS;
       this.scene.add(im);
