@@ -398,6 +398,18 @@ window.DRAFT_GAMES = [
     "full": true,
     "catch": "位置入れ替え能力で行列を前へ"
   },
-  {"type":"lab","tags":[],"id":"adaname","title":"あだ名ルーレット","year":2026,"date":"2026-11-05","plays":null,"url":"","img":"games/_adaname/img/thumb.webp","play":"games/_adaname/index.html","full":true,"catch":"あだ名によく出る文字でルーレット"},
-  {"type":"lab","tags":[],"id":"myouji","title":"名字の水族館","year":2026,"date":"2026-11-05","plays":null,"url":"","img":"games/_myouji/img/thumb.webp","play":"games/_myouji/index.html","full":true,"catch":"名字が泳ぐ水族館"},
+  {
+    "type": "lab",
+    "tags": [],
+    "id": "adaname",
+    "title": "あだ名ルーレット",
+    "year": 2026,
+    "date": "2026-11-05",
+    "plays": null,
+    "url": "",
+    "img": "games/_adaname/img/thumb.webp",
+    "play": "games/_adaname/index.html",
+    "full": true,
+    "catch": "あだ名によく出る文字でルーレット"
+  }
 ];
