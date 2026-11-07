@@ -148,6 +148,7 @@
   /* 卵: th=重力に対する傾き(右へ+)、om=その速さ、phi=机の傾き(右が下がる+) */
   /* 360度: 傾きは向きつき(tx=右へ, tz=手前へ)。th はその大きさ */
   var th = 0, om = 0, phi = 0, grabX = 0, grabY = 0, standT = 0;
+  var camYaw = 0, camSpin = 0, camFocus = 0;
   var tx = 0, tz = 0, vx = 0, vz = 0, ax = 0, az = 0, gx = 0, gz = 0;
   var cracked = false, crackT = 0, falling = false, fallT = 0, cleared = false, endT = 0, keyDir = 0;
   var lastY = 0, lastMoveT = 0, downY = 0;
@@ -172,12 +173,17 @@
     phi = 0; keyDir = 0; standT = 0;
     cracked = false; crackT = 0; falling = false; fallT = 0; cleared = false; endT = 0;
     if (confetti) confetti.clear();
+    camSpin = 0;
   }
 
   /* ============ 進行 ============
      卵をつまんで左右に傾け、離すと卵だけで立つ。真上のごく狭い範囲で離したときだけ止まる。 */
   function update(dt) {
     if (confetti && state === S.RESULT) confetti.step(dt, W, H);
+    /* カメラ: 遊んでいる間はゆっくり左右に回り込み、クリアしたら卵のまわりを一周する */
+    if (state === S.RESULT && cleared) camSpin += dt * 0.8;
+    else if (state === S.PLAY) camYaw = 0.5 * Math.sin(T * 0.2);
+    camFocus += ((state === S.PLAY && !cracked && (th < 0.08 || Math.PI - th < 0.08) ? 1 : (cleared ? 0.6 : 0)) - camFocus) * Math.min(1, dt * 2.2);
     if (state !== S.PLAY) { rollSound(0); return; }
     T += dt;
     score = T;
@@ -196,6 +202,12 @@
       return;
     }
     th = Math.sqrt(tx * tx + tz * tz);
+    /* つまんで一回転させたあと: 半回転を超えた分は反対向きの傾きに直す */
+    if (th > Math.PI) {
+      var mm = th % (Math.PI * 2), sc = mm > Math.PI ? -(Math.PI * 2 - mm) / th : mm / th;
+      tx *= sc; tz *= sc; th = Math.sqrt(tx * tx + tz * tz);
+    }
+    var prevTh = th;
     var ux = th > 1e-6 ? tx / th : 0, uz = th > 1e-6 ? tz / th : 0;
     if (cracked) {
       /* 底が平らなので起き上がる */
@@ -206,24 +218,40 @@
     } else if (th < REST) {
       var g = K * Math.sin(th);
       vx += (g * ux - 0.12 * vx) * dt; vz += (g * uz - 0.12 * vz) * dt;
-    } else {
+    } else if (Math.PI - th < EPS * 0.6) {
+      /* さかさ（とがった方が下）でもごく狭い範囲なら止まる */
+      var e = Math.PI - th;
+      vx += (14 * e * ux - 3 * vx) * dt; vz += (14 * e * uz - 3 * vz) * dt;
+    } else if (th > REST + 0.001) {
+      /* とがった方が下: 横に寝る向きへ倒れる */
+      var g2 = -K * Math.sin(th);
+      vx += (g2 * ux - 0.12 * vx) * dt; vz += (g2 * uz - 0.12 * vz) * dt;
+    } else if (th >= REST - 0.001) {
       /* 寝ている卵は向きを変えながらゆっくり転がる */
       vx -= vx * 0.6 * dt; vz -= vz * 0.6 * dt;
     }
     tx += vx * dt; tz += vz * dt;
     th = Math.sqrt(tx * tx + tz * tz);
-    if (th >= REST) {
+    /* 横に寝る角度で机に当たって跳ね返る（立つ側からも、さかさ側からも） */
+    var fromBelow = prevTh < REST - 0.001 && th >= REST;
+    var fromTop = prevTh > REST + 0.001 && th <= REST;
+    var lying = !fromBelow && !fromTop && Math.abs(prevTh - REST) <= 0.001;
+    if ((fromBelow || fromTop || lying) && th > 1e-6) {
       ux = tx / th; uz = tz / th;
       var vr = vx * ux + vz * uz;
-      tx = ux * REST; tz = uz * REST; th = REST;
-      if (vr > 0) {
-        if (vr > 0.6) noiseHit(0.08, 900, 0.18, 2);
+      if (lying) {
+        /* 寝ているときは、さかさ側へ持ち上がる動きだけ止める */
+        tx = ux * REST; tz = uz * REST; th = REST;
+        if (vr > 0) { vx -= ux * vr; vz -= uz * vr; }
+      } else {
+        tx = ux * REST; tz = uz * REST; th = REST;
+        if (Math.abs(vr) > 0.6) noiseHit(0.08, 900, 0.18, 2);
         vx -= ux * vr * 1.45; vz -= uz * vr * 1.45;
       }
     }
     om = Math.sqrt(vx * vx + vz * vz);
     var prevN = Math.floor(standT);
-    if ((cracked || Math.abs(th) < EPS) && Math.abs(om) < 0.06) standT += dt; else standT = 0;
+    if ((cracked || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
     /* 静止したら 1,2,3,4,5 と数える */
     if (standT > 0 && Math.floor(standT) !== prevN && standT < STAND) tone(880, 0.09, 0.12, "sine");
     if (standT > 0 && prevN === 0 && standT <= dt * 1.5) tone(880, 0.09, 0.12, "sine");
@@ -237,7 +265,7 @@
     }
   }
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
-  function limitAim() { var m = Math.sqrt(ax * ax + az * az); if (m > REST) { ax *= REST / m; az *= REST / m; } }
+  function limitAim() {}
   /* 下へはやくはじくと、底を割って立てる */
   function crack() {
     if (state !== S.PLAY || cracked || Math.abs(th) > 0.6) return;
@@ -263,13 +291,15 @@
     /* 寝ている卵はつまむと少し起きる */
     var m = Math.sqrt(tx * tx + tz * tz);
     gx = tx; gz = tz;
-    if (m > 0.5) { gx *= 0.5 / m; gz *= 0.5 / m; }
+    if (Math.abs(m - REST) < 0.01) { gx *= 0.5 / m; gz *= 0.5 / m; }
     ax = gx; az = gz;
     grabX = x; grabY = y; downY = lastY = y; lastMoveT = performance.now();
   }
   function move(x, y) {
     if (state !== S.PLAY || !held) return;
-    ax = gx + (x - grabX) / W * 1.2; az = gz + (y - grabY) / W * 1.2; limitAim();
+    /* 画面の向き（カメラの回り込み）に合わせて、指の左右・上下を机の上の向きに直す */
+    var ddx = (x - grabX) / W * 1.8, ddy = (y - grabY) / W * 1.8, cy = Math.cos(camYaw), sy = Math.sin(camYaw);
+    ax = gx + ddx * cy + ddy * sy; az = gz - ddx * sy + ddy * cy;
     var now = performance.now(), dtm = Math.max(1, now - lastMoveT);
     if ((y - lastY) / dtm > 2.2 && y - downY > 50) crack();
     lastY = y; lastMoveT = now;
@@ -298,6 +328,8 @@
     if (n === 1) { startButton.hidden = true; newRound(); }
     if (n === 2) { startButton.hidden = true; newRound(); tx = 0.2; tz = 0.2; th = 0.28; crack(); }
     if (n === 3) { startButton.hidden = true; newRound(); tx = 0.002; tz = 0.002; th = 0.003; vx = vz = 0; }
+    if (n === 5) { startButton.hidden = true; newRound(); tx = Math.PI - 0.002; tz = 0; th = tx; vx = vz = 0; }
+    if (n === 6) { startButton.hidden = true; newRound(); tx = 2.2; tz = 0.6; th = 2.28; vx = vz = 0; }
     if (n === 4) { startButton.hidden = true; newRound(); tx = 0.03; tz = -0.03; th = 0.042; vx = vz = 0; }
     /* ▼DEBUG: 数字キーで飛ぶ先。基本は「n を押すと n 番目の場面・工程の始めへ直接飛ぶ」（前は済ませた状態。開始前や結果画面からでも飛べる）。
        結果を直接出すより「次の操作でそうなる」形を優先（次に引くのが当たり、次の一押しでクリアなど）。録画で本物の動きが撮れる */
@@ -359,7 +391,7 @@
 
     /* ▼DRAW: ここに絵。立体の上に、文字やボタンを2Dで描く */
     var s3 = scene3d(), drew = false;
-    if (s3) { try { s3.sync({ t: T || 0, tx: tx, tz: tz, phi: phi, cracked: cracked, crackT: crackT }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (s3) { try { s3.sync({ t: T || 0, tx: tx, tz: tz, phi: phi, yaw: camYaw + camSpin, focus: camFocus, cracked: cracked, crackT: crackT }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
     if (!drew) { ctx.fillStyle = "#1d1714"; ctx.fillRect(0, 0, W, H); }
     if (state === S.PLAY && !hideUI) {
       ctx.save();

@@ -191,16 +191,20 @@
       this.table.add(m); this.bits.push(m);
     }
 
-    this.camX = 0;
-    this.aimCam(0);
+    this.camX = 0; this.camZ = 0;
+    this.aimCam(0, 0, 0, 0, 0);
     this.cracked = false;
   }
 
   GameScene.prototype.reset = function () {};
   /* カメラは卵の真ん中を横に追う（倒れても見切れない） */
-  GameScene.prototype.aimCam = function (x) {
-    this.camera.position.set(x, 1.4, 6.9);
-    this.camera.lookAt(x, 0.4, 0);
+  GameScene.prototype.aimCam = function (x, z, yaw, focus, shake) {
+    /* focus: 0=引き 1=卵が真上に近いとき低く寄る。yaw: 卵のまわりの回り込み */
+    var f = focus * focus * (3 - 2 * focus);
+    var d = 6.9 - 2.6 * f, h = 1.4 - 0.75 * f, ly = 0.4 + 0.08 * f;
+    var sx = shake ? (Math.random() - 0.5) * shake : 0, sy = shake ? (Math.random() - 0.5) * shake : 0;
+    this.camera.position.set(x + Math.sin(yaw) * d + sx, h + sy, z + Math.cos(yaw) * d);
+    this.camera.lookAt(x, ly, z);
   };
 
   GameScene.prototype.sync = function (s) {
@@ -232,9 +236,12 @@
     this.eggPivot.quaternion.setFromAxisAngle(this.tmpAxis, th);
     this.eggPivot.position.set(0, -low - lowX * dx * tp, 0);
     this.blob.position.set(lowX * 0.3 * dx, 0.002, lowX * 0.3 * dz);
-    var cx = Math.sin(th) * 0.5 * dx;
-    this.camX += (cx * 0.85 - this.camX) * 0.06;
-    this.aimCam(this.camX);
+    /* 卵の真ん中を追う（倒れても見切れない） */
+    var cm = Math.sin(Math.min(th, Math.PI)) * 0.42;
+    this.camX += (cm * dx - this.camX) * 0.06;
+    this.camZ += (cm * dz - this.camZ) * 0.06;
+    var ct0 = s.cracked ? (s.t || 0) - (s.crackT || 0) : 9;
+    this.aimCam(this.camX, this.camZ, s.yaw || 0, s.focus || 0, ct0 < 0.25 ? 0.08 * (1 - ct0 / 0.25) : 0);
     var stand = Math.max(0, 1 - Math.abs(th) * 1.6);
     this.blob.scale.set(0.75 + (1 - stand) * 0.6, 0.6 + (1 - stand) * 0.3, 1);
     this.blob.material.opacity = 0.5 + 0.4 * stand;
