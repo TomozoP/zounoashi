@@ -266,7 +266,9 @@
     if (this.skipRoll && this.prevEx != null) { this.rollX = this.prevEx + lowX * dx; this.skipRoll = false; }
     else if (this.prevC) {
       var ds = Math.hypot(lx - this.prevC[0], ly - this.prevC[1]);
-      if (ds < 0.3) this.rollX += ds * (aSigned >= this.prevA ? 1 : -1);
+      /* 割った平らな底の上では触れる点が端から端へ飛ぶだけなので進めない */
+      var onFace = this.cracked && ly < 0.002 && this.prevC[1] < 0.002;
+      if (ds < 0.3 && !onFace) this.rollX += ds * (aSigned >= this.prevA ? 1 : -1);
     }
     this.prevC = [lx, ly]; this.prevA = aSigned; this.prevT = tt;
     var ex = this.rollX - lowX * dx;
