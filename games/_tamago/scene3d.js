@@ -241,12 +241,44 @@
       .map(function (p) { return new T.Vector2(Math.max(p[0], 0.0001), p[1]); });
     var porcelain = new T.MeshPhysicalMaterial({ color: 0xf6f3ee, roughness: 0.18, clearcoat: 0.8, clearcoatRoughness: 0.15 });
     this.cups = [];
-    for (var gi = -1; gi <= 1; gi += 2) {
-      var cm = new T.Mesh(new T.LatheGeometry(cupProf, 48), porcelain);
-      cm.castShadow = true; cm.receiveShadow = true;
-      cm.position.set(gi * 6.5, 0, 0); cm.scale.setScalar(1.35); sc.add(cm); this.cups.push(cm);
+    var cm = new T.Mesh(new T.LatheGeometry(cupProf, 48), porcelain);
+    cm.castShadow = true; cm.receiveShadow = true;
+    cm.position.set(6.5, 0, 0); cm.scale.setScalar(1.35); sc.add(cm); this.cups.push(cm);
+    this.CUP_SEAT = 0.27;   /* 卵の足もとが座る高さ（右の卵立て） */
+
+    /* 左は塩の山。ざらざらの白い小山（頂上に卵の足もとが刺さる） */
+    var saltPts = [], srng = rand(31);
+    for (var si = 0; si <= 16; si++) {
+      var su = si / 16;                                      /* 0=すそ 1=頂上 */
+      saltPts.push(new T.Vector2(Math.max(0.0001, 0.62 * (1 - su)), 0.27 * (1 - Math.pow(1 - su, 1.6)) * (1 - 0.15 * su * su)));
     }
-    this.CUP_SEAT = 0.27;   /* 卵の足もとが座る高さ */
+    var saltG = new T.LatheGeometry(saltPts, 48);
+    /* すそを少しでこぼこに */
+    var sp = saltG.attributes.position;
+    for (si = 0; si < sp.count; si++) {
+      var syy = sp.getY(si), ang = Math.atan2(sp.getZ(si), sp.getX(si));
+      var wob = 1 + (Math.sin(ang * 5 + 1.3) * 0.05 + Math.sin(ang * 9) * 0.03) * (1 - syy / 0.27);
+      sp.setX(si, sp.getX(si) * wob); sp.setZ(si, sp.getZ(si) * wob);
+    }
+    saltG.computeVertexNormals();
+    var saltTex = Z3.canvasTex(256, 256, function (g, w, h) {
+      var r = rand(41); g.fillStyle = "#e9e6e0"; g.fillRect(0, 0, w, h);
+      for (var i = 0; i < 5000; i++) { var v = 200 + Math.floor(r() * 55); g.fillStyle = "rgb(" + v + "," + v + "," + (v - 4) + ")"; g.fillRect(r() * w, r() * h, 1.6, 1.6); }
+    });
+    this.salt = new T.Mesh(saltG, new T.MeshStandardMaterial({ map: saltTex, bumpMap: saltTex, bumpScale: 1.2, roughness: 0.95 }));
+    this.salt.position.set(-6.5, 0, 0); this.salt.castShadow = true; this.salt.receiveShadow = true;
+    sc.add(this.salt);
+    /* 粒の飛び散り */
+    this.grains = [];
+    var gmat = new T.MeshStandardMaterial({ color: 0xf4f2ee, roughness: 0.7 });
+    var ggeo = new T.BoxGeometry(0.018, 0.018, 0.018);
+    for (si = 0; si < 40; si++) {
+      var gm2 = new T.Mesh(ggeo, gmat); gm2.visible = false;
+      var ga = srng() * Math.PI * 2;
+      gm2.userData = { vx: Math.cos(ga) * (0.4 + srng() * 0.8), vz: Math.sin(ga) * (0.3 + srng() * 0.6), vy: 0.8 + srng() * 1.2 };
+      sc.add(gm2); this.grains.push(gm2);
+    }
+    this.SALT_SEAT = 0.19;
 
     /* 孵化: 殻の下半分・上のかけら・ヒヨコ */
     var cupPts = [], capPts = [];
@@ -321,7 +353,7 @@
     var cupK = 0;
     if (s.cup != null && s.cup >= 0) {
       /* 卵立てに入る間は転がって進まない。いまの場所から卵立ての上へ弧を描いて収まる */
-      if (this.cupFrom == null) { this.cupFrom = [this.prevEx || 0, 0]; this.cupX = (this.rollX >= 0 ? 1 : -1) * (s.gapX || 6.5); }
+      if (this.cupFrom == null) { this.cupFrom = [this.prevEx || 0, 0]; this.cupSide = this.rollX >= 0 ? 1 : -1; this.cupX = this.cupSide * (s.gapX || 6.5); }
       cupK = Math.min(1, s.cup / 0.45);
       cupK = cupK * cupK * (3 - 2 * cupK);
     } else if (this.skipRoll && this.prevEx != null) { this.rollX = this.prevEx + lowX * dx; this.skipRoll = false; }
@@ -338,10 +370,19 @@
     var py = -low - lowX * dx * tp;
     if (cupK > 0) {
       ex = this.cupFrom[0] + (this.cupX - this.cupFrom[0]) * cupK;
-      py = py * (1 - cupK) + this.CUP_SEAT * cupK + Math.sin(cupK * Math.PI) * 0.35;
+      py = py * (1 - cupK) + (this.cupSide > 0 ? this.CUP_SEAT : this.SALT_SEAT) * cupK + Math.sin(cupK * Math.PI) * 0.35;
       this.rollX = ex + lowX * dx;
     } else this.cupFrom = null;
     this.eggPivot.position.set(ex, py, 0);
+    /* 塩に刺さった瞬間、粒が飛び散る */
+    var gt = (cupK > 0 && this.cupSide < 0) ? s.cup - 0.45 : -1;
+    for (var gi2 = 0; gi2 < this.grains.length; gi2++) {
+      var gr2 = this.grains[gi2], gu = gr2.userData;
+      gr2.visible = gt >= 0;
+      if (gt < 0) continue;
+      var gtt = Math.min(gt, 0.6);
+      gr2.position.set(-6.5 + gu.vx * gtt, Math.max(0.01, 0.2 + gu.vy * gtt - 4.9 * gtt * gtt), gu.vz * gtt);
+    }
     /* 温まると、ほんのり赤みが出る */
     var hv = Math.min(1, s.heat || 0);
     this.shellMat.emissive = this.shellMat.emissive || new T.Color();
