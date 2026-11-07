@@ -311,10 +311,14 @@
     if (hs >= 0 && this.hatchShake) this.eggPivot.rotateZ(this.hatchShake);
     /* 転がり: 机に触れている点は滑らないので、殻の上で触れる点が動いた分だけ卵が進む（どこまでも） */
     var tt = s.t || 0, aSigned = tx;
-    if (tt < this.prevT || !this.prevC) { this.rollX = lowX * dx; this.prevC = null; this.crackX = null; this.camX = 0; this.skipRoll = false; this.prevEx = null; }
+    if (tt < this.prevT || !this.prevC) { this.rollX = lowX * dx; this.prevC = null; this.crackX = null; this.camX = 0; this.skipRoll = false; this.prevEx = null; this.wedgeEx = null; }
     if (global.__eggJump != null) { this.rollX = global.__eggJump + lowX * dx; global.__eggJump = null; this.camX = global.__eggJump0 = this.rollX; this.prevC = null; }
     var lx = cLx * dx, ly = cLy;
-    if (this.skipRoll && this.prevEx != null) { this.rollX = this.prevEx + lowX * dx; this.skipRoll = false; }
+    if (s.wedged) {
+      /* すき間にはまっている間は、すき間の真上で起き上がるだけ（転がって進まない） */
+      if (this.wedgeEx == null) this.wedgeEx = (this.rollX >= 0 ? 1 : -1) * (s.gapX || 6.5);
+      this.rollX = this.wedgeEx + lowX * dx;
+    } else if (this.skipRoll && this.prevEx != null) { this.rollX = this.prevEx + lowX * dx; this.skipRoll = false; }
     else if (this.prevC) {
       var ds = Math.hypot(lx - this.prevC[0], ly - this.prevC[1]);
       /* 割った平らな底の上では触れる点が端から端へ飛ぶだけなので進めない */
@@ -345,9 +349,8 @@
         this.cap.rotation.set(0, 0, -2.2 * k2);
         var k3 = Math.min(1, Math.max(0, (hs - 1.2) / 0.6)), ease = 1 - Math.pow(1 - k3, 3);
         this.chick.visible = true;
-        /* 殻から顔を出したあと、ぴょんと横に飛び出して机の上に立つ */
-        var k4 = Math.min(1, Math.max(0, (hs - 2.0) / 0.5));
-        this.chick.position.set(ex - 0.62 * k4, (-0.35 + 0.5 * ease) * (1 - k4) + Math.sin(k4 * Math.PI) * 0.45, 0.02 + 0.25 * k4);
+        /* 殻が割れて、ヒヨコが上に出てくる */
+        this.chick.position.set(ex, -0.35 + 0.68 * ease, 0.02);
         this.chick.rotation.y = Math.sin(hs * 2) * 0.3;
       }
     } else if (!this.egg.visible || this.chick.visible) {

@@ -152,7 +152,7 @@
   /* 左右ガイド: 最初と、しばらく触っていないときに出す */
   var idleT = 9, guideA = 0, holdX = 0;
   /* 隠しの正解: こすって温めると孵化（hatch）、遠くの板のすき間にはまる（gap） */
-  var heat = 0, hatchT = -1, rubDir = 0, rubFlipT = 0, rubLastX = 0, wedged = false, sink = 0;
+  var heat = 0, hatchT = -1, rubDir = 0, rubFlipT = 0, rubLastX = 0, wedged = 0, sink = 0, prevEggX = 0;
   var GAP_X = 6.5;
   var tx = 0, tz = 0, vx = 0, vz = 0, ax = 0, az = 0, gx = 0, gz = 0;
   var cracked = 0, crackT = 0, falling = false, fallT = 0, cleared = false, endT = 0, keyDir = 0;
@@ -179,7 +179,7 @@
     phi = 0; keyDir = 0; standT = 0;
     cracked = 0; crackT = 0; falling = false; fallT = 0; cleared = false; endT = 0;
     if (confetti) confetti.clear();
-    heat = 0; hatchT = -1; rubDir = 0; wedged = false; sink = 0;
+    heat = 0; hatchT = -1; rubDir = 0; wedged = 0; sink = 0; prevEggX = 0;
     camSpin = 0; camSpinT = 0; idleT = 9; guideA = 0;
   }
 
@@ -236,13 +236,16 @@
     if (!cr && Math.abs(up) < EPS * 0.6) acc += DIMPLE * 3 * up - 3 * vx;
     if (cr === 2 && Math.abs(up) < 0.08) acc = 45 * up - 14 * vx;
     /* 板のすき間: 起きぎみの卵の足もとが、すき間の上に来たらはまって立つ */
-    var ex = window.__eggX || 0;
-    if (!wedged && !held && !cr && Math.abs(am) < 0.5 && Math.abs(Math.abs(ex) - GAP_X) < 0.12) {
-      wedged = true; noiseHit(0.07, 700, 0.35, 1.2);
+    /* 足もと（机に触れている点）がすき間の上を通ったら（1コマで飛び越えても）、起きぎみ・逆さぎみならはまる */
+    var ex = window.__eggX || 0, gd = Math.abs(ex) - GAP_X, gpd = Math.abs(prevEggX) - GAP_X;
+    var overGap = Math.abs(gd) < 0.16 || (gd * gpd < 0 && Math.abs(Math.abs(ex) - Math.abs(prevEggX)) < 1);
+    prevEggX = ex;
+    if (!wedged && !cr && overGap && (Math.abs(am) < 0.9 || Math.abs(up) < 0.9)) {
+      wedged = Math.abs(am) < 0.9 ? 1 : 2; held = false; vx *= 0.2; noiseHit(0.07, 700, 0.35, 1.2);
     }
-    if (wedged && Math.abs(am) > 0.9) wedged = false;
     sink += ((wedged ? 0.06 : 0) - sink) * Math.min(1, dt * 10);
-    if (wedged) acc = -45 * am - 12 * vx + (held ? HOLD_K * 0.3 * (ax - a) : 0);
+    if (wedged === 1) acc = -45 * am - 12 * vx;
+    if (wedged === 2) acc = 45 * up - 12 * vx;
     if (held) {
       /* 指はばねのように卵を引っぱる（ぴったり張りつかない）。指先のわずかな震え */
       var jx = Math.sin(T * 9.3) * 0.005 + Math.sin(T * 5.1) * 0.004;
@@ -253,7 +256,7 @@
     th = Math.abs(am); om = Math.abs(vx);
     if (held) { standT = 0; return; }
     var prevN = Math.floor(standT);
-    if (((wedged && th < 0.2) || (cracked === 1 && th < 0.3) || (cracked === 2 && Math.PI - th < 0.18) || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
+    if (((wedged === 1 && th < 0.2) || (wedged === 2 && Math.PI - th < 0.2) || (cracked === 1 && th < 0.3) || (cracked === 2 && Math.PI - th < 0.18) || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
     /* 静止したら 1,2,3,4,5 と数える */
     if (standT > 0 && Math.floor(standT) !== prevN && standT < STAND) tone(880, 0.09, 0.12, "sine");
     if (standT > 0 && prevN === 0 && standT <= dt * 1.5) tone(880, 0.09, 0.12, "sine");
@@ -410,7 +413,7 @@
 
     /* ▼DRAW: ここに絵。立体の上に、文字やボタンを2Dで描く */
     var s3 = scene3d(), drew = false;
-    if (s3) { try { s3.sync({ t: T || 0, tx: tx, tz: tz, phi: phi, yaw: camYaw + camSpin, focus: camFocus, cracked: cracked, crackT: crackT, heat: heat, hatch: hatchT >= 0 ? T - hatchT : -1, sink: sink, gapX: GAP_X }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (s3) { try { s3.sync({ t: T || 0, tx: tx, tz: tz, phi: phi, yaw: camYaw + camSpin, focus: camFocus, cracked: cracked, crackT: crackT, heat: heat, hatch: hatchT >= 0 ? T - hatchT : -1, sink: sink, gapX: GAP_X, wedged: wedged }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
     if (!drew) { ctx.fillStyle = "#1d1714"; ctx.fillRect(0, 0, W, H); }
     if (state === S.PLAY && !hideUI) {
       ctx.save();
