@@ -204,7 +204,8 @@
   };
 
   GameScene.prototype.sync = function (s) {
-    var phi = s.phi || 0, th = s.th || 0;
+    var phi = s.phi || 0, tx = s.tx || 0, tz = s.tz || 0, th = Math.sqrt(tx * tx + tz * tz);
+    var dx = th > 1e-6 ? tx / th : 1, dz = th > 1e-6 ? tz / th : 0;
     this.table.rotation.z = -phi;
     if (!!s.cracked !== this.cracked) {
       this.cracked = !!s.cracked;
@@ -224,11 +225,14 @@
       if (yl < low) { low = yl; lowX = xl; }
     }
     /* 机の面（足もとの中心を軸に傾いている）の高さ */
-    var tz = Math.tan(phi);
-    this.eggPivot.rotation.z = -th;
-    this.eggPivot.position.set(-lowX * 0 + (s.slide || 0), -low - lowX * tz, 0);
-    this.blob.position.x = (s.slide || 0) + lowX * 0.3;
-    var cx = Math.sin(th) * 0.5;
+    var tp = Math.tan(phi);
+    /* 傾く向きに倒す（上向きの軸を、向き d へ th だけ回す） */
+    this.tmpAxis = this.tmpAxis || new T.Vector3();
+    this.tmpAxis.set(dz, 0, -dx);
+    this.eggPivot.quaternion.setFromAxisAngle(this.tmpAxis, th);
+    this.eggPivot.position.set(0, -low - lowX * dx * tp, 0);
+    this.blob.position.set(lowX * 0.3 * dx, 0.002, lowX * 0.3 * dz);
+    var cx = Math.sin(th) * 0.5 * dx;
     this.camX += (cx * 0.85 - this.camX) * 0.06;
     this.aimCam(this.camX);
     var stand = Math.max(0, 1 - Math.abs(th) * 1.6);
