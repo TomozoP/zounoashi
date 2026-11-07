@@ -1,4 +1,4 @@
-/* コロンブスの卵の立体（three.js）。見た目だけ。進行は index.html 側。
+/* コロコロたまごの立体（three.js）。見た目だけ。進行は index.html 側。
    sync({ th: 卵の傾き(重力に対して、右へ+), phi: 机の傾き(右が下がる+), cracked, crackT, t }) */
 (function (global) {
   "use strict";
