@@ -116,6 +116,26 @@
     s.connect(f); f.connect(g); g.connect(AC.destination);
     s.start(n); s.stop(n + dur + 0.05);
   }
+  /* 卵が机の上を転がるゴロゴロ音（つないだまま音量だけ変える） */
+  var roll = null;
+  function rollSound(v) {
+    if (!AC || !NOISE) return;
+    if (!roll) {
+      try {
+        var src = AC.createBufferSource(); src.buffer = NOISE; src.loop = true;
+        var f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 420; f.Q.value = 0.9;
+        var lp = AC.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 1400;
+        var g = AC.createGain(); g.gain.value = 0;
+        src.connect(f); f.connect(lp); lp.connect(g); g.connect(AC.destination); src.start();
+        roll = { g: g, f: f };
+      } catch (e) { return; }
+    }
+    var n = AC.currentTime;
+    /* 殻のでこぼこで小さく揺れる */
+    var j = 0.75 + Math.random() * 0.5;
+    roll.g.gain.setTargetAtTime(v * 0.32 * j, n, 0.03);
+    roll.f.frequency.setTargetAtTime(300 + v * 500, n, 0.05);
+  }
   document.addEventListener("visibilitychange", function () {
     if (!AC) return;
     if (document.hidden) { try { AC.suspend(); } catch (e) {} }
@@ -129,7 +149,7 @@
   var th = 0, om = 0, phi = 0, aim = 0, grabX = 0, grabTh = 0, standT = 0;
   var cracked = false, crackT = 0, falling = false, fallT = 0, cleared = false, endT = 0, keyDir = 0;
   var lastY = 0, lastMoveT = 0, downY = 0;
-  var K = 6.5, REST = 1.36, EPS = 0.012, STAND = 3;
+  var K = 9.5, REST = 1.36, EPS = 0.012, STAND = 3;
   var confetti = window.zCelebrate ? window.zCelebrate.confetti() : null;
 
   var CY, hideUI = false;                                      /* 高さから決まる置き場所 */
@@ -155,9 +175,11 @@
      卵をつまんで左右に傾け、離すと卵だけで立つ。真上のごく狭い範囲で離したときだけ止まる。 */
   function update(dt) {
     if (confetti && state === S.RESULT) confetti.step(dt, W, H);
-    if (state !== S.PLAY) return;
+    if (state !== S.PLAY) { rollSound(0); return; }
     T += dt;
     score = T;
+    /* 転がる速さ（重心の横の動き）で音を出す。つまんでいる間も机に触れているので鳴る */
+    rollSound(Math.min(1, Math.abs(om) * Math.max(0.25, Math.abs(Math.sin(th)) + 0.2) / 2.2));
 
     if (keyMode && keyDir) { held = true; aim = clamp(aim + keyDir * dt * 0.35, -REST, REST); }
     if (held) {
@@ -175,13 +197,13 @@
       /* 真上のくぼみ。ここで静かに離せば止まる */
       om += (-30 * th - 6 * om) * dt;
     } else if (Math.abs(th) < REST) {
-      om += (K * Math.sin(th) - 0.3 * om) * dt;
+      om += (K * Math.sin(th) - 0.12 * om) * dt;
     }
     th += om * dt;
     if (Math.abs(th) >= REST && om * th > 0) {
       th = (th > 0 ? 1 : -1) * REST;
       if (Math.abs(om) > 0.6) noiseHit(0.08, 900, 0.18, 2);
-      om = -om * 0.28;
+      om = -om * 0.45;
     }
     var prevN = Math.floor(standT);
     if ((cracked || Math.abs(th) < EPS) && Math.abs(om) < 0.06) standT += dt; else standT = 0;
