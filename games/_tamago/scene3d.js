@@ -15,6 +15,29 @@
   })();
   var FLAT = 0.065;                                     /* 割ったときに平らにする高さ */
 
+  /* 卵の形から、傾き a のときの一番低い点（足もとを原点に回したとき）。ゲーム側の物理でも使う */
+  /* 物理用の細かい輪郭（角ばると真上で転がり方が変わるため） */
+  var FN = 480, FINE = [];
+  for (var fj = 0; fj <= FN; fj++) {
+    var fa = fj / FN * Math.PI, ft = -Math.cos(fa);
+    FINE.push([0.36 * Math.sin(fa) * (1 - 0.13 * ft), (ft + 1) / 2]);
+  }
+  global.EggShape = {
+    COM: 0.46,  /* 重心の高さ（足もとから） */
+    FLAT: FLAT,
+    low: function (a, cracked) {
+      var c = Math.cos(a), sn = Math.sin(a), low = 1e9;
+      for (var j = 0; j <= FN; j++) {
+        var rr = FINE[j][0], y = cracked ? Math.max(FINE[j][1], FLAT) - FLAT : FINE[j][1];
+        if (cracked && FINE[j][1] < FLAT) rr *= 0.7 + 0.3 * FINE[j][1] / FLAT;
+        var y1 = y * c - rr * sn, y2 = y * c + rr * sn;
+        if (y1 < low) low = y1;
+        if (y2 < low) low = y2;
+      }
+      return low;
+    }
+  };
+
   function rand(seed) { return Z3.rng(seed); }
 
   /* 殻の絵（色むら・細かい斑点）。crack なら下の方にひび */

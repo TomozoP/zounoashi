@@ -154,7 +154,8 @@
   var tx = 0, tz = 0, vx = 0, vz = 0, ax = 0, az = 0, gx = 0, gz = 0;
   var cracked = false, crackT = 0, falling = false, fallT = 0, cleared = false, endT = 0, keyDir = 0;
   var lastY = 0, lastMoveT = 0, downY = 0;
-  var K = 9.5, REST = 1.36, EPS = 0.005, STAND = 3;
+  var G = 35, INERTIA = 0.3, ROLL_DAMP = 0.5, DIMPLE = 30, HOLD_K = 260, HOLD_C = 28;
+  var K = 9.5, REST = 1.72, EPS = 0.005, STAND = 3;
   var confetti = window.zCelebrate ? window.zCelebrate.confetti() : null;
 
   var CY, hideUI = false;                                      /* 高さから決まる置き場所 */
@@ -196,67 +197,31 @@
     var sp = Math.sqrt(vx * vx + vz * vz);
     rollSound(Math.min(1, sp * Math.max(0.25, Math.sin(th) + 0.2) / 2.2));
 
-    if (keyMode && keyDir) { if (!held) { ax = tx; az = tz; } held = true; ax += keyDir * dt * 0.35; limitAim(); }
+    if (keyMode && keyDir) { if (!held) { ax = tx; az = 0; } held = true; ax += keyDir * dt * 0.35; }
+
+    /* ===== 物理 =====
+       卵は机の上を滑らずに転がる。重心の高さ（形から計算）が下がる向きに倒れ、
+       横に寝た所で揺れながら落ち着く。真上・さかさはごく狭い範囲だけ止まれる（殻のざらつき） */
+    var a = tx, cr = cracked;
+    var hc = function (q) { return -window.EggShape.low(q, cr) + (window.EggShape.COM - (cr ? window.EggShape.FLAT : 0)) * Math.cos(q); };
+    var dH = (hc(a + 0.002) - hc(a - 0.002)) / 0.004;
+    var acc = -G * dH / INERTIA - ROLL_DAMP * vx;
+    var am = ((a % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;   /* -π〜π */
+    if (cr && Math.abs(am) < 0.3) acc -= 4 * vx;   /* 平らな底が机をたたいて勢いが消える */
+    if (!cr && Math.abs(am) < EPS) acc += -DIMPLE * am - 3 * vx;
+    var up = am > 0 ? Math.PI - am : -Math.PI - am;                          /* さかさからのずれ */
+    if (!cr && Math.abs(up) < EPS * 0.6) acc += DIMPLE * 3 * up - 3 * vx;
     if (held) {
-      /* 指についてくる。指先のわずかな震え（前後左右） */
-      var jx = Math.sin(T * 9.3) * 0.005 + Math.sin(T * 5.1) * 0.004, jz = 0;
-      var k = Math.min(1, dt * 14), nx = tx + (ax + jx - tx) * k, nz = tz + (az + jz - tz) * k;
-      vx = (nx - tx) / dt; vz = (nz - tz) / dt; tx = nx; tz = nz;
-      th = Math.sqrt(tx * tx + tz * tz); om = Math.sqrt(vx * vx + vz * vz);
-      standT = 0;
-      return;
+      /* 指はばねのように卵を引っぱる（ぴったり張りつかない）。指先のわずかな震え */
+      var jx = Math.sin(T * 9.3) * 0.005 + Math.sin(T * 5.1) * 0.004;
+      acc += HOLD_K * (ax + jx - a) - HOLD_C * vx;
     }
-    th = Math.sqrt(tx * tx + tz * tz);
-    /* つまんで一回転させたあと: 半回転を超えた分は反対向きの傾きに直す */
-    if (th > Math.PI) {
-      var mm = th % (Math.PI * 2), sc = mm > Math.PI ? -(Math.PI * 2 - mm) / th : mm / th;
-      tx *= sc; tz *= sc; th = Math.sqrt(tx * tx + tz * tz);
-    }
-    var prevTh = th;
-    var ux = th > 1e-6 ? tx / th : 0, uz = th > 1e-6 ? tz / th : 0;
-    if (cracked) {
-      /* 底が平らなので起き上がる */
-      vx += (-70 * tx - 9 * vx) * dt; vz += (-70 * tz - 9 * vz) * dt;
-    } else if (th < EPS) {
-      /* 真上のくぼみ。ここで静かに離せば止まる */
-      vx += (-14 * tx - 3 * vx) * dt; vz += (-14 * tz - 3 * vz) * dt;
-    } else if (th < REST) {
-      var g = K * Math.sin(th);
-      vx += (g * ux - 0.12 * vx) * dt; vz += (g * uz - 0.12 * vz) * dt;
-    } else if (Math.PI - th < EPS * 0.6) {
-      /* さかさ（とがった方が下）でもごく狭い範囲なら止まる */
-      var e = Math.PI - th;
-      vx += (14 * e * ux - 3 * vx) * dt; vz += (14 * e * uz - 3 * vz) * dt;
-    } else if (th > REST + 0.001) {
-      /* とがった方が下: 横に寝る向きへ倒れる */
-      var g2 = -K * Math.sin(th);
-      vx += (g2 * ux - 0.12 * vx) * dt; vz += (g2 * uz - 0.12 * vz) * dt;
-    } else if (th >= REST - 0.001) {
-      /* 寝ている卵は向きを変えながらゆっくり転がる */
-      vx -= vx * 0.6 * dt; vz -= vz * 0.6 * dt;
-    }
-    tx += vx * dt; tz += vz * dt;
-    th = Math.sqrt(tx * tx + tz * tz);
-    /* 横に寝る角度で机に当たって跳ね返る（立つ側からも、さかさ側からも） */
-    var fromBelow = prevTh < REST - 0.001 && th >= REST;
-    var fromTop = prevTh > REST + 0.001 && th <= REST;
-    var lying = !fromBelow && !fromTop && Math.abs(prevTh - REST) <= 0.001;
-    if ((fromBelow || fromTop || lying) && th > 1e-6) {
-      ux = tx / th; uz = tz / th;
-      var vr = vx * ux + vz * uz;
-      if (lying) {
-        /* 寝ているときは、さかさ側へ持ち上がる動きだけ止める */
-        tx = ux * REST; tz = uz * REST; th = REST;
-        if (vr > 0) { vx -= ux * vr; vz -= uz * vr; }
-      } else {
-        tx = ux * REST; tz = uz * REST; th = REST;
-        if (Math.abs(vr) > 0.6) noiseHit(0.08, 900, 0.18, 2);
-        vx -= ux * vr * 1.45; vz -= uz * vr * 1.45;
-      }
-    }
-    om = Math.sqrt(vx * vx + vz * vz);
+    vx += acc * dt; tx += vx * dt; tz = 0; vz = 0;
+    am = ((tx % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+    th = Math.abs(am); om = Math.abs(vx);
+    if (held) { standT = 0; return; }
     var prevN = Math.floor(standT);
-    if ((cracked || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
+    if (((cracked && th < 0.3) || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
     /* 静止したら 1,2,3,4,5 と数える */
     if (standT > 0 && Math.floor(standT) !== prevN && standT < STAND) tone(880, 0.09, 0.12, "sine");
     if (standT > 0 && prevN === 0 && standT <= dt * 1.5) tone(880, 0.09, 0.12, "sine");
