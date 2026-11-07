@@ -63,18 +63,21 @@
       if (crack) {
         /* 下の端(絵の下側＝輪郭の下)から上へ伸びるひび */
         g.lineJoin = "round";
-        for (var k = 0; k < 14; k++) {
-          var x0 = (k + r() * 0.6) / 14 * w, y0 = h - 2;
+        /* 下から上へ伸びる、枝分かれしたひび（立てたときに机の上から見える高さまで） */
+        var crackLine = function (x0, y0, len, n, width, depth) {
           g.beginPath(); g.moveTo(x0, y0);
-          var x1 = x0, y1 = y0, len = 18 + r() * 34;
-          for (var s2 = 0; s2 < 5; s2++) {
-            x1 += (r() - 0.5) * 14; y1 -= len / 5 * (0.6 + r() * 0.8);
-            g.lineTo(x1, y1);
+          var x1 = x0, y1 = y0, pts = [];
+          for (var s2 = 0; s2 < n; s2++) {
+            x1 += (r() - 0.5) * 22; y1 -= len / n * (0.6 + r() * 0.8);
+            g.lineTo(x1, y1); pts.push([x1, y1]);
           }
-          g.strokeStyle = "rgba(70,48,30,.9)"; g.lineWidth = 2.6; g.stroke();
-          g.strokeStyle = "rgba(255,250,240,.6)"; g.lineWidth = 0.8;
-          g.save(); g.translate(1, -1); g.stroke(); g.restore();
-        }
+          g.strokeStyle = "rgba(60,40,24,.92)"; g.lineWidth = width; g.stroke();
+          g.strokeStyle = "rgba(255,250,240,.55)"; g.lineWidth = width * 0.4;
+          g.save(); g.translate(1.2, -1); g.stroke(); g.restore();
+          if (depth < 2) for (var q = 0; q < pts.length - 1; q++) if (r() < 0.35) crackLine(pts[q][0], pts[q][1], len * 0.45, 3, width * 0.7, depth + 1);
+        };
+        g.lineJoin = "round"; g.lineCap = "round";
+        for (var k = 0; k < 11; k++) crackLine((k + r() * 0.6) / 11 * w, h - 2, 55 + r() * 45, 6, 2.6, 0);
         g.fillStyle = "rgba(120,90,60,.35)"; g.fillRect(0, h - 10, w, 10);
       }
     };
@@ -261,7 +264,7 @@
     this.eggPivot.quaternion.setFromAxisAngle(this.tmpAxis, th);
     /* 転がり: 机に触れている点は滑らないので、殻の上で触れる点が動いた分だけ卵が進む（どこまでも） */
     var tt = s.t || 0, aSigned = tx;
-    if (tt < this.prevT || !this.prevC) { this.rollX = lowX * dx; this.prevC = null; this.crackX = null; this.camX = 0; }
+    if (tt < this.prevT || !this.prevC) { this.rollX = lowX * dx; this.prevC = null; this.crackX = null; this.camX = 0; this.skipRoll = false; this.prevEx = null; }
     var lx = cLx * dx, ly = cLy;
     if (this.skipRoll && this.prevEx != null) { this.rollX = this.prevEx + lowX * dx; this.skipRoll = false; }
     else if (this.prevC) {
