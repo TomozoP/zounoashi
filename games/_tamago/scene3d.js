@@ -22,14 +22,20 @@
     var fa = fj / FN * Math.PI, ft = -Math.cos(fa);
     FINE.push([0.36 * Math.sin(fa) * (1 - 0.13 * ft), (ft + 1) / 2]);
   }
+  /* 割り方: 0=なし 1=底(太い方)を割る 2=とがった方を割る。割った所は平らにつぶれる */
+  function shapePt(r0, y0, mode) {
+    if (mode === 1 && y0 < FLAT) return [r0 * (0.7 + 0.3 * y0 / FLAT), 0];
+    if (mode === 1) return [r0, y0 - FLAT];
+    if (mode === 2 && y0 > 1 - FLAT) return [r0 * (0.7 + 0.3 * (1 - y0) / FLAT), 1 - FLAT];
+    return [r0, y0];
+  }
   global.EggShape = {
     COM: 0.46,  /* 重心の高さ（足もとから） */
     FLAT: FLAT,
     low: function (a, cracked) {
       var c = Math.cos(a), sn = Math.sin(a), low = 1e9;
       for (var j = 0; j <= FN; j++) {
-        var rr = FINE[j][0], y = cracked ? Math.max(FINE[j][1], FLAT) - FLAT : FINE[j][1];
-        if (cracked && FINE[j][1] < FLAT) rr *= 0.7 + 0.3 * FINE[j][1] / FLAT;
+        var sp = shapePt(FINE[j][0], FINE[j][1], cracked || 0), rr = sp[0], y = sp[1];
         var y1 = y * c - rr * sn, y2 = y * c + rr * sn;
         if (y1 < low) low = y1;
         if (y2 < low) low = y2;
@@ -41,8 +47,9 @@
   function rand(seed) { return Z3.rng(seed); }
 
   /* 殻の絵（色むら・細かい斑点）。crack なら下の方にひび */
-  function shellPaint(crack) {
+  function shellPaint(crack, top) {
     return function (g, w, h) {
+      if (top) { g.translate(0, h); g.scale(1, -1); }   /* とがった方（絵の上側）にひびを描く */
       var r = rand(11);
       g.fillStyle = "#efe2cf"; g.fillRect(0, 0, w, h);
       for (var i = 0; i < 260; i++) {
@@ -189,9 +196,17 @@
     }
     this.geoCracked.computeVertexNormals();
     this.geoCracked.translate(0, -FLAT, 0);
+    this.geoCrackedTop = this.geo.clone();
+    pos = this.geoCrackedTop.attributes.position;
+    for (i = 0; i < pos.count; i++) {
+      var yt = pos.getY(i);
+      if (yt > 1 - FLAT) { var kt = (1 - yt) / FLAT; pos.setY(i, 1 - FLAT); pos.setX(i, pos.getX(i) * (0.7 + 0.3 * kt)); pos.setZ(i, pos.getZ(i) * (0.7 + 0.3 * kt)); }
+    }
+    this.geoCrackedTop.computeVertexNormals();
     var bump = Z3.canvasTex(512, 256, bumpPaint);
     this.mapPlain = Z3.canvasTex(512, 256, shellPaint(false));
     this.mapCrack = Z3.canvasTex(512, 256, shellPaint(true));
+    this.mapCrackTop = Z3.canvasTex(512, 256, shellPaint(true, true));
     this.shellMat = new T.MeshPhysicalMaterial({
       map: this.mapPlain, bumpMap: bump, bumpScale: 0.6, roughness: 0.58, metalness: 0,
       clearcoat: 0.15, clearcoatRoughness: 0.5, sheen: 0.3, sheenColor: new T.Color(0xfff6ea), sheenRoughness: 0.6
@@ -219,7 +234,7 @@
 
     this.camX = 0; this.camZ = 0; this.rollX = 0; this.prevC = null; this.prevA = 0; this.prevT = 0; this.crackX = null;
     this.aimCam(0, 0, 0, 0, 0);
-    this.cracked = false;
+    this.cracked = 0;
   }
 
   GameScene.prototype.reset = function () {};
@@ -238,18 +253,17 @@
     var phi = s.phi || 0, tx = s.tx || 0, tz = s.tz || 0, th = Math.sqrt(tx * tx + tz * tz);
     var dx = th > 1e-6 ? tx / th : 1, dz = th > 1e-6 ? tz / th : 0;
     this.table.rotation.z = -phi;
-    if (!!s.cracked !== this.cracked) {
-      this.cracked = !!s.cracked;
-      this.egg.geometry = this.cracked ? this.geoCracked : this.geo;
-      this.shellMat.map = this.cracked ? this.mapCrack : this.mapPlain;
+    if ((s.cracked || 0) !== this.cracked) {
+      this.cracked = s.cracked || 0;
+      this.egg.geometry = this.cracked === 1 ? this.geoCracked : this.cracked === 2 ? this.geoCrackedTop : this.geo;
+      this.shellMat.map = this.cracked === 1 ? this.mapCrack : this.cracked === 2 ? this.mapCrackTop : this.mapPlain;
       this.shellMat.needsUpdate = true;
       this.skipRoll = true;   /* 形が変わった瞬間に横へずれないように */
     }
     /* 卵は足もとの点で机に乗る。傾けたら、一番低い所が机の面に来るように持ち上げる */
     var c = Math.cos(th), sn = Math.sin(th), low = 1e9, lowX = 0, cLx = 0, cLy = 0;
     for (var j = 0; j <= N; j++) {
-      var rr = PROF[j][0], y = this.cracked ? Math.max(PROF[j][1], FLAT) - FLAT : PROF[j][1];
-      if (this.cracked && PROF[j][1] < FLAT) rr *= 0.7 + 0.3 * PROF[j][1] / FLAT;
+      var sp = shapePt(PROF[j][0], PROF[j][1], this.cracked), rr = sp[0], y = sp[1];
       /* 右に倒れる(th>0)ときは右側(x=+r)の縁が下がる */
       var yr = y * c - rr * sn, xr = y * sn + rr * c;
       var yl = y * c + rr * sn, xl = y * sn - rr * c;
@@ -270,7 +284,8 @@
     else if (this.prevC) {
       var ds = Math.hypot(lx - this.prevC[0], ly - this.prevC[1]);
       /* 割った平らな底の上では触れる点が端から端へ飛ぶだけなので進めない */
-      var onFace = this.cracked && ly < 0.002 && this.prevC[1] < 0.002;
+      var fy = this.cracked === 2 ? 1 - FLAT : 0;
+      var onFace = this.cracked && Math.abs(ly - fy) < 0.002 && Math.abs(this.prevC[1] - fy) < 0.002;
       if (ds < 0.3 && !onFace) this.rollX += ds * (aSigned >= this.prevA ? 1 : -1);
     }
     this.prevC = [lx, ly]; this.prevA = aSigned; this.prevT = tt;

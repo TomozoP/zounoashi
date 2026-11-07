@@ -152,7 +152,7 @@
   /* 左右ガイド: 最初と、しばらく触っていないときに出す */
   var idleT = 9, guideA = 0, holdX = 0;
   var tx = 0, tz = 0, vx = 0, vz = 0, ax = 0, az = 0, gx = 0, gz = 0;
-  var cracked = false, crackT = 0, falling = false, fallT = 0, cleared = false, endT = 0, keyDir = 0;
+  var cracked = 0, crackT = 0, falling = false, fallT = 0, cleared = false, endT = 0, keyDir = 0;
   var lastY = 0, lastMoveT = 0, downY = 0;
   var G = 35, INERTIA = 0.3, ROLL_DAMP = 0.5, DIMPLE = 30, HOLD_K = 260, HOLD_C = 28;
   var K = 9.5, REST = 1.72, EPS = 0.005, STAND = 3;
@@ -174,7 +174,7 @@
     var a0 = Math.random() < 0.5 ? 0 : Math.PI;   /* 操作は左右だけ。卵も左右の向きにだけ傾く */
     tx = Math.cos(a0) * REST; tz = Math.sin(a0) * REST; vx = vz = 0; ax = tx; az = tz; th = REST; om = 0;
     phi = 0; keyDir = 0; standT = 0;
-    cracked = false; crackT = 0; falling = false; fallT = 0; cleared = false; endT = 0;
+    cracked = 0; crackT = 0; falling = false; fallT = 0; cleared = false; endT = 0;
     if (confetti) confetti.clear();
     camSpin = 0; camSpinT = 0; idleT = 9; guideA = 0;
   }
@@ -187,7 +187,7 @@
     if (state === S.RESULT && cleared) camSpin += dt * 0.8 * Math.min(1, (T - endT + (camSpinT += dt)) * 0.8);
     else if (state === S.PLAY) camYaw = 0.3 * Math.sin(T * 0.2);
     /* 寄り: 真上近くで寄る。結果の間はそのまま動かさない（クリアの瞬間に画がずれないように） */
-    if (state === S.PLAY) camFocus += (((cracked ? th < 0.4 : (th < 0.1 || Math.PI - th < 0.1)) ? 1 : 0) - camFocus) * Math.min(1, dt * 1.4);
+    if (state === S.PLAY) camFocus += (((cracked === 1 ? th < 0.4 : cracked === 2 ? Math.PI - th < 0.4 : (th < 0.1 || Math.PI - th < 0.1)) ? 1 : 0) - camFocus) * Math.min(1, dt * 1.4);
     if (state !== S.PLAY) { rollSound(0); return; }
     T += dt;
     idleT = held ? 0 : idleT + dt;
@@ -207,15 +207,16 @@
        横に寝た所で揺れながら落ち着く。真上・さかさはごく狭い範囲だけ止まれる（殻のざらつき） */
     var a = tx, cr = cracked;
     var ES = window.EggShape;
-    var hc = ES ? function (q) { return -ES.low(q, cr) + (ES.COM - (cr ? ES.FLAT : 0)) * Math.cos(q); } : function (q) { return 0.13 * Math.cos(q); };
+    var hc = ES ? function (q) { return -ES.low(q, cr) + (ES.COM - (cr === 1 ? ES.FLAT : 0)) * Math.cos(q); } : function (q) { return 0.13 * Math.cos(q); };
     var dH = (hc(a + 0.002) - hc(a - 0.002)) / 0.004;
     var acc = -G * dH / INERTIA - ROLL_DAMP * vx;
     var am = ((a % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;   /* -π〜π */
     /* 平らな底が机に乗っている間は、底の面で受け止めて揺れが早く収まる（角で行ったり来たりしない） */
-    if (cr && Math.abs(am) < 0.12) acc = -45 * am - 14 * vx;
+    if (cr === 1 && Math.abs(am) < 0.12) acc = -45 * am - 14 * vx;
     if (!cr && Math.abs(am) < EPS) acc += -DIMPLE * am - 3 * vx;
     var up = am > 0 ? Math.PI - am : -Math.PI - am;                          /* さかさからのずれ */
     if (!cr && Math.abs(up) < EPS * 0.6) acc += DIMPLE * 3 * up - 3 * vx;
+    if (cr === 2 && Math.abs(up) < 0.08) acc = 45 * up - 14 * vx;
     if (held) {
       /* 指はばねのように卵を引っぱる（ぴったり張りつかない）。指先のわずかな震え */
       var jx = Math.sin(T * 9.3) * 0.005 + Math.sin(T * 5.1) * 0.004;
@@ -226,7 +227,7 @@
     th = Math.abs(am); om = Math.abs(vx);
     if (held) { standT = 0; return; }
     var prevN = Math.floor(standT);
-    if (((cracked && th < 0.3) || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
+    if (((cracked === 1 && th < 0.3) || (cracked === 2 && Math.PI - th < 0.18) || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
     /* 静止したら 1,2,3,4,5 と数える */
     if (standT > 0 && Math.floor(standT) !== prevN && standT < STAND) tone(880, 0.09, 0.12, "sine");
     if (standT > 0 && prevN === 0 && standT <= dt * 1.5) tone(880, 0.09, 0.12, "sine");
@@ -243,8 +244,10 @@
   function limitAim() {}
   /* 下へはやくはじくと、底を割って立てる */
   function crack() {
-    if (state !== S.PLAY || cracked || Math.abs(th) > 0.6) return;
-    cracked = true; crackT = T;
+    /* 立てる向きの端（下になっている方）を割る。逆さならとがった方 */
+    if (state !== S.PLAY || cracked) return;
+    if (th <= 0.6) cracked = 1; else if (Math.PI - th <= 0.6) cracked = 2; else return;
+    crackT = T;
     held = false; keyDir = 0; om = 0; vx = vz = 0;
     noiseHit(0.05, 3200, 0.7, 1.2); noiseHit(0.09, 1800, 0.5, 2); noiseHit(0.22, 600, 0.45, 0.7); tone(140, 0.14, 0.32, "triangle", 60);
   }
@@ -303,6 +306,7 @@
     if (n === 5) { startButton.hidden = true; newRound(); tx = Math.PI - 0.002; tz = 0; th = tx; vx = vz = 0; }
     if (n === 6) { startButton.hidden = true; newRound(); tx = 2.28; tz = 0; th = 2.28; vx = vz = 0; }
     if (n === 7) { startButton.hidden = true; newRound(); held = true; gx = tx; ax = tx + 9; grabX = 0; }
+    if (n === 8) { startButton.hidden = true; newRound(); tx = Math.PI - 0.1; tz = 0; th = tx; vx = vz = 0; crack(); }
     if (n === 4) { startButton.hidden = true; newRound(); tx = 0.04; tz = 0; th = 0.04; vx = vz = 0; }
     /* ▼DEBUG: 数字キーで飛ぶ先。基本は「n を押すと n 番目の場面・工程の始めへ直接飛ぶ」（前は済ませた状態。開始前や結果画面からでも飛べる）。
        結果を直接出すより「次の操作でそうなる」形を優先（次に引くのが当たり、次の一押しでクリアなど）。録画で本物の動きが撮れる */
@@ -337,7 +341,9 @@
        URLはここで作らない。公開準備の publish.js がゲーム名とサムネのOGPを作る。 */
     /* 英語のときのハッシュタグは英語のゲーム名にする（空白・記号は除く） */
     var s = score.toFixed(1);
-    var text = cracked
+    var text = cracked === 2
+      ? zT("逆さまの卵の先を割って" + s + "秒で立てました", "I cracked the tip and stood the egg upside down in " + s + "s", "달걀 끝을 깨서 거꾸로 " + s + "초 만에 세웠습니다", "敲碎蛋尖，" + s + "秒把蛋倒立起来了", "敲碎蛋尖，" + s + "秒把蛋倒立起來了")
+      : cracked
       ? zT("卵の底を割って" + s + "秒で立てました", "I cracked the bottom and stood the egg up in " + s + "s", "달걀 밑을 깨서 " + s + "초 만에 세웠습니다", "敲碎蛋底，" + s + "秒把蛋立起来了", "敲碎蛋底，" + s + "秒把蛋立起來了")
       : zT(s + "秒で卵を立てました", "I stood an egg upright in " + s + "s", s + "초 만에 달걀을 세웠습니다", "用" + s + "秒把蛋立起来了", "用" + s + "秒把蛋立起來了");
     window.zResultActions.x({ text: text + zT(" #たまご立てゲーム", " #EggStandingGame", " #달걀세우기게임", " #立蛋游戏", " #立蛋遊戲") });
