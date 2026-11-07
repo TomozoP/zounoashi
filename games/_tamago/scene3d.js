@@ -72,10 +72,10 @@
     base.addColorStop(0, "#6b4428"); base.addColorStop(1, "#5a3820");
     g.fillStyle = base; g.fillRect(0, 0, w, h);
     for (var i = 0; i < 180; i++) {
-      var y = r() * h, a = 0.04 + r() * 0.1, amp = 2 + r() * 6, fr = 0.002 + r() * 0.006, ph = r() * 9;
+      var y = r() * h, a = 0.04 + r() * 0.1, amp = 2 + r() * 6, fr = (2 + Math.floor(r() * 5)) * Math.PI * 2 / w, ph = r() * 9;   /* 左右でつながる波 */
       g.beginPath();
       for (var x = 0; x <= w; x += 8) {
-        var yy = y + Math.sin(x * fr + ph) * amp + Math.sin(x * fr * 3.1 + ph) * amp * 0.3;
+        var yy = y + Math.sin(x * fr + ph) * amp + Math.sin(x * fr * 3 + ph) * amp * 0.3;
         if (x === 0) g.moveTo(x, yy); else g.lineTo(x, yy);
       }
       g.strokeStyle = (r() < 0.5 ? "rgba(40,22,10," : "rgba(150,100,60,") + a + ")";
@@ -138,12 +138,12 @@
     key.shadow.mapSize.set(Z3.mobile ? 1024 : 2048, Z3.mobile ? 1024 : 2048);
     var c = key.shadow.camera; c.left = -2; c.right = 2; c.top = 2; c.bottom = -2; c.near = 0.5; c.far = 12;
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.01; key.shadow.radius = 6;
-    sc.add(key);
+    sc.add(key); sc.add(key.target); this.key = key;
     var rim = new T.DirectionalLight(0xcfe0ff, 1.1); rim.position.set(3, 2.2, -3); sc.add(rim);
 
     /* 机（傾けるのは天板ごと。回す中心は卵の足もと） */
     this.table = new T.Group(); sc.add(this.table);
-    var wood = Z3.canvasTex(1024, 512, woodPaint);
+    var wood = this.wood = Z3.canvasTex(1024, 512, woodPaint);
     wood.wrapS = wood.wrapT = T.RepeatWrapping;
     var top = new T.Mesh(new T.BoxGeometry(6, 0.16, 5), new T.MeshStandardMaterial({ map: wood, roughness: 0.42, metalness: 0, envMapIntensity: 0.9 }));
     top.position.set(0, -0.08, 0.6); top.receiveShadow = true;
@@ -191,7 +191,7 @@
       this.table.add(m); this.bits.push(m);
     }
 
-    this.camX = 0; this.camZ = 0;
+    this.camX = 0; this.camZ = 0; this.rollX = 0; this.prevC = null; this.prevA = 0; this.prevT = 0; this.crackX = null;
     this.aimCam(0, 0, 0, 0, 0);
     this.cracked = false;
   }
@@ -218,15 +218,15 @@
       this.shellMat.needsUpdate = true;
     }
     /* 卵は足もとの点で机に乗る。傾けたら、一番低い所が机の面に来るように持ち上げる */
-    var c = Math.cos(th), sn = Math.sin(th), low = 1e9, lowX = 0;
+    var c = Math.cos(th), sn = Math.sin(th), low = 1e9, lowX = 0, cLx = 0, cLy = 0;
     for (var j = 0; j <= N; j++) {
       var rr = PROF[j][0], y = this.cracked ? Math.max(PROF[j][1], FLAT) - FLAT : PROF[j][1];
       if (this.cracked && PROF[j][1] < FLAT) rr *= 0.7 + 0.3 * PROF[j][1] / FLAT;
       /* 右に倒れる(th>0)ときは右側(x=+r)の縁が下がる */
       var yr = y * c - rr * sn, xr = y * sn + rr * c;
       var yl = y * c + rr * sn, xl = y * sn - rr * c;
-      if (yr < low) { low = yr; lowX = xr; }
-      if (yl < low) { low = yl; lowX = xl; }
+      if (yr < low) { low = yr; lowX = xr; cLx = rr; cLy = y; }
+      if (yl < low) { low = yl; lowX = xl; cLx = -rr; cLy = y; }
     }
     /* 机の面（足もとの中心を軸に傾いている）の高さ */
     var tp = Math.tan(phi);
@@ -234,11 +234,25 @@
     this.tmpAxis = this.tmpAxis || new T.Vector3();
     this.tmpAxis.set(dz, 0, -dx);
     this.eggPivot.quaternion.setFromAxisAngle(this.tmpAxis, th);
-    this.eggPivot.position.set(0, -low - lowX * dx * tp, 0);
+    /* 転がり: 机に触れている点は滑らないので、殻の上で触れる点が動いた分だけ卵が進む（どこまでも） */
+    var tt = s.t || 0, aSigned = tx;
+    if (tt < this.prevT || !this.prevC) { this.rollX = lowX * dx; this.prevC = null; this.crackX = null; this.camX = 0; }
+    var lx = cLx * dx, ly = cLy;
+    if (this.prevC) {
+      var ds = Math.hypot(lx - this.prevC[0], ly - this.prevC[1]);
+      if (ds < 0.3) this.rollX += ds * (aSigned >= this.prevA ? 1 : -1);
+    }
+    this.prevC = [lx, ly]; this.prevA = aSigned; this.prevT = tt;
+    var ex = this.rollX - lowX * dx;
+    this.eggPivot.position.set(ex, -low - lowX * dx * tp, 0);
+    /* 机は卵についていき、木目だけずらす */
+    this.table.position.x = ex;
+    this.wood.offset.x = ex / 6;
+    this.key.position.x = -2.4 + ex; this.key.target.position.set(ex, 0, 0);
     this.blob.position.set(lowX * 0.3 * dx, 0.002, lowX * 0.3 * dz);
     /* 卵の真ん中を追う（倒れても見切れない） */
     var cm = Math.sin(th) * 0.42;
-    this.camX += (cm * dx - this.camX) * 0.06;
+    this.camX += (ex + cm * dx - this.camX) * 0.08;
     this.camZ += (cm * dz - this.camZ) * 0.06;
     var ct0 = s.cracked ? (s.t || 0) - (s.crackT || 0) : 9;
     this.aimCam(this.camX, this.camZ, s.yaw || 0, s.focus || 0, ct0 < 0.25 ? 0.08 * (1 - ct0 / 0.25) : 0);
@@ -252,7 +266,8 @@
       b.visible = ct >= 0;
       if (ct < 0) continue;
       var k = Math.min(1, ct / 0.35);
-      b.position.set(u.x * k, 0.004 + Math.max(0, Math.sin(k * Math.PI) * u.up), u.z * k);
+      if (this.crackX == null) this.crackX = ex;
+      b.position.set(u.x * k + this.crackX - ex, 0.004 + Math.max(0, Math.sin(k * Math.PI) * u.up), u.z * k);
       b.rotation.set(-Math.PI / 2 + (1 - k) * u.rot, 0, u.rot);
     }
   };
