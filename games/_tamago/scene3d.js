@@ -239,6 +239,7 @@
       this.egg.geometry = this.cracked ? this.geoCracked : this.geo;
       this.shellMat.map = this.cracked ? this.mapCrack : this.mapPlain;
       this.shellMat.needsUpdate = true;
+      this.skipRoll = true;   /* 形が変わった瞬間に横へずれないように */
     }
     /* 卵は足もとの点で机に乗る。傾けたら、一番低い所が机の面に来るように持ち上げる */
     var c = Math.cos(th), sn = Math.sin(th), low = 1e9, lowX = 0, cLx = 0, cLy = 0;
@@ -261,12 +262,14 @@
     var tt = s.t || 0, aSigned = tx;
     if (tt < this.prevT || !this.prevC) { this.rollX = lowX * dx; this.prevC = null; this.crackX = null; this.camX = 0; }
     var lx = cLx * dx, ly = cLy;
-    if (this.prevC) {
+    if (this.skipRoll && this.prevEx != null) { this.rollX = this.prevEx + lowX * dx; this.skipRoll = false; }
+    else if (this.prevC) {
       var ds = Math.hypot(lx - this.prevC[0], ly - this.prevC[1]);
       if (ds < 0.3) this.rollX += ds * (aSigned >= this.prevA ? 1 : -1);
     }
     this.prevC = [lx, ly]; this.prevA = aSigned; this.prevT = tt;
     var ex = this.rollX - lowX * dx;
+    this.prevEx = ex;
     this.eggPivot.position.set(ex, -low - lowX * dx * tp, 0);
     /* 机は卵についていき、木目だけずらす */
     this.table.position.x = ex;
@@ -278,7 +281,10 @@
     this.camX += (ex + cm * dx - this.camX) * 0.08;
     this.camZ += (cm * dz - this.camZ) * 0.06;
     var ct0 = s.cracked ? (s.t || 0) - (s.crackT || 0) : 9;
-    this.aimCam(this.camX, this.camZ, s.yaw || 0, s.focus || 0, ct0 < 0.3 ? 0.12 * (1 - ct0 / 0.3) : 0);
+    /* 割った瞬間: 卵がグシャッと少しつぶれて戻る */
+    var sq = ct0 < 0.25 ? Math.sin(ct0 / 0.25 * Math.PI) * 0.09 : 0;
+    this.egg.scale.set(1 + sq * 0.5, 1 - sq, 1 + sq * 0.5);
+    this.aimCam(this.camX, this.camZ, s.yaw || 0, s.focus || 0, ct0 < 0.35 ? 0.16 * (1 - ct0 / 0.35) : 0);
     var stand = Math.max(0, 1 - Math.abs(th) * 1.6);
     this.blob.scale.set(0.75 + (1 - stand) * 0.6, 0.6 + (1 - stand) * 0.3, 1);
     this.blob.material.opacity = 0.5 + 0.4 * stand;
