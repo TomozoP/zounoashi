@@ -151,6 +151,9 @@
   var camYaw = 0, camSpin = 0, camFocus = 0, camSpinT = 0;
   /* 左右ガイド: 最初と、しばらく触っていないときに出す */
   var idleT = 9, guideA = 0, holdX = 0;
+  /* 隠しの正解: こすって温めると孵化（hatch）、遠くの板のすき間にはまる（gap） */
+  var heat = 0, hatchT = -1, rubDir = 0, rubFlipT = 0, rubLastX = 0, wedged = false, sink = 0;
+  var GAP_X = 6.5;
   var tx = 0, tz = 0, vx = 0, vz = 0, ax = 0, az = 0, gx = 0, gz = 0;
   var cracked = 0, crackT = 0, falling = false, fallT = 0, cleared = false, endT = 0, keyDir = 0;
   var lastY = 0, lastMoveT = 0, downY = 0;
@@ -176,6 +179,7 @@
     phi = 0; keyDir = 0; standT = 0;
     cracked = 0; crackT = 0; falling = false; fallT = 0; cleared = false; endT = 0;
     if (confetti) confetti.clear();
+    heat = 0; hatchT = -1; rubDir = 0; wedged = false; sink = 0;
     camSpin = 0; camSpinT = 0; idleT = 9; guideA = 0;
   }
 
@@ -191,13 +195,27 @@
     if (state !== S.PLAY) { rollSound(0); return; }
     T += dt;
     idleT = held ? 0 : idleT + dt;
-    var showG = !held && standT === 0 && idleT > 2.5;
+    var showG = !held && standT === 0 && hatchT < 0 && idleT > 2.5;
     guideA += ((showG ? 1 : 0) - guideA) * Math.min(1, dt * (showG ? 4 : 12));
     score = T;
     /* 転がる速さで音を出す */
     var sp = Math.sqrt(vx * vx + vz * vz);
     rollSound(Math.min(1, sp * Math.max(0.25, Math.sin(th) + 0.2) / 2.2));
 
+    /* 孵化: 温まりきったら、卵をまっすぐにして震わせ、殻が割れてヒヨコが立つ */
+    if (hatchT >= 0) {
+      var ht = T - hatchT;
+      held = false; tx += (Math.round(tx / (Math.PI * 2)) * Math.PI * 2 - tx) * Math.min(1, dt * 6); vx = 0;
+      th = 0; om = 0;
+      if (ht > 3.4) { cleared = true; finish(); }
+      return;
+    }
+    if (heat >= 1 && !cracked) {
+      hatchT = T; heat = 1;
+      noiseHit(0.05, 3000, 0.4, 1.4);
+      return;
+    }
+    heat = Math.max(0, heat - dt * 0.04);
     /* 割った瞬間の一瞬の止め（ヒットストップ） */
     if (cracked && T - crackT < 0.09) return;
     if (keyMode && keyDir) { if (!held) { ax = tx; az = 0; } held = true; ax += keyDir * dt * 0.35; }
@@ -217,6 +235,14 @@
     var up = am > 0 ? Math.PI - am : -Math.PI - am;                          /* さかさからのずれ */
     if (!cr && Math.abs(up) < EPS * 0.6) acc += DIMPLE * 3 * up - 3 * vx;
     if (cr === 2 && Math.abs(up) < 0.08) acc = 45 * up - 14 * vx;
+    /* 板のすき間: 起きぎみの卵の足もとが、すき間の上に来たらはまって立つ */
+    var ex = window.__eggX || 0;
+    if (!wedged && !held && !cr && Math.abs(am) < 0.5 && Math.abs(Math.abs(ex) - GAP_X) < 0.12) {
+      wedged = true; noiseHit(0.07, 700, 0.35, 1.2);
+    }
+    if (wedged && Math.abs(am) > 0.9) wedged = false;
+    sink += ((wedged ? 0.06 : 0) - sink) * Math.min(1, dt * 10);
+    if (wedged) acc = -45 * am - 12 * vx + (held ? HOLD_K * 0.3 * (ax - a) : 0);
     if (held) {
       /* 指はばねのように卵を引っぱる（ぴったり張りつかない）。指先のわずかな震え */
       var jx = Math.sin(T * 9.3) * 0.005 + Math.sin(T * 5.1) * 0.004;
@@ -227,7 +253,7 @@
     th = Math.abs(am); om = Math.abs(vx);
     if (held) { standT = 0; return; }
     var prevN = Math.floor(standT);
-    if (((cracked === 1 && th < 0.3) || (cracked === 2 && Math.PI - th < 0.18) || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
+    if (((wedged && th < 0.2) || (cracked === 1 && th < 0.3) || (cracked === 2 && Math.PI - th < 0.18) || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
     /* 静止したら 1,2,3,4,5 と数える */
     if (standT > 0 && Math.floor(standT) !== prevN && standT < STAND) tone(880, 0.09, 0.12, "sine");
     if (standT > 0 && prevN === 0 && standT <= dt * 1.5) tone(880, 0.09, 0.12, "sine");
@@ -269,10 +295,17 @@
     var m = Math.sqrt(tx * tx + tz * tz);
     gx = tx; gz = tz;
     ax = gx; az = gz;
-    grabX = x; grabY = y; holdX = x; downY = lastY = y; lastMoveT = performance.now();
+    grabX = x; grabY = y; holdX = x; rubLastX = x; rubDir = 0; downY = lastY = y; lastMoveT = performance.now();
   }
   function move(x, y) {
     if (state !== S.PLAY || !held) return;
+    /* こする: 左右に細かく往復させるほど温まる（ゆっくり大きく動かすのは数えない） */
+    var rdx = x - rubLastX, nowR = performance.now();
+    if (Math.abs(rdx) > 2) {
+      var d = rdx > 0 ? 1 : -1;
+      if (d !== rubDir) { if (nowR - rubFlipT < 350) { heat += 0.035; noiseHit(0.05, 2400, 0.05, 1); } rubDir = d; rubFlipT = nowR; }
+      rubLastX = x;
+    }
     holdX = x;
     ax = gx + (x - grabX) / W * 1.8; az = 0;
     var now = performance.now(), dtm = Math.max(1, now - lastMoveT);
@@ -307,6 +340,8 @@
     if (n === 6) { startButton.hidden = true; newRound(); tx = 2.28; tz = 0; th = 2.28; vx = vz = 0; }
     if (n === 7) { startButton.hidden = true; newRound(); held = true; gx = tx; ax = tx + 9; grabX = 0; }
     if (n === 8) { startButton.hidden = true; newRound(); tx = Math.PI - 0.1; tz = 0; th = tx; vx = vz = 0; crack(); }
+    if (n === 9) { startButton.hidden = true; newRound(); tx = 0.3; heat = 1; }
+    if (n === 0) { startButton.hidden = true; newRound(); window.__eggJump = GAP_X - 0.04; tx = 0.1; vx = 0; }
     if (n === 4) { startButton.hidden = true; newRound(); tx = 0.04; tz = 0; th = 0.04; vx = vz = 0; }
     /* ▼DEBUG: 数字キーで飛ぶ先。基本は「n を押すと n 番目の場面・工程の始めへ直接飛ぶ」（前は済ませた状態。開始前や結果画面からでも飛べる）。
        結果を直接出すより「次の操作でそうなる」形を優先（次に引くのが当たり、次の一押しでクリアなど）。録画で本物の動きが撮れる */
@@ -342,7 +377,13 @@
     /* 英語のときのハッシュタグは英語のゲーム名にする（空白・記号は除く） */
     var s = score.toFixed(1);
     /* 割ったかどうかは言わない（割れることは秘密）。逆さに立てたときだけ言い方を変える */
-    var text = th > Math.PI / 2
+    var text = hatchT >= 0
+      ? zT(s + "秒で卵からヒヨコが立ちました", "A chick hatched and stood up in " + s + "s", s + "초 만에 달걀에서 병아리가 일어섰습니다", "用" + s + "秒孵出小鸡站起来了", "用" + s + "秒孵出小雞站起來了")
+      : cracked
+      ? zT("誰にでもできる方法で、" + s + "秒で卵を立てました", "I stood an egg up in " + s + "s, in a way anyone could do", "누구나 할 수 있는 방법으로 " + s + "초 만에 달걀을 세웠습니다", "用谁都会的方法，" + s + "秒把蛋立起来了", "用誰都會的方法，" + s + "秒把蛋立起來了")
+      : wedged
+      ? zT(s + "秒で卵を板のすき間に立てました", "I stood an egg in a gap of the table in " + s + "s", s + "초 만에 달걀을 판자 틈에 세웠습니다", "用" + s + "秒把蛋立在了木板缝里", "用" + s + "秒把蛋立在了木板縫裡")
+      : th > Math.PI / 2
       ? zT(s + "秒で卵を逆さまに立てました", "I stood an egg upside down in " + s + "s", s + "초 만에 달걀을 거꾸로 세웠습니다", "用" + s + "秒把蛋倒立起来了", "用" + s + "秒把蛋倒立起來了")
       : zT(s + "秒で卵を立てました", "I stood an egg upright in " + s + "s", s + "초 만에 달걀을 세웠습니다", "用" + s + "秒把蛋立起来了", "用" + s + "秒把蛋立起來了");
     window.zResultActions.x({ text: text + zT(" #たまご立てゲーム", " #EggStandingGame", " #달걀세우기게임", " #立蛋游戏", " #立蛋遊戲") });
@@ -369,7 +410,7 @@
 
     /* ▼DRAW: ここに絵。立体の上に、文字やボタンを2Dで描く */
     var s3 = scene3d(), drew = false;
-    if (s3) { try { s3.sync({ t: T || 0, tx: tx, tz: tz, phi: phi, yaw: camYaw + camSpin, focus: camFocus, cracked: cracked, crackT: crackT }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (s3) { try { s3.sync({ t: T || 0, tx: tx, tz: tz, phi: phi, yaw: camYaw + camSpin, focus: camFocus, cracked: cracked, crackT: crackT, heat: heat, hatch: hatchT >= 0 ? T - hatchT : -1, sink: sink, gapX: GAP_X }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
     if (!drew) { ctx.fillStyle = "#1d1714"; ctx.fillRect(0, 0, W, H); }
     if (state === S.PLAY && !hideUI) {
       ctx.save();

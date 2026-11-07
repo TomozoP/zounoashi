@@ -235,6 +235,38 @@
     this.camX = 0; this.camZ = 0; this.rollX = 0; this.prevC = null; this.prevA = 0; this.prevT = 0; this.crackX = null;
     this.aimCam(0, 0, 0, 0, 0);
     this.cracked = 0;
+
+    /* 板のすき間（左右の遠く）。机の上の暗い溝 */
+    this.gaps = [];
+    for (var gi = -1; gi <= 1; gi += 2) {
+      var gm = new T.Mesh(new T.BoxGeometry(0.16, 0.02, 5), new T.MeshStandardMaterial({ color: 0x120a05, roughness: 1 }));
+      gm.position.set(gi * 6.5, -0.0085, 0.6); gm.receiveShadow = true;
+      sc.add(gm); this.gaps.push(gm);
+    }
+
+    /* 孵化: 殻の下半分・上のかけら・ヒヨコ */
+    var cupPts = [], capPts = [];
+    PROF.forEach(function (p) { if (p[1] <= 0.6) cupPts.push(new T.Vector2(p[0], p[1])); else capPts.push(new T.Vector2(p[0], p[1] - 0.6)); });
+    capPts.unshift(new T.Vector2(PROF.filter(function (p) { return p[1] > 0.6; })[0][0], 0));
+    var shellMat2 = new T.MeshPhysicalMaterial({ map: this.mapPlain, roughness: 0.58, side: T.DoubleSide, clearcoat: 0.15 });
+    this.cup = new T.Mesh(new T.LatheGeometry(cupPts, 48), shellMat2); this.cup.castShadow = true;
+    this.cap = new T.Mesh(new T.LatheGeometry(capPts, 32), shellMat2); this.cap.castShadow = true;
+    this.cup.visible = this.cap.visible = false;
+    sc.add(this.cup); sc.add(this.cap);
+    this.chick = new T.Group();
+    var yel = new T.MeshStandardMaterial({ color: 0xffd23a, roughness: 0.9 });
+    var body = new T.Mesh(new T.SphereGeometry(0.26, 24, 18), yel); body.scale.set(1, 0.95, 0.95); body.position.y = 0.26;
+    var head = new T.Mesh(new T.SphereGeometry(0.17, 20, 16), yel); head.position.set(0, 0.58, 0.03);
+    var beak = new T.Mesh(new T.ConeGeometry(0.045, 0.1, 12), new T.MeshStandardMaterial({ color: 0xff8a1e, roughness: 0.6 }));
+    beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.57, 0.22);
+    var eyeM = new T.MeshStandardMaterial({ color: 0x111111, roughness: 0.3 });
+    var e1 = new T.Mesh(new T.SphereGeometry(0.025, 10, 8), eyeM); e1.position.set(-0.07, 0.63, 0.16);
+    var e2 = e1.clone(); e2.position.x = 0.07;
+    var w1 = new T.Mesh(new T.SphereGeometry(0.1, 12, 10), yel); w1.scale.set(0.4, 0.8, 0.9); w1.position.set(-0.25, 0.3, 0);
+    var w2 = w1.clone(); w2.position.x = 0.25;
+    [body, head, beak, e1, e2, w1, w2].forEach(function (m) { m.castShadow = true; this.chick.add(m); }, this);
+    this.chick.visible = false;
+    sc.add(this.chick);
   }
 
   GameScene.prototype.reset = function () {};
@@ -276,9 +308,11 @@
     this.tmpAxis = this.tmpAxis || new T.Vector3();
     this.tmpAxis.set(dz, 0, -dx);
     this.eggPivot.quaternion.setFromAxisAngle(this.tmpAxis, th);
+    if (hs >= 0 && this.hatchShake) this.eggPivot.rotateZ(this.hatchShake);
     /* 転がり: 机に触れている点は滑らないので、殻の上で触れる点が動いた分だけ卵が進む（どこまでも） */
     var tt = s.t || 0, aSigned = tx;
     if (tt < this.prevT || !this.prevC) { this.rollX = lowX * dx; this.prevC = null; this.crackX = null; this.camX = 0; this.skipRoll = false; this.prevEx = null; }
+    if (global.__eggJump != null) { this.rollX = global.__eggJump + lowX * dx; global.__eggJump = null; this.camX = global.__eggJump0 = this.rollX; this.prevC = null; }
     var lx = cLx * dx, ly = cLy;
     if (this.skipRoll && this.prevEx != null) { this.rollX = this.prevEx + lowX * dx; this.skipRoll = false; }
     else if (this.prevC) {
@@ -290,8 +324,35 @@
     }
     this.prevC = [lx, ly]; this.prevA = aSigned; this.prevT = tt;
     var ex = this.rollX - lowX * dx;
-    this.prevEx = ex;
-    this.eggPivot.position.set(ex, -low - lowX * dx * tp, 0);
+    this.prevEx = ex; global.__eggX = this.rollX;
+    this.eggPivot.position.set(ex, -low - lowX * dx * tp - (s.sink || 0), 0);
+    /* 温まると、ほんのり赤みが出る */
+    var hv = Math.min(1, s.heat || 0);
+    this.shellMat.emissive = this.shellMat.emissive || new T.Color();
+    this.shellMat.emissive.setRGB(0.22 * hv, 0.07 * hv, 0.01 * hv);
+    /* 孵化の流れ: 0〜0.8秒 震える → 割れて上のかけらが飛ぶ → ヒヨコが出て立つ */
+    var hs = s.hatch == null ? -1 : s.hatch;
+    if (hs >= 0) {
+      var shake = hs < 0.9 ? Math.sin(hs * 60) * 0.05 * (hs / 0.9) : 0;
+      this.hatchShake = shake;
+      var open = hs >= 0.9;
+      this.egg.visible = !open;
+      this.cup.visible = this.cap.visible = open;
+      this.cup.position.set(ex, 0, 0);
+      if (open) {
+        var k2 = Math.min(1, (hs - 0.9) / 0.5);
+        this.cap.position.set(ex + 0.55 * k2, 0.6 * (1 - k2) + Math.sin(k2 * Math.PI) * 0.35 + 0.02 * k2, 0.25 * k2);
+        this.cap.rotation.set(0, 0, -2.2 * k2);
+        var k3 = Math.min(1, Math.max(0, (hs - 1.2) / 0.6)), ease = 1 - Math.pow(1 - k3, 3);
+        this.chick.visible = true;
+        /* 殻から顔を出したあと、ぴょんと横に飛び出して机の上に立つ */
+        var k4 = Math.min(1, Math.max(0, (hs - 2.0) / 0.5));
+        this.chick.position.set(ex - 0.62 * k4, (-0.35 + 0.5 * ease) * (1 - k4) + Math.sin(k4 * Math.PI) * 0.45, 0.02 + 0.25 * k4);
+        this.chick.rotation.y = Math.sin(hs * 2) * 0.3;
+      }
+    } else if (!this.egg.visible || this.chick.visible) {
+      this.egg.visible = true; this.cup.visible = this.cap.visible = this.chick.visible = false;
+    }
     /* 机は卵についていき、木目だけずらす */
     this.table.position.x = ex;
     this.wood.offset.x = ex / 6;
