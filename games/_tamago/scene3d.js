@@ -285,8 +285,27 @@
     PROF.forEach(function (p) { if (p[1] <= 0.6) cupPts.push(new T.Vector2(p[0], p[1])); else capPts.push(new T.Vector2(p[0], p[1] - 0.6)); });
     capPts.unshift(new T.Vector2(PROF.filter(function (p) { return p[1] > 0.6; })[0][0], 0));
     var shellMat2 = new T.MeshPhysicalMaterial({ map: this.mapPlain, roughness: 0.58, side: T.DoubleSide, clearcoat: 0.15 });
-    this.cup = new T.Mesh(new T.LatheGeometry(cupPts, 48), shellMat2); this.cup.castShadow = true;
-    this.cap = new T.Mesh(new T.LatheGeometry(capPts, 32), shellMat2); this.cap.castShadow = true;
+    /* 割れ目はギザギザ（まっすぐ切らない）。下の殻と上のかけらで同じ形にする */
+    var zr = rand(57), teeth = [];
+    for (var zi = 0; zi < 11; zi++) teeth.push(0.03 + zr() * 0.07);
+    function zig(ang) {
+      var u = ((ang / (Math.PI * 2)) % 1 + 1) % 1 * 11, i0 = Math.floor(u), f = u - i0;
+      var tri = f < 0.5 ? f * 2 : (1 - f) * 2;                      /* 0→1→0 の山 */
+      return (tri - 0.5) * teeth[i0 % 11] * 2;
+    }
+    function jag(geo, rowY, tol) {
+      var ps = geo.attributes.position;
+      for (var k = 0; k < ps.count; k++) {
+        if (Math.abs(ps.getY(k) - rowY) > tol) continue;
+        ps.setY(k, ps.getY(k) + zig(Math.atan2(ps.getX(k), ps.getZ(k))));
+      }
+      geo.computeVertexNormals();
+      return geo;
+    }
+    var cupGeo = jag(new T.LatheGeometry(cupPts, 66), cupPts[cupPts.length - 1].y, 0.002);
+    var capGeo = jag(new T.LatheGeometry(capPts, 66), 0, 0.002);
+    this.cup = new T.Mesh(cupGeo, shellMat2); this.cup.castShadow = true; this.cup.rotation.y = Math.PI;
+    this.cap = new T.Mesh(capGeo, shellMat2); this.cap.castShadow = true;
     this.cup.visible = this.cap.visible = false;
     sc.add(this.cup); sc.add(this.cap);
     this.chick = new T.Group();
@@ -301,6 +320,7 @@
     var w1 = new T.Mesh(new T.SphereGeometry(0.1, 12, 10), yel); w1.scale.set(0.4, 0.8, 0.9); w1.position.set(-0.25, 0.3, 0);
     var w2 = w1.clone(); w2.position.x = 0.25;
     [body, head, beak, e1, e2, w1, w2].forEach(function (m) { m.castShadow = true; this.chick.add(m); }, this);
+    this.chick.scale.setScalar(0.74);   /* 殻の中に収まる大きさ */
     this.chick.visible = false;
     sc.add(this.chick);
   }
@@ -403,7 +423,8 @@
         var k3 = Math.min(1, Math.max(0, (hs - 1.2) / 0.6)), ease = 1 - Math.pow(1 - k3, 3);
         this.chick.visible = true;
         /* 殻が割れて、ヒヨコが上に出てくる */
-        this.chick.position.set(ex, -0.35 + 0.68 * ease, 0.02);
+        /* 殻の中（底より下には出ない）から上へ */
+        this.chick.position.set(ex, 0.04 + 0.34 * ease, 0.0);
         this.chick.rotation.y = Math.sin(hs * 2) * 0.3;
       }
     } else if (!this.egg.visible || this.chick.visible) {
