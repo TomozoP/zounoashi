@@ -152,7 +152,7 @@
   /* 左右ガイド: 最初と、しばらく触っていないときに出す */
   var idleT = 9, guideA = 0, holdX = 0;
   /* 隠しの正解: こすって温めると孵化（hatch）、遠くの板のすき間にはまる（gap） */
-  var heat = 0, hatchT = -1, rubDir = 0, rubFlipT = 0, rubLastX = 0, wedged = 0, sink = 0, prevEggX = 0;
+  var heat = 0, hatchT = -1, rubDir = 0, rubFlipT = 0, rubLastX = 0, cupT = 0;
   var GAP_X = 6.5;
   var tx = 0, tz = 0, vx = 0, vz = 0, ax = 0, az = 0, gx = 0, gz = 0;
   var cracked = 0, crackT = 0, falling = false, fallT = 0, cleared = false, endT = 0, keyDir = 0;
@@ -179,7 +179,7 @@
     phi = 0; keyDir = 0; standT = 0;
     cracked = 0; crackT = 0; falling = false; fallT = 0; cleared = false; endT = 0;
     if (confetti) confetti.clear();
-    heat = 0; hatchT = -1; rubDir = 0; wedged = 0; sink = 0; prevEggX = 0;
+    heat = 0; hatchT = -1; rubDir = 0; cupT = 0;
     camSpin = 0; camSpinT = 0; idleT = 9; guideA = 0;
   }
 
@@ -195,13 +195,26 @@
     if (state !== S.PLAY) { rollSound(0); return; }
     T += dt;
     idleT = held ? 0 : idleT + dt;
-    var showG = !held && standT === 0 && hatchT < 0 && idleT > 2.5;
+    var showG = !held && standT === 0 && hatchT < 0 && !cupT && idleT > 2.5;
     guideA += ((showG ? 1 : 0) - guideA) * Math.min(1, dt * (showG ? 4 : 12));
     score = T;
     /* 転がる速さで音を出す */
     var sp = Math.sqrt(vx * vx + vz * vz);
     rollSound(Math.min(1, sp * Math.max(0.25, Math.sin(th) + 0.2) / 2.2));
 
+    /* 卵立てに収まる間: 一番近い「立った向き」へ回りながら入る */
+    if (cupT) {
+      var tgt0 = Math.round(tx / (Math.PI * 2)) * Math.PI * 2;
+      tx += (tgt0 - tx) * Math.min(1, dt * 7); vx = 0; th = Math.abs(tx - tgt0); om = 0;
+      if (T - cupT > 0.5) {
+        var pn = Math.floor(standT);
+        standT += dt;
+        if (Math.floor(standT) !== pn && standT < STAND) tone(880, 0.09, 0.12, "sine");
+        if (pn === 0 && standT <= dt * 1.5) tone(880, 0.09, 0.12, "sine");
+        if (standT >= STAND) { cleared = true; finish(); }
+      }
+      return;
+    }
     /* 孵化: 温まりきったら、卵をまっすぐにして震わせ、殻が割れてヒヨコが立つ */
     if (hatchT >= 0) {
       var ht = T - hatchT;
@@ -236,16 +249,11 @@
     if (!cr && Math.abs(up) < EPS * 0.6) acc += DIMPLE * 3 * up - 3 * vx;
     if (cr === 2 && Math.abs(up) < 0.08) acc = 45 * up - 14 * vx;
     /* 板のすき間: 起きぎみの卵の足もとが、すき間の上に来たらはまって立つ */
-    /* 足もと（机に触れている点）がすき間の上を通ったら（1コマで飛び越えても）、起きぎみ・逆さぎみならはまる */
-    var ex = window.__eggX || 0, gd = Math.abs(ex) - GAP_X, gpd = Math.abs(prevEggX) - GAP_X;
-    var overGap = Math.abs(gd) < 0.16 || (gd * gpd < 0 && Math.abs(Math.abs(ex) - Math.abs(prevEggX)) < 1);
-    prevEggX = ex;
-    if (!wedged && !cr && overGap && (Math.abs(am) < 0.9 || Math.abs(up) < 0.9)) {
-      wedged = Math.abs(am) < 0.9 ? 1 : 2; held = false; vx *= 0.2; noiseHit(0.07, 700, 0.35, 1.2);
+    /* 遠くの卵立て: 卵がそこまで転がって当たったら、どんな向きでもすっぽり収まって立つ */
+    var ex = window.__eggX || 0;
+    if (!cupT && !cr && Math.abs(ex) >= GAP_X - 0.45) {
+      cupT = T; held = false; noiseHit(0.06, 1500, 0.3, 2); tone(1320, 0.08, 0.08, "sine", 0, 0.32);
     }
-    sink += ((wedged ? 0.06 : 0) - sink) * Math.min(1, dt * 10);
-    if (wedged === 1) acc = -45 * am - 12 * vx;
-    if (wedged === 2) acc = 45 * up - 12 * vx;
     if (held) {
       /* 指はばねのように卵を引っぱる（ぴったり張りつかない）。指先のわずかな震え */
       var jx = Math.sin(T * 9.3) * 0.005 + Math.sin(T * 5.1) * 0.004;
@@ -256,7 +264,7 @@
     th = Math.abs(am); om = Math.abs(vx);
     if (held) { standT = 0; return; }
     var prevN = Math.floor(standT);
-    if (((wedged === 1 && th < 0.2) || (wedged === 2 && Math.PI - th < 0.2) || (cracked === 1 && th < 0.3) || (cracked === 2 && Math.PI - th < 0.18) || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
+    if (((cracked === 1 && th < 0.3) || (cracked === 2 && Math.PI - th < 0.18) || th < EPS || Math.PI - th < EPS * 0.6) && om < 0.06) standT += dt; else standT = 0;
     /* 静止したら 1,2,3,4,5 と数える */
     if (standT > 0 && Math.floor(standT) !== prevN && standT < STAND) tone(880, 0.09, 0.12, "sine");
     if (standT > 0 && prevN === 0 && standT <= dt * 1.5) tone(880, 0.09, 0.12, "sine");
@@ -344,7 +352,7 @@
     if (n === 7) { startButton.hidden = true; newRound(); held = true; gx = tx; ax = tx + 9; grabX = 0; }
     if (n === 8) { startButton.hidden = true; newRound(); tx = Math.PI - 0.1; tz = 0; th = tx; vx = vz = 0; crack(); }
     if (n === 9) { startButton.hidden = true; newRound(); tx = 0.3; heat = 1; }
-    if (n === 0) { startButton.hidden = true; newRound(); window.__eggJump = GAP_X - 0.04; tx = 0.1; vx = 0; }
+    if (n === 0) { startButton.hidden = true; newRound(); window.__eggJump = GAP_X - 0.9; tx = 0.3; vx = 3; vx = 0; }
     if (n === 4) { startButton.hidden = true; newRound(); tx = 0.04; tz = 0; th = 0.04; vx = vz = 0; }
     /* ▼DEBUG: 数字キーで飛ぶ先。基本は「n を押すと n 番目の場面・工程の始めへ直接飛ぶ」（前は済ませた状態。開始前や結果画面からでも飛べる）。
        結果を直接出すより「次の操作でそうなる」形を優先（次に引くのが当たり、次の一押しでクリアなど）。録画で本物の動きが撮れる */
@@ -384,8 +392,8 @@
       ? zT(s + "秒で卵からヒヨコが立ちました", "A chick hatched and stood up in " + s + "s", s + "초 만에 달걀에서 병아리가 일어섰습니다", "用" + s + "秒孵出小鸡站起来了", "用" + s + "秒孵出小雞站起來了")
       : cracked
       ? zT("誰にでもできる方法で、" + s + "秒で卵を立てました", "I stood an egg up in " + s + "s, in a way anyone could do", "누구나 할 수 있는 방법으로 " + s + "초 만에 달걀을 세웠습니다", "用谁都会的方法，" + s + "秒把蛋立起来了", "用誰都會的方法，" + s + "秒把蛋立起來了")
-      : wedged
-      ? zT(s + "秒で卵を板のすき間に立てました", "I stood an egg in a gap of the table in " + s + "s", s + "초 만에 달걀을 판자 틈에 세웠습니다", "用" + s + "秒把蛋立在了木板缝里", "用" + s + "秒把蛋立在了木板縫裡")
+      : cupT
+      ? zT(s + "秒で卵を卵立てに立てました", "I stood an egg in an egg cup in " + s + "s", s + "초 만에 달걀을 달걀 받침에 세웠습니다", "用" + s + "秒把蛋立在了蛋托上", "用" + s + "秒把蛋立在了蛋托上")
       : th > Math.PI / 2
       ? zT(s + "秒で卵を逆さまに立てました", "I stood an egg upside down in " + s + "s", s + "초 만에 달걀을 거꾸로 세웠습니다", "用" + s + "秒把蛋倒立起来了", "用" + s + "秒把蛋倒立起來了")
       : zT(s + "秒で卵を立てました", "I stood an egg upright in " + s + "s", s + "초 만에 달걀을 세웠습니다", "用" + s + "秒把蛋立起来了", "用" + s + "秒把蛋立起來了");
@@ -413,7 +421,7 @@
 
     /* ▼DRAW: ここに絵。立体の上に、文字やボタンを2Dで描く */
     var s3 = scene3d(), drew = false;
-    if (s3) { try { s3.sync({ t: T || 0, tx: tx, tz: tz, phi: phi, yaw: camYaw + camSpin, focus: camFocus, cracked: cracked, crackT: crackT, heat: heat, hatch: hatchT >= 0 ? T - hatchT : -1, sink: sink, gapX: GAP_X, wedged: wedged }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
+    if (s3) { try { s3.sync({ t: T || 0, tx: tx, tz: tz, phi: phi, yaw: camYaw + camSpin, focus: camFocus, cracked: cracked, crackT: crackT, heat: heat, hatch: hatchT >= 0 ? T - hatchT : -1, gapX: GAP_X, cup: cupT ? T - cupT : -1 }); drew = s3.draw(ctx, W, H); } catch (e) { scene3d.drop(); } }
     if (!drew) { ctx.fillStyle = "#1d1714"; ctx.fillRect(0, 0, W, H); }
     if (state === S.PLAY && !hideUI) {
       ctx.save();

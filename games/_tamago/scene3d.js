@@ -236,13 +236,17 @@
     this.aimCam(0, 0, 0, 0, 0);
     this.cracked = 0;
 
-    /* 板のすき間（左右の遠く）。机の上の暗い溝 */
-    this.gaps = [];
+    /* 卵立て（エッグスタンド）。左右の遠くに1つずつ。白い陶器 */
+    var cupProf = [[0.0, 0.0], [0.2, 0.0], [0.21, 0.015], [0.19, 0.03], [0.09, 0.07], [0.07, 0.12], [0.09, 0.16], [0.18, 0.22], [0.24, 0.29], [0.26, 0.335], [0.25, 0.345], [0.23, 0.335], [0.21, 0.29], [0.15, 0.23], [0.06, 0.19], [0.0, 0.185]]
+      .map(function (p) { return new T.Vector2(Math.max(p[0], 0.0001), p[1]); });
+    var porcelain = new T.MeshPhysicalMaterial({ color: 0xf6f3ee, roughness: 0.18, clearcoat: 0.8, clearcoatRoughness: 0.15 });
+    this.cups = [];
     for (var gi = -1; gi <= 1; gi += 2) {
-      var gm = new T.Mesh(new T.BoxGeometry(0.16, 0.02, 5), new T.MeshStandardMaterial({ color: 0x120a05, roughness: 1 }));
-      gm.position.set(gi * 6.5, -0.0085, 0.6); gm.receiveShadow = true;
-      sc.add(gm); this.gaps.push(gm);
+      var cm = new T.Mesh(new T.LatheGeometry(cupProf, 48), porcelain);
+      cm.castShadow = true; cm.receiveShadow = true;
+      cm.position.set(gi * 6.5, 0, 0); cm.scale.setScalar(1.35); sc.add(cm); this.cups.push(cm);
     }
+    this.CUP_SEAT = 0.27;   /* 卵の足もとが座る高さ */
 
     /* 孵化: 殻の下半分・上のかけら・ヒヨコ */
     var cupPts = [], capPts = [];
@@ -311,13 +315,15 @@
     if (hs >= 0 && this.hatchShake) this.eggPivot.rotateZ(this.hatchShake);
     /* 転がり: 机に触れている点は滑らないので、殻の上で触れる点が動いた分だけ卵が進む（どこまでも） */
     var tt = s.t || 0, aSigned = tx;
-    if (tt < this.prevT || !this.prevC) { this.rollX = lowX * dx; this.prevC = null; this.crackX = null; this.camX = 0; this.skipRoll = false; this.prevEx = null; this.wedgeEx = null; }
+    if (tt < this.prevT || !this.prevC) { this.rollX = lowX * dx; this.prevC = null; this.crackX = null; this.camX = 0; this.skipRoll = false; this.prevEx = null; this.cupFrom = null; }
     if (global.__eggJump != null) { this.rollX = global.__eggJump + lowX * dx; global.__eggJump = null; this.camX = global.__eggJump0 = this.rollX; this.prevC = null; }
     var lx = cLx * dx, ly = cLy;
-    if (s.wedged) {
-      /* すき間にはまっている間は、すき間の真上で起き上がるだけ（転がって進まない） */
-      if (this.wedgeEx == null) this.wedgeEx = (this.rollX >= 0 ? 1 : -1) * (s.gapX || 6.5);
-      this.rollX = this.wedgeEx + lowX * dx;
+    var cupK = 0;
+    if (s.cup != null && s.cup >= 0) {
+      /* 卵立てに入る間は転がって進まない。いまの場所から卵立ての上へ弧を描いて収まる */
+      if (this.cupFrom == null) { this.cupFrom = [this.prevEx || 0, 0]; this.cupX = (this.rollX >= 0 ? 1 : -1) * (s.gapX || 6.5); }
+      cupK = Math.min(1, s.cup / 0.45);
+      cupK = cupK * cupK * (3 - 2 * cupK);
     } else if (this.skipRoll && this.prevEx != null) { this.rollX = this.prevEx + lowX * dx; this.skipRoll = false; }
     else if (this.prevC) {
       var ds = Math.hypot(lx - this.prevC[0], ly - this.prevC[1]);
@@ -329,7 +335,13 @@
     this.prevC = [lx, ly]; this.prevA = aSigned; this.prevT = tt;
     var ex = this.rollX - lowX * dx;
     this.prevEx = ex; global.__eggX = this.rollX;
-    this.eggPivot.position.set(ex, -low - lowX * dx * tp - (s.sink || 0), 0);
+    var py = -low - lowX * dx * tp;
+    if (cupK > 0) {
+      ex = this.cupFrom[0] + (this.cupX - this.cupFrom[0]) * cupK;
+      py = py * (1 - cupK) + this.CUP_SEAT * cupK + Math.sin(cupK * Math.PI) * 0.35;
+      this.rollX = ex + lowX * dx;
+    } else this.cupFrom = null;
+    this.eggPivot.position.set(ex, py, 0);
     /* 温まると、ほんのり赤みが出る */
     var hv = Math.min(1, s.heat || 0);
     this.shellMat.emissive = this.shellMat.emissive || new T.Color();
@@ -363,7 +375,7 @@
     this.blob.position.set(lowX * 0.3 * dx, 0.002, lowX * 0.3 * dz);
     /* 卵の真ん中を追う（倒れても見切れない） */
     var cm = Math.sin(th) * 0.42;
-    this.camX += (ex + cm * dx - this.camX) * 0.08;
+    this.camX += (ex + cm * dx - this.camX) * (cupK > 0 ? 0.2 : 0.08);
     this.camZ += (cm * dz - this.camZ) * 0.06;
     var ct0 = s.cracked ? (s.t || 0) - (s.crackT || 0) : 9;
     this.shakeT = ct0;
