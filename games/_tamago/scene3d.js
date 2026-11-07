@@ -237,7 +237,7 @@
     this.eggPivot.position.set(0, -low - lowX * dx * tp, 0);
     this.blob.position.set(lowX * 0.3 * dx, 0.002, lowX * 0.3 * dz);
     /* 卵の真ん中を追う（倒れても見切れない） */
-    var cm = Math.sin(Math.min(th, Math.PI)) * 0.42;
+    var cm = Math.sin(th) * 0.42;
     this.camX += (cm * dx - this.camX) * 0.06;
     this.camZ += (cm * dz - this.camZ) * 0.06;
     var ct0 = s.cracked ? (s.t || 0) - (s.crackT || 0) : 9;
