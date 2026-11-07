@@ -126,10 +126,10 @@
   var S = { INTRO: "intro", PLAY: "play", RESULT: "result" };
   var state, score, T, held, keyMode = false;
   /* 卵: th=重力に対する傾き(右へ+)、om=その速さ、phi=机の傾き(右が下がる+) */
-  var th = 0, om = 0, phi = 0, phiV = 0, phiAim = 0, grabX = 0, grabPhi = 0;
+  var th = 0, om = 0, phi = 0, aim = 0, grabX = 0, grabTh = 0, standT = 0;
   var cracked = false, crackT = 0, falling = false, fallT = 0, cleared = false, endT = 0, keyDir = 0;
   var lastY = 0, lastMoveT = 0, downY = 0;
-  var K = 6.5, PHI_MAX = 0.32, GOAL = 10;
+  var K = 6.5, REST = 1.36, EPS = 0.012, STAND = 2;
   var confetti = window.zCelebrate ? window.zCelebrate.confetti() : null;
 
   var CY, hideUI = false;                                      /* 高さから決まる置き場所 */
@@ -144,52 +144,47 @@
     score = 0;
     T = 0;
     held = false;
-    th = (Math.random() < 0.5 ? -1 : 1) * (0.006 + Math.random() * 0.01); om = 0;
-    phi = 0; phiV = 0; phiAim = 0; keyDir = 0;
+    /* 卵は横に寝た状態から始める */
+    th = (Math.random() < 0.5 ? -1 : 1) * REST; om = 0; aim = th;
+    phi = 0; keyDir = 0; standT = 0;
     cracked = false; crackT = 0; falling = false; fallT = 0; cleared = false; endT = 0;
     if (confetti) confetti.clear();
   }
 
-  /* ============ 進行 ============ */
+  /* ============ 進行 ============
+     卵をつまんで左右に傾け、離すと卵だけで立つ。真上のごく狭い範囲で離したときだけ止まる。 */
   function update(dt) {
     if (confetti && state === S.RESULT) confetti.step(dt, W, H);
-    if (state === S.RESULT && falling) fallStep(dt);
     if (state !== S.PLAY) return;
     T += dt;
+    score = T;
 
-    if (keyMode && keyDir) phiAim = clamp(phiAim + keyDir * dt * 0.9, -PHI_MAX, PHI_MAX);
-    var np = phi + (phiAim - phi) * Math.min(1, dt * 16);
-    var nv = (np - phi) / dt, pa = (nv - phiV) / dt;
-    var dphi = np - phi;
-    phi = np; phiV = nv;
-    /* 卵は机と一緒に傾く（すべらない） */
-    th += dphi;
-
-    if (falling) { fallStep(dt); if (fallT > 1.1) finish(); return; }
+    if (keyMode && keyDir) { held = true; aim = clamp(aim + keyDir * dt * 0.35, -REST, REST); }
+    if (held) {
+      /* 指についてくる。指先のわずかな震え */
+      var tgt = aim + Math.sin(T * 9.3) * 0.0025 + Math.sin(T * 5.1) * 0.002;
+      var nth = th + (tgt - th) * Math.min(1, dt * 14);
+      om = (nth - th) / dt; th = nth;
+      standT = 0;
+      return;
+    }
     if (cracked) {
-      /* 底が平らなので机の上で起き上がる */
-      var rel = th - phi;
-      om += (-70 * rel - 9 * om) * dt;
-    } else {
-      /* さかさの振り子。少しずつ揺らぎが入る */
-      om += (K * Math.sin(th) - 0.06 * pa - 0.25 * om + (Math.random() - 0.5) * 0.5) * dt;
+      /* 底が平らなので起き上がる */
+      om += (-70 * th - 9 * om) * dt;
+    } else if (Math.abs(th) < EPS) {
+      /* 真上のくぼみ。ここで静かに離せば止まる */
+      om += (-30 * th - 6 * om) * dt;
+    } else if (Math.abs(th) < REST) {
+      om += (K * Math.sin(th) - 0.3 * om) * dt;
     }
     th += om * dt;
-    if (!cracked && Math.abs(th) > 0.5) { falling = true; fallT = 0; tone(220, 0.12, 0.08, "sine", 120); return; }
-    score = Math.min(GOAL, score + dt);
-    if (score >= GOAL) { cleared = true; finish(); }
-  }
-  /* 倒れて横になる（横に寝た卵の角度で跳ねて止まる） */
-  function fallStep(dt) {
-    fallT += dt;
-    var sg = th > 0 ? 1 : -1, rest = 1.36;
-    if (Math.abs(th) < rest) om += sg * 9 * Math.abs(Math.sin(th) + 0.3) * dt;
-    th += om * dt;
-    if (Math.abs(th) >= rest && om * sg > 0) {
-      th = sg * rest;
+    if (Math.abs(th) >= REST && om * th > 0) {
+      th = (th > 0 ? 1 : -1) * REST;
       if (Math.abs(om) > 0.6) noiseHit(0.08, 900, 0.18, 2);
       om = -om * 0.28;
     }
+    if ((cracked || Math.abs(th) < EPS) && Math.abs(om) < 0.06) standT += dt; else standT = 0;
+    if (standT >= STAND) { cleared = true; finish(); }
   }
   function finish() {
     state = S.RESULT; endT = T;
@@ -201,9 +196,9 @@
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
   /* 下へはやくはじくと、底を割って立てる */
   function crack() {
-    if (state !== S.PLAY || cracked || falling) return;
+    if (state !== S.PLAY || cracked || Math.abs(th) > 0.6) return;
     cracked = true; crackT = T;
-    om = 0;
+    held = false; keyDir = 0; om = 0;
     noiseHit(0.05, 2600, 0.5, 1.5); noiseHit(0.16, 700, 0.35, 0.8); tone(180, 0.09, 0.2, "triangle", 90);
   }
 
@@ -219,12 +214,15 @@
       return;
     }
     if (x == null) return;
+    if (cracked) return;
     held = true;
-    grabX = x; grabPhi = phiAim; downY = lastY = y; lastMoveT = performance.now();
+    /* 寝ている卵はつまむと少し起きる */
+    grabTh = clamp(th, -0.5, 0.5); aim = grabTh;
+    grabX = x; downY = lastY = y; lastMoveT = performance.now();
   }
   function move(x, y) {
     if (state !== S.PLAY || !held) return;
-    phiAim = clamp(grabPhi + (x - grabX) / W * 0.9, -PHI_MAX, PHI_MAX);
+    aim = clamp(grabTh + (x - grabX) / W * 1.2, -REST, REST);
     var now = performance.now(), dtm = Math.max(1, now - lastMoveT);
     if ((y - lastY) / dtm > 2.2 && y - downY > 50) crack();
     lastY = y; lastMoveT = now;
@@ -232,7 +230,6 @@
   function up() {
     if (!held) return;
     held = false;
-    /* ▼UPDATE: 離したときの処理（要らなければ空のまま） */
   }
 
   function atCanvas(e) { return window.zGameView.point(canvas, e, W, H); }
@@ -252,9 +249,9 @@
   var DEBUG = !/(^|\.)zounoashi\.com$/.test(location.hostname) || /^\/shisaku-/.test(location.pathname);
   function debugKey(n) {
     if (n === 1) { startButton.hidden = true; newRound(); }
-    if (n === 2) { startButton.hidden = true; newRound(); crack(); }
-    if (n === 3) { startButton.hidden = true; newRound(); score = GOAL - 0.5; crack(); }
-    if (n === 4) { startButton.hidden = true; newRound(); th = 0.49; om = 0.5; }
+    if (n === 2) { startButton.hidden = true; newRound(); th = 0.3; crack(); }
+    if (n === 3) { startButton.hidden = true; newRound(); th = 0.004; om = 0; }
+    if (n === 4) { startButton.hidden = true; newRound(); th = 0.05; om = 0; }
     /* ▼DEBUG: 数字キーで飛ぶ先。基本は「n を押すと n 番目の場面・工程の始めへ直接飛ぶ」（前は済ませた状態。開始前や結果画面からでも飛べる）。
        結果を直接出すより「次の操作でそうなる」形を優先（次に引くのが当たり、次の一押しでクリアなど）。録画で本物の動きが撮れる */
   }
@@ -272,6 +269,7 @@
     if (esc) { if (!e.repeat) newRound(); return; }
     if (left || right) {
       if (state !== S.PLAY) return;
+      if (!held && !cracked) aim = clamp(th, -0.5, 0.5);
       keyDir = left ? -1 : 1;
       return;
     }
@@ -279,7 +277,7 @@
     down();
   });
   window.addEventListener("keyup", function (e) {
-    if (/^Arrow(Left|Right)$|^[aAdD]$/.test(e.key)) keyDir = 0;
+    if (/^Arrow(Left|Right)$|^[aAdD]$/.test(e.key)) { keyDir = 0; held = false; }
     if (e.code === "Space" || e.key === " " || e.key === "Enter") { if(state===S.INTRO)startButton.click();else up(); }
   });
 
@@ -289,8 +287,8 @@
     /* 英語のときのハッシュタグは英語のゲーム名にする（空白・記号は除く） */
     var s = score.toFixed(1);
     var text = cracked
-      ? zT("卵の底を割って" + s + "秒立てました", "I cracked the bottom and stood the egg for " + s + "s", "달걀 밑을 깨서 " + s + "초 세웠습니다", "敲碎蛋底，让蛋立了" + s + "秒", "敲碎蛋底，讓蛋立了" + s + "秒")
-      : zT("卵を" + s + "秒立てました", "I stood an egg upright for " + s + "s", "달걀을 " + s + "초 세웠습니다", "让蛋立了" + s + "秒", "讓蛋立了" + s + "秒");
+      ? zT("卵の底を割って" + s + "秒で立てました", "I cracked the bottom and stood the egg up in " + s + "s", "달걀 밑을 깨서 " + s + "초 만에 세웠습니다", "敲碎蛋底，" + s + "秒把蛋立起来了", "敲碎蛋底，" + s + "秒把蛋立起來了")
+      : zT(s + "秒で卵を立てました", "I stood an egg upright in " + s + "s", s + "초 만에 달걀을 세웠습니다", "用" + s + "秒把蛋立起来了", "用" + s + "秒把蛋立起來了");
     window.zResultActions.x({ text: text + zT(" #コロンブスの卵", " #ColumbussEgg", " #콜럼버스의달걀", " #哥伦布的蛋", " #哥倫布的蛋") });
   }
 
