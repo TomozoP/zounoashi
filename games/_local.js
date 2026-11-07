@@ -411,6 +411,5 @@ window.DRAFT_GAMES = [
     "play": "games/_adaname/index.html",
     "full": true,
     "catch": "あだ名によく出る文字でルーレット"
-  },
-  {"type":"lab","tags":[],"id":"tamago","title":"たまご立てゲーム","year":2026,"date":"2026-11-07","plays":null,"url":"","img":"games/_tamago/img/thumb.webp","play":"games/_tamago/index.html","full":true,"catch":"卵を立てる"},
+  }
 ];
