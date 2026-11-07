@@ -1,4 +1,4 @@
-/* コロコロたまごの立体（three.js）。見た目だけ。進行は index.html 側。
+/* たまご立てゲームの立体（three.js）。見た目だけ。進行は index.html 側。
    sync({ th: 卵の傾き(重力に対して、右へ+), phi: 机の傾き(右が下がる+), cracked, crackT, t }) */
 (function (global) {
   "use strict";
@@ -71,7 +71,7 @@
             x1 += (r() - 0.5) * 14; y1 -= len / 5 * (0.6 + r() * 0.8);
             g.lineTo(x1, y1);
           }
-          g.strokeStyle = "rgba(70,48,30,.85)"; g.lineWidth = 1.6; g.stroke();
+          g.strokeStyle = "rgba(70,48,30,.9)"; g.lineWidth = 2.6; g.stroke();
           g.strokeStyle = "rgba(255,250,240,.6)"; g.lineWidth = 0.8;
           g.save(); g.translate(1, -1); g.stroke(); g.restore();
         }
@@ -201,16 +201,16 @@
     /* 割れたかけら */
     this.bits = [];
     var br = rand(21);
-    for (i = 0; i < 9; i++) {
-      var sh = new T.Shape(), n = 3 + Math.floor(br() * 3), s = 0.018 + br() * 0.022;
+    for (i = 0; i < 14; i++) {
+      var sh = new T.Shape(), n = 3 + Math.floor(br() * 3), s = 0.03 + br() * 0.04;
       for (var q = 0; q < n; q++) {
         var a = q / n * Math.PI * 2, rr = s * (0.6 + br() * 0.6);
         if (q === 0) sh.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); else sh.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
       }
       var m = new T.Mesh(new T.ShapeGeometry(sh), new T.MeshStandardMaterial({ color: 0xf1e4d2, roughness: 0.6, side: T.DoubleSide }));
       m.castShadow = true; m.visible = false;
-      var ang = br() * Math.PI * 2, d = 0.22 + br() * 0.25;
-      m.userData = { x: Math.cos(ang) * d, z: Math.sin(ang) * d * 0.8, rot: br() * 6, up: 0.15 + br() * 0.25 };
+      var ang = br() * Math.PI * 2, d = 0.28 + br() * 0.4;
+      m.userData = { x: Math.cos(ang) * d, z: Math.sin(ang) * d * 0.8, rot: br() * 6, up: 0.25 + br() * 0.35 };
       this.table.add(m); this.bits.push(m);
     }
 
@@ -278,7 +278,7 @@
     this.camX += (ex + cm * dx - this.camX) * 0.08;
     this.camZ += (cm * dz - this.camZ) * 0.06;
     var ct0 = s.cracked ? (s.t || 0) - (s.crackT || 0) : 9;
-    this.aimCam(this.camX, this.camZ, s.yaw || 0, s.focus || 0, ct0 < 0.25 ? 0.08 * (1 - ct0 / 0.25) : 0);
+    this.aimCam(this.camX, this.camZ, s.yaw || 0, s.focus || 0, ct0 < 0.3 ? 0.12 * (1 - ct0 / 0.3) : 0);
     var stand = Math.max(0, 1 - Math.abs(th) * 1.6);
     this.blob.scale.set(0.75 + (1 - stand) * 0.6, 0.6 + (1 - stand) * 0.3, 1);
     this.blob.material.opacity = 0.5 + 0.4 * stand;
@@ -288,7 +288,7 @@
       var b = this.bits[i], u = b.userData;
       b.visible = ct >= 0;
       if (ct < 0) continue;
-      var k = Math.min(1, ct / 0.35);
+      var k = Math.min(1, ct / 0.45);
       if (this.crackX == null) this.crackX = ex;
       b.position.set(u.x * k + this.crackX - ex, 0.004 + Math.max(0, Math.sin(k * Math.PI) * u.up), u.z * k);
       b.rotation.set(-Math.PI / 2 + (1 - k) * u.rot, 0, u.rot);
